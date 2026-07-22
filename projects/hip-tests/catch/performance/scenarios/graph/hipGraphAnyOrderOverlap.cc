@@ -224,6 +224,75 @@ TEST_CASE("Performance_Graph_AnyOrderOverlap_Fork") {
   HIP_CHECK(hipFree(tok));
 }
 
+// Correctness across graph update: re-capturing a segment head (via
+// hipGraphExecKernelNodeSetParams) resets its packet barrier bit. The runtime
+// must re-apply the head-barrier clear for oversubscribed heads without ever
+// clearing a barrier a dependency needs. Update each child head in place, then
+// relaunch and verify the child still observes the producer's token.
+TEST_CASE("Performance_Graph_AnyOrderOverlap_Update") {
+  INFO("DEBUG_HIP_GRAPH_ANYORDER_OVERLAP=" << FlagState());
+  const int N = kGridBlocks * kBlock;
+
+  int* tok = nullptr;
+  int* err = nullptr;
+  HIP_CHECK(hipMalloc(&tok, N * sizeof(int)));
+  HIP_CHECK(hipMalloc(&err, sizeof(int)));
+  int nArg = N, burnArg = kBurn;
+
+  hipGraph_t graph{};
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipGraphNode_t root =
+      AddKernel(graph, {}, reinterpret_cast<void*>(forkRoot), {&tok, &nArg, &burnArg});
+  std::vector<hipGraphNode_t> heads;
+  for (int c = 0; c < kForkChildren; ++c) {
+    hipGraphNode_t head =
+        AddKernel(graph, {root}, reinterpret_cast<void*>(forkChild), {&tok, &nArg, &err});
+    heads.push_back(head);
+    hipGraphNode_t prev = head;
+    for (int k = 1; k < kChildLen; ++k) {
+      prev = AddKernel(graph, {prev}, reinterpret_cast<void*>(forkChild), {&tok, &nArg, &err});
+    }
+  }
+
+  hipGraphExec_t exec{};
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+
+  // Update every child head in place -> forces packet re-capture (barrier reset)
+  // and exercises the head-barrier re-clear on the update path.
+  for (auto head : heads) {
+    std::vector<void*> args = {&tok, &nArg, &err};
+    hipKernelNodeParams p{};
+    p.func = reinterpret_cast<void*>(forkChild);
+    p.gridDim = dim3(kGridBlocks, 1, 1);
+    p.blockDim = dim3(kBlock, 1, 1);
+    p.sharedMemBytes = 0;
+    p.kernelParams = args.data();
+    p.extra = nullptr;
+    HIP_CHECK(hipGraphExecKernelNodeSetParams(exec, head, &p));
+  }
+
+  hipStream_t stream{};
+  HIP_CHECK(hipStreamCreate(&stream));
+  int order_violations = 0;
+  for (int r = 0; r < kReps; ++r) {
+    HIP_CHECK(hipMemsetAsync(tok, 0, N * sizeof(int), stream));
+    HIP_CHECK(hipMemsetAsync(err, 0, sizeof(int), stream));
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    int host_err = 0;
+    HIP_CHECK(hipMemcpy(&host_err, err, sizeof(int), hipMemcpyDeviceToHost));
+    if (host_err != 0) ++order_violations;
+  }
+  INFO("ordering_violations=" << order_violations);
+  REQUIRE(order_violations == 0);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(err));
+  HIP_CHECK(hipFree(tok));
+}
+
 // Detector self-test: prove the ordering checks above actually fire on a known
 // bad state, so a PASS in the correctness cases cannot be a false negative.
 TEST_CASE("Performance_Graph_AnyOrderOverlap_DetectorSelfTest") {

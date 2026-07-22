@@ -4019,6 +4019,23 @@ uint8_t* Device::CreateBarrierPacket() const {
 }
 
 // ================================================================================================
+void Device::ClearAqlDispatchBarrierBit(uint8_t* packet) const {
+  if (packet == nullptr) return;
+  uint16_t hdr;
+  memcpy(&hdr, packet, sizeof(hdr));
+  const uint32_t type =
+      (hdr >> HSA_PACKET_HEADER_TYPE) & ((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);
+  constexpr uint8_t kExtKernelDispatchFormat = 3;  // vendor-specific ext dispatch amd_format
+  const bool is_dispatch =
+      type == HSA_PACKET_TYPE_KERNEL_DISPATCH ||
+      (type == HSA_PACKET_TYPE_VENDOR_SPECIFIC && hdr != 0 &&
+       packet[2] == kExtKernelDispatchFormat);
+  if (!is_dispatch) return;
+  hdr &= static_cast<uint16_t>(~(1u << HSA_PACKET_HEADER_BARRIER));
+  memcpy(packet, &hdr, sizeof(hdr));
+}
+
+// ================================================================================================
 void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                  const std::vector<void*>& hw_events) const {
   for (const auto& patch : patches) {

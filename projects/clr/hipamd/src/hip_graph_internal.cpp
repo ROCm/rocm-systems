@@ -521,6 +521,14 @@ void GraphExecSegmented::BuildSyncPlan() {
 
     auto& firstBatch = segBatch.packet_batches[0];
 
+    // Clear an oversubscribed head's barrier bit for overlap. Done before any
+    // prepend so it targets the first packet, and skipped for the single-stream
+    // fallback.
+    if (segment.oversubscribed && !collapsed_to_single_stream_ &&
+        !firstBatch.dispatchPackets.empty()) {
+      device->ClearAqlDispatchBarrierBit(firstBatch.dispatchPackets[0]);
+    }
+
     // Prepend barrier packets for segments with dependencies.
     // Optimization: when there is exactly 1 dependency and the first captured
     // packet is an ext kernel dispatch, embed the dep_signal directly into
@@ -1217,8 +1225,8 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
                ? static_cast<size_t>(it->second) : 1;
   };
 
-  // Count of any-order overlap heads tagged in place (for logging / collapse undo).
-  size_t cleared = 0;
+  // Count of any-order overlap heads (later same-level collisions) for logging.
+  size_t overlap_heads = 0;
   for (int level = 0; level <= max_dependency_level_; ++level) {
     auto it = segments_per_level_.find(level);
     if (it == segments_per_level_.end()) continue;
@@ -1234,44 +1242,16 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
       const size_t idx = dev_idx[seg.dev_id]++;
       seg.stream_id = static_cast<int>(idx % pool);
 
-      // Same-queue any-order overlap: a later collision (idx >= pool) with no
-      // cross-queue dep on a kernel head drops its barrier via the AnyOrderLaunch
-      // path. Collapse guard applied after ComputeCompletionSignalFlags() below.
-      seg.clear_head_barrier = false;
-      if (anyorder_enabled_ && idx >= pool && seg.first_node != nullptr &&
-          seg.first_node->GetType() == hipGraphNodeTypeKernel) {
-        bool dependsOffQueue = false;
-        for (int dep_id : seg.segment_ids_dependencies) {
-          if (dep_id < 0 || dep_id >= static_cast<int>(segments_.size())) continue;
-          const auto& dep_seg = segments_[dep_id];
-          if (dep_seg.dev_id != seg.dev_id || dep_seg.stream_id != seg.stream_id) {
-            dependsOffQueue = true;
-            break;
-          }
-        }
-        if (!dependsOffQueue) {
-          seg.clear_head_barrier = true;
-          static_cast<GraphKernelNode*>(seg.first_node)->SetAnyOrderOverlapHead(true);
-          ++cleared;
-        }
+      // Flag later same-queue collisions (idx >= pool); their head barrier bit is
+      // cleared later so capable HW can overlap independent work.
+      seg.oversubscribed = (anyorder_enabled_ && idx >= pool);
+      if (seg.oversubscribed) {
+        ++overlap_heads;
       }
     }
   }
 
   ComputeCompletionSignalFlags();
-
-  // Collapse needs the completion flags just computed, so it can't be checked in
-  // the loop above. A collapsed graph serializes by design, so undo the tags. The
-  // decision is memoized in ShouldCollapseToSingleStream(), reused by BuildSyncPlan.
-  if (cleared > 0 && ShouldCollapseToSingleStream()) {
-    for (auto& seg : segments_) {
-      if (seg.clear_head_barrier) {
-        seg.clear_head_barrier = false;
-        static_cast<GraphKernelNode*>(seg.first_node)->SetAnyOrderOverlapHead(false);
-      }
-    }
-    cleared = 0;
-  }
 
   if (anyorder_enabled_) {
     auto poolIt = max_streams_dev_.find(captureDeviceId_);
@@ -1280,7 +1260,7 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
             "[hipGraph] any-order overlap: %zu segments, %zu head(s) marked for overlap on "
             "oversubscribed queues (queue pool = %d)",
-            segments_.size(), cleared, effective_pool);
+            segments_.size(), overlap_heads, effective_pool);
   }
 }
 
@@ -2332,9 +2312,15 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
           }
         }
       }
-      // Any-order overlap needs no re-stamp: CaptureAndFormPacket re-ran
-      // CreateCommand, which re-applies the head tag via the AnyOrderLaunch path,
-      // so the re-captured packet already carries the correct barrier bit.
+      // Re-capture resets the barrier bit, so re-clear it for an oversubscribed
+      // head to preserve overlap across updates.
+      if (!collapsed_to_single_stream_ && segmentId >= 0 &&
+          segmentId < static_cast<int>(segments_.size()) &&
+          segments_[segmentId].oversubscribed &&
+          segments_[segmentId].first_node == node && !newPackets.empty()) {
+        g_devices[segments_[segmentId].dev_id]->devices()[0]->ClearAqlDispatchBarrierBit(
+            newPackets[0]);
+      }
 
       // Rebuild the flat buffer immediately so the next dispatch uses updated packets.
       // The flat buffer always represents the full packet sequence; the dispatch path

@@ -2265,6 +2265,9 @@ class Device : public RuntimeObject {
   };
 
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
+  //! Clear the AQL dispatch barrier bit on a captured head packet so capable HW
+  //! can overlap it. No-op for non-dispatch packets. Backend-specific (AQL).
+  virtual void ClearAqlDispatchBarrierBit(uint8_t* packet) const {}
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const {}
 

@@ -959,10 +959,8 @@ class Graph {
 
     bool needs_completion_signal = false;        // True if any downstream segment is on a different stream/device, or this is a leaf
 
-    // Same-queue any-order overlap: when true, this head kernel's dispatch is
-    // captured with the AQL barrier bit cleared so capable HW overlaps it on the
-    // oversubscribed queue. Decided in RoundRobinStreamAssignment().
-    bool clear_head_barrier = false;
+    // True for a later same-queue collision whose head barrier bit is cleared for overlap.
+    bool oversubscribed = false;
   };
 
   //! Segment information for batch scheduling
@@ -1436,14 +1434,6 @@ class GraphKernelNode : public GraphNode {
   int globalWorkSizeZ_remainder_;
   dim3 clusterDim_;                    //!< Cluster dimensions for cluster launch
   hipFunction_t resolvedFunc_ = nullptr;  //!< Cached resolved function to avoid redundant lookups
-  //!< When set, this kernel head oversubscribes its queue with no cross-queue dep,
-  //!< so its dispatch clears the barrier via the AnyOrderLaunch path. Decided in
-  //!< RoundRobinStreamAssignment() per instantiate; recomputed on re-capture.
-  bool anyOrderOverlapHead_ = false;
-
- public:
-  //!< Mark/unmark this kernel as an any-order overlap segment head.
-  void SetAnyOrderOverlapHead(bool v) { anyOrderOverlapHead_ = v; }
 
  protected:
   // Copy Constructor. This is protected to prevent accidental copies causing unexpected behaviors.
@@ -1766,13 +1756,6 @@ class GraphKernelNode : public GraphNode {
         }
       }
     }
-    // Same-queue any-order overlap: this head oversubscribes its queue, so the
-    // AnyOrderLaunch path clears its barrier bit and capable HW overlaps it
-    // instead of serializing on the in-order queue.
-    if (anyOrderOverlapHead_) {
-      flags = hipExtAnyOrderLaunch;
-    }
-
     const amd::Device* device = g_devices[dev_id_]->devices()[0];
     amd::HIPLaunchParams launch_params(kernelParams_.gridDim.x, kernelParams_.gridDim.y,
                                        kernelParams_.gridDim.z, kernelParams_.blockDim.x,
