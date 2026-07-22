@@ -98,7 +98,7 @@ flowchart TD
   subgraph F[Four instrumentation flavors]
     SC0["SC0 DONE<br/>native CDNA4 LDS checks:<br/>CLIP + TP1/TP2 clean"]
     SC1["SC1 TODO<br/>SuperCollider group-FLAT clean vertical;<br/>racy detection and trap breadth open"]
-    RR0["RR0 ACTIVE<br/>TP1 prefill + TP2 full clean accepted;<br/>dynamic-stack helpers and fault detection open"]
+    RR0["RR0 ACTIVE<br/>TP1 prefill green; decode + TP2 clean/paired;<br/>dynamic-stack helpers and fault detection open"]
     RR1["RR1 TODO<br/>Record/Replay barriers, atomics and fences"]
     SA0A["SA0A DONE<br/>CDNA4 sampled barrier lowering:<br/>TP1 + CLIP clean"]
     SA0["SA0 TODO<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
@@ -271,6 +271,15 @@ flowchart TD
 ```
 
 ## Reconnaissance conclusions
+
+- 2026-07-22: `RR0` remains ACTIVE/blue, but the CDNA4 VCC correction now
+  recovers TP1 decode/combined as well as TP2.  Clean and one-repetition
+  paired artifacts pass both exact oracles with complete 240/240 access plus
+  62/62 barrier coverage and 1.41x maximum slowdown.  A prospectively
+  reviewed late decode-attention barrier drop applies exactly once but is
+  schedule-masked and produces no Record/Replay diagnosis, contradicting its
+  frozen detected/pass policy.  The cell advances from red to yellow; fault
+  detection and shared dynamic-stack helpers keep the box active.
 
 - 2026-07-22: `RR0` remains ACTIVE/blue after `4ad984b1c9`, but TP2 replay
   stability is no longer the blocker.  CDNA4 reserves a six-register tail in

@@ -51,7 +51,7 @@ scratch before promotion.
 |---|---|---|---|---|
 | **P0 Qwen3-0.6B prefill** | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown |
 | **P1 Sharktank TP1 prefill** | 🟨 current clean and paired: exact oracle, 120/120 accesses, complete analysis, 1.13x; reviewed exact-one fault detected one instability but contradicted its frozen external-oracle policy | 🟩 current accepted bundle: exact clean and paired oracle, complete 120/120 accesses plus 31/31 barriers, 1.29x paired slowdown, reviewed exact-one detected/pass fault, containment, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟨 current clean and paired: exact oracle, complete 120/120 accesses plus 31/31 barriers, 246.6x paired slowdown; reviewed exact-one mutation is schedule-masked with a passing oracle and no diagnostic, contradicting its frozen detection policy |
-| **P1 Sharktank TP1 decode/combined** | 🟨 current clean and paired: both exact oracles, 240/240 accesses, complete analysis, 1.33x maximum; reviewed exact-one fault was schedule-masked and contradicted its frozen detection policy | 🟥 current decode warmup oracle fails after complete 120/120 access plus 31/31 barrier lowering; the prefill mode remains exact, localizing a mode-sensitive replay defect | 🩶 historical: clean 208/208 access + 14/14 qualified barrier accepted | 🟧 current clean execution passes both exact oracles with complete 240/240 accesses plus 62/62 barriers; clean-tip paired and fault gates remain |
+| **P1 Sharktank TP1 decode/combined** | 🟨 current clean and paired: both exact oracles, 240/240 accesses, complete analysis, 1.33x maximum; reviewed exact-one fault was schedule-masked and contradicted its frozen detection policy | 🟨 current clean and paired: both exact oracles, complete 240/240 accesses plus 62/62 barriers, and 1.41x maximum paired slowdown; the first prospectively reviewed exact-one barrier drop preserved the oracle without a Record/Replay diagnostic, so the fault gate remains open | 🩶 historical: clean 208/208 access + 14/14 qualified barrier accepted | 🟧 current clean execution passes both exact oracles with complete 240/240 accesses plus 62/62 barriers; clean-tip paired and fault gates remain |
 | **P2 Sharktank TP2 family** | 🟨 current clean and paired: all three exact oracles pass with complete 936/936 access coverage; reviewed exact-one fault was schedule-masked and contradicted its frozen detection policy | 🟨 current clean and paired: all three exact oracles pass with complete 936/936 accesses plus 168/168 barriers and 1.57x combined paired slowdown; two prospectively reviewed exact-one barrier drops produced no Record/Replay diagnostic, so the fault gate remains open | 🩶 historical: aggregate rejected: one 140-access + 10-barrier slice executes 0 | 🟨 current clean and paired: all three exact oracles pass with complete 936/936 accesses plus 168/168 barriers and 16.80x combined slowdown; reviewed exact-one fault manifested an oracle failure without an Inline diagnostic, contradicting its frozen pass/no-diagnostic policy |
 | **P3 CLIP BF16** | 🟨 current clean: cosine oracle passes; 45/45 accesses; complete analysis | 🟨 current one-process clean passes the cosine oracle with complete 45/45 accesses plus 24/24 barriers; a separate ten-process stress keeps full coverage but reproduces a replay conflict in 2/10 processes, so paired evidence is rejected | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟥 current lowering is complete at 45/45 accesses plus 24/24 barriers, but the warmup cosine oracle fails with NaN |
 | **P4 hip-moi D128 block attention** | 🟩 current accepted bundle: exact clean, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟧 current oracle passes with 6/12 accesses and 4/4 barriers; six shared-helper accesses hit the typed dynamic-stack resource limit | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current scalar fallback lacks entry-local scratch for one connected component |
@@ -287,6 +287,22 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-22: The CDNA4 physical-VCC fix also recovers TP1
+  decode/combined Record/Replay, promoting that cell from red to yellow.
+  Clean artifact
+  `consan-validation-gfx950-tp1-decode-rr-vcc-fix-20260722-048` passes both
+  exact oracles with complete 240/240 access plus 62/62 barrier coverage.
+  One-repetition paired artifact
+  `consan-validation-gfx950-tp1-decode-rr-vcc-fix-paired-20260722-050`
+  accepts both controls and the instrumented leg; its maximum slowdown is
+  1.41x.  Current inventory `...-inventory-vcc-fix-20260722-051` freezes 31
+  singleton barriers.  Prospectively reviewed exact-one artifact
+  `...-rr-fault-vcc-fix-20260722-052` drops the late decode-attention barrier
+  exactly once, preserves both oracles, and emits no Record/Replay diagnosis,
+  contradicting its frozen detected/pass policy.  It is rejected rather than
+  post-hoc relabeled, so the remaining gate is a causal or diagnostically
+  visible fault.
 
 - 2026-07-22: Commit `4ad984b1c9` fixes the TP2 Record/Replay oracle corruption
   by modeling CDNA4's six-register descriptor-allocation tail correctly.  At
