@@ -413,8 +413,8 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
   EXPECT_EQ(patch->spilled_vgpr_count, 18u);
   ASSERT_EQ(patch->persistent_epoch_private_offset, 0u);
   ASSERT_EQ(patch->persistent_owner_private_offset, 4u);
-  EXPECT_FALSE(patch->persistent_workgroup_key_private_offset);
-  ASSERT_EQ(patch->persistent_private_state_end, 8u);
+  ASSERT_EQ(patch->persistent_workgroup_key_private_offset, 8u);
+  ASSERT_EQ(patch->persistent_private_state_end, 12u);
   EXPECT_GT(patch->required_private_segment_size, 0u);
   EXPECT_GT(patch->workgroup_shadow_size, 0u);
   EXPECT_TRUE(patch->workgroup_shadow_lazy_initialization);
@@ -423,9 +423,9 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  EXPECT_FALSE(prologue->persistent_workgroup_key_private_offset);
-  EXPECT_EQ(prologue->persistent_private_state_end, 8u);
-  EXPECT_EQ(prologue->spilled_vgpr_count, 2u);
+  ASSERT_EQ(prologue->persistent_workgroup_key_private_offset, 8u);
+  EXPECT_EQ(prologue->persistent_private_state_end, 12u);
+  EXPECT_EQ(prologue->spilled_vgpr_count, 3u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -434,6 +434,13 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
   std::memcpy(patch_words.data(),
               patched.text_sections().front()->data() + patch->trampoline_offset,
               patch->trampoline_size);
+  const auto private_key_load = ib::build_private_load_b32(
+      static_cast<uint16_t>(*patch->scratch_vgpr + 5u), 8u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto private_key_wait = ib::build_s_wait_private_load0(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(private_key_load && private_key_wait);
+  std::vector<uint32_t> expected_private_key_load = *private_key_load;
+  expected_private_key_load.push_back(*private_key_wait);
+  EXPECT_TRUE(contains_subsequence(patch_words, expected_private_key_load));
   const auto local_exchange = build_cdna4_ds_storexchg_rtn_b64(
       static_cast<uint16_t>(*patch->scratch_vgpr + 6u), *patch->scratch_vgpr,
       static_cast<uint16_t>(*patch->scratch_vgpr + 2u), /*byte_offset=*/0u,

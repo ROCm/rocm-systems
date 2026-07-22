@@ -547,14 +547,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           cached->second = build_moi_private_epoch_layout(
               result, *resources, arch, result.warnings,
               /*include_sample_sequence=*/false, persist_workitem_owner,
-              /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA4 && !workgroup_shadow);
+              /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA4);
         }
         private_layout = cached->second;
       } else {
         private_layout = build_moi_private_epoch_layout(
             result, *resources, arch, result.warnings,
             /*include_sample_sequence=*/false, persist_workitem_owner,
-            /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA4 && !workgroup_shadow);
+            /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA4);
       }
       if (!private_layout)
         continue;

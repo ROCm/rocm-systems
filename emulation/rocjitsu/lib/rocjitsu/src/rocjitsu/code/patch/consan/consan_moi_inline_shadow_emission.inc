@@ -1890,7 +1890,7 @@
     }
     words.push_back(*save_original_exec);
   }
-  if (!workgroup_shadow && private_workgroup_key_offset) {
+  if (private_workgroup_key_offset && (!workgroup_shadow || generation_tagged_local_shadow)) {
     const auto load = instrumentation::build_private_load_b32(workgroup_key_vgpr,
                                                               *private_workgroup_key_offset, arch);
     const auto wait = instrumentation::build_s_wait_private_load0(arch);
