@@ -33,19 +33,6 @@ SUPPORTED_ARCHS = {
     "gfx1153": {"rdna35_krackan2": ["RDNA35_KRACKAN2"]},
 }
 
-# SOC model names used in tests -> fixture directory when gfx115x workloads are shared.
-WORKLOAD_FIXTURE_ALIAS: dict[str, str] = {
-    "RDNA35_POINT_1": "RDNA35_HALO",
-    "RDNA35_POINT_2": "RDNA35_HALO",
-    "RDNA35_KRACKAN2": "RDNA35_HALO",
-}
-
-
-def workload_fixture_path(workload_type: str, arch: str) -> str:
-    """Resolve analyze workload directory, applying family alias when configured."""
-    fixture_arch = WORKLOAD_FIXTURE_ALIAS.get(arch, arch)
-    return f"tests/workloads/{workload_type}/{fixture_arch}"
-
 
 def check_resource_allocation():
     """Check if CTEST resource allocation is enabled for parallel testing and set
