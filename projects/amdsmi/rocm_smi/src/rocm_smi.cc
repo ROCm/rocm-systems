@@ -3574,19 +3574,8 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind, uint32_t sensor_ind, int64
 
   DEVICE_MUTEX
 
-  // On gpu_od GPUs (Navi3x+), hwmon pwm1 does not reflect the actual fan speed.
-  // Read the FAN_MINIMUM_PWM value from the gpu_od sysfs instead.
-  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
-  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
-    uint64_t current_pwm = 0;
-    int parse_ret = amd::smi::ParseGpuOdFanCurrentPwm(fan_ctrl_path, &current_pwm);
-    if (parse_ret == 0) {
-      *speed = static_cast<int64_t>(current_pwm);
-      return RSMI_STATUS_SUCCESS;
-    }
-  }
-
-  // Legacy hwmon path
+  // hwmon pwm1 is the running fan duty cycle. The gpu_od fan_minimum_pwm node is
+  // only a user-set curve floor (0 by default), so it must not be read here.
   ret = get_dev_mon_value(amd::smi::kMonFanSpeed, dv_ind, sensor_ind, speed);
 
   return ret;
@@ -3731,20 +3720,8 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind,
   CHK_SUPPORT_SUBVAR_ONLY(max_speed, sensor_ind)
   DEVICE_MUTEX
 
-  // On gpu_od GPUs (Navi3x+), the effective max fan speed is the OD_RANGE
-  // maximum from fan_minimum_pwm, not the hwmon pwm1_max (which is always 255).
-  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
-  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
-    uint64_t od_min_pwm = 0;
-    uint64_t od_max_pwm = 0;
-    int parse_ret = amd::smi::ParseGpuOdFanRange(fan_ctrl_path, &od_min_pwm, &od_max_pwm);
-    if (parse_ret == 0) {
-      *max_speed = od_max_pwm;
-      return RSMI_STATUS_SUCCESS;
-    }
-  }
-
-  // Legacy hwmon path
+  // Pair with rsmi_dev_fan_speed_get: the running duty cycle comes from hwmon
+  // pwm1, so its max must be hwmon pwm1_max, not the gpu_od OD_RANGE limit.
   ret = get_dev_mon_value(amd::smi::kMonMaxFanSpeed, dv_ind, sensor_ind,
                           reinterpret_cast<int64_t*>(max_speed));
 
