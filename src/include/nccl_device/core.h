@@ -260,24 +260,24 @@ NCCL_EXTERN_C __host__ ncclResult_t ncclGetPeerDeviceLeInfo(ncclWindow_t window,
 
 ////////////////////////////////////////////////////////////////////////////////
 // Team API:
-#if __cplusplus
-NCCL_IR_EXTERN_C NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamWorld(ncclDevComm const&);
+#ifdef __CUDACC__
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclTeam ncclTeamWorld(ncclDevComm const&);
 #endif
 #ifndef __clang_llvm_bitcode_lib__
 NCCL_EXTERN_C __host__ ncclTeam_t ncclTeamWorld(ncclComm_t comm);
 #endif
 
-#if __cplusplus
-NCCL_IR_EXTERN_C NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamLsa(ncclDevComm const&);
+#ifdef __CUDACC__
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclTeam ncclTeamLsa(ncclDevComm const&);
 #endif
 #ifndef __clang_llvm_bitcode_lib__
 NCCL_EXTERN_C __host__ ncclTeam_t ncclTeamLsa(ncclComm_t comm);
 #endif
 
-#if __cplusplus
-NCCL_IR_EXTERN_C NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamCft(ncclDevComm const&,
-                                                              ncclCftTeamMode_t mode = NCCL_CFT_TEAM_FLAT);
-NCCL_IR_EXTERN_C NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamCftMultimem(ncclDevComm const&);
+#ifdef __CUDACC__
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclTeam ncclTeamCft(ncclDevComm const&,
+                                                         ncclCftTeamMode_t mode = NCCL_CFT_TEAM_FLAT);
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclTeam ncclTeamCftMultimem(ncclDevComm const&);
 #endif
 #ifndef __clang_llvm_bitcode_lib__
 #if __cplusplus
@@ -291,15 +291,15 @@ NCCL_EXTERN_C __host__ ncclTeam_t ncclTeamCftMultimem(ncclComm_t comm);
 NCCL_EXTERN_C NCCL_HOST_DEVICE_INLINE bool ncclTeamRankIsMember(ncclTeam_t a, ncclTeam_t b, int bPeer);
 NCCL_EXTERN_C NCCL_HOST_DEVICE_INLINE int ncclTeamRankToTeam(ncclTeam_t a, ncclTeam_t b, int bPeer);
 
-#if __cplusplus
-NCCL_IR_EXTERN_C NCCL_HOST_DEVICE_INLINE int ncclTeamRankToWorld(ncclDevComm const&, ncclTeam, int rank);
+#ifdef __CUDACC__
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE int ncclTeamRankToWorld(ncclDevComm const&, ncclTeam, int rank);
 #endif
 #ifndef __clang_llvm_bitcode_lib__
 NCCL_EXTERN_C __host__ int ncclTeamRankToWorld(ncclComm_t comm, ncclTeam_t team, int rank);
 #endif
 
-#if __cplusplus
-NCCL_IR_EXTERN_C NCCL_HOST_DEVICE_INLINE int ncclTeamRankToLsa(ncclDevComm const&, ncclTeam, int rank);
+#ifdef __CUDACC__
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE int ncclTeamRankToLsa(ncclDevComm const&, ncclTeam, int rank);
 #endif
 #ifndef __clang_llvm_bitcode_lib__
 NCCL_EXTERN_C __host__ int ncclTeamRankToLsa(ncclComm_t comm, ncclTeam_t team, int rank);
@@ -315,8 +315,8 @@ NCCL_EXTERN_C NCCL_HOST_DEVICE_INLINE ncclTeam_t ncclTeamOuterFactor(ncclTeam_t 
 NCCL_EXTERN_C NCCL_HOST_DEVICE_INLINE int ncclTeamRankInDifference(ncclTeam_t parent, ncclTeam_t subset, int index);
 
 // Equivalent to ncclTeamOuterFactor of lsa team.
-#if __cplusplus
-NCCL_IR_EXTERN_C NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamRail(ncclDevComm const&);
+#ifdef __CUDACC__
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclTeam ncclTeamRail(ncclDevComm const&);
 #endif
 #ifndef __clang_llvm_bitcode_lib__
 NCCL_EXTERN_C __host__ ncclTeam_t ncclTeamRail(ncclComm_t comm);

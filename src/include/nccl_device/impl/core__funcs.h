@@ -12,8 +12,8 @@
 #include "comm__types.h"
 #include "ptr__types.h"
 
-#if __cplusplus
-NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamWorld(ncclDevComm const& comm) {
+#ifdef __CUDACC__
+NCCL_DEVICE_INLINE ncclTeam ncclTeamWorld(ncclDevComm const& comm) {
   ncclTeam ans;
   ans.nRanks = comm.nRanks;
   ans.rank = comm.rank;
@@ -22,8 +22,8 @@ NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamWorld(ncclDevComm const& comm) {
 }
 #endif
 
-#if __cplusplus
-NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamLsa(ncclDevComm const& comm) {
+#ifdef __CUDACC__
+NCCL_DEVICE_INLINE ncclTeam ncclTeamLsa(ncclDevComm const& comm) {
   ncclTeam ans;
   ans.nRanks = comm.lsaSize;
   ans.rank = comm.lsaRank;
@@ -32,8 +32,8 @@ NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamLsa(ncclDevComm const& comm) {
 }
 #endif
 
-#if __cplusplus
-NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamCft(ncclDevComm const& comm, ncclCftTeamMode_t mode) {
+#ifdef __CUDACC__
+NCCL_DEVICE_INLINE ncclTeam ncclTeamCft(ncclDevComm const& comm, ncclCftTeamMode_t mode) {
   ncclTeam flat;
   flat.nRanks = comm.cftSize;
   flat.rank = comm.cftRank;
@@ -54,7 +54,7 @@ NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamCft(ncclDevComm const& comm, ncclCftTea
   return ncclTeam{};
 }
 
-NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamCftMultimem(ncclDevComm const& comm) {
+NCCL_DEVICE_INLINE ncclTeam ncclTeamCftMultimem(ncclDevComm const& comm) {
   ncclTeam ans;
   ans.nRanks = comm.cftMultimemSize;
   ans.rank = comm.cftMultimemRank;
@@ -63,8 +63,8 @@ NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamCftMultimem(ncclDevComm const& comm) {
 }
 #endif
 
-#if __cplusplus
-NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamRail(ncclDevComm const& comm) {
+#ifdef __CUDACC__
+NCCL_DEVICE_INLINE ncclTeam ncclTeamRail(ncclDevComm const& comm) {
   ncclTeam ans;
   ans.nRanks = nccl::utility::idivFast32(comm.nRanks, comm.lsaSize, comm.lsaSize_rcp32);
   ans.rank = nccl::utility::idivFast32(comm.rank, comm.lsaSize, comm.lsaSize_rcp32);
@@ -89,14 +89,14 @@ NCCL_HOST_DEVICE_INLINE int ncclTeamRankToTeam(ncclTeam_t a, ncclTeam_t b, int b
   return arank;
 }
 
-#if __cplusplus
-NCCL_HOST_DEVICE_INLINE int ncclTeamRankToWorld(ncclDevComm const& comm, ncclTeam tm, int rank) {
+#ifdef __CUDACC__
+NCCL_DEVICE_INLINE int ncclTeamRankToWorld(ncclDevComm const& comm, ncclTeam tm, int rank) {
   return comm.rank + (rank - tm.rank) * tm.stride;
 }
 #endif
 
-#if __cplusplus
-NCCL_HOST_DEVICE_INLINE int ncclTeamRankToLsa(ncclDevComm const& comm, ncclTeam tm, int rank) {
+#ifdef __CUDACC__
+NCCL_DEVICE_INLINE int ncclTeamRankToLsa(ncclDevComm const& comm, ncclTeam tm, int rank) {
   return comm.lsaRank + (rank - tm.rank) * tm.stride;
 }
 #endif
