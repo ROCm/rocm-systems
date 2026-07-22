@@ -272,6 +272,18 @@ flowchart TD
 
 ## Reconnaissance conclusions
 
+- 2026-07-22: `SA0` remains TODO/gray after a bounded physical tree-atomic-OR
+  investigation.  The current object combines a compiler-managed dynamic
+  stack, transient spill pressure, a full ordinary VGPR bank below
+  `ACCUM_OFFSET`, and synchronization-aware Sampled state whose sequence is
+  lane-varying.  The existing scalar fallback cannot represent that sequence,
+  while the address-free persistent-private layout deliberately rejects
+  dynamic-stack owners.  An incomplete transient-spill prototype was
+  withdrawn after isolating this next design boundary; the current matrix now
+  records the cell red rather than retaining stale historical gray evidence.
+  This hard frontier is not the active gfx950 lane while higher-payoff cells
+  remain.
+
 - 2026-07-22: `RR0` remains ACTIVE/blue, but the CDNA4 VCC correction now
   recovers TP1 decode/combined as well as TP2.  Clean and one-repetition
   paired artifacts pass both exact oracles with complete 240/240 access plus
