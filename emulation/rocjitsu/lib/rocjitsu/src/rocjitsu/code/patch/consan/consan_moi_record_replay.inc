@@ -182,6 +182,15 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       if (group_resource != nullptr)
         (void)apply_moi_transient_sgpr_assignment(group_options,
                                                   group_resource->owner_descriptor_file_offsets);
+      std::vector<const MoiKernelResourceContext *> group_owner_contexts;
+      if (group_resource != nullptr) {
+        group_owner_contexts.reserve(group_resource->owner_descriptor_file_offsets.size());
+        for (uint64_t descriptor_offset : group_resource->owner_descriptor_file_offsets) {
+          const auto context = resource_state.context_by_descriptor.find(descriptor_offset);
+          if (context != resource_state.context_by_descriptor.end())
+            group_owner_contexts.push_back(context->second);
+        }
+      }
       const uint32_t group_entry_island_words = group_options.automatic_moi_record_replay_sgpr_spill
                                                     ? kIndirectIslandWords + 1u
                                                     : kIndirectIslandWords;
@@ -264,7 +273,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           std::optional<DenseEntryHost> best_host;
           uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
           const auto host_preserves_owner_scalar_window = [&](BasicBlock &block,
-                                                              uint64_t host_offset) {
+                                                              const Instruction &host_instruction) {
             if (!has_owner_override)
               return true;
             if (!resource_state.valid || !group_options.moi_exec_save_sgpr ||
@@ -291,27 +300,18 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                      overlaps_range(*group_options.moi_record_replay_call_return_sgpr, 2u);
             };
             bool found_owner_context = false;
-            BasicBlock *resource_block = block_for_offset(resource_state.block_index, host_offset);
-            for (const MoiKernelResourceContext &context : resource_state.contexts) {
-              if (context.kernel == nullptr ||
-                  std::ranges::find(group_resource->owner_descriptor_file_offsets,
-                                    context.kernel->descriptor_file_offset) ==
-                      group_resource->owner_descriptor_file_offsets.end() ||
-                  resource_block == nullptr ||
-                  std::ranges::find(context.scope.blocks, resource_block) ==
-                      context.scope.blocks.end())
+            for (const MoiKernelResourceContext *context : group_owner_contexts) {
+              if (context == nullptr || !context->block_set.contains(&block))
                 continue;
-              const Instruction *host_instruction = instruction_at(resource_block, host_offset);
-              if (host_instruction == nullptr ||
-                  overlaps_window(context.liveness->live_before(*host_instruction)))
+              if (overlaps_window(context->liveness->live_before(host_instruction)))
                 return false;
               found_owner_context = true;
             }
             if (!found_owner_context)
               return false;
             for (const Instruction &instruction : block.instructions()) {
-              if (instruction.src_loc() < host_offset ||
-                  instruction.src_loc() >= host_offset + host_bytes)
+              if (instruction.src_loc() < host_instruction.src_loc() ||
+                  instruction.src_loc() >= host_instruction.src_loc() + host_bytes)
                 continue;
               const InstDefUse def_use(instruction);
               if (overlaps_window(def_use.defs | def_use.uses))
@@ -333,7 +333,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
               const uint64_t host_offset = instruction.src_loc();
               if (host_offset + host_bytes > (*block)->end_offset() ||
                   overlaps_instrumented_site(host_offset, host_offset + host_bytes) ||
-                  !host_preserves_owner_scalar_window(**block, host_offset))
+                  !host_preserves_owner_scalar_window(**block, instruction))
                 continue;
               const uint64_t relay_offset = host_offset + sizeof(uint32_t);
               uint64_t max_distance = 0;
