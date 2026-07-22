@@ -1787,6 +1787,68 @@ TEST(ConSanMoi, Cdna4InlineShadowSpillsThroughSiteLocalDynamicStackFrame) {
       cave_words.end());
 }
 
+TEST(ConSanMoi, Cdna4InlineScalarPersistencePlansEntryScratchForEveryComponent) {
+  const auto guest = build_cdna4_ds_store_b32(
+      /*vaddr=*/0, /*vdata=*/0, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(guest);
+  std::vector<uint32_t> probe_words(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  probe_words[1] =
+      build_v_mov_b32_e32(/*vdst=*/0, vector_source_vgpr(255), ROCJITSU_CODE_ARCH_CDNA4);
+  std::copy(guest->begin(), guest->end(), probe_words.begin() + 2u);
+  probe_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  std::vector<uint32_t> helper_words(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  std::copy(guest->begin(), guest->end(), helper_words.begin() + 1u);
+  helper_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+  std::vector<uint8_t> bytes = make_rdna4_code_object_with_local_function(
+      probe_words, helper_words, {}, kRdna4Wave64AllVgprsGranulated,
+      /*function_is_kernel=*/true, /*wave32=*/false);
+  mutate_elf_header(bytes,
+                    [](Elf64_Ehdr &header) { header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950; });
+  mutate_kernel_descriptor(bytes, "lds_probe", [](KD &descriptor) {
+    // v256 is the first accumulator register, while the guest reaches v255.
+    // This component therefore needs scalar persistent state without moving
+    // the compiler's ordinary/accumulator boundary.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63u);
+  });
+  mutate_kernel_descriptor(bytes, "lds_helper", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 4u);
+  });
+  append_kernel_metadata_note(bytes, "lds_probe", /*uses_dynamic_stack=*/true,
+                              /*sgpr_count=*/0u);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.force_vgpr_spill = true;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
+                               << " errors=" << testing::PrintToString(result.errors);
+  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
+  EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
+  EXPECT_FALSE(result.moi_private_epoch_automatic);
+  EXPECT_TRUE(result.resolved_moi_persistent_vgpr_assignments.empty());
+  EXPECT_EQ(result.resolved_moi_prologue_scratch_vgpr_assignments.size(), 2u);
+  // The full-bank owner drives the code-object-wide scalar choice but its
+  // forced-spill access is filtered during the rebuilt resource plan.  The
+  // other component still emits, and planning must retain an entry assignment
+  // for both so a later selection change cannot expose a partial scalar mode.
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
+                               &ConSanPatchInfo::kind),
+            1u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
+                               &ConSanPatchInfo::kind),
+            1u);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, InlineShadowSpillingIgnoresAbsentAndMalformedMetadata) {
   const std::array<uint32_t, 4> text_words = {
       build_v_mov_b32_e32(/*vdst=*/11, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4),

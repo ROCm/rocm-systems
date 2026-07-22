@@ -1534,7 +1534,7 @@ void apply_test_container_filter(std::vector<Candidate> &candidates, const ConSa
     return options.moi_inline_access_present ? kConSanMoiInlineExecSaveSgprCount : 22u;
   }
   if (options.automatic_moi_record_replay_sgpr_spill)
-    return 4u;
+    return options.moi_engine == ConSanMoiEngine::Sampled ? 8u : 4u;
   // One EXEC-save pair, one VCC-save pair, and one SCC snapshot. Barrier-dense
   // RDNA-family objects additionally reserve a dispatch key and an aligned
   // call-return pair for the relocated router.
@@ -1940,8 +1940,10 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         }
       }
     }
-    if (!selected && options.moi_engine == ConSanMoiEngine::RecordReplay &&
-        is_rdna4_family_arch(arch) && !options.moi_dynamic_stack_spill &&
+    if (!selected &&
+        ((options.moi_engine == ConSanMoiEngine::RecordReplay && is_rdna4_family_arch(arch)) ||
+         gfx1250_sampled) &&
+        !options.moi_dynamic_stack_spill &&
         address_free_scratch_private_limit(arch)) {
       const auto reserved = [&](uint16_t base, uint16_t width) {
         return (options.moi_owner_sgpr &&
@@ -1979,15 +1981,15 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       // One dead pair is therefore sufficient for both transient roles.
       if (spill_key)
         spill_call_return = spill_pc;
-      constexpr uint16_t kSpilledExecVccCount = 4u;
-      for (uint32_t base = 0; spill_call_return && base + kSpilledExecVccCount <= limit;
+      const uint16_t spilled_scalar_count = gfx1250_sampled ? 8u : 4u;
+      for (uint32_t base = 0; spill_call_return && base + spilled_scalar_count <= limit;
            base += 2u) {
         const uint16_t candidate = static_cast<uint16_t>(base);
-        if (!reserved(candidate, kSpilledExecVccCount) &&
-            !range_overlaps(candidate, kSpilledExecVccCount, *spill_pc, 2u) &&
-            !range_overlaps(candidate, kSpilledExecVccCount, *spill_scc, 1u) &&
-            !range_overlaps(candidate, kSpilledExecVccCount, *spill_key, 1u) &&
-            !range_overlaps(candidate, kSpilledExecVccCount, *spill_call_return, 2u)) {
+        if (!reserved(candidate, spilled_scalar_count) &&
+            !range_overlaps(candidate, spilled_scalar_count, *spill_pc, 2u) &&
+            !range_overlaps(candidate, spilled_scalar_count, *spill_scc, 1u) &&
+            !range_overlaps(candidate, spilled_scalar_count, *spill_key, 1u) &&
+            !range_overlaps(candidate, spilled_scalar_count, *spill_call_return, 2u)) {
           selected = candidate;
           break;
         }
@@ -2412,9 +2414,12 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   // A code object made entirely of full-pressure owners has no owner from
   // which to seed the ordinary high-window fallback. Seed component planning
   // with a placeholder; every admitted owner must replace it with either a
-  // liveness-dead window or the spill-backed Record/Replay layout.
-  if (is_rdna4_family_arch(arch) && (options.moi_engine == ConSanMoiEngine::RecordReplay ||
-                                     options.moi_engine == ConSanMoiEngine::InlineShadow)) {
+  // liveness-dead window or a spill-backed access-probe layout.
+  if ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      (options.moi_engine == ConSanMoiEngine::RecordReplay ||
+       options.moi_engine == ConSanMoiEngine::InlineShadow ||
+       (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+        options.moi_engine == ConSanMoiEngine::Sampled))) {
     options.moi_exec_save_sgpr = 0u;
     options.automatic_moi_exec_save_sgprs = true;
     options.automatic_moi_partial_exec_save_sgprs = true;
@@ -2906,6 +2911,15 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
           // without changing ACCUM_OFFSET or consuming address-based private
           // state, so it composes with compiler-managed dynamic stacks.
           const uint16_t scalar_count = static_cast<uint16_t>(2u + needs_workgroup_key);
+          std::vector<uint64_t> scalar_owners;
+          for (const ConSanCandidateResourcePlan &scalar_plan : result.resource_plans) {
+            if (scalar_plan.source == ConSanRegisterAllocationSource::Unsupported)
+              continue;
+            for (uint64_t descriptor_offset : scalar_plan.owner_descriptor_file_offsets) {
+              if (std::ranges::find(scalar_owners, descriptor_offset) == scalar_owners.end())
+                scalar_owners.push_back(descriptor_offset);
+            }
+          }
           uint32_t first = 0u;
           for (const ConSanCandidateResourcePlan &scalar_plan : result.resource_plans) {
             if (scalar_plan.source == ConSanRegisterAllocationSource::Unsupported ||
@@ -2945,7 +2959,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
               return false;
             }
             std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch;
-            for (uint64_t descriptor_offset : component) {
+            for (uint64_t descriptor_offset : scalar_owners) {
               const auto context = std::ranges::find_if(
                   state.contexts, [&](const MoiKernelResourceContext &candidate) {
                     return candidate.kernel != nullptr &&
@@ -2989,6 +3003,12 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
               }
               prologue_scratch.push_back({descriptor_offset, *scratch});
             }
+            // Scalar persistence is a code-object-wide mode.  A prior
+            // disconnected component may already have accumulated a VGPR
+            // tuple, but every later emitted owner will take this scalar
+            // prologue path.  Commit the transition only after entry scratch
+            // has been proven for their complete union.
+            options.moi_persistent_vgpr_assignments.clear();
             options.moi_persistent_owner_sgpr = static_cast<uint16_t>(base);
             options.moi_persistent_epoch_sgpr = static_cast<uint16_t>(base + 1u);
             if (needs_workgroup_key)
