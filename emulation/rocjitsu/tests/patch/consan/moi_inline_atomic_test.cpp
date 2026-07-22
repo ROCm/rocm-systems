@@ -1054,7 +1054,7 @@ TEST(ConSanMoi, InlineAcquiredEpochTokenOrdersOnlyItsExactPair) {
   EXPECT_FALSE(consan_moi_inline_acquired_epoch_orders(token, current, prior));
 }
 
-TEST(ConSanMoi, InlineStableTokenFollowsDirectAndInheritedSourceEvidence) {
+TEST(ConSanMoi, InlineStableDirectAndInheritedTokensSurviveSourceReplacement) {
   constexpr uint64_t dispatch = 0xd150000000000001ull;
   constexpr uint32_t workgroup = 31;
   const ConSanMoiExactShadowEntry prior{ConSanMoiShadowAccessKind::Write, 3, 11, workgroup, 0x100};
@@ -1081,8 +1081,8 @@ TEST(ConSanMoi, InlineStableTokenFollowsDirectAndInheritedSourceEvidence) {
   EXPECT_TRUE(
       consan_moi_inline_stable_token_orders({6, token, 6}, source, dispatch, current, prior));
 
-  // A later source-slot publication cannot revoke the direct acquire fact
-  // already committed in the stable token.
+  // A later source-slot publication cannot revoke an acquire fact already
+  // committed in a stable token.
   source.version_before = 8;
   source.version_after = 8;
   source.slot.version = 8;
@@ -1096,15 +1096,18 @@ TEST(ConSanMoi, InlineStableTokenFollowsDirectAndInheritedSourceEvidence) {
   source.snapshot.entries[0] = {prior.owner_id, 12};
   EXPECT_TRUE(
       consan_moi_inline_stable_token_orders({6, token, 6}, source, dispatch, current, prior));
+  // The inherited fact was validated before token publication. A later
+  // replacement or transient rewrite of the direct-mapped source snapshot is
+  // irrelevant to the durable token.
   source.snapshot.entries[0].ancestor_epoch_plus_one = 11;
-  EXPECT_FALSE(
+  EXPECT_TRUE(
       consan_moi_inline_stable_token_orders({6, token, 6}, source, dispatch, current, prior));
   source.snapshot.entries[0].ancestor_epoch_plus_one = 12;
   token.source_release_version = 8;
   EXPECT_TRUE(
       consan_moi_inline_stable_token_orders({6, token, 6}, source, dispatch, current, prior));
   token.source_release_version = 10;
-  EXPECT_FALSE(
+  EXPECT_TRUE(
       consan_moi_inline_stable_token_orders({6, token, 6}, source, dispatch, current, prior));
   token.source_release_version = 4;
   token.kind = static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence);
@@ -2029,7 +2032,7 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
       acquire_words, std::array<uint32_t, 3>{*restore_original_exec, *restore_vcc, *restore_scc}));
 }
 
-TEST(ConSanMoi, InlineShadowExactConflictRejectsLegacyPairScopedAcquireToken) {
+TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_and_ordered_flat_atomic_handoff_code_object();
   ASSERT_FALSE(bytes.empty());
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
@@ -2180,59 +2183,19 @@ TEST(ConSanMoi, InlineShadowExactConflictRejectsLegacyPairScopedAcquireToken) {
         << "missing acquired-token field at offset " << offset;
   }
 
-  for (const auto &[offset, destination] : std::array<std::pair<size_t, uint16_t>, 7>{
-           {{offsetof(ConSanMoiInlineAtomicReleaseSlot, version), scratch + 16u},
-            {offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address), temporary},
-            {offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) + sizeof(uint32_t),
-             temporary},
-            {offsetof(ConSanMoiInlineAtomicReleaseSlot, workgroup_key), temporary},
-            {offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id), temporary},
-            {offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id) + sizeof(uint32_t), temporary},
-            {offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id), scratch + 20u}}}) {
-    EXPECT_TRUE(
-        contains_subsequence(words, make_expected_offset_load_words(offset, destination, scratch)))
-        << "missing stable source-release field at offset " << offset;
-  }
-  EXPECT_TRUE(contains_subsequence(
-      words,
-      make_expected_offset_load_words(offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch_plus_one),
-                                      scratch + 21u, scratch)));
-  EXPECT_TRUE(contains_subsequence(
-      words, make_expected_offset_load_words(offsetof(ConSanMoiInlineCausalSnapshot, entry_count),
-                                             scratch + 7u, scratch + 17u)));
-  EXPECT_TRUE(contains_subsequence(
-      words, make_expected_offset_load_words(offsetof(ConSanMoiInlineCausalSnapshot, flags),
-                                             scratch + 10u, scratch + 17u)));
-  for (uint16_t i = 0; i < kConSanMoiInlineCausalSnapshotEntryCapacity; ++i) {
-    const size_t entry_offset = offsetof(ConSanMoiInlineCausalSnapshot, entries) +
-                                i * sizeof(ConSanMoiInlineCausalSnapshotEntry);
-    EXPECT_TRUE(contains_subsequence(
-        words, make_expected_offset_load_words(entry_offset, scratch + 14u, scratch + 17u)))
-        << "missing causal-snapshot owner " << i;
-    EXPECT_TRUE(
-        contains_subsequence(words, make_expected_offset_load_words(entry_offset + sizeof(uint32_t),
-                                                                    scratch + 15u, scratch + 17u)))
-        << "missing causal-snapshot epoch " << i;
-  }
-  const auto select_direct = build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(0), scratch + 8u,
-                                                        ROCJITSU_CODE_ARCH_RDNA4);
-  const auto select_inherited = build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(1),
-                                                           scratch + 8u, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto accumulate_inherited =
-      build_s_xor_b64(exec + 4u, exec + 4u, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(select_direct);
-  ASSERT_TRUE(select_inherited);
-  ASSERT_TRUE(accumulate_inherited);
-  EXPECT_NE(std::ranges::find(words, *select_direct), words.end());
-  EXPECT_EQ(std::ranges::count(words, *select_inherited),
-            kConSanMoiInlineCausalSnapshotEntryCapacity + 1u);
-  EXPECT_EQ(std::ranges::count(words, *accumulate_inherited),
-            kConSanMoiInlineCausalSnapshotEntryCapacity);
+  const auto authorize_stable_access_token =
+      build_v_cmp_gt_u32_e32_vcc(scalar_positive_inline_u32(static_cast<uint32_t>(
+                                     ConSanMoiInlineTokenEvidenceKind::ReleaseSequence)),
+                                 scratch + 8u, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(authorize_stable_access_token);
+  EXPECT_NE(std::ranges::find(words.begin(), words.end(), *authorize_stable_access_token),
+            words.end())
+      << "stable direct and inherited tokens must authorize ordinary accesses";
 
   const auto remove_insufficient =
       build_s_and_not1_b64(kRdna4ExecLo, kRdna4ExecLo, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto remove_ordered =
-      build_s_and_not1_b64(kRdna4ExecLo, exec + 2u, exec + 4u, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_not1_b64(kRdna4ExecLo, exec + 2u, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_original_exec = build_s_mov_b64(
       kRdna4ExecLo, exec + kConSanMoiInlineOriginalExecSaveOffset, ROCJITSU_CODE_ARCH_RDNA4);
   const auto forbidden_vcc_clobber =

@@ -1226,18 +1226,18 @@ TEST(ConSanMoi, Gfx1250GenerationTaggedShadowValidatesAtomicTokenWithWorkgroupKe
   const uint16_t exec_base = *result.resolved_moi_exec_save_sgpr;
   const uint16_t original_exec =
       static_cast<uint16_t>(exec_base + kConSanMoiInlineOriginalExecSaveOffset);
-  const uint16_t direct_authorized_exec = static_cast<uint16_t>(exec_base + 20u);
   const auto save_original =
       ib::build_s_mov_b64(original_exec, kRdna4ExecLo, ROCJITSU_CODE_ARCH_GFX1250);
   const auto restore_original =
       ib::build_s_mov_b64(kRdna4ExecLo, original_exec, ROCJITSU_CODE_ARCH_GFX1250);
-  const auto save_direct =
-      ib::build_s_mov_b64(direct_authorized_exec, kRdna4ExecLo, ROCJITSU_CODE_ARCH_GFX1250);
-  ASSERT_TRUE(save_original && restore_original && save_direct);
-  EXPECT_NE(original_exec, direct_authorized_exec);
+  const auto authorize_stable_access_token = ib::build_v_cmp_gt_u32_vcc(
+      scalar_positive_inline_u32(
+          static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence)),
+      static_cast<uint16_t>(*access->scratch_vgpr + 8u), ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(save_original && restore_original && authorize_stable_access_token);
   EXPECT_NE(std::ranges::find(body, *save_original), body.end());
   EXPECT_NE(std::ranges::find(body, *restore_original), body.end());
-  EXPECT_NE(std::ranges::find(body, *save_direct), body.end());
+  EXPECT_NE(std::ranges::find(body, *authorize_stable_access_token), body.end());
 }
 
 TEST(ConSanMoi, Gfx1250FullLocalShadowValidatesAtomicTokenWithPersistentWorkgroupKey) {

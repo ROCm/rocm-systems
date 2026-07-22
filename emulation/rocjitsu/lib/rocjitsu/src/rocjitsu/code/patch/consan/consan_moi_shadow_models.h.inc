@@ -427,42 +427,26 @@ consan_moi_inline_acquired_epoch_orders(const ConSanMoiInlineAcquiredEpochTokenS
 }
 
 /// A stable full token records causal evidence from one source-release
-/// version. A later stable version of that same source slot does not invalidate
-/// a direct token: its acquire was already bracketed before publication.
-/// Inherited tokens still require the current immutable causal snapshot to
-/// contain the producer. Release-sequence tokens carry ancestry between release
-/// operations and never authorize an ordinary access directly.
+/// version. Direct and inherited tokens commit only after the source evidence
+/// is stable and the guest RMW has completed, so later publication to the
+/// direct-mapped source slot cannot revoke either fact. Release-sequence tokens
+/// carry ancestry between release operations and never authorize an ordinary
+/// access directly.
 [[nodiscard]] constexpr bool consan_moi_inline_stable_token_orders(
     const ConSanMoiInlineAcquiredTokenSnapshot &token_words,
-    const ConSanMoiInlineReleaseSnapshotWords &source_words, uint64_t dispatch_id,
+    const ConSanMoiInlineReleaseSnapshotWords & /*source_words*/, uint64_t dispatch_id,
     const ConSanMoiExactShadowEntry &current, const ConSanMoiExactShadowEntry &prior) {
   const auto classified_token = consan_moi_inline_classify_acquired_token(token_words);
-  const auto classified_source = classify_consan_moi_inline_release_snapshot(source_words);
-  if (classified_token.state != ConSanMoiInlineAcquiredTokenState::Stable ||
-      classified_source.state != ConSanMoiInlineReleaseSnapshotState::Stable || dispatch_id == 0 ||
+  if (classified_token.state != ConSanMoiInlineAcquiredTokenState::Stable || dispatch_id == 0 ||
       current.generation == 0 || current.generation != prior.generation)
     return false;
   const auto &token = classified_token.token;
-  const auto &source = classified_source.release;
-  if (token.dispatch_id != dispatch_id || source.identity.dispatch_id != dispatch_id ||
-      token.workgroup_key != current.generation ||
-      source.identity.workgroup_key != current.generation ||
+  if (token.dispatch_id != dispatch_id || token.workgroup_key != current.generation ||
       token.consumer_owner_id != current.owner_id || token.producer_owner_id != prior.owner_id ||
-      token.producer_epoch_plus_one < consan_moi_inline_acquired_epoch_token_value(prior.epoch) ||
-      token.source_release_address != source.identity.atomic_address ||
-      source.version_before < token.source_release_version)
+      token.producer_epoch_plus_one < consan_moi_inline_acquired_epoch_token_value(prior.epoch))
     return false;
-  if (token.kind == static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Direct))
-    return true;
-  if (token.kind != static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Inherited))
-    return false;
-  for (uint32_t i = 0; i < source.snapshot.entry_count; ++i) {
-    const auto &entry = source.snapshot.entries[i];
-    if (entry.ancestor_owner_id == prior.owner_id &&
-        entry.ancestor_epoch_plus_one >= token.producer_epoch_plus_one)
-      return true;
-  }
-  return false;
+  return token.kind == static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Direct) ||
+         token.kind == static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Inherited);
 }
 
 [[nodiscard]] constexpr uint32_t consan_moi_acquired_epoch_token_value(uint32_t epoch) {
