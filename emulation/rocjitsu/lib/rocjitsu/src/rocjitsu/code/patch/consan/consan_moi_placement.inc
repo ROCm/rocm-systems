@@ -1190,6 +1190,38 @@ struct MoiResourcePlanningState {
   return true;
 }
 
+[[nodiscard]] RegisterSet
+dynamic_frame_save_registers_for_site(const MoiResourcePlanningState &state,
+                                      uint64_t text_offset) {
+  RegisterSet saved;
+  constexpr uint64_t kMaxDynamicFramePrologueDistance = 16u * 1024u;
+  CodeObjectPatcher patcher(state.code_object);
+  const std::span<const uint8_t> text = patcher.text_bytes();
+  if (text_offset < sizeof(uint32_t) || text_offset > text.size())
+    return saved;
+  const uint64_t begin = text_offset > kMaxDynamicFramePrologueDistance
+                             ? text_offset - kMaxDynamicFramePrologueDistance
+                             : 0u;
+  for (uint64_t offset = text_offset - sizeof(uint32_t);; offset -= sizeof(uint32_t)) {
+    if (offset + 2u * sizeof(uint32_t) <= text.size()) {
+      uint32_t save_word = 0;
+      uint32_t establish_word = 0;
+      std::memcpy(&save_word, text.data() + offset, sizeof(save_word));
+      std::memcpy(&establish_word, text.data() + offset + sizeof(uint32_t),
+                  sizeof(establish_word));
+      if ((save_word & 0xff800000u) == 0xbe800000u && (save_word & 0xffu) == 33u &&
+          establish_word == build_s_mov_b32(/*dst=*/33u, /*src=*/32u, state.arch)) {
+        saved.expand(
+            {RegClass::SGPR, static_cast<uint16_t>((save_word >> 16u) & 0x7fu), 1u});
+        break;
+      }
+    }
+    if (offset < begin + sizeof(uint32_t))
+      break;
+  }
+  return saved;
+}
+
 [[nodiscard]] ConSanCandidateResourcePlan
 plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &options,
                        ConSanResourceSiteKind site_kind, size_t candidate_index,
@@ -1752,6 +1784,12 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       unavailable |= context.liveness->live_before(*instruction);
       const InstDefUse def_use(*instruction);
       unavailable |= def_use.defs | def_use.uses;
+      // Dynamic-stack helpers save their caller's frame base before establishing
+      // a callee frame.  Recovered CFGs do not always connect a helper return to
+      // its entry, so ordinary liveness can miss that long-lived scalar.  A
+      // transient instrumentation window must never overwrite it.
+      if (context.kernel->uses_dynamic_stack.value_or(false))
+        unavailable |= dynamic_frame_save_registers_for_site(state, text_offset);
     }
   };
   for (const ConSanMoiCandidate &candidate : result.moi_candidates)
@@ -2152,11 +2190,19 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   }
   RegisterSet unavailable;
   bool saw_site = false;
+  const bool has_dynamic_stack_owner =
+      std::ranges::any_of(result.kernels, [](const ConSanKernelInfo &kernel) {
+        return kernel.uses_dynamic_stack.value_or(false);
+      });
   const auto include_site = [&](uint64_t text_offset) {
     BasicBlock *block = block_for_offset(state.block_index, text_offset);
     const Instruction *instruction = instruction_at(block, text_offset);
     if (block == nullptr || instruction == nullptr)
       return;
+    if (has_dynamic_stack_owner) {
+      const RegisterSet frame_saves = dynamic_frame_save_registers_for_site(state, text_offset);
+      unavailable |= frame_saves;
+    }
     const auto owners = contexts_by_block.find(block);
     if (owners == contexts_by_block.end())
       return;
@@ -2164,6 +2210,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       unavailable |= context->liveness->live_before(*instruction);
       const InstDefUse def_use(*instruction);
       unavailable |= def_use.defs | def_use.uses;
+      if (context->kernel != nullptr && context->kernel->uses_dynamic_stack.value_or(false))
+        unavailable |= dynamic_frame_save_registers_for_site(state, text_offset);
       saw_site = true;
     }
   };
@@ -2174,6 +2222,10 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   for (const ConSanSiteDispositionRecord &site : result.site_dispositions) {
     if (site.disposition == ConSanSiteDisposition::Supported)
       include_site(site.text_offset);
+  }
+  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    if (!plan.owner_descriptor_file_offsets.empty())
+      include_site(plan.text_offset);
   }
   if (options.moi_init_owner_epoch) {
     for (const ConSanKernelInfo &kernel : result.kernels)

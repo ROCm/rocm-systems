@@ -4624,11 +4624,17 @@ TEST(ConSanMoi, Cdna4AtomicRecordSpillsThroughSiteLocalDynamicStackFrame) {
   const auto wait = build_cdna4_s_wait_flat0(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(atomic && wait);
   std::vector<uint32_t> text_words;
+  text_words.push_back(build_s_mov_b32(/*sdst=*/18u, /*ssrc=*/33u,
+                                      ROCJITSU_CODE_ARCH_CDNA4));
+  text_words.push_back(build_s_mov_b32(/*sdst=*/33u, /*ssrc=*/32u,
+                                      ROCJITSU_CODE_ARCH_CDNA4));
   text_words.insert(text_words.end(), release.begin(), release.end());
   text_words.push_back(*wait);
   text_words.insert(text_words.end(), atomic->begin(), atomic->end());
   text_words.push_back(*wait);
   text_words.insert(text_words.end(), acquire.begin(), acquire.end());
+  text_words.push_back(build_s_mov_b32(/*sdst=*/33u, /*ssrc=*/18u,
+                                      ROCJITSU_CODE_ARCH_CDNA4));
   text_words.resize(800, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
   text_words.push_back(
       build_v_mov_b32_e32(/*vdst=*/0, vector_source_vgpr(255), ROCJITSU_CODE_ARCH_CDNA4));
@@ -4656,6 +4662,8 @@ TEST(ConSanMoi, Cdna4AtomicRecordSpillsThroughSiteLocalDynamicStackFrame) {
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " errors=" << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  EXPECT_TRUE(*result.resolved_moi_exec_save_sgpr + 6u <= 18u ||
+              *result.resolved_moi_exec_save_sgpr > 18u);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
     return item.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
   });
