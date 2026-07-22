@@ -108,6 +108,7 @@ using rocjitsu::make_kernarg_extension_layout;
 using rocjitsu::parse_kernarg_extension_metadata;
 using rocjitsu::parse_virtual_lds_metadata;
 using rocjitsu::plan_virtual_lds_dispatch;
+using rocjitsu::ProcessorRevision;
 using rocjitsu::SHN_UNDEF;
 using rocjitsu::SHT_NULL;
 using rocjitsu::SHT_STRTAB;
@@ -204,6 +205,11 @@ struct HookConfig {
   uint32_t host_gpu_id = 0;
   int log_level = kLogDisabled;
   bool signal_backtrace = false;
+  /// @brief Guest/host silicon revisions from the DBT guest config. gfx1250 A0 and
+  /// B0 share an ELF machine ID, so the revision cannot be inferred from the code
+  /// object; it selects the B0->A0 workaround direction for same-target loads.
+  ProcessorRevision guest_revision = ProcessorRevision::Unspecified;
+  ProcessorRevision host_revision = ProcessorRevision::Unspecified;
 };
 
 /// @brief Parse a config ISA name or architecture alias into a DBT target.
@@ -221,6 +227,20 @@ struct HookConfig {
       return target;
   }
   return std::nullopt;
+}
+
+/// @brief Map a config silicon revision to the DBT translator revision.
+[[nodiscard]] ProcessorRevision
+processor_revision_from_config(rocjitsu::config::DbtSiliconRevision revision) {
+  switch (revision) {
+  case rocjitsu::config::DbtSiliconRevision::Unspecified:
+    return ProcessorRevision::Unspecified;
+  case rocjitsu::config::DbtSiliconRevision::Gfx1250A0:
+    return ProcessorRevision::Gfx1250A0;
+  case rocjitsu::config::DbtSiliconRevision::Gfx1250B0:
+    return ProcessorRevision::Gfx1250B0;
+  }
+  return ProcessorRevision::Unspecified;
 }
 
 /// @brief Clamp a user-provided hook log level to the supported range.
@@ -353,6 +373,8 @@ void restore_signal_backtrace_handlers() {
   config.host_gpu_id = dbt_guest->host.gpu_id;
   config.log_level = clamp_log_level(dbt_guest->log_level);
   config.signal_backtrace = dbt_guest->signal_backtrace;
+  config.guest_revision = processor_revision_from_config(dbt_guest->guest_revision);
+  config.host_revision = processor_revision_from_config(dbt_guest->host_revision);
   return config;
 }
 
@@ -3787,7 +3809,28 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return HSA_STATUS_ERROR;
   }
 
-  if (source_target.arch == config->target.arch && source_target.mach == config->target.mach) {
+  // gfx1250 A0 and B0 share an ELF machine ID, so a same-arch/same-mach match does
+  // NOT prove the code object is already the target silicon revision. The revision
+  // cannot be inferred from the code object; it comes from the DBT guest config.
+  // When both revisions are configured, this is a real same-ISA revision
+  // translation (e.g. B0->A0), so it must go through the translator below rather
+  // than the pass-through path. When they are not configured, a same-target gfx1250
+  // load cannot be proven safe to pass through unchanged (it might require B0->A0
+  // workarounds), so fail closed. Other architectures are unambiguous by mach.
+  const bool gfx1250_same_target = source_target.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                   config->target.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                   source_target.mach == config->target.mach;
+  const bool have_gfx1250_revisions = config->guest_revision != ProcessorRevision::Unspecified &&
+                                      config->host_revision != ProcessorRevision::Unspecified;
+  if (gfx1250_same_target && !have_gfx1250_revisions) {
+    std::fprintf(stderr,
+                 "[rocjitsu-hooks] gfx1250 same-target load requires guest and host silicon "
+                 "revisions in the DBT guest config; failing load\n");
+    return HSA_STATUS_ERROR;
+  }
+
+  if (!gfx1250_same_target && source_target.arch == config->target.arch &&
+      source_target.mach == config->target.mach) {
     log_message(kLogInfo,
                 "source target %s arch %s already matches requested target; passing through",
                 elf_mach_name(source_target.mach), arch_name(source_target.arch));
@@ -3828,6 +3871,11 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   // an independent kernel fails translation; the skipped-kernel diagnostic names
   // the symbol that is redirected to a target no-op stub.
   translator_options.skip_failed_kernels = true;
+  // Silicon revisions come from the DBT guest config, not the code object (gfx1250
+  // A0/B0 share a machine ID). They select the same-ISA workaround direction, e.g.
+  // a B0 guest translated to A0 host.
+  translator_options.input_revision = config->guest_revision;
+  translator_options.output_revision = config->host_revision;
 
   std::vector<uint8_t> translated_elf;
   log_message(kLogInfo, "translating reader=%llu %s/%s -> %s/%s mach=0x%x",
@@ -3851,10 +3899,9 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return HSA_STATUS_ERROR;
   }
 
-  // A skipped kernel is redirected to an s_trap; s_endpgm stub. Because a
-  // no-handler s_trap falls through (it is not a program terminator), dispatching
-  // that stub would run the s_endpgm and COMPLETE NORMALLY — the application would
-  // observe success with stale/garbage output instead of a failure. There is no
+  // A skipped kernel is redirected to an s_endpgm stub. Dispatching that stub
+  // would COMPLETE NORMALLY without producing the kernel's outputs, so the application
+  // would observe success with stale/garbage output instead of a failure. There is no
   // safe way to let such a kernel be dispatched, so fail the whole code-object
   // load rather than hand back an executable that can silently produce wrong
   // results. (This trades the "keep the module loadable when an unused kernel
