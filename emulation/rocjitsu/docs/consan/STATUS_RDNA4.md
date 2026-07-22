@@ -9,12 +9,12 @@ The last complete gfx1201 certificate was produced on 2026-07-16 at executable
 commit `640e575da2`, with hook SHA-256
 `c45aa0fece5a9aa7ef8b3ad24bcbb2077e477586df6b4eecf12990f7fafa693d`.  It is
 retained below as historical evidence, but it does not qualify the current
-branch.  After rebasing onto the 2026-07-21 sanitizer tip, the current
-certificate has advanced through rebuilt-hook checkpoint `5643227561`, using
-hook SHA-256
-`9dc9695d241114b74c00597878caf2e1c07afa4311d85296a6c48a5b13f05c34`.
-Current-tip qualification is in progress; cells below name retained artifacts
-when post-rebase execution evidence has replaced the initial gray state.
+branch.  After rebasing onto the 2026-07-21 sanitizer tip, qualification
+advanced through independently retained per-row checkpoints.  The latest
+Record/Replay checkpoint is `e057b83d14`, using hook SHA-256
+`3b14b804564342e4e659f7dbac8a066ef950aeea091ea1fe40c368e08186f589`.
+Every matrix cell now has current-tip evidence; cells below name the retained
+artifact and hook that justify their individual status.
 Intermediate `aff4853917` and `da7af06ef7` artifacts predate that rebase and
 remain diagnostic evidence only; they cannot promote a current cell.
 
@@ -60,12 +60,11 @@ are indistinguishable.
 
 ## Catch-up snapshot
 
-- **Immediate requalification:** the portable manifest now has 19 workloads ×
-  4 profiles = 76 current-tip cells, including six independently selected
-  native gfx1201 PyTorch workloads and two native llama.cpp workloads. Rebuild
-  the exact hook, run
-  clean and paired rows, regenerate target identities, review fault specs,
-  execute contained faults, and freeze one provenance bundle.
+- **Current matrix:** the portable manifest has 19 workloads × 4 profiles = 76
+  assessed current-tip cells, including six independently selected native
+  gfx1201 PyTorch workloads and two native llama.cpp workloads.  Remaining
+  non-green cells record concrete coverage, diagnostic, or reviewed-fault
+  gaps rather than missing initial qualification.
 - **Historical comparator:** commit `640e575da2` accepted 55 clean
   baseline/profile rows, 14 reviewed fault policies, and 66 paired-overhead
   rows.  Do not copy its colors or selectors to the current tip.
@@ -84,10 +83,10 @@ are indistinguishable.
   model, but do not port its configurations, shapes, selectors, denominators,
   or expected outcomes to RDNA4.
 
-Thus the immediate regression campaign contains 76 cells.  The expanded
-gfx1201 denominator is intentionally unknown until discovery produces concrete
-native workloads with independent oracles.  Survey rows and baselines are not
-counted as instrumentation cells.
+Thus the current regression campaign contains 76 instrumentation cells.
+Target-native discovery is selection-complete for this checkpoint: survey
+rows, resolved exclusions, and uninstrumented baselines are not counted in
+that denominator.
 
 The current `gfx1201 manifest --json` exposes the original 11 workloads plus
 `pytorch-rdna4-compiled-softmax`, `pytorch-rdna4-split-softmax`,
