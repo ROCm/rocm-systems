@@ -242,13 +242,8 @@ apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
 
 [[nodiscard]] rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
   switch (target) {
-  case ROCJITSU_CODE_TARGET_GFX90A:
-    return ROCJITSU_CODE_ARCH_CDNA2;
-  case ROCJITSU_CODE_TARGET_GFX942:
-    return ROCJITSU_CODE_ARCH_CDNA3;
   case ROCJITSU_CODE_TARGET_GFX950:
     return ROCJITSU_CODE_ARCH_CDNA4;
-  case ROCJITSU_CODE_TARGET_GFX1200:
   case ROCJITSU_CODE_TARGET_GFX1201:
     return ROCJITSU_CODE_ARCH_RDNA4;
   case ROCJITSU_CODE_TARGET_GFX1250:

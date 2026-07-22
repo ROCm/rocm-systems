@@ -593,8 +593,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
 
   const rj_code_arch_t arch = arch_for_target(code_object.target_id());
   if (arch == ROCJITSU_CODE_ARCH_INVALID) {
-    result.warnings.emplace_back("ConSan cannot decode unknown target '" + result.target_name +
-                                 "'");
+    result.warnings.emplace_back("ConSan does not support target '" + result.target_name + "'");
     result.outcome = ConSanTransformOutcome::Unsupported;
     return result;
   }

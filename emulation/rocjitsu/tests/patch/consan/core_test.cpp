@@ -138,6 +138,32 @@ TEST(ConSan, EnabledModeRejectsInvalidCodeObject) {
   EXPECT_TRUE(result.kernels.empty());
 }
 
+TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
+  const std::array<uint32_t, 1> text_words = {build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
+  constexpr std::array unsupported_targets = {
+      EF_AMDGPU_MACH_AMDGCN_GFX90A,
+      EF_AMDGPU_MACH_AMDGCN_GFX942,
+      EF_AMDGPU_MACH_AMDGCN_GFX1200,
+  };
+
+  for (uint32_t target : unsupported_targets) {
+    SCOPED_TRACE(target);
+    std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+    mutate_elf_header(bytes, [target](Elf64_Ehdr &header) { header.e_flags = target; });
+    ConSanOptions options;
+    options.flavor = ConSanFlavor::SuperCollider;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
+    EXPECT_FALSE(result.modified);
+    EXPECT_TRUE(result.errors.empty());
+    EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+      return warning.starts_with("ConSan does not support target '");
+    }));
+  }
+}
+
 TEST(ConSan, StubRejectsEmptyCodeObject) {
   const std::vector<uint8_t> bytes;
   ConSanOptions options;
