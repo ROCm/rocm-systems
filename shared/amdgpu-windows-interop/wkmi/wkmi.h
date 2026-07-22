@@ -218,14 +218,6 @@ struct VideoBiosInfo {
   char date[24];        // "yyyy/mm/dd hh:mm"
 };
 
-/// Driver identification from KMTQAITYPE_QUERYREGISTRY adapter keys.
-struct DriverRegInfo {
-  char radeon_software_version[256]; // RadeonSoftwareVersion key
-  char release_version[256];         // ReleaseVersion key (parsed version)
-  char driver_desc[256];             // DriverDesc key
-  char adapter_string[MAX_PATH];     // AdapterString from KMTQAITYPE_ADAPTERREGISTRYINFO
-};
-
 // ============================================================================
 // GPU Telemetry Functions
 // ============================================================================
@@ -252,9 +244,6 @@ NTSTATUS QueryChipsetId(D3DKMT_HANDLE adapter, D3DKMT_HANDLE device,
 /// @brief Read VBIOS version, part number, and build date.
 NTSTATUS QueryVideoBiosInfo(D3DKMT_HANDLE adapter, D3DKMT_HANDLE device,
                             VideoBiosInfo* out);
-
-/// @brief Read driver version strings and adapter name from registry.
-NTSTATUS QueryDriverRegInfo(D3DKMT_HANDLE adapter, DriverRegInfo* out);
 
 // ============================================================================
 // Device Query Functions
@@ -449,5 +438,28 @@ void FillinRegisterRuntimeStatePrivData(void* priv_data, uint32_t runtime_state,
 
 /// @brief Configure the SetTrapHandler private data
 void FillinTrapHandlerPrivData(void* priv_data, uint64_t tba, uint64_t tma);
+
+
+
+
+/// RAS (Reliability, Availability, Serviceability) feature flags from KMD.
+/// Populated via LHESCAPE_UMDKMDIF_RAS_GET_FEATURES escape.
+struct RasFeatureInfo {
+  uint32_t dram_ecc_supported;     // 1 = KMD reports DRAM ECC support
+  uint32_t sram_ecc_supported;     // 1 = KMD reports SRAM ECC support
+  uint32_t poisoning_supported;    // 1 = KMD reports data poisoning support
+  uint32_t dram_ecc_enabled;       // current mode
+  uint32_t sram_ecc_enabled;
+  uint32_t poisoning_enabled;
+  bool     needs_reboot;           // immediate reboot required to change features
+};
+
+// ============================================================================
+// Additional GPU Telemetry Functions
+// ============================================================================
+
+/// @brief Read RAS (ECC / poisoning) feature flags via LHESCAPE_UMDKMDIF_RAS_GET_FEATURES.
+NTSTATUS QueryRasFeature(D3DKMT_HANDLE adapter, D3DKMT_HANDLE device,
+                         RasFeatureInfo* out);
 
 }  // namespace Wkmi
