@@ -147,10 +147,12 @@ Capture wire version must match the `hrr-playback` reader (see DESIGN.md wire-fo
 
 ## Agent tooling
 
-Optional Cursor/agent skill: [skills/decode-and-triage/SKILL.md](skills/decode-and-triage/SKILL.md)
-(Windows or Linux native replay; Docker replay on Linux hosts). Docker replay uses the
-image HRR stack by default; set `HRR_DOCKER_MOUNT_CLR=1` to overlay a host dev build
-(`CLR_BUILD` / `HRR_PLAYBACK`).
+Optional Cursor/agent skill: [skills/decode-and-triage/SKILL.md](skills/decode-and-triage/SKILL.md).
+**Linux:** full workflow (native replay, optional Docker replay, auto-build). **Windows:**
+metadata-only triage via Python is supported; full skill orchestration and Docker replay
+are Linux-first today — see the skill doc for Windows limitations (`hrr-playback.exe`
+replay is manual; set `HRR_PLAYBACK`). Docker replay uses the image HRR stack by default;
+set `HRR_DOCKER_MOUNT_CLR=1` to overlay a host dev build (`CLR_BUILD` / `HRR_PLAYBACK`).
 
 ## Copyright
 

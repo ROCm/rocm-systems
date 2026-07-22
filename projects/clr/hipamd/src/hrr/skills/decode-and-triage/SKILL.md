@@ -1,9 +1,10 @@
 ---
 name: decode-and-triage
 description: >-
-  Decode and triage HRR capture archives with full GPU replay by default.
-  Builds hrr-playback when missing. Never edits source. Print finding summary
-  in the chat reply.
+  Decode and triage HRR capture archives with full GPU replay by default (Linux).
+  Builds hrr-playback when missing. On Windows: metadata-only triage via Python, or
+  manual hrr-playback.exe replay — bash orchestration is Linux-first; no Docker on
+  Windows. Never edits source. Print finding summary in the chat reply.
 inputs:
   - HRR archive path (`capture.hrr/pid-*` directory, or capture root to resolve)
   - Optional Docker image from capture (`HRR_DOCKER_IMAGE`)
@@ -15,21 +16,41 @@ outputs:
 
 # HRR Decode & Triage
 
-**Platform:** Windows or Linux host with AMD GPU. Native replay uses `hrr-playback`
-from a CLR build on the same OS. Docker replay (`--replay docker`) requires a Linux
-host with Docker and GPU passthrough.
+**Platform (Linux):** AMD GPU host. Full skill workflow via `triage_archive.sh`:
+native GPU replay (auto-builds `hrr-playback` when missing), optional Docker replay,
+manifest preflight, and finding output.
 
-**Run from:** any working directory. Invoke the script by absolute path:
+**Platform (Windows):** `hrr-playback.exe` and native GPU replay exist, but the skill
+orchestration scripts are **bash/Linux-oriented today** — see [Windows support](#windows-support)
+below. Docker replay is **not** supported on Windows (ROCm containers are Linux-only).
+
+**Run from:** any working directory. On Linux, invoke by absolute path:
 
 ```bash
 <rocm-systems>/projects/clr/hipamd/src/hrr/skills/decode-and-triage/scripts/triage_archive.sh \
   --archive <path-to>/capture.hrr/pid-<pid>
 ```
 
-On Windows, use Git Bash or WSL for the bash scripts. Scripts locate the colocated
-CLR tree from their install path; you do not need to `cd` into `rocm-systems` first.
+Scripts locate the colocated CLR tree from their install path; you do not need to
+`cd` into `rocm-systems` first.
 
 Print the **finding markdown** that `triage_archive.sh` writes to stdout.
+
+### Windows support
+
+| Capability | Windows today |
+|------------|---------------|
+| Full skill via `triage_archive.sh` | **Unreliable** — scripts require bash (Git Bash or WSL) and use Linux GPU/lib checks (`/dev/kfd`, `LD_LIBRARY_PATH`) |
+| Metadata-only triage (`--no-replay`) | **Yes** — `python3 analyze_replay_finding.py --archive <pid-dir>` |
+| Native GPU replay (manual) | **Yes** — run prebuilt `hrr-playback.exe` yourself; prepend ROCm `bin` to `PATH` for HIP DLLs; pass `--log` to the analyzer |
+| Auto-build `hrr-playback` (`ensure_playback.sh --build`) | **No** — Linux/Ninja only; set `HRR_PLAYBACK` to an existing Windows build |
+| Docker replay (`--replay docker`) | **No** — requires a Linux host with Docker and GPU passthrough |
+| Container captures (e.g. vLLM image) | Replay on **Linux** (native or Docker); on Windows use manual native replay only if the Windows HIP stack matches the capture |
+
+On Windows, prefer **`--no-replay`** through the Python analyzer until a
+cross-platform entry point lands. Do not claim full GPU triage succeeded if replay
+did not run. For Linux container captures without a matching Windows HIP stack,
+say replay must happen on Linux.
 
 ## Example prompt
 
@@ -74,6 +95,10 @@ summary — do not invent a fault type.
 
 ## Hard constraints
 
+- **Windows hosts:** follow [Windows support](#windows-support); do not run `triage_archive.sh`
+  for full GPU replay unless the user explicitly has bash + a working Linux-style GPU path.
+  Prefer `analyze_replay_finding.py --archive <pid-dir>` (`--no-replay`) or document manual
+  `hrr-playback.exe` steps.
 - **No source edits.** One `ensure_playback.sh --build` attempt max; on failure stop (or `--no-replay`).
 - Do not ask about Docker until native replay fails **unless** user named the capture image.
 - Do not ask user to run cmake/ninja — scripts handle it.
@@ -84,7 +109,8 @@ summary — do not invent a fault type.
 | Situation | Action |
 |-----------|--------|
 | `--build` fails (`rocdevice.cpp` etc.) | Set `CLR_BUILD` to existing `projects/clr/build-hrr*`; re-run. |
-| Native replay fails | Docker replay with capture image (Linux host). |
+| Native replay fails (Linux) | Docker replay with capture image (Linux host). |
+| Windows host | Metadata-only via `analyze_replay_finding.py`, or manual `hrr-playback.exe` + analyzer; no Docker; no auto-build. |
 | Docker `hrr-playback` not in image | `HRR_DOCKER_MOUNT_CLR=1` with `CLR_BUILD` / `HRR_PLAYBACK`. |
 | Docker HIP symbol/version mismatch | Dev overlay — `HRR_DOCKER_MOUNT_CLR=1`; `replay_docker.sh` puts mounted CLR first on `LD_LIBRARY_PATH`. |
 | Preflight exit 2 | Ask user to confirm; re-run with `HRR_CONTINUE=1`. |
