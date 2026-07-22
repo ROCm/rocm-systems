@@ -336,11 +336,12 @@ TEST(ConSanMoi, Cdna4InlineShadowPreservesDsWorkgroupKeyFromKernelEntry) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  ASSERT_TRUE(prologue->dispatch_id_primary_prologue_offset);
-  ASSERT_TRUE(prologue->dispatch_id_secondary_prologue_offset);
-  EXPECT_EQ(*prologue->dispatch_id_primary_prologue_offset, prologue->trampoline_offset + 512u);
-  EXPECT_GT(*prologue->dispatch_id_secondary_prologue_offset,
-            *prologue->dispatch_id_primary_prologue_offset);
+  EXPECT_TRUE(prologue->workgroup_shadow_lazy_initialization);
+  EXPECT_EQ(prologue->workgroup_shadow_validity_size, 0u);
+  // Generation-tagged CDNA4 shadows need no eager LDS clear, so both entry
+  // variants now fit directly in their aligned entry windows.
+  EXPECT_FALSE(prologue->dispatch_id_primary_prologue_offset);
+  EXPECT_FALSE(prologue->dispatch_id_secondary_prologue_offset);
 }
 
 TEST(ConSanMoi, Cdna4InlineShadowAvoidsOriginalPhysicalVccPair) {
@@ -416,6 +417,8 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
   ASSERT_EQ(patch->persistent_private_state_end, 8u);
   EXPECT_GT(patch->required_private_segment_size, 0u);
   EXPECT_GT(patch->workgroup_shadow_size, 0u);
+  EXPECT_TRUE(patch->workgroup_shadow_lazy_initialization);
+  EXPECT_EQ(patch->workgroup_shadow_validity_size, 0u);
 
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue, &ConSanPatchInfo::kind);
@@ -437,6 +440,25 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
       ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(local_exchange);
   EXPECT_TRUE(contains_subsequence(patch_words, *local_exchange));
+
+  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  const uint16_t generation_vgpr = static_cast<uint16_t>(*patch->scratch_vgpr + 5u);
+  const auto mix_dispatch_low =
+      ib::build_v_xor_b32(generation_vgpr, *result.resolved_moi_dispatch_id_sgpr, generation_vgpr,
+                          ROCJITSU_CODE_ARCH_CDNA4);
+  const auto mix_dispatch_high = ib::build_v_xor_b32(
+      generation_vgpr, static_cast<uint16_t>(*result.resolved_moi_dispatch_id_sgpr + 1u),
+      generation_vgpr, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto bound_generation =
+      ib::build_v_and_b32_literal(generation_vgpr, consan_moi_exact_shadow::max_generation - 1u,
+                                  generation_vgpr, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto make_nonzero_generation = ib::build_v_add_u32(
+      generation_vgpr, scalar_positive_inline_u32(1u), generation_vgpr, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(mix_dispatch_low && mix_dispatch_high && bound_generation && make_nonzero_generation);
+  EXPECT_NE(std::ranges::find(patch_words, *mix_dispatch_low), patch_words.end());
+  EXPECT_NE(std::ranges::find(patch_words, *mix_dispatch_high), patch_words.end());
+  EXPECT_TRUE(contains_subsequence(patch_words, *bound_generation));
+  EXPECT_TRUE(contains_subsequence(patch_words, *make_nonzero_generation));
 
   const uint16_t first_snapshot = static_cast<uint16_t>(*patch->scratch_vgpr + 16u);
   const uint16_t address_snapshot = first_snapshot == 2u ? first_snapshot + 1u : first_snapshot;

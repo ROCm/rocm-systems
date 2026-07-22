@@ -1909,6 +1909,34 @@
     errors.emplace_back("ConSan MOI inline-shadow probe could not derive workgroup identity");
     return std::nullopt;
   }
+  if (generation_tagged_local_shadow && arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (!options.moi_dispatch_id_sgpr) {
+      errors.emplace_back(
+          "ConSan MOI CDNA4 generation-tagged local shadow requires dispatch identity");
+      return std::nullopt;
+    }
+    // Workgroup coordinates alone repeat across dispatches. Fold the native
+    // dispatch identity into the bounded generation and reserve zero for an
+    // empty/unqualified cell, so LDS reuse cannot manufacture a prior owner.
+    const auto mix_dispatch_low = instrumentation::build_v_xor_b32(
+        workgroup_key_vgpr, *options.moi_dispatch_id_sgpr, workgroup_key_vgpr, arch);
+    const auto mix_dispatch_high = instrumentation::build_v_xor_b32(
+        workgroup_key_vgpr, static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u),
+        workgroup_key_vgpr, arch);
+    const auto bound_generation = instrumentation::build_v_and_b32_literal(
+        workgroup_key_vgpr, consan_moi_exact_shadow::max_generation - 1u, workgroup_key_vgpr, arch);
+    const auto make_nonzero_generation = instrumentation::build_v_add_u32(
+        workgroup_key_vgpr, scalar_positive_inline_u32(1u), workgroup_key_vgpr, arch);
+    if (!mix_dispatch_low || !mix_dispatch_high || !bound_generation || !make_nonzero_generation) {
+      errors.emplace_back(
+          "ConSan MOI CDNA4 local shadow could not derive dispatch-qualified generation");
+      return std::nullopt;
+    }
+    words.push_back(*mix_dispatch_low);
+    words.push_back(*mix_dispatch_high);
+    words.insert(words.end(), bound_generation->begin(), bound_generation->end());
+    words.insert(words.end(), make_nonzero_generation->begin(), make_nonzero_generation->end());
+  }
   if ((!workgroup_shadow || generation_tagged_local_shadow) && options.moi_exec_save_sgpr) {
     // The packed key is injective only inside its documented dimensional
     // bounds. Keep the guest running, but make every excluded lane-site

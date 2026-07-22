@@ -116,8 +116,19 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     // exact local identity and select the representation requested by the
     // object-wide planner.
     constexpr uint32_t kGfx1250PreferredLocalShadowLimit = 48u * 1024u;
-    if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-        layout->required_group_segment_size > kGfx1250PreferredLocalShadowLimit) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      // LDS is reusable storage whose initial contents are unspecified. Make
+      // CDNA4 validity explicit in each exact cell instead of depending on a
+      // workgroup-wide eager clear before the instrumented program starts.
+      layout = plan_consan_moi_generation_tagged_workgroup_shadow(
+          descriptor.group_segment_fixed_size, max_workgroup_lds_bytes);
+      if (!layout) {
+        warnings.emplace_back("ConSan MOI CDNA4 generation-tagged workgroup shadow does not fit in "
+                              "architectural LDS");
+        return std::nullopt;
+      }
+    } else if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+               layout->required_group_segment_size > kGfx1250PreferredLocalShadowLimit) {
       layout = consan_moi_prefer_generation_tagged_workgroup_shadow(
                    descriptor.group_segment_fixed_size, prefer_compact)
                    ? plan_consan_moi_generation_tagged_workgroup_shadow(
