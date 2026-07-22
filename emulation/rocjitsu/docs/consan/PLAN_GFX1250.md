@@ -153,7 +153,7 @@ flowchart TD
     XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessed;<br/>SGEMM first problem 12/12 exact and fully covered"]
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
-    XT3I["XT3I ACTIVE<br/>SPMM F8 Sampled third-object relay window localized;<br/>partition fix, then paired and reviewed-fault acceptance"]
+    XT3I["XT3I ACTIVE<br/>SPMM F8 Sampled relay-window fix complete;<br/>paired and reviewed-fault acceptance remain"]
     XT3J["XT3J DONE<br/>SPMM F8 Inline standard clean assessed;<br/>MT64x64 wrong-result rows isolate blocker"]
     XT3K["XT3K DONE<br/>SPMM F8 Inline ninth-barrier bank defect fixed;<br/>exact kernel fully passes"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
@@ -406,6 +406,15 @@ flowchart TD
   not partition an over-wide dense owner into independently reachable relay
   windows.  The next checkpoint is the analogous Sampled partition regression
   and fix; no source edit is in flight.
+
+- 2026-07-22: XT3I's narrow Sampled relay-window fix is complete.  Per-owner
+  address sorting followed by the established signed-branch-span partition
+  gives each over-wide dense window a reachable host relay and dispatcher.
+  The new two-window regression, the 86-test Sampled/relay slice, and the full
+  723-test ConSan suite pass.  A current-hook run of the formerly incomplete
+  third SPMM client accepts all five exact numeric rows and reports complete
+  11,154/11,154 access plus 380/380 barrier-member coverage.  The node remains
+  ACTIVE/blue for a full paired run and reviewed-fault acceptance.
 
 - 2026-07-22: V9A is DONE and V9B is the sole ACTIVE/blue node.  The current
   and historical Qwen runs use the same VMFB, and both reach the

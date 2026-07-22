@@ -262,7 +262,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                               static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
         sizeof(uint32_t);
     std::vector<std::pair<std::pair<bool, std::string>, DenseGroup>> groups;
-    for (const auto &[key, owner_candidates] : owner_groups) {
+    for (auto &[key, owner_candidates] : owner_groups) {
+      std::ranges::sort(owner_candidates, {}, &ConSanMoiCandidate::text_offset);
       for (const ConSanMoiCandidate *candidate : owner_candidates) {
         if (groups.empty() || groups.back().first != key ||
             (arch != ROCJITSU_CODE_ARCH_GFX1250 && groups.back().second.candidates.size() == 64u) ||
