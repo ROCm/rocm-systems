@@ -615,8 +615,8 @@ sdk_core<Wrapper, Externals>::get_callback_domains()
         Wrapper::CALLBACK_TRACING_CODE_OBJECT,
     };
 
-    auto _version          = get_version();
-    auto formatted_version = _version.formatted();
+    const auto current_version   = get_version();
+    auto       formatted_version = current_version.formatted();
     if(formatted_version == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
@@ -640,20 +640,21 @@ sdk_core<Wrapper, Externals>::get_callback_domains()
         }
     }
 
-    auto _data    = std::unordered_set<kind_t>{};
-    auto _domains = rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
+    auto       callback_domains = std::unordered_set<kind_t>{};
+    const auto domains_input =
+        rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
 
     if constexpr(Wrapper::compile_time_version >= 600)
     {
         if(Externals::get_use_rcclp() && formatted_version >= 600)
         {
             // Translate ROCPROFSYS_USE_RCCLP to entry in ROCPROFSYS_ROCM_DOMAINS
-            _data.emplace(Wrapper::CALLBACK_TRACING_RCCL_API);
+            callback_domains.emplace(Wrapper::CALLBACK_TRACING_RCCL_API);
         }
         if(Externals::get_use_ompt() && formatted_version >= 600)
         {
             // Translate some configuration settings to rocprofiler domains
-            _data.emplace(Wrapper::CALLBACK_TRACING_OMPT);
+            callback_domains.emplace(Wrapper::CALLBACK_TRACING_OMPT);
         }
     }
 
@@ -666,7 +667,7 @@ sdk_core<Wrapper, Externals>::get_callback_domains()
             valid_choices, [&domainv](const auto& choice) { return choice == domainv; });
     };
 
-    for(const auto& itr : _domains)
+    for(const auto& itr : domains_input)
     {
         if(invalid_domain(itr))
         {
@@ -680,17 +681,17 @@ sdk_core<Wrapper, Externals>::get_callback_domains()
                               Wrapper::CALLBACK_TRACING_HSA_AMD_EXT_API,
                               Wrapper::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
                               Wrapper::CALLBACK_TRACING_HSA_FINALIZE_EXT_API })
-                _data.emplace(eitr);
+                callback_domains.emplace(eitr);
         }
         else if(itr == "hip_api")
         {
             for(auto eitr : { Wrapper::CALLBACK_TRACING_HIP_RUNTIME_API,
                               Wrapper::CALLBACK_TRACING_HIP_COMPILER_API })
-                _data.emplace(eitr);
+                callback_domains.emplace(eitr);
         }
         else if(itr == "marker_api" || itr == "roctx")
         {
-            _data.emplace(Wrapper::CALLBACK_TRACING_MARKER_CORE_API);
+            callback_domains.emplace(Wrapper::CALLBACK_TRACING_MARKER_CORE_API);
         }
         else
         {
@@ -700,14 +701,14 @@ sdk_core<Wrapper, Externals>::get_callback_domains()
                 auto        dval = static_cast<kind_t>(idx);
                 if(itr == to_lower(ditr.name) && supported.count(dval) > 0)
                 {
-                    _data.emplace(dval);
+                    callback_domains.emplace(dval);
                     break;
                 }
             }
         }
     }
 
-    return _data;
+    return callback_domains;
 }
 
 template <typename Wrapper, typename Externals>

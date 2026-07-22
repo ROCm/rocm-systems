@@ -777,9 +777,9 @@ public:
 
 inline std::unique_ptr<gmock_wrapper> g_mock_wrapper;
 
-// ─── backend ──────────────────────────────────────────────────────────────────
+// ─── wrapper ──────────────────────────────────────────────────────────────────
 
-struct backend
+struct wrapper
 {
     // ─── Compile-time SDK version ─────────────────────────────────────────────
     static constexpr std::uint32_t compile_time_version = 10301U;
@@ -787,7 +787,7 @@ struct backend
     // ─── Scalar handle / ID types ─────────────────────────────────────────────
     using status_t = ::rocprofsys::mock::rocprofiler_sdk::status_t;
 
-    // handle_t is defined at namespace scope; alias it here so backend::handle_t works.
+    // handle_t is defined at namespace scope; alias it here so wrapper::handle_t works.
     using handle_t = ::rocprofsys::mock::rocprofiler_sdk::handle_t;
 
     using context_id            = handle_t;
