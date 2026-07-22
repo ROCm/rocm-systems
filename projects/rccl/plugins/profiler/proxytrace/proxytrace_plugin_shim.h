@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  *
  * Minimal types for the proxytrace profiler plugin only (same content as
- * ext-profiler example nccl/common.h + nccl/err.h). Kept local so this plugin
+ * plugins/profiler/example nccl/common.h + nccl/err.h). Kept local so this plugin
  * does not depend on plugins/profiler/example/.
  ************************************************************************/
 

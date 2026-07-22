@@ -35,13 +35,13 @@ ext-plugins/
 │       └── valid_config_without_wildcards.conf
 └── tests/                       # Test suite directory
     ├── conftest.py              # Pytest fixtures and shared test configuration
-    ├── ext-tuner/               # CSV Tuner Plugin specific tests (sources at plugins/tuner/)
+    ├── ext-tuner/               # CSV Tuner Plugin tests (plugin sources at plugins/tuner/)
     │   ├── test_allreduce.py
     │   ├── test_broadcast.py
     │   ├── test_reduce.py
     │   ├── test_allgather.py
     │   └── test_reducescatter.py
-    ├── ext-profiler/            # Profiler Plugin specific tests (sources at plugins/profiler/)
+    ├── ext-profiler/            # Profiler Plugin tests (plugin sources at plugins/profiler/)
     │   ├── test_allreduce.py
     │   ├── test_broadcast.py
     │   ├── test_reduce.py
