@@ -34,7 +34,6 @@ from utils.parser import (
     _merge_stall_reason_rows,
     load_non_mertrics_table,
     load_pc_sampling_data,
-    load_pc_sampling_data_per_kernel,
     load_table_data,
     nullify_unevaluated_metric_values,
 )
@@ -562,14 +561,14 @@ def test_load_aggregated_pc_sampling_happy_path() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════
-# load_pc_sampling_data_per_kernel
+# load_pc_sampling_data
 # ═══════════════════════════════════════════════════════════════
 
 
-def setup_per_kernel_data(
+def setup_pc_sampling_data(
     method: str = "host_trap",
 ) -> dict:
-    """Build tool_data for per-kernel tests.
+    """Build tool data for filtered PC sampling tests.
 
     vecCopy (kernel_id 100) and vecAdd (kernel_id 101) share code object 5,
     so kernels are distinguished only by kernel_id via dispatch attribution.
@@ -609,6 +608,14 @@ def setup_per_kernel_data(
     )
 
 
+def make_pc_sampling_workload(kernel_name: str = "vecCopy") -> schema.Workload:
+    """Build a workload that selects *kernel_name* from the kernel-top table."""
+    return schema.Workload(
+        filter_kernel_ids=[0],
+        dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": [kernel_name]})},
+    )
+
+
 @pytest.mark.parametrize(
     "method, sorting_type",
     [
@@ -618,8 +625,7 @@ def setup_per_kernel_data(
         ("stochastic", "count"),
     ],
 )
-def test_load_per_kernel_schema_and_sort(
-    tmp_path: Path,
+def test_load_pc_sampling_data_filtered_schema_and_sort(
     method: str,
     sorting_type: str,
 ) -> None:
@@ -629,12 +635,12 @@ def test_load_per_kernel_schema_and_sort(
         if method == "host_trap"
         else STOCHASTIC_DISPLAY_COLUMNS
     )
-    tool_data = setup_per_kernel_data(method=method)
-    df = load_pc_sampling_data_per_kernel(
-        method=method,
-        tool_data=tool_data,
-        kernel_name="vecCopy",
-        sorting_type=sorting_type,
+    tool_data = setup_pc_sampling_data(method=method)
+    df = load_pc_sampling_data(
+        make_pc_sampling_workload(),
+        "ps_file",
+        sorting_type,
+        [tool_data],
     )
     assert not df.empty
     assert list(df.columns) == expected_columns
@@ -648,7 +654,7 @@ def test_load_per_kernel_schema_and_sort(
         assert offsets == sorted(offsets)
 
 
-def test_load_per_kernel_offset_sort_is_numeric() -> None:
+def test_load_pc_sampling_data_filtered_offset_sort_is_numeric() -> None:
     """Offset sort orders by numeric value, not lexicographic hex string."""
     tool_data = make_tool_data(
         host_trap=[
@@ -660,38 +666,38 @@ def test_load_per_kernel_offset_sort_is_numeric() -> None:
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 100)],
     )
-    df = load_pc_sampling_data_per_kernel(
-        method="host_trap",
-        tool_data=tool_data,
-        kernel_name="vecCopy",
-        sorting_type="offset",
+    df = load_pc_sampling_data(
+        make_pc_sampling_workload(),
+        "ps_file",
+        "offset",
+        [tool_data],
     )
     # 0x20 (32) must precede 0x100 (256); lexicographic order would invert them.
     assert df["offset"].tolist() == ["0x20", "0x100"]
 
 
 @pytest.mark.parametrize("num_rows, expected_rows", [(1, 1), (0, 2), (None, 2)])
-def test_load_per_kernel_num_rows_limit(
+def test_load_pc_sampling_data_filtered_num_rows_limit(
     num_rows: int | None,
     expected_rows: int,
 ) -> None:
     """num_rows caps the table after sorting; 0 or None keeps every row."""
-    df = load_pc_sampling_data_per_kernel(
-        method="host_trap",
-        tool_data=setup_per_kernel_data(),
-        kernel_name="vecCopy",
-        sorting_type="count",
+    df = load_pc_sampling_data(
+        make_pc_sampling_workload(),
+        "ps_file",
+        "count",
+        [setup_pc_sampling_data()],
         num_rows=num_rows,
     )
     assert len(df) == expected_rows
 
 
-def make_per_kernel_guard_data(
+def make_pc_sampling_guard_data(
     instructions: list | None,
     comments: list | None,
     indices: tuple[int, int] = (0, 1),
 ) -> dict:
-    """Per-kernel tool_data with caller-controlled instruction/comment tables."""
+    """Build tool data with caller-controlled instruction/comment tables."""
     samples = [
         make_record(5, 0x10, indices[0], dispatch_id=0),
         make_record(5, 0x20, indices[1], dispatch_id=1),
@@ -734,7 +740,7 @@ def make_per_kernel_guard_data(
         ),
     ],
 )
-def test_load_per_kernel_out_of_range_index_guards(
+def test_load_pc_sampling_data_filtered_out_of_range_index_guards(
     instructions: list | None,
     comments: list | None,
     instruction_none: str,
@@ -746,12 +752,12 @@ def test_load_per_kernel_out_of_range_index_guards(
     instruction stays None when out of range; source_line uses the "N/A"
     sentinel so display code does not suppress the table.
     """
-    tool_data = make_per_kernel_guard_data(instructions, comments, indices)
-    df = load_pc_sampling_data_per_kernel(
-        method="host_trap",
-        tool_data=tool_data,
-        kernel_name="vecCopy",
-        sorting_type="offset",
+    tool_data = make_pc_sampling_guard_data(instructions, comments, indices)
+    df = load_pc_sampling_data(
+        make_pc_sampling_workload(),
+        "ps_file",
+        "offset",
+        [tool_data],
     )
     assert not df.empty
     assert_none_kind(df["instruction"], instruction_none)
@@ -765,18 +771,18 @@ def test_load_per_kernel_out_of_range_index_guards(
         pytest.param(["v_mov", "v_add"], None, id="empty_comments"),
     ],
 )
-def test_load_per_kernel_empty_string_table_warns_and_skips(
+def test_load_pc_sampling_data_filtered_empty_string_table_warns_and_skips(
     instructions: list | None,
     comments: list | None,
 ) -> None:
     """Empty instruction/comment table warns with the kernel name, no exit."""
-    tool_data = make_per_kernel_guard_data(instructions, comments)
+    tool_data = make_pc_sampling_guard_data(instructions, comments)
     with patch("utils.parser.console_warning") as console_warning_mock:
-        df = load_pc_sampling_data_per_kernel(
-            method="host_trap",
-            tool_data=tool_data,
-            kernel_name="vecCopy",
-            sorting_type="offset",
+        df = load_pc_sampling_data(
+            make_pc_sampling_workload(),
+            "ps_file",
+            "offset",
+            [tool_data],
         )
     assert df.empty
     console_warning_mock.assert_called_once()
@@ -804,7 +810,7 @@ def assert_na_kind(column: pd.Series, kind: str) -> None:
         assert not is_na.any()
 
 
-def test_load_per_kernel_multi_dispatch_groupby() -> None:
+def test_load_pc_sampling_data_filtered_multi_dispatch_groupby() -> None:
     """Two dispatch IDs at one (code_object_id, offset) collapse to a summed row."""
     samples = [
         make_record(
@@ -831,11 +837,11 @@ def test_load_per_kernel_multi_dispatch_groupby() -> None:
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 100)],
     )
-    df = load_pc_sampling_data_per_kernel(
-        method="stochastic",
-        tool_data=tool_data,
-        kernel_name="vecCopy",
-        sorting_type="count",
+    df = load_pc_sampling_data(
+        make_pc_sampling_workload(),
+        "ps_file",
+        "count",
+        [tool_data],
     )
     assert len(df) == 1
     row = df.iloc[0]
@@ -848,55 +854,32 @@ def test_load_per_kernel_multi_dispatch_groupby() -> None:
     }
 
 
-def test_load_per_kernel_kernel_not_found() -> None:
+def test_load_pc_sampling_data_filtered_kernel_not_found() -> None:
     """
     Return an empty DataFrame when the requested kernel name
     is absent from the kernel symbols.
     """
-    tool_data = setup_per_kernel_data()
-    df = load_pc_sampling_data_per_kernel(
-        method="host_trap",
-        tool_data=tool_data,
-        kernel_name="nonexistent",
-        sorting_type="offset",
+    tool_data = setup_pc_sampling_data()
+    df = load_pc_sampling_data(
+        make_pc_sampling_workload("nonexistent"),
+        "ps_file",
+        "offset",
+        [tool_data],
     )
     assert df.empty
 
 
-def test_load_per_kernel_no_pc_sample_key_warns_and_skips() -> None:
-    """Missing pc_sample array warns with the kernel name, no exit."""
-    tool_data = make_tool_data(
-        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
-        kernel_dispatch=[make_dispatch(0, 100)],
-    )
-    with patch("utils.parser.console_warning") as console_warning_mock:
-        df = load_pc_sampling_data_per_kernel(
-            method="host_trap",
-            tool_data=tool_data,
-            kernel_name="vecCopy",
-            sorting_type="offset",
-        )
-    assert df.empty
-    console_warning_mock.assert_called_once()
-    assert "vecCopy" in console_warning_mock.call_args.args[0]
-
-
-def test_load_per_kernel_invalid_sorting_type() -> None:
+def test_load_pc_sampling_data_filtered_invalid_sorting_type() -> None:
     """Return an empty DataFrame and log an error for an unrecognized sorting type."""
-    tool_data = setup_per_kernel_data()
+    tool_data = setup_pc_sampling_data()
     with patch("utils.parser.console_error"):
-        df = load_pc_sampling_data_per_kernel(
-            method="host_trap",
-            tool_data=tool_data,
-            kernel_name="vecCopy",
-            sorting_type="invalid",
+        df = load_pc_sampling_data(
+            make_pc_sampling_workload(),
+            "ps_file",
+            "invalid",
+            [tool_data],
         )
     assert df.empty
-
-
-# ═══════════════════════════════════════════════════════════════
-# load_pc_sampling_data
-# ═══════════════════════════════════════════════════════════════
 
 
 def test_load_pc_sampling_data_no_tool_data() -> None:
