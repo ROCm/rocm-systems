@@ -334,10 +334,11 @@ inline constexpr uint64_t kConSanMoiInlineShadowDefaultReportBufferBytes = 512u 
 /// the process ceiling; this pure planner enforces the per-buffer ceiling.
 inline constexpr uint64_t kConSanMoiAutoReportBufferCeilingBytes = 128u * 1024u * 1024u;
 inline constexpr uint64_t kConSanMoiAutoReportProcessCeilingBytes = 256u * 1024u * 1024u;
-// Record/replay synchronization probes can execute many times per static site.
-// Reserve bounded dynamic headroom by default so normal loop trip counts do not
-// immediately turn a complete static transform into report overflow.
-inline constexpr uint64_t kConSanMoiRecordReplayDynamicEventHeadroom = 256u;
+// Record/replay synchronization probes can execute many times per static site,
+// and a code-object-scoped report remains live across repeated dispatches. Keep
+// enough bounded dynamic headroom for ordinary validation and benchmark loops
+// without requiring a report-size tuning knob.
+inline constexpr uint64_t kConSanMoiRecordReplayDynamicEventHeadroom = 1024u;
 
 struct ConSanMoiAutoReportProcessBudget {
   uint64_t current_live_bytes = 0;

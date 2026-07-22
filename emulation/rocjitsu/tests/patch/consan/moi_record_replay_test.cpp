@@ -1380,6 +1380,10 @@ TEST(ConSanMoi, FirstLightProbeSupportsMultiWidthNativeLdsSites) {
 }
 
 TEST(ConSanMoi, AutoReportInventoryReservesRecordReplaySyncHeadroom) {
+  // A representative batched validation executes each static synchronization
+  // site 32 times per dispatch and measures ten dispatches in one process.
+  constexpr uint64_t kBatchedEventsPerStaticSite = 32u * 10u;
+  static_assert(kConSanMoiRecordReplayDynamicEventHeadroom >= kBatchedEventsPerStaticSite);
   const std::array<uint32_t, 4> text_words = {
       0xD8340000u,
       0x00000000u, // ds_store_b32 v0, v0
