@@ -2370,7 +2370,7 @@ TEST(InstrumentorProbeSpill, Cdna4SpillsMultipleLiveClobberedSgprs) {
 
   const uint32_t wait = build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
   // Both SGPRs bridge through v0; s8 -> slot 64, s9 -> slot 68.
-  for (const auto [sgpr, off] :
+  for (const auto &[sgpr, off] :
        {std::pair{uint16_t{8}, uint32_t{64}}, {uint16_t{9}, uint32_t{68}}}) {
     const auto writelane =
         build_v_writelane_b32(/*bridge=*/0, sgpr, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA4);
