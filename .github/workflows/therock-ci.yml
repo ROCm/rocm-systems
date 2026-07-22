@@ -5,12 +5,13 @@ on:
     branches:
       - develop
       - release/therock-*
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - labeled
+  # TEST: Disable presubmit - using therock-multi-arch-ci.yml instead
+  # pull_request:
+  #   types:
+  #     - opened
+  #     - synchronize
+  #     - reopened
+  #     - labeled
   workflow_dispatch:
     inputs:
       projects:

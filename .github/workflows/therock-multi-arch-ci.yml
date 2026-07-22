@@ -28,6 +28,12 @@
 name: TheRock Multi-Arch CI
 
 on:
+  # TEST: Enable presubmit for multi-arch CI testing
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
