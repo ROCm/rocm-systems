@@ -7,7 +7,7 @@ program. Every PE calls every API so that rocprofiler-systems tracing captures
 all nine `rocm_rocshmem_api` spans:
 
 | API | Description |
-|-----|-------------|
+| --- | --- |
 | `barrier_all_on_stream` | Global barrier across all PEs |
 | `sync_all_on_stream` | Lightweight global synchronization |
 | `putmem_on_stream` | One-sided write to a remote PE |
@@ -55,7 +55,7 @@ mpirun -np 2 ./rocshmem
 
 Expected output:
 
-```
+```text
 [PE 0/2] rocshmem: all 9 host-stream APIs completed
 [PE 1/2] rocshmem: all 9 host-stream APIs completed
 ```
@@ -69,7 +69,7 @@ rocprof-sys-run -- mpirun -np 2 ./rocshmem
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| --- | --- | --- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `rocshmem_api` | Enable rocSHMEM host-stream API tracing |
 | `ROCPROFSYS_PROFILE` | `ON` | Generate call-stack profile |
 | `ROCPROFSYS_USE_SAMPLING` | `OFF` | Disable statistical sampling (use instrumentation only) |

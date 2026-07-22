@@ -71,7 +71,6 @@ target_link_libraries(
         $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
 )
 
-
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
         TARGETS rocshmem
