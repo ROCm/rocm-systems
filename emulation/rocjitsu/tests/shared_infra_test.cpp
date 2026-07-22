@@ -84,7 +84,9 @@
 #include <shared_mutex>
 #include <span>
 #include <string>
+#include <unistd.h>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -1194,6 +1196,42 @@ TEST(GpuMemoryTest, BlockAccessRechecksTranslationAfterSparseFallbackPage) {
   for (size_t i = 0; i < 8; ++i)
     EXPECT_EQ(mem.read8(kAddr + i, kVmid), kWriteData[i]);
   EXPECT_TRUE(std::equal(kWriteData.begin() + 8, kWriteData.end(), second_page.begin()));
+}
+
+TEST(GpuMemoryTest, CopyBlockTransfersPageableClientMemoryAcrossPageBoundaries) {
+  amdgpu::GpuMemory mem("test_mem");
+  constexpr uint32_t kVmid = 10;
+  constexpr uint64_t kGpuAddr = 0x100000 + KfdProcess::kPageSize - 11;
+  constexpr size_t kSize = KfdProcess::kPageSize + 37;
+
+  std::array<uint8_t, KfdProcess::kPageSize> first_page{};
+  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+  std::array<uint8_t, KfdProcess::kPageSize> third_page{};
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  const uint64_t first_page_number = kGpuAddr >> amdgpu::GpuMemory::PAGE_SHIFT;
+  page_table[first_page_number] = {first_page.data(), amdgpu::Mtype::RW};
+  page_table[first_page_number + 1] = {second_page.data(), amdgpu::Mtype::RW};
+  page_table[first_page_number + 2] = {third_page.data(), amdgpu::Mtype::RW};
+  mem.register_process(kVmid, &page_table, &page_table_mutex);
+  mem.set_process_client_pid(kVmid, getpid());
+
+  std::vector<uint8_t> host_source(kSize + 19);
+  auto source = std::span<uint8_t>(host_source).subspan(7, kSize);
+  for (size_t i = 0; i < source.size(); ++i)
+    source[i] = static_cast<uint8_t>((i * 37 + 11) & 0xff);
+
+  ASSERT_TRUE(
+      mem.copy_block(kGpuAddr, reinterpret_cast<uint64_t>(source.data()), source.size(), kVmid));
+  std::vector<uint8_t> gpu_result(kSize);
+  mem.read_block(kGpuAddr, std::span<uint8_t>(gpu_result), kVmid);
+  EXPECT_TRUE(std::equal(source.begin(), source.end(), gpu_result.begin()));
+
+  std::vector<uint8_t> host_destination(kSize + 23, 0);
+  auto destination = std::span<uint8_t>(host_destination).subspan(13, kSize);
+  ASSERT_TRUE(mem.copy_block(reinterpret_cast<uint64_t>(destination.data()), kGpuAddr,
+                             destination.size(), kVmid));
+  EXPECT_TRUE(std::equal(source.begin(), source.end(), destination.begin()));
 }
 
 TEST(L1VectorCacheTest, UcDwordx4RoundTripPreservesVectorTransaction) {

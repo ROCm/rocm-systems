@@ -2220,11 +2220,6 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
                           (static_cast<uint64_t>(dw(COPY_BASE + 3)) << 32);
         uint64_t dst_va = static_cast<uint64_t>(dw(COPY_BASE + 4)) |
                           (static_cast<uint64_t>(dw(COPY_BASE + 5)) << 32);
-        auto *src_ptr = resolve(src_va);
-        auto *dst_ptr = resolve(dst_va);
-        if (!src_ptr || !dst_ptr) {
-          return stop_and_retry_current_packet();
-        }
 
         // Emulated SDMA writes straight to the backing store, bypassing the GPU
         // caches. Real SDMA does not snoop GL2; coherence is re-established by
@@ -2236,7 +2231,8 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         // supersedes it instead of being clobbered by a later flush. After the
         // flush the caches are empty, so the destination re-reads fresh backing.
         flush_gpu_caches();
-        std::memcpy(dst_ptr, src_ptr, count);
+        if (!memory_->copy_block(dst_va, src_va, count, queue.process_id))
+          return stop_and_retry_current_packet();
 
         if (signal_decrement) {
           std::atomic_ref<int64_t>(*signal_ptr)
@@ -2256,11 +2252,6 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       uint64_t dst_va = static_cast<uint64_t>(dw(5)) | (static_cast<uint64_t>(dw(6)) << 32);
       util::Logger::vm("SDMA COPY: src=", std::hex, src_va, " dst=", dst_va, std::dec,
                        " count=", count, " (", count / 1024, " KB)");
-      auto *src_ptr = resolve(src_va);
-      auto *dst_ptr = resolve(dst_va);
-      if (!src_ptr || !dst_ptr) {
-        return stop_and_retry_current_packet();
-      }
       // GFX11+ COPY_LINEAR uses bit 28 for NPD metadata. The two-destination
       // broadcast form is marked by bit 27 and extends the packet with DW7/DW8.
       bool is_broadcast_copy = uses_gfx11_plus_sdma_packets()
@@ -2268,20 +2259,18 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
                                    : (header & (1u << 28)) != 0;
       if (is_broadcast_copy) {
         uint64_t dst2_va = static_cast<uint64_t>(dw(7)) | (static_cast<uint64_t>(dw(8)) << 32);
-        auto *dst2_ptr = resolve(dst2_va);
-        if (!dst2_ptr) {
-          return stop_and_retry_current_packet();
-        }
         // Flush before the direct write (see COPY_LINEAR_WAITSIGNAL above): a
         // destination-overlapping dirty L2 line must be written back first so
         // the SDMA write supersedes it rather than being clobbered afterward.
         flush_gpu_caches();
-        std::memcpy(dst_ptr, src_ptr, count);
-        std::memcpy(dst2_ptr, src_ptr, count);
+        if (!memory_->copy_block(dst_va, src_va, count, queue.process_id) ||
+            !memory_->copy_block(dst2_va, src_va, count, queue.process_id))
+          return stop_and_retry_current_packet();
         pkt_dwords = sdma::COPY_LINEAR_BROADCAST_SIZE;
       } else {
         flush_gpu_caches();
-        std::memcpy(dst_ptr, src_ptr, count);
+        if (!memory_->copy_block(dst_va, src_va, count, queue.process_id))
+          return stop_and_retry_current_packet();
         pkt_dwords = sdma::COPY_LINEAR_SIZE;
       }
       break;

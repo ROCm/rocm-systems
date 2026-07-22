@@ -13,6 +13,7 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <format>
 #include <memory>
@@ -152,6 +153,37 @@ public:
       for (size_t i = 0; i < chunk; ++i)
         simdojo::SparseMemory::write8(ea + i, in[i]);
     });
+  }
+
+  /// @brief Copy a contiguous range between two VMID-scoped addresses.
+  /// @details Unlike read_block()/write_block(), this does not fall back to
+  /// sparse memory: an SDMA packet must remain pending when either endpoint is
+  /// inaccessible. In daemon mode, pageable host pointers are accessed through
+  /// process_vm_readv/process_vm_writev while GPU allocations use their mapped
+  /// daemon backing. Transfers are split at both source and destination page
+  /// boundaries so no translated pointer is used beyond its page.
+  bool copy_block(uint64_t dst_addr, uint64_t src_addr, size_t len, uint32_t vmid = 0) {
+    std::array<uint8_t, PAGE_SIZE> buffer{};
+    size_t offset = 0;
+    while (offset < len) {
+      const uint64_t src_ea = src_addr + offset;
+      const uint64_t dst_ea = dst_addr + offset;
+      const size_t chunk = std::min(
+          {len - offset, PAGE_SIZE - (src_ea & PAGE_MASK), PAGE_SIZE - (dst_ea & PAGE_MASK)});
+
+      if (auto *src = translate(src_ea, vmid))
+        std::memcpy(buffer.data(), src + (src_ea & PAGE_MASK), chunk);
+      else if (vmid == 0 || !read_client_memory(src_ea, buffer.data(), chunk, vmid))
+        return false;
+
+      if (auto *dst = translate(dst_ea, vmid))
+        std::memcpy(dst + (dst_ea & PAGE_MASK), buffer.data(), chunk);
+      else if (vmid == 0 || !write_client_memory(dst_ea, buffer.data(), chunk, vmid))
+        return false;
+
+      offset += chunk;
+    }
+    return true;
   }
 
   uint8_t *translate_debug(uint64_t addr, uint32_t vmid) const { return translate(addr, vmid); }
