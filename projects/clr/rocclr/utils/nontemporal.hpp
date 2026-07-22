@@ -243,7 +243,14 @@ namespace amd {
 
 // ================================================================================================
 #if IS_LINUX
-__attribute__((optimize("unroll-all-loops"), always_inline)) static inline void nontemporalMemcpy(
+#if defined(__GNUC__) && !defined(__clang__)
+// The 'optimize' attribute is GCC-specific; Clang does not recognize it and warns
+// under -Wunknown-attributes (an error with -Werror). Apply it only on GCC.
+__attribute__((optimize("unroll-all-loops"), always_inline))
+#else
+__attribute__((always_inline))
+#endif
+static inline void nontemporalMemcpy(
     void* __restrict dst, const void* __restrict src, size_t size) {
 #if defined(ATI_ARCH_X86)
   // Drain unaligned head with scalar NT stores to reach 4-byte then 16-byte
