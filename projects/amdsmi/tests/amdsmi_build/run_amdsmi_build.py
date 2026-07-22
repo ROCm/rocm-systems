@@ -944,25 +944,6 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
         log_dir=cfg.log_dir,
     )
 
-    smoke_test = (
-        "import amdsmi\n"
-        "print('PASS: import amdsmi OK')\n"
-        "amdsmi.amdsmi_init()\n"
-        "print('PASS: amdsmi_init() OK')\n"
-        "devs = amdsmi.amdsmi_get_processor_handles()\n"
-        "print('PASS: Found %d device(s)' % len(devs))\n"
-        "amdsmi.amdsmi_shut_down()\n"
-        "print('PASS: amdsmi_shut_down() OK')\n"
-        "print('=== Wheel verification passed ===')\n"
-    )
-    run_command(
-        ["python3", "-c", smoke_test],
-        name="wheel-smoke-test",
-        cwd=Path("/tmp"),
-        retries=1,
-        log_dir=cfg.log_dir,
-    )
-
     run_command(
         ["python3", "-m", "pip", "show", "amdsmi"],
         name="pip-show-amdsmi",
@@ -978,6 +959,10 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
     # unconditionally precedes site-packages, so leaving it set would test the
     # environment's path config rather than the package. A bare interpreter
     # (no PYTHONPATH) is the real scripting scenario where pip must win.
+    # This check is hardware-independent and runs before the GPU smoke test
+    # below, so it executes even on GPU-less runners (manylinux, containers)
+    # where amdsmi_init() would otherwise fail first and mask a wrong-path
+    # install.
     priority_check = (
         "import os, subprocess, amdsmi\n"
         "out = subprocess.check_output(['python3', '-m', 'pip', 'show', 'amdsmi'], text=True)\n"
@@ -999,6 +984,31 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
         name="wheel-priority-check",
         cwd=Path("/tmp"),
         env=priority_env,
+        retries=1,
+        log_dir=cfg.log_dir,
+    )
+
+    # GPU-dependent smoke test: initialize the library and enumerate devices.
+    # Skip cleanly when no GPU/driver is present so packaging-only runners are
+    # not failed by the absence of hardware.
+    smoke_test = (
+        "import amdsmi\n"
+        "try:\n"
+        "    amdsmi.amdsmi_init()\n"
+        "except amdsmi.AmdSmiException as e:\n"
+        "    print('SKIP: amdsmi_init() failed (no GPU/driver?): %s' % e)\n"
+        "    raise SystemExit(0)\n"
+        "print('PASS: amdsmi_init() OK')\n"
+        "devs = amdsmi.amdsmi_get_processor_handles()\n"
+        "print('PASS: Found %d device(s)' % len(devs))\n"
+        "amdsmi.amdsmi_shut_down()\n"
+        "print('PASS: amdsmi_shut_down() OK')\n"
+        "print('=== Wheel GPU smoke test passed ===')\n"
+    )
+    run_command(
+        ["python3", "-c", smoke_test],
+        name="wheel-smoke-test",
+        cwd=Path("/tmp"),
         retries=1,
         log_dir=cfg.log_dir,
     )
