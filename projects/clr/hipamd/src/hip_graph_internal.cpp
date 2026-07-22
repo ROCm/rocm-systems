@@ -400,9 +400,13 @@ void GraphExecSegmented::BuildSyncPlan() {
 
   auto* device = g_devices[captureDeviceId_]->devices()[0];
 
-  // PASS 0: Barrier-ROI collapse. When cross-stream sync would cost more than the
-  // overlap it unlocks, fold every segment onto stream 0 (the launch stream) so the
-  // later passes emit no cross-stream barriers/signals. Init() reads the flag below.
+  // PASS 0: Barrier-ROI collapse. When multi-stream's cross-stream sync would not
+  // pay for the overlap it unlocks (see ShouldCollapseToSingleStream), fold every
+  // segment onto stream 0. EnqueueSegmentedGraph resolves stream 0 to the launch
+  // stream (streams_[0]), so the whole graph runs on that one in-order queue: the
+  // subsequent passes then emit zero cross-stream barriers and zero completion
+  // signals, and graph completion is observed through the launch stream itself.
+  // Init() reads collapsed_to_single_stream_ to create just one stream per device.
   collapsed_to_single_stream_ = false;
   if (ShouldCollapseToSingleStream()) {
     for (auto& seg : segments_) {
@@ -445,7 +449,7 @@ void GraphExecSegmented::BuildSyncPlan() {
   // effective_barrier_deps by segment.id consistently below.
   std::vector<std::vector<int>> effective_barrier_deps(segments_.size());
   for (size_t i = 0; i < segments_.size(); ++i) {
-    auto& seg = segments_[i];
+    const auto& seg = segments_[i];
     assert(seg.id == static_cast<int>(i) &&
            "segment.id must equal its index in segments_");
     for (int dep_id : seg.segment_ids_dependencies) {
@@ -472,7 +476,7 @@ void GraphExecSegmented::BuildSyncPlan() {
 
       for (int seg_id : level_it->second) {
         if (seg_id < 0 || seg_id >= static_cast<int>(segments_.size())) continue;
-        auto& seg = segments_[seg_id];
+        const auto& seg = segments_[seg_id];
         auto& waited = stream_waited_deps[stream_key(seg.dev_id, seg.stream_id)];
 
         std::vector<int>& reduced = effective_barrier_deps[seg_id];
@@ -521,9 +525,8 @@ void GraphExecSegmented::BuildSyncPlan() {
 
     auto& firstBatch = segBatch.packet_batches[0];
 
-    // Clear an oversubscribed head's barrier bit for overlap. Done before any
-    // prepend so it targets the first packet, and skipped for the single-stream
-    // fallback.
+    // Clear an oversubscribed head's barrier bit for overlap, before any prepend
+    // so it targets the first packet; skipped when collapsed to one stream.
     if (segment.oversubscribed && !collapsed_to_single_stream_ &&
         !firstBatch.dispatchPackets.empty()) {
       device->ClearAqlDispatchBarrierBit(firstBatch.dispatchPackets[0]);
@@ -1211,10 +1214,6 @@ void GraphExecSegmented::FindStreamsReqPerDevForSegments() {
 
 // ================================================================================================
 void GraphExecSegmented::RoundRobinStreamAssignment() {
-  // Record that round-robin is the active assignment: any-order head-barrier
-  // clearing is only valid here (same-queue collisions are independent
-  // same-level siblings, not dependency chains as under DFS).
-  assignment_is_round_robin_ = true;
   // max_streams_dev_ holds the raw parallelism count per device as computed by
   // FindStreamsReqPerDevForSegments() and capped in Init(). CreateStreams() handles
   // the -1 adjustment for the instantiation device internally, so the value here
@@ -1225,8 +1224,6 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
                ? static_cast<size_t>(it->second) : 1;
   };
 
-  // Count of any-order overlap heads (later same-level collisions) for logging.
-  size_t overlap_heads = 0;
   for (int level = 0; level <= max_dependency_level_; ++level) {
     auto it = segments_per_level_.find(level);
     if (it == segments_per_level_.end()) continue;
@@ -1242,26 +1239,13 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
       const size_t idx = dev_idx[seg.dev_id]++;
       seg.stream_id = static_cast<int>(idx % pool);
 
-      // Flag later same-queue collisions (idx >= pool); their head barrier bit is
-      // cleared later so capable HW can overlap independent work.
-      seg.oversubscribed = (anyorder_enabled_ && idx >= pool);
-      if (seg.oversubscribed) {
-        ++overlap_heads;
-      }
+      // Mark later same-queue collisions; their head barrier bit is cleared
+      // later so capable hardware can overlap independent work.
+      seg.oversubscribed = (DEBUG_HIP_GRAPH_ANYORDER_OVERLAP && idx >= pool);
     }
   }
 
   ComputeCompletionSignalFlags();
-
-  if (anyorder_enabled_) {
-    auto poolIt = max_streams_dev_.find(captureDeviceId_);
-    const int effective_pool =
-        (poolIt != max_streams_dev_.end() && poolIt->second > 0) ? poolIt->second : 1;
-    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] any-order overlap: %zu segments, %zu head(s) marked for overlap on "
-            "oversubscribed queues (queue pool = %d)",
-            segments_.size(), overlap_heads, effective_pool);
-  }
 }
 
 // ================================================================================================
@@ -1295,9 +1279,6 @@ void GraphExecSegmented::ComputeCompletionSignalFlags() {
 // DFS-based stream assignment for segment DAG.
 // Linear chains of segments stay on the same stream; branches rotate to a new stream at each leaf.
 void GraphExecSegmented::DFSStreamAssignment() {
-  // Under DFS, same-stream segments form dependency chains, so any-order
-  // head-barrier clearing must never apply (see RoundRobinStreamAssignment).
-  assignment_is_round_robin_ = false;
   auto getPoolSize = [&](int dev_id) -> int {
     auto it = max_streams_dev_.find(dev_id);
     return (it != max_streams_dev_.end() && it->second > 0) ? it->second : 1;
@@ -1380,8 +1361,6 @@ void GraphExecSegmented::DFSStreamAssignment() {
 //   1 = Force round-robin
 //   2 = Force DFS
 void GraphExecSegmented::SelectStreamAssignment() {
-  // A new assignment invalidates any memoized collapse decision.
-  collapse_decision_cache_ = -1;
   if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 1) {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
             "[hipGraph] SelectStreamAssignment: forced round-robin (%zu segs)", segments_.size());
@@ -1392,20 +1371,6 @@ void GraphExecSegmented::SelectStreamAssignment() {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
             "[hipGraph] SelectStreamAssignment: forced DFS (%zu segs)", segments_.size());
     DFSStreamAssignment();
-    return;
-  }
-
-  // Any-order overlap targets round-robin oversubscription specifically: the
-  // barrier-bit overlap only helps when several parallel segments collide on the
-  // same queue, which is exactly what round-robin (% pool size) produces. A
-  // wide-shallow "complex" graph would otherwise be routed to DFS by the
-  // heuristic below, taking the overlap opportunity with it, so keep it on
-  // round-robin when any-order overlap is enabled.
-  if (anyorder_enabled_) {
-    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] SelectStreamAssignment: any-order overlap enabled -> "
-            "round-robin (%zu segs)", segments_.size());
-    RoundRobinStreamAssignment();
     return;
   }
 
@@ -1489,17 +1454,6 @@ void GraphExecSegmented::SelectStreamAssignment() {
 // sync cost is what multi-stream genuinely pays over collapse. Tunable via
 // DEBUG_HIP_GRAPH_MIN_OVERLAP; 0 disables the gate.
 bool GraphExecSegmented::ShouldCollapseToSingleStream() const {
-  // Memoized: inputs (stream assignment + completion flags) don't change between
-  // assignment time and BuildSyncPlan, so run the heavy scan at most once per
-  // instantiate. Cache is reset when a new assignment begins.
-  if (collapse_decision_cache_ < 0) {
-    collapse_decision_cache_ = ComputeCollapseDecision() ? 1 : 0;
-  }
-  return collapse_decision_cache_ == 1;
-}
-
-// ================================================================================================
-bool GraphExecSegmented::ComputeCollapseDecision() const {
   const uint32_t min_overlap = DEBUG_HIP_GRAPH_MIN_OVERLAP;
   if (min_overlap == 0) return false;            // gate disabled
   if (segments_.size() < 2) return false;        // nothing to parallelize
@@ -1747,18 +1701,9 @@ hipError_t GraphExecSegmented::Init() {
     }
   }
 
-  // Same-queue any-order overlap (opt-in): clear the barrier bit on segments that
-  // oversubscribe a queue so HW can overlap them. The CP decides per ISA whether
-  // the clear reorders; incapable HW just serializes anyway.
-  anyorder_enabled_ = DEBUG_HIP_GRAPH_ANYORDER_OVERLAP;
-  if (anyorder_enabled_) {
-    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] same-queue any-order overlap on oversubscribed queues enabled");
-  }
-
-  // Assign streams before capture so BuildSyncPlan sees each segment's stream_id
-  // and skips same-stream barriers. RR also tags any-order heads here, so capture
-  // clears their barrier bit via the AnyOrderLaunch path.
+  // Select and apply stream assignment before packet capture so that BuildSyncPlan
+  // (called inside CaptureAQLPackets) can see each segment's stream_id and
+  // skip same-stream dependency barriers.
   SelectStreamAssignment();
 
   // For graph nodes capture AQL packets to dispatch them directly during graph launch.

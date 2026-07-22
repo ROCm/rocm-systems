@@ -4025,11 +4025,12 @@ void Device::ClearAqlDispatchBarrierBit(uint8_t* packet) const {
   memcpy(&hdr, packet, sizeof(hdr));
   const uint32_t type =
       (hdr >> HSA_PACKET_HEADER_TYPE) & ((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);
-  constexpr uint8_t kExtKernelDispatchFormat = 3;  // vendor-specific ext dispatch amd_format
+  // A dispatch may be a vendor-specific ext-kernel-dispatch packet, identified by
+  // its amd_format byte (byte 2), same as ApplyHwEventPatches classifies it.
   const bool is_dispatch =
       type == HSA_PACKET_TYPE_KERNEL_DISPATCH ||
       (type == HSA_PACKET_TYPE_VENDOR_SPECIFIC && hdr != 0 &&
-       packet[2] == kExtKernelDispatchFormat);
+       packet[2] == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
   if (!is_dispatch) return;
   hdr &= static_cast<uint16_t>(~(1u << HSA_PACKET_HEADER_BARRIER));
   memcpy(packet, &hdr, sizeof(hdr));

@@ -4,25 +4,14 @@
  * SPDX-License-Identifier: MIT
  */
 
-// Correctness + performance test for the same-queue any-order overlap
-// optimization on oversubscribed graph queues.
+// Correctness + performance tests for same-queue any-order overlap: under
+// round-robin, the head barrier bit of later same-queue collisions is cleared so
+// capable hardware can overlap them (non-head packets keep intra-segment order).
 //
-// WHAT THE FEATURE DOES
-//   When more parallel graph segments land on a queue than there are queues in
-//   the pool, the runtime may CLEAR the AQL barrier bit on the *head* packet of
-//   the later same-queue collisions so they overlap on capable HW instead of
-//   serializing. Only the segment head is touched; every non-head packet keeps
-//   barrier=1, so intra-segment order is preserved. The first segment on each
-//   queue at each dependency level keeps barrier=1 and thus fences the whole
-//   collision group behind the previous level's (dependency) work.
-//
-// THE FLAG (turn the feature ON/OFF)
-//   DEBUG_HIP_GRAPH_ANYORDER_OVERLAP = 1  -> feature ON  (barrier bits cleared)
-//   DEBUG_HIP_GRAPH_ANYORDER_OVERLAP = 0  -> feature OFF (default; fully ordered)
-//   The flag is read ONCE at hipGraphInstantiate, so ON vs OFF must be compared
-//   across SEPARATE processes:
-//     DEBUG_HIP_GRAPH_ANYORDER_OVERLAP=1 ./GraphPerformance "Performance_Graph_AnyOrderOverlap*"
-//     DEBUG_HIP_GRAPH_ANYORDER_OVERLAP=0 ./GraphPerformance "Performance_Graph_AnyOrderOverlap*"
+// The feature applies only under round-robin and is read once at instantiate, so
+// force RR and compare feature ON vs OFF across separate processes:
+//   DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=1 DEBUG_HIP_GRAPH_ANYORDER_OVERLAP=1 ./GraphPerformance "Performance_Graph_AnyOrderOverlap*"
+//   DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=1 DEBUG_HIP_GRAPH_ANYORDER_OVERLAP=0 ./GraphPerformance "Performance_Graph_AnyOrderOverlap*"
 
 #include <hip_test_common.hh>
 
@@ -41,9 +30,8 @@ constexpr int kChildLen = 5;       // child chains long enough to avoid collapse
 constexpr int kReps = 200;         // many launches to surface nondeterministic races
 constexpr int kBurn = 100000;      // widens any misordering window (does not touch tokens)
 
-// Ordering-token kernel: step i of a chain must observe val==expected (its
-// producer already ran) before writing expected+1. A relaxed intra-chain
-// dependency makes a step read a stale value and record it in err.
+// Ordering-token kernel: step i must observe val==expected before writing
+// expected+1; a relaxed intra-chain dep reads a stale value and flags err.
 __global__ void chainStep(int* val, int n, int expected, int* err, int burn) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) {
@@ -106,8 +94,8 @@ const char* FlagState() {
 
 }  // namespace
 
-// Correctness: independent oversubscribed chains. Validates that clearing a
-// segment head never relaxes an intra-segment (intra-chain) dependency.
+// Correctness: independent oversubscribed chains; clearing a segment head must
+// never relax an intra-chain dependency.
 TEST_CASE("Performance_Graph_AnyOrderOverlap_Chains") {
   INFO("DEBUG_HIP_GRAPH_ANYORDER_OVERLAP=" << FlagState());
   const int N = kGridBlocks * kBlock;
@@ -168,11 +156,9 @@ TEST_CASE("Performance_Graph_AnyOrderOverlap_Chains") {
   for (auto* p : val) HIP_CHECK(hipFree(p));
 }
 
-// Correctness: producer -> N children fork (cross-segment same-queue dependency).
-// Round-robin lands a child on the producer's queue as a non-first collision, so
-// its head barrier is a clear candidate. The child must still observe the
-// producer's published token. Child chains are long enough that the graph does
-// NOT collapse to a single stream at default flags.
+// Correctness: producer -> N children fork; a child colliding on the producer's
+// queue must still observe its published token. Child chains are long enough to
+// avoid single-stream collapse.
 TEST_CASE("Performance_Graph_AnyOrderOverlap_Fork") {
   INFO("DEBUG_HIP_GRAPH_ANYORDER_OVERLAP=" << FlagState());
   const int N = kGridBlocks * kBlock;
@@ -224,11 +210,9 @@ TEST_CASE("Performance_Graph_AnyOrderOverlap_Fork") {
   HIP_CHECK(hipFree(tok));
 }
 
-// Correctness across graph update: re-capturing a segment head (via
-// hipGraphExecKernelNodeSetParams) resets its packet barrier bit. The runtime
-// must re-apply the head-barrier clear for oversubscribed heads without ever
-// clearing a barrier a dependency needs. Update each child head in place, then
-// relaunch and verify the child still observes the producer's token.
+// Correctness across graph update: updating a child head re-captures its packet
+// (resetting the barrier bit); the head-barrier clear must be re-applied and the
+// child must still observe the producer's token.
 TEST_CASE("Performance_Graph_AnyOrderOverlap_Update") {
   INFO("DEBUG_HIP_GRAPH_ANYORDER_OVERLAP=" << FlagState());
   const int N = kGridBlocks * kBlock;
@@ -328,8 +312,7 @@ TEST_CASE("Performance_Graph_AnyOrderOverlap_DetectorSelfTest") {
 }
 
 // Performance (informational): steady-state launch time for the oversubscribed
-// chain graph. Compare across two runs with the flag ON vs OFF (separate
-// processes). No hard assert -- timing is machine/load dependent.
+// chain graph. Compare flag ON vs OFF across processes; no hard assert.
 TEST_CASE("Performance_Graph_AnyOrderOverlap_Perf") {
   INFO("DEBUG_HIP_GRAPH_ANYORDER_OVERLAP=" << FlagState());
   constexpr int kTimedLaunches = 200;

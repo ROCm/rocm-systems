@@ -1173,12 +1173,10 @@ class GraphExecSegmented : public GraphExecBase {
   //! stream assignment. Called after the initial assignment and again if
   //! BuildSyncPlan's collapse pass reassigns segments to a single stream.
   void ComputeCompletionSignalFlags();
-  //! Barrier-ROI heuristic: returns true to collapse the graph onto one stream when
-  //! cross-stream sync would cost more than the overlap it unlocks. Memoized (see
-  //! collapse_decision_cache_); the raw scan lives in ComputeCollapseDecision().
+  //! Barrier-ROI heuristic: decide whether the segment graph should be collapsed
+  //! onto a single stream because the cross-stream barriers multi-stream would
+  //! cost outweigh the work that could actually overlap. Returns true to collapse.
   bool ShouldCollapseToSingleStream() const;
-  //! Uncached barrier-ROI computation backing ShouldCollapseToSingleStream().
-  bool ComputeCollapseDecision() const;
   //! Get the parallel streams map for synchronization before destruction
   const std::unordered_map<int, std::vector<hip::Stream*>>& GetParallelStreams() const {
     return parallel_streams_;
@@ -1297,21 +1295,7 @@ class GraphExecSegmented : public GraphExecBase {
   //! the graph onto a single stream. Read by Init() to size stream creation.
   bool collapsed_to_single_stream_ = false;
 
-  //! Memoized ShouldCollapseToSingleStream(): -1 unknown, 0 no, 1 yes. Reset on a
-  //! new assignment; mutable so the const query can populate it on first use.
-  mutable int collapse_decision_cache_ = -1;
-
   void BuildSyncPlan();
-
-  // ---- Same-queue any-order overlap (oversubscribed queues) ---------------
-  // When round-robin oversubscribes a queue, it tags the later heads so capture
-  // clears their barrier bit. Targets RR only, so SelectStreamAssignment() forces
-  // round-robin when enabled.
-  bool anyorder_enabled_ = false;
-  // True when the active assignment is round-robin. Head-barrier clearing runs
-  // only here (same-queue collisions are independent siblings); under DFS
-  // same-stream segments form dependency chains, so no head is tagged.
-  bool assignment_is_round_robin_ = false;
 };
 
 
@@ -1756,6 +1740,7 @@ class GraphKernelNode : public GraphNode {
         }
       }
     }
+
     const amd::Device* device = g_devices[dev_id_]->devices()[0];
     amd::HIPLaunchParams launch_params(kernelParams_.gridDim.x, kernelParams_.gridDim.y,
                                        kernelParams_.gridDim.z, kernelParams_.blockDim.x,
