@@ -2478,6 +2478,8 @@ struct DescriptorRequirement {
   bool dispatch_id_preload_inserted = false;
   uint16_t dispatch_id_original_user_sgpr_count = 0;
   uint16_t dispatch_id_expanded_user_sgpr_count = 0;
+  uint16_t dispatch_id_original_kernarg_preload_length = 0;
+  uint16_t dispatch_id_replacement_kernarg_preload_length = 0;
   uint16_t required_vgpr_count = 0;
   uint16_t required_sgpr_count = 0;
   uint32_t required_private_bytes = 0;
@@ -2507,8 +2509,16 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
       return;
     }
     const uint32_t restore_count =
-        patch.dispatch_id_preload_inserted ? guest_input_count - patch.dispatch_id_source_sgpr : 0u;
-    const uint64_t required_words = 8u + 2u * restore_count;
+        patch.dispatch_id_preload_inserted
+            ? (patch.dispatch_id_kernarg_reload_count != 0
+                   ? patch.dispatch_id_kernarg_reload_sgpr - patch.dispatch_id_source_sgpr
+                   : guest_input_count - patch.dispatch_id_source_sgpr)
+            : 0u;
+    const uint64_t reload_words = patch.dispatch_id_kernarg_reload_count != 0
+                                      ? 2u * patch.dispatch_id_kernarg_reload_count + 1u
+                                      : 0u;
+    const uint64_t required_words =
+        4u + 2u * (restore_count + patch.dispatch_id_shifted_system_sgpr_count) + reload_words;
     const uint64_t required_bytes = required_words * sizeof(uint32_t);
     if (entry_offset > replacement_text.size() ||
         required_bytes > replacement_text.size() - entry_offset) {
@@ -2551,6 +2561,36 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
       const uint16_t destination = static_cast<uint16_t>(patch.dispatch_id_source_sgpr + i);
       expect_write(build_s_mov_b32(destination, static_cast<uint16_t>(destination + 2u), arch),
                    "ascending guest restore");
+    }
+    for (uint16_t i = 0; i < patch.dispatch_id_shifted_system_sgpr_count; ++i) {
+      const uint16_t destination =
+          static_cast<uint16_t>(patch.dispatch_id_original_user_sgpr_count + i);
+      expect_write(
+          build_s_mov_b32(destination,
+                          static_cast<uint16_t>(destination + patch.dispatch_id_system_sgpr_shift),
+                          arch),
+          "system-SGPR restore");
+    }
+    if (patch.dispatch_id_kernarg_reload_count != 0) {
+      for (uint16_t i = 0; i < patch.dispatch_id_kernarg_reload_count; ++i) {
+        const auto load = build_cdna4_s_load_dword(
+            static_cast<uint16_t>(patch.dispatch_id_kernarg_reload_sgpr + i),
+            patch.dispatch_id_kernarg_reload_base_sgpr,
+            static_cast<uint32_t>(patch.dispatch_id_kernarg_reload_offset_dwords + i) *
+                sizeof(uint32_t),
+            arch);
+        if (!load || read_word(cursor++) != (*load)[0] || read_word(cursor++) != (*load)[1]) {
+          errors.emplace_back("ConSan final validation found an invalid dispatch-ID kernarg "
+                              "reload in kernel '" +
+                              std::string(kernel_name) + "'");
+        }
+      }
+      const auto wait = build_cdna4_s_wait_scalar_load0(arch);
+      if (!wait || read_word(cursor++) != *wait) {
+        errors.emplace_back("ConSan final validation found an invalid dispatch-ID kernarg wait "
+                            "in kernel '" +
+                            std::string(kernel_name) + "'");
+      }
     }
   };
 
@@ -3225,6 +3265,10 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
               patch.dispatch_id_original_user_sgpr_count;
           requirement.dispatch_id_expanded_user_sgpr_count =
               patch.dispatch_id_expanded_user_sgpr_count;
+          requirement.dispatch_id_original_kernarg_preload_length =
+              patch.dispatch_id_original_kernarg_preload_length;
+          requirement.dispatch_id_replacement_kernarg_preload_length =
+              patch.dispatch_id_replacement_kernarg_preload_length;
           requirement.required_sgpr_count =
               std::max(requirement.required_sgpr_count, patch.dispatch_id_required_sgpr_count);
         }
@@ -3311,6 +3355,18 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
             "kernel '" +
             original_kernel.name + "'");
       }
+      const uint32_t original_preload_length =
+          AMDHSA_BITS_GET(original_descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH);
+      const uint32_t replacement_preload_length =
+          AMDHSA_BITS_GET(replacement_descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH);
+      if (original_preload_length != requirement.dispatch_id_original_kernarg_preload_length ||
+          replacement_preload_length !=
+              requirement.dispatch_id_replacement_kernarg_preload_length) {
+        errors.emplace_back(
+            "ConSan final validation found an invalid dispatch-ID kernarg-preload delta for "
+            "kernel '" +
+            original_kernel.name + "'");
+      }
 
       uint32_t normalized_rsrc2 = replacement_descriptor.compute_pgm_rsrc2;
       AMDHSA_BITS_SET(normalized_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, original_user_count);
@@ -3344,6 +3400,10 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
                       kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID,
                       AMDHSA_BITS_GET(original_descriptor.kernel_code_properties,
                                       kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID));
+      if (requirement.dispatch_id_original_kernarg_preload_length != 0) {
+        AMDHSA_BITS_SET(normalized.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH,
+                        requirement.dispatch_id_original_kernarg_preload_length);
+      }
     }
     if (text_relocated || requirement.allow_entry_delta)
       normalized.kernel_code_entry_byte_offset = original_descriptor.kernel_code_entry_byte_offset;

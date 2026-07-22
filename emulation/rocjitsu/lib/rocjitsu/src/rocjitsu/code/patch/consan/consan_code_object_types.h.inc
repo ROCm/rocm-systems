@@ -478,6 +478,14 @@ struct ConSanPatchInfo {
   uint16_t dispatch_id_original_user_sgpr_count = 0;
   uint16_t dispatch_id_expanded_user_sgpr_count = 0;
   uint16_t dispatch_id_system_sgpr_count = 0;
+  uint16_t dispatch_id_kernarg_reload_sgpr = 0;
+  uint16_t dispatch_id_kernarg_reload_base_sgpr = 0;
+  uint16_t dispatch_id_kernarg_reload_offset_dwords = 0;
+  uint16_t dispatch_id_kernarg_reload_count = 0;
+  uint16_t dispatch_id_shifted_system_sgpr_count = 0;
+  uint16_t dispatch_id_system_sgpr_shift = 0;
+  uint16_t dispatch_id_original_kernarg_preload_length = 0;
+  uint16_t dispatch_id_replacement_kernarg_preload_length = 0;
   uint16_t dispatch_id_required_sgpr_count = 0;
   bool dispatch_id_preload_inserted = false;
   uint16_t spilled_vgpr_count = 0;

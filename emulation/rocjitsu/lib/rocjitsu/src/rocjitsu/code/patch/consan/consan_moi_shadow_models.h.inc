@@ -109,6 +109,16 @@ struct ConSanMoiDispatchIdPreloadPlan {
   uint16_t system_sgpr_count = 0;
   uint16_t first_shifted_guest_sgpr = 0;
   uint16_t shifted_guest_sgpr_count = 0;
+  /// Full user-SGPR windows can make room for dispatch ID by shortening the
+  /// hardware kernarg preload and reloading its final two dwords in software.
+  uint16_t kernarg_reload_sgpr = 0;
+  uint16_t kernarg_reload_base_sgpr = 0;
+  uint16_t kernarg_reload_offset_dwords = 0;
+  uint16_t kernarg_reload_count = 0;
+  uint16_t shifted_system_sgpr_count = 0;
+  uint16_t system_sgpr_shift = 0;
+  uint16_t original_kernarg_preload_length = 0;
+  uint16_t replacement_kernarg_preload_length = 0;
   uint16_t required_sgpr_count = 0;
 
   [[nodiscard]] constexpr bool supported() const {
@@ -118,6 +128,7 @@ struct ConSanMoiDispatchIdPreloadPlan {
   [[nodiscard]] constexpr bool descriptor_change_required() const {
     return support == ConSanMoiDispatchIdPreloadSupport::SupportedInsert;
   }
+  [[nodiscard]] constexpr bool requires_kernarg_reload() const { return kernarg_reload_count != 0; }
 };
 
 [[nodiscard]] constexpr uint16_t

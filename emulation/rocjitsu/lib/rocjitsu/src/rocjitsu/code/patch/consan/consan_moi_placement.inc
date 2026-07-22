@@ -269,6 +269,16 @@ void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t align
       AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) != 0);
 }
 
+[[nodiscard]] std::optional<uint16_t> moi_descriptor_kernarg_segment_ptr_sgpr(const KD &desc) {
+  const uint16_t properties = desc.kernel_code_properties;
+  if (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) == 0)
+    return std::nullopt;
+  return consan_moi_amdhsa_dispatch_id_prefix_sgpr_count(
+      AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER) != 0,
+      AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR) != 0,
+      AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR) != 0, false);
+}
+
 [[nodiscard]] bool moi_descriptor_has_kernarg_preload(const KD &desc) {
   return AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH) != 0;
 }
@@ -301,9 +311,44 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
     return invalid;
   }
   const uint16_t user_sgpr_initialization_limit = arch == ROCJITSU_CODE_ARCH_GFX1250 ? 32u : 16u;
-  return consan_moi_plan_dispatch_id_preload(original_user_count, system_count, prefix,
-                                             dispatch_enabled, kMaxSgprs,
-                                             user_sgpr_initialization_limit);
+  ConSanMoiDispatchIdPreloadPlan plan = consan_moi_plan_dispatch_id_preload(
+      original_user_count, system_count, prefix, dispatch_enabled, kMaxSgprs,
+      user_sgpr_initialization_limit);
+  const uint16_t preload_length =
+      AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH);
+  plan.original_kernarg_preload_length = preload_length;
+  plan.replacement_kernarg_preload_length = preload_length;
+  const auto kernarg_ptr = moi_descriptor_kernarg_segment_ptr_sgpr(desc);
+  // CDNA4 initializes at most 16 user SGPRs. When dispatch ID would exceed
+  // that window by one or two dwords, shorten the hardware kernarg preload by
+  // exactly that overflow and recover those guest values from the still-live
+  // kernarg pointer in the entry prologue. System SGPRs move only by the
+  // remaining user-window growth, so record that smaller repair separately.
+  const uint16_t overflow =
+      original_user_count + 2u > user_sgpr_initialization_limit
+          ? static_cast<uint16_t>(original_user_count + 2u - user_sgpr_initialization_limit)
+          : 0u;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+      plan.support == ConSanMoiDispatchIdPreloadSupport::UserSgprInitializationLimit &&
+      !dispatch_enabled && overflow >= 1u && overflow <= 2u && kernarg_ptr &&
+      preload_length > overflow && prefix + named_suffix == original_user_count) {
+    plan.support = ConSanMoiDispatchIdPreloadSupport::SupportedInsert;
+    plan.expanded_user_sgpr_count = user_sgpr_initialization_limit;
+    plan.first_shifted_guest_sgpr = prefix;
+    plan.shifted_guest_sgpr_count = static_cast<uint16_t>(original_user_count - prefix - overflow);
+    plan.kernarg_reload_sgpr = static_cast<uint16_t>(original_user_count - overflow);
+    plan.kernarg_reload_base_sgpr = *kernarg_ptr;
+    plan.kernarg_reload_offset_dwords = static_cast<uint16_t>(
+        AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET) + preload_length -
+        overflow);
+    plan.kernarg_reload_count = overflow;
+    plan.system_sgpr_shift = static_cast<uint16_t>(2u - overflow);
+    plan.shifted_system_sgpr_count = plan.system_sgpr_shift != 0u ? system_count : 0u;
+    plan.original_kernarg_preload_length = preload_length;
+    plan.replacement_kernarg_preload_length = static_cast<uint16_t>(preload_length - overflow);
+    plan.required_sgpr_count = static_cast<uint16_t>(plan.expanded_user_sgpr_count + system_count);
+  }
+  return plan;
 }
 
 [[nodiscard]] std::optional<uint16_t> moi_descriptor_workgroup_id_sgpr(const KD &desc,
@@ -2347,8 +2392,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       });
   const bool needs_dispatch_id =
       has_inline_dispatch_consumer ||
-      (options.moi_engine == ConSanMoiEngine::RecordReplay &&
-       arch == ROCJITSU_CODE_ARCH_GFX1250) ||
+      (options.moi_engine == ConSanMoiEngine::RecordReplay && arch == ROCJITSU_CODE_ARCH_GFX1250) ||
       (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_runtime_sample_stride > 1u &&
        arch != ROCJITSU_CODE_ARCH_GFX1250);
   if (!needs_dispatch_id || !options.moi_report_buffer_address || options.moi_dispatch_id_sgpr) {
@@ -2374,8 +2418,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   }
 
   const auto qualify_owner_local_assignments = [&](uint16_t dispatch_base) {
-    for (ConSanMoiTransientSgprAssignment &assignment :
-         options.moi_transient_sgpr_assignments) {
+    for (ConSanMoiTransientSgprAssignment &assignment : options.moi_transient_sgpr_assignments) {
       uint32_t max_referenced_sgpr_count = 0u;
       for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
         if (std::ranges::find(plan.owner_descriptor_file_offsets,
@@ -2633,8 +2676,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     // existing MFMA and accumulator operands address and has corrupted native
     // gfx950 workloads. Until persistent tuples are selected per owning kernel,
     // reject a code object whose one global tuple would cross any such boundary.
-    if (options.moi_engine == ConSanMoiEngine::RecordReplay &&
-        !options.force_private_epoch) {
+    if (options.moi_engine == ConSanMoiEngine::RecordReplay && !options.force_private_epoch) {
       constexpr uint16_t scalar_count = 2u;
       uint32_t first = 0u;
       for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
