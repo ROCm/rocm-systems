@@ -4176,7 +4176,8 @@ TEST(ConSanMoi, FenceRecordRelocatesSccDeadPrefixForCompactFarEntry) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   const auto fence = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                        &ConSanPatchInfo::kind);
-  ASSERT_NE(fence, result.patches.end());
+  ASSERT_NE(fence, result.patches.end()) << "warnings=" << testing::PrintToString(result.warnings)
+                                         << " errors=" << testing::PrintToString(result.errors);
   EXPECT_EQ(fence->anchor_offset, 0u);
   EXPECT_EQ(fence->original_size, 7u * sizeof(uint32_t));
   const auto island = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
@@ -4358,7 +4359,8 @@ TEST(ConSanMoi, Cdna4FenceRecordUsesCacheOrderingWithoutRdnaTh) {
                                << " errors=" << testing::PrintToString(result.errors);
   const auto fence = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                        &ConSanPatchInfo::kind);
-  ASSERT_NE(fence, result.patches.end());
+  ASSERT_NE(fence, result.patches.end()) << "warnings=" << testing::PrintToString(result.warnings)
+                                         << " errors=" << testing::PrintToString(result.errors);
   EXPECT_TRUE(result.final_validation_passed);
 }
 
@@ -4629,7 +4631,7 @@ TEST(ConSanMoi, AtomicRecordForcedSpillUsesPlannedPrivateWindow) {
   }));
   EXPECT_EQ(result.resource_plan_summary.spill_plans, 2u);
   EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 2u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 40u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 60u);
 }
 
 TEST(ConSanMoi, AtomicRecordSpillsSpecialStateOnRdna4) {
@@ -4740,7 +4742,7 @@ TEST(ConSanMoi, Cdna4AtomicRecordForcedSpillUsesNativePrivateWindow) {
   EXPECT_EQ(*plan->scratch_vgpr % 2u, 0u);
   EXPECT_EQ(result.resource_plan_summary.spill_plans, 3u);
   EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 2u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 40u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 60u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                &ConSanPatchInfo::kind),
             1u);
@@ -4803,8 +4805,6 @@ TEST(ConSanMoi, Cdna4AtomicRecordSpillsThroughSiteLocalDynamicStackFrame) {
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
   options.force_vgpr_spill = true;
-  options.moi_persistent_owner_sgpr = 70u;
-  options.moi_persistent_epoch_sgpr = 71u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -4814,6 +4814,10 @@ TEST(ConSanMoi, Cdna4AtomicRecordSpillsThroughSiteLocalDynamicStackFrame) {
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " errors=" << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
+  ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
+  ASSERT_TRUE(result.resolved_moi_persistent_workgroup_key_sgpr);
+  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
   EXPECT_TRUE(*result.resolved_moi_exec_save_sgpr + 6u <= 18u ||
               *result.resolved_moi_exec_save_sgpr > 18u);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
@@ -4832,29 +4836,33 @@ TEST(ConSanMoi, Cdna4AtomicRecordSpillsThroughSiteLocalDynamicStackFrame) {
                 build_s_mov_b32(saved_frame_sgpr, /*frame base=*/33, ROCJITSU_CODE_ARCH_CDNA4)),
       cave_words.end());
   const uint16_t record_value_vgpr = static_cast<uint16_t>(patch->scratch_vgpr.value() + 4u);
-  EXPECT_NE(std::find(cave_words.begin(), cave_words.end(),
-                      build_v_mov_b32_e32(record_value_vgpr, *options.moi_persistent_owner_sgpr,
-                                          ROCJITSU_CODE_ARCH_CDNA4)),
-            cave_words.end());
-  EXPECT_NE(std::find(cave_words.begin(), cave_words.end(),
-                      build_v_mov_b32_e32(record_value_vgpr, *options.moi_persistent_epoch_sgpr,
-                                          ROCJITSU_CODE_ARCH_CDNA4)),
-            cave_words.end());
+  EXPECT_NE(
+      std::find(cave_words.begin(), cave_words.end(),
+                build_v_mov_b32_e32(record_value_vgpr, *result.resolved_moi_persistent_owner_sgpr,
+                                    ROCJITSU_CODE_ARCH_CDNA4)),
+      cave_words.end());
+  EXPECT_NE(
+      std::find(cave_words.begin(), cave_words.end(),
+                build_v_mov_b32_e32(record_value_vgpr, *result.resolved_moi_persistent_epoch_sgpr,
+                                    ROCJITSU_CODE_ARCH_CDNA4)),
+      cave_words.end());
   const auto fence = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(fence, result.patches.end());
   ASSERT_TRUE(fence->scratch_vgpr);
   const std::vector<uint32_t> fence_words =
       text_words_at_offset(patched, fence->trampoline_offset, fence->trampoline_size);
-  const uint16_t fence_value_vgpr = static_cast<uint16_t>(*fence->scratch_vgpr + 2u);
-  EXPECT_NE(std::ranges::find(fence_words, build_v_mov_b32_e32(fence_value_vgpr,
-                                                               *options.moi_persistent_owner_sgpr,
-                                                               ROCJITSU_CODE_ARCH_CDNA4)),
-            fence_words.end());
-  EXPECT_NE(std::ranges::find(fence_words, build_v_mov_b32_e32(fence_value_vgpr,
-                                                               *options.moi_persistent_epoch_sgpr,
-                                                               ROCJITSU_CODE_ARCH_CDNA4)),
-            fence_words.end());
+  const uint16_t fence_value_vgpr = static_cast<uint16_t>(*fence->scratch_vgpr + 5u);
+  EXPECT_NE(
+      std::ranges::find(fence_words, build_v_mov_b32_e32(fence_value_vgpr,
+                                                         *result.resolved_moi_persistent_owner_sgpr,
+                                                         ROCJITSU_CODE_ARCH_CDNA4)),
+      fence_words.end());
+  EXPECT_NE(
+      std::ranges::find(fence_words, build_v_mov_b32_e32(fence_value_vgpr,
+                                                         *result.resolved_moi_persistent_epoch_sgpr,
+                                                         ROCJITSU_CODE_ARCH_CDNA4)),
+      fence_words.end());
   EXPECT_TRUE(result.final_validation_passed);
 }
 

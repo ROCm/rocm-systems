@@ -432,6 +432,28 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
   };
 }
 
+/// CDNA4 exposes workgroup IDs through ordinary entry SGPRs. Record/Replay
+/// probes in shared helpers execute after those registers may have become
+/// guest temporaries, so atomic-tracking objects capture a packed key
+/// at entry and publish that stable identity in the x field of every record.
+/// The y/z fields remain zero; replay treats the three fields as an opaque
+/// workgroup tuple. RDNA4 and gfx1250 retain their lifetime-stable sources.
+[[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
+record_replay_persistent_workgroup_sources(const ConSanOptions &options, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA4 || options.moi_engine != ConSanMoiEngine::RecordReplay ||
+      !options.moi_persistent_workgroup_key_sgpr)
+    return std::nullopt;
+  return ConSanMoiWorkgroupSources{
+      ConSanMoiWorkgroupSource{*options.moi_persistent_workgroup_key_sgpr, false, false},
+      ConSanMoiWorkgroupSource{}, ConSanMoiWorkgroupSource{}, ConSanMoiWorkgroupSource{}};
+}
+
+[[nodiscard]] ConSanMoiWorkgroupSources
+record_replay_workgroup_sources(const ConSanMoiWorkgroupSources &descriptor_sources,
+                                const ConSanOptions &options, rj_code_arch_t arch) {
+  return record_replay_persistent_workgroup_sources(options, arch).value_or(descriptor_sources);
+}
+
 [[nodiscard]] uint32_t moi_descriptor_vgpr_granularity(const KD &desc, rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA4)
     return 8;
@@ -2858,7 +2880,7 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
   const bool needs_sample_sequence = options.moi_engine == ConSanMoiEngine::Sampled &&
                                      options.moi_runtime_sample_stride > 1u &&
                                      has_supported_sampled_sync;
-  const bool needs_workgroup_key =
+  const bool needs_inline_workgroup_key =
       options.moi_engine == ConSanMoiEngine::InlineShadow &&
       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
         // Inline sync dispositions are appended only after persistent-state
@@ -2876,12 +2898,16 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         // lifetime fix to shared helper/group-FLAT candidates.
         return result.arch_name == "cdna4" && plan.site_kind == ConSanResourceSiteKind::Access;
       });
+  const bool needs_record_replay_workgroup_key =
+      arch == ROCJITSU_CODE_ARCH_CDNA4 && options.moi_engine == ConSanMoiEngine::RecordReplay &&
+      options.moi_track_atomics;
+  const bool needs_workgroup_key = needs_inline_workgroup_key || needs_record_replay_workgroup_key;
   // Sampled access probes execute after arbitrary guest instructions. Their
   // owner must therefore come from entry-captured persistent state even when
   // the code object has no semantically admitted synchronization site; v0 is
   // only the ABI workitem ID at kernel entry and may be clobbered later.
   const bool needs_persistent_state =
-      options.moi_init_owner_epoch ||
+      options.moi_init_owner_epoch || needs_record_replay_workgroup_key ||
       (options.moi_track_atomics && options.moi_engine != ConSanMoiEngine::RecordReplay) ||
       (options.moi_engine == ConSanMoiEngine::Sampled &&
        (options.moi_track_barriers || options.moi_runtime_sample_stride > 1u)) ||
@@ -2928,11 +2954,12 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
   const uint32_t persistent_end = persistent_base + persistent_count;
   const bool crosses_cdna4_accvgpr_boundary =
       result.arch_name == "cdna4" &&
-      std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-        return !plan.owner_descriptor_file_offsets.empty() &&
-               plan.source != ConSanRegisterAllocationSource::Unsupported &&
-               plan.ordinary_vgpr_limit != kMaxVgprs && persistent_end > plan.ordinary_vgpr_limit;
-      });
+      (needs_record_replay_workgroup_key ||
+       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+         return !plan.owner_descriptor_file_offsets.empty() &&
+                plan.source != ConSanRegisterAllocationSource::Unsupported &&
+                plan.ordinary_vgpr_limit != kMaxVgprs && persistent_end > plan.ordinary_vgpr_limit;
+       }));
   if (crosses_cdna4_accvgpr_boundary) {
     // ACCUM_OFFSET defines the compiler's ordinary/accumulator register split.
     // Moving that split after code generation changes which physical registers
@@ -2962,7 +2989,7 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
       return true;
     }
     if (options.moi_engine == ConSanMoiEngine::RecordReplay && !options.force_private_epoch) {
-      constexpr uint16_t scalar_count = 2u;
+      const uint16_t scalar_count = static_cast<uint16_t>(2u + needs_workgroup_key);
       uint32_t first = 0u;
       for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
         if (plan.source == ConSanRegisterAllocationSource::Unsupported ||
@@ -3007,22 +3034,26 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         }
         options.moi_persistent_owner_sgpr = static_cast<uint16_t>(base);
         options.moi_persistent_epoch_sgpr = static_cast<uint16_t>(base + 1u);
+        if (needs_workgroup_key)
+          options.moi_persistent_workgroup_key_sgpr = static_cast<uint16_t>(base + 2u);
         options.moi_init_owner_epoch = true;
         options.automatic_moi_persistent_sgprs = true;
         options.moi_prologue_scratch_vgpr_assignments = std::move(prologue_scratch);
         result.resolved_moi_persistent_owner_sgpr = options.moi_persistent_owner_sgpr;
         result.resolved_moi_persistent_epoch_sgpr = options.moi_persistent_epoch_sgpr;
+        result.resolved_moi_persistent_workgroup_key_sgpr =
+            options.moi_persistent_workgroup_key_sgpr;
         result.moi_persistent_sgprs_automatic = true;
         result.resolved_moi_prologue_scratch_vgpr_assignments =
             options.moi_prologue_scratch_vgpr_assignments;
-        result.warnings.emplace_back(
-            "ConSan MOI assigned persistent scalar owner/epoch state below a CDNA4 "
-            "AccVGPR boundary for Record/Replay");
+        result.warnings.emplace_back("ConSan MOI assigned persistent scalar owner/epoch" +
+                                     std::string(needs_workgroup_key ? "/workgroup-key" : "") +
+                                     " state for CDNA4 Record/Replay");
         return true;
       }
 
       // A linked kernel can reference a high SGPR transiently while leaving a
-      // lower pair completely untouched throughout every owning kernel and
+      // lower window completely untouched throughout every owning kernel and
       // shared helper. Persistent state may use such a hole only after proving
       // that the pair is absent from the complete owner scopes; site-local
       // liveness is insufficient because the values cross arbitrary guest
@@ -3127,40 +3158,45 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         // Resource plans are rebuilt after persistent-state selection. Keep
         // the same placeholder used by the ordinary scalar fallback for every
         // kernel that the rebuild can newly admit. Record/Replay initializes
-        // both persistent values directly in SGPRs, so the shared prologue API
-        // does not actually clobber this VGPR pair.
+        // its persistent values directly in SGPRs, so the shared prologue API
+        // does not actually clobber this placeholder VGPR pair.
         for (const ConSanKernelInfo &kernel : result.kernels) {
           if (kernel.has_text_range)
             prologue_scratch.push_back({kernel.descriptor_file_offset, 0u});
         }
         options.moi_persistent_owner_sgpr = *persistent_hole;
         options.moi_persistent_epoch_sgpr = static_cast<uint16_t>(*persistent_hole + 1u);
+        if (needs_workgroup_key)
+          options.moi_persistent_workgroup_key_sgpr = static_cast<uint16_t>(*persistent_hole + 2u);
         options.moi_init_owner_epoch = true;
         options.automatic_moi_persistent_sgprs = true;
         options.moi_prologue_scratch_vgpr_assignments = std::move(prologue_scratch);
         result.resolved_moi_persistent_owner_sgpr = options.moi_persistent_owner_sgpr;
         result.resolved_moi_persistent_epoch_sgpr = options.moi_persistent_epoch_sgpr;
+        result.resolved_moi_persistent_workgroup_key_sgpr =
+            options.moi_persistent_workgroup_key_sgpr;
         result.moi_persistent_sgprs_automatic = true;
         result.resolved_moi_prologue_scratch_vgpr_assignments =
             options.moi_prologue_scratch_vgpr_assignments;
-        result.warnings.emplace_back(
-            "ConSan MOI assigned persistent scalar owner/epoch state to a proven-unused "
-            "CDNA4 SGPR pair below the maximum guest reference");
+        result.warnings.emplace_back("ConSan MOI assigned persistent scalar owner/epoch" +
+                                     std::string(needs_workgroup_key ? "/workgroup-key" : "") +
+                                     " state to a proven-unused "
+                                     "CDNA4 SGPR pair below the maximum guest reference");
         return true;
       }
       if (!scalar_state_valid) {
         result.warnings.emplace_back(
-            "ConSan MOI could not build owner scopes for a proven-unused persistent SGPR pair");
+            "ConSan MOI could not build owner scopes for a proven-unused persistent SGPR window");
       } else if (!every_owner_resolved) {
         result.warnings.emplace_back(
             "ConSan MOI could not resolve every owner descriptor for a proven-unused persistent "
-            "SGPR pair");
+            "SGPR window");
       } else if (component_uses_indirect_sgprs) {
         result.warnings.emplace_back(
             "ConSan MOI cannot prove a persistent SGPR hole across scalar-relative guest access");
       } else {
         result.warnings.emplace_back(
-            "ConSan MOI found no persistent SGPR pair unused by every admitted owner");
+            "ConSan MOI found no persistent SGPR window unused by every admitted owner");
       }
       result.outcome = ConSanTransformOutcome::Unsupported;
       result.warnings.emplace_back(

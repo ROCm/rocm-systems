@@ -1275,10 +1275,13 @@ private:
       const rocjitsu::ConSanMoiFenceRecord &fence = fences[i];
       log_message(kLogInfo,
                   "ConSan MOI auto fence reader=%llu index=%u event_index=%u owner=%u "
-                  "epoch=%u inst=0x%x kind=%u scope=%u semantics=%u token=0x%016llx",
+                  "generation=%llu epoch=%u workgroup=(%u,%u,%u) inst=0x%x kind=%u scope=%u "
+                  "semantics=%u token=0x%016llx",
                   static_cast<unsigned long long>(entry.reader), i, fence.event_index,
-                  fence.owner_id, fence.epoch, fence.instruction_offset, fence.kind, fence.scope,
-                  fence.semantics, static_cast<unsigned long long>(fence.communication_token));
+                  fence.owner_id, static_cast<unsigned long long>(fence.generation), fence.epoch,
+                  fence.workgroup_x, fence.workgroup_y, fence.workgroup_z, fence.instruction_offset,
+                  fence.kind, fence.scope, fence.semantics,
+                  static_cast<unsigned long long>(fence.communication_token));
     }
     if (visible_records != 0 || visible_barriers != 0 || visible_atomics != 0 ||
         visible_fences != 0) {
@@ -1382,17 +1385,18 @@ private:
     const uint32_t sample_count = std::min<uint32_t>(visible_records, 4u);
     for (uint32_t i = 0; i < sample_count; ++i) {
       const rocjitsu::ConSanMoiAccessRecord &record = records[i];
-      log_message(kLogInfo,
-                  "ConSan MOI auto record reader=%llu index=%u event_index=%u kind=%u wave=%u "
-                  "epoch=%u workgroup=(%u,%u,%u) inst=0x%x lds_offset=%u lds_bytes=%u "
-                  "cells=[%u,%u) "
-                  "lane_mask=0x%llx",
-                  static_cast<unsigned long long>(entry.reader), i, record.event_index,
-                  record.access_kind, record.wave_id, record.epoch, record.workgroup_x,
-                  record.workgroup_y, record.workgroup_z, record.instruction_offset,
-                  record.lds_byte_offset, record.lds_byte_count, record.start_cell,
-                  record.start_cell + record.cell_count,
-                  static_cast<unsigned long long>(record.lane_mask));
+      log_message(
+          kLogInfo,
+          "ConSan MOI auto record reader=%llu index=%u event_index=%u kind=%u wave=%u "
+          "generation=%llu epoch=%u workgroup=(%u,%u,%u) inst=0x%x lds_offset=%u "
+          "lds_bytes=%u "
+          "cells=[%u,%u) "
+          "lane_mask=0x%llx",
+          static_cast<unsigned long long>(entry.reader), i, record.event_index, record.access_kind,
+          record.wave_id, static_cast<unsigned long long>(record.generation), record.epoch,
+          record.workgroup_x, record.workgroup_y, record.workgroup_z, record.instruction_offset,
+          record.lds_byte_offset, record.lds_byte_count, record.start_cell,
+          record.start_cell + record.cell_count, static_cast<unsigned long long>(record.lane_mask));
     }
 
     const uint32_t barrier_sample_count = std::min<uint32_t>(visible_barriers, 4u);
@@ -1411,9 +1415,12 @@ private:
       const rocjitsu::ConSanMoiAtomicRecord &record = atomics[i];
       log_message(kLogInfo,
                   "ConSan MOI auto atomic reader=%llu index=%u event_index=%u kind=%u owner=%u "
-                  "epoch=%u inst=0x%x address=0x%llx scope=%u semantics=%u",
+                  "generation=%llu epoch=%u workgroup=(%u,%u,%u) inst=0x%x address=0x%llx "
+                  "scope=%u semantics=%u",
                   static_cast<unsigned long long>(entry.reader), i, record.event_index,
-                  static_cast<uint32_t>(record.kind), record.owner_id, record.epoch,
+                  static_cast<uint32_t>(record.kind), record.owner_id,
+                  static_cast<unsigned long long>(record.generation), record.epoch,
+                  record.workgroup_x, record.workgroup_y, record.workgroup_z,
                   record.instruction_offset, static_cast<unsigned long long>(record.atomic_address),
                   record.scope, record.semantics);
     }

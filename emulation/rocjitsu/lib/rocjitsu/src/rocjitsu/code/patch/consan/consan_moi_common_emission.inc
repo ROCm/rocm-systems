@@ -659,13 +659,17 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     derived_owner_words.push_back(*owner_init);
     derived_owner_words.insert(derived_owner_words.end(), owner_mask->begin(), owner_mask->end());
   }
-  ConSanMoiWorkgroupSources workgroup_sources;
-  if (candidate.kernel_descriptor_file_offset) {
+  const auto persistent_workgroup_sources =
+      record_replay_persistent_workgroup_sources(options, arch);
+  ConSanMoiWorkgroupSources workgroup_sources =
+      persistent_workgroup_sources.value_or(ConSanMoiWorkgroupSources{});
+  if (!persistent_workgroup_sources && candidate.kernel_descriptor_file_offset) {
     const auto descriptor_workgroup_sources = moi_descriptor_workgroup_sources(
         bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
     if (!descriptor_workgroup_sources)
       return std::nullopt;
-    workgroup_sources = *descriptor_workgroup_sources;
+    workgroup_sources =
+        record_replay_workgroup_sources(*descriptor_workgroup_sources, options, arch);
   }
 
   std::vector<uint32_t> words;

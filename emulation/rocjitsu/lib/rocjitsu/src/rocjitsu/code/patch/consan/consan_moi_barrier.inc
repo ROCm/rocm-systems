@@ -117,13 +117,17 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     derived_owner_vgpr = value_vgpr;
     derived_owner_word = *owner_init;
   }
-  ConSanMoiWorkgroupSources workgroup_sources;
-  if (candidate.kernel_descriptor_file_offset) {
+  const auto persistent_workgroup_sources =
+      record_replay_persistent_workgroup_sources(options, arch);
+  ConSanMoiWorkgroupSources workgroup_sources =
+      persistent_workgroup_sources.value_or(ConSanMoiWorkgroupSources{});
+  if (!persistent_workgroup_sources && candidate.kernel_descriptor_file_offset) {
     const auto descriptor_workgroup_sources = moi_descriptor_workgroup_sources(
         bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
     if (!descriptor_workgroup_sources)
       return std::nullopt;
-    workgroup_sources = *descriptor_workgroup_sources;
+    workgroup_sources =
+        record_replay_workgroup_sources(*descriptor_workgroup_sources, options, arch);
   }
 
   std::vector<uint32_t> words;
@@ -331,8 +335,8 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     const auto save_scc = instrumentation::build_s_cselect_b32(special_state->scc_save_sgpr,
                                                                scalar_positive_inline_u32(1),
                                                                scalar_positive_inline_u32(0), arch);
-    const auto at_maximum = instrumentation::build_s_cmp_eq_u32(
-        *options.moi_persistent_epoch_sgpr, /*literal=*/255u, arch);
+    const auto at_maximum = instrumentation::build_s_cmp_eq_u32(*options.moi_persistent_epoch_sgpr,
+                                                                /*literal=*/255u, arch);
     // The compare consumes the following literal word. If the epoch is already
     // saturated, skip the two-word CDNA4-compatible increment sequence. This
     // needs no temporary SGPRs: in particular, the SCC snapshot at exec-save

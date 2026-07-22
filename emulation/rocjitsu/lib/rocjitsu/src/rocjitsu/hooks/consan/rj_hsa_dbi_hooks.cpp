@@ -3139,29 +3139,43 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       }
       if (patch_result.resolved_moi_owner_vgpr || patch_result.resolved_moi_epoch_vgpr ||
           patch_result.resolved_moi_exec_save_sgpr || patch_result.resolved_moi_owner_sgpr ||
+          patch_result.resolved_moi_persistent_owner_sgpr ||
+          patch_result.resolved_moi_persistent_epoch_sgpr ||
+          patch_result.resolved_moi_persistent_workgroup_key_sgpr ||
           patch_result.moi_private_epoch_automatic) {
-        log_message(kLogInfo,
-                    "ConSan MOI persistent reader=%llu owner_vgpr=%s epoch_vgpr=%s "
-                    "exec_save_sgpr=%s owner_sgpr=%s automatic_vgprs=%s "
-                    "automatic_private_epoch=%s automatic_exec_save=%s "
-                    "automatic_owner_sgpr=%s",
-                    static_cast<unsigned long long>(code_object_reader.handle),
-                    patch_result.resolved_moi_owner_vgpr
-                        ? std::to_string(*patch_result.resolved_moi_owner_vgpr).c_str()
-                        : "-",
-                    patch_result.resolved_moi_epoch_vgpr
-                        ? std::to_string(*patch_result.resolved_moi_epoch_vgpr).c_str()
-                        : "-",
-                    patch_result.resolved_moi_exec_save_sgpr
-                        ? std::to_string(*patch_result.resolved_moi_exec_save_sgpr).c_str()
-                        : "-",
-                    patch_result.resolved_moi_owner_sgpr
-                        ? std::to_string(*patch_result.resolved_moi_owner_sgpr).c_str()
-                        : "-",
-                    patch_result.moi_persistent_vgprs_automatic ? "true" : "false",
-                    patch_result.moi_private_epoch_automatic ? "true" : "false",
-                    patch_result.moi_exec_save_sgprs_automatic ? "true" : "false",
-                    patch_result.moi_owner_sgpr_automatic ? "true" : "false");
+        log_message(
+            kLogInfo,
+            "ConSan MOI persistent reader=%llu owner_vgpr=%s epoch_vgpr=%s "
+            "exec_save_sgpr=%s owner_sgpr=%s scalar_owner_sgpr=%s "
+            "scalar_epoch_sgpr=%s scalar_workgroup_key_sgpr=%s automatic_vgprs=%s "
+            "automatic_private_epoch=%s automatic_exec_save=%s "
+            "automatic_owner_sgpr=%s",
+            static_cast<unsigned long long>(code_object_reader.handle),
+            patch_result.resolved_moi_owner_vgpr
+                ? std::to_string(*patch_result.resolved_moi_owner_vgpr).c_str()
+                : "-",
+            patch_result.resolved_moi_epoch_vgpr
+                ? std::to_string(*patch_result.resolved_moi_epoch_vgpr).c_str()
+                : "-",
+            patch_result.resolved_moi_exec_save_sgpr
+                ? std::to_string(*patch_result.resolved_moi_exec_save_sgpr).c_str()
+                : "-",
+            patch_result.resolved_moi_owner_sgpr
+                ? std::to_string(*patch_result.resolved_moi_owner_sgpr).c_str()
+                : "-",
+            patch_result.resolved_moi_persistent_owner_sgpr
+                ? std::to_string(*patch_result.resolved_moi_persistent_owner_sgpr).c_str()
+                : "-",
+            patch_result.resolved_moi_persistent_epoch_sgpr
+                ? std::to_string(*patch_result.resolved_moi_persistent_epoch_sgpr).c_str()
+                : "-",
+            patch_result.resolved_moi_persistent_workgroup_key_sgpr
+                ? std::to_string(*patch_result.resolved_moi_persistent_workgroup_key_sgpr).c_str()
+                : "-",
+            patch_result.moi_persistent_vgprs_automatic ? "true" : "false",
+            patch_result.moi_private_epoch_automatic ? "true" : "false",
+            patch_result.moi_exec_save_sgprs_automatic ? "true" : "false",
+            patch_result.moi_owner_sgpr_automatic ? "true" : "false");
       }
     }
     size_t candidate_kernel_count = 0;
