@@ -34,10 +34,12 @@
  * class.
  */
 
+#include <cassert>
+
 #include <limits>
-#include <map>
 #include <tuple>
 #include <type_traits>
+#include <unordered_map>
 
 #include <hip/hip_runtime.h>
 
@@ -58,6 +60,13 @@ struct BufferInfo {
   uintptr_t addr;
   size_t    length;
   uint32_t  lkey;
+};
+
+struct BufferHostInfo {
+  struct ibv_mr* mr;
+  BufferInfo*    info_ptr;
+
+  BufferHostInfo(struct ibv_mr* mr, BufferInfo* info_ptr) : mr{mr}, info_ptr{info_ptr} { }
 };
 
 /**
@@ -1244,7 +1253,7 @@ protected:
 
 private:
   // Used by host in buffer_register, buffer_unregister
-  std::map<uintptr_t, struct ibv_mr*> buffer_mr_map{};
+  std::unordered_map<void*, BufferHostInfo> buffer_info_map{};
   struct ibv_pd* pd;
   struct ibv_mr* fetching_atomic_mr{nullptr};
   struct ibv_mr* nonfetching_atomic_mr{nullptr};
@@ -1292,6 +1301,9 @@ __host__ QueuePairBase<Provider>::QueuePairBase(uint32_t qpn, void *base_heap, s
 
   CHECK_HIP(hipMalloc(&buffer_info, sizeof(BufferInfo) * num_user_buffers));
   CHECK_HIP(hipMemset(buffer_info, 0, sizeof(BufferInfo) * num_user_buffers));
+
+  /* Reserve memory to register up to num_user_buffers */
+  buffer_info_map.reserve(num_user_buffers);
 }
 
 template <typename Provider>
@@ -1310,7 +1322,7 @@ __host__ QueuePairBase<Provider>::QueuePairBase(QueuePairBase&& other) noexcept
     nonfetching_atomic_lkey {std::move(other.nonfetching_atomic_lkey)},
     fetching_atomic_freelist{std::move(other.fetching_atomic_freelist)},
     allocator               {std::move(other.allocator)},
-    buffer_mr_map           {std::move(other.buffer_mr_map)},
+    buffer_info_map         {std::move(other.buffer_info_map)},
     pd                      {std::move(other.pd)},
     fetching_atomic_mr      {std::move(other.fetching_atomic_mr)},
     nonfetching_atomic_mr   {std::move(other.nonfetching_atomic_mr)} {
@@ -1327,13 +1339,13 @@ __host__ QueuePairBase<Provider>& QueuePairBase<Provider>::operator=(QueuePairBa
   int err = 0;
 
   /* Step 1: ensure all resources in *this are deallocated */
-  if (!buffer_mr_map.empty()) {
+  if (!buffer_info_map.empty()) {
     LOG_WARN("Unmatched buffer_register detected: "
              "move assignment operator %s called, but buffer registration map is not empty!",
              __PRETTY_FUNCTION__ );
     /* Deregister every memory region registered with this QP */
-    for (auto&& [addrint, mr] : buffer_mr_map) {
-      err = ibv.dereg_mr(mr);
+    for (auto&& [addr, host_info] : buffer_info_map) {
+      err = ibv.dereg_mr(host_info.mr);
       CHECK_ZERO(err, "ibv_dereg_mr (QueuePairBase<Provider>::operator=(QueuePairBase&&))");
     }
   }
@@ -1380,7 +1392,7 @@ __host__ QueuePairBase<Provider>& QueuePairBase<Provider>::operator=(QueuePairBa
   nonfetching_atomic_lkey  = std::move(other.nonfetching_atomic_lkey);
   fetching_atomic_freelist = std::move(other.fetching_atomic_freelist);
   allocator                = std::move(other.allocator);
-  buffer_mr_map            = std::move(other.buffer_mr_map);
+  buffer_info_map          = std::move(other.buffer_info_map);
   pd                       = std::move(other.pd);
   fetching_atomic_mr       = std::move(other.fetching_atomic_mr);
   nonfetching_atomic_mr    = std::move(other.nonfetching_atomic_mr);
@@ -1401,13 +1413,13 @@ template <typename Provider>
 __host__ QueuePairBase<Provider>::~QueuePairBase() {
   int err = 0;
 
-  if (!buffer_mr_map.empty()) {
+  if (!buffer_info_map.empty()) {
     LOG_WARN("Unmatched buffer_register detected: "
              "destructor %s called, but buffer registration map is not empty!",
              __PRETTY_FUNCTION__ );
     /* Deregister every memory region registered with this QP */
-    for (auto&& [addrint, mr] : buffer_mr_map) {
-      err = ibv.dereg_mr(mr);
+    for (auto&& [addr, host_info] : buffer_info_map) {
+      err = ibv.dereg_mr(host_info.mr);
       CHECK_ZERO(err, "ibv_dereg_mr (QueuePairBase<Provider>::~QueuePairBase)");
     }
   }
@@ -1455,12 +1467,14 @@ QueuePairBase<Provider>::allocate_and_register(size_t count, int access) {
 
 template <typename Provider>
 __host__ int QueuePairBase<Provider>::buffer_register(void *addr, size_t length) {
-  if (buffer_mr_map.size() >= num_user_buffers) {
-    LOG_WARN("Unable to register user buffer with QP. "
-             "Please increase the value of %s.", envvar::gda::num_user_buffers.get_name().c_str());
+  if (buffer_info_map.size() >= num_user_buffers) {
+    LOG_WARN("Unable to register user buffer (%p, %zu) with QP. "
+             "Please increase the value of %s.",
+             addr, length, envvar::gda::num_user_buffers.get_name().c_str());
     return ROCSHMEM_ERROR;
   }
 
+  /* Register addr */
   int access = IBV_ACCESS_LOCAL_WRITE
              | IBV_ACCESS_REMOTE_WRITE
              | IBV_ACCESS_REMOTE_READ
@@ -1473,39 +1487,57 @@ __host__ int QueuePairBase<Provider>::buffer_register(void *addr, size_t length)
   struct ibv_mr* mr = ibv.reg_mr(pd, addr, length, access, &allocator);
   CHECK_NNULL(mr, "ibv_reg_mr (buffer_register)");
 
-  uintptr_t addr_int = reinterpret_cast<uintptr_t>(addr);
-  buffer_mr_map[addr_int] = mr;
 
+  /* Search for next free buffer_info entry */
+  BufferInfo* info_ptr = nullptr;
   for (size_t i = 0; i < num_user_buffers; i++) {
     if (buffer_info[i].addr == 0) {
-      buffer_info[i].addr   = addr_int;
-      buffer_info[i].length = length;
-      buffer_info[i].lkey   = to_provider_endianness(mr->lkey);
+      info_ptr = & buffer_info[i];
       break;
     }
   }
+  assert(info_ptr);
 
-  return ROCSHMEM_SUCCESS;
+  /* Try inserting buffer host info into buffer_info_map; detects whether this is a duplicate */
+  auto&& [it, inserted] = buffer_info_map.try_emplace(addr, mr, info_ptr);
+
+  if (inserted) {
+    /* Copy buffer info to device */
+    BufferInfo info{reinterpret_cast<uintptr_t>(addr), length, to_provider_endianness(mr->lkey)};
+    CHECK_HIP(hipMemcpy(info_ptr, &info, sizeof(BufferInfo), hipMemcpyHostToDevice));
+    return ROCSHMEM_SUCCESS;
+  } else {
+    auto&& [key, host_info] = *it;
+    LOG_WARN("Unable to register user buffer (%p, %zu) with QP: "
+             "already registered with length=%zu, lkey=%u, rkey=%u.",
+             addr, length, host_info.mr->length, host_info.mr->lkey, host_info.mr->rkey);
+    /* Deregister addr */
+    int err = ibv.dereg_mr(mr);
+    CHECK_ZERO(err, "ibv_dereg_mr (buffer_register)");
+    return ROCSHMEM_ERROR;
+  }
 }
 
 template <typename Provider>
 __host__ int QueuePairBase<Provider>::buffer_unregister(void *addr) {
-  // TODO: we don't verify that addr was actually registered, we should do that
-  uintptr_t addr_int = reinterpret_cast<uintptr_t>(addr);
-  for (size_t i = 0; i < num_user_buffers; i++) {
-    if (is_ptr_in_range(buffer_info[i].addr, buffer_info[i].length, addr_int)) {
-      CHECK_HIP(hipMemset(&buffer_info[i], 0, sizeof(BufferInfo)));
-      break;
-    }
+  /* Lookup buffer host info */
+  auto it = buffer_info_map.find(addr);
+
+  if (it != buffer_info_map.end()) {
+    auto&& [key, host_info] = *it;
+    /* Reset buffer_info entry */
+    CHECK_HIP(hipMemset(host_info.info_ptr, 0, sizeof(BufferInfo)));
+    /* Deregister addr */
+    int err = ibv.dereg_mr(host_info.mr);
+    CHECK_ZERO(err, "ibv_dereg_mr (buffer_unregister)");
+    /* Remove from map */
+    buffer_info_map.erase(it);
+    return ROCSHMEM_SUCCESS;
+  } else {
+    LOG_WARN("Unable to unregister user buffer (%p) with this QP: "
+             "user buffer not registered.", addr);
+    return ROCSHMEM_ERROR;
   }
-
-  auto it = buffer_mr_map.find(addr_int);
-  int err = ibv.dereg_mr(std::get<struct ibv_mr*>(*it));
-  CHECK_ZERO(err, "ibv_dereg_mr (buffer_unregister)");
-
-  buffer_mr_map.erase(it);
-
-  return ROCSHMEM_SUCCESS;
 }
 
 template <typename Provider>
@@ -1513,13 +1545,13 @@ __host__ int QueuePairBase<Provider>::buffer_unregister_all() {
   int err = 0;
 
   /* Deregister every memory region registered with this QP */
-  for (auto&& [addrint, mr] : buffer_mr_map) {
-    err = ibv.dereg_mr(mr);
+  for (auto&& [addr, host_info] : buffer_info_map) {
+    err = ibv.dereg_mr(host_info.mr);
     CHECK_ZERO(err, "ibv_dereg_mr (QueuePairBase<Provider>::~QueuePairBase)");
   }
-  buffer_mr_map.clear();
+  buffer_info_map.clear();
 
-  /* Clear all buffer info slots */
+  /* Clear all buffer_info slots */
   CHECK_HIP(hipMemset(buffer_info, 0, sizeof(BufferInfo) * num_user_buffers));
 
   return ROCSHMEM_SUCCESS;
