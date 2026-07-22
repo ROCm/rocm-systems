@@ -154,7 +154,7 @@ flowchart TD
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
     XT3I["XT3I DONE<br/>SPMM F8 Sampled clean, paired, reviewed fault,<br/>containment, and frozen evidence green"]
-    XT3P["XT3P ACTIVE<br/>SPMM F8 Record/Replay clean E2E complete;<br/>paired and reviewed-fault bundle pending"]
+    XT3P["XT3P ACTIVE<br/>SPMM F8 Record/Replay clean E2E complete;<br/>baseline bound reached; fault inventory next"]
     XT3J["XT3J DONE<br/>SPMM F8 Inline standard clean assessed;<br/>MT64x64 wrong-result rows isolate blocker"]
     XT3K["XT3K DONE<br/>SPMM F8 Inline ninth-barrier bank defect fixed;<br/>exact kernel fully passes"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
@@ -392,6 +392,14 @@ flowchart TD
   class XT3P active
   class G0,V9B,XT2C2,XT2C3,XT3E,XF,XG todo
 ```
+
+- 2026-07-22: `XT3P` remains ACTIVE/blue after paired artifact
+  `consan-validation-gfx1250-spmm-f8-ml-rr-paired-current-20260722-224`
+  reaches its evidence-based 1,500-second bound in the uninstrumented
+  baseline-before leg.  Record/Replay never ran, so this is software-device
+  throughput evidence rather than a ConSan failure and no overhead is
+  claimed.  The node rotates within its remaining gates to a fresh static
+  fault inventory instead of widening the paired timeout.
 
 - 2026-07-22: `XT3P` remains ACTIVE/blue but its clean E2E gate is now
   complete.  Artifact

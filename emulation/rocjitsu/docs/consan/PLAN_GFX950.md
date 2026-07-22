@@ -272,6 +272,16 @@ flowchart TD
 
 ## Reconnaissance conclusions
 
+- 2026-07-22: TP2 Record/Replay is green within ACTIVE/blue `RR0`.
+  Prospectively reviewed artifact
+  `consan-validation-gfx950-tp2-rr-fault-dpp-phase-20260722-113` applies one
+  DPP-phase barrier mutation and matches its qualified-miss contract while
+  combined, decode, and prefill exact oracles pass.  Together with retained
+  clean and one-repetition paired evidence, this closes the cell; bounded
+  execution, cleanup, physical health, and clean provenance at `85506cf30a`
+  all pass.  CLIP replay stability and dynamic-stack shared helpers remain in
+  `RR0`.
+
 - 2026-07-22: TP1 decode/combined Record/Replay is green within ACTIVE/blue
   `RR0`.  The same prospectively reviewed DPP-phase mutation used to close its
   SuperCollider sibling accepts its independently frozen Record/Replay

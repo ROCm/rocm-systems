@@ -289,6 +289,15 @@ do not promote matrix cells without the end-to-end evidence above.
   and dynamic evidence, and zero incomplete publications.  The cell remains
   yellow only because paired timing and reviewed-fault evidence are pending.
 
+- 2026-07-22: P3 SPMM F8 Record/Replay paired artifact
+  `consan-validation-gfx1250-spmm-f8-ml-rr-paired-current-20260722-224`
+  reaches its fixed 1,500-second bound in baseline-before.  The
+  uninstrumented client remains CPU-active but produces no final verdict;
+  Record/Replay is therefore never launched and no overhead is claimed.  This
+  is a software-device throughput boundary, not a ConSan regression.  The
+  cell stays yellow and rotates to fault inventory without another timeout
+  increase.
+
 - 2026-07-22: P3 SPMM F8 Record/Replay advances within yellow.  Bounded
   one-repetition artifact
   `consan-green-expansion-20260722-spmm-f8-ml-rr-final-209` completes all seven
