@@ -6,6 +6,19 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     return;
   }
 
+  const auto contains_supported_site = [&](const auto &containers) {
+    return std::ranges::any_of(containers, [&](const auto &container) {
+      return std::ranges::any_of(container.flat_sites, [&](const ConSanFlatSite &site) {
+        return is_supported_flat_check_trap_site(site, options.flat_provenance_mode);
+      });
+    });
+  };
+  if (!contains_supported_site(result.kernels) && !contains_supported_site(result.functions)) {
+    result.warnings.emplace_back("ConSan flat check/trap proof found no supported likely group "
+                                 "flat_load/store_b{32,64,128} site");
+    return;
+  }
+
   const auto delay_words =
       delay_instruction_word_count(options, result.errors, "ConSan flat check/trap proof");
   if (!delay_words)

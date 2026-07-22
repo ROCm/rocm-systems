@@ -75,7 +75,18 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   std::vector<ScReservoirOwnerContext> reservoir_owner_contexts;
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (decoder) {
-    std::vector<uint64_t> extra_leaders = kernel_entry_offsets(result);
+    const bool restrict_to_preflight_candidates =
+        result.functions.empty() && options.flavor == ConSanFlavor::SuperCollider &&
+        !options.fault_dry_run && options.sc_perturb_kind == ConSanPerturbationKind::None;
+    std::vector<uint64_t> extra_leaders;
+    if (restrict_to_preflight_candidates) {
+      for (const ConSanKernelInfo &kernel : result.kernels) {
+        if (kernel.has_text_range && kernel.preflight_action == ConSanPreflightAction::Candidate)
+          extra_leaders.push_back(kernel.entry_text_offset);
+      }
+    } else {
+      extra_leaders = kernel_entry_offsets(result);
+    }
     extra_leaders.reserve(extra_leaders.size() + result.functions.size());
     for (const ConSanFunctionInfo &function : result.functions)
       extra_leaders.push_back(function.entry_text_offset);
@@ -83,11 +94,22 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     extra_leaders.erase(std::ranges::unique(extra_leaders).begin(), extra_leaders.end());
 
     std::vector<BasicBlock::CodeRange> code_ranges;
-    code_ranges.reserve(code_object.functions().size());
-    for (const AmdGpuFunctionInfo &function : code_object.functions()) {
-      if (function.code_size != 0)
-        code_ranges.push_back(
-            {.start_offset = function.entry_text_offset, .size = function.code_size});
+    if (restrict_to_preflight_candidates) {
+      code_ranges.reserve(extra_leaders.size());
+      for (const ConSanKernelInfo &kernel : result.kernels) {
+        if (kernel.has_text_range && kernel.code_size != 0 &&
+            kernel.preflight_action == ConSanPreflightAction::Candidate) {
+          code_ranges.push_back(
+              {.start_offset = kernel.entry_text_offset, .size = kernel.code_size});
+        }
+      }
+    } else {
+      code_ranges.reserve(code_object.functions().size());
+      for (const AmdGpuFunctionInfo &function : code_object.functions()) {
+        if (function.code_size != 0)
+          code_ranges.push_back(
+              {.start_offset = function.entry_text_offset, .size = function.code_size});
+      }
     }
     blocks = BasicBlock::build(code_object, *decoder, arch, extra_leaders, code_ranges);
     block_ptrs = block_ptrs_for(blocks);
@@ -95,13 +117,20 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     const BlockOffsetIndex block_index = build_block_offset_index(blocks);
     std::vector<uint64_t> kernel_entries;
     for (const ConSanKernelInfo &kernel : result.kernels) {
-      if (kernel.has_text_range)
+      if (kernel.has_text_range && (!restrict_to_preflight_candidates ||
+                                    kernel.preflight_action == ConSanPreflightAction::Candidate))
         kernel_entries.push_back(kernel.entry_text_offset);
     }
     std::ranges::sort(kernel_entries);
     kernel_entries.erase(std::ranges::unique(kernel_entries).begin(), kernel_entries.end());
     reservoir_owner_contexts.reserve(result.kernels.size());
     for (const ConSanKernelInfo &kernel : result.kernels) {
+      // With no shared functions, a preflight-skipped kernel cannot own a
+      // supported access. Avoid constructing thousands of unused liveness
+      // analyses for generated operator-library code objects.
+      if (restrict_to_preflight_candidates &&
+          kernel.preflight_action != ConSanPreflightAction::Candidate)
+        continue;
       if (!kernel.has_text_range || kernel.descriptor_file_offset > original_bytes.size() ||
           sizeof(KD) > original_bytes.size() - kernel.descriptor_file_offset)
         continue;

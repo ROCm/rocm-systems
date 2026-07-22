@@ -2769,6 +2769,9 @@ TEST(ConSan, ProbeLdsCheckTrapModeLeavesAdjacentAtomicAndBarrierUntouched) {
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 4;
   options.delay_nops = 1;
+  // Match an ordinary runtime clean transform: fault discovery is a separate
+  // validation phase and barrier-move destinations were not requested.
+  options.collect_barrier_move_destinations = false;
 
   const auto result = try_patch_consan(bytes, options);
 
@@ -2778,6 +2781,9 @@ TEST(ConSan, ProbeLdsCheckTrapModeLeavesAdjacentAtomicAndBarrierUntouched) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
   EXPECT_EQ(result.patches.front().original_size, 8u);
+  EXPECT_TRUE(result.fault_sites.empty());
+  EXPECT_TRUE(result.sync_events.empty());
+  EXPECT_TRUE(result.sync_sequences.empty());
   constexpr uint64_t adjacent_file_offset = 0x108u;
   constexpr uint64_t adjacent_size = 5u * sizeof(uint32_t);
   EXPECT_EQ(0, std::memcmp(result.elf_bytes.data() + adjacent_file_offset,

@@ -635,25 +635,38 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   if (!result.errors.empty())
     return result;
   prune_unreachable_inferred_ranges(code_object, *decoder, arch, options, result);
-  build_fault_site_inventory(code_object_bytes, result);
-  build_sync_event_inventory(code_object_bytes, result);
-  build_singleton_sync_sequences(code_object, *decoder, arch, result);
-  const bool allow_extended_barrier_pairs =
-      options.fault_drop_barrier || options.abort_unmatched_barrier_wait ||
-      (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_track_barriers);
-  associate_barrier_sync_sequences(code_object, *decoder, arch, allow_extended_barrier_pairs,
-                                   result);
-  associate_atomic_sync_sequences(code_object, *decoder, arch, result);
-  build_barrier_lifecycle_group_inventory(result);
-  if (options.collect_barrier_move_destinations)
-    build_barrier_move_destination_inventory(code_object, *decoder, arch, result);
-  annotate_execution_owners(code_object, *decoder, arch, options, result);
-  associate_ordinary_release_sync_sequences(code_object, *decoder, arch, result);
-  associate_ordinary_acquire_sync_sequences(code_object, *decoder, arch, result);
-  build_communication_address_recipes(code_object, *decoder, arch, result);
-  build_moi_fence_candidate_inventory(result);
-  build_perturbation_candidate_inventory(result);
-  annotate_fault_sites_with_sync_sequences(result);
+  const bool needs_semantic_inventory = options.flavor == ConSanFlavor::Moi ||
+                                        options.fault_dry_run || has_fault || has_perturbation ||
+                                        options.abort_unmatched_barrier_wait ||
+                                        options.collect_barrier_move_destinations;
+  if (needs_semantic_inventory) {
+    build_fault_site_inventory(code_object_bytes, result);
+    build_sync_event_inventory(code_object_bytes, result);
+    build_singleton_sync_sequences(code_object, *decoder, arch, result);
+    const bool allow_extended_barrier_pairs =
+        options.fault_drop_barrier || options.abort_unmatched_barrier_wait ||
+        (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_track_barriers);
+    associate_barrier_sync_sequences(code_object, *decoder, arch, allow_extended_barrier_pairs,
+                                     result);
+    associate_atomic_sync_sequences(code_object, *decoder, arch, result);
+    build_barrier_lifecycle_group_inventory(result);
+    if (options.collect_barrier_move_destinations)
+      build_barrier_move_destination_inventory(code_object, *decoder, arch, result);
+    annotate_execution_owners(code_object, *decoder, arch, options, result);
+    associate_ordinary_release_sync_sequences(code_object, *decoder, arch, result);
+    associate_ordinary_acquire_sync_sequences(code_object, *decoder, arch, result);
+    build_communication_address_recipes(code_object, *decoder, arch, result);
+    build_moi_fence_candidate_inventory(result);
+    build_perturbation_candidate_inventory(result);
+    annotate_fault_sites_with_sync_sequences(result);
+  } else if (std::ranges::any_of(result.functions, [](const ConSanFunctionInfo &function) {
+               return !function.flat_sites.empty();
+             })) {
+    // SuperCollider's ordinary clean transform does not consume synchronization
+    // semantics. Shared-function flat sites still need kernel ownership, while
+    // kernel-local sites carry their descriptor directly.
+    annotate_execution_owners(code_object, *decoder, arch, options, result);
+  }
   if (options.fault_dry_run) {
     build_fault_mutation_plan(options, result);
     build_perturbation_plan(options, result, carried_plans);
