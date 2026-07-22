@@ -7,6 +7,7 @@ set(RJ_TOOL_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
     rocjitsu_isa
+    rocjitsu_isa_registry
     rocjitsu_isa_cdna1
     rocjitsu_isa_cdna2
     rocjitsu_isa_cdna3

@@ -110,7 +110,7 @@ target_compile_definitions(
 
 configure_file(../../scripts/functional_tests/driver.sh rocshmem_functional_driver.sh COPYONLY)
 rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocshmem_functional_driver.sh COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
-install(TARGETS rocshmem_functional_tests COMPONENT tests RUNTIME DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
+install(TARGETS rocshmem_functional_tests COMPONENT tests RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 target_link_libraries(
   ${PROJECT_NAME}
@@ -159,6 +159,31 @@ rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/test_wrapper.sh
 # Include CTest-based functional tests
 # Set BUILD_CTESTS=ON to register all tests (can be slow for large test suites)
 # By default, only the shell script is installed for compatibility
+if(BUILD_CTESTS)
+    # Probe for Python3 + PyYAML before registering tests. Tests rely on
+    # test_categories.yaml for tier labels (quick/standard/comprehensive/full);
+    # without those labels they would be invisible to `ctest -L <tier>` in CI.
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(NOT Python3_FOUND)
+        message(WARNING
+            "Python3 not found — skipping CTest functional test registration. "
+            "Tests require PyYAML to apply tier labels from test_categories.yaml.")
+        set(BUILD_CTESTS OFF CACHE BOOL "CTests disabled: Python3 not found" FORCE)
+    else()
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -c "import yaml"
+            RESULT_VARIABLE _pyyaml_result
+            ERROR_QUIET)
+        if(NOT _pyyaml_result EQUAL 0)
+            message(WARNING
+                "PyYAML not found for '${Python3_EXECUTABLE}' — skipping CTest functional "
+                "test registration. Tests require PyYAML to apply tier labels from "
+                "test_categories.yaml. Install with: pip install pyyaml")
+            set(BUILD_CTESTS OFF CACHE BOOL "CTests disabled: PyYAML not found" FORCE)
+        endif()
+    endif()
+endif()
+
 if(BUILD_CTESTS)
     message(STATUS "Registering CTest-based functional tests")
     include(${CMAKE_CURRENT_SOURCE_DIR}/CTestFunctionalTests.cmake OPTIONAL)

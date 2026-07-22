@@ -4,6 +4,26 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 7.15.0
+
+### Resolved Issues
+
+- **Fixed `amd-smi set --ptl-status` silently failing to change PTL state**.  
+  - The set path wrote `"1"`/`"0"` to the `ptl/ptl_enable` sysfs node, which only accepts `"enabled"`/`"disabled"`; the driver ignored the numeric write while the API still reported success. The state now changes as expected, and a rejected write returns a real error instead of a generic success.
+
+- **Fixed `amd-smi process` hiding compute processes owned by other users**.  
+  - A caller without permission to read another process's `/proc/<pid>/fd` was misdetected as running in a separate PID namespace, which caused the whole compute-process list to come back empty. Such processes are now listed with a redacted (`N/A`) name instead of being dropped.
+
+- **Fixed CU%/SDMA column alignment in the `amd-smi` process table**.  
+  - The `SDMA` header no longer sits a column left of its values, and valid `CU %`/`SDMA` values are no longer truncated.
+
+- **Fixed compute processes being reported on every GPU**.  
+  - A process was attributed to a GPU whenever it had a KFD context on that GPU, so a job with queues on a single GPU appeared under every GPU. Attribution now uses the process's active KFD queues plus any GPU where it holds a non-zero VRAM allocation, so a process is listed only against the GPUs it actually uses.
+
+- **Fixed `amd-smi` hanging in `amdsmi_init()` on UALink systems when the IFoE driver is unresponsive**.  
+  - `AMDSmiGPUDevice` opened the per-GPU IFoE/UALoE generic-netlink session in its constructor, so `amdsmi_init(AMDSMI_INIT_AMD_GPUS)` (and every CLI verb) blocked in an uninterruptible netlink wait when the Broadcom IFoE driver was wedged, even for queries that never use fabric data.
+  - The UALoE session is now opened lazily on the first fabric query via `get_ualoe_handle()`, so initialization and non-fabric queries no longer touch the IFoE driver.
+
 ## amd_smi_lib for ROCm 7.14.0
 
 ### Added
@@ -90,17 +110,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Renamed "AINIC version" to "ionic version" in `amd-smi version` output**.  
   - The label now correctly reflects that it shows the ionic kernel driver version.
 
-### Fixed
-
-- **Fixed `amd-smi process` hiding compute processes owned by other users**.  
-  - A caller without permission to read another process's `/proc/<pid>/fd` was misdetected as running in a separate PID namespace, which caused the whole compute-process list to come back empty. Such processes are now listed with a redacted (`N/A`) name instead of being dropped.
-
-- **Fixed CU%/SDMA column alignment in the `amd-smi` process table**.  
-  - The `SDMA` header no longer sits a column left of its values, and valid `CU %`/`SDMA` values are no longer truncated.
-
-- **Fixed compute processes being reported on every GPU**.  
-  - A process was attributed to a GPU whenever it had a KFD context on that GPU, so a job with queues on a single GPU appeared under every GPU. Attribution now uses the process's active KFD queues plus any GPU where it holds a non-zero VRAM allocation, so a process is listed only against the GPUs it actually uses.
-
 ### Removed
 
 - **Removed the non-functional `--decode` flag from `amd-smi ras`**. Out-of-band CPER decoding is available via `amd-smi ras --afid --cper-file <path>` or `--afid --folder <DIR>`.
@@ -108,10 +117,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Removed the unused `amdsmi_nic_link_type_t` enum from the public header**. No API or struct referenced it; NIC link types are reported through `amdsmi_link_type_t`, which gains `AMDSMI_LINK_TYPE_NUMA` and `AMDSMI_LINK_TYPE_XNUMA` in this release.
 
 ### Resolved Issues
-
-- **Fixed `amd-smi` hanging in `amdsmi_init()` on UALink systems when the IFoE driver is unresponsive**.  
-  - `AMDSmiGPUDevice` opened the per-GPU IFoE/UALoE generic-netlink session in its constructor, so `amdsmi_init(AMDSMI_INIT_AMD_GPUS)` (and every CLI verb) blocked in an uninterruptible netlink wait when the Broadcom IFoE driver was wedged, even for queries that never use fabric data.
-  - The UALoE session is now opened lazily on the first fabric query via `get_ualoe_handle()`, so initialization and non-fabric queries no longer touch the IFoE driver.
 
 - **Fixed `amd-smi set --power-cap` rejecting the minimum allowed value**.  
   - The lower bound is now inclusive, so setting the power cap to the exact minimum of the reported range (e.g. `210` when the range is 210-300W) succeeds instead of failing validation, matching the inclusive range shown in the error message.
@@ -347,7 +352,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     Several items were misaligned in the default output, and this change ensures a consistent left-aligned format across all fields.
   - *This change is purely cosmetic and does not affect any functionality.*
 
-- **Fixed `amd-smi static -C` reporting `N/A` for SYS/MEM/DF/SOC/DCEF clocks at idle on gfx1151-class APUs (ROCM-21057)**.
+- **Fixed `amd-smi static -C` reporting `N/A` for SYS/MEM/DF/SOC/DCEF clocks at idle on gfx1151-class APUs**.  
   - `get_frequencies()` in the rsmi backend no longer discards a parsed `pp_dpm_*` DPM table with `STATUS_UNEXPECTED_DATA` when the kernel omits the `*` current-level marker (which happens whenever the SMU power-gates the domain at idle). The supported frequency table is now returned and `current` is reported as `-1` (unknown) until the marker reappears, so `amdsmi_get_clk_freq()` and all callers see the table at idle as well as under load.
 
 ## amd_smi_lib for ROCm 7.12.0

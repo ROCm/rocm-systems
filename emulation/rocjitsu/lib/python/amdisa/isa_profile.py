@@ -290,6 +290,11 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def split_execution_sources(self) -> bool:
+        """True when execution bodies are emitted to separate source files."""
+        return False
+
+    @property
     def uses_true16_vop3_opsel(self) -> bool:
         """True when VOP3 16-bit operands use op_sel half selectors."""
         return False
@@ -834,9 +839,24 @@ class _AmdgpuProfileBase(IsaProfile):
         return False
 
     @property
+    def uses_ttmp_workgroup_ids(self) -> bool:
+        """Whether dispatch workgroup IDs are carried in TTMP registers."""
+        return False
+
+    @property
+    def uses_cluster_ttmp_workgroup_ids(self) -> bool:
+        """Whether the TTMP workgroup-ID payload uses cluster coordinates."""
+        return False
+
+    @property
     def max_addressable_vgprs_per_wf(self) -> int:
         """Maximum VGPR index space addressable by one wavefront."""
         return 256
+
+    @property
+    def descriptor_sgpr_count_encoded(self) -> bool:
+        """Whether zero SGPR granule fields still use descriptor encoding."""
+        return True
 
     @property
     def has_acc_vgpr(self) -> bool:
@@ -1229,6 +1249,10 @@ class Rdna1Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def descriptor_sgpr_count_encoded(self) -> bool:
+        return False
+
+    @property
     def waitcnt_family(self) -> str:
         return 'gfx10'
 
@@ -1345,6 +1369,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
     @property
     def supports_wgp_mode(self) -> bool:
         return True
+
+    @property
+    def descriptor_sgpr_count_encoded(self) -> bool:
+        return False
 
     @property
     def waitcnt_family(self) -> str:
@@ -1482,6 +1510,14 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def supports_wgp_mode(self) -> bool:
         return True
+
+    @property
+    def uses_ttmp_workgroup_ids(self) -> bool:
+        return True
+
+    @property
+    def descriptor_sgpr_count_encoded(self) -> bool:
+        return False
 
     @property
     def waitcnt_family(self) -> str:
@@ -1632,6 +1668,10 @@ class Gfx1250Profile(Rdna4Profile):
         return False
 
     @property
+    def uses_cluster_ttmp_workgroup_ids(self) -> bool:
+        return True
+
+    @property
     def max_addressable_vgprs_per_wf(self) -> int:
         return 1024
 
@@ -1649,6 +1689,10 @@ class Gfx1250Profile(Rdna4Profile):
 
     @property
     def uses_packed_16bit_e32_source_selectors(self) -> bool:
+        return True
+
+    @property
+    def split_execution_sources(self) -> bool:
         return True
 
     @property
