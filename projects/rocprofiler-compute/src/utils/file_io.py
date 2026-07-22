@@ -425,7 +425,17 @@ def is_single_panel_config(
 def _select_pc_sampling_result_files(
     direct_child_files: tuple[Path, ...],
 ) -> tuple[Path, ...]:
-    legacy_results_filename = "ps_file_results.json"
+    pid_result_files = _find_pid_prefixed_pc_sampling_result_files(direct_child_files)
+    if pid_result_files:
+        return pid_result_files
+
+    legacy_result_file = _find_legacy_pc_sampling_result_file(direct_child_files)
+    return (legacy_result_file,) if legacy_result_file is not None else ()
+
+
+def _find_pid_prefixed_pc_sampling_result_files(
+    direct_child_files: tuple[Path, ...],
+) -> tuple[Path, ...]:
     results_filename_suffix = "_ps_file_results.json"
     pid_result_candidates: list[Path] = []
 
@@ -439,18 +449,22 @@ def _select_pc_sampling_result_files(
 
         pid_result_candidates.append(candidate_path)
 
-    if pid_result_candidates:
-        return tuple(
-            sorted(
-                pid_result_candidates,
-                key=lambda candidate_path: (
-                    int(candidate_path.name[: -len(results_filename_suffix)]),
-                    candidate_path.name,
-                ),
-            )
+    return tuple(
+        sorted(
+            pid_result_candidates,
+            key=lambda candidate_path: (
+                int(candidate_path.name[: -len(results_filename_suffix)]),
+                candidate_path.name,
+            ),
         )
+    )
 
-    legacy_result_file = next(
+
+def _find_legacy_pc_sampling_result_file(
+    direct_child_files: tuple[Path, ...],
+) -> Optional[Path]:
+    legacy_results_filename = "ps_file_results.json"
+    return next(
         (
             candidate_path
             for candidate_path in direct_child_files
@@ -458,7 +472,6 @@ def _select_pc_sampling_result_files(
         ),
         None,
     )
-    return (legacy_result_file,) if legacy_result_file is not None else ()
 
 
 def _validate_pc_sampling_process_ids(
