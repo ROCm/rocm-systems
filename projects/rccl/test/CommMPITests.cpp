@@ -350,8 +350,8 @@ TEST_F(CtaConfigMPITest, DefaultConfigDoesNotClampChannels)
  * @class DestroySubsysMPITest
  * @brief Regression coverage for the NCCL 2.30.3 log-volume-reduction cherry-pick
  *        (upstream sync PR #6837 brought in NCCL_DESTROY and retagged the shared
- *        comm-destroy/plugin-unload call sites; this covers the one RCCL-only
- *        call site the sync did not touch: COLLTRACE's destroy-time INFO line).
+ *        comm-destroy/plugin-unload call sites; this covers the RCCL-only call
+ *        sites the sync did not touch: COLLTRACE's destroy-time INFO lines).
  *
  * NCCL_DESTROY is not part of the default NCCL_DEBUG_SUBSYS mask
  * (NCCL_INIT | NCCL_BOOTSTRAP | NCCL_ENV), so destroy/teardown INFO lines
