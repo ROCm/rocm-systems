@@ -84,11 +84,13 @@ jobs:
             ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
             ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
             if [ ${{ matrix.os-release }} == "8.10" ]; then
+              dnf -y --enablerepo=powertools install perl-File-BaseDir
               yum install -y https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/rhel/8.10/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.el8.noarch.rpm
             else
+              dnf -y --enablerepo=crb install perl-File-BaseDir
               yum install -y https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/rhel/9.4/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.el9.noarch.rpm
             fi
-            yum install -y rocm-smi-lib roctracer-dev rocprofiler-dev hip-devel
+            yum install -y rocm-dev rocm-smi-lib roctracer-dev rocprofiler-dev libpciaccess
 
       - name: Checkout
         uses: actions/checkout@v6
