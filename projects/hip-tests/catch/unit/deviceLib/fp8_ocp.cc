@@ -34,7 +34,7 @@ std::string arch_type() {
 #define FP8_OCP_SKIP_TEST                                                                          \
   std::string gfxName = arch_type();                                                               \
   if (!(OCP_SUPPORTED_ARCH(gfxName))) {                                                            \
-    HIP_SKIP_TEST("this test requires GFX1200.");                                                  \
+    HIP_SKIP_TEST("this test requires gfx950, gfx1200, or gfx1201 architecture.");                   \
   }
 
 #define __FP8_DEVICE__ __device__ static inline
