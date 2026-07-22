@@ -251,8 +251,8 @@ create_amd_queue(hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t
         }
 
         const auto&    compute_params = descs[desc_idx].engine.compute;
-        const uint32_t ring_packets   = static_cast<uint32_t>(
-            descs[desc_idx].queue_size_bytes / sizeof(hsa_kernel_dispatch_packet_t));
+        const uint32_t ring_packets   = static_cast<uint32_t>(descs[desc_idx].queue_size_bytes /
+                                                            sizeof(hsa_kernel_dispatch_packet_t));
 
         hsa_queue_t* new_queue = nullptr;
         ROCP_ATTACH_HSA_TABLE_CALL(
@@ -411,8 +411,8 @@ queue_registration_init(HsaApiTable* table)
 #if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
     // Save the real hsa_amd_queue_create before overwriting it, so non-compute queue requests can
     // be forwarded, then intercept descriptor-based queue creation.
-    registration->hsa_amd_queue_create_fn      = *table->amd_ext_->hsa_amd_queue_create_fn;
-    table->amd_ext_->hsa_amd_queue_create_fn   = create_amd_queue;
+    registration->hsa_amd_queue_create_fn    = *table->amd_ext_->hsa_amd_queue_create_fn;
+    table->amd_ext_->hsa_amd_queue_create_fn = create_amd_queue;
 #endif
 
     registration->hsa_amd_queue_intercept_create_fn =
