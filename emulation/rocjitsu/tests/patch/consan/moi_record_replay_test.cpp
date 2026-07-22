@@ -3843,7 +3843,7 @@ TEST(ConSanMoi, Rdna4FamilyDenseAccessesShareOneWordCallRelay) {
   }
 }
 
-TEST(ConSanMoi, Cdna4DenseRecordReplayAccessesUseRelocatableRouter) {
+TEST(ConSanMoi, Cdna4DenseRecordReplayAccessesDoNotRequireBarrierRouter) {
   constexpr uint32_t kAccessCount = 9u;
   constexpr size_t kLargeTextWords = 33'000u;
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
@@ -3866,7 +3866,6 @@ TEST(ConSanMoi, Cdna4DenseRecordReplayAccessesUseRelocatableRouter) {
   options.moi_epoch_vgpr = 41;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
-  options.moi_record_replay_dense_barrier_router = true;
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
   options.max_patches = kAccessCount;

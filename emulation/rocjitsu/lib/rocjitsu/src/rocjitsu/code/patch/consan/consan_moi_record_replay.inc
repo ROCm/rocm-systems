@@ -170,9 +170,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   // here (and a third time for component-local scalar assignments) is both
   // redundant and dominant on multi-thousand-kernel generated libraries.
   const auto &dense_host_blocks = resource_state.blocks;
-  if ((is_rdna4_family_arch(arch) ||
-       (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
-        options.moi_record_replay_dense_barrier_router)) &&
+  if ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       use_indirect_appended && local_entry_islands) {
     struct DenseGroup {
       std::vector<const ConSanMoiCandidate *> candidates;
