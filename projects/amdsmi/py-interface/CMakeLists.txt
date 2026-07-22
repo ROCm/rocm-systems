@@ -296,45 +296,6 @@ set(AMDSMI_SYSTEM_PYTHON_ABI
     FORCE
 )
 
-# Concrete interpreter the amd-smi CLI shebang must point at, for RPM distros
-# where the module lives in a version-specific site-packages. The CLI ships with
-# `#!/usr/bin/python3`, but on RHEL that symlink can be repointed (by
-# `alternatives`, a venv on PATH, or simply a newer default in a later release)
-# to a python minor whose site-packages does NOT contain amdsmi -- then the CLI
-# dies with ModuleNotFoundError even though the package is installed. Pinning the
-# shebang to the exact interpreter the module was built for makes the CLI immune
-# to that. The value must be the REAL path of the detection interpreter, not a
-# guessed /usr/bin/python3.X: on el8 `python(abi) = 3.6` is provided by
-# platform-python, whose binary is /usr/libexec/platform-python3.6 -- there is NO
-# /usr/bin/python3.6 -- so a hardcoded /usr/bin/python3.X shebang would be a
-# guaranteed "bad interpreter" failure. Resolving the anchor's realpath yields
-# the interpreter that the python(abi) dependency actually guarantees present
-# (el8 -> /usr/libexec/platform-python3.6, el9 -> /usr/bin/python3.9,
-# Azure -> /usr/bin/python3.12). Only set on RPM distros (ABI derived); Debian
-# keeps the version-agnostic /usr/bin/python3 shebang (dist-packages serves every
-# python3 minor there, and pinning would break across default-python transitions).
-set(AMDSMI_CLI_SHEBANG_INTERP "")
-if(AMDSMI_SYSTEM_PYTHON_ABI AND EXISTS "${_amdsmi_detect_python}")
-    execute_process(
-        COMMAND ${_amdsmi_detect_python} -c "import os,sys;print(os.path.realpath(sys.executable))"
-        OUTPUT_VARIABLE _amdsmi_cli_interp
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _amdsmi_cli_interp_rc
-    )
-    if(_amdsmi_cli_interp_rc EQUAL 0 AND EXISTS "${_amdsmi_cli_interp}")
-        set(AMDSMI_CLI_SHEBANG_INTERP "${_amdsmi_cli_interp}")
-    endif()
-endif()
-set(AMDSMI_CLI_SHEBANG_INTERP
-    "${AMDSMI_CLI_SHEBANG_INTERP}"
-    CACHE STRING
-    "Concrete interpreter path for the amd-smi CLI shebang on RPM distros (empty = keep #!/usr/bin/python3, e.g. Debian)."
-    FORCE
-)
-if(AMDSMI_CLI_SHEBANG_INTERP)
-    message(STATUS "amd-smi CLI shebang interpreter: ${AMDSMI_CLI_SHEBANG_INTERP}")
-endif()
-
 install(
     DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}
     DESTINATION ${AMDSMI_SYSTEM_PYTHON_SITELIB}
