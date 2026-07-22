@@ -893,6 +893,59 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   EXPECT_EQ(restored_wf->exec_raw(), 0xDEADBEEF0000000FULL);
 }
 
+TEST(CheckpointTest, SaveAndRestoreModePreservesFp16Ovfl) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"cdna3"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
+  ASSERT_TRUE(wf->fp16_ovfl());
+
+  const char *path = "/tmp/rocjitsu_test_checkpoint_mode.bin";
+  config::save_checkpoint(path, *loaded.soc(), 42, loaded.engine_config);
+  ASSERT_TRUE(std::filesystem::exists(path));
+
+  auto restored = config::restore_checkpoint(path);
+  auto *restored_vm = dynamic_cast<VirtualMachine *>(restored.build_result.root.get());
+  ASSERT_NE(restored_vm, nullptr);
+  auto *restored_wf = restored_vm->soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+  ASSERT_NE(restored_wf, nullptr);
+  EXPECT_EQ(restored_wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
+  EXPECT_TRUE(restored_wf->fp16_ovfl());
+
+  std::filesystem::remove(path);
+}
+
 TEST(CApiTest, CreateAndDestroyFromString) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"cdna3"},

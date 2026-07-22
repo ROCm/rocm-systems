@@ -14,29 +14,27 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-class TensorLoadToLdsVimage : public Vimage
-{
-  public:
-   TensorLoadToLdsVimage(const MachineInst * inst);
+class TensorLoadToLdsVimage : public Vimage {
+public:
+  TensorLoadToLdsVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr0;
   Operand vaddr1;
   Operand vaddr2;
   Operand vaddr3;
   static const bool execute_registered_;
-} ;
+};
 
-class TensorStoreFromLdsVimage : public Vimage
-{
-  public:
-   TensorStoreFromLdsVimage(const MachineInst * inst);
+class TensorStoreFromLdsVimage : public Vimage {
+public:
+  TensorStoreFromLdsVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr0;
   Operand vaddr1;
   Operand vaddr2;
   Operand vaddr3;
   static const bool execute_registered_;
-} ;
+};
 
 } // namespace gfx1250
 } // namespace rocjitsu

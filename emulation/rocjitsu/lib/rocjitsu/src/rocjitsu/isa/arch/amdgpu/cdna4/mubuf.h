@@ -14,504 +14,461 @@
 namespace rocjitsu {
 namespace cdna4 {
 
-class BufferLoadFormatXMubuf : public Mubuf
-{
-  public:
-   BufferLoadFormatXMubuf(const MachineInst * inst);
+class BufferLoadFormatXMubuf : public Mubuf {
+public:
+  BufferLoadFormatXMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadFormatXyMubuf : public Mubuf
-{
-  public:
-   BufferLoadFormatXyMubuf(const MachineInst * inst);
+class BufferLoadFormatXyMubuf : public Mubuf {
+public:
+  BufferLoadFormatXyMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadFormatXyzMubuf : public Mubuf
-{
-  public:
-   BufferLoadFormatXyzMubuf(const MachineInst * inst);
+class BufferLoadFormatXyzMubuf : public Mubuf {
+public:
+  BufferLoadFormatXyzMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadFormatXyzwMubuf : public Mubuf
-{
-  public:
-   BufferLoadFormatXyzwMubuf(const MachineInst * inst);
+class BufferLoadFormatXyzwMubuf : public Mubuf {
+public:
+  BufferLoadFormatXyzwMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreFormatXMubuf : public Mubuf
-{
-  public:
-   BufferStoreFormatXMubuf(const MachineInst * inst);
+class BufferStoreFormatXMubuf : public Mubuf {
+public:
+  BufferStoreFormatXMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreFormatXyMubuf : public Mubuf
-{
-  public:
-   BufferStoreFormatXyMubuf(const MachineInst * inst);
+class BufferStoreFormatXyMubuf : public Mubuf {
+public:
+  BufferStoreFormatXyMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreFormatXyzMubuf : public Mubuf
-{
-  public:
-   BufferStoreFormatXyzMubuf(const MachineInst * inst);
+class BufferStoreFormatXyzMubuf : public Mubuf {
+public:
+  BufferStoreFormatXyzMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreFormatXyzwMubuf : public Mubuf
-{
-  public:
-   BufferStoreFormatXyzwMubuf(const MachineInst * inst);
+class BufferStoreFormatXyzwMubuf : public Mubuf {
+public:
+  BufferStoreFormatXyzwMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadFormatD16XMubuf : public Mubuf
-{
-  public:
-   BufferLoadFormatD16XMubuf(const MachineInst * inst);
+class BufferLoadFormatD16XMubuf : public Mubuf {
+public:
+  BufferLoadFormatD16XMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadFormatD16XyMubuf : public Mubuf
-{
-  public:
-   BufferLoadFormatD16XyMubuf(const MachineInst * inst);
+class BufferLoadFormatD16XyMubuf : public Mubuf {
+public:
+  BufferLoadFormatD16XyMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadFormatD16XyzMubuf : public Mubuf
-{
-  public:
-   BufferLoadFormatD16XyzMubuf(const MachineInst * inst);
+class BufferLoadFormatD16XyzMubuf : public Mubuf {
+public:
+  BufferLoadFormatD16XyzMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadFormatD16XyzwMubuf : public Mubuf
-{
-  public:
-   BufferLoadFormatD16XyzwMubuf(const MachineInst * inst);
+class BufferLoadFormatD16XyzwMubuf : public Mubuf {
+public:
+  BufferLoadFormatD16XyzwMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreFormatD16XMubuf : public Mubuf
-{
-  public:
-   BufferStoreFormatD16XMubuf(const MachineInst * inst);
+class BufferStoreFormatD16XMubuf : public Mubuf {
+public:
+  BufferStoreFormatD16XMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreFormatD16XyMubuf : public Mubuf
-{
-  public:
-   BufferStoreFormatD16XyMubuf(const MachineInst * inst);
+class BufferStoreFormatD16XyMubuf : public Mubuf {
+public:
+  BufferStoreFormatD16XyMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreFormatD16XyzMubuf : public Mubuf
-{
-  public:
-   BufferStoreFormatD16XyzMubuf(const MachineInst * inst);
+class BufferStoreFormatD16XyzMubuf : public Mubuf {
+public:
+  BufferStoreFormatD16XyzMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreFormatD16XyzwMubuf : public Mubuf
-{
-  public:
-   BufferStoreFormatD16XyzwMubuf(const MachineInst * inst);
+class BufferStoreFormatD16XyzwMubuf : public Mubuf {
+public:
+  BufferStoreFormatD16XyzwMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadUbyteMubuf : public Mubuf
-{
-  public:
-   BufferLoadUbyteMubuf(const MachineInst * inst);
+class BufferLoadUbyteMubuf : public Mubuf {
+public:
+  BufferLoadUbyteMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadSbyteMubuf : public Mubuf
-{
-  public:
-   BufferLoadSbyteMubuf(const MachineInst * inst);
+class BufferLoadSbyteMubuf : public Mubuf {
+public:
+  BufferLoadSbyteMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadUshortMubuf : public Mubuf
-{
-  public:
-   BufferLoadUshortMubuf(const MachineInst * inst);
+class BufferLoadUshortMubuf : public Mubuf {
+public:
+  BufferLoadUshortMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadSshortMubuf : public Mubuf
-{
-  public:
-   BufferLoadSshortMubuf(const MachineInst * inst);
+class BufferLoadSshortMubuf : public Mubuf {
+public:
+  BufferLoadSshortMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadDwordMubuf : public Mubuf
-{
-  public:
-   BufferLoadDwordMubuf(const MachineInst * inst);
+class BufferLoadDwordMubuf : public Mubuf {
+public:
+  BufferLoadDwordMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadDwordx2Mubuf : public Mubuf
-{
-  public:
-   BufferLoadDwordx2Mubuf(const MachineInst * inst);
+class BufferLoadDwordx2Mubuf : public Mubuf {
+public:
+  BufferLoadDwordx2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadDwordx3Mubuf : public Mubuf
-{
-  public:
-   BufferLoadDwordx3Mubuf(const MachineInst * inst);
+class BufferLoadDwordx3Mubuf : public Mubuf {
+public:
+  BufferLoadDwordx3Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadDwordx4Mubuf : public Mubuf
-{
-  public:
-   BufferLoadDwordx4Mubuf(const MachineInst * inst);
+class BufferLoadDwordx4Mubuf : public Mubuf {
+public:
+  BufferLoadDwordx4Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreByteMubuf : public Mubuf
-{
-  public:
-   BufferStoreByteMubuf(const MachineInst * inst);
+class BufferStoreByteMubuf : public Mubuf {
+public:
+  BufferStoreByteMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreByteD16HiMubuf : public Mubuf
-{
-  public:
-   BufferStoreByteD16HiMubuf(const MachineInst * inst);
+class BufferStoreByteD16HiMubuf : public Mubuf {
+public:
+  BufferStoreByteD16HiMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreShortMubuf : public Mubuf
-{
-  public:
-   BufferStoreShortMubuf(const MachineInst * inst);
+class BufferStoreShortMubuf : public Mubuf {
+public:
+  BufferStoreShortMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreShortD16HiMubuf : public Mubuf
-{
-  public:
-   BufferStoreShortD16HiMubuf(const MachineInst * inst);
+class BufferStoreShortD16HiMubuf : public Mubuf {
+public:
+  BufferStoreShortD16HiMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreDwordMubuf : public Mubuf
-{
-  public:
-   BufferStoreDwordMubuf(const MachineInst * inst);
+class BufferStoreDwordMubuf : public Mubuf {
+public:
+  BufferStoreDwordMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreDwordx2Mubuf : public Mubuf
-{
-  public:
-   BufferStoreDwordx2Mubuf(const MachineInst * inst);
+class BufferStoreDwordx2Mubuf : public Mubuf {
+public:
+  BufferStoreDwordx2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreDwordx3Mubuf : public Mubuf
-{
-  public:
-   BufferStoreDwordx3Mubuf(const MachineInst * inst);
+class BufferStoreDwordx3Mubuf : public Mubuf {
+public:
+  BufferStoreDwordx3Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreDwordx4Mubuf : public Mubuf
-{
-  public:
-   BufferStoreDwordx4Mubuf(const MachineInst * inst);
+class BufferStoreDwordx4Mubuf : public Mubuf {
+public:
+  BufferStoreDwordx4Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadUbyteD16Mubuf : public Mubuf
-{
-  public:
-   BufferLoadUbyteD16Mubuf(const MachineInst * inst);
+class BufferLoadUbyteD16Mubuf : public Mubuf {
+public:
+  BufferLoadUbyteD16Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadUbyteD16HiMubuf : public Mubuf
-{
-  public:
-   BufferLoadUbyteD16HiMubuf(const MachineInst * inst);
+class BufferLoadUbyteD16HiMubuf : public Mubuf {
+public:
+  BufferLoadUbyteD16HiMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadSbyteD16Mubuf : public Mubuf
-{
-  public:
-   BufferLoadSbyteD16Mubuf(const MachineInst * inst);
+class BufferLoadSbyteD16Mubuf : public Mubuf {
+public:
+  BufferLoadSbyteD16Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadSbyteD16HiMubuf : public Mubuf
-{
-  public:
-   BufferLoadSbyteD16HiMubuf(const MachineInst * inst);
+class BufferLoadSbyteD16HiMubuf : public Mubuf {
+public:
+  BufferLoadSbyteD16HiMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadShortD16Mubuf : public Mubuf
-{
-  public:
-   BufferLoadShortD16Mubuf(const MachineInst * inst);
+class BufferLoadShortD16Mubuf : public Mubuf {
+public:
+  BufferLoadShortD16Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadShortD16HiMubuf : public Mubuf
-{
-  public:
-   BufferLoadShortD16HiMubuf(const MachineInst * inst);
+class BufferLoadShortD16HiMubuf : public Mubuf {
+public:
+  BufferLoadShortD16HiMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferLoadFormatD16HiXMubuf : public Mubuf
-{
-  public:
-   BufferLoadFormatD16HiXMubuf(const MachineInst * inst);
+class BufferLoadFormatD16HiXMubuf : public Mubuf {
+public:
+  BufferLoadFormatD16HiXMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferStoreFormatD16HiXMubuf : public Mubuf
-{
-  public:
-   BufferStoreFormatD16HiXMubuf(const MachineInst * inst);
+class BufferStoreFormatD16HiXMubuf : public Mubuf {
+public:
+  BufferStoreFormatD16HiXMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
   Operand gpumem;
-} ;
+};
 
-class BufferWbl2Mubuf : public Mubuf
-{
-  public:
-   BufferWbl2Mubuf(const MachineInst * inst);
+class BufferWbl2Mubuf : public Mubuf {
+public:
+  BufferWbl2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-} ;
+};
 
-class BufferInvMubuf : public Mubuf
-{
-  public:
-   BufferInvMubuf(const MachineInst * inst);
+class BufferInvMubuf : public Mubuf {
+public:
+  BufferInvMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-} ;
+};
 
-class BufferAtomicSwapMubuf : public Mubuf
-{
-  public:
-   BufferAtomicSwapMubuf(const MachineInst * inst);
+class BufferAtomicSwapMubuf : public Mubuf {
+public:
+  BufferAtomicSwapMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -519,12 +476,11 @@ class BufferAtomicSwapMubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicCmpswapMubuf : public Mubuf
-{
-  public:
-   BufferAtomicCmpswapMubuf(const MachineInst * inst);
+class BufferAtomicCmpswapMubuf : public Mubuf {
+public:
+  BufferAtomicCmpswapMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vdata_return;
@@ -533,12 +489,11 @@ class BufferAtomicCmpswapMubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicAddMubuf : public Mubuf
-{
-  public:
-   BufferAtomicAddMubuf(const MachineInst * inst);
+class BufferAtomicAddMubuf : public Mubuf {
+public:
+  BufferAtomicAddMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -546,12 +501,11 @@ class BufferAtomicAddMubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicSubMubuf : public Mubuf
-{
-  public:
-   BufferAtomicSubMubuf(const MachineInst * inst);
+class BufferAtomicSubMubuf : public Mubuf {
+public:
+  BufferAtomicSubMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -559,12 +513,11 @@ class BufferAtomicSubMubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicSminMubuf : public Mubuf
-{
-  public:
-   BufferAtomicSminMubuf(const MachineInst * inst);
+class BufferAtomicSminMubuf : public Mubuf {
+public:
+  BufferAtomicSminMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -572,12 +525,11 @@ class BufferAtomicSminMubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicUminMubuf : public Mubuf
-{
-  public:
-   BufferAtomicUminMubuf(const MachineInst * inst);
+class BufferAtomicUminMubuf : public Mubuf {
+public:
+  BufferAtomicUminMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -585,12 +537,11 @@ class BufferAtomicUminMubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicSmaxMubuf : public Mubuf
-{
-  public:
-   BufferAtomicSmaxMubuf(const MachineInst * inst);
+class BufferAtomicSmaxMubuf : public Mubuf {
+public:
+  BufferAtomicSmaxMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -598,12 +549,11 @@ class BufferAtomicSmaxMubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicUmaxMubuf : public Mubuf
-{
-  public:
-   BufferAtomicUmaxMubuf(const MachineInst * inst);
+class BufferAtomicUmaxMubuf : public Mubuf {
+public:
+  BufferAtomicUmaxMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -611,12 +561,11 @@ class BufferAtomicUmaxMubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicAndMubuf : public Mubuf
-{
-  public:
-   BufferAtomicAndMubuf(const MachineInst * inst);
+class BufferAtomicAndMubuf : public Mubuf {
+public:
+  BufferAtomicAndMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -624,12 +573,11 @@ class BufferAtomicAndMubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicOrMubuf : public Mubuf
-{
-  public:
-   BufferAtomicOrMubuf(const MachineInst * inst);
+class BufferAtomicOrMubuf : public Mubuf {
+public:
+  BufferAtomicOrMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -637,12 +585,11 @@ class BufferAtomicOrMubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicXorMubuf : public Mubuf
-{
-  public:
-   BufferAtomicXorMubuf(const MachineInst * inst);
+class BufferAtomicXorMubuf : public Mubuf {
+public:
+  BufferAtomicXorMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -650,12 +597,11 @@ class BufferAtomicXorMubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicIncMubuf : public Mubuf
-{
-  public:
-   BufferAtomicIncMubuf(const MachineInst * inst);
+class BufferAtomicIncMubuf : public Mubuf {
+public:
+  BufferAtomicIncMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -663,12 +609,11 @@ class BufferAtomicIncMubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicDecMubuf : public Mubuf
-{
-  public:
-   BufferAtomicDecMubuf(const MachineInst * inst);
+class BufferAtomicDecMubuf : public Mubuf {
+public:
+  BufferAtomicDecMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -676,12 +621,11 @@ class BufferAtomicDecMubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicAddF32Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicAddF32Mubuf(const MachineInst * inst);
+class BufferAtomicAddF32Mubuf : public Mubuf {
+public:
+  BufferAtomicAddF32Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -689,12 +633,11 @@ class BufferAtomicAddF32Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicPkAddF16Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicPkAddF16Mubuf(const MachineInst * inst);
+class BufferAtomicPkAddF16Mubuf : public Mubuf {
+public:
+  BufferAtomicPkAddF16Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -702,12 +645,11 @@ class BufferAtomicPkAddF16Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicAddF64Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicAddF64Mubuf(const MachineInst * inst);
+class BufferAtomicAddF64Mubuf : public Mubuf {
+public:
+  BufferAtomicAddF64Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -715,12 +657,11 @@ class BufferAtomicAddF64Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicMinF64Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicMinF64Mubuf(const MachineInst * inst);
+class BufferAtomicMinF64Mubuf : public Mubuf {
+public:
+  BufferAtomicMinF64Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -728,12 +669,11 @@ class BufferAtomicMinF64Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicMaxF64Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicMaxF64Mubuf(const MachineInst * inst);
+class BufferAtomicMaxF64Mubuf : public Mubuf {
+public:
+  BufferAtomicMaxF64Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -741,12 +681,11 @@ class BufferAtomicMaxF64Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicPkAddBf16Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicPkAddBf16Mubuf(const MachineInst * inst);
+class BufferAtomicPkAddBf16Mubuf : public Mubuf {
+public:
+  BufferAtomicPkAddBf16Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -754,12 +693,11 @@ class BufferAtomicPkAddBf16Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicSwapX2Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicSwapX2Mubuf(const MachineInst * inst);
+class BufferAtomicSwapX2Mubuf : public Mubuf {
+public:
+  BufferAtomicSwapX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -767,12 +705,11 @@ class BufferAtomicSwapX2Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicCmpswapX2Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicCmpswapX2Mubuf(const MachineInst * inst);
+class BufferAtomicCmpswapX2Mubuf : public Mubuf {
+public:
+  BufferAtomicCmpswapX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vdata_return;
@@ -781,12 +718,11 @@ class BufferAtomicCmpswapX2Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicAddX2Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicAddX2Mubuf(const MachineInst * inst);
+class BufferAtomicAddX2Mubuf : public Mubuf {
+public:
+  BufferAtomicAddX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -794,12 +730,11 @@ class BufferAtomicAddX2Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicSubX2Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicSubX2Mubuf(const MachineInst * inst);
+class BufferAtomicSubX2Mubuf : public Mubuf {
+public:
+  BufferAtomicSubX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -807,12 +742,11 @@ class BufferAtomicSubX2Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicSminX2Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicSminX2Mubuf(const MachineInst * inst);
+class BufferAtomicSminX2Mubuf : public Mubuf {
+public:
+  BufferAtomicSminX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -820,12 +754,11 @@ class BufferAtomicSminX2Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicUminX2Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicUminX2Mubuf(const MachineInst * inst);
+class BufferAtomicUminX2Mubuf : public Mubuf {
+public:
+  BufferAtomicUminX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -833,12 +766,11 @@ class BufferAtomicUminX2Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicSmaxX2Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicSmaxX2Mubuf(const MachineInst * inst);
+class BufferAtomicSmaxX2Mubuf : public Mubuf {
+public:
+  BufferAtomicSmaxX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -846,12 +778,11 @@ class BufferAtomicSmaxX2Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicUmaxX2Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicUmaxX2Mubuf(const MachineInst * inst);
+class BufferAtomicUmaxX2Mubuf : public Mubuf {
+public:
+  BufferAtomicUmaxX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -859,12 +790,11 @@ class BufferAtomicUmaxX2Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicAndX2Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicAndX2Mubuf(const MachineInst * inst);
+class BufferAtomicAndX2Mubuf : public Mubuf {
+public:
+  BufferAtomicAndX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -872,12 +802,11 @@ class BufferAtomicAndX2Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicOrX2Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicOrX2Mubuf(const MachineInst * inst);
+class BufferAtomicOrX2Mubuf : public Mubuf {
+public:
+  BufferAtomicOrX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -885,12 +814,11 @@ class BufferAtomicOrX2Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicXorX2Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicXorX2Mubuf(const MachineInst * inst);
+class BufferAtomicXorX2Mubuf : public Mubuf {
+public:
+  BufferAtomicXorX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -898,12 +826,11 @@ class BufferAtomicXorX2Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicIncX2Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicIncX2Mubuf(const MachineInst * inst);
+class BufferAtomicIncX2Mubuf : public Mubuf {
+public:
+  BufferAtomicIncX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -911,12 +838,11 @@ class BufferAtomicIncX2Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
-class BufferAtomicDecX2Mubuf : public Mubuf
-{
-  public:
-   BufferAtomicDecX2Mubuf(const MachineInst * inst);
+class BufferAtomicDecX2Mubuf : public Mubuf {
+public:
+  BufferAtomicDecX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -924,7 +850,7 @@ class BufferAtomicDecX2Mubuf : public Mubuf
   Operand soffset;
   Operand gpumem;
   Operand gpumem_in;
-} ;
+};
 
 } // namespace cdna4
 } // namespace rocjitsu

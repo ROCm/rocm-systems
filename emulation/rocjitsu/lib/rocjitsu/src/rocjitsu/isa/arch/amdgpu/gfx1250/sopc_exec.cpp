@@ -5,14 +5,14 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/sopc.h"
-#include "util/except.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
+#include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
 #include <limits>
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 
 namespace rocjitsu {
 namespace gfx1250 {

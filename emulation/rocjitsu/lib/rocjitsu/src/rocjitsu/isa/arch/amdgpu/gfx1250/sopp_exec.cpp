@@ -5,23 +5,21 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/sopp.h"
-#include "util/except.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
+#include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
 #include <limits>
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 
 namespace rocjitsu {
 namespace gfx1250 {
 
 const bool SNopSopp::execute_registered_ = register_exec_fn<SNopSopp>();
 
-void SNopSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_nop_sopp(*this, wf);
-}
+void SNopSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_nop_sopp(*this, wf); }
 
 const bool SSethaltSopp::execute_registered_ = register_exec_fn<SSethaltSopp>();
 
@@ -31,21 +29,15 @@ void SSethaltSopp::execute_impl(amdgpu::Wavefront &wf) {
 
 const bool SSleepSopp::execute_registered_ = register_exec_fn<SSleepSopp>();
 
-void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sleep_sopp(*this, wf);
-}
+void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sleep_sopp(*this, wf); }
 
 const bool SMonitorSleepSopp::execute_registered_ = register_exec_fn<SMonitorSleepSopp>();
 
-void SMonitorSleepSopp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-}
+void SMonitorSleepSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 const bool SClauseSopp::execute_registered_ = register_exec_fn<SClauseSopp>();
 
-void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_clause_sopp(*this, wf);
-}
+void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_clause_sopp(*this, wf); }
 
 const bool SSetVgprMsbSopp::execute_registered_ = register_exec_fn<SSetVgprMsbSopp>();
 
@@ -73,9 +65,7 @@ void SWaitIdleSopp::execute_impl(amdgpu::Wavefront &wf) {
 
 const bool STrapSopp::execute_registered_ = register_exec_fn<STrapSopp>();
 
-void STrapSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_trap_sopp(*this, wf);
-}
+void STrapSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_trap_sopp(*this, wf); }
 
 const bool SRoundModeSopp::execute_registered_ = register_exec_fn<SRoundModeSopp>();
 
@@ -97,9 +87,7 @@ void SBarrierWaitSopp::execute_impl(amdgpu::Wavefront &wf) {
 
 const bool SBarrierLeaveSopp::execute_registered_ = register_exec_fn<SBarrierLeaveSopp>();
 
-void SBarrierLeaveSopp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-}
+void SBarrierLeaveSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 const bool SCodeEndSopp::execute_registered_ = register_exec_fn<SCodeEndSopp>();
 
@@ -135,7 +123,8 @@ void SCbranchScc1Sopp::execute_impl(amdgpu::Wavefront &wf) {
 const bool SCbranchVcczSopp::execute_registered_ = register_exec_fn<SCbranchVcczSopp>();
 
 void SCbranchVcczSopp::execute_impl(amdgpu::Wavefront &wf) {
-  const uint64_t live_vcc = wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
+  const uint64_t live_vcc =
+      wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
   if (live_vcc == 0) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
@@ -145,7 +134,8 @@ void SCbranchVcczSopp::execute_impl(amdgpu::Wavefront &wf) {
 const bool SCbranchVccnzSopp::execute_registered_ = register_exec_fn<SCbranchVccnzSopp>();
 
 void SCbranchVccnzSopp::execute_impl(amdgpu::Wavefront &wf) {
-  const uint64_t live_vcc = wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
+  const uint64_t live_vcc =
+      wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
   if (live_vcc != 0) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
@@ -172,21 +162,15 @@ void SCbranchExecnzSopp::execute_impl(amdgpu::Wavefront &wf) {
 
 const bool SEndpgmSopp::execute_registered_ = register_exec_fn<SEndpgmSopp>();
 
-void SEndpgmSopp::execute_impl(amdgpu::Wavefront &wf) {
-  wf.end();
-}
+void SEndpgmSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
 
 const bool SEndpgmSavedSopp::execute_registered_ = register_exec_fn<SEndpgmSavedSopp>();
 
-void SEndpgmSavedSopp::execute_impl(amdgpu::Wavefront &wf) {
-  wf.end();
-}
+void SEndpgmSavedSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
 
 const bool SWakeupSopp::execute_registered_ = register_exec_fn<SWakeupSopp>();
 
-void SWakeupSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_wakeup_sopp(*this, wf);
-}
+void SWakeupSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_wakeup_sopp(*this, wf); }
 
 const bool SSetprioSopp::execute_registered_ = register_exec_fn<SSetprioSopp>();
 
@@ -238,9 +222,7 @@ void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) {
 
 const bool SSetprioIncWgSopp::execute_registered_ = register_exec_fn<SSetprioIncWgSopp>();
 
-void SSetprioIncWgSopp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-}
+void SSetprioIncWgSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 const bool SWaitLoadcntSopp::execute_registered_ = register_exec_fn<SWaitLoadcntSopp>();
 
@@ -258,9 +240,7 @@ void SWaitStorecntSopp::execute_impl(amdgpu::Wavefront &wf) {
 
 const bool SWaitXcntSopp::execute_registered_ = register_exec_fn<SWaitXcntSopp>();
 
-void SWaitXcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-}
+void SWaitXcntSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 const bool SWaitDscntSopp::execute_registered_ = register_exec_fn<SWaitDscntSopp>();
 

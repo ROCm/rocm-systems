@@ -5,33 +5,29 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/sop1.h"
-#include "util/except.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
+#include "util/except.h"
+#include "util/log.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
-#include <limits>
-#include "rocjitsu/vm/amdgpu/register_access.h"
-#include "util/log.h"
 #include <format>
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include <limits>
 
 namespace rocjitsu {
 namespace gfx1250 {
 
 const bool SMovB32Sop1::execute_registered_ = register_exec_fn<SMovB32Sop1>();
 
-void SMovB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_mov_b32_sop1(*this, wf);
-}
+void SMovB32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mov_b32_sop1(*this, wf); }
 
 const bool SMovB64Sop1::execute_registered_ = register_exec_fn<SMovB64Sop1>();
 
-void SMovB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_mov_b64_sop1(*this, wf);
-}
+void SMovB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mov_b64_sop1(*this, wf); }
 
 const bool SCmovB32Sop1::execute_registered_ = register_exec_fn<SCmovB32Sop1>();
 
@@ -57,7 +53,8 @@ void SBrevB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_brev_b64_sop1(*this, wf);
 }
 
-const bool SGetShaderCyclesU64Sop1::execute_registered_ = register_exec_fn<SGetShaderCyclesU64Sop1>();
+const bool SGetShaderCyclesU64Sop1::execute_registered_ =
+    register_exec_fn<SGetShaderCyclesU64Sop1>();
 
 void SGetShaderCyclesU64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   auto *engine = wf.cu().engine();
@@ -91,9 +88,7 @@ void SClzI32U64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 
 const bool SClsI32Sop1::execute_registered_ = register_exec_fn<SClsI32Sop1>();
 
-void SClsI32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cls_i32_sop1(*this, wf);
-}
+void SClsI32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_cls_i32_sop1(*this, wf); }
 
 const bool SClsI32I64Sop1::execute_registered_ = register_exec_fn<SClsI32I64Sop1>();
 
@@ -137,7 +132,8 @@ void SBitset1B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_bitset1_b64_sop1(*this, wf);
 }
 
-const bool SBitreplicateB64B32Sop1::execute_registered_ = register_exec_fn<SBitreplicateB64B32Sop1>();
+const bool SBitreplicateB64B32Sop1::execute_registered_ =
+    register_exec_fn<SBitreplicateB64B32Sop1>();
 
 void SBitreplicateB64B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_bitreplicate_b64_b32_sop1(*this, wf);
@@ -145,9 +141,7 @@ void SBitreplicateB64B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 
 const bool SAbsI32Sop1::execute_registered_ = register_exec_fn<SAbsI32Sop1>();
 
-void SAbsI32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_abs_i32_sop1(*this, wf);
-}
+void SAbsI32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_abs_i32_sop1(*this, wf); }
 
 const bool SBcnt0I32B32Sop1::execute_registered_ = register_exec_fn<SBcnt0I32B32Sop1>();
 
@@ -187,27 +181,19 @@ void SQuadmaskB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 
 const bool SWqmB32Sop1::execute_registered_ = register_exec_fn<SWqmB32Sop1>();
 
-void SWqmB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_wqm_b32_sop1(*this, wf);
-}
+void SWqmB32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_wqm_b32_sop1(*this, wf); }
 
 const bool SWqmB64Sop1::execute_registered_ = register_exec_fn<SWqmB64Sop1>();
 
-void SWqmB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_wqm_b64_sop1(*this, wf);
-}
+void SWqmB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_wqm_b64_sop1(*this, wf); }
 
 const bool SNotB32Sop1::execute_registered_ = register_exec_fn<SNotB32Sop1>();
 
-void SNotB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_not_b32_sop1(*this, wf);
-}
+void SNotB32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_not_b32_sop1(*this, wf); }
 
 const bool SNotB64Sop1::execute_registered_ = register_exec_fn<SNotB64Sop1>();
 
-void SNotB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_not_b64_sop1(*this, wf);
-}
+void SNotB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_not_b64_sop1(*this, wf); }
 
 const bool SAndSaveexecB32Sop1::execute_registered_ = register_exec_fn<SAndSaveexecB32Sop1>();
 
@@ -281,13 +267,15 @@ void SXnorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_xnor_saveexec_b64_sop1(*this, wf);
 }
 
-const bool SAndNot0SaveexecB32Sop1::execute_registered_ = register_exec_fn<SAndNot0SaveexecB32Sop1>();
+const bool SAndNot0SaveexecB32Sop1::execute_registered_ =
+    register_exec_fn<SAndNot0SaveexecB32Sop1>();
 
 void SAndNot0SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_and_not0_saveexec_b32_sop1(*this, wf);
 }
 
-const bool SAndNot0SaveexecB64Sop1::execute_registered_ = register_exec_fn<SAndNot0SaveexecB64Sop1>();
+const bool SAndNot0SaveexecB64Sop1::execute_registered_ =
+    register_exec_fn<SAndNot0SaveexecB64Sop1>();
 
 void SAndNot0SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_and_not0_saveexec_b64_sop1(*this, wf);
@@ -305,13 +293,15 @@ void SOrNot0SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_or_not0_saveexec_b64_sop1(*this, wf);
 }
 
-const bool SAndNot1SaveexecB32Sop1::execute_registered_ = register_exec_fn<SAndNot1SaveexecB32Sop1>();
+const bool SAndNot1SaveexecB32Sop1::execute_registered_ =
+    register_exec_fn<SAndNot1SaveexecB32Sop1>();
 
 void SAndNot1SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_and_not1_saveexec_b32_sop1(*this, wf);
 }
 
-const bool SAndNot1SaveexecB64Sop1::execute_registered_ = register_exec_fn<SAndNot1SaveexecB64Sop1>();
+const bool SAndNot1SaveexecB64Sop1::execute_registered_ =
+    register_exec_fn<SAndNot1SaveexecB64Sop1>();
 
 void SAndNot1SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_and_not1_saveexec_b64_sop1(*this, wf);
@@ -361,9 +351,11 @@ void SMovrelsB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src_reg = static_cast<uint32_t>(ssrc0.encoding_value()) + index * width_words;
   Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
   if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(sdst, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));
+    amdgpu::RegisterAccess(wf).write_scalar64(
+        sdst, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));
   } else {
-    amdgpu::RegisterAccess(wf).write_scalar(sdst, amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
+    amdgpu::RegisterAccess(wf).write_scalar(sdst,
+                                            amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
   }
 }
 
@@ -375,9 +367,11 @@ void SMovrelsB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src_reg = static_cast<uint32_t>(ssrc0.encoding_value()) + index * width_words;
   Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
   if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(sdst, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));
+    amdgpu::RegisterAccess(wf).write_scalar64(
+        sdst, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));
   } else {
-    amdgpu::RegisterAccess(wf).write_scalar(sdst, amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
+    amdgpu::RegisterAccess(wf).write_scalar(sdst,
+                                            amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
   }
 }
 
@@ -389,9 +383,11 @@ void SMovreldB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + index * width_words;
   Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
   if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst, amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
+    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst,
+                                              amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
   } else {
-    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst, amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
+    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
+                                            amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
   }
 }
 
@@ -403,9 +399,11 @@ void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + index * width_words;
   Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
   if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst, amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
+    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst,
+                                              amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
   } else {
-    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst, amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
+    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
+                                            amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
   }
 }
 
@@ -418,7 +416,8 @@ void SMovrelsd2B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + dst_index;
   Operand indexed_src(32, OperandType::OPR_SSRC, static_cast<int>(src_reg));
   Operand indexed_dst(32, OperandType::OPR_SDST, static_cast<int>(dst_reg));
-  amdgpu::RegisterAccess(wf).write_scalar(indexed_dst, amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
+  amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
+                                          amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
 }
 
 const bool SGetPcI64Sop1::execute_registered_ = register_exec_fn<SGetPcI64Sop1>();
@@ -443,9 +442,7 @@ void SSwapPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 
 const bool SRfeI64Sop1::execute_registered_ = register_exec_fn<SRfeI64Sop1>();
 
-void SRfeI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-}
+void SRfeI64Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 const bool SAddPcI64Sop1::execute_registered_ = register_exec_fn<SAddPcI64Sop1>();
 
@@ -472,7 +469,8 @@ void SBarrierSignalSop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_barrier_signal_sop1(*this, wf);
 }
 
-const bool SBarrierSignalIsfirstSop1::execute_registered_ = register_exec_fn<SBarrierSignalIsfirstSop1>();
+const bool SBarrierSignalIsfirstSop1::execute_registered_ =
+    register_exec_fn<SBarrierSignalIsfirstSop1>();
 
 void SBarrierSignalIsfirstSop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_barrier_signal_isfirst_sop1(*this, wf);
@@ -486,15 +484,11 @@ void SGetBarrierStateSop1::execute_impl(amdgpu::Wavefront &wf) {
 
 const bool SBarrierInitSop1::execute_registered_ = register_exec_fn<SBarrierInitSop1>();
 
-void SBarrierInitSop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-}
+void SBarrierInitSop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 const bool SBarrierJoinSop1::execute_registered_ = register_exec_fn<SBarrierJoinSop1>();
 
-void SBarrierJoinSop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-}
+void SBarrierJoinSop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 const bool SAllocVgprSop1::execute_registered_ = register_exec_fn<SAllocVgprSop1>();
 
@@ -504,9 +498,7 @@ void SAllocVgprSop1::execute_impl(amdgpu::Wavefront &wf) {
 
 const bool SWakeupBarrierSop1::execute_registered_ = register_exec_fn<SWakeupBarrierSop1>();
 
-void SWakeupBarrierSop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-}
+void SWakeupBarrierSop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 const bool SSleepVarSop1::execute_registered_ = register_exec_fn<SSleepVarSop1>();
 

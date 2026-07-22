@@ -5,25 +5,51 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/ldsdir.h"
-#include "util/except.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
+#include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
 #include <limits>
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 
 namespace rocjitsu {
 namespace rdna3_5 {
 
-LdsParamLoadLdsdir::LdsParamLoadLdsdir(const MachineInst *inst) : Ldsdir("lds_param_load", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<LdsParamLoadLdsdir>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding*>(inst)->attr), dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {dst_operands_[0] = &vdst;src_operands_[0] = &attr;src_operands_[1] = &dsmem;src_operands_[2] = &m0;num_src_ = 3;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);m0.apply_fieldless_caps(false, false, false);}
+LdsParamLoadLdsdir::LdsParamLoadLdsdir(const MachineInst *inst)
+    : Ldsdir("lds_param_load", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<LdsParamLoadLdsdir>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &attr;
+  src_operands_[1] = &dsmem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
+}
 
 void LdsParamLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_lds_param_load_ldsdir(*this, wf);
 }
 
-LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst) : Ldsdir("lds_direct_load", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<LdsDirectLoadLdsdir>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {dst_operands_[0] = &vdst;src_operands_[0] = &dsmem;src_operands_[1] = &m0;num_src_ = 2;num_dst_ = 1;dsmem.apply_fieldless_caps(false, false, false);m0.apply_fieldless_caps(false, false, false);}
+LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
+    : Ldsdir("lds_direct_load", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<LdsDirectLoadLdsdir>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &dsmem;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
+}
 
 void LdsDirectLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_lds_direct_load_ldsdir(*this, wf);

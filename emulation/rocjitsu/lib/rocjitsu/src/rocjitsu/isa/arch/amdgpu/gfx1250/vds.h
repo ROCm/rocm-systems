@@ -14,154 +14,141 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-class DsAddU32Vds : public Vds
-{
-  public:
-   DsAddU32Vds(const MachineInst * inst);
+class DsAddU32Vds : public Vds {
+public:
+  DsAddU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsSubU32Vds : public Vds
-{
-  public:
-   DsSubU32Vds(const MachineInst * inst);
+class DsSubU32Vds : public Vds {
+public:
+  DsSubU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsRsubU32Vds : public Vds
-{
-  public:
-   DsRsubU32Vds(const MachineInst * inst);
+class DsRsubU32Vds : public Vds {
+public:
+  DsRsubU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsIncU32Vds : public Vds
-{
-  public:
-   DsIncU32Vds(const MachineInst * inst);
+class DsIncU32Vds : public Vds {
+public:
+  DsIncU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsDecU32Vds : public Vds
-{
-  public:
-   DsDecU32Vds(const MachineInst * inst);
+class DsDecU32Vds : public Vds {
+public:
+  DsDecU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsMinI32Vds : public Vds
-{
-  public:
-   DsMinI32Vds(const MachineInst * inst);
+class DsMinI32Vds : public Vds {
+public:
+  DsMinI32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsMaxI32Vds : public Vds
-{
-  public:
-   DsMaxI32Vds(const MachineInst * inst);
+class DsMaxI32Vds : public Vds {
+public:
+  DsMaxI32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsMinU32Vds : public Vds
-{
-  public:
-   DsMinU32Vds(const MachineInst * inst);
+class DsMinU32Vds : public Vds {
+public:
+  DsMinU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsMaxU32Vds : public Vds
-{
-  public:
-   DsMaxU32Vds(const MachineInst * inst);
+class DsMaxU32Vds : public Vds {
+public:
+  DsMaxU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsAndB32Vds : public Vds
-{
-  public:
-   DsAndB32Vds(const MachineInst * inst);
+class DsAndB32Vds : public Vds {
+public:
+  DsAndB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsOrB32Vds : public Vds
-{
-  public:
-   DsOrB32Vds(const MachineInst * inst);
+class DsOrB32Vds : public Vds {
+public:
+  DsOrB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsXorB32Vds : public Vds
-{
-  public:
-   DsXorB32Vds(const MachineInst * inst);
+class DsXorB32Vds : public Vds {
+public:
+  DsXorB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsMskorB32Vds : public Vds
-{
-  public:
-   DsMskorB32Vds(const MachineInst * inst);
+class DsMskorB32Vds : public Vds {
+public:
+  DsMskorB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
@@ -169,47 +156,43 @@ class DsMskorB32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsStoreB32Vds : public Vds
-{
-  public:
-   DsStoreB32Vds(const MachineInst * inst);
+class DsStoreB32Vds : public Vds {
+public:
+  DsStoreB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsStore2addrB32Vds : public Vds
-{
-  public:
-   DsStore2addrB32Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand data1;
-  Operand dsmem;
-  static const bool execute_registered_;
-} ;
-
-class DsStore2addrStride64B32Vds : public Vds
-{
-  public:
-   DsStore2addrStride64B32Vds(const MachineInst * inst);
+class DsStore2addrB32Vds : public Vds {
+public:
+  DsStore2addrB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand data1;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsCmpstoreB32Vds : public Vds
-{
-  public:
-   DsCmpstoreB32Vds(const MachineInst * inst);
+class DsStore2addrStride64B32Vds : public Vds {
+public:
+  DsStore2addrStride64B32Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand data1;
+  Operand dsmem;
+  static const bool execute_registered_;
+};
+
+class DsCmpstoreB32Vds : public Vds {
+public:
+  DsCmpstoreB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
@@ -217,78 +200,71 @@ class DsCmpstoreB32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsMinNumF32Vds : public Vds
-{
-  public:
-   DsMinNumF32Vds(const MachineInst * inst);
+class DsMinNumF32Vds : public Vds {
+public:
+  DsMinNumF32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsMaxNumF32Vds : public Vds
-{
-  public:
-   DsMaxNumF32Vds(const MachineInst * inst);
+class DsMaxNumF32Vds : public Vds {
+public:
+  DsMaxNumF32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsNopVds : public Vds
-{
-  public:
-   DsNopVds(const MachineInst * inst);
+class DsNopVds : public Vds {
+public:
+  DsNopVds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   static const bool execute_registered_;
-} ;
+};
 
-class DsAddF32Vds : public Vds
-{
-  public:
-   DsAddF32Vds(const MachineInst * inst);
+class DsAddF32Vds : public Vds {
+public:
+  DsAddF32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsStoreB8Vds : public Vds
-{
-  public:
-   DsStoreB8Vds(const MachineInst * inst);
+class DsStoreB8Vds : public Vds {
+public:
+  DsStoreB8Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsStoreB16Vds : public Vds
-{
-  public:
-   DsStoreB16Vds(const MachineInst * inst);
+class DsStoreB16Vds : public Vds {
+public:
+  DsStoreB16Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsAddRtnU32Vds : public Vds
-{
-  public:
-   DsAddRtnU32Vds(const MachineInst * inst);
+class DsAddRtnU32Vds : public Vds {
+public:
+  DsAddRtnU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -296,12 +272,11 @@ class DsAddRtnU32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsSubRtnU32Vds : public Vds
-{
-  public:
-   DsSubRtnU32Vds(const MachineInst * inst);
+class DsSubRtnU32Vds : public Vds {
+public:
+  DsSubRtnU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -309,12 +284,11 @@ class DsSubRtnU32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsRsubRtnU32Vds : public Vds
-{
-  public:
-   DsRsubRtnU32Vds(const MachineInst * inst);
+class DsRsubRtnU32Vds : public Vds {
+public:
+  DsRsubRtnU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -322,12 +296,11 @@ class DsRsubRtnU32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsIncRtnU32Vds : public Vds
-{
-  public:
-   DsIncRtnU32Vds(const MachineInst * inst);
+class DsIncRtnU32Vds : public Vds {
+public:
+  DsIncRtnU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -335,12 +308,11 @@ class DsIncRtnU32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsDecRtnU32Vds : public Vds
-{
-  public:
-   DsDecRtnU32Vds(const MachineInst * inst);
+class DsDecRtnU32Vds : public Vds {
+public:
+  DsDecRtnU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -348,12 +320,11 @@ class DsDecRtnU32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsMinRtnI32Vds : public Vds
-{
-  public:
-   DsMinRtnI32Vds(const MachineInst * inst);
+class DsMinRtnI32Vds : public Vds {
+public:
+  DsMinRtnI32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -361,12 +332,11 @@ class DsMinRtnI32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsMaxRtnI32Vds : public Vds
-{
-  public:
-   DsMaxRtnI32Vds(const MachineInst * inst);
+class DsMaxRtnI32Vds : public Vds {
+public:
+  DsMaxRtnI32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -374,12 +344,11 @@ class DsMaxRtnI32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsMinRtnU32Vds : public Vds
-{
-  public:
-   DsMinRtnU32Vds(const MachineInst * inst);
+class DsMinRtnU32Vds : public Vds {
+public:
+  DsMinRtnU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -387,12 +356,11 @@ class DsMinRtnU32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsMaxRtnU32Vds : public Vds
-{
-  public:
-   DsMaxRtnU32Vds(const MachineInst * inst);
+class DsMaxRtnU32Vds : public Vds {
+public:
+  DsMaxRtnU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -400,12 +368,11 @@ class DsMaxRtnU32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsAndRtnB32Vds : public Vds
-{
-  public:
-   DsAndRtnB32Vds(const MachineInst * inst);
+class DsAndRtnB32Vds : public Vds {
+public:
+  DsAndRtnB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -413,12 +380,11 @@ class DsAndRtnB32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsOrRtnB32Vds : public Vds
-{
-  public:
-   DsOrRtnB32Vds(const MachineInst * inst);
+class DsOrRtnB32Vds : public Vds {
+public:
+  DsOrRtnB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -426,12 +392,11 @@ class DsOrRtnB32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsXorRtnB32Vds : public Vds
-{
-  public:
-   DsXorRtnB32Vds(const MachineInst * inst);
+class DsXorRtnB32Vds : public Vds {
+public:
+  DsXorRtnB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -439,12 +404,11 @@ class DsXorRtnB32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsMskorRtnB32Vds : public Vds
-{
-  public:
-   DsMskorRtnB32Vds(const MachineInst * inst);
+class DsMskorRtnB32Vds : public Vds {
+public:
+  DsMskorRtnB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -453,12 +417,11 @@ class DsMskorRtnB32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsStorexchgRtnB32Vds : public Vds
-{
-  public:
-   DsStorexchgRtnB32Vds(const MachineInst * inst);
+class DsStorexchgRtnB32Vds : public Vds {
+public:
+  DsStorexchgRtnB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -466,26 +429,11 @@ class DsStorexchgRtnB32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsStorexchg2addrRtnB32Vds : public Vds
-{
-  public:
-   DsStorexchg2addrRtnB32Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data0;
-  Operand data1;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsStorexchg2addrStride64RtnB32Vds : public Vds
-{
-  public:
-   DsStorexchg2addrStride64RtnB32Vds(const MachineInst * inst);
+class DsStorexchg2addrRtnB32Vds : public Vds {
+public:
+  DsStorexchg2addrRtnB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -494,12 +442,11 @@ class DsStorexchg2addrStride64RtnB32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsCmpstoreRtnB32Vds : public Vds
-{
-  public:
-   DsCmpstoreRtnB32Vds(const MachineInst * inst);
+class DsStorexchg2addrStride64RtnB32Vds : public Vds {
+public:
+  DsStorexchg2addrStride64RtnB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -508,555 +455,11 @@ class DsCmpstoreRtnB32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsMinNumRtnF32Vds : public Vds
-{
-  public:
-   DsMinNumRtnF32Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsMaxNumRtnF32Vds : public Vds
-{
-  public:
-   DsMaxNumRtnF32Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsSwizzleB32Vds : public Vds
-{
-  public:
-   DsSwizzleB32Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  static const bool execute_registered_;
-} ;
-
-class DsLoadB32Vds : public Vds
-{
-  public:
-   DsLoadB32Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand dsmem;
-  static const bool execute_registered_;
-} ;
-
-class DsLoad2addrB32Vds : public Vds
-{
-  public:
-   DsLoad2addrB32Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand dsmem;
-  static const bool execute_registered_;
-} ;
-
-class DsLoad2addrStride64B32Vds : public Vds
-{
-  public:
-   DsLoad2addrStride64B32Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand dsmem;
-  static const bool execute_registered_;
-} ;
-
-class DsLoadI8Vds : public Vds
-{
-  public:
-   DsLoadI8Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand dsmem;
-  static const bool execute_registered_;
-} ;
-
-class DsLoadU8Vds : public Vds
-{
-  public:
-   DsLoadU8Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand dsmem;
-  static const bool execute_registered_;
-} ;
-
-class DsLoadI16Vds : public Vds
-{
-  public:
-   DsLoadI16Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand dsmem;
-  static const bool execute_registered_;
-} ;
-
-class DsLoadU16Vds : public Vds
-{
-  public:
-   DsLoadU16Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand dsmem;
-  static const bool execute_registered_;
-} ;
-
-class DsConsumeVds : public Vds
-{
-  public:
-   DsConsumeVds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsAppendVds : public Vds
-{
-  public:
-   DsAppendVds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsAddU64Vds : public Vds
-{
-  public:
-   DsAddU64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsSubU64Vds : public Vds
-{
-  public:
-   DsSubU64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsRsubU64Vds : public Vds
-{
-  public:
-   DsRsubU64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsIncU64Vds : public Vds
-{
-  public:
-   DsIncU64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsDecU64Vds : public Vds
-{
-  public:
-   DsDecU64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsMinI64Vds : public Vds
-{
-  public:
-   DsMinI64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsMaxI64Vds : public Vds
-{
-  public:
-   DsMaxI64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsMinU64Vds : public Vds
-{
-  public:
-   DsMinU64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsMaxU64Vds : public Vds
-{
-  public:
-   DsMaxU64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsAndB64Vds : public Vds
-{
-  public:
-   DsAndB64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsOrB64Vds : public Vds
-{
-  public:
-   DsOrB64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsXorB64Vds : public Vds
-{
-  public:
-   DsXorB64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsMskorB64Vds : public Vds
-{
-  public:
-   DsMskorB64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand data1;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsStoreB64Vds : public Vds
-{
-  public:
-   DsStoreB64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  static const bool execute_registered_;
-} ;
-
-class DsStore2addrB64Vds : public Vds
-{
-  public:
-   DsStore2addrB64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand data1;
-  Operand dsmem;
-  static const bool execute_registered_;
-} ;
-
-class DsStore2addrStride64B64Vds : public Vds
-{
-  public:
-   DsStore2addrStride64B64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand data1;
-  Operand dsmem;
-  static const bool execute_registered_;
-} ;
-
-class DsCmpstoreB64Vds : public Vds
-{
-  public:
-   DsCmpstoreB64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand data1;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsMinNumF64Vds : public Vds
-{
-  public:
-   DsMinNumF64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsMaxNumF64Vds : public Vds
-{
-  public:
-   DsMaxNumF64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsAddF64Vds : public Vds
-{
-  public:
-   DsAddF64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsAtomicAsyncBarrierArriveB64Vds : public Vds
-{
-  public:
-   DsAtomicAsyncBarrierArriveB64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand addr;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsAddRtnU64Vds : public Vds
-{
-  public:
-   DsAddRtnU64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsSubRtnU64Vds : public Vds
-{
-  public:
-   DsSubRtnU64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsRsubRtnU64Vds : public Vds
-{
-  public:
-   DsRsubRtnU64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsIncRtnU64Vds : public Vds
-{
-  public:
-   DsIncRtnU64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsDecRtnU64Vds : public Vds
-{
-  public:
-   DsDecRtnU64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsMinRtnI64Vds : public Vds
-{
-  public:
-   DsMinRtnI64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsMaxRtnI64Vds : public Vds
-{
-  public:
-   DsMaxRtnI64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsMinRtnU64Vds : public Vds
-{
-  public:
-   DsMinRtnU64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsMaxRtnU64Vds : public Vds
-{
-  public:
-   DsMaxRtnU64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsAndRtnB64Vds : public Vds
-{
-  public:
-   DsAndRtnB64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsOrRtnB64Vds : public Vds
-{
-  public:
-   DsOrRtnB64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsXorRtnB64Vds : public Vds
-{
-  public:
-   DsXorRtnB64Vds(const MachineInst * inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data0;
-  Operand dsmem;
-  Operand dsmem_in;
-  static const bool execute_registered_;
-} ;
-
-class DsMskorRtnB64Vds : public Vds
-{
-  public:
-   DsMskorRtnB64Vds(const MachineInst * inst);
+class DsCmpstoreRtnB32Vds : public Vds {
+public:
+  DsCmpstoreRtnB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -1065,12 +468,11 @@ class DsMskorRtnB64Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsStorexchgRtnB64Vds : public Vds
-{
-  public:
-   DsStorexchgRtnB64Vds(const MachineInst * inst);
+class DsMinNumRtnF32Vds : public Vds {
+public:
+  DsMinNumRtnF32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -1078,12 +480,497 @@ class DsStorexchgRtnB64Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsStorexchg2addrRtnB64Vds : public Vds
-{
-  public:
-   DsStorexchg2addrRtnB64Vds(const MachineInst * inst);
+class DsMaxNumRtnF32Vds : public Vds {
+public:
+  DsMaxNumRtnF32Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsSwizzleB32Vds : public Vds {
+public:
+  DsSwizzleB32Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  static const bool execute_registered_;
+};
+
+class DsLoadB32Vds : public Vds {
+public:
+  DsLoadB32Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand dsmem;
+  static const bool execute_registered_;
+};
+
+class DsLoad2addrB32Vds : public Vds {
+public:
+  DsLoad2addrB32Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand dsmem;
+  static const bool execute_registered_;
+};
+
+class DsLoad2addrStride64B32Vds : public Vds {
+public:
+  DsLoad2addrStride64B32Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand dsmem;
+  static const bool execute_registered_;
+};
+
+class DsLoadI8Vds : public Vds {
+public:
+  DsLoadI8Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand dsmem;
+  static const bool execute_registered_;
+};
+
+class DsLoadU8Vds : public Vds {
+public:
+  DsLoadU8Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand dsmem;
+  static const bool execute_registered_;
+};
+
+class DsLoadI16Vds : public Vds {
+public:
+  DsLoadI16Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand dsmem;
+  static const bool execute_registered_;
+};
+
+class DsLoadU16Vds : public Vds {
+public:
+  DsLoadU16Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand dsmem;
+  static const bool execute_registered_;
+};
+
+class DsConsumeVds : public Vds {
+public:
+  DsConsumeVds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsAppendVds : public Vds {
+public:
+  DsAppendVds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsAddU64Vds : public Vds {
+public:
+  DsAddU64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsSubU64Vds : public Vds {
+public:
+  DsSubU64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsRsubU64Vds : public Vds {
+public:
+  DsRsubU64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsIncU64Vds : public Vds {
+public:
+  DsIncU64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsDecU64Vds : public Vds {
+public:
+  DsDecU64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsMinI64Vds : public Vds {
+public:
+  DsMinI64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsMaxI64Vds : public Vds {
+public:
+  DsMaxI64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsMinU64Vds : public Vds {
+public:
+  DsMinU64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsMaxU64Vds : public Vds {
+public:
+  DsMaxU64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsAndB64Vds : public Vds {
+public:
+  DsAndB64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsOrB64Vds : public Vds {
+public:
+  DsOrB64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsXorB64Vds : public Vds {
+public:
+  DsXorB64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsMskorB64Vds : public Vds {
+public:
+  DsMskorB64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsStoreB64Vds : public Vds {
+public:
+  DsStoreB64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  static const bool execute_registered_;
+};
+
+class DsStore2addrB64Vds : public Vds {
+public:
+  DsStore2addrB64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand data1;
+  Operand dsmem;
+  static const bool execute_registered_;
+};
+
+class DsStore2addrStride64B64Vds : public Vds {
+public:
+  DsStore2addrStride64B64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand data1;
+  Operand dsmem;
+  static const bool execute_registered_;
+};
+
+class DsCmpstoreB64Vds : public Vds {
+public:
+  DsCmpstoreB64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsMinNumF64Vds : public Vds {
+public:
+  DsMinNumF64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsMaxNumF64Vds : public Vds {
+public:
+  DsMaxNumF64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsAddF64Vds : public Vds {
+public:
+  DsAddF64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsAtomicAsyncBarrierArriveB64Vds : public Vds {
+public:
+  DsAtomicAsyncBarrierArriveB64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsAddRtnU64Vds : public Vds {
+public:
+  DsAddRtnU64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsSubRtnU64Vds : public Vds {
+public:
+  DsSubRtnU64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsRsubRtnU64Vds : public Vds {
+public:
+  DsRsubRtnU64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsIncRtnU64Vds : public Vds {
+public:
+  DsIncRtnU64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsDecRtnU64Vds : public Vds {
+public:
+  DsDecRtnU64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsMinRtnI64Vds : public Vds {
+public:
+  DsMinRtnI64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsMaxRtnI64Vds : public Vds {
+public:
+  DsMaxRtnI64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsMinRtnU64Vds : public Vds {
+public:
+  DsMinRtnU64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsMaxRtnU64Vds : public Vds {
+public:
+  DsMaxRtnU64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsAndRtnB64Vds : public Vds {
+public:
+  DsAndRtnB64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsOrRtnB64Vds : public Vds {
+public:
+  DsOrRtnB64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsXorRtnB64Vds : public Vds {
+public:
+  DsXorRtnB64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsMskorRtnB64Vds : public Vds {
+public:
+  DsMskorRtnB64Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -1092,12 +979,23 @@ class DsStorexchg2addrRtnB64Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsStorexchg2addrStride64RtnB64Vds : public Vds
-{
-  public:
-   DsStorexchg2addrStride64RtnB64Vds(const MachineInst * inst);
+class DsStorexchgRtnB64Vds : public Vds {
+public:
+  DsStorexchgRtnB64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsStorexchg2addrRtnB64Vds : public Vds {
+public:
+  DsStorexchg2addrRtnB64Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -1106,12 +1004,11 @@ class DsStorexchg2addrStride64RtnB64Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsCmpstoreRtnB64Vds : public Vds
-{
-  public:
-   DsCmpstoreRtnB64Vds(const MachineInst * inst);
+class DsStorexchg2addrStride64RtnB64Vds : public Vds {
+public:
+  DsStorexchg2addrStride64RtnB64Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -1120,12 +1017,24 @@ class DsCmpstoreRtnB64Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsMinNumRtnF64Vds : public Vds
-{
-  public:
-   DsMinNumRtnF64Vds(const MachineInst * inst);
+class DsCmpstoreRtnB64Vds : public Vds {
+public:
+  DsCmpstoreRtnB64Vds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data0;
+  Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
+  static const bool execute_registered_;
+};
+
+class DsMinNumRtnF64Vds : public Vds {
+public:
+  DsMinNumRtnF64Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -1133,12 +1042,11 @@ class DsMinNumRtnF64Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsMaxNumRtnF64Vds : public Vds
-{
-  public:
-   DsMaxNumRtnF64Vds(const MachineInst * inst);
+class DsMaxNumRtnF64Vds : public Vds {
+public:
+  DsMaxNumRtnF64Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -1146,12 +1054,11 @@ class DsMaxNumRtnF64Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsAddRtnF64Vds : public Vds
-{
-  public:
-   DsAddRtnF64Vds(const MachineInst * inst);
+class DsAddRtnF64Vds : public Vds {
+public:
+  DsAddRtnF64Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -1159,12 +1066,11 @@ class DsAddRtnF64Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsAtomicBarrierArriveRtnB64Vds : public Vds
-{
-  public:
-   DsAtomicBarrierArriveRtnB64Vds(const MachineInst * inst);
+class DsAtomicBarrierArriveRtnB64Vds : public Vds {
+public:
+  DsAtomicBarrierArriveRtnB64Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -1172,45 +1078,41 @@ class DsAtomicBarrierArriveRtnB64Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoadB64Vds : public Vds
-{
-  public:
-   DsLoadB64Vds(const MachineInst * inst);
+class DsLoadB64Vds : public Vds {
+public:
+  DsLoadB64Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoad2addrB64Vds : public Vds
-{
-  public:
-   DsLoad2addrB64Vds(const MachineInst * inst);
+class DsLoad2addrB64Vds : public Vds {
+public:
+  DsLoad2addrB64Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoad2addrStride64B64Vds : public Vds
-{
-  public:
-   DsLoad2addrStride64B64Vds(const MachineInst * inst);
+class DsLoad2addrStride64B64Vds : public Vds {
+public:
+  DsLoad2addrStride64B64Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsAddRtnF32Vds : public Vds
-{
-  public:
-   DsAddRtnF32Vds(const MachineInst * inst);
+class DsAddRtnF32Vds : public Vds {
+public:
+  DsAddRtnF32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -1218,12 +1120,11 @@ class DsAddRtnF32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsCondxchg32RtnB64Vds : public Vds
-{
-  public:
-   DsCondxchg32RtnB64Vds(const MachineInst * inst);
+class DsCondxchg32RtnB64Vds : public Vds {
+public:
+  DsCondxchg32RtnB64Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -1231,148 +1132,135 @@ class DsCondxchg32RtnB64Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsCondSubU32Vds : public Vds
-{
-  public:
-   DsCondSubU32Vds(const MachineInst * inst);
+class DsCondSubU32Vds : public Vds {
+public:
+  DsCondSubU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsSubClampU32Vds : public Vds
-{
-  public:
-   DsSubClampU32Vds(const MachineInst * inst);
+class DsSubClampU32Vds : public Vds {
+public:
+  DsSubClampU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsPkAddF16Vds : public Vds
-{
-  public:
-   DsPkAddF16Vds(const MachineInst * inst);
+class DsPkAddF16Vds : public Vds {
+public:
+  DsPkAddF16Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsPkAddBf16Vds : public Vds
-{
-  public:
-   DsPkAddBf16Vds(const MachineInst * inst);
+class DsPkAddBf16Vds : public Vds {
+public:
+  DsPkAddBf16Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsStoreB8D16HiVds : public Vds
-{
-  public:
-   DsStoreB8D16HiVds(const MachineInst * inst);
+class DsStoreB8D16HiVds : public Vds {
+public:
+  DsStoreB8D16HiVds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsStoreB16D16HiVds : public Vds
-{
-  public:
-   DsStoreB16D16HiVds(const MachineInst * inst);
+class DsStoreB16D16HiVds : public Vds {
+public:
+  DsStoreB16D16HiVds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoadU8D16Vds : public Vds
-{
-  public:
-   DsLoadU8D16Vds(const MachineInst * inst);
+class DsLoadU8D16Vds : public Vds {
+public:
+  DsLoadU8D16Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoadU8D16HiVds : public Vds
-{
-  public:
-   DsLoadU8D16HiVds(const MachineInst * inst);
+class DsLoadU8D16HiVds : public Vds {
+public:
+  DsLoadU8D16HiVds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoadI8D16Vds : public Vds
-{
-  public:
-   DsLoadI8D16Vds(const MachineInst * inst);
+class DsLoadI8D16Vds : public Vds {
+public:
+  DsLoadI8D16Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoadI8D16HiVds : public Vds
-{
-  public:
-   DsLoadI8D16HiVds(const MachineInst * inst);
+class DsLoadI8D16HiVds : public Vds {
+public:
+  DsLoadI8D16HiVds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoadU16D16Vds : public Vds
-{
-  public:
-   DsLoadU16D16Vds(const MachineInst * inst);
+class DsLoadU16D16Vds : public Vds {
+public:
+  DsLoadU16D16Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoadU16D16HiVds : public Vds
-{
-  public:
-   DsLoadU16D16HiVds(const MachineInst * inst);
+class DsLoadU16D16HiVds : public Vds {
+public:
+  DsLoadU16D16HiVds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsCondSubRtnU32Vds : public Vds
-{
-  public:
-   DsCondSubRtnU32Vds(const MachineInst * inst);
+class DsCondSubRtnU32Vds : public Vds {
+public:
+  DsCondSubRtnU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -1380,12 +1268,11 @@ class DsCondSubRtnU32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsSubClampRtnU32Vds : public Vds
-{
-  public:
-   DsSubClampRtnU32Vds(const MachineInst * inst);
+class DsSubClampRtnU32Vds : public Vds {
+public:
+  DsSubClampRtnU32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -1393,12 +1280,11 @@ class DsSubClampRtnU32Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsPkAddRtnF16Vds : public Vds
-{
-  public:
-   DsPkAddRtnF16Vds(const MachineInst * inst);
+class DsPkAddRtnF16Vds : public Vds {
+public:
+  DsPkAddRtnF16Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -1406,12 +1292,11 @@ class DsPkAddRtnF16Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsPkAddRtnBf16Vds : public Vds
-{
-  public:
-   DsPkAddRtnBf16Vds(const MachineInst * inst);
+class DsPkAddRtnBf16Vds : public Vds {
+public:
+  DsPkAddRtnBf16Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
@@ -1419,150 +1304,137 @@ class DsPkAddRtnBf16Vds : public Vds
   Operand dsmem;
   Operand dsmem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class DsStoreAddtidB32Vds : public Vds
-{
-  public:
-   DsStoreAddtidB32Vds(const MachineInst * inst);
+class DsStoreAddtidB32Vds : public Vds {
+public:
+  DsStoreAddtidB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand data0;
   Operand dsmem;
   Operand m0;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoadAddtidB32Vds : public Vds
-{
-  public:
-   DsLoadAddtidB32Vds(const MachineInst * inst);
+class DsLoadAddtidB32Vds : public Vds {
+public:
+  DsLoadAddtidB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand dsmem;
   Operand m0;
   static const bool execute_registered_;
-} ;
+};
 
-class DsPermuteB32Vds : public Vds
-{
-  public:
-   DsPermuteB32Vds(const MachineInst * inst);
+class DsPermuteB32Vds : public Vds {
+public:
+  DsPermuteB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
   static const bool execute_registered_;
-} ;
+};
 
-class DsBpermuteB32Vds : public Vds
-{
-  public:
-   DsBpermuteB32Vds(const MachineInst * inst);
+class DsBpermuteB32Vds : public Vds {
+public:
+  DsBpermuteB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
   static const bool execute_registered_;
-} ;
+};
 
-class DsBpermuteFiB32Vds : public Vds
-{
-  public:
-   DsBpermuteFiB32Vds(const MachineInst * inst);
+class DsBpermuteFiB32Vds : public Vds {
+public:
+  DsBpermuteFiB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
   static const bool execute_registered_;
-} ;
+};
 
-class DsStoreB96Vds : public Vds
-{
-  public:
-   DsStoreB96Vds(const MachineInst * inst);
+class DsStoreB96Vds : public Vds {
+public:
+  DsStoreB96Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsStoreB128Vds : public Vds
-{
-  public:
-   DsStoreB128Vds(const MachineInst * inst);
+class DsStoreB128Vds : public Vds {
+public:
+  DsStoreB128Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoadTr4B64Vds : public Vds
-{
-  public:
-   DsLoadTr4B64Vds(const MachineInst * inst);
+class DsLoadTr4B64Vds : public Vds {
+public:
+  DsLoadTr4B64Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoadTr6B96Vds : public Vds
-{
-  public:
-   DsLoadTr6B96Vds(const MachineInst * inst);
+class DsLoadTr6B96Vds : public Vds {
+public:
+  DsLoadTr6B96Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoadTr16B128Vds : public Vds
-{
-  public:
-   DsLoadTr16B128Vds(const MachineInst * inst);
+class DsLoadTr16B128Vds : public Vds {
+public:
+  DsLoadTr16B128Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoadTr8B64Vds : public Vds
-{
-  public:
-   DsLoadTr8B64Vds(const MachineInst * inst);
+class DsLoadTr8B64Vds : public Vds {
+public:
+  DsLoadTr8B64Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoadB96Vds : public Vds
-{
-  public:
-   DsLoadB96Vds(const MachineInst * inst);
+class DsLoadB96Vds : public Vds {
+public:
+  DsLoadB96Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
-class DsLoadB128Vds : public Vds
-{
-  public:
-   DsLoadB128Vds(const MachineInst * inst);
+class DsLoadB128Vds : public Vds {
+public:
+  DsLoadB128Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand dsmem;
   static const bool execute_registered_;
-} ;
+};
 
 } // namespace gfx1250
 } // namespace rocjitsu

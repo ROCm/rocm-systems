@@ -5,9 +5,9 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna2/exp.h"
-#include "util/except.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
+#include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -16,7 +16,24 @@
 namespace rocjitsu {
 namespace rdna2 {
 
-ExpExp::ExpExp(const MachineInst *inst) : Exp("exp", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<ExpExp>()), tgt(128, OperandType::OPR_TGT, reinterpret_cast<const OpEncoding*>(inst)->tgt), vsrc0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1), vsrc2(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc2), vsrc3(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc3), sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {dst_operands_[0] = &tgt;src_operands_[0] = &vsrc0;src_operands_[1] = &vsrc1;src_operands_[2] = &vsrc2;src_operands_[3] = &vsrc3;src_operands_[4] = &sdst_exec;num_src_ = 5;num_dst_ = 1;sdst_exec.apply_fieldless_caps(false, false, false);}
+ExpExp::ExpExp(const MachineInst *inst)
+    : Exp("exp", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<ExpExp>()),
+      tgt(128, OperandType::OPR_TGT, reinterpret_cast<const OpEncoding *>(inst)->tgt),
+      vsrc0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      vsrc2(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc2),
+      vsrc3(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc3),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
+  dst_operands_[0] = &tgt;
+  src_operands_[0] = &vsrc0;
+  src_operands_[1] = &vsrc1;
+  src_operands_[2] = &vsrc2;
+  src_operands_[3] = &vsrc3;
+  src_operands_[4] = &sdst_exec;
+  num_src_ = 5;
+  num_dst_ = 1;
+  sdst_exec.apply_fieldless_caps(false, false, false);
+}
 
 void ExpExp::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Export: no-op in compute simulation.

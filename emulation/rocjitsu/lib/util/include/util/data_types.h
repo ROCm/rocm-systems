@@ -358,90 +358,126 @@ inline float fp8_e4m3_fnuz_to_f32(uint8_t v) {
   return std::bit_cast<float>(f);
 }
 
-inline uint8_t f32_to_fp8_e4m3_fnuz_rne(float val) {
-  uint32_t f = std::bit_cast<uint32_t>(val);
-  uint32_t sign = (f >> 24) & 0x80;
-  if (std::isnan(val))
-    return 0x80u;
-  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
-  uint32_t f_mant = f & 0x7FFFFF;
-  if (f_exp == 0xFF)
-    return static_cast<uint8_t>(sign | 0x7F);
-  int32_t exp = f_exp - 127 + 8;
-  if (exp <= 0) {
-    if (exp < -3)
-      return 0;
-    uint32_t mant = f_mant | 0x800000;
-    int shift = 21 - exp;
-    if (shift > 24)
-      return 0;
-    uint32_t round_bit = (mant >> (shift - 1)) & 1;
-    uint32_t sticky = (mant & ((1u << (shift - 1)) - 1)) ? 1 : 0;
-    uint32_t result = mant >> shift;
-    result += round_bit & (sticky | (result & 1));
-    if (result >= 8)
-      return static_cast<uint8_t>(sign | (1 << 3));
-    if (result == 0)
-      return 0;
-    return static_cast<uint8_t>(sign | (result & 0x7));
-  }
-  if (exp > 15)
-    return static_cast<uint8_t>(sign | 0x7F);
-  uint32_t round_bit = (f_mant >> 19) & 1;
-  uint32_t sticky = (f_mant & 0x7FFFF) ? 1 : 0;
-  uint32_t mant = (f_mant >> 20) & 0x7;
-  mant += round_bit & (sticky | (mant & 1));
-  if (mant > 0x7) {
-    mant = 0;
-    exp += 1;
-  }
-  if (exp > 15)
-    return static_cast<uint8_t>(sign | 0x7F);
-  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
+namespace detail {
+
+struct FnuzNarrowResult {
+  uint8_t value;
+  bool overflow;
+};
+
+inline uint8_t fnuz_max_finite_code(uint32_t exp_bits, uint32_t mant_bits, uint32_t sign) {
+  const uint32_t exp_max = (1u << exp_bits) - 1u;
+  const uint32_t mant_max = (1u << mant_bits) - 1u;
+  return static_cast<uint8_t>(sign | (exp_max << mant_bits) | mant_max);
 }
 
-inline uint8_t f32_to_fp8_e4m3_fnuz_sr(float val, uint32_t seed) {
+inline FnuzNarrowResult f32_to_fnuz_rne(float val, uint32_t exp_bits, uint32_t mant_bits,
+                                        int32_t bias) {
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 24) & 0x80;
   if (std::isnan(val))
-    return 0x80u;
+    return {0x80u, false};
+
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  if (f_exp == 0xFF)
+    return {fnuz_max_finite_code(exp_bits, mant_bits, sign), true};
+
+  const uint32_t mant_limit = 1u << mant_bits;
+  const int32_t exp_max = static_cast<int32_t>((1u << exp_bits) - 1u);
+  int32_t exp = f_exp - 127 + bias;
+  if (exp <= 0) {
+    uint32_t mant = f_mant | 0x800000;
+    int shift = static_cast<int>(24u - mant_bits) - exp;
+    if (shift > 24)
+      return {0, false};
+    uint32_t round_bit = (mant >> (shift - 1)) & 1u;
+    uint32_t sticky = (mant & ((1u << (shift - 1)) - 1u)) ? 1u : 0u;
+    uint32_t result = mant >> shift;
+    result += round_bit & (sticky | (result & 1u));
+    if (result >= mant_limit)
+      return {static_cast<uint8_t>(sign | mant_limit), false};
+    if (result == 0)
+      return {0, false};
+    return {static_cast<uint8_t>(sign | (result & (mant_limit - 1u))), false};
+  }
+  if (exp > exp_max)
+    return {fnuz_max_finite_code(exp_bits, mant_bits, sign), true};
+
+  const uint32_t discarded_bits = 23u - mant_bits;
+  uint32_t round_bit = (f_mant >> (discarded_bits - 1u)) & 1u;
+  uint32_t sticky = (f_mant & ((1u << (discarded_bits - 1u)) - 1u)) ? 1u : 0u;
+  uint32_t mant = (f_mant >> discarded_bits) & (mant_limit - 1u);
+  mant += round_bit & (sticky | (mant & 1u));
+  if (mant >= mant_limit) {
+    mant = 0;
+    ++exp;
+  }
+  if (exp > exp_max)
+    return {fnuz_max_finite_code(exp_bits, mant_bits, sign), true};
+  return {static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << mant_bits) | mant), false};
+}
+
+inline FnuzNarrowResult f32_to_fnuz_sr(float val, uint32_t seed, uint32_t exp_bits,
+                                       uint32_t mant_bits, int32_t bias) {
+  if (std::isnan(val))
+    return {0x80u, false};
+
   uint32_t f = std::bit_cast<uint32_t>(val);
   uint32_t sign = (f >> 24) & 0x80;
   int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
   uint32_t f_mant = f & 0x7FFFFF;
   if (f_exp == 0xFF)
-    return static_cast<uint8_t>(sign | 0x7F);
-  int32_t exp = f_exp - 127 + 8;
+    return {fnuz_max_finite_code(exp_bits, mant_bits, sign), true};
+
+  const uint32_t mant_limit = 1u << mant_bits;
+  const int32_t exp_max = static_cast<int32_t>((1u << exp_bits) - 1u);
+  int32_t exp = f_exp - 127 + bias;
   if (exp <= 0) {
     uint32_t full_mant = f_mant | 0x800000;
-    int shift = 21 - exp;
+    int shift = static_cast<int>(24u - mant_bits) - exp;
     if (shift > 24)
-      return 0;
+      return {0, false};
     uint32_t result = full_mant >> shift;
-    uint32_t trunc_mask = (1u << shift) - 1;
+    uint32_t trunc_mask = (1u << shift) - 1u;
     uint32_t trunc_bits = full_mant & trunc_mask;
     uint32_t random_add = seed >> (32 - shift);
     if ((trunc_bits + random_add) >= (1u << shift))
       result += 1;
-    if (result >= 8)
-      return static_cast<uint8_t>(sign | (1 << 3));
+    if (result >= mant_limit)
+      return {static_cast<uint8_t>(sign | mant_limit), false};
     if (result == 0)
-      return 0;
-    return static_cast<uint8_t>(sign | (result & 0x7));
+      return {0, false};
+    return {static_cast<uint8_t>(sign | (result & (mant_limit - 1u))), false};
   }
-  if (exp > 15)
-    return static_cast<uint8_t>(sign | 0x7F);
-  uint32_t trunc_bits = f_mant & 0xFFFFF;
-  uint32_t random_add = seed >> 12;
-  uint32_t mant = (f_mant >> 20) & 0x7;
-  if ((trunc_bits + random_add) > 0xFFFFF) {
-    mant += 1;
-    if (mant > 0x7) {
+  if (exp > exp_max)
+    return {fnuz_max_finite_code(exp_bits, mant_bits, sign), true};
+
+  const uint32_t discarded_bits = 23u - mant_bits;
+  const uint32_t trunc_mask = (1u << discarded_bits) - 1u;
+  uint32_t trunc_bits = f_mant & trunc_mask;
+  uint32_t random_add = seed >> (32u - discarded_bits);
+  uint32_t mant = (f_mant >> discarded_bits) & (mant_limit - 1u);
+  if ((trunc_bits + random_add) > trunc_mask) {
+    ++mant;
+    if (mant >= mant_limit) {
       mant = 0;
-      exp += 1;
+      ++exp;
     }
   }
-  if (exp > 15)
-    return static_cast<uint8_t>(sign | 0x7F);
-  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
+  if (exp > exp_max)
+    return {fnuz_max_finite_code(exp_bits, mant_bits, sign), true};
+  return {static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << mant_bits) | mant), false};
+}
+
+} // namespace detail
+
+inline uint8_t f32_to_fp8_e4m3_fnuz_rne(float val) {
+  return detail::f32_to_fnuz_rne(val, 4, 3, 8).value;
+}
+
+inline uint8_t f32_to_fp8_e4m3_fnuz_sr(float val, uint32_t seed) {
+  return detail::f32_to_fnuz_sr(val, seed, 4, 3, 8).value;
 }
 
 namespace detail {
@@ -451,49 +487,11 @@ namespace detail {
 // the FNUZ NaN code when FP16_OVFL=0; the emulator regression is
 // Cdna3CvtFp8Test.SetregImm32ModeChangeRecomputesFp16OvflRounding.
 inline bool f32_to_fp8_e4m3_fnuz_rne_overflows(float val) {
-  if (std::isnan(val))
-    return false;
-  uint32_t f = std::bit_cast<uint32_t>(val);
-  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
-  if (f_exp == 0xFF)
-    return true;
-  uint32_t f_mant = f & 0x7FFFFF;
-  int32_t exp = f_exp - 127 + 8;
-  if (exp <= 0)
-    return false;
-  if (exp > 15)
-    return true;
-  uint32_t round_bit = (f_mant >> 19) & 1;
-  uint32_t sticky = (f_mant & 0x7FFFF) ? 1 : 0;
-  uint32_t mant = (f_mant >> 20) & 0x7;
-  mant += round_bit & (sticky | (mant & 1));
-  if (mant > 0x7)
-    ++exp;
-  return exp > 15;
+  return f32_to_fnuz_rne(val, 4, 3, 8).overflow;
 }
 
 inline bool f32_to_fp8_e4m3_fnuz_sr_overflows(float val, uint32_t seed) {
-  if (std::isnan(val))
-    return false;
-  uint32_t f = std::bit_cast<uint32_t>(val);
-  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
-  if (f_exp == 0xFF)
-    return true;
-  uint32_t f_mant = f & 0x7FFFFF;
-  int32_t exp = f_exp - 127 + 8;
-  if (exp <= 0)
-    return false;
-  if (exp > 15)
-    return true;
-  uint32_t trunc_bits = f_mant & 0xFFFFF;
-  uint32_t random_add = seed >> 12;
-  uint32_t mant = (f_mant >> 20) & 0x7;
-  if ((trunc_bits + random_add) > 0xFFFFF) {
-    ++mant;
-    if (mant > 0x7)
-      ++exp;
-  }
-  return exp > 15;
+  return f32_to_fnuz_sr(val, seed, 4, 3, 8).overflow;
 }
 
 } // namespace detail
@@ -793,89 +791,11 @@ inline float bf8_e5m2_fnuz_to_f32(uint8_t v) {
 }
 
 inline uint8_t f32_to_bf8_e5m2_fnuz_rne(float val) {
-  uint32_t f = std::bit_cast<uint32_t>(val);
-  uint32_t sign = (f >> 24) & 0x80;
-  if (std::isnan(val))
-    return 0x80u;
-  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
-  uint32_t f_mant = f & 0x7FFFFF;
-  if (f_exp == 0xFF)
-    return static_cast<uint8_t>(sign | 0x7F);
-  int32_t exp = f_exp - 127 + 16;
-  if (exp <= 0) {
-    if (exp < -2)
-      return 0;
-    uint32_t mant = f_mant | 0x800000;
-    int shift = 22 - exp;
-    if (shift > 24)
-      return 0;
-    uint32_t round_bit = (mant >> (shift - 1)) & 1;
-    uint32_t sticky = (mant & ((1u << (shift - 1)) - 1)) ? 1 : 0;
-    uint32_t result = mant >> shift;
-    result += round_bit & (sticky | (result & 1));
-    if (result >= 4)
-      return static_cast<uint8_t>(sign | (1 << 2));
-    if (result == 0)
-      return 0;
-    return static_cast<uint8_t>(sign | (result & 0x3));
-  }
-  if (exp > 31)
-    return static_cast<uint8_t>(sign | 0x7F);
-  uint32_t round_bit = (f_mant >> 20) & 1;
-  uint32_t sticky = (f_mant & 0xFFFFF) ? 1 : 0;
-  uint32_t mant = (f_mant >> 21) & 0x3;
-  mant += round_bit & (sticky | (mant & 1));
-  if (mant > 0x3) {
-    mant = 0;
-    exp += 1;
-  }
-  if (exp > 31)
-    return static_cast<uint8_t>(sign | 0x7F);
-  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 2) | mant);
+  return detail::f32_to_fnuz_rne(val, 5, 2, 16).value;
 }
 
 inline uint8_t f32_to_bf8_e5m2_fnuz_sr(float val, uint32_t seed) {
-  if (std::isnan(val))
-    return 0x80u;
-  uint32_t f = std::bit_cast<uint32_t>(val);
-  uint32_t sign = (f >> 24) & 0x80;
-  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
-  uint32_t f_mant = f & 0x7FFFFF;
-  if (f_exp == 0xFF)
-    return static_cast<uint8_t>(sign | 0x7F);
-  int32_t exp = f_exp - 127 + 16;
-  if (exp <= 0) {
-    uint32_t full_mant = f_mant | 0x800000;
-    int shift = 22 - exp;
-    if (shift > 24)
-      return 0;
-    uint32_t result = full_mant >> shift;
-    uint32_t trunc_mask = (1u << shift) - 1;
-    uint32_t trunc_bits = full_mant & trunc_mask;
-    uint32_t random_add = seed >> (32 - shift);
-    if ((trunc_bits + random_add) >= (1u << shift))
-      result += 1;
-    if (result >= 4)
-      return static_cast<uint8_t>(sign | (1 << 2));
-    if (result == 0)
-      return 0;
-    return static_cast<uint8_t>(sign | (result & 0x3));
-  }
-  if (exp > 31)
-    return static_cast<uint8_t>(sign | 0x7F);
-  uint32_t trunc_bits = f_mant & 0x1FFFFF;
-  uint32_t random_add = seed >> 11;
-  uint32_t mant = (f_mant >> 21) & 0x3;
-  if ((trunc_bits + random_add) > 0x1FFFFF) {
-    mant += 1;
-    if (mant > 0x3) {
-      mant = 0;
-      exp += 1;
-    }
-  }
-  if (exp > 31)
-    return static_cast<uint8_t>(sign | 0x7F);
-  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 2) | mant);
+  return detail::f32_to_fnuz_sr(val, seed, 5, 2, 16).value;
 }
 
 namespace detail {
@@ -883,49 +803,11 @@ namespace detail {
 // See the FP8 FNUZ overflow note above; BF8 FNUZ uses the same rounded-overflow
 // ordering.
 inline bool f32_to_bf8_e5m2_fnuz_rne_overflows(float val) {
-  if (std::isnan(val))
-    return false;
-  uint32_t f = std::bit_cast<uint32_t>(val);
-  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
-  if (f_exp == 0xFF)
-    return true;
-  uint32_t f_mant = f & 0x7FFFFF;
-  int32_t exp = f_exp - 127 + 16;
-  if (exp <= 0)
-    return false;
-  if (exp > 31)
-    return true;
-  uint32_t round_bit = (f_mant >> 20) & 1;
-  uint32_t sticky = (f_mant & 0xFFFFF) ? 1 : 0;
-  uint32_t mant = (f_mant >> 21) & 0x3;
-  mant += round_bit & (sticky | (mant & 1));
-  if (mant > 0x3)
-    ++exp;
-  return exp > 31;
+  return f32_to_fnuz_rne(val, 5, 2, 16).overflow;
 }
 
 inline bool f32_to_bf8_e5m2_fnuz_sr_overflows(float val, uint32_t seed) {
-  if (std::isnan(val))
-    return false;
-  uint32_t f = std::bit_cast<uint32_t>(val);
-  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
-  if (f_exp == 0xFF)
-    return true;
-  uint32_t f_mant = f & 0x7FFFFF;
-  int32_t exp = f_exp - 127 + 16;
-  if (exp <= 0)
-    return false;
-  if (exp > 31)
-    return true;
-  uint32_t trunc_bits = f_mant & 0x1FFFFF;
-  uint32_t random_add = seed >> 11;
-  uint32_t mant = (f_mant >> 21) & 0x3;
-  if ((trunc_bits + random_add) > 0x1FFFFF) {
-    ++mant;
-    if (mant > 0x3)
-      ++exp;
-  }
-  return exp > 31;
+  return f32_to_fnuz_sr(val, seed, 5, 2, 16).overflow;
 }
 
 } // namespace detail

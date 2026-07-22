@@ -14,351 +14,309 @@
 namespace rocjitsu {
 namespace rdna4 {
 
-class SNopSopp : public Sopp
-{
-  public:
-   SNopSopp(const MachineInst * inst);
+class SNopSopp : public Sopp {
+public:
+  SNopSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SSetkillSopp : public Sopp
-{
-  public:
-   SSetkillSopp(const MachineInst * inst);
+class SSetkillSopp : public Sopp {
+public:
+  SSetkillSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SSethaltSopp : public Sopp
-{
-  public:
-   SSethaltSopp(const MachineInst * inst);
+class SSethaltSopp : public Sopp {
+public:
+  SSethaltSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SSleepSopp : public Sopp
-{
-  public:
-   SSleepSopp(const MachineInst * inst);
+class SSleepSopp : public Sopp {
+public:
+  SSleepSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SClauseSopp : public Sopp
-{
-  public:
-   SClauseSopp(const MachineInst * inst);
+class SClauseSopp : public Sopp {
+public:
+  SClauseSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SDelayAluSopp : public Sopp
-{
-  public:
-   SDelayAluSopp(const MachineInst * inst);
+class SDelayAluSopp : public Sopp {
+public:
+  SDelayAluSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SWaitAluSopp : public Sopp
-{
-  public:
-   SWaitAluSopp(const MachineInst * inst);
+class SWaitAluSopp : public Sopp {
+public:
+  SWaitAluSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SWaitcntSopp : public Sopp
-{
-  public:
-   SWaitcntSopp(const MachineInst * inst);
+class SWaitcntSopp : public Sopp {
+public:
+  SWaitcntSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SWaitIdleSopp : public Sopp
-{
-  public:
-   SWaitIdleSopp(const MachineInst * inst);
+class SWaitIdleSopp : public Sopp {
+public:
+  SWaitIdleSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-} ;
+};
 
-class SWaitEventSopp : public Sopp
-{
-  public:
-   SWaitEventSopp(const MachineInst * inst);
+class SWaitEventSopp : public Sopp {
+public:
+  SWaitEventSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class STrapSopp : public Sopp
-{
-  public:
-   STrapSopp(const MachineInst * inst);
+class STrapSopp : public Sopp {
+public:
+  STrapSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SRoundModeSopp : public Sopp
-{
-  public:
-   SRoundModeSopp(const MachineInst * inst);
+class SRoundModeSopp : public Sopp {
+public:
+  SRoundModeSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SDenormModeSopp : public Sopp
-{
-  public:
-   SDenormModeSopp(const MachineInst * inst);
+class SDenormModeSopp : public Sopp {
+public:
+  SDenormModeSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SBarrierWaitSopp : public Sopp
-{
-  public:
-   SBarrierWaitSopp(const MachineInst * inst);
+class SBarrierWaitSopp : public Sopp {
+public:
+  SBarrierWaitSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SCodeEndSopp : public Sopp
-{
-  public:
-   SCodeEndSopp(const MachineInst * inst);
+class SCodeEndSopp : public Sopp {
+public:
+  SCodeEndSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-} ;
+};
 
-class SBranchSopp : public Sopp
-{
-  public:
-   SBranchSopp(const MachineInst * inst);
+class SBranchSopp : public Sopp {
+public:
+  SBranchSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
-} ;
+};
 
-class SCbranchScc0Sopp : public Sopp
-{
-  public:
-   SCbranchScc0Sopp(const MachineInst * inst);
+class SCbranchScc0Sopp : public Sopp {
+public:
+  SCbranchScc0Sopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
   Operand scc;
-} ;
+};
 
-class SCbranchScc1Sopp : public Sopp
-{
-  public:
-   SCbranchScc1Sopp(const MachineInst * inst);
+class SCbranchScc1Sopp : public Sopp {
+public:
+  SCbranchScc1Sopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
   Operand scc;
-} ;
+};
 
-class SCbranchVcczSopp : public Sopp
-{
-  public:
-   SCbranchVcczSopp(const MachineInst * inst);
+class SCbranchVcczSopp : public Sopp {
+public:
+  SCbranchVcczSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
   Operand vcc;
-} ;
+};
 
-class SCbranchVccnzSopp : public Sopp
-{
-  public:
-   SCbranchVccnzSopp(const MachineInst * inst);
+class SCbranchVccnzSopp : public Sopp {
+public:
+  SCbranchVccnzSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
   Operand vcc;
-} ;
+};
 
-class SCbranchExeczSopp : public Sopp
-{
-  public:
-   SCbranchExeczSopp(const MachineInst * inst);
+class SCbranchExeczSopp : public Sopp {
+public:
+  SCbranchExeczSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
   Operand sdst_exec;
-} ;
+};
 
-class SCbranchExecnzSopp : public Sopp
-{
-  public:
-   SCbranchExecnzSopp(const MachineInst * inst);
+class SCbranchExecnzSopp : public Sopp {
+public:
+  SCbranchExecnzSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
   Operand sdst_exec;
-} ;
+};
 
-class SEndpgmSopp : public Sopp
-{
-  public:
-   SEndpgmSopp(const MachineInst * inst);
+class SEndpgmSopp : public Sopp {
+public:
+  SEndpgmSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-} ;
+};
 
-class SEndpgmSavedSopp : public Sopp
-{
-  public:
-   SEndpgmSavedSopp(const MachineInst * inst);
+class SEndpgmSavedSopp : public Sopp {
+public:
+  SEndpgmSavedSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-} ;
+};
 
-class SWakeupSopp : public Sopp
-{
-  public:
-   SWakeupSopp(const MachineInst * inst);
+class SWakeupSopp : public Sopp {
+public:
+  SWakeupSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-} ;
+};
 
-class SSetprioSopp : public Sopp
-{
-  public:
-   SSetprioSopp(const MachineInst * inst);
+class SSetprioSopp : public Sopp {
+public:
+  SSetprioSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SSendmsgSopp : public Sopp
-{
-  public:
-   SSendmsgSopp(const MachineInst * inst);
+class SSendmsgSopp : public Sopp {
+public:
+  SSendmsgSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
   Operand m0;
-} ;
+};
 
-class SSendmsghaltSopp : public Sopp
-{
-  public:
-   SSendmsghaltSopp(const MachineInst * inst);
+class SSendmsghaltSopp : public Sopp {
+public:
+  SSendmsghaltSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
   Operand m0;
-} ;
+};
 
-class SIncperflevelSopp : public Sopp
-{
-  public:
-   SIncperflevelSopp(const MachineInst * inst);
+class SIncperflevelSopp : public Sopp {
+public:
+  SIncperflevelSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SDecperflevelSopp : public Sopp
-{
-  public:
-   SDecperflevelSopp(const MachineInst * inst);
+class SDecperflevelSopp : public Sopp {
+public:
+  SDecperflevelSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class STtracedataSopp : public Sopp
-{
-  public:
-   STtracedataSopp(const MachineInst * inst);
+class STtracedataSopp : public Sopp {
+public:
+  STtracedataSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand m0;
-} ;
+};
 
-class STtracedataImmSopp : public Sopp
-{
-  public:
-   STtracedataImmSopp(const MachineInst * inst);
+class STtracedataImmSopp : public Sopp {
+public:
+  STtracedataImmSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
   Operand m0;
-} ;
+};
 
-class SIcacheInvSopp : public Sopp
-{
-  public:
-   SIcacheInvSopp(const MachineInst * inst);
+class SIcacheInvSopp : public Sopp {
+public:
+  SIcacheInvSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-} ;
+};
 
-class SWaitLoadcntSopp : public Sopp
-{
-  public:
-   SWaitLoadcntSopp(const MachineInst * inst);
+class SWaitLoadcntSopp : public Sopp {
+public:
+  SWaitLoadcntSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SWaitStorecntSopp : public Sopp
-{
-  public:
-   SWaitStorecntSopp(const MachineInst * inst);
+class SWaitStorecntSopp : public Sopp {
+public:
+  SWaitStorecntSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SWaitSamplecntSopp : public Sopp
-{
-  public:
-   SWaitSamplecntSopp(const MachineInst * inst);
+class SWaitSamplecntSopp : public Sopp {
+public:
+  SWaitSamplecntSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SWaitBvhcntSopp : public Sopp
-{
-  public:
-   SWaitBvhcntSopp(const MachineInst * inst);
+class SWaitBvhcntSopp : public Sopp {
+public:
+  SWaitBvhcntSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SWaitExpcntSopp : public Sopp
-{
-  public:
-   SWaitExpcntSopp(const MachineInst * inst);
+class SWaitExpcntSopp : public Sopp {
+public:
+  SWaitExpcntSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SWaitDscntSopp : public Sopp
-{
-  public:
-   SWaitDscntSopp(const MachineInst * inst);
+class SWaitDscntSopp : public Sopp {
+public:
+  SWaitDscntSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SWaitKmcntSopp : public Sopp
-{
-  public:
-   SWaitKmcntSopp(const MachineInst * inst);
+class SWaitKmcntSopp : public Sopp {
+public:
+  SWaitKmcntSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SWaitLoadcntDscntSopp : public Sopp
-{
-  public:
-   SWaitLoadcntDscntSopp(const MachineInst * inst);
+class SWaitLoadcntDscntSopp : public Sopp {
+public:
+  SWaitLoadcntDscntSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
-class SWaitStorecntDscntSopp : public Sopp
-{
-  public:
-   SWaitStorecntDscntSopp(const MachineInst * inst);
+class SWaitStorecntDscntSopp : public Sopp {
+public:
+  SWaitStorecntDscntSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-} ;
+};
 
 } // namespace rdna4
 } // namespace rocjitsu

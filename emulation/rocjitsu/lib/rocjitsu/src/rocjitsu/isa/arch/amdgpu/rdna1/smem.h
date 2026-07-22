@@ -14,193 +14,173 @@
 namespace rocjitsu {
 namespace rdna1 {
 
-class SLoadDwordSmem : public Smem
-{
-  public:
-   SLoadDwordSmem(const MachineInst * inst);
+class SLoadDwordSmem : public Smem {
+public:
+  SLoadDwordSmem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
-} ;
+};
 
-class SLoadDwordx2Smem : public Smem
-{
-  public:
-   SLoadDwordx2Smem(const MachineInst * inst);
+class SLoadDwordx2Smem : public Smem {
+public:
+  SLoadDwordx2Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
-} ;
+};
 
-class SLoadDwordx4Smem : public Smem
-{
-  public:
-   SLoadDwordx4Smem(const MachineInst * inst);
+class SLoadDwordx4Smem : public Smem {
+public:
+  SLoadDwordx4Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
-} ;
+};
 
-class SLoadDwordx8Smem : public Smem
-{
-  public:
-   SLoadDwordx8Smem(const MachineInst * inst);
+class SLoadDwordx8Smem : public Smem {
+public:
+  SLoadDwordx8Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
-} ;
+};
 
-class SLoadDwordx16Smem : public Smem
-{
-  public:
-   SLoadDwordx16Smem(const MachineInst * inst);
+class SLoadDwordx16Smem : public Smem {
+public:
+  SLoadDwordx16Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
-} ;
+};
 
-class SScratchLoadDwordSmem : public Smem
-{
-  public:
-   SScratchLoadDwordSmem(const MachineInst * inst);
+class SScratchLoadDwordSmem : public Smem {
+public:
+  SScratchLoadDwordSmem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
-} ;
+};
 
-class SScratchLoadDwordx2Smem : public Smem
-{
-  public:
-   SScratchLoadDwordx2Smem(const MachineInst * inst);
+class SScratchLoadDwordx2Smem : public Smem {
+public:
+  SScratchLoadDwordx2Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
-} ;
+};
 
-class SScratchLoadDwordx4Smem : public Smem
-{
-  public:
-   SScratchLoadDwordx4Smem(const MachineInst * inst);
+class SScratchLoadDwordx4Smem : public Smem {
+public:
+  SScratchLoadDwordx4Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
-} ;
+};
 
-class SBufferLoadDwordSmem : public Smem
-{
-  public:
-   SBufferLoadDwordSmem(const MachineInst * inst);
+class SBufferLoadDwordSmem : public Smem {
+public:
+  SBufferLoadDwordSmem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
-} ;
+};
 
-class SBufferLoadDwordx2Smem : public Smem
-{
-  public:
-   SBufferLoadDwordx2Smem(const MachineInst * inst);
+class SBufferLoadDwordx2Smem : public Smem {
+public:
+  SBufferLoadDwordx2Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
-} ;
+};
 
-class SBufferLoadDwordx4Smem : public Smem
-{
-  public:
-   SBufferLoadDwordx4Smem(const MachineInst * inst);
+class SBufferLoadDwordx4Smem : public Smem {
+public:
+  SBufferLoadDwordx4Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
-} ;
+};
 
-class SBufferLoadDwordx8Smem : public Smem
-{
-  public:
-   SBufferLoadDwordx8Smem(const MachineInst * inst);
+class SBufferLoadDwordx8Smem : public Smem {
+public:
+  SBufferLoadDwordx8Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
-} ;
+};
 
-class SBufferLoadDwordx16Smem : public Smem
-{
-  public:
-   SBufferLoadDwordx16Smem(const MachineInst * inst);
+class SBufferLoadDwordx16Smem : public Smem {
+public:
+  SBufferLoadDwordx16Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
-} ;
+};
 
-class SGl1InvSmem : public Smem
-{
-  public:
-   SGl1InvSmem(const MachineInst * inst);
+class SGl1InvSmem : public Smem {
+public:
+  SGl1InvSmem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-} ;
+};
 
-class SDcacheInvSmem : public Smem
-{
-  public:
-   SDcacheInvSmem(const MachineInst * inst);
+class SDcacheInvSmem : public Smem {
+public:
+  SDcacheInvSmem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-} ;
+};
 
-class SMemtimeSmem : public Smem
-{
-  public:
-   SMemtimeSmem(const MachineInst * inst);
+class SMemtimeSmem : public Smem {
+public:
+  SMemtimeSmem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
-} ;
+};
 
-class SMemrealtimeSmem : public Smem
-{
-  public:
-   SMemrealtimeSmem(const MachineInst * inst);
+class SMemrealtimeSmem : public Smem {
+public:
+  SMemrealtimeSmem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
-} ;
+};
 
-class SAtcProbeSmem : public Smem
-{
-  public:
-   SAtcProbeSmem(const MachineInst * inst);
+class SAtcProbeSmem : public Smem {
+public:
+  SAtcProbeSmem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
-} ;
+};
 
-class SAtcProbeBufferSmem : public Smem
-{
-  public:
-   SAtcProbeBufferSmem(const MachineInst * inst);
+class SAtcProbeBufferSmem : public Smem {
+public:
+  SAtcProbeBufferSmem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
-} ;
+};
 
-class SGetWaveidInWorkgroupSmem : public Smem
-{
-  public:
-   SGetWaveidInWorkgroupSmem(const MachineInst * inst);
+class SGetWaveidInWorkgroupSmem : public Smem {
+public:
+  SGetWaveidInWorkgroupSmem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
-} ;
+};
 
 } // namespace rdna1
 } // namespace rocjitsu

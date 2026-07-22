@@ -14,38 +14,35 @@
 namespace rocjitsu {
 namespace cdna1 {
 
-class VInterpP1F32Vintrp : public Vintrp
-{
-  public:
-   VInterpP1F32Vintrp(const MachineInst * inst);
+class VInterpP1F32Vintrp : public Vintrp {
+public:
+  VInterpP1F32Vintrp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vsrc;
   Operand attr;
   Operand m0;
-} ;
+};
 
-class VInterpP2F32Vintrp : public Vintrp
-{
-  public:
-   VInterpP2F32Vintrp(const MachineInst * inst);
+class VInterpP2F32Vintrp : public Vintrp {
+public:
+  VInterpP2F32Vintrp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vsrc;
   Operand attr;
   Operand m0;
-} ;
+};
 
-class VInterpMovF32Vintrp : public Vintrp
-{
-  public:
-   VInterpMovF32Vintrp(const MachineInst * inst);
+class VInterpMovF32Vintrp : public Vintrp {
+public:
+  VInterpMovF32Vintrp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vsrc;
   Operand attr;
   Operand m0;
-} ;
+};
 
 } // namespace cdna1
 } // namespace rocjitsu

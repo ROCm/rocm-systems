@@ -5,25 +5,49 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3/flat.h"
-#include "util/except.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
-#include <cstring>
-#include <memory>
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
+#include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <limits>
-#include "rocjitsu/vm/amdgpu/register_access.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna3 {
 
-FlatLoadU8Flat::FlatLoadU8Flat(const MachineInst *inst) : Flat("flat_load_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatLoadU8Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &flat_scratch;num_src_ = 2;num_dst_ = 1;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatLoadU8Flat::FlatLoadU8Flat(const MachineInst *inst)
+    : Flat("flat_load_u8", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatLoadU8Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &flat_scratch;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatLoadU8Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -38,7 +62,31 @@ void FlatLoadU8Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatLoadI8Flat::FlatLoadI8Flat(const MachineInst *inst) : Flat("flat_load_i8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatLoadI8Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &flat_scratch;num_src_ = 2;num_dst_ = 1;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatLoadI8Flat::FlatLoadI8Flat(const MachineInst *inst)
+    : Flat("flat_load_i8", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatLoadI8Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &flat_scratch;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatLoadI8Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -54,7 +102,31 @@ void FlatLoadI8Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatLoadU16Flat::FlatLoadU16Flat(const MachineInst *inst) : Flat("flat_load_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatLoadU16Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &flat_scratch;num_src_ = 2;num_dst_ = 1;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatLoadU16Flat::FlatLoadU16Flat(const MachineInst *inst)
+    : Flat("flat_load_u16", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatLoadU16Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &flat_scratch;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatLoadU16Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -69,7 +141,31 @@ void FlatLoadU16Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatLoadI16Flat::FlatLoadI16Flat(const MachineInst *inst) : Flat("flat_load_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatLoadI16Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &flat_scratch;num_src_ = 2;num_dst_ = 1;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatLoadI16Flat::FlatLoadI16Flat(const MachineInst *inst)
+    : Flat("flat_load_i16", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatLoadI16Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &flat_scratch;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatLoadI16Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -85,7 +181,31 @@ void FlatLoadI16Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatLoadB32Flat::FlatLoadB32Flat(const MachineInst *inst) : Flat("flat_load_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatLoadB32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &flat_scratch;num_src_ = 2;num_dst_ = 1;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatLoadB32Flat::FlatLoadB32Flat(const MachineInst *inst)
+    : Flat("flat_load_b32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatLoadB32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &flat_scratch;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatLoadB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -100,7 +220,31 @@ void FlatLoadB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatLoadB64Flat::FlatLoadB64Flat(const MachineInst *inst) : Flat("flat_load_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatLoadB64Flat>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &flat_scratch;num_src_ = 2;num_dst_ = 1;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatLoadB64Flat::FlatLoadB64Flat(const MachineInst *inst)
+    : Flat("flat_load_b64", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatLoadB64Flat>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &flat_scratch;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatLoadB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -115,7 +259,31 @@ void FlatLoadB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatLoadB96Flat::FlatLoadB96Flat(const MachineInst *inst) : Flat("flat_load_b96", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatLoadB96Flat>()), vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &flat_scratch;num_src_ = 2;num_dst_ = 1;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatLoadB96Flat::FlatLoadB96Flat(const MachineInst *inst)
+    : Flat("flat_load_b96", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatLoadB96Flat>()),
+      vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &flat_scratch;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatLoadB96Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -130,7 +298,31 @@ void FlatLoadB96Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatLoadB128Flat::FlatLoadB128Flat(const MachineInst *inst) : Flat("flat_load_b128", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatLoadB128Flat>()), vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &flat_scratch;num_src_ = 2;num_dst_ = 1;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatLoadB128Flat::FlatLoadB128Flat(const MachineInst *inst)
+    : Flat("flat_load_b128", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatLoadB128Flat>()),
+      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &flat_scratch;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatLoadB128Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -145,7 +337,31 @@ void FlatLoadB128Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatStoreB8Flat::FlatStoreB8Flat(const MachineInst *inst) : Flat("flat_store_b8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatStoreB8Flat>()), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatStoreB8Flat::FlatStoreB8Flat(const MachineInst *inst)
+    : Flat("flat_store_b8", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatStoreB8Flat>()),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatStoreB8Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -161,14 +377,39 @@ void FlatStoreB8Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 1);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
 }
 
-FlatStoreB16Flat::FlatStoreB16Flat(const MachineInst *inst) : Flat("flat_store_b16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatStoreB16Flat>()), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatStoreB16Flat::FlatStoreB16Flat(const MachineInst *inst)
+    : Flat("flat_store_b16", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatStoreB16Flat>()),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatStoreB16Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -184,14 +425,39 @@ void FlatStoreB16Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
 }
 
-FlatStoreB32Flat::FlatStoreB32Flat(const MachineInst *inst) : Flat("flat_store_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatStoreB32Flat>()), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatStoreB32Flat::FlatStoreB32Flat(const MachineInst *inst)
+    : Flat("flat_store_b32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatStoreB32Flat>()),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatStoreB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -207,14 +473,39 @@ void FlatStoreB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-FlatStoreB64Flat::FlatStoreB64Flat(const MachineInst *inst) : Flat("flat_store_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatStoreB64Flat>()), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatStoreB64Flat::FlatStoreB64Flat(const MachineInst *inst)
+    : Flat("flat_store_b64", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatStoreB64Flat>()),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatStoreB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -230,7 +521,8 @@ void FlatStoreB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -239,7 +531,31 @@ void FlatStoreB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatStoreB96Flat::FlatStoreB96Flat(const MachineInst *inst) : Flat("flat_store_b96", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatStoreB96Flat>()), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatStoreB96Flat::FlatStoreB96Flat(const MachineInst *inst)
+    : Flat("flat_store_b96", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatStoreB96Flat>()),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatStoreB96Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -255,7 +571,8 @@ void FlatStoreB96Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 12);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -266,7 +583,31 @@ void FlatStoreB96Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatStoreB128Flat::FlatStoreB128Flat(const MachineInst *inst) : Flat("flat_store_b128", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatStoreB128Flat>()), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatStoreB128Flat::FlatStoreB128Flat(const MachineInst *inst)
+    : Flat("flat_store_b128", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatStoreB128Flat>()),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatStoreB128Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -282,7 +623,8 @@ void FlatStoreB128Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -295,7 +637,31 @@ void FlatStoreB128Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatLoadD16U8Flat::FlatLoadD16U8Flat(const MachineInst *inst) : Flat("flat_load_d16_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatLoadD16U8Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &flat_scratch;num_src_ = 2;num_dst_ = 1;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatLoadD16U8Flat::FlatLoadD16U8Flat(const MachineInst *inst)
+    : Flat("flat_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatLoadD16U8Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &flat_scratch;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatLoadD16U8Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -311,7 +677,31 @@ void FlatLoadD16U8Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatLoadD16I8Flat::FlatLoadD16I8Flat(const MachineInst *inst) : Flat("flat_load_d16_i8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatLoadD16I8Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &flat_scratch;num_src_ = 2;num_dst_ = 1;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatLoadD16I8Flat::FlatLoadD16I8Flat(const MachineInst *inst)
+    : Flat("flat_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatLoadD16I8Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &flat_scratch;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatLoadD16I8Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -328,7 +718,31 @@ void FlatLoadD16I8Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatLoadD16B16Flat::FlatLoadD16B16Flat(const MachineInst *inst) : Flat("flat_load_d16_b16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatLoadD16B16Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &flat_scratch;num_src_ = 2;num_dst_ = 1;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatLoadD16B16Flat::FlatLoadD16B16Flat(const MachineInst *inst)
+    : Flat("flat_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatLoadD16B16Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &flat_scratch;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatLoadD16B16Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -344,7 +758,31 @@ void FlatLoadD16B16Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatLoadD16HiU8Flat::FlatLoadD16HiU8Flat(const MachineInst *inst) : Flat("flat_load_d16_hi_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatLoadD16HiU8Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &flat_scratch;num_src_ = 2;num_dst_ = 1;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatLoadD16HiU8Flat::FlatLoadD16HiU8Flat(const MachineInst *inst)
+    : Flat("flat_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatLoadD16HiU8Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &flat_scratch;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatLoadD16HiU8Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -360,7 +798,31 @@ void FlatLoadD16HiU8Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatLoadD16HiI8Flat::FlatLoadD16HiI8Flat(const MachineInst *inst) : Flat("flat_load_d16_hi_i8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatLoadD16HiI8Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &flat_scratch;num_src_ = 2;num_dst_ = 1;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatLoadD16HiI8Flat::FlatLoadD16HiI8Flat(const MachineInst *inst)
+    : Flat("flat_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatLoadD16HiI8Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &flat_scratch;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatLoadD16HiI8Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -377,7 +839,31 @@ void FlatLoadD16HiI8Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatLoadD16HiB16Flat::FlatLoadD16HiB16Flat(const MachineInst *inst) : Flat("flat_load_d16_hi_b16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatLoadD16HiB16Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &addr;src_operands_[1] = &flat_scratch;num_src_ = 2;num_dst_ = 1;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatLoadD16HiB16Flat::FlatLoadD16HiB16Flat(const MachineInst *inst)
+    : Flat("flat_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatLoadD16HiB16Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &flat_scratch;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatLoadD16HiB16Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -393,7 +879,31 @@ void FlatLoadD16HiB16Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatStoreD16HiB8Flat::FlatStoreD16HiB8Flat(const MachineInst *inst) : Flat("flat_store_d16_hi_b8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatStoreD16HiB8Flat>()), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatStoreD16HiB8Flat::FlatStoreD16HiB8Flat(const MachineInst *inst)
+    : Flat("flat_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatStoreD16HiB8Flat>()),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatStoreD16HiB8Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -409,7 +919,8 @@ void FlatStoreD16HiB8Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 1);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
@@ -417,7 +928,31 @@ void FlatStoreD16HiB8Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatStoreD16HiB16Flat::FlatStoreD16HiB16Flat(const MachineInst *inst) : Flat("flat_store_d16_hi_b16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatStoreD16HiB16Flat>()), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatStoreD16HiB16Flat::FlatStoreD16HiB16Flat(const MachineInst *inst)
+    : Flat("flat_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatStoreD16HiB16Flat>()),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatStoreD16HiB16Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -433,7 +968,8 @@ void FlatStoreD16HiB16Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
@@ -441,7 +977,34 @@ void FlatStoreD16HiB16Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicSwapB32Flat::FlatAtomicSwapB32Flat(const MachineInst *inst) : Flat("flat_atomic_swap_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicSwapB32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicSwapB32Flat::FlatAtomicSwapB32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicSwapB32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicSwapB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -459,14 +1022,42 @@ void FlatAtomicSwapB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-FlatAtomicCmpswapB32Flat::FlatAtomicCmpswapB32Flat(const MachineInst *inst) : Flat("flat_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicCmpswapB32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicCmpswapB32Flat::FlatAtomicCmpswapB32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicCmpswapB32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicCmpswapB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -484,7 +1075,8 @@ void FlatAtomicCmpswapB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -493,7 +1085,34 @@ void FlatAtomicCmpswapB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicAddU32Flat::FlatAtomicAddU32Flat(const MachineInst *inst) : Flat("flat_atomic_add_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicAddU32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicAddU32Flat::FlatAtomicAddU32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicAddU32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicAddU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -511,14 +1130,42 @@ void FlatAtomicAddU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-FlatAtomicSubU32Flat::FlatAtomicSubU32Flat(const MachineInst *inst) : Flat("flat_atomic_sub_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicSubU32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicSubU32Flat::FlatAtomicSubU32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicSubU32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicSubU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -536,14 +1183,42 @@ void FlatAtomicSubU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-FlatAtomicMinI32Flat::FlatAtomicMinI32Flat(const MachineInst *inst) : Flat("flat_atomic_min_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicMinI32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicMinI32Flat::FlatAtomicMinI32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicMinI32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicMinI32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -561,14 +1236,42 @@ void FlatAtomicMinI32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-FlatAtomicMinU32Flat::FlatAtomicMinU32Flat(const MachineInst *inst) : Flat("flat_atomic_min_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicMinU32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicMinU32Flat::FlatAtomicMinU32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicMinU32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicMinU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -586,14 +1289,42 @@ void FlatAtomicMinU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-FlatAtomicMaxI32Flat::FlatAtomicMaxI32Flat(const MachineInst *inst) : Flat("flat_atomic_max_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicMaxI32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicMaxI32Flat::FlatAtomicMaxI32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicMaxI32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicMaxI32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -611,14 +1342,42 @@ void FlatAtomicMaxI32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-FlatAtomicMaxU32Flat::FlatAtomicMaxU32Flat(const MachineInst *inst) : Flat("flat_atomic_max_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicMaxU32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicMaxU32Flat::FlatAtomicMaxU32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicMaxU32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicMaxU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -636,14 +1395,42 @@ void FlatAtomicMaxU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-FlatAtomicAndB32Flat::FlatAtomicAndB32Flat(const MachineInst *inst) : Flat("flat_atomic_and_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicAndB32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicAndB32Flat::FlatAtomicAndB32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicAndB32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicAndB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -661,14 +1448,42 @@ void FlatAtomicAndB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-FlatAtomicOrB32Flat::FlatAtomicOrB32Flat(const MachineInst *inst) : Flat("flat_atomic_or_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicOrB32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicOrB32Flat::FlatAtomicOrB32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicOrB32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicOrB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -686,14 +1501,42 @@ void FlatAtomicOrB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-FlatAtomicXorB32Flat::FlatAtomicXorB32Flat(const MachineInst *inst) : Flat("flat_atomic_xor_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicXorB32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicXorB32Flat::FlatAtomicXorB32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicXorB32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicXorB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -711,14 +1554,42 @@ void FlatAtomicXorB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-FlatAtomicIncU32Flat::FlatAtomicIncU32Flat(const MachineInst *inst) : Flat("flat_atomic_inc_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicIncU32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicIncU32Flat::FlatAtomicIncU32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicIncU32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicIncU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -736,14 +1607,42 @@ void FlatAtomicIncU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-FlatAtomicDecU32Flat::FlatAtomicDecU32Flat(const MachineInst *inst) : Flat("flat_atomic_dec_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicDecU32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicDecU32Flat::FlatAtomicDecU32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicDecU32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicDecU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -761,14 +1660,42 @@ void FlatAtomicDecU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-FlatAtomicSwapB64Flat::FlatAtomicSwapB64Flat(const MachineInst *inst) : Flat("flat_atomic_swap_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicSwapB64Flat>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicSwapB64Flat::FlatAtomicSwapB64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicSwapB64Flat>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicSwapB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -786,7 +1713,8 @@ void FlatAtomicSwapB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -795,7 +1723,34 @@ void FlatAtomicSwapB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicCmpswapB64Flat::FlatAtomicCmpswapB64Flat(const MachineInst *inst) : Flat("flat_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicCmpswapB64Flat>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicCmpswapB64Flat::FlatAtomicCmpswapB64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicCmpswapB64Flat>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicCmpswapB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -813,7 +1768,8 @@ void FlatAtomicCmpswapB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -826,7 +1782,34 @@ void FlatAtomicCmpswapB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicAddU64Flat::FlatAtomicAddU64Flat(const MachineInst *inst) : Flat("flat_atomic_add_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicAddU64Flat>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicAddU64Flat::FlatAtomicAddU64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicAddU64Flat>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicAddU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -844,7 +1827,8 @@ void FlatAtomicAddU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -853,7 +1837,34 @@ void FlatAtomicAddU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicSubU64Flat::FlatAtomicSubU64Flat(const MachineInst *inst) : Flat("flat_atomic_sub_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicSubU64Flat>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicSubU64Flat::FlatAtomicSubU64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicSubU64Flat>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicSubU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -871,7 +1882,8 @@ void FlatAtomicSubU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -880,7 +1892,34 @@ void FlatAtomicSubU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicMinI64Flat::FlatAtomicMinI64Flat(const MachineInst *inst) : Flat("flat_atomic_min_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicMinI64Flat>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicMinI64Flat::FlatAtomicMinI64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicMinI64Flat>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicMinI64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -898,7 +1937,8 @@ void FlatAtomicMinI64Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -907,7 +1947,34 @@ void FlatAtomicMinI64Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicMinU64Flat::FlatAtomicMinU64Flat(const MachineInst *inst) : Flat("flat_atomic_min_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicMinU64Flat>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicMinU64Flat::FlatAtomicMinU64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicMinU64Flat>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicMinU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -925,7 +1992,8 @@ void FlatAtomicMinU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -934,7 +2002,34 @@ void FlatAtomicMinU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicMaxI64Flat::FlatAtomicMaxI64Flat(const MachineInst *inst) : Flat("flat_atomic_max_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicMaxI64Flat>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicMaxI64Flat::FlatAtomicMaxI64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicMaxI64Flat>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicMaxI64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -952,7 +2047,8 @@ void FlatAtomicMaxI64Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -961,7 +2057,34 @@ void FlatAtomicMaxI64Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicMaxU64Flat::FlatAtomicMaxU64Flat(const MachineInst *inst) : Flat("flat_atomic_max_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicMaxU64Flat>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicMaxU64Flat::FlatAtomicMaxU64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicMaxU64Flat>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicMaxU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -979,7 +2102,8 @@ void FlatAtomicMaxU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -988,7 +2112,34 @@ void FlatAtomicMaxU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicAndB64Flat::FlatAtomicAndB64Flat(const MachineInst *inst) : Flat("flat_atomic_and_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicAndB64Flat>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicAndB64Flat::FlatAtomicAndB64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicAndB64Flat>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicAndB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1006,7 +2157,8 @@ void FlatAtomicAndB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1015,7 +2167,34 @@ void FlatAtomicAndB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicOrB64Flat::FlatAtomicOrB64Flat(const MachineInst *inst) : Flat("flat_atomic_or_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicOrB64Flat>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicOrB64Flat::FlatAtomicOrB64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicOrB64Flat>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicOrB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1033,7 +2212,8 @@ void FlatAtomicOrB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1042,7 +2222,34 @@ void FlatAtomicOrB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicXorB64Flat::FlatAtomicXorB64Flat(const MachineInst *inst) : Flat("flat_atomic_xor_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicXorB64Flat>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicXorB64Flat::FlatAtomicXorB64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicXorB64Flat>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicXorB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1060,7 +2267,8 @@ void FlatAtomicXorB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1069,7 +2277,34 @@ void FlatAtomicXorB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicIncU64Flat::FlatAtomicIncU64Flat(const MachineInst *inst) : Flat("flat_atomic_inc_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicIncU64Flat>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicIncU64Flat::FlatAtomicIncU64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicIncU64Flat>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicIncU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1087,7 +2322,8 @@ void FlatAtomicIncU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1096,7 +2332,34 @@ void FlatAtomicIncU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicDecU64Flat::FlatAtomicDecU64Flat(const MachineInst *inst) : Flat("flat_atomic_dec_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicDecU64Flat>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicDecU64Flat::FlatAtomicDecU64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicDecU64Flat>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicDecU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1114,7 +2377,8 @@ void FlatAtomicDecU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1123,7 +2387,34 @@ void FlatAtomicDecU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicCmpswapF32Flat::FlatAtomicCmpswapF32Flat(const MachineInst *inst) : Flat("flat_atomic_cmpswap_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicCmpswapF32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicCmpswapF32Flat::FlatAtomicCmpswapF32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_cmpswap_f32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicCmpswapF32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicCmpswapF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1141,7 +2432,8 @@ void FlatAtomicCmpswapF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1150,7 +2442,34 @@ void FlatAtomicCmpswapF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-FlatAtomicMinF32Flat::FlatAtomicMinF32Flat(const MachineInst *inst) : Flat("flat_atomic_min_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicMinF32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicMinF32Flat::FlatAtomicMinF32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_min_f32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicMinF32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicMinF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1168,14 +2487,42 @@ void FlatAtomicMinF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-FlatAtomicMaxF32Flat::FlatAtomicMaxF32Flat(const MachineInst *inst) : Flat("flat_atomic_max_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicMaxF32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicMaxF32Flat::FlatAtomicMaxF32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_max_f32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicMaxF32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicMaxF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1193,14 +2540,42 @@ void FlatAtomicMaxF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-FlatAtomicAddF32Flat::FlatAtomicAddF32Flat(const MachineInst *inst) : Flat("flat_atomic_add_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<FlatAtomicAddF32Flat>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->addr), data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->data), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {src_operands_[0] = &addr;src_operands_[1] = &data;src_operands_[2] = &flat_scratch;num_src_ = 3;num_dst_ = 0;if ((inst_.glc != 0)) dst_operands_[num_dst_++] = &vdst;if (inst_.seg == 1) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  if (inst_.saddr != 0x7F) {    saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);    src_operands_[num_src_++] = &saddr;  }} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {  addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(&inst_)->addr);  saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);  src_operands_[num_src_++] = &saddr;}flat_scratch.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+FlatAtomicAddF32Flat::FlatAtomicAddF32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<FlatAtomicAddF32Flat>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &flat_scratch;
+  num_src_ = 3;
+  num_dst_ = 0;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void FlatAtomicAddF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1218,7 +2593,8 @@ void FlatAtomicAddF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }

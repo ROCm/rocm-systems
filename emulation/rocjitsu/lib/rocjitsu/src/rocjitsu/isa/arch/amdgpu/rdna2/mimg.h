@@ -14,1389 +14,1259 @@
 namespace rocjitsu {
 namespace rdna2 {
 
-class ImageLoadMimg : public Mimg
-{
-  public:
-   ImageLoadMimg(const MachineInst * inst);
+class ImageLoadMimg : public Mimg {
+public:
+  ImageLoadMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageLoadMipMimg : public Mimg
-{
-  public:
-   ImageLoadMipMimg(const MachineInst * inst);
+class ImageLoadMipMimg : public Mimg {
+public:
+  ImageLoadMipMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageLoadPckMimg : public Mimg
-{
-  public:
-   ImageLoadPckMimg(const MachineInst * inst);
+class ImageLoadPckMimg : public Mimg {
+public:
+  ImageLoadPckMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageLoadPckSgnMimg : public Mimg
-{
-  public:
-   ImageLoadPckSgnMimg(const MachineInst * inst);
+class ImageLoadPckSgnMimg : public Mimg {
+public:
+  ImageLoadPckSgnMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageLoadMipPckMimg : public Mimg
-{
-  public:
-   ImageLoadMipPckMimg(const MachineInst * inst);
+class ImageLoadMipPckMimg : public Mimg {
+public:
+  ImageLoadMipPckMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageLoadMipPckSgnMimg : public Mimg
-{
-  public:
-   ImageLoadMipPckSgnMimg(const MachineInst * inst);
+class ImageLoadMipPckSgnMimg : public Mimg {
+public:
+  ImageLoadMipPckSgnMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageStoreMimg : public Mimg
-{
-  public:
-   ImageStoreMimg(const MachineInst * inst);
+class ImageStoreMimg : public Mimg {
+public:
+  ImageStoreMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageStoreMipMimg : public Mimg
-{
-  public:
-   ImageStoreMipMimg(const MachineInst * inst);
+class ImageStoreMipMimg : public Mimg {
+public:
+  ImageStoreMipMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageStorePckMimg : public Mimg
-{
-  public:
-   ImageStorePckMimg(const MachineInst * inst);
+class ImageStorePckMimg : public Mimg {
+public:
+  ImageStorePckMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageStoreMipPckMimg : public Mimg
-{
-  public:
-   ImageStoreMipPckMimg(const MachineInst * inst);
+class ImageStoreMipPckMimg : public Mimg {
+public:
+  ImageStoreMipPckMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageGetResinfoMimg : public Mimg
-{
-  public:
-   ImageGetResinfoMimg(const MachineInst * inst);
+class ImageGetResinfoMimg : public Mimg {
+public:
+  ImageGetResinfoMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicSwapMimg : public Mimg
-{
-  public:
-   ImageAtomicSwapMimg(const MachineInst * inst);
+class ImageAtomicSwapMimg : public Mimg {
+public:
+  ImageAtomicSwapMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicCmpswapMimg : public Mimg
-{
-  public:
-   ImageAtomicCmpswapMimg(const MachineInst * inst);
+class ImageAtomicCmpswapMimg : public Mimg {
+public:
+  ImageAtomicCmpswapMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicAddMimg : public Mimg
-{
-  public:
-   ImageAtomicAddMimg(const MachineInst * inst);
+class ImageAtomicAddMimg : public Mimg {
+public:
+  ImageAtomicAddMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicSubMimg : public Mimg
-{
-  public:
-   ImageAtomicSubMimg(const MachineInst * inst);
+class ImageAtomicSubMimg : public Mimg {
+public:
+  ImageAtomicSubMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicSminMimg : public Mimg
-{
-  public:
-   ImageAtomicSminMimg(const MachineInst * inst);
+class ImageAtomicSminMimg : public Mimg {
+public:
+  ImageAtomicSminMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicUminMimg : public Mimg
-{
-  public:
-   ImageAtomicUminMimg(const MachineInst * inst);
+class ImageAtomicUminMimg : public Mimg {
+public:
+  ImageAtomicUminMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicSmaxMimg : public Mimg
-{
-  public:
-   ImageAtomicSmaxMimg(const MachineInst * inst);
+class ImageAtomicSmaxMimg : public Mimg {
+public:
+  ImageAtomicSmaxMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicUmaxMimg : public Mimg
-{
-  public:
-   ImageAtomicUmaxMimg(const MachineInst * inst);
+class ImageAtomicUmaxMimg : public Mimg {
+public:
+  ImageAtomicUmaxMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicAndMimg : public Mimg
-{
-  public:
-   ImageAtomicAndMimg(const MachineInst * inst);
+class ImageAtomicAndMimg : public Mimg {
+public:
+  ImageAtomicAndMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicOrMimg : public Mimg
-{
-  public:
-   ImageAtomicOrMimg(const MachineInst * inst);
+class ImageAtomicOrMimg : public Mimg {
+public:
+  ImageAtomicOrMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicXorMimg : public Mimg
-{
-  public:
-   ImageAtomicXorMimg(const MachineInst * inst);
+class ImageAtomicXorMimg : public Mimg {
+public:
+  ImageAtomicXorMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicIncMimg : public Mimg
-{
-  public:
-   ImageAtomicIncMimg(const MachineInst * inst);
+class ImageAtomicIncMimg : public Mimg {
+public:
+  ImageAtomicIncMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicDecMimg : public Mimg
-{
-  public:
-   ImageAtomicDecMimg(const MachineInst * inst);
+class ImageAtomicDecMimg : public Mimg {
+public:
+  ImageAtomicDecMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicFcmpswapMimg : public Mimg
-{
-  public:
-   ImageAtomicFcmpswapMimg(const MachineInst * inst);
+class ImageAtomicFcmpswapMimg : public Mimg {
+public:
+  ImageAtomicFcmpswapMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicFminMimg : public Mimg
-{
-  public:
-   ImageAtomicFminMimg(const MachineInst * inst);
+class ImageAtomicFminMimg : public Mimg {
+public:
+  ImageAtomicFminMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageAtomicFmaxMimg : public Mimg
-{
-  public:
-   ImageAtomicFmaxMimg(const MachineInst * inst);
+class ImageAtomicFmaxMimg : public Mimg {
+public:
+  ImageAtomicFmaxMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageSampleMimg : public Mimg
-{
-  public:
-   ImageSampleMimg(const MachineInst * inst);
+class ImageSampleMimg : public Mimg {
+public:
+  ImageSampleMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleClMimg : public Mimg
-{
-  public:
-   ImageSampleClMimg(const MachineInst * inst);
+class ImageSampleClMimg : public Mimg {
+public:
+  ImageSampleClMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleDMimg : public Mimg
-{
-  public:
-   ImageSampleDMimg(const MachineInst * inst);
+class ImageSampleDMimg : public Mimg {
+public:
+  ImageSampleDMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleDClMimg : public Mimg
-{
-  public:
-   ImageSampleDClMimg(const MachineInst * inst);
+class ImageSampleDClMimg : public Mimg {
+public:
+  ImageSampleDClMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleLMimg : public Mimg
-{
-  public:
-   ImageSampleLMimg(const MachineInst * inst);
+class ImageSampleLMimg : public Mimg {
+public:
+  ImageSampleLMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleBMimg : public Mimg
-{
-  public:
-   ImageSampleBMimg(const MachineInst * inst);
+class ImageSampleBMimg : public Mimg {
+public:
+  ImageSampleBMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleBClMimg : public Mimg
-{
-  public:
-   ImageSampleBClMimg(const MachineInst * inst);
+class ImageSampleBClMimg : public Mimg {
+public:
+  ImageSampleBClMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleLzMimg : public Mimg
-{
-  public:
-   ImageSampleLzMimg(const MachineInst * inst);
+class ImageSampleLzMimg : public Mimg {
+public:
+  ImageSampleLzMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCMimg : public Mimg
-{
-  public:
-   ImageSampleCMimg(const MachineInst * inst);
+class ImageSampleCMimg : public Mimg {
+public:
+  ImageSampleCMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCClMimg : public Mimg
-{
-  public:
-   ImageSampleCClMimg(const MachineInst * inst);
+class ImageSampleCClMimg : public Mimg {
+public:
+  ImageSampleCClMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCDMimg : public Mimg
-{
-  public:
-   ImageSampleCDMimg(const MachineInst * inst);
+class ImageSampleCDMimg : public Mimg {
+public:
+  ImageSampleCDMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCDClMimg : public Mimg
-{
-  public:
-   ImageSampleCDClMimg(const MachineInst * inst);
+class ImageSampleCDClMimg : public Mimg {
+public:
+  ImageSampleCDClMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCLMimg : public Mimg
-{
-  public:
-   ImageSampleCLMimg(const MachineInst * inst);
+class ImageSampleCLMimg : public Mimg {
+public:
+  ImageSampleCLMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCBMimg : public Mimg
-{
-  public:
-   ImageSampleCBMimg(const MachineInst * inst);
+class ImageSampleCBMimg : public Mimg {
+public:
+  ImageSampleCBMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCBClMimg : public Mimg
-{
-  public:
-   ImageSampleCBClMimg(const MachineInst * inst);
+class ImageSampleCBClMimg : public Mimg {
+public:
+  ImageSampleCBClMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCLzMimg : public Mimg
-{
-  public:
-   ImageSampleCLzMimg(const MachineInst * inst);
+class ImageSampleCLzMimg : public Mimg {
+public:
+  ImageSampleCLzMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleOMimg : public Mimg
-{
-  public:
-   ImageSampleOMimg(const MachineInst * inst);
+class ImageSampleOMimg : public Mimg {
+public:
+  ImageSampleOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleClOMimg : public Mimg
-{
-  public:
-   ImageSampleClOMimg(const MachineInst * inst);
+class ImageSampleClOMimg : public Mimg {
+public:
+  ImageSampleClOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleDOMimg : public Mimg
-{
-  public:
-   ImageSampleDOMimg(const MachineInst * inst);
+class ImageSampleDOMimg : public Mimg {
+public:
+  ImageSampleDOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleDClOMimg : public Mimg
-{
-  public:
-   ImageSampleDClOMimg(const MachineInst * inst);
+class ImageSampleDClOMimg : public Mimg {
+public:
+  ImageSampleDClOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleLOMimg : public Mimg
-{
-  public:
-   ImageSampleLOMimg(const MachineInst * inst);
+class ImageSampleLOMimg : public Mimg {
+public:
+  ImageSampleLOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleBOMimg : public Mimg
-{
-  public:
-   ImageSampleBOMimg(const MachineInst * inst);
+class ImageSampleBOMimg : public Mimg {
+public:
+  ImageSampleBOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleBClOMimg : public Mimg
-{
-  public:
-   ImageSampleBClOMimg(const MachineInst * inst);
+class ImageSampleBClOMimg : public Mimg {
+public:
+  ImageSampleBClOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleLzOMimg : public Mimg
-{
-  public:
-   ImageSampleLzOMimg(const MachineInst * inst);
+class ImageSampleLzOMimg : public Mimg {
+public:
+  ImageSampleLzOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCOMimg : public Mimg
-{
-  public:
-   ImageSampleCOMimg(const MachineInst * inst);
+class ImageSampleCOMimg : public Mimg {
+public:
+  ImageSampleCOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCClOMimg : public Mimg
-{
-  public:
-   ImageSampleCClOMimg(const MachineInst * inst);
+class ImageSampleCClOMimg : public Mimg {
+public:
+  ImageSampleCClOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCDOMimg : public Mimg
-{
-  public:
-   ImageSampleCDOMimg(const MachineInst * inst);
+class ImageSampleCDOMimg : public Mimg {
+public:
+  ImageSampleCDOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCDClOMimg : public Mimg
-{
-  public:
-   ImageSampleCDClOMimg(const MachineInst * inst);
+class ImageSampleCDClOMimg : public Mimg {
+public:
+  ImageSampleCDClOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCLOMimg : public Mimg
-{
-  public:
-   ImageSampleCLOMimg(const MachineInst * inst);
+class ImageSampleCLOMimg : public Mimg {
+public:
+  ImageSampleCLOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCBOMimg : public Mimg
-{
-  public:
-   ImageSampleCBOMimg(const MachineInst * inst);
+class ImageSampleCBOMimg : public Mimg {
+public:
+  ImageSampleCBOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCBClOMimg : public Mimg
-{
-  public:
-   ImageSampleCBClOMimg(const MachineInst * inst);
+class ImageSampleCBClOMimg : public Mimg {
+public:
+  ImageSampleCBClOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCLzOMimg : public Mimg
-{
-  public:
-   ImageSampleCLzOMimg(const MachineInst * inst);
+class ImageSampleCLzOMimg : public Mimg {
+public:
+  ImageSampleCLzOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4Mimg : public Mimg
-{
-  public:
-   ImageGather4Mimg(const MachineInst * inst);
+class ImageGather4Mimg : public Mimg {
+public:
+  ImageGather4Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4ClMimg : public Mimg
-{
-  public:
-   ImageGather4ClMimg(const MachineInst * inst);
+class ImageGather4ClMimg : public Mimg {
+public:
+  ImageGather4ClMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageLoadBy2Mimg : public Mimg
-{
-  public:
-   ImageLoadBy2Mimg(const MachineInst * inst);
+class ImageLoadBy2Mimg : public Mimg {
+public:
+  ImageLoadBy2Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageLoadBy4Mimg : public Mimg
-{
-  public:
-   ImageLoadBy4Mimg(const MachineInst * inst);
+class ImageLoadBy4Mimg : public Mimg {
+public:
+  ImageLoadBy4Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageGather4LMimg : public Mimg
-{
-  public:
-   ImageGather4LMimg(const MachineInst * inst);
+class ImageGather4LMimg : public Mimg {
+public:
+  ImageGather4LMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4BMimg : public Mimg
-{
-  public:
-   ImageGather4BMimg(const MachineInst * inst);
+class ImageGather4BMimg : public Mimg {
+public:
+  ImageGather4BMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4BClMimg : public Mimg
-{
-  public:
-   ImageGather4BClMimg(const MachineInst * inst);
+class ImageGather4BClMimg : public Mimg {
+public:
+  ImageGather4BClMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4LzMimg : public Mimg
-{
-  public:
-   ImageGather4LzMimg(const MachineInst * inst);
+class ImageGather4LzMimg : public Mimg {
+public:
+  ImageGather4LzMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4CMimg : public Mimg
-{
-  public:
-   ImageGather4CMimg(const MachineInst * inst);
+class ImageGather4CMimg : public Mimg {
+public:
+  ImageGather4CMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4CClMimg : public Mimg
-{
-  public:
-   ImageGather4CClMimg(const MachineInst * inst);
+class ImageGather4CClMimg : public Mimg {
+public:
+  ImageGather4CClMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageLoadMipBy2Mimg : public Mimg
-{
-  public:
-   ImageLoadMipBy2Mimg(const MachineInst * inst);
+class ImageLoadMipBy2Mimg : public Mimg {
+public:
+  ImageLoadMipBy2Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageLoadMipBy4Mimg : public Mimg
-{
-  public:
-   ImageLoadMipBy4Mimg(const MachineInst * inst);
+class ImageLoadMipBy4Mimg : public Mimg {
+public:
+  ImageLoadMipBy4Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageGather4CLMimg : public Mimg
-{
-  public:
-   ImageGather4CLMimg(const MachineInst * inst);
+class ImageGather4CLMimg : public Mimg {
+public:
+  ImageGather4CLMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4CBMimg : public Mimg
-{
-  public:
-   ImageGather4CBMimg(const MachineInst * inst);
+class ImageGather4CBMimg : public Mimg {
+public:
+  ImageGather4CBMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4CBClMimg : public Mimg
-{
-  public:
-   ImageGather4CBClMimg(const MachineInst * inst);
+class ImageGather4CBClMimg : public Mimg {
+public:
+  ImageGather4CBClMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4CLzMimg : public Mimg
-{
-  public:
-   ImageGather4CLzMimg(const MachineInst * inst);
+class ImageGather4CLzMimg : public Mimg {
+public:
+  ImageGather4CLzMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4OMimg : public Mimg
-{
-  public:
-   ImageGather4OMimg(const MachineInst * inst);
+class ImageGather4OMimg : public Mimg {
+public:
+  ImageGather4OMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4ClOMimg : public Mimg
-{
-  public:
-   ImageGather4ClOMimg(const MachineInst * inst);
+class ImageGather4ClOMimg : public Mimg {
+public:
+  ImageGather4ClOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageStoreBy2Mimg : public Mimg
-{
-  public:
-   ImageStoreBy2Mimg(const MachineInst * inst);
+class ImageStoreBy2Mimg : public Mimg {
+public:
+  ImageStoreBy2Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageStoreBy4Mimg : public Mimg
-{
-  public:
-   ImageStoreBy4Mimg(const MachineInst * inst);
+class ImageStoreBy4Mimg : public Mimg {
+public:
+  ImageStoreBy4Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageGather4LOMimg : public Mimg
-{
-  public:
-   ImageGather4LOMimg(const MachineInst * inst);
+class ImageGather4LOMimg : public Mimg {
+public:
+  ImageGather4LOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4BOMimg : public Mimg
-{
-  public:
-   ImageGather4BOMimg(const MachineInst * inst);
+class ImageGather4BOMimg : public Mimg {
+public:
+  ImageGather4BOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4BClOMimg : public Mimg
-{
-  public:
-   ImageGather4BClOMimg(const MachineInst * inst);
+class ImageGather4BClOMimg : public Mimg {
+public:
+  ImageGather4BClOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4LzOMimg : public Mimg
-{
-  public:
-   ImageGather4LzOMimg(const MachineInst * inst);
+class ImageGather4LzOMimg : public Mimg {
+public:
+  ImageGather4LzOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4COMimg : public Mimg
-{
-  public:
-   ImageGather4COMimg(const MachineInst * inst);
+class ImageGather4COMimg : public Mimg {
+public:
+  ImageGather4COMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4CClOMimg : public Mimg
-{
-  public:
-   ImageGather4CClOMimg(const MachineInst * inst);
+class ImageGather4CClOMimg : public Mimg {
+public:
+  ImageGather4CClOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageStoreMipBy2Mimg : public Mimg
-{
-  public:
-   ImageStoreMipBy2Mimg(const MachineInst * inst);
+class ImageStoreMipBy2Mimg : public Mimg {
+public:
+  ImageStoreMipBy2Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageStoreMipBy4Mimg : public Mimg
-{
-  public:
-   ImageStoreMipBy4Mimg(const MachineInst * inst);
+class ImageStoreMipBy4Mimg : public Mimg {
+public:
+  ImageStoreMipBy4Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageGather4CLOMimg : public Mimg
-{
-  public:
-   ImageGather4CLOMimg(const MachineInst * inst);
+class ImageGather4CLOMimg : public Mimg {
+public:
+  ImageGather4CLOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4CBOMimg : public Mimg
-{
-  public:
-   ImageGather4CBOMimg(const MachineInst * inst);
+class ImageGather4CBOMimg : public Mimg {
+public:
+  ImageGather4CBOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4CBClOMimg : public Mimg
-{
-  public:
-   ImageGather4CBClOMimg(const MachineInst * inst);
+class ImageGather4CBClOMimg : public Mimg {
+public:
+  ImageGather4CBClOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4CLzOMimg : public Mimg
-{
-  public:
-   ImageGather4CLzOMimg(const MachineInst * inst);
+class ImageGather4CLzOMimg : public Mimg {
+public:
+  ImageGather4CLzOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGetLodMimg : public Mimg
-{
-  public:
-   ImageGetLodMimg(const MachineInst * inst);
+class ImageGetLodMimg : public Mimg {
+public:
+  ImageGetLodMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4hMimg : public Mimg
-{
-  public:
-   ImageGather4hMimg(const MachineInst * inst);
+class ImageGather4hMimg : public Mimg {
+public:
+  ImageGather4hMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather4hPckMimg : public Mimg
-{
-  public:
-   ImageGather4hPckMimg(const MachineInst * inst);
+class ImageGather4hPckMimg : public Mimg {
+public:
+  ImageGather4hPckMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageGather8hPckMimg : public Mimg
-{
-  public:
-   ImageGather8hPckMimg(const MachineInst * inst);
+class ImageGather8hPckMimg : public Mimg {
+public:
+  ImageGather8hPckMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCdMimg : public Mimg
-{
-  public:
-   ImageSampleCdMimg(const MachineInst * inst);
+class ImageSampleCdMimg : public Mimg {
+public:
+  ImageSampleCdMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCdClMimg : public Mimg
-{
-  public:
-   ImageSampleCdClMimg(const MachineInst * inst);
+class ImageSampleCdClMimg : public Mimg {
+public:
+  ImageSampleCdClMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCCdMimg : public Mimg
-{
-  public:
-   ImageSampleCCdMimg(const MachineInst * inst);
+class ImageSampleCCdMimg : public Mimg {
+public:
+  ImageSampleCCdMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCCdClMimg : public Mimg
-{
-  public:
-   ImageSampleCCdClMimg(const MachineInst * inst);
+class ImageSampleCCdClMimg : public Mimg {
+public:
+  ImageSampleCCdClMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCdOMimg : public Mimg
-{
-  public:
-   ImageSampleCdOMimg(const MachineInst * inst);
+class ImageSampleCdOMimg : public Mimg {
+public:
+  ImageSampleCdOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCdClOMimg : public Mimg
-{
-  public:
-   ImageSampleCdClOMimg(const MachineInst * inst);
+class ImageSampleCdClOMimg : public Mimg {
+public:
+  ImageSampleCdClOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCCdOMimg : public Mimg
-{
-  public:
-   ImageSampleCCdOMimg(const MachineInst * inst);
+class ImageSampleCCdOMimg : public Mimg {
+public:
+  ImageSampleCCdOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCCdClOMimg : public Mimg
-{
-  public:
-   ImageSampleCCdClOMimg(const MachineInst * inst);
+class ImageSampleCCdClOMimg : public Mimg {
+public:
+  ImageSampleCCdClOMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageLoadPck2Mimg : public Mimg
-{
-  public:
-   ImageLoadPck2Mimg(const MachineInst * inst);
+class ImageLoadPck2Mimg : public Mimg {
+public:
+  ImageLoadPck2Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageLoadPck4Mimg : public Mimg
-{
-  public:
-   ImageLoadPck4Mimg(const MachineInst * inst);
+class ImageLoadPck4Mimg : public Mimg {
+public:
+  ImageLoadPck4Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageLoadMipPck2Mimg : public Mimg
-{
-  public:
-   ImageLoadMipPck2Mimg(const MachineInst * inst);
+class ImageLoadMipPck2Mimg : public Mimg {
+public:
+  ImageLoadMipPck2Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageLoadMipPck4Mimg : public Mimg
-{
-  public:
-   ImageLoadMipPck4Mimg(const MachineInst * inst);
+class ImageLoadMipPck4Mimg : public Mimg {
+public:
+  ImageLoadMipPck4Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageStorePck2Mimg : public Mimg
-{
-  public:
-   ImageStorePck2Mimg(const MachineInst * inst);
+class ImageStorePck2Mimg : public Mimg {
+public:
+  ImageStorePck2Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageStorePck4Mimg : public Mimg
-{
-  public:
-   ImageStorePck4Mimg(const MachineInst * inst);
+class ImageStorePck4Mimg : public Mimg {
+public:
+  ImageStorePck4Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageStoreMipPck2Mimg : public Mimg
-{
-  public:
-   ImageStoreMipPck2Mimg(const MachineInst * inst);
+class ImageStoreMipPck2Mimg : public Mimg {
+public:
+  ImageStoreMipPck2Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageStoreMipPck4Mimg : public Mimg
-{
-  public:
-   ImageStoreMipPck4Mimg(const MachineInst * inst);
+class ImageStoreMipPck4Mimg : public Mimg {
+public:
+  ImageStoreMipPck4Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageMsaaLoadMimg : public Mimg
-{
-  public:
-   ImageMsaaLoadMimg(const MachineInst * inst);
+class ImageMsaaLoadMimg : public Mimg {
+public:
+  ImageMsaaLoadMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageSampleDG16Mimg : public Mimg
-{
-  public:
-   ImageSampleDG16Mimg(const MachineInst * inst);
+class ImageSampleDG16Mimg : public Mimg {
+public:
+  ImageSampleDG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleDClG16Mimg : public Mimg
-{
-  public:
-   ImageSampleDClG16Mimg(const MachineInst * inst);
+class ImageSampleDClG16Mimg : public Mimg {
+public:
+  ImageSampleDClG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCDG16Mimg : public Mimg
-{
-  public:
-   ImageSampleCDG16Mimg(const MachineInst * inst);
+class ImageSampleCDG16Mimg : public Mimg {
+public:
+  ImageSampleCDG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCDClG16Mimg : public Mimg
-{
-  public:
-   ImageSampleCDClG16Mimg(const MachineInst * inst);
+class ImageSampleCDClG16Mimg : public Mimg {
+public:
+  ImageSampleCDClG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleDOG16Mimg : public Mimg
-{
-  public:
-   ImageSampleDOG16Mimg(const MachineInst * inst);
+class ImageSampleDOG16Mimg : public Mimg {
+public:
+  ImageSampleDOG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleDClOG16Mimg : public Mimg
-{
-  public:
-   ImageSampleDClOG16Mimg(const MachineInst * inst);
+class ImageSampleDClOG16Mimg : public Mimg {
+public:
+  ImageSampleDClOG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCDOG16Mimg : public Mimg
-{
-  public:
-   ImageSampleCDOG16Mimg(const MachineInst * inst);
+class ImageSampleCDOG16Mimg : public Mimg {
+public:
+  ImageSampleCDOG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCDClOG16Mimg : public Mimg
-{
-  public:
-   ImageSampleCDClOG16Mimg(const MachineInst * inst);
+class ImageSampleCDClOG16Mimg : public Mimg {
+public:
+  ImageSampleCDClOG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageBvhIntersectRayMimg : public Mimg
-{
-  public:
-   ImageBvhIntersectRayMimg(const MachineInst * inst);
+class ImageBvhIntersectRayMimg : public Mimg {
+public:
+  ImageBvhIntersectRayMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageBvh64IntersectRayMimg : public Mimg
-{
-  public:
-   ImageBvh64IntersectRayMimg(const MachineInst * inst);
+class ImageBvh64IntersectRayMimg : public Mimg {
+public:
+  ImageBvh64IntersectRayMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
-} ;
+};
 
-class ImageSampleCdG16Mimg : public Mimg
-{
-  public:
-   ImageSampleCdG16Mimg(const MachineInst * inst);
+class ImageSampleCdG16Mimg : public Mimg {
+public:
+  ImageSampleCdG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCdClG16Mimg : public Mimg
-{
-  public:
-   ImageSampleCdClG16Mimg(const MachineInst * inst);
+class ImageSampleCdClG16Mimg : public Mimg {
+public:
+  ImageSampleCdClG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCCdG16Mimg : public Mimg
-{
-  public:
-   ImageSampleCCdG16Mimg(const MachineInst * inst);
+class ImageSampleCCdG16Mimg : public Mimg {
+public:
+  ImageSampleCCdG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCCdClG16Mimg : public Mimg
-{
-  public:
-   ImageSampleCCdClG16Mimg(const MachineInst * inst);
+class ImageSampleCCdClG16Mimg : public Mimg {
+public:
+  ImageSampleCCdClG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCdOG16Mimg : public Mimg
-{
-  public:
-   ImageSampleCdOG16Mimg(const MachineInst * inst);
+class ImageSampleCdOG16Mimg : public Mimg {
+public:
+  ImageSampleCdOG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCdClOG16Mimg : public Mimg
-{
-  public:
-   ImageSampleCdClOG16Mimg(const MachineInst * inst);
+class ImageSampleCdClOG16Mimg : public Mimg {
+public:
+  ImageSampleCdClOG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCCdOG16Mimg : public Mimg
-{
-  public:
-   ImageSampleCCdOG16Mimg(const MachineInst * inst);
+class ImageSampleCCdOG16Mimg : public Mimg {
+public:
+  ImageSampleCCdOG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
-class ImageSampleCCdClOG16Mimg : public Mimg
-{
-  public:
-   ImageSampleCCdClOG16Mimg(const MachineInst * inst);
+class ImageSampleCCdClOG16Mimg : public Mimg {
+public:
+  ImageSampleCCdClOG16Mimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand ssamp;
-} ;
+};
 
 } // namespace rdna2
 } // namespace rocjitsu

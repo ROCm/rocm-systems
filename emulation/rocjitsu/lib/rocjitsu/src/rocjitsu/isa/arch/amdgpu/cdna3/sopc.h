@@ -14,205 +14,185 @@
 namespace rocjitsu {
 namespace cdna3 {
 
-class SCmpEqI32Sopc : public Sopc
-{
-  public:
-   SCmpEqI32Sopc(const MachineInst * inst);
+class SCmpEqI32Sopc : public Sopc {
+public:
+  SCmpEqI32Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SCmpLgI32Sopc : public Sopc
-{
-  public:
-   SCmpLgI32Sopc(const MachineInst * inst);
+class SCmpLgI32Sopc : public Sopc {
+public:
+  SCmpLgI32Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SCmpGtI32Sopc : public Sopc
-{
-  public:
-   SCmpGtI32Sopc(const MachineInst * inst);
+class SCmpGtI32Sopc : public Sopc {
+public:
+  SCmpGtI32Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SCmpGeI32Sopc : public Sopc
-{
-  public:
-   SCmpGeI32Sopc(const MachineInst * inst);
+class SCmpGeI32Sopc : public Sopc {
+public:
+  SCmpGeI32Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SCmpLtI32Sopc : public Sopc
-{
-  public:
-   SCmpLtI32Sopc(const MachineInst * inst);
+class SCmpLtI32Sopc : public Sopc {
+public:
+  SCmpLtI32Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SCmpLeI32Sopc : public Sopc
-{
-  public:
-   SCmpLeI32Sopc(const MachineInst * inst);
+class SCmpLeI32Sopc : public Sopc {
+public:
+  SCmpLeI32Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SCmpEqU32Sopc : public Sopc
-{
-  public:
-   SCmpEqU32Sopc(const MachineInst * inst);
+class SCmpEqU32Sopc : public Sopc {
+public:
+  SCmpEqU32Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SCmpLgU32Sopc : public Sopc
-{
-  public:
-   SCmpLgU32Sopc(const MachineInst * inst);
+class SCmpLgU32Sopc : public Sopc {
+public:
+  SCmpLgU32Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SCmpGtU32Sopc : public Sopc
-{
-  public:
-   SCmpGtU32Sopc(const MachineInst * inst);
+class SCmpGtU32Sopc : public Sopc {
+public:
+  SCmpGtU32Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SCmpGeU32Sopc : public Sopc
-{
-  public:
-   SCmpGeU32Sopc(const MachineInst * inst);
+class SCmpGeU32Sopc : public Sopc {
+public:
+  SCmpGeU32Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SCmpLtU32Sopc : public Sopc
-{
-  public:
-   SCmpLtU32Sopc(const MachineInst * inst);
+class SCmpLtU32Sopc : public Sopc {
+public:
+  SCmpLtU32Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SCmpLeU32Sopc : public Sopc
-{
-  public:
-   SCmpLeU32Sopc(const MachineInst * inst);
+class SCmpLeU32Sopc : public Sopc {
+public:
+  SCmpLeU32Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SBitcmp0B32Sopc : public Sopc
-{
-  public:
-   SBitcmp0B32Sopc(const MachineInst * inst);
+class SBitcmp0B32Sopc : public Sopc {
+public:
+  SBitcmp0B32Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SBitcmp1B32Sopc : public Sopc
-{
-  public:
-   SBitcmp1B32Sopc(const MachineInst * inst);
+class SBitcmp1B32Sopc : public Sopc {
+public:
+  SBitcmp1B32Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SBitcmp0B64Sopc : public Sopc
-{
-  public:
-   SBitcmp0B64Sopc(const MachineInst * inst);
+class SBitcmp0B64Sopc : public Sopc {
+public:
+  SBitcmp0B64Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SBitcmp1B64Sopc : public Sopc
-{
-  public:
-   SBitcmp1B64Sopc(const MachineInst * inst);
+class SBitcmp1B64Sopc : public Sopc {
+public:
+  SBitcmp1B64Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SSetvskipSopc : public Sopc
-{
-  public:
-   SSetvskipSopc(const MachineInst * inst);
+class SSetvskipSopc : public Sopc {
+public:
+  SSetvskipSopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
-} ;
+};
 
-class SSetGprIdxOnSopc : public Sopc
-{
-  public:
-   SSetGprIdxOnSopc(const MachineInst * inst);
+class SSetGprIdxOnSopc : public Sopc {
+public:
+  SSetGprIdxOnSopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand m0;
   Operand m0_in;
-} ;
+};
 
-class SCmpEqU64Sopc : public Sopc
-{
-  public:
-   SCmpEqU64Sopc(const MachineInst * inst);
+class SCmpEqU64Sopc : public Sopc {
+public:
+  SCmpEqU64Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
-class SCmpLgU64Sopc : public Sopc
-{
-  public:
-   SCmpLgU64Sopc(const MachineInst * inst);
+class SCmpLgU64Sopc : public Sopc {
+public:
+  SCmpLgU64Sopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-} ;
+};
 
 } // namespace cdna3
 } // namespace rocjitsu

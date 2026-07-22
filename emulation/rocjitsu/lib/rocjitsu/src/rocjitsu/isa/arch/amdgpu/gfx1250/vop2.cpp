@@ -5,101 +5,2055 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop2.h"
-#include "util/except.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "util/except.h"
 
 namespace rocjitsu {
 namespace gfx1250 {
 
-VCndmaskB32Vop2::VCndmaskB32Vop2(const MachineInst *inst) : Vop2("v_cndmask_b32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VCndmaskB32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1), vcc(64, OperandType::OPR_VCC, 106) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;src_operands_[2] = &vcc;num_src_ = 3;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vcc.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VCndmaskB32Vop2::VCndmaskB32Vop2(const MachineInst *inst)
+    : Vop2("v_cndmask_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VCndmaskB32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      vcc(64, OperandType::OPR_VCC, 106) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  src_operands_[2] = &vcc;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vcc.apply_fieldless_caps(false, false, false);
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VAddF64Vop2::VAddF64Vop2(const MachineInst *inst) : Vop2("v_add_f64_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VAddF64Vop2>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(64, OperandType::OPR_SIMM32, (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32) << 32), true);if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VAddF64Vop2::VAddF64Vop2(const MachineInst *inst)
+    : Vop2("v_add_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VAddF64Vop2>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VAddF32Vop2::VAddF32Vop2(const MachineInst *inst) : Vop2("v_add_f32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VAddF32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VAddF32Vop2::VAddF32Vop2(const MachineInst *inst)
+    : Vop2("v_add_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VAddF32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VSubF32Vop2::VSubF32Vop2(const MachineInst *inst) : Vop2("v_sub_f32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VSubF32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VSubF32Vop2::VSubF32Vop2(const MachineInst *inst)
+    : Vop2("v_sub_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VSubF32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VSubrevF32Vop2::VSubrevF32Vop2(const MachineInst *inst) : Vop2("v_subrev_f32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VSubrevF32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VSubrevF32Vop2::VSubrevF32Vop2(const MachineInst *inst)
+    : Vop2("v_subrev_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VSubrevF32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMulF64Vop2::VMulF64Vop2(const MachineInst *inst) : Vop2("v_mul_f64_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMulF64Vop2>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(64, OperandType::OPR_SIMM32, (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32) << 32), true);if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMulF64Vop2::VMulF64Vop2(const MachineInst *inst)
+    : Vop2("v_mul_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMulF64Vop2>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMulDx9ZeroF32Vop2::VMulDx9ZeroF32Vop2(const MachineInst *inst) : Vop2("v_mul_dx9_zero_f32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMulDx9ZeroF32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMulDx9ZeroF32Vop2::VMulDx9ZeroF32Vop2(const MachineInst *inst)
+    : Vop2("v_mul_dx9_zero_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMulDx9ZeroF32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMulF32Vop2::VMulF32Vop2(const MachineInst *inst) : Vop2("v_mul_f32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMulF32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMulF32Vop2::VMulF32Vop2(const MachineInst *inst)
+    : Vop2("v_mul_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMulF32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMulI32I24Vop2::VMulI32I24Vop2(const MachineInst *inst) : Vop2("v_mul_i32_i24_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMulI32I24Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMulI32I24Vop2::VMulI32I24Vop2(const MachineInst *inst)
+    : Vop2("v_mul_i32_i24_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMulI32I24Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMulHiI32I24Vop2::VMulHiI32I24Vop2(const MachineInst *inst) : Vop2("v_mul_hi_i32_i24_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMulHiI32I24Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMulHiI32I24Vop2::VMulHiI32I24Vop2(const MachineInst *inst)
+    : Vop2("v_mul_hi_i32_i24_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMulHiI32I24Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMulU32U24Vop2::VMulU32U24Vop2(const MachineInst *inst) : Vop2("v_mul_u32_u24_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMulU32U24Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMulU32U24Vop2::VMulU32U24Vop2(const MachineInst *inst)
+    : Vop2("v_mul_u32_u24_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMulU32U24Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMulHiU32U24Vop2::VMulHiU32U24Vop2(const MachineInst *inst) : Vop2("v_mul_hi_u32_u24_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMulHiU32U24Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMulHiU32U24Vop2::VMulHiU32U24Vop2(const MachineInst *inst)
+    : Vop2("v_mul_hi_u32_u24_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMulHiU32U24Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMinNumF64Vop2::VMinNumF64Vop2(const MachineInst *inst) : Vop2("v_min_num_f64_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMinNumF64Vop2>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(64, OperandType::OPR_SIMM32, (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32) << 32), true);if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMinNumF64Vop2::VMinNumF64Vop2(const MachineInst *inst)
+    : Vop2("v_min_num_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMinNumF64Vop2>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMaxNumF64Vop2::VMaxNumF64Vop2(const MachineInst *inst) : Vop2("v_max_num_f64_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMaxNumF64Vop2>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(64, OperandType::OPR_SIMM32, (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32) << 32), true);if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMaxNumF64Vop2::VMaxNumF64Vop2(const MachineInst *inst)
+    : Vop2("v_max_num_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMaxNumF64Vop2>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMinI32Vop2::VMinI32Vop2(const MachineInst *inst) : Vop2("v_min_i32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMinI32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMinI32Vop2::VMinI32Vop2(const MachineInst *inst)
+    : Vop2("v_min_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMinI32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMaxI32Vop2::VMaxI32Vop2(const MachineInst *inst) : Vop2("v_max_i32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMaxI32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMaxI32Vop2::VMaxI32Vop2(const MachineInst *inst)
+    : Vop2("v_max_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMaxI32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMinU32Vop2::VMinU32Vop2(const MachineInst *inst) : Vop2("v_min_u32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMinU32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMinU32Vop2::VMinU32Vop2(const MachineInst *inst)
+    : Vop2("v_min_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMinU32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMaxU32Vop2::VMaxU32Vop2(const MachineInst *inst) : Vop2("v_max_u32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMaxU32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMaxU32Vop2::VMaxU32Vop2(const MachineInst *inst)
+    : Vop2("v_max_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMaxU32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMinNumF32Vop2::VMinNumF32Vop2(const MachineInst *inst) : Vop2("v_min_num_f32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMinNumF32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMinNumF32Vop2::VMinNumF32Vop2(const MachineInst *inst)
+    : Vop2("v_min_num_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMinNumF32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMaxNumF32Vop2::VMaxNumF32Vop2(const MachineInst *inst) : Vop2("v_max_num_f32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMaxNumF32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMaxNumF32Vop2::VMaxNumF32Vop2(const MachineInst *inst)
+    : Vop2("v_max_num_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMaxNumF32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VFmacF64Vop2::VFmacF64Vop2(const MachineInst *inst) : Vop2("v_fmac_f64_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VFmacF64Vop2>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;src_operands_[2] = &vdst;num_src_ = 3;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(64, OperandType::OPR_SIMM32, (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32) << 32), true);if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VFmacF64Vop2::VFmacF64Vop2(const MachineInst *inst)
+    : Vop2("v_fmac_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VFmacF64Vop2>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VLshlrevB32Vop2::VLshlrevB32Vop2(const MachineInst *inst) : Vop2("v_lshlrev_b32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VLshlrevB32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VLshlrevB32Vop2::VLshlrevB32Vop2(const MachineInst *inst)
+    : Vop2("v_lshlrev_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VLshlrevB32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VLshrrevB32Vop2::VLshrrevB32Vop2(const MachineInst *inst) : Vop2("v_lshrrev_b32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VLshrrevB32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VLshrrevB32Vop2::VLshrrevB32Vop2(const MachineInst *inst)
+    : Vop2("v_lshrrev_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VLshrrevB32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VAshrrevI32Vop2::VAshrrevI32Vop2(const MachineInst *inst) : Vop2("v_ashrrev_i32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VAshrrevI32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VAshrrevI32Vop2::VAshrrevI32Vop2(const MachineInst *inst)
+    : Vop2("v_ashrrev_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VAshrrevI32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VAndB32Vop2::VAndB32Vop2(const MachineInst *inst) : Vop2("v_and_b32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VAndB32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VAndB32Vop2::VAndB32Vop2(const MachineInst *inst)
+    : Vop2("v_and_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VAndB32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VOrB32Vop2::VOrB32Vop2(const MachineInst *inst) : Vop2("v_or_b32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VOrB32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VOrB32Vop2::VOrB32Vop2(const MachineInst *inst)
+    : Vop2("v_or_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VOrB32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VXorB32Vop2::VXorB32Vop2(const MachineInst *inst) : Vop2("v_xor_b32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VXorB32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VXorB32Vop2::VXorB32Vop2(const MachineInst *inst)
+    : Vop2("v_xor_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VXorB32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VXnorB32Vop2::VXnorB32Vop2(const MachineInst *inst) : Vop2("v_xnor_b32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VXnorB32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VXnorB32Vop2::VXnorB32Vop2(const MachineInst *inst)
+    : Vop2("v_xnor_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VXnorB32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VLshlrevB64Vop2::VLshlrevB64Vop2(const MachineInst *inst) : Vop2("v_lshlrev_b64_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VLshlrevB64Vop2>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VLshlrevB64Vop2::VLshlrevB64Vop2(const MachineInst *inst)
+    : Vop2("v_lshlrev_b64_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VLshlrevB64Vop2>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VAddCoCiU32Vop2::VAddCoCiU32Vop2(const MachineInst *inst) : Vop2("v_add_co_ci_u32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VAddCoCiU32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vcc(64, OperandType::OPR_VCC, 106), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1), vcc_in(64, OperandType::OPR_VCC, 106) {dst_operands_[0] = &vdst;dst_operands_[1] = &vcc;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;src_operands_[2] = &vcc_in;num_src_ = 3;num_dst_ = 2;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vcc.apply_fieldless_caps(false, false, false);vcc_in.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VAddCoCiU32Vop2::VAddCoCiU32Vop2(const MachineInst *inst)
+    : Vop2("v_add_co_ci_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VAddCoCiU32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vcc(64, OperandType::OPR_VCC, 106),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      vcc_in(64, OperandType::OPR_VCC, 106) {
+  dst_operands_[0] = &vdst;
+  dst_operands_[1] = &vcc;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  src_operands_[2] = &vcc_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vcc.apply_fieldless_caps(false, false, false);
+  vcc_in.apply_fieldless_caps(false, false, false);
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VSubCoCiU32Vop2::VSubCoCiU32Vop2(const MachineInst *inst) : Vop2("v_sub_co_ci_u32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VSubCoCiU32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vcc(64, OperandType::OPR_VCC, 106), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1), vcc_in(64, OperandType::OPR_VCC, 106) {dst_operands_[0] = &vdst;dst_operands_[1] = &vcc;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;src_operands_[2] = &vcc_in;num_src_ = 3;num_dst_ = 2;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vcc.apply_fieldless_caps(false, false, false);vcc_in.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VSubCoCiU32Vop2::VSubCoCiU32Vop2(const MachineInst *inst)
+    : Vop2("v_sub_co_ci_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VSubCoCiU32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vcc(64, OperandType::OPR_VCC, 106),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      vcc_in(64, OperandType::OPR_VCC, 106) {
+  dst_operands_[0] = &vdst;
+  dst_operands_[1] = &vcc;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  src_operands_[2] = &vcc_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vcc.apply_fieldless_caps(false, false, false);
+  vcc_in.apply_fieldless_caps(false, false, false);
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VSubrevCoCiU32Vop2::VSubrevCoCiU32Vop2(const MachineInst *inst) : Vop2("v_subrev_co_ci_u32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VSubrevCoCiU32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vcc(64, OperandType::OPR_VCC, 106), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1), vcc_in(64, OperandType::OPR_VCC, 106) {dst_operands_[0] = &vdst;dst_operands_[1] = &vcc;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;src_operands_[2] = &vcc_in;num_src_ = 3;num_dst_ = 2;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vcc.apply_fieldless_caps(false, false, false);vcc_in.apply_fieldless_caps(false, false, false);vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VSubrevCoCiU32Vop2::VSubrevCoCiU32Vop2(const MachineInst *inst)
+    : Vop2("v_subrev_co_ci_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VSubrevCoCiU32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vcc(64, OperandType::OPR_VCC, 106),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      vcc_in(64, OperandType::OPR_VCC, 106) {
+  dst_operands_[0] = &vdst;
+  dst_operands_[1] = &vcc;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  src_operands_[2] = &vcc_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vcc.apply_fieldless_caps(false, false, false);
+  vcc_in.apply_fieldless_caps(false, false, false);
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VFmamkF64Vop2::VFmamkF64Vop2(const MachineInst *inst) : Vop2("v_fmamk_f64_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VFmamkF64Vop2>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), literal64(64, OperandType::OPR_SIMM64, 0), vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &literal64;src_operands_[2] = &vsrc1;num_src_ = 3;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(64, OperandType::OPR_SIMM32, (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32) << 32), true);if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true); }literal64 = Operand(64, OperandType::OPR_SIMM64, (static_cast<uint64_t>(reinterpret_cast<const uint32_t *>(inst)[2]) << 32) | reinterpret_cast<const uint32_t *>(inst)[1], true);if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);}
+VFmamkF64Vop2::VFmamkF64Vop2(const MachineInst *inst)
+    : Vop2("v_fmamk_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VFmamkF64Vop2>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      literal64(64, OperandType::OPR_SIMM64, 0),
+      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &literal64;
+  src_operands_[2] = &vsrc1;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  literal64 = Operand(64, OperandType::OPR_SIMM64,
+                      (static_cast<uint64_t>(reinterpret_cast<const uint32_t *>(inst)[2]) << 32) |
+                          reinterpret_cast<const uint32_t *>(inst)[1],
+                      true);
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+}
 
-VFmaakF64Vop2::VFmaakF64Vop2(const MachineInst *inst) : Vop2("v_fmaak_f64_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VFmaakF64Vop2>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1), literal64(64, OperandType::OPR_SIMM64, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;src_operands_[2] = &literal64;num_src_ = 3;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(64, OperandType::OPR_SIMM32, (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32) << 32), true);if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true); }literal64 = Operand(64, OperandType::OPR_SIMM64, (static_cast<uint64_t>(reinterpret_cast<const uint32_t *>(inst)[2]) << 32) | reinterpret_cast<const uint32_t *>(inst)[1], true);if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VFmaakF64Vop2::VFmaakF64Vop2(const MachineInst *inst)
+    : Vop2("v_fmaak_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VFmaakF64Vop2>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      literal64(64, OperandType::OPR_SIMM64, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  src_operands_[2] = &literal64;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        (static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32)
+         << 32),
+        true);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  literal64 = Operand(64, OperandType::OPR_SIMM64,
+                      (static_cast<uint64_t>(reinterpret_cast<const uint32_t *>(inst)[2]) << 32) |
+                          reinterpret_cast<const uint32_t *>(inst)[1],
+                      true);
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VAddNcU32Vop2::VAddNcU32Vop2(const MachineInst *inst) : Vop2("v_add_nc_u32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VAddNcU32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VAddNcU32Vop2::VAddNcU32Vop2(const MachineInst *inst)
+    : Vop2("v_add_nc_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VAddNcU32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VSubNcU32Vop2::VSubNcU32Vop2(const MachineInst *inst) : Vop2("v_sub_nc_u32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VSubNcU32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VSubNcU32Vop2::VSubNcU32Vop2(const MachineInst *inst)
+    : Vop2("v_sub_nc_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VSubNcU32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VSubrevNcU32Vop2::VSubrevNcU32Vop2(const MachineInst *inst) : Vop2("v_subrev_nc_u32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VSubrevNcU32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VSubrevNcU32Vop2::VSubrevNcU32Vop2(const MachineInst *inst)
+    : Vop2("v_subrev_nc_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VSubrevNcU32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VAddNcU64Vop2::VAddNcU64Vop2(const MachineInst *inst) : Vop2("v_add_nc_u64_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VAddNcU64Vop2>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(64, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VAddNcU64Vop2::VAddNcU64Vop2(const MachineInst *inst)
+    : Vop2("v_add_nc_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VAddNcU64Vop2>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VSubNcU64Vop2::VSubNcU64Vop2(const MachineInst *inst) : Vop2("v_sub_nc_u64_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VSubNcU64Vop2>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(64, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VSubNcU64Vop2::VSubNcU64Vop2(const MachineInst *inst)
+    : Vop2("v_sub_nc_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VSubNcU64Vop2>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMulU64Vop2::VMulU64Vop2(const MachineInst *inst) : Vop2("v_mul_u64_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMulU64Vop2>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(64, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMulU64Vop2::VMulU64Vop2(const MachineInst *inst)
+    : Vop2("v_mul_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMulU64Vop2>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        64, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VFmacF32Vop2::VFmacF32Vop2(const MachineInst *inst) : Vop2("v_fmac_f32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VFmacF32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;src_operands_[2] = &vdst;num_src_ = 3;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VFmacF32Vop2::VFmacF32Vop2(const MachineInst *inst)
+    : Vop2("v_fmac_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VFmacF32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VFmamkF32Vop2::VFmamkF32Vop2(const MachineInst *inst) : Vop2("v_fmamk_f32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VFmamkF32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), literal(32, OperandType::OPR_SIMM32, 0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &literal;src_operands_[2] = &vsrc1;num_src_ = 3;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }literal = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);}
+VFmamkF32Vop2::VFmamkF32Vop2(const MachineInst *inst)
+    : Vop2("v_fmamk_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VFmamkF32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      literal(32, OperandType::OPR_SIMM32, 0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &literal;
+  src_operands_[2] = &vsrc1;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  literal =
+      Operand(32, OperandType::OPR_SIMM32,
+              static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+}
 
-VFmaakF32Vop2::VFmaakF32Vop2(const MachineInst *inst) : Vop2("v_fmaak_f32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VFmaakF32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1), literal(32, OperandType::OPR_SIMM32, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;src_operands_[2] = &literal;num_src_ = 3;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }literal = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VFmaakF32Vop2::VFmaakF32Vop2(const MachineInst *inst)
+    : Vop2("v_fmaak_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VFmaakF32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      literal(32, OperandType::OPR_SIMM32, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  src_operands_[2] = &literal;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  literal =
+      Operand(32, OperandType::OPR_SIMM32,
+              static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VCvtPkRtzF16F32Vop2::VCvtPkRtzF16F32Vop2(const MachineInst *inst) : Vop2("v_cvt_pk_rtz_f16_f32_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VCvtPkRtzF16F32Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VCvtPkRtzF16F32Vop2::VCvtPkRtzF16F32Vop2(const MachineInst *inst)
+    : Vop2("v_cvt_pk_rtz_f16_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VCvtPkRtzF16F32Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
-VMinNumF16Vop2::VMinNumF16Vop2(const MachineInst *inst) : Vop2("v_min_num_f16_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMinNumF16Vop2>()), vdst(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vdst), false, true), src0(16, OperandType::OPR_SRC, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->src0), true), vsrc1(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vsrc1), true) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(16, OperandType::OPR_SIMM32, static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMinNumF16Vop2::VMinNumF16Vop2(const MachineInst *inst)
+    : Vop2("v_min_num_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMinNumF16Vop2>()),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
+      src0(16, OperandType::OPR_SRC,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
+      vsrc1(16, OperandType::OPR_VGPR,
+            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
 void VMinNumF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -107,7 +2061,54 @@ void VMinNumF16Vop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-VMaxNumF16Vop2::VMaxNumF16Vop2(const MachineInst *inst) : Vop2("v_max_num_f16_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMaxNumF16Vop2>()), vdst(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vdst), false, true), src0(16, OperandType::OPR_SRC, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->src0), true), vsrc1(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vsrc1), true) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(16, OperandType::OPR_SIMM32, static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMaxNumF16Vop2::VMaxNumF16Vop2(const MachineInst *inst)
+    : Vop2("v_max_num_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMaxNumF16Vop2>()),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
+      src0(16, OperandType::OPR_SRC,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
+      vsrc1(16, OperandType::OPR_VGPR,
+            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
 void VMaxNumF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -115,7 +2116,54 @@ void VMaxNumF16Vop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-VAddF16Vop2::VAddF16Vop2(const MachineInst *inst) : Vop2("v_add_f16_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VAddF16Vop2>()), vdst(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vdst), false, true), src0(16, OperandType::OPR_SRC, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->src0), true), vsrc1(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vsrc1), true) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(16, OperandType::OPR_SIMM32, static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VAddF16Vop2::VAddF16Vop2(const MachineInst *inst)
+    : Vop2("v_add_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VAddF16Vop2>()),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
+      src0(16, OperandType::OPR_SRC,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
+      vsrc1(16, OperandType::OPR_VGPR,
+            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
 void VAddF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -123,7 +2171,54 @@ void VAddF16Vop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-VSubF16Vop2::VSubF16Vop2(const MachineInst *inst) : Vop2("v_sub_f16_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VSubF16Vop2>()), vdst(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vdst), false, true), src0(16, OperandType::OPR_SRC, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->src0), true), vsrc1(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vsrc1), true) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(16, OperandType::OPR_SIMM32, static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VSubF16Vop2::VSubF16Vop2(const MachineInst *inst)
+    : Vop2("v_sub_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VSubF16Vop2>()),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
+      src0(16, OperandType::OPR_SRC,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
+      vsrc1(16, OperandType::OPR_VGPR,
+            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
 void VSubF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -131,7 +2226,54 @@ void VSubF16Vop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-VSubrevF16Vop2::VSubrevF16Vop2(const MachineInst *inst) : Vop2("v_subrev_f16_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VSubrevF16Vop2>()), vdst(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vdst), false, true), src0(16, OperandType::OPR_SRC, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->src0), true), vsrc1(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vsrc1), true) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(16, OperandType::OPR_SIMM32, static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VSubrevF16Vop2::VSubrevF16Vop2(const MachineInst *inst)
+    : Vop2("v_subrev_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VSubrevF16Vop2>()),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
+      src0(16, OperandType::OPR_SRC,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
+      vsrc1(16, OperandType::OPR_VGPR,
+            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
 void VSubrevF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -139,7 +2281,54 @@ void VSubrevF16Vop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-VMulF16Vop2::VMulF16Vop2(const MachineInst *inst) : Vop2("v_mul_f16_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VMulF16Vop2>()), vdst(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vdst), false, true), src0(16, OperandType::OPR_SRC, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->src0), true), vsrc1(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vsrc1), true) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(16, OperandType::OPR_SIMM32, static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VMulF16Vop2::VMulF16Vop2(const MachineInst *inst)
+    : Vop2("v_mul_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VMulF16Vop2>()),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
+      src0(16, OperandType::OPR_SRC,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
+      vsrc1(16, OperandType::OPR_VGPR,
+            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
 void VMulF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -147,7 +2336,55 @@ void VMulF16Vop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-VFmacF16Vop2::VFmacF16Vop2(const MachineInst *inst) : Vop2("v_fmac_f16_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VFmacF16Vop2>()), vdst(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vdst), true, true), src0(16, OperandType::OPR_SRC, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->src0), true), vsrc1(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vsrc1), true) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;src_operands_[2] = &vdst;num_src_ = 3;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(16, OperandType::OPR_SIMM32, static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VFmacF16Vop2::VFmacF16Vop2(const MachineInst *inst)
+    : Vop2("v_fmac_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VFmacF16Vop2>()),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), true,
+           true),
+      src0(16, OperandType::OPR_SRC,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
+      vsrc1(16, OperandType::OPR_VGPR,
+            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
 void VFmacF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -155,7 +2392,60 @@ void VFmacF16Vop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-VFmamkF16Vop2::VFmamkF16Vop2(const MachineInst *inst) : Vop2("v_fmamk_f16_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VFmamkF16Vop2>()), vdst(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vdst), false, true), src0(16, OperandType::OPR_SRC, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->src0), true), literal(16, OperandType::OPR_SIMM16, 0), vsrc1(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vsrc1), true) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &literal;src_operands_[2] = &vsrc1;num_src_ = 3;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(16, OperandType::OPR_SIMM32, static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true); }literal = Operand(16, OperandType::OPR_SIMM16, static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);}
+VFmamkF16Vop2::VFmamkF16Vop2(const MachineInst *inst)
+    : Vop2("v_fmamk_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VFmamkF16Vop2>()),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
+      src0(16, OperandType::OPR_SRC,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
+      literal(16, OperandType::OPR_SIMM16, 0),
+      vsrc1(16, OperandType::OPR_VGPR,
+            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &literal;
+  src_operands_[2] = &vsrc1;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
+  }
+  literal =
+      Operand(16, OperandType::OPR_SIMM16,
+              static_cast<int>(
+                  (reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+}
 
 void VFmamkF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -163,7 +2453,60 @@ void VFmamkF16Vop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-VFmaakF16Vop2::VFmaakF16Vop2(const MachineInst *inst) : Vop2("v_fmaak_f16_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VFmaakF16Vop2>()), vdst(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vdst), false, true), src0(16, OperandType::OPR_SRC, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->src0), true), vsrc1(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vsrc1), true), literal(16, OperandType::OPR_SIMM16, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;src_operands_[2] = &literal;num_src_ = 3;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(16, OperandType::OPR_SIMM32, static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true); }literal = Operand(16, OperandType::OPR_SIMM16, static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VFmaakF16Vop2::VFmaakF16Vop2(const MachineInst *inst)
+    : Vop2("v_fmaak_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VFmaakF16Vop2>()),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
+      src0(16, OperandType::OPR_SRC,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
+      vsrc1(16, OperandType::OPR_VGPR,
+            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true),
+      literal(16, OperandType::OPR_SIMM16, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  src_operands_[2] = &literal;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
+  }
+  literal =
+      Operand(16, OperandType::OPR_SIMM16,
+              static_cast<int>(
+                  (reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
 void VFmaakF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -171,7 +2514,54 @@ void VFmaakF16Vop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-VLdexpF16Vop2::VLdexpF16Vop2(const MachineInst *inst) : Vop2("v_ldexp_f16_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VLdexpF16Vop2>()), vdst(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vdst), false, true), src0(16, OperandType::OPR_SRC, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->src0), true), vsrc1(16, OperandType::OPR_VGPR, static_cast<unsigned short>(reinterpret_cast<const OpEncoding*>(inst)->vsrc1), true) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;num_src_ = 2;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(16, OperandType::OPR_SIMM32, static_cast<int>((reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VLdexpF16Vop2::VLdexpF16Vop2(const MachineInst *inst)
+    : Vop2("v_ldexp_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VLdexpF16Vop2>()),
+      vdst(16, OperandType::OPR_VGPR,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
+           true),
+      src0(16, OperandType::OPR_SRC,
+           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
+      vsrc1(16, OperandType::OPR_VGPR,
+            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
 void VLdexpF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -179,7 +2569,50 @@ void VLdexpF16Vop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-VPkFmacF16Vop2::VPkFmacF16Vop2(const MachineInst *inst) : Vop2("v_pk_fmac_f16_e32", reinterpret_cast<const OpEncoding*>(inst), registered_exec_fn<VPkFmacF16Vop2>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &vsrc1;src_operands_[2] = &vdst;num_src_ = 3;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 255) src0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 254) { const auto *words = reinterpret_cast<const uint32_t *>(inst); uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t); uint64_t literal64 = (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word]; src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true); }if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) { auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0); dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) | (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) | (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21); dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding*>(inst)->src0);}if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) { auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst*>(inst); src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0); dpp_ctrl_ = dp->dpp_ctrl; dpp_row_mask_ = dp->row_mask; dpp_bank_mask_ = dp->bank_mask; dpp_bound_ctrl_ = dp->bound_ctrl; dpp_fi_ = dp->fi;}vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);}
+VPkFmacF16Vop2::VPkFmacF16Vop2(const MachineInst *inst)
+    : Vop2("v_pk_fmac_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+           registered_exec_fn<VPkFmacF16Vop2>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &vsrc1;
+  src_operands_[2] = &vdst;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
+    const auto *words = reinterpret_cast<const uint32_t *>(inst);
+    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
+    uint64_t literal64 =
+        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
+    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop2VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
 
 } // namespace gfx1250
 } // namespace rocjitsu

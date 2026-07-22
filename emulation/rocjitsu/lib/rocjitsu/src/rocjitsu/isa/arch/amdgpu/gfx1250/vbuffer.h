@@ -14,10 +14,9 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-class BufferLoadU8Vbuffer : public Vbuffer
-{
-  public:
-   BufferLoadU8Vbuffer(const MachineInst * inst);
+class BufferLoadU8Vbuffer : public Vbuffer {
+public:
+  BufferLoadU8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -25,12 +24,11 @@ class BufferLoadU8Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferLoadI8Vbuffer : public Vbuffer
-{
-  public:
-   BufferLoadI8Vbuffer(const MachineInst * inst);
+class BufferLoadI8Vbuffer : public Vbuffer {
+public:
+  BufferLoadI8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -38,12 +36,11 @@ class BufferLoadI8Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferLoadU16Vbuffer : public Vbuffer
-{
-  public:
-   BufferLoadU16Vbuffer(const MachineInst * inst);
+class BufferLoadU16Vbuffer : public Vbuffer {
+public:
+  BufferLoadU16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -51,12 +48,11 @@ class BufferLoadU16Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferLoadI16Vbuffer : public Vbuffer
-{
-  public:
-   BufferLoadI16Vbuffer(const MachineInst * inst);
+class BufferLoadI16Vbuffer : public Vbuffer {
+public:
+  BufferLoadI16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -64,12 +60,11 @@ class BufferLoadI16Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferLoadB32Vbuffer : public Vbuffer
-{
-  public:
-   BufferLoadB32Vbuffer(const MachineInst * inst);
+class BufferLoadB32Vbuffer : public Vbuffer {
+public:
+  BufferLoadB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -77,12 +72,11 @@ class BufferLoadB32Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferLoadB64Vbuffer : public Vbuffer
-{
-  public:
-   BufferLoadB64Vbuffer(const MachineInst * inst);
+class BufferLoadB64Vbuffer : public Vbuffer {
+public:
+  BufferLoadB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -90,12 +84,11 @@ class BufferLoadB64Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferLoadB96Vbuffer : public Vbuffer
-{
-  public:
-   BufferLoadB96Vbuffer(const MachineInst * inst);
+class BufferLoadB96Vbuffer : public Vbuffer {
+public:
+  BufferLoadB96Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -103,12 +96,11 @@ class BufferLoadB96Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferLoadB128Vbuffer : public Vbuffer
-{
-  public:
-   BufferLoadB128Vbuffer(const MachineInst * inst);
+class BufferLoadB128Vbuffer : public Vbuffer {
+public:
+  BufferLoadB128Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -116,12 +108,11 @@ class BufferLoadB128Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferStoreB8Vbuffer : public Vbuffer
-{
-  public:
-   BufferStoreB8Vbuffer(const MachineInst * inst);
+class BufferStoreB8Vbuffer : public Vbuffer {
+public:
+  BufferStoreB8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -129,12 +120,11 @@ class BufferStoreB8Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferStoreB16Vbuffer : public Vbuffer
-{
-  public:
-   BufferStoreB16Vbuffer(const MachineInst * inst);
+class BufferStoreB16Vbuffer : public Vbuffer {
+public:
+  BufferStoreB16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -142,12 +132,11 @@ class BufferStoreB16Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferStoreB32Vbuffer : public Vbuffer
-{
-  public:
-   BufferStoreB32Vbuffer(const MachineInst * inst);
+class BufferStoreB32Vbuffer : public Vbuffer {
+public:
+  BufferStoreB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -155,12 +144,11 @@ class BufferStoreB32Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferStoreB64Vbuffer : public Vbuffer
-{
-  public:
-   BufferStoreB64Vbuffer(const MachineInst * inst);
+class BufferStoreB64Vbuffer : public Vbuffer {
+public:
+  BufferStoreB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -168,12 +156,11 @@ class BufferStoreB64Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferStoreB96Vbuffer : public Vbuffer
-{
-  public:
-   BufferStoreB96Vbuffer(const MachineInst * inst);
+class BufferStoreB96Vbuffer : public Vbuffer {
+public:
+  BufferStoreB96Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -181,12 +168,11 @@ class BufferStoreB96Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferStoreB128Vbuffer : public Vbuffer
-{
-  public:
-   BufferStoreB128Vbuffer(const MachineInst * inst);
+class BufferStoreB128Vbuffer : public Vbuffer {
+public:
+  BufferStoreB128Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -194,12 +180,11 @@ class BufferStoreB128Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferLoadD16U8Vbuffer : public Vbuffer
-{
-  public:
-   BufferLoadD16U8Vbuffer(const MachineInst * inst);
+class BufferLoadD16U8Vbuffer : public Vbuffer {
+public:
+  BufferLoadD16U8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -207,12 +192,11 @@ class BufferLoadD16U8Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferLoadD16I8Vbuffer : public Vbuffer
-{
-  public:
-   BufferLoadD16I8Vbuffer(const MachineInst * inst);
+class BufferLoadD16I8Vbuffer : public Vbuffer {
+public:
+  BufferLoadD16I8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -220,12 +204,11 @@ class BufferLoadD16I8Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferLoadD16B16Vbuffer : public Vbuffer
-{
-  public:
-   BufferLoadD16B16Vbuffer(const MachineInst * inst);
+class BufferLoadD16B16Vbuffer : public Vbuffer {
+public:
+  BufferLoadD16B16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -233,12 +216,11 @@ class BufferLoadD16B16Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferLoadD16HiU8Vbuffer : public Vbuffer
-{
-  public:
-   BufferLoadD16HiU8Vbuffer(const MachineInst * inst);
+class BufferLoadD16HiU8Vbuffer : public Vbuffer {
+public:
+  BufferLoadD16HiU8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -246,12 +228,11 @@ class BufferLoadD16HiU8Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferLoadD16HiI8Vbuffer : public Vbuffer
-{
-  public:
-   BufferLoadD16HiI8Vbuffer(const MachineInst * inst);
+class BufferLoadD16HiI8Vbuffer : public Vbuffer {
+public:
+  BufferLoadD16HiI8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -259,12 +240,11 @@ class BufferLoadD16HiI8Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferLoadD16HiB16Vbuffer : public Vbuffer
-{
-  public:
-   BufferLoadD16HiB16Vbuffer(const MachineInst * inst);
+class BufferLoadD16HiB16Vbuffer : public Vbuffer {
+public:
+  BufferLoadD16HiB16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -272,12 +252,11 @@ class BufferLoadD16HiB16Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferStoreD16HiB8Vbuffer : public Vbuffer
-{
-  public:
-   BufferStoreD16HiB8Vbuffer(const MachineInst * inst);
+class BufferStoreD16HiB8Vbuffer : public Vbuffer {
+public:
+  BufferStoreD16HiB8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -285,12 +264,11 @@ class BufferStoreD16HiB8Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferStoreD16HiB16Vbuffer : public Vbuffer
-{
-  public:
-   BufferStoreD16HiB16Vbuffer(const MachineInst * inst);
+class BufferStoreD16HiB16Vbuffer : public Vbuffer {
+public:
+  BufferStoreD16HiB16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -298,12 +276,11 @@ class BufferStoreD16HiB16Vbuffer : public Vbuffer
   Operand soffset;
   Operand gpumem;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicSwapB32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicSwapB32Vbuffer(const MachineInst * inst);
+class BufferAtomicSwapB32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicSwapB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -312,12 +289,11 @@ class BufferAtomicSwapB32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicCmpswapB32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicCmpswapB32Vbuffer(const MachineInst * inst);
+class BufferAtomicCmpswapB32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicCmpswapB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vdata_return;
@@ -327,12 +303,11 @@ class BufferAtomicCmpswapB32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicAddU32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicAddU32Vbuffer(const MachineInst * inst);
+class BufferAtomicAddU32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicAddU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -341,12 +316,11 @@ class BufferAtomicAddU32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicSubU32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicSubU32Vbuffer(const MachineInst * inst);
+class BufferAtomicSubU32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicSubU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -355,12 +329,11 @@ class BufferAtomicSubU32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicSubClampU32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicSubClampU32Vbuffer(const MachineInst * inst);
+class BufferAtomicSubClampU32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicSubClampU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -369,12 +342,11 @@ class BufferAtomicSubClampU32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicMinI32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicMinI32Vbuffer(const MachineInst * inst);
+class BufferAtomicMinI32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicMinI32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -383,12 +355,11 @@ class BufferAtomicMinI32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicMinU32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicMinU32Vbuffer(const MachineInst * inst);
+class BufferAtomicMinU32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicMinU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -397,12 +368,11 @@ class BufferAtomicMinU32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicMaxI32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicMaxI32Vbuffer(const MachineInst * inst);
+class BufferAtomicMaxI32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicMaxI32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -411,12 +381,11 @@ class BufferAtomicMaxI32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicMaxU32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicMaxU32Vbuffer(const MachineInst * inst);
+class BufferAtomicMaxU32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicMaxU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -425,12 +394,11 @@ class BufferAtomicMaxU32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicAndB32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicAndB32Vbuffer(const MachineInst * inst);
+class BufferAtomicAndB32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicAndB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -439,12 +407,11 @@ class BufferAtomicAndB32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicOrB32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicOrB32Vbuffer(const MachineInst * inst);
+class BufferAtomicOrB32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicOrB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -453,12 +420,11 @@ class BufferAtomicOrB32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicXorB32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicXorB32Vbuffer(const MachineInst * inst);
+class BufferAtomicXorB32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicXorB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -467,12 +433,11 @@ class BufferAtomicXorB32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicIncU32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicIncU32Vbuffer(const MachineInst * inst);
+class BufferAtomicIncU32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicIncU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -481,12 +446,11 @@ class BufferAtomicIncU32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicDecU32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicDecU32Vbuffer(const MachineInst * inst);
+class BufferAtomicDecU32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicDecU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -495,12 +459,11 @@ class BufferAtomicDecU32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicSwapB64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicSwapB64Vbuffer(const MachineInst * inst);
+class BufferAtomicSwapB64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicSwapB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -509,12 +472,11 @@ class BufferAtomicSwapB64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicCmpswapB64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicCmpswapB64Vbuffer(const MachineInst * inst);
+class BufferAtomicCmpswapB64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicCmpswapB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vdata_return;
@@ -524,12 +486,11 @@ class BufferAtomicCmpswapB64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicAddU64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicAddU64Vbuffer(const MachineInst * inst);
+class BufferAtomicAddU64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicAddU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -538,12 +499,11 @@ class BufferAtomicAddU64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicSubU64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicSubU64Vbuffer(const MachineInst * inst);
+class BufferAtomicSubU64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicSubU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -552,12 +512,11 @@ class BufferAtomicSubU64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicMinI64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicMinI64Vbuffer(const MachineInst * inst);
+class BufferAtomicMinI64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicMinI64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -566,12 +525,11 @@ class BufferAtomicMinI64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicMinU64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicMinU64Vbuffer(const MachineInst * inst);
+class BufferAtomicMinU64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicMinU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -580,12 +538,11 @@ class BufferAtomicMinU64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicMaxI64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicMaxI64Vbuffer(const MachineInst * inst);
+class BufferAtomicMaxI64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicMaxI64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -594,12 +551,11 @@ class BufferAtomicMaxI64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicMaxU64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicMaxU64Vbuffer(const MachineInst * inst);
+class BufferAtomicMaxU64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicMaxU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -608,12 +564,11 @@ class BufferAtomicMaxU64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicAndB64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicAndB64Vbuffer(const MachineInst * inst);
+class BufferAtomicAndB64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicAndB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -622,12 +577,11 @@ class BufferAtomicAndB64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicOrB64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicOrB64Vbuffer(const MachineInst * inst);
+class BufferAtomicOrB64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicOrB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -636,12 +590,11 @@ class BufferAtomicOrB64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicXorB64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicXorB64Vbuffer(const MachineInst * inst);
+class BufferAtomicXorB64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicXorB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -650,12 +603,11 @@ class BufferAtomicXorB64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicIncU64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicIncU64Vbuffer(const MachineInst * inst);
+class BufferAtomicIncU64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicIncU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -664,12 +616,11 @@ class BufferAtomicIncU64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicDecU64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicDecU64Vbuffer(const MachineInst * inst);
+class BufferAtomicDecU64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicDecU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -678,12 +629,11 @@ class BufferAtomicDecU64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicCondSubU32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicCondSubU32Vbuffer(const MachineInst * inst);
+class BufferAtomicCondSubU32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicCondSubU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -692,12 +642,11 @@ class BufferAtomicCondSubU32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicMinNumF32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicMinNumF32Vbuffer(const MachineInst * inst);
+class BufferAtomicMinNumF32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicMinNumF32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -706,12 +655,11 @@ class BufferAtomicMinNumF32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicMaxNumF32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicMaxNumF32Vbuffer(const MachineInst * inst);
+class BufferAtomicMaxNumF32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicMaxNumF32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -720,12 +668,11 @@ class BufferAtomicMaxNumF32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicAddF64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicAddF64Vbuffer(const MachineInst * inst);
+class BufferAtomicAddF64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicAddF64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -734,12 +681,11 @@ class BufferAtomicAddF64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicAddF32Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicAddF32Vbuffer(const MachineInst * inst);
+class BufferAtomicAddF32Vbuffer : public Vbuffer {
+public:
+  BufferAtomicAddF32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -748,12 +694,11 @@ class BufferAtomicAddF32Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicPkAddF16Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicPkAddF16Vbuffer(const MachineInst * inst);
+class BufferAtomicPkAddF16Vbuffer : public Vbuffer {
+public:
+  BufferAtomicPkAddF16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -762,12 +707,11 @@ class BufferAtomicPkAddF16Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicPkAddBf16Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicPkAddBf16Vbuffer(const MachineInst * inst);
+class BufferAtomicPkAddBf16Vbuffer : public Vbuffer {
+public:
+  BufferAtomicPkAddBf16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -776,12 +720,11 @@ class BufferAtomicPkAddBf16Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicMinNumF64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicMinNumF64Vbuffer(const MachineInst * inst);
+class BufferAtomicMinNumF64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicMinNumF64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -790,12 +733,11 @@ class BufferAtomicMinNumF64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
-class BufferAtomicMaxNumF64Vbuffer : public Vbuffer
-{
-  public:
-   BufferAtomicMaxNumF64Vbuffer(const MachineInst * inst);
+class BufferAtomicMaxNumF64Vbuffer : public Vbuffer {
+public:
+  BufferAtomicMaxNumF64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
@@ -804,7 +746,7 @@ class BufferAtomicMaxNumF64Vbuffer : public Vbuffer
   Operand gpumem;
   Operand gpumem_in;
   static const bool execute_registered_;
-} ;
+};
 
 } // namespace gfx1250
 } // namespace rocjitsu

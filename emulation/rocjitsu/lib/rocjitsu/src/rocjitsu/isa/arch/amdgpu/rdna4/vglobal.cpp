@@ -5,33 +5,49 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vglobal.h"
-#include "util/except.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
-#include <cstring>
-#include <memory>
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
+#include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <limits>
-#include "rocjitsu/vm/amdgpu/register_access.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
 
 namespace {
-template <typename VmemMachineInst>
-uint32_t vflat_vaddr_bits(const VmemMachineInst *inst) {
+template <typename VmemMachineInst> uint32_t vflat_vaddr_bits(const VmemMachineInst *inst) {
   // SADDR == NULL selects a 64-bit vector address; otherwise VADDR is a 32-bit offset.
   return inst->saddr == OPR_SREG_NULL ? 64 : 32;
 }
 } // namespace
 
-GlobalLoadU8Vglobal::GlobalLoadU8Vglobal(const MachineInst *inst) : Vglobal("global_load_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadU8Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadU8Vglobal::GlobalLoadU8Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_u8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadU8Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -46,7 +62,24 @@ void GlobalLoadU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalLoadI8Vglobal::GlobalLoadI8Vglobal(const MachineInst *inst) : Vglobal("global_load_i8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadI8Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadI8Vglobal::GlobalLoadI8Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_i8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadI8Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadI8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -62,7 +95,24 @@ void GlobalLoadI8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalLoadU16Vglobal::GlobalLoadU16Vglobal(const MachineInst *inst) : Vglobal("global_load_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadU16Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadU16Vglobal::GlobalLoadU16Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_u16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadU16Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadU16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -77,7 +127,24 @@ void GlobalLoadU16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalLoadI16Vglobal::GlobalLoadI16Vglobal(const MachineInst *inst) : Vglobal("global_load_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadI16Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadI16Vglobal::GlobalLoadI16Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_i16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadI16Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadI16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -93,7 +160,24 @@ void GlobalLoadI16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalLoadB32Vglobal::GlobalLoadB32Vglobal(const MachineInst *inst) : Vglobal("global_load_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadB32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadB32Vglobal::GlobalLoadB32Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadB32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -108,7 +192,24 @@ void GlobalLoadB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalLoadB64Vglobal::GlobalLoadB64Vglobal(const MachineInst *inst) : Vglobal("global_load_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadB64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadB64Vglobal::GlobalLoadB64Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadB64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -123,7 +224,24 @@ void GlobalLoadB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalLoadB96Vglobal::GlobalLoadB96Vglobal(const MachineInst *inst) : Vglobal("global_load_b96", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadB96Vglobal>()), vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(96, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadB96Vglobal::GlobalLoadB96Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_b96", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadB96Vglobal>()),
+      vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -138,7 +256,24 @@ void GlobalLoadB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalLoadB128Vglobal::GlobalLoadB128Vglobal(const MachineInst *inst) : Vglobal("global_load_b128", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadB128Vglobal>()), vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(128, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadB128Vglobal::GlobalLoadB128Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_b128", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadB128Vglobal>()),
+      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -153,7 +288,24 @@ void GlobalLoadB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalStoreB8Vglobal::GlobalStoreB8Vglobal(const MachineInst *inst) : Vglobal("global_store_b8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalStoreB8Vglobal>()), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalStoreB8Vglobal::GlobalStoreB8Vglobal(const MachineInst *inst)
+    : Vglobal("global_store_b8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreB8Vglobal>()),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalStoreB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -169,14 +321,32 @@ void GlobalStoreB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 1);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
 }
 
-GlobalStoreB16Vglobal::GlobalStoreB16Vglobal(const MachineInst *inst) : Vglobal("global_store_b16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalStoreB16Vglobal>()), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalStoreB16Vglobal::GlobalStoreB16Vglobal(const MachineInst *inst)
+    : Vglobal("global_store_b16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreB16Vglobal>()),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalStoreB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -192,14 +362,32 @@ void GlobalStoreB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
 }
 
-GlobalStoreB32Vglobal::GlobalStoreB32Vglobal(const MachineInst *inst) : Vglobal("global_store_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalStoreB32Vglobal>()), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalStoreB32Vglobal::GlobalStoreB32Vglobal(const MachineInst *inst)
+    : Vglobal("global_store_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreB32Vglobal>()),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalStoreB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -215,14 +403,32 @@ void GlobalStoreB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalStoreB64Vglobal::GlobalStoreB64Vglobal(const MachineInst *inst) : Vglobal("global_store_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalStoreB64Vglobal>()), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalStoreB64Vglobal::GlobalStoreB64Vglobal(const MachineInst *inst)
+    : Vglobal("global_store_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreB64Vglobal>()),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalStoreB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -238,7 +444,8 @@ void GlobalStoreB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -247,7 +454,24 @@ void GlobalStoreB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalStoreB96Vglobal::GlobalStoreB96Vglobal(const MachineInst *inst) : Vglobal("global_store_b96", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalStoreB96Vglobal>()), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(96, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalStoreB96Vglobal::GlobalStoreB96Vglobal(const MachineInst *inst)
+    : Vglobal("global_store_b96", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreB96Vglobal>()),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalStoreB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -263,7 +487,8 @@ void GlobalStoreB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 12);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -274,7 +499,24 @@ void GlobalStoreB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalStoreB128Vglobal::GlobalStoreB128Vglobal(const MachineInst *inst) : Vglobal("global_store_b128", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalStoreB128Vglobal>()), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(128, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalStoreB128Vglobal::GlobalStoreB128Vglobal(const MachineInst *inst)
+    : Vglobal("global_store_b128", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreB128Vglobal>()),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalStoreB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -290,7 +532,8 @@ void GlobalStoreB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -303,7 +546,24 @@ void GlobalStoreB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst) : Vglobal("global_load_d16_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadD16U8Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadD16U8Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadD16U8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -319,7 +579,24 @@ void GlobalLoadD16U8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst) : Vglobal("global_load_d16_i8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadD16I8Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadD16I8Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadD16I8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -336,7 +613,24 @@ void GlobalLoadD16I8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst) : Vglobal("global_load_d16_b16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadD16B16Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadD16B16Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadD16B16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -352,7 +646,24 @@ void GlobalLoadD16B16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst) : Vglobal("global_load_d16_hi_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadD16HiU8Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadD16HiU8Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadD16HiU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -368,7 +679,24 @@ void GlobalLoadD16HiU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst) : Vglobal("global_load_d16_hi_i8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadD16HiI8Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadD16HiI8Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadD16HiI8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -385,7 +713,24 @@ void GlobalLoadD16HiI8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst) : Vglobal("global_load_d16_hi_b16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadD16HiB16Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadD16HiB16Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -401,7 +746,24 @@ void GlobalLoadD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalStoreD16HiB8Vglobal::GlobalStoreD16HiB8Vglobal(const MachineInst *inst) : Vglobal("global_store_d16_hi_b8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalStoreD16HiB8Vglobal>()), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(8, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalStoreD16HiB8Vglobal::GlobalStoreD16HiB8Vglobal(const MachineInst *inst)
+    : Vglobal("global_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreD16HiB8Vglobal>()),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalStoreD16HiB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -417,7 +779,8 @@ void GlobalStoreD16HiB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 1);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
@@ -425,7 +788,24 @@ void GlobalStoreD16HiB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalStoreD16HiB16Vglobal::GlobalStoreD16HiB16Vglobal(const MachineInst *inst) : Vglobal("global_store_d16_hi_b16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalStoreD16HiB16Vglobal>()), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(16, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalStoreD16HiB16Vglobal::GlobalStoreD16HiB16Vglobal(const MachineInst *inst)
+    : Vglobal("global_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreD16HiB16Vglobal>()),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalStoreD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -441,7 +821,8 @@ void GlobalStoreD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
@@ -449,7 +830,21 @@ void GlobalStoreD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalLoadAddtidB32Vglobal::GlobalLoadAddtidB32Vglobal(const MachineInst *inst) : Vglobal("global_load_addtid_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadAddtidB32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &gpumem;num_src_ = 1;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadAddtidB32Vglobal::GlobalLoadAddtidB32Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadAddtidB32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &gpumem;
+  num_src_ = 1;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -462,21 +857,39 @@ void GlobalLoadAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   {
     uint64_t exec = wf.exec();
-    d->lane_mask = exec; d->exec_mask = exec;
+    d->lane_mask = exec;
+    d->exec_mask = exec;
     d->wf_size = wf.wf_size();
-    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();
+    d->wg_id = wf.wg_id();
+    d->wf_id = wf.wf_id();
     d->cu_path = wf.cu().full_path();
     uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);
     int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(exec & (1ULL << lane))) continue;
-      d->per_lane_addr[lane] = base + static_cast<uint64_t>(offset + static_cast<int64_t>(lane * 4));
+      if (!(exec & (1ULL << lane)))
+        continue;
+      d->per_lane_addr[lane] =
+          base + static_cast<uint64_t>(offset + static_cast<int64_t>(lane * 4));
     }
   }
   set_data(std::move(d));
 }
 
-GlobalStoreAddtidB32Vglobal::GlobalStoreAddtidB32Vglobal(const MachineInst *inst) : Vglobal("global_store_addtid_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalStoreAddtidB32Vglobal>()), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vsrc;dst_operands_[0] = &gpumem;num_src_ = 1;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalStoreAddtidB32Vglobal::GlobalStoreAddtidB32Vglobal(const MachineInst *inst)
+    : Vglobal("global_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreAddtidB32Vglobal>()),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  num_src_ = 1;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalStoreAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -488,15 +901,19 @@ void GlobalStoreAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   {
     uint64_t exec = wf.exec();
-    d->lane_mask = exec; d->exec_mask = exec;
+    d->lane_mask = exec;
+    d->exec_mask = exec;
     d->wf_size = wf.wf_size();
-    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();
+    d->wg_id = wf.wg_id();
+    d->wf_id = wf.wf_id();
     d->cu_path = wf.cu().full_path();
     uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);
     int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(exec & (1ULL << lane))) continue;
-      d->per_lane_addr[lane] = base + static_cast<uint64_t>(offset + static_cast<int64_t>(lane * 4));
+      if (!(exec & (1ULL << lane)))
+        continue;
+      d->per_lane_addr[lane] =
+          base + static_cast<uint64_t>(offset + static_cast<int64_t>(lane * 4));
     }
   }
   auto &cu = wf.cu();
@@ -504,14 +921,20 @@ void GlobalStoreAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     std::memcpy(&d->store_data[lane * 4], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalInvVglobal::GlobalInvVglobal(const MachineInst *inst) : Vglobal("global_inv", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalInvVglobal>()) {num_src_ = 0;num_dst_ = 0;}
+GlobalInvVglobal::GlobalInvVglobal(const MachineInst *inst)
+    : Vglobal("global_inv", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalInvVglobal>()) {
+  num_src_ = 0;
+  num_dst_ = 0;
+}
 
 void GlobalInvVglobal::execute_impl(amdgpu::Wavefront &wf) {
   wf.cu().l1_vector().invalidate_all();
@@ -519,13 +942,38 @@ void GlobalInvVglobal::execute_impl(amdgpu::Wavefront &wf) {
     l2->flush_all(wf.process_id());
 }
 
-GlobalWbVglobal::GlobalWbVglobal(const MachineInst *inst) : Vglobal("global_wb", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalWbVglobal>()) {num_src_ = 0;num_dst_ = 0;}
-
-void GlobalWbVglobal::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
+GlobalWbVglobal::GlobalWbVglobal(const MachineInst *inst)
+    : Vglobal("global_wb", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalWbVglobal>()) {
+  num_src_ = 0;
+  num_dst_ = 0;
 }
 
-GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_swap_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicSwapB32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+void GlobalWbVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+
+GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicSwapB32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicSwapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -543,14 +991,37 @@ void GlobalAtomicSwapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicCmpswapB32Vglobal::GlobalAtomicCmpswapB32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicCmpswapB32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicCmpswapB32Vglobal::GlobalAtomicCmpswapB32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicCmpswapB32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicCmpswapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -568,7 +1039,8 @@ void GlobalAtomicCmpswapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -577,7 +1049,29 @@ void GlobalAtomicCmpswapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalAtomicAddU32Vglobal::GlobalAtomicAddU32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_add_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicAddU32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicAddU32Vglobal::GlobalAtomicAddU32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicAddU32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicAddU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -595,14 +1089,37 @@ void GlobalAtomicAddU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicSubU32Vglobal::GlobalAtomicSubU32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_sub_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicSubU32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicSubU32Vglobal::GlobalAtomicSubU32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicSubU32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -620,14 +1137,37 @@ void GlobalAtomicSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicSubClampU32Vglobal::GlobalAtomicSubClampU32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicSubClampU32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicSubClampU32Vglobal::GlobalAtomicSubClampU32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicSubClampU32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicSubClampU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -645,14 +1185,37 @@ void GlobalAtomicSubClampU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicMinI32Vglobal::GlobalAtomicMinI32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_min_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicMinI32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicMinI32Vglobal::GlobalAtomicMinI32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMinI32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicMinI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -670,14 +1233,37 @@ void GlobalAtomicMinI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicMinU32Vglobal::GlobalAtomicMinU32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_min_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicMinU32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicMinU32Vglobal::GlobalAtomicMinU32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMinU32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicMinU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -695,14 +1281,37 @@ void GlobalAtomicMinU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicMaxI32Vglobal::GlobalAtomicMaxI32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_max_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicMaxI32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicMaxI32Vglobal::GlobalAtomicMaxI32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMaxI32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicMaxI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -720,14 +1329,37 @@ void GlobalAtomicMaxI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicMaxU32Vglobal::GlobalAtomicMaxU32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_max_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicMaxU32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicMaxU32Vglobal::GlobalAtomicMaxU32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMaxU32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicMaxU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -745,14 +1377,37 @@ void GlobalAtomicMaxU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicAndB32Vglobal::GlobalAtomicAndB32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_and_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicAndB32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicAndB32Vglobal::GlobalAtomicAndB32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicAndB32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicAndB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -770,14 +1425,37 @@ void GlobalAtomicAndB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicOrB32Vglobal::GlobalAtomicOrB32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_or_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicOrB32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicOrB32Vglobal::GlobalAtomicOrB32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicOrB32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicOrB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -795,14 +1473,37 @@ void GlobalAtomicOrB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicXorB32Vglobal::GlobalAtomicXorB32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_xor_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicXorB32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicXorB32Vglobal::GlobalAtomicXorB32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicXorB32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicXorB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -820,14 +1521,37 @@ void GlobalAtomicXorB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicIncU32Vglobal::GlobalAtomicIncU32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_inc_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicIncU32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicIncU32Vglobal::GlobalAtomicIncU32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicIncU32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicIncU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -845,14 +1569,37 @@ void GlobalAtomicIncU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicDecU32Vglobal::GlobalAtomicDecU32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_dec_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicDecU32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicDecU32Vglobal::GlobalAtomicDecU32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicDecU32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicDecU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -870,14 +1617,37 @@ void GlobalAtomicDecU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicSwapB64Vglobal::GlobalAtomicSwapB64Vglobal(const MachineInst *inst) : Vglobal("global_atomic_swap_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicSwapB64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicSwapB64Vglobal::GlobalAtomicSwapB64Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicSwapB64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicSwapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -895,7 +1665,8 @@ void GlobalAtomicSwapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -904,7 +1675,29 @@ void GlobalAtomicSwapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalAtomicCmpswapB64Vglobal::GlobalAtomicCmpswapB64Vglobal(const MachineInst *inst) : Vglobal("global_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicCmpswapB64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicCmpswapB64Vglobal::GlobalAtomicCmpswapB64Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicCmpswapB64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicCmpswapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -922,7 +1715,8 @@ void GlobalAtomicCmpswapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -935,7 +1729,29 @@ void GlobalAtomicCmpswapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalAtomicAddU64Vglobal::GlobalAtomicAddU64Vglobal(const MachineInst *inst) : Vglobal("global_atomic_add_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicAddU64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicAddU64Vglobal::GlobalAtomicAddU64Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicAddU64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicAddU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -953,7 +1769,8 @@ void GlobalAtomicAddU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -962,7 +1779,29 @@ void GlobalAtomicAddU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalAtomicSubU64Vglobal::GlobalAtomicSubU64Vglobal(const MachineInst *inst) : Vglobal("global_atomic_sub_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicSubU64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicSubU64Vglobal::GlobalAtomicSubU64Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicSubU64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicSubU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -980,7 +1819,8 @@ void GlobalAtomicSubU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -989,7 +1829,29 @@ void GlobalAtomicSubU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalAtomicMinI64Vglobal::GlobalAtomicMinI64Vglobal(const MachineInst *inst) : Vglobal("global_atomic_min_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicMinI64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicMinI64Vglobal::GlobalAtomicMinI64Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMinI64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicMinI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1007,7 +1869,8 @@ void GlobalAtomicMinI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1016,7 +1879,29 @@ void GlobalAtomicMinI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalAtomicMinU64Vglobal::GlobalAtomicMinU64Vglobal(const MachineInst *inst) : Vglobal("global_atomic_min_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicMinU64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicMinU64Vglobal::GlobalAtomicMinU64Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMinU64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicMinU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1034,7 +1919,8 @@ void GlobalAtomicMinU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1043,7 +1929,29 @@ void GlobalAtomicMinU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalAtomicMaxI64Vglobal::GlobalAtomicMaxI64Vglobal(const MachineInst *inst) : Vglobal("global_atomic_max_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicMaxI64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicMaxI64Vglobal::GlobalAtomicMaxI64Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMaxI64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicMaxI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1061,7 +1969,8 @@ void GlobalAtomicMaxI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1070,7 +1979,29 @@ void GlobalAtomicMaxI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalAtomicMaxU64Vglobal::GlobalAtomicMaxU64Vglobal(const MachineInst *inst) : Vglobal("global_atomic_max_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicMaxU64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicMaxU64Vglobal::GlobalAtomicMaxU64Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMaxU64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicMaxU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1088,7 +2019,8 @@ void GlobalAtomicMaxU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1097,7 +2029,29 @@ void GlobalAtomicMaxU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalAtomicAndB64Vglobal::GlobalAtomicAndB64Vglobal(const MachineInst *inst) : Vglobal("global_atomic_and_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicAndB64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicAndB64Vglobal::GlobalAtomicAndB64Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicAndB64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicAndB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1115,7 +2069,8 @@ void GlobalAtomicAndB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1124,7 +2079,29 @@ void GlobalAtomicAndB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalAtomicOrB64Vglobal::GlobalAtomicOrB64Vglobal(const MachineInst *inst) : Vglobal("global_atomic_or_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicOrB64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicOrB64Vglobal::GlobalAtomicOrB64Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicOrB64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicOrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1142,7 +2119,8 @@ void GlobalAtomicOrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1151,7 +2129,29 @@ void GlobalAtomicOrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalAtomicXorB64Vglobal::GlobalAtomicXorB64Vglobal(const MachineInst *inst) : Vglobal("global_atomic_xor_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicXorB64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicXorB64Vglobal::GlobalAtomicXorB64Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicXorB64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicXorB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1169,7 +2169,8 @@ void GlobalAtomicXorB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1178,7 +2179,29 @@ void GlobalAtomicXorB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalAtomicIncU64Vglobal::GlobalAtomicIncU64Vglobal(const MachineInst *inst) : Vglobal("global_atomic_inc_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicIncU64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicIncU64Vglobal::GlobalAtomicIncU64Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicIncU64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicIncU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1196,7 +2219,8 @@ void GlobalAtomicIncU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1205,7 +2229,29 @@ void GlobalAtomicIncU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalAtomicDecU64Vglobal::GlobalAtomicDecU64Vglobal(const MachineInst *inst) : Vglobal("global_atomic_dec_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicDecU64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicDecU64Vglobal::GlobalAtomicDecU64Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicDecU64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicDecU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1223,7 +2269,8 @@ void GlobalAtomicDecU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1232,13 +2279,38 @@ void GlobalAtomicDecU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalWbinvVglobal::GlobalWbinvVglobal(const MachineInst *inst) : Vglobal("global_wbinv", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalWbinvVglobal>()) {num_src_ = 0;num_dst_ = 0;}
-
-void GlobalWbinvVglobal::execute_impl(amdgpu::Wavefront &wf) {
-  wf.cu().l1_vector().flush_all();
+GlobalWbinvVglobal::GlobalWbinvVglobal(const MachineInst *inst)
+    : Vglobal("global_wbinv", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalWbinvVglobal>()) {
+  num_src_ = 0;
+  num_dst_ = 0;
 }
 
-GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicCondSubU32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+void GlobalWbinvVglobal::execute_impl(amdgpu::Wavefront &wf) { wf.cu().l1_vector().flush_all(); }
+
+GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicCondSubU32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicCondSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1256,14 +2328,37 @@ void GlobalAtomicCondSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicMinNumF32Vglobal::GlobalAtomicMinNumF32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_min_num_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicMinNumF32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicMinNumF32Vglobal::GlobalAtomicMinNumF32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMinNumF32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicMinNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1281,14 +2376,37 @@ void GlobalAtomicMinNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicMaxNumF32Vglobal::GlobalAtomicMaxNumF32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_max_num_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicMaxNumF32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicMaxNumF32Vglobal::GlobalAtomicMaxNumF32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMaxNumF32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicMaxNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1306,14 +2424,34 @@ void GlobalAtomicMaxNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst) : Vglobal("global_load_block", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadBlockVglobal>()), vdst(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;src_operands_[2] = &m0;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);m0.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
+    : Vglobal("global_load_block", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadBlockVglobal>()),
+      vdst(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1328,7 +2466,26 @@ void GlobalLoadBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst) : Vglobal("global_store_block", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalStoreBlockVglobal>()), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &m0;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);m0.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
+    : Vglobal("global_store_block", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreBlockVglobal>()),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1344,7 +2501,8 @@ void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 128);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 128 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1413,7 +2571,29 @@ void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst) : Vglobal("global_atomic_add_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicAddF32Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicAddF32Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicAddF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1431,14 +2611,32 @@ void GlobalAtomicAddF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalLoadTrB128Vglobal::GlobalLoadTrB128Vglobal(const MachineInst *inst) : Vglobal("global_load_tr_b128", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadTrB128Vglobal>()), vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(128, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadTrB128Vglobal::GlobalLoadTrB128Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_tr_b128", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadTrB128Vglobal>()),
+      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadTrB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1454,7 +2652,24 @@ void GlobalLoadTrB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalLoadTrB64Vglobal::GlobalLoadTrB64Vglobal(const MachineInst *inst) : Vglobal("global_load_tr_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalLoadTrB64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0) {dst_operands_[0] = &vdst;src_operands_[0] = &vaddr;src_operands_[1] = &gpumem;num_src_ = 2;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;gpumem.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalLoadTrB64Vglobal::GlobalLoadTrB64Vglobal(const MachineInst *inst)
+    : Vglobal("global_load_tr_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadTrB64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalLoadTrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1470,7 +2685,29 @@ void GlobalLoadTrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst) : Vglobal("global_atomic_pk_add_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicPkAddF16Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicPkAddF16Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicPkAddF16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1488,14 +2725,37 @@ void GlobalAtomicPkAddF16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicPkAddBf16Vglobal::GlobalAtomicPkAddBf16Vglobal(const MachineInst *inst) : Vglobal("global_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicPkAddBf16Vglobal>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicPkAddBf16Vglobal::GlobalAtomicPkAddBf16Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicPkAddBf16Vglobal>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicPkAddBf16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1513,14 +2773,37 @@ void GlobalAtomicPkAddBf16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
 }
 
-GlobalAtomicOrderedAddB64Vglobal::GlobalAtomicOrderedAddB64Vglobal(const MachineInst *inst) : Vglobal("global_atomic_ordered_add_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<GlobalAtomicOrderedAddB64Vglobal>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vaddr), vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vsrc), saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->saddr), gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {src_operands_[0] = &vaddr;src_operands_[1] = &vsrc;dst_operands_[0] = &gpumem;src_operands_[2] = &gpumem_in;num_src_ = 3;num_dst_ = 1;if (inst_.saddr != OPR_SREG_NULL) src_operands_[num_src_++] = &saddr;if (amdgpu::gfx12_atomic_returns(inst_.th)) dst_operands_[num_dst_++] = &vdst;gpumem.apply_fieldless_caps(false, false, false);gpumem_in.apply_fieldless_caps(false, false, false);flags_ |= MEMORY_OP;}
+GlobalAtomicOrderedAddB64Vglobal::GlobalAtomicOrderedAddB64Vglobal(const MachineInst *inst)
+    : Vglobal("global_atomic_ordered_add_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicOrderedAddB64Vglobal>()),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  if (inst_.saddr != OPR_SREG_NULL)
+    src_operands_[num_src_++] = &saddr;
+  if (amdgpu::gfx12_atomic_returns(inst_.th))
+    dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
 
 void GlobalAtomicOrderedAddB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1538,7 +2821,8 @@ void GlobalAtomicOrderedAddB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) continue;
+    if (!(exec & (1ULL << lane)))
+      continue;
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);

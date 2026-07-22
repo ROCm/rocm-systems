@@ -14,10 +14,9 @@
 namespace rocjitsu {
 namespace rdna3_5 {
 
-class ExpExp : public Exp
-{
-  public:
-   ExpExp(const MachineInst * inst);
+class ExpExp : public Exp {
+public:
+  ExpExp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand tgt;
   Operand vsrc0;
@@ -26,7 +25,7 @@ class ExpExp : public Exp
   Operand vsrc3;
   Operand sdst_exec;
   Operand m0;
-} ;
+};
 
 } // namespace rdna3_5
 } // namespace rocjitsu

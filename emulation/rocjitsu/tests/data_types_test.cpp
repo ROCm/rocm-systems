@@ -291,8 +291,18 @@ TEST(Fp8E4M3Fnuz, SrNarrow) {
 TEST(Fp8E4M3Fnuz, Fp16OvflModeControlsOverflow) {
   // FP16_OVFL follows rounded overflow: just-above-max finite values that
   // round back to max remain finite, while deeper overflow is mode-controlled.
+  const float rne_overflow_tie = 248.0f;
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(240.0f, false), 0x7F);
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(241.0f, false), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(247.9f, false), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(std::nextafter(rne_overflow_tie, 0.0f), false),
+            0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(rne_overflow_tie, false), 0x80);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(rne_overflow_tie, true), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(-std::nextafter(rne_overflow_tie, 0.0f), false),
+            0xFF);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(-rne_overflow_tie, false), 0x80);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(-rne_overflow_tie, true), 0xFF);
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(300.0f, false), 0x80);
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(300.0f, true), 0x7F);
   EXPECT_EQ(util::f32_to_fp8_e4m3_fnuz_rne_mode(-300.0f, false), 0x80);
@@ -562,8 +572,17 @@ TEST(Bf8E5M2Fnuz, SrNarrow) {
 TEST(Bf8E5M2Fnuz, Fp16OvflModeControlsOverflow) {
   // Just-above-max finite BF8 values round back to max; deeper rounded
   // overflow is mode-controlled.
+  const float rne_overflow_tie = 61440.0f;
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(57344.0f, false), 0x7F);
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(57345.0f, false), 0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(std::nextafter(rne_overflow_tie, 0.0f), false),
+            0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(rne_overflow_tie, false), 0x80);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(rne_overflow_tie, true), 0x7F);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(-std::nextafter(rne_overflow_tie, 0.0f), false),
+            0xFF);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(-rne_overflow_tie, false), 0x80);
+  EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(-rne_overflow_tie, true), 0xFF);
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(70000.0f, false), 0x80);
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(70000.0f, true), 0x7F);
   EXPECT_EQ(util::f32_to_bf8_e5m2_fnuz_rne_mode(-70000.0f, false), 0x80);
