@@ -43,6 +43,7 @@
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/pc_sampling.h>
 #include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
 #include <rocprofiler-sdk/cxx/details/mpl.hpp>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
@@ -264,6 +265,32 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                  result["vaddr"]       = instruction->vaddr;
                  return result;
              });
+
+    // Expose the SDK's canonical PC-sampling enum->name lookups so post-processing
+    // (rocpd importer) can resolve inst_type / stall_reason names without hardcoding
+    // the enum tables.  The SDK generates these from the enums at compile time, so new
+    // hardware values are picked up automatically -- nothing here needs updating.
+    pyrocpd.def(
+        "pc_sampling_instruction_type_name",
+        [](int value) -> py::object {
+            const auto* name = rocprofiler_get_pc_sampling_instruction_type_name(
+                static_cast<rocprofiler_pc_sampling_instruction_type_t>(value));
+            if(name == nullptr) return py::none{};
+            return py::str{name};
+        },
+        "Return the ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_* name for a PC sampling "
+        "inst_type enum value, or None if the value is not recognized by this SDK.");
+
+    pyrocpd.def(
+        "pc_sampling_instruction_not_issued_reason_name",
+        [](int value) -> py::object {
+            const auto* name = rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
+                static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(value));
+            if(name == nullptr) return py::none{};
+            return py::str{name};
+        },
+        "Return the ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_* name for a "
+        "PC sampling stall_reason enum value, or None if unrecognized by this SDK.");
 
     // demo for creating python bindings to a class
     py::class_<rocpd::types::agent>(pyrocpd, "agent")

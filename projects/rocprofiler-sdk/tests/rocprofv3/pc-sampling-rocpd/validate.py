@@ -180,9 +180,12 @@ def test_rocpd_stochastic_columns_populated(rocpd_connection):
 
 
 def test_rocpd_on_demand_disassembly(rocpd_connection):
-    # Default path: without --complete-isa-decode no instruction text is
-    # persisted, so the decoded view must disassemble on demand via the registered SQLite
-    # UDFs (rocpd_isa_instruction / rocpd_isa_comment).
+    # Default path: without --complete-isa-decode no instruction text is persisted
+    # at collection, so the decoded view must disassemble on demand via the
+    # registered SQLite UDFs (rocpd_isa_instruction / rocpd_isa_comment).  The
+    # write-back cache is on by default, but validation opens the database
+    # read-only (cache_disassembly=False) and the CSV-generation convert runs with
+    # --no-cache-disassembly, so nothing is written back and the table stays empty.
     conn = rocpd_connection
     assert _count_rows(conn, "rocpd_disassembly_data") == 0
     total = _count_rows(conn, "rocpd_gpu_pc_sample")

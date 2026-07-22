@@ -83,7 +83,7 @@ def rocpd_connection(request):
 
     from rocpd.importer import RocpdImportData
 
-    with RocpdImportData(filename) as conn:
+    with RocpdImportData(filename, cache_disassembly=False) as conn:
         yield conn
 
 
@@ -140,5 +140,5 @@ def rocpd_disasm_connection(request):
 
     from rocpd.importer import RocpdImportData
 
-    with RocpdImportData(filename) as conn:
+    with RocpdImportData(filename, cache_disassembly=False) as conn:
         yield conn

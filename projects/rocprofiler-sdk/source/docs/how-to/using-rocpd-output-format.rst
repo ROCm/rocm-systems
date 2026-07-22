@@ -1939,13 +1939,13 @@ Instruction disassembly
 By default, instruction text is decoded lazily during post-processing. Each
 time the ``rocpd_gpu_pc_sample_decoded`` view is queried, ``rocpd``
 disassembles the sampled program counters on demand from the referenced code
-objects and returns the instruction text in the query result. By default the
-decoded text is only cached in memory for the lifetime of the process and is
-not written back to the database, so the ``.db`` file is left unchanged and no
-instruction text is persisted, and re-running a query re-disassembles the
-sampled program counters. Set the ``ROCPD_CACHE_DISASSEMBLY`` environment
-variable to instead persist this lazily decoded text so it is reused on the
-next open (described below).
+objects and returns the instruction text in the query result. By default this
+lazily decoded text is also written back into the database when the process 
+exits, so it is reused on the next open instead of being re-disassembled (described below). 
+Pass ``--no-cache-disassembly`` to the ``rocpd`` subcommands (or ``cache_disassembly=False`` 
+to the ``RocpdImportData`` API) to keep the input database read-only, in which case the 
+decoded text is cached only in memory for the lifetime of the process and the ``.db`` file 
+is left unchanged.
 
 Passing ``--complete-isa-decode`` to ``rocprofv3`` instead persists
 the disassembly at collection time into the ``rocpd_disassembly_data`` table
@@ -1961,9 +1961,11 @@ only for those absent program counters. Because the fallback decodes from the
 same code objects, a query still returns instruction text for those program
 counters as long as the code objects remain accessible.
 
-Alternatively, set the ``ROCPD_CACHE_DISASSEMBLY=1`` environment variable to
-have the ``rocpd`` post-processing tools persist instructions that are decoded
-*lazily*. When it is set, program counters that are disassembled on demand while
+By default (unless ``--no-cache-disassembly`` is passed to ``rocpd convert``,
+``rocpd query``, or ``rocpd summary``, or ``cache_disassembly=False`` is passed
+to the ``RocpdImportData`` API), the ``rocpd`` post-processing tools persist
+instructions that are decoded *lazily*. Program counters
+that are disassembled on demand while
 a query is served (for example by ``rocpd query`` or ``rocpd convert``) are
 written into the same ``rocpd_disassembly_data`` table when the process exits,
 so a later open reads the stored text instead of decoding again. Unlike
@@ -1973,10 +1975,11 @@ only those that resolved to an instruction.
 
 .. note::
 
-   ``ROCPD_CACHE_DISASSEMBLY`` is opt-in and best-effort:
+   Disassembly write-back is on by default and best-effort:
 
-   - It is off by default; queries never modify the ``.db`` unless the variable
-     is set to ``1`` (or ``true``, ``yes``, or ``on``).
+   - It writes to the input database(s) unless disabled with
+     ``--no-cache-disassembly`` (or ``cache_disassembly=False`` via the API),
+     which keeps the input read-only.
    - Rows are written to the input database(s) at process exit (routed to each
      recording by ``guid``), so the cache benefits the *next* open rather than
      the current run.
@@ -1989,51 +1992,54 @@ only those that resolved to an instruction.
      file or filesystem, lock contention, or a pre-3.0.3 database without the
      ``rocpd_disassembly_data`` table); the database is left untouched.
    - Writes are de-duplicated per ``guid``, ``code_object_id``, and
-     ``code_object_offset``, so enabling the cache never changes query results.
+     ``code_object_offset``, so the cache never changes query results.
 
-With the variable set, the cache is populated whenever a command decodes program
-counters that are not already stored. For example:
+By default the cache is populated whenever a command decodes program counters
+that are not already stored. For example:
 
 .. code-block:: bash
 
    # A query that projects the instruction/comment columns of the decoded view.
-   ROCPD_CACHE_DISASSEMBLY=1 rocpd query -i results.db --query "
+   rocpd query -i results.db --query "
      SELECT dispatch_id, instruction, instruction_comment
      FROM rocpd_gpu_pc_sample_decoded LIMIT 100"
 
    # A query written against rocpd_gpu_pc_sample is rewritten to the decoded
    # view automatically (update_query_for_blob_views), so it decodes -- and
    # caches -- the projected program counters too.
-   ROCPD_CACHE_DISASSEMBLY=1 rocpd query -i results.db --query "
+   rocpd query -i results.db --query "
      SELECT instruction FROM rocpd_gpu_pc_sample LIMIT 100"
 
    # CSV conversion: the PC sampling CSV writers select instruction and
    # instruction_comment, so a convert run caches every decoded sample.
-   ROCPD_CACHE_DISASSEMBLY=1 rocpd convert -i results.db -f csv
+   rocpd convert -i results.db -f csv
 
 Any direct ``SELECT`` of the ``instruction`` or ``instruction_comment`` columns
 of ``rocpd_gpu_pc_sample_decoded`` has the same effect. In every case the
 decoded program counters are written to ``rocpd_disassembly_data`` when the
 process exits, so the *next* time the database is opened the stored text is
 served through the decoded view instead of being disassembled again. Reading the
-stored text does not require the variable -- it only controls whether new
-decodes are persisted:
+stored text is unaffected by ``--no-cache-disassembly`` -- that flag only
+controls whether *new* decodes are persisted:
 
 .. code-block:: bash
 
    # First run: decodes lazily and, at exit, persists the disassembly.
-   ROCPD_CACHE_DISASSEMBLY=1 rocpd convert -i results.db -f csv
+   rocpd convert -i results.db -f csv
 
-   # Later runs: the decoded view serves the stored text (no re-decoding),
-   # whether or not ROCPD_CACHE_DISASSEMBLY is set.
+   # Later runs: the decoded view serves the stored text (no re-decoding);
+   # --no-cache-disassembly does not affect reading already-stored text.
    rocpd query -i results.db --query "
      SELECT instruction FROM rocpd_gpu_pc_sample_decoded LIMIT 100"
 
 .. warning::
 
-   Persisting disassembly can significantly increase the database size,
-   especially for applications with large code objects. Leave the option off
-   unless you need the instruction text baked into the database.
+   Persisting disassembly grows the input database by roughly one row per
+   distinct sampled program counter that is decoded. This is bounded (only
+   sampled program counters, not whole code objects) but non-zero; pass
+   ``--no-cache-disassembly`` (or ``cache_disassembly=False`` via the API) to
+   keep the input read-only if you do not want the instruction text written
+   back.
 
 .. note::
 

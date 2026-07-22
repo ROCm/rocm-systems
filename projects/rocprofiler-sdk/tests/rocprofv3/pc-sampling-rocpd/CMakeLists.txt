@@ -65,7 +65,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-rocpd-csv-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f csv -d
+        ${Python3_EXECUTABLE} -m rocpd convert --no-cache-disassembly -f csv -d
         ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-csv -o out -i
         ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-input/out_results.db
     DEPENDS rocprofiler-sdk::rocprofv3

@@ -38,25 +38,6 @@ try:
     # librocpd and Python use the same SQLite library, avoiding mixed-lib symbol
     # collisions
     _sqlite3lib = ctypes.CDLL(_sqlite3.__file__, mode=ctypes.RTLD_GLOBAL)
-
-    # Preload the rocPD shared library with global symbol visibility so its
-    # SQLite symbols resolve against the interpreter's.  For the standard
-    # install layout the library lives in the ROCm library directory three
-    # levels above this package (<libdir>/pythonX.Y/site-packages/rocpd/);
-    # probe a few plausible relative locations instead of hard-coding a single
-    # fixed depth.  This is best-effort -- the SDK also loads the library
-    # through other paths -- so a miss here is non-fatal.
-    _pkg_dir = os.path.dirname(os.path.abspath(__file__))
-    _rocpd_lib_name = "librocprofiler-sdk-rocpd.so.1"
-    for _rel in (
-        ("..", "..", "..", _rocpd_lib_name),
-        ("..", "..", "..", "..", _rocpd_lib_name),
-        (_rocpd_lib_name,),
-    ):
-        _rocpd_lib = os.path.realpath(os.path.join(_pkg_dir, *_rel))
-        if os.path.exists(_rocpd_lib):
-            ctypes.CDLL(_rocpd_lib, mode=ctypes.RTLD_GLOBAL)
-            break
 except Exception:
     pass
 

@@ -47,7 +47,14 @@ __all__ = [
 ]
 
 
-def internal_init(_input, _output, skip_auto_merge, automerge_limit):
+def internal_init(
+    _input,
+    _output,
+    skip_auto_merge,
+    automerge_limit,
+    codeobj_path_prefix_map=None,
+    cache_disassembly=True,
+):
     from . import package
 
     _input = package.flatten_rocpd_yaml_input_file(
@@ -66,14 +73,24 @@ def internal_init(_input, _output, skip_auto_merge, automerge_limit):
     # {{uuid}} renders as "" making every view reference its own name.  Skip it
     # entirely; there is no data to set up views for anyway.
     if _input:
-        _create_meta_views(_connection)
+        _create_meta_views(
+            _connection,
+            codeobj_path_prefix_map=codeobj_path_prefix_map,
+            cache_disassembly=cache_disassembly,
+        )
     return (_connection, _input, _table_info)
 
 
 class RocpdImportData(libpyrocpd.RocpdImportData):
 
     def __init__(
-        self, input, skip_auto_merge=False, automerge_limit=None, dbname=":memory:"
+        self,
+        input,
+        skip_auto_merge=False,
+        automerge_limit=None,
+        dbname=":memory:",
+        codeobj_path_prefix_map=None,
+        cache_disassembly=True,
     ):
         from . import package
 
@@ -93,7 +110,12 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
                 isinstance(input, list) and len(input) > 0 and isinstance(input[0], str)
             ):
                 _connection, _filenames, _table_info = internal_init(
-                    input, dbname, skip_auto_merge, automerge_limit
+                    input,
+                    dbname,
+                    skip_auto_merge,
+                    automerge_limit,
+                    codeobj_path_prefix_map=codeobj_path_prefix_map,
+                    cache_disassembly=cache_disassembly,
                 )
                 self.table_info = _table_info
             else:
@@ -236,41 +258,60 @@ def _blob_struct_fmt(size: int, data_type: str, is_signed: int) -> str:
     return (signed_map if bool(is_signed) else unsigned_map)[size]
 
 
-def _codeobj_path_prefix_map():
-    """Return ``(source_prefix, replacement_prefix)`` pairs used to relocate
-    code-object paths recorded under a different filesystem layout.
+def _normalize_codeobj_path_prefix_map(mapping):
+    """Normalize a code-object path prefix map into a list of
+    ``(source_prefix, replacement_prefix)`` pairs.
 
-    Post-processing frequently runs in a different mount namespace than the
-    profiled process -- for example a code object recorded inside a container is
-    decoded on the host under a different mount point (or vice versa).  The
-    mapping is consulted only as a fallback when the recorded path does not
-    exist, and it only ever resolves to an *existing* regular file which callers
-    still offset/size-validate, so it cannot substitute unrelated data -- at
-    worst the object is not found and decoding reports "unavailable".
+    The map relocates code-object paths recorded under a different filesystem
+    layout than post-processing runs in -- for example a code object recorded
+    inside a container is decoded on the host under a different mount point (or
+    vice versa).  It is consulted only as a fallback when the recorded path does
+    not exist, and it only ever resolves to an *existing* regular file which
+    callers still offset/size-validate, so it cannot substitute unrelated data
+    -- at worst the object is not found and decoding reports "unavailable".
 
-    There is no built-in default: relocation is opt-in via
-    ``ROCPROF_CODEOBJ_PATH_PREFIX_MAP``, an ``os.pathsep``-separated list of
-    ``source=replacement`` prefix pairs (e.g.
-    ``/dockerx/=/home/user:/other/src=/other/dst``).  When it is unset or empty,
-    recorded code-object paths are used exactly as stored.
+    Supply it through the API
+    (``RocpdImportData(..., codeobj_path_prefix_map=...)``) or the ``rocpd``
+    command line (``--codeobj-path-prefix-map SRC=DST ...``); there is no
+    environment-variable or built-in default.  Accepts ``None`` (no
+    relocation), a ``dict`` of ``{source: replacement}``, or an iterable of
+    ``"source=replacement"`` strings / ``(source, replacement)`` pairs.  When
+    empty, recorded code-object paths are used exactly as stored.
     """
-    raw = os.environ.get("ROCPROF_CODEOBJ_PATH_PREFIX_MAP")
-    if not raw:
+    if not mapping:
         return []
+    if isinstance(mapping, str):
+        mapping = [mapping]
+    items = mapping.items() if isinstance(mapping, dict) else mapping
     pairs = []
-    for entry in raw.split(os.pathsep):
-        source_prefix, sep, replacement_prefix = entry.partition("=")
-        if sep and source_prefix:
+    for entry in items:
+        if isinstance(entry, str):
+            source_prefix, sep, replacement_prefix = entry.partition("=")
+            if not sep or not source_prefix:
+                continue
+        else:
+            source_prefix, replacement_prefix = entry
+        source_prefix = str(source_prefix)
+        replacement_prefix = str(replacement_prefix)
+        if source_prefix:
             pairs.append((source_prefix, replacement_prefix))
     return pairs
 
 
-def setup_isa_decode_views(conn):
+def setup_isa_decode_views(conn, codeobj_path_prefix_map=None, cache_disassembly=True):
     """Register lazy ISA decode functions and enrich PC-sample decoded TEMP VIEWs.
 
     ``setup_blob_views`` remains the generic self-describing blob decoder. This
     helper layers PC-sampling-specific ISA disassembly and enum-name expansion on
     top of its generic ``rocpd_gpu_pc_sample_decoded`` output when available.
+
+    ``codeobj_path_prefix_map`` relocates recorded code-object paths when
+    decoding in a different filesystem layout than profiling ran in (see
+    _normalize_codeobj_path_prefix_map).  ``cache_disassembly`` (default True)
+    writes lazily disassembled instructions back into the input database(s) at
+    exit so later opens reuse them; pass False (rocpd ``--no-cache-disassembly``)
+    to keep the input read-only.  Both are supplied through the API / ``rocpd``
+    command line, never an environment variable.
     """
     try:
         code_objects = conn.execute("""
@@ -324,7 +365,7 @@ def setup_isa_decode_views(conn):
             raise ValueError(f"Negative {name!r} in code-object URI")
         return parsed
 
-    path_prefix_map = _codeobj_path_prefix_map()
+    path_prefix_map = _normalize_codeobj_path_prefix_map(codeobj_path_prefix_map)
 
     def _existing_path(path):
         if os.path.exists(path):
@@ -398,18 +439,18 @@ def setup_isa_decode_views(conn):
     decoder_unavailable = object()
 
     # ------------------------------------------------------------------
-    # Optional cross-session disassembly cache (opt-in via the
-    # ROCPD_CACHE_DISASSEMBLY environment variable).  When enabled, program
-    # counters disassembled lazily during this session are written back into
-    # rocpd_disassembly_data at interpreter exit, so a later open serves the
-    # stored text through the decoded view's COALESCE instead of decoding it
-    # again.  Strictly best-effort: any problem (read-only database, lock
-    # contention, a pre-3.0.3 input without the table, ...) silently disables
-    # the write-back and leaves the database untouched.  Default off preserves
-    # the "queries never modify the .db" contract.
+    # Cross-session disassembly cache.  On by default; disable per call with the
+    # API's ``cache_disassembly=False`` argument or the rocpd
+    # ``--no-cache-disassembly`` flag to keep the input database read-only.  When
+    # enabled, program counters disassembled lazily during this session are
+    # written back into rocpd_disassembly_data at interpreter exit, so a later
+    # open serves the stored text through the decoded view's COALESCE instead of
+    # decoding it again.  Strictly best-effort: any problem (read-only database,
+    # lock contention, a pre-3.0.3 input without the table, ...) silently
+    # disables the write-back and leaves the database untouched.  Query results
+    # are identical whether or not the cache is written.
     # ------------------------------------------------------------------
-    _cache_env = os.environ.get("ROCPD_CACHE_DISASSEMBLY", "").strip().lower()
-    writeback_enabled = _cache_env in ("1", "true", "yes", "on")
+    writeback_enabled = bool(cache_disassembly)
     writeback_pending = {}
     writeback_targets = {}  # guid -> (db_path, base_table)
     writeback_context = {}  # guid -> (nid, pid)
@@ -570,6 +611,35 @@ def setup_isa_decode_views(conn):
     conn.create_function("rocpd_isa_instruction", 3, _instruction)
     conn.create_function("rocpd_isa_comment", 3, _comment)
 
+    # Resolve PC-sampling enum codes to their ROCPROFILER_* names via the SDK's own
+    # lookup (exposed through libpyrocpd) instead of a hardcoded mapping, so new
+    # hardware inst_type / stall_reason values are named automatically.  The bindings
+    # are optional: an older libpyrocpd without them yields NULL names rather than a
+    # failed view.
+    _inst_type_name_fn = getattr(libpyrocpd, "pc_sampling_instruction_type_name", None)
+    _stall_reason_name_fn = getattr(
+        libpyrocpd, "pc_sampling_instruction_not_issued_reason_name", None
+    )
+
+    def _enum_name(lookup, value):
+        if value is None or lookup is None:
+            return None
+        try:
+            return lookup(int(value))
+        except (ValueError, TypeError):
+            return None
+
+    conn.create_function(
+        "rocpd_pc_sample_inst_type_name",
+        1,
+        lambda value: _enum_name(_inst_type_name_fn, value),
+    )
+    conn.create_function(
+        "rocpd_pc_sample_stall_reason_name",
+        1,
+        lambda value: _enum_name(_stall_reason_name_fn, value),
+    )
+
     def _flush_writeback():
         # Persist lazily decoded instructions into rocpd_disassembly_data so a
         # future open reads the stored text instead of decoding again.  Runs at
@@ -694,39 +764,9 @@ def setup_isa_decode_views(conn):
                 {source_select},
                 {instruction_expr} AS instruction,
                 {comment_expr} AS instruction_comment,
-                CASE s."inst_type"
-                    WHEN 0  THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_NONE'
-                    WHEN 1  THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU'
-                    WHEN 2  THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_MATRIX'
-                    WHEN 3  THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_SCALAR'
-                    WHEN 4  THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_TEX'
-                    WHEN 5  THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_LDS'
-                    WHEN 6  THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_LDS_DIRECT'
-                    WHEN 7  THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_FLAT'
-                    WHEN 8  THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_EXPORT'
-                    WHEN 9  THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_MESSAGE'
-                    WHEN 10 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_BARRIER'
-                    WHEN 11 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_BRANCH_NOT_TAKEN'
-                    WHEN 12 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_BRANCH_TAKEN'
-                    WHEN 13 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_JUMP'
-                    WHEN 14 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_OTHER'
-                    WHEN 15 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_NO_INST'
-                    WHEN 16 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_DUAL_VALU'
-                    ELSE NULL
-                END AS inst_type_name,
-                CASE s."stall_reason"
-                    WHEN 0 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NONE'
-                    WHEN 1 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE'
-                    WHEN 2 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ALU_DEPENDENCY'
-                    WHEN 3 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_WAITCNT'
-                    WHEN 4 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_INTERNAL_INSTRUCTION'
-                    WHEN 5 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_BARRIER_WAIT'
-                    WHEN 6 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_NOT_WIN'
-                    WHEN 7 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_WIN_EX_STALL'
-                    WHEN 8 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_OTHER_WAIT'
-                    WHEN 9 THEN 'ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_SLEEP_WAIT'
-                    ELSE NULL
-                END AS stall_reason_name
+                rocpd_pc_sample_inst_type_name(s."inst_type") AS inst_type_name,
+                rocpd_pc_sample_stall_reason_name(s."stall_reason")
+                    AS stall_reason_name
             FROM {_quote_identifier(blob_source)} s
             {disasm_join}
             """
@@ -969,7 +1009,7 @@ def _create_temp_views(connection, input):
     return all_tables
 
 
-def _create_meta_views(connection):
+def _create_meta_views(connection, codeobj_path_prefix_map=None, cache_disassembly=True):
     schema = RocpdSchema()
     sql_script = schema.views.replace("CREATE VIEW", "CREATE TEMPORARY VIEW")
     execute_statement(connection, sql_script, is_script=True)
@@ -980,7 +1020,11 @@ def _create_meta_views(connection):
     # rocpd_ views fully queryable.
     try:
         setup_blob_views(connection)
-        setup_isa_decode_views(connection)
+        setup_isa_decode_views(
+            connection,
+            codeobj_path_prefix_map=codeobj_path_prefix_map,
+            cache_disassembly=cache_disassembly,
+        )
     except (
         Exception
     ) as error:  # noqa: BLE001 - keep base views usable on decode-setup failure
