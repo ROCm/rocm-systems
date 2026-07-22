@@ -2423,8 +2423,13 @@ bool VirtualGPU::ManagedBuffer::Create(Device::MemorySegment mem_segment) {
     pool_base_ = reinterpret_cast<address>(gpu_.dev().deviceLocalAlloc(pool_size_, flags, false));
     if (pool_base_ != nullptr) {
       // @note Workaround first access penalty.
-      // KFD may update CPU page tables on the first CPU access
-      *pool_base_ = 0;
+      // KFD/TTM maps CPU PTEs lazily, and TTM prefaults 16 4KiB pages
+      // from the faulting address.
+      constexpr size_t kCpuPtePrefaultSpan = 64 * Ki;
+      volatile unsigned char* ptr = pool_base_;
+      for (size_t offset = 0; offset < pool_size_; offset += kCpuPtePrefaultSpan) {
+        ptr[offset] = 0;
+      }
     }
   } else {
     pool_base_ = reinterpret_cast<address>(gpu_.dev().hostAlloc(pool_size_, 0, mem_segment, nullptr, false));
