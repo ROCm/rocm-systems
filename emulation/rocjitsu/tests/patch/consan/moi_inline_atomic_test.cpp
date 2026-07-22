@@ -1570,7 +1570,7 @@ TEST(ConSanMoi, SampledAtomicTrackingRequiresSelectedReadyCausalWindow) {
   EXPECT_TRUE(result.patches.empty());
   const ConSanMoiAutoReportInventory inventory =
       inventory_consan_moi_auto_report(result, options, bytes);
-  EXPECT_GT(inventory.atomic_event_count, 0u);
+  EXPECT_EQ(inventory.atomic_event_count, 0u);
   EXPECT_EQ(inventory.access_range_count, 0u);
   EXPECT_EQ(inventory.sampled_range_bank_count, 0u);
   EXPECT_EQ(inventory.sampled_watchpoint_count, 0u);
@@ -1578,8 +1578,11 @@ TEST(ConSanMoi, SampledAtomicTrackingRequiresSelectedReadyCausalWindow) {
                               &ConSanPatchInfo::kind),
             result.patches.end());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("no selected Ready causal-window capacity") != std::string::npos;
+    return warning.find("no selected LDS access candidates") != std::string::npos;
   }));
+  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Atomic,
+                               &ConSanSiteDispositionRecord::site_kind),
+            0u);
 }
 
 TEST(ConSanMoi, SampledAccessAndAtomicShareSelectedCausalSlot) {

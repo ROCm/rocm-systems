@@ -121,6 +121,19 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     append_moi_access_site_dispositions(code_object_bytes, function,
                                         effective_options.flat_provenance_mode, effective_options,
                                         arch, result);
+  if (effective_options.moi_engine == ConSanMoiEngine::Sampled &&
+      effective_options.moi_track_atomics && result.moi_candidates.empty()) {
+    // Sampled atomics publish ordering only into a selected LDS watchpoint's
+    // causal window. In an access-free code object there is no consumer for
+    // that metadata, so treating standalone runtime atomics as required
+    // instrumentation would reject the workload without improving coverage.
+    // Keep them in decoded/fault inventory, but make them operationally not
+    // applicable for this object's sampled report and coverage ledger.
+    effective_options.moi_track_atomics = false;
+    result.warnings.emplace_back(
+        "ConSan MOI sampled engine skipped atomic ordering in a code object with no selected "
+        "LDS access candidates");
+  }
   ConSanResult sync_admission = result;
   append_moi_sync_site_dispositions(effective_options, sync_admission);
   const bool has_supported_atomic_or_fence = std::ranges::any_of(

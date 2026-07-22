@@ -743,7 +743,7 @@ TEST(ConSanMoi, SampledAtomicCasWithoutReturnedOldValueFailsClosed) {
   EXPECT_FALSE(result.modified);
   EXPECT_TRUE(result.patches.empty());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("no selected Ready causal-window capacity") != std::string::npos;
+    return warning.find("no selected LDS access candidates") != std::string::npos;
   }));
 }
 
