@@ -3794,6 +3794,53 @@ TEST(ConSanMoi, Rdna4FamilyDenseAccessesShareOneWordCallRelay) {
   }
 }
 
+TEST(ConSanMoi, Cdna4DenseRecordReplayAccessesUseRelocatableRouter) {
+  constexpr uint32_t kAccessCount = 9u;
+  constexpr size_t kLargeTextWords = 33'000u;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, kArch);
+  std::vector<uint32_t> text_words(kLargeTextWords, filler);
+  size_t cursor = 8u;
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    const auto access = build_cdna4_ds_store_b32(
+        /*vaddr=*/2, /*vdata=*/3, index * sizeof(uint32_t), kArch);
+    ASSERT_TRUE(access);
+    std::copy(access->begin(), access->end(), text_words.begin() + cursor);
+    cursor += access->size();
+  }
+  text_words.back() = build_s_endpgm(kArch);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
+  options.moi_record_replay_dense_barrier_router = true;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_cdna4_lds_code_object(text_words, "cdna4_dense_record_replay"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.target_name, "gfx950");
+  EXPECT_EQ(result.arch_name, "cdna4");
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            2u);
+  EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("entry island is unreachable") != std::string::npos;
+  }));
+}
+
 TEST(ConSanMoi, Rdna4DenseRecordReplayBarriersUseRelocatedRouter) {
   // Seventeen split barriers contribute 34 supported member instructions,
   // exceeding the compact operating point and reserving the dense router.
@@ -3835,6 +3882,56 @@ TEST(ConSanMoi, Rdna4DenseRecordReplayBarriersUseRelocatedRouter) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
                                &ConSanPatchInfo::kind),
             kAccessCount);
+}
+
+TEST(ConSanMoi, Cdna4DenseRecordReplayBarriersUseRelocatedRouter) {
+  constexpr uint32_t kSiteCount = 33u;
+  constexpr size_t kLargeTextWords = 33'000u;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, kArch);
+  std::vector<uint32_t> text_words(kLargeTextWords, filler);
+  size_t cursor = 32u;
+  for (uint32_t index = 0; index < kSiteCount; ++index) {
+    const auto access = build_cdna4_ds_store_b32(
+        /*vaddr=*/2, /*vdata=*/3, index * sizeof(uint32_t), kArch);
+    const auto barrier = build_cdna4_s_barrier(kArch);
+    ASSERT_TRUE(access && barrier);
+    std::copy(access->begin(), access->end(), text_words.begin() + cursor);
+    cursor += access->size();
+    text_words[cursor++] = *barrier;
+  }
+  text_words.back() = build_s_endpgm(kArch);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size =
+      consan_moi_report_buffer_min_bytes(kSiteCount, 0, 0, 0, kSiteCount);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 96u;
+
+  const ConSanResult result = try_patch_consan(
+      make_cdna4_lds_code_object(text_words, "cdna4_dense_record_replay_barriers"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.target_name, "gfx950");
+  EXPECT_EQ(result.arch_name, "cdna4");
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            kSiteCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
+                               &ConSanPatchInfo::kind),
+            kSiteCount);
+  EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("no reachable indirect entry island") != std::string::npos;
+  }));
 }
 
 TEST(ConSanMoi, Rdna4DenseFunctionBarriersUseRelocatableRouter) {

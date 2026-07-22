@@ -1596,6 +1596,9 @@ void apply_test_container_filter(std::vector<Candidate> &candidates, const ConSa
     // not pay for access state they cannot execute.
     return options.moi_inline_access_present ? kConSanMoiInlineExecSaveSgprCount : 22u;
   }
+  if (options.moi_engine == ConSanMoiEngine::RecordReplay &&
+      options.moi_record_replay_dense_barrier_router)
+    return 8u;
   if (options.automatic_moi_record_replay_sgpr_spill)
     return options.moi_engine == ConSanMoiEngine::Sampled ? 8u : 4u;
   if (arch == ROCJITSU_CODE_ARCH_CDNA4 && options.moi_engine == ConSanMoiEngine::RecordReplay &&
@@ -1606,10 +1609,7 @@ void apply_test_container_filter(std::vector<Candidate> &candidates, const ConSa
   // One EXEC-save pair, one VCC-save pair, and one SCC snapshot. Barrier-dense
   // RDNA-family objects additionally reserve a dispatch key and an aligned
   // call-return pair for the relocated router.
-  return options.moi_report_buffer_address
-             ? (is_rdna4_family_arch(arch) && options.moi_record_replay_dense_barrier_router ? 8u
-                                                                                             : 5u)
-             : 0u;
+  return options.moi_report_buffer_address ? 5u : 0u;
 }
 
 [[nodiscard]] std::optional<uint16_t>

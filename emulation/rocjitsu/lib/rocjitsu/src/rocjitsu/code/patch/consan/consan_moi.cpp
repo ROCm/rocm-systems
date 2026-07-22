@@ -162,8 +162,10 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   // output, otherwise-unused adjacent SGPRs may still carry entry ABI state.
   constexpr size_t kCompactRecordReplayBarrierMemberLimit = 32u;
   effective_options.moi_record_replay_dense_barrier_router =
-      is_rdna4_family_arch(arch) && effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
-      supported_barrier_members > kCompactRecordReplayBarrierMemberLimit;
+      effective_options.moi_record_replay_dense_barrier_router ||
+      ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+       effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
+       supported_barrier_members > kCompactRecordReplayBarrierMemberLimit);
   const auto has_operational_atomic = [&](const auto &container, bool in_kernel) {
     return std::ranges::any_of(container.atomic_sites, [&](const ConSanAtomicSite &site) {
       return atomic_event_kind_for_site(result, container.name, in_kernel, site).has_value();
