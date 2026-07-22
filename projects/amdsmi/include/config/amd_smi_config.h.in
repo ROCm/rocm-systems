@@ -2,6 +2,3 @@
 // SPDX-License-Identifier:  MIT
 
 #define LIBDRM_AMDGPU_SONAME "@LIBDRM_AMDGPU_SONAME@"
-
-// WSL backend; see amd_smi_wsl_backend.h. Absent unless ENABLE_WSL_BACKEND=ON.
-#cmakedefine AMDSMI_ENABLE_WSL_BACKEND

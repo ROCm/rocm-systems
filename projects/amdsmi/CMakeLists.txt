@@ -198,13 +198,14 @@ generic_package()
 
 # Dependencies
 find_package(Threads REQUIRED)
+find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 
+
 # Netlink libraries for network interface functionality (required)
 # TheRock RUNTIME_DEPS automatically configure PKG_CONFIG_PATH for bundled sysdeps
-find_package(PkgConfig REQUIRED)
 
 # Try to use CMake config files first (bundled sysdeps provide these)
 find_package(libnl CONFIG QUIET)

@@ -83,6 +83,15 @@ target_include_directories(
 
 # Absolute path to the committed mock CPER fixtures (unit/gpu/mock_cper).
 target_compile_definitions(${TEST} PRIVATE AMDSMI_TEST_MOCK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/unit/gpu/mock_cper")
+
+if(ENABLE_WSL_BACKEND)
+    target_compile_definitions(${TEST} PRIVATE ENABLE_WSL_BACKEND)
+    target_include_directories(${TEST} PRIVATE ${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include)
+    find_library(ROCDXG_LIB rocdxg)
+    if(ROCDXG_LIB)
+        target_link_libraries(${TEST} ${ROCDXG_LIB})
+    endif()
+endif()
 target_link_libraries(
     ${TEST}
     ${AMD_SMI_TARGET}
