@@ -3694,11 +3694,12 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         if (!ceArGraphAllowed || !rcclUseCeAllReduce(comm, info->count, info->datatype, info->op)) {
           ceAvailable = false;
         } else {
+          size_t minCEBytes = rcclParamOobBalanced() ? 0 : NCCL_CE_AR_MIN_MSG_BYTES;
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || totalBytes < (size_t)NCCL_CE_AR_MIN_MSG_BYTES) {
+          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || totalBytes < minCEBytes) {
             ceAllReduceFits = false;
             INFO(NCCL_COLL, "CE AllReduce: msg %zu B range (%zu, %zu) B, falling back to standard NCCL AllReduce",
-                 totalBytes, (size_t)NCCL_CE_AR_MIN_MSG_BYTES, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
+                 totalBytes, minCEBytes, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
           }
         }
       }
@@ -3707,9 +3708,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool CeScratchAvailable =
         !ceCapturing && ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
-      if (rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg &&
-          winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr &&
-          recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
+      if ((rcclParamForceCe() || rcclParamOobBalanced()) && CeScratchAvailable &&
+          winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment &&
+          comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
         INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);
         NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr, comm->ddaScratch,
                                    comm->ddaPeerPtrsHost, opDev));

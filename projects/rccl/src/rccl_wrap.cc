@@ -611,8 +611,12 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
   if (count == 0 || count % (size_t)comm->nRanks != 0) return false;
 
   // Total message must fit within the pre-allocated staging buffer.
+  // Under OOB balanced mode the 4 MiB performance floor is lifted so CE AR
+  // can cover small messages
+  // ceiling is a hard limit from the pre-allocated ceARTmpBuf and cannot be relaxed at run-time.
   size_t msgBytes = count * ncclTypeSize(datatype);
-  if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES || msgBytes < NCCL_CE_AR_MIN_MSG_BYTES) return false;
+  size_t minBytes = rcclParamOobBalanced() ? 0 : NCCL_CE_AR_MIN_MSG_BYTES;
+  if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES || msgBytes < minBytes) return false;
 
   // Only standard reduction ops with a simple kernel implementation.
   // ncclAvg (maps to SumPostDiv) and user-defined PreMulSum fall back to ring.
