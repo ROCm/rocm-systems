@@ -124,6 +124,11 @@ The installed ROCdbgapi library and documentation will be placed in:
 - ``../install/share/html/amd-dbgapi/index.html``
 - ``../install/share/doc/amd-dbgapi/amd-dbgapi.pdf``
 
+Code Style
+----------
+
+CMake files are formatted with [gersemi](https://github.com/BlankSpruce/gersemi).
+
 Running the AMD Debugger API Library
 ------------------------------------
 
