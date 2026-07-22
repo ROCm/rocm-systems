@@ -13,7 +13,7 @@
 
 #if __cplusplus
 struct ncclCftSmem {
-  alignas(8) uint64_t bar;
+  alignas(16) uint64_t bar;
 };
 
 template <typename Coop>
