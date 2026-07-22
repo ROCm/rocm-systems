@@ -98,7 +98,7 @@ flowchart TD
   subgraph F[Four instrumentation flavors]
     SC0["SC0 DONE<br/>native CDNA4 LDS checks:<br/>CLIP + TP1/TP2 clean"]
     SC1["SC1 DONE<br/>all runnable model and hip-moi<br/>SuperCollider bundles green"]
-    RR0["RR0 ACTIVE<br/>TP1 prefill green; decode + TP2 clean/paired;<br/>dynamic-stack helpers and fault detection open"]
+    RR0["RR0 ACTIVE<br/>all runnable model bundles green;<br/>dynamic-stack shared helpers open"]
     RR1["RR1 TODO<br/>Record/Replay barriers, atomics and fences"]
     SA0A["SA0A DONE<br/>CDNA4 sampled barrier lowering:<br/>TP1 + CLIP clean"]
     SA0["SA0 TODO<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
@@ -271,6 +271,18 @@ flowchart TD
 ```
 
 ## Reconnaissance conclusions
+
+- 2026-07-22: CLIP Record/Replay is green within ACTIVE/blue `RR0` after
+  commit `8075a15390` partitions CDNA4 replay records by hardware dispatch
+  identity.  The former intermittent CLIP reports combined accesses from
+  distinct kernel dispatches with equal workgroup coordinates; committed-tip
+  paired artifact `consan-validation-gfx950-clip-rr-dispatch-committed-20260722-230`
+  now accepts the cosine oracle, complete 45/45 accesses plus 24/24 barriers,
+  zero diagnostics, and 1.29x slowdown.  Reviewed exact-one qualified-miss
+  artifact `...-fault-committed-20260722-231` also accepts with bounded
+  cleanup, health, and clean provenance.  All runnable model Record/Replay
+  bundles are green; `RR0` remains blue only for the shared dynamic-stack
+  helper limitation visible in the hip-moi rows.
 
 - 2026-07-22: TP2 Record/Replay is green within ACTIVE/blue `RR0`.
   Prospectively reviewed artifact
