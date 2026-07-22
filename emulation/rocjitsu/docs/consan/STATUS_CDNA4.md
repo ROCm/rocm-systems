@@ -51,13 +51,13 @@ scratch before promotion.
 |---|---|---|---|---|
 | **P0 Qwen3-0.6B prefill** | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown |
 | **P1 Sharktank TP1 prefill** | 🟨 current clean and paired: exact oracle, 120/120 accesses, complete analysis, 1.13x; reviewed exact-one fault detected one instability but contradicted its frozen external-oracle policy | 🩶 historical: clean 104/104 access + 31/31 barrier accepted | 🩶 historical: clean 104/104 access + 7/7 qualified barrier accepted | 🩶 historical: clean 104/104 access + 31/31 barrier accepted |
-| **P1 Sharktank TP1 decode/combined** | 🟨 current clean and paired: both exact oracles, 240/240 accesses, complete analysis, 1.33x maximum; reviewed fault active | 🩶 historical: clean 208/208 access + 62/62 barrier accepted | 🩶 historical: clean 208/208 access + 14/14 qualified barrier accepted | 🩶 historical: clean 208/208 access + 62/62 barrier accepted across six sequential runs |
+| **P1 Sharktank TP1 decode/combined** | 🟨 current clean and paired: both exact oracles, 240/240 accesses, complete analysis, 1.33x maximum; reviewed exact-one fault was schedule-masked and contradicted its frozen detection policy | 🩶 historical: clean 208/208 access + 62/62 barrier accepted | 🩶 historical: clean 208/208 access + 14/14 qualified barrier accepted | 🩶 historical: clean 208/208 access + 62/62 barrier accepted across six sequential runs |
 | **P2 Sharktank TP2 family** | 🟨 current clean: prefill, decode, and combined oracles pass; aggregate 936/936 accesses; complete analysis | 🩶 historical: clean 840/840 access + 168/168 barrier accepted | 🩶 historical: aggregate rejected: one 140-access + 10-barrier slice executes 0 | 🩶 historical: aggregate rejected: one 140-access + 28-barrier slice lowers 0 |
 | **P3 CLIP BF16** | 🟨 current clean: cosine oracle passes; 45/45 accesses; complete analysis | 🩶 historical: clean 39/39 access + 24/24 barrier accepted | 🩶 historical: clean 39/39 access + 20/20 qualified barrier accepted | 🩶 historical: clean 39/39 access + 24/24 barrier accepted |
 | **P4 hip-moi D128 block attention** | 🟩 current accepted bundle: exact clean, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current scalar fallback lacks entry-local scratch for one connected component |
 | **P4 hip-moi D128 pressure attention** | 🟩 current accepted bundle: four exact clean oracles, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🩶 historical: clean 12/12 access + 4/4 barrier accepted | 🩶 historical: clean 12/12 access accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
 | **P4 hip-moi MFMA attention** | 🟩 current accepted bundle: two exact clean oracles, 12/12 group-FLAT coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🩶 historical: clean 12/12 access + 4/4 barrier accepted | 🩶 historical: clean 12/12 access accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
-| **P4 hip-moi Stream-K arrival** | 🟨 current clean and paired: exact oracle, 4/4 accesses, 172.78x; fault inventory exposes missing CDNA4 atomic-site encoding | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: planner safely rejected persistent identity at a full ordinary-VGPR/AccVGPR boundary; scalar persistent state open |
+| **P4 hip-moi Stream-K arrival** | 🟩 current accepted bundle: exact clean, 4/4 coverage, paired 143.70x, reviewed exact-one CDNA4 atomic-order fault, containment, health, and clean provenance | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: planner safely rejected persistent identity at a full ordinary-VGPR/AccVGPR boundary; scalar persistent state open |
 | **P4 hip-moi tree atomic-OR** | 🟨 current clean and paired: both exact tests, 4/4 accesses, 197.94x; fault inventory exposes missing CDNA4 atomic-site encoding | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier accepted |
 | **P4 hip-moi Jakub attention** | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending |
 
@@ -287,6 +287,31 @@ a ConSan detection.
 
 ## Progress log
 
+- 2026-07-22: Stream-K-arrival SuperCollider is green at clean
+  `0942528a56`.  Commit `0942528a56` admits CDNA4 atomic-order faults while
+  keeping instruction-scope and address rewrites fail-closed.  Same-tip paired
+  artifact
+  `consan-validation-gfx950-streamk-arrival-supercollider-overhead-tip-20260722-002`
+  accepts at 143.70x with complete 4/4 coverage.  Inventory artifact
+  `consan-validation-gfx950-streamk-arrival-inventory-tip-20260722-002`
+  accepts 23 order sites and correctly omits the inapplicable scope family.
+  Reviewed artifact
+  `consan-validation-gfx950-streamk-arrival-supercollider-atomic-order-fault-tip-20260722-001`
+  replaces exactly one eight-byte release `buffer_wbl2` with two target-native
+  NOPs while preserving the atomic, waits, and acquire cache operation
+  byte-for-byte.  Its precommitted pass-oracle/qualified-miss policy matches;
+  coverage, cleanup, containment, and physical-device health all pass.
+
+- 2026-07-22: TP1 decode/combined reviewed fault artifact
+  `consan-validation-gfx950-tp1-decode-combined-supercollider-fault-tip-20260722-001`
+  removes exactly one semantically reviewed barrier between waited LDS
+  producers and immediate LDS consumers.  Coverage remains complete at
+  240/240 and all containment checks pass, but one execution is schedule-masked:
+  the external oracle passes and SuperCollider emits no diagnostic.  That
+  contradicts the prospectively frozen detected/pass policy, so the validator
+  correctly rejects the trial and the cell remains yellow without a post-hoc
+  policy change.
+
 - 2026-07-22: TP1 decode/combined SuperCollider paired artifact
   `consan-validation-gfx950-tp1-decode-combined-supercollider-overhead-tip-20260722-001`
   accepts at clean `1a16f718ac`, with exactly one repetition per leg.  Both
@@ -325,14 +350,11 @@ a ConSan detection.
   workload oracle and qualified detector miss, retain complete 12/12 coverage,
   terminate within policy, and leave the physical gfx950 healthy.
 
-- 2026-07-22: Stream-K arrival and tree atomic-OR now have accepted clean and
-  paired SuperCollider evidence (172.78x and 197.94x), but remain yellow.  Both
-  inventories discover meaningful ordered-atomic synchronization sequences
-  yet produce zero selectable fault sites.  The current fault encoder admits
-  `flat_atomic` only with the 12-byte RDNA4 instruction shape; CDNA4 uses an
-  8-byte FLAT instruction.  Admission cannot be widened alone because the
-  mutation bit layout is also target-specific; a CDNA4-aware mutation path is
-  required before either reviewed fault is sound.
+- 2026-07-22: Earlier Stream-K-arrival and tree atomic-OR inventories exposed
+  the missing CDNA4 atomic-order mutation path after their clean and paired
+  SuperCollider runs.  Commit `0942528a56` closes that implementation gap;
+  Stream-K is now green above, while tree retains its earlier paired evidence
+  and awaits a same-tip inventory and reviewed fault.
 
 - 2026-07-22: Completed the first current-tip green gfx950 cell.  D128-block
   SuperCollider combines the clean artifact, accepted one-repetition paired
