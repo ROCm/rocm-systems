@@ -230,7 +230,7 @@ __amd_extract_fp4x2(const __amd_fp4x8_storage_t x, const size_t index) {
  * @return float embed with E8M0 in its exponent
  */
 __OCP_FP_HOST_DEVICE_STATIC__ float __amd_scale_to_float(const __amd_scale_t scale_exp) {
-  constexpr __hip_uint8_t OCP_SCALE_EXP_NAN = -128;
+  constexpr __hip_int8_t OCP_SCALE_EXP_NAN = -128;
   const __hip_uint32_t SCALE_EXP_BIAS = 127;  // OCP MX E8M0 "scale" bias
 
   // On gfx950 the "scale" operand is encoded in the exponent bits of
@@ -435,9 +435,9 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_floatx2_storage_t __amd_cvt_fp8x2_to_floatx2
   __amd_floatx2_storage_t ret;
   if (interpret == __AMD_OCP_E4M3) {
     ret[0] =
-        to_float<float, Encoding::E4M3, false>(static_cast<__hip_uint32_t>(__amd_extract_fp8(val, 0)), 0);
+        to_float<float, Encoding::E4M3, true>(static_cast<__hip_uint32_t>(__amd_extract_fp8(val, 0)), 0);
     ret[1] =
-        to_float<float, Encoding::E4M3, false>(static_cast<__hip_uint32_t>(__amd_extract_fp8(val, 1)), 0);
+        to_float<float, Encoding::E4M3, true>(static_cast<__hip_uint32_t>(__amd_extract_fp8(val, 1)), 0);
   } else {
     ret[0] =
         to_float<float, Encoding::E5M2, true>(static_cast<__hip_uint32_t>(__amd_extract_fp8(val, 0)), 0);

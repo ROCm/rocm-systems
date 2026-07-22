@@ -355,17 +355,6 @@ struct NumericLimits<double> {
   static constexpr double minimum()    { return -maximum(); }
 };
 
-template <typename T, size_t N> struct array {
-  T __elements[N];
-#if __cplusplus >= 201402L
-  constexpr T& operator[](size_t i) { return __elements[i]; }
-#else
-  T& operator[](size_t i) { return __elements[i]; }
-#endif
-  constexpr const T& operator[](size_t i) const { return __elements[i]; }
-  constexpr size_t size() const { return N; }
-};
-
 #if defined(_MSC_VER) && !defined(__clang__)
 // MSVC lacks __builtin_copysignf. Copy the sign bit of y onto x bit-for-bit;
 // this matches the behavior of the GCC/Clang intrinsic exactly.

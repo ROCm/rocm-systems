@@ -94,8 +94,18 @@ constexpr __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t bitmask(__hip_uint32_t bi
   return ((__hip_uint32_t)1 << bits) - 1;
 }
 
-constexpr __hip_internal::array<Float, (size_t)Encoding::NumEncodings> init() {
-  __hip_internal::array<Float, (size_t)Encoding::NumEncodings> a{};
+struct EncodingTable {
+  Float __elements[(size_t)Encoding::NumEncodings];
+#if __cplusplus >= 201402L
+  constexpr Float& operator[](size_t i) { return __elements[i]; }
+#else
+  Float& operator[](size_t i) { return __elements[i]; }
+#endif
+  constexpr const Float& operator[](size_t i) const { return __elements[i]; }
+};
+
+constexpr EncodingTable init() {
+  EncodingTable a{};
 
   a[(size_t)Encoding::E2M1] = {
       .ExpBias = 1,
