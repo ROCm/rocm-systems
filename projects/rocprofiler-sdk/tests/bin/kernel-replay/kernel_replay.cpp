@@ -233,9 +233,9 @@ run_vecscale(int n, int iters)
 }
 
 // Restore-correctness mode: launch ONE in-place saxpy dispatch (y = a*x + y) and self-check that
-// the effect landed exactly once. Under --kernel-replay with N counter groups the SDK re-executes
-// this single dispatch N times, restoring device memory between passes, so the result is
-// data-dependent on restore:
+// the effect landed exactly once. Under --kernel-replay-beta-enabled with N counter groups the
+// SDK re-executes this single dispatch N times, restoring device memory between passes, so the
+// result is data-dependent on restore:
 //   restore WORKS  -> y == y0 + a*x        (applied once)          e.g. 102
 //   restore BROKEN -> y == y0 + N*(a*x)    (accumulated per pass)  e.g. 110 for N=5
 // A no-op/broken restore therefore makes this exit non-zero -- unlike a counter-only check.
