@@ -154,7 +154,7 @@ flowchart TD
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
     XT3I["XT3I DONE<br/>SPMM F8 Sampled clean, paired, reviewed fault,<br/>containment, and frozen evidence green"]
-    XT3P["XT3P ACTIVE<br/>SPMM F8 Record/Replay clean E2E complete;<br/>baseline bound reached; fault inventory next"]
+    XT3P["XT3P ACTIVE<br/>SPMM F8 RR clean E2E complete;<br/>exact fault applies, 1800s execution bound reached"]
     XT3J["XT3J DONE<br/>SPMM F8 Inline standard clean assessed;<br/>MT64x64 wrong-result rows isolate blocker"]
     XT3K["XT3K DONE<br/>SPMM F8 Inline ninth-barrier bank defect fixed;<br/>exact kernel fully passes"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
@@ -392,6 +392,13 @@ flowchart TD
   class XT3P active
   class G0,V9B,XT2C2,XT2C3,XT3E,XF,XG todo
 ```
+
+- 2026-07-22: `XT3P` remains ACTIVE/blue after the reviewed exact-one barrier
+  fault is applied successfully but the CPU software-device workload reaches
+  its 1,800-second execution bound before producing an oracle.  Independent
+  marker-contained health probes pass both before and after; the result is a
+  throughput-bound `not_run`, not green fault evidence.  The DAG label and
+  blue Mermaid class now name this exact remaining gate.
 
 - 2026-07-22: `XT3P` remains ACTIVE/blue after paired artifact
   `consan-validation-gfx1250-spmm-f8-ml-rr-paired-current-20260722-224`

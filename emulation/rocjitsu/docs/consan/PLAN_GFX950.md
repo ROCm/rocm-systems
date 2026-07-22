@@ -98,7 +98,7 @@ flowchart TD
   subgraph F[Four instrumentation flavors]
     SC0["SC0 DONE<br/>native CDNA4 LDS checks:<br/>CLIP + TP1/TP2 clean"]
     SC1["SC1 ACTIVE<br/>former runnable matrix green;<br/>new Qwen fault gate open"]
-    RR0["RR0 ACTIVE<br/>former model bundles green;<br/>Qwen paired/fault + dynamic-stack open"]
+    RR0["RR0 ACTIVE<br/>all model bundles green;<br/>dynamic-stack support open"]
     RR1["RR1 TODO<br/>Record/Replay barriers, atomics and fences"]
     SA0A["SA0A DONE<br/>CDNA4 sampled barrier lowering:<br/>TP1 + CLIP clean"]
     SA0["SA0 TODO<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
@@ -120,9 +120,9 @@ flowchart TD
     V0["V0 TODO<br/>target-aware workload registry and manifest"]
     V1["V1 ACTIVE<br/>TP1/TP2/CLIP/Qwen runnable;<br/>Jakub-CDNA4 asset open"]
     V2["V2 ACTIVE<br/>Qwen SC/RR clean; Sampled rejects;<br/>Inline planning timeout"]
-    V3["V3 TODO<br/>P0 Qwen fault inventory and exact policies"]
-    V4["V4 TODO<br/>P0 Qwen contained fault campaign"]
-    V5["V5 ACTIVE<br/>TP2 SC/RR/Inline clean + paired;<br/>Sampled admission and remaining faults open"]
+    V3["V3 DONE<br/>P0 Qwen fault inventory<br/>and exact policy frozen"]
+    V4["V4 DONE<br/>P0 Qwen contained exact<br/>barrier-fault campaign"]
+    V5["V5 ACTIVE<br/>P0 corpus recursion fixed;<br/>SC and MOI placement remain open"]
     V6["V6 DONE<br/>D128 block, D128 pressure, MFMA<br/>Inline bundles green"]
     V7["V7 ACTIVE<br/>D128-pressure one-process paired accepted;<br/>peak memory and broader rows open"]
     V8["V8 TODO<br/>freeze one committed tip, rebuild,<br/>and rerun authoritative matrix"]
@@ -266,7 +266,8 @@ flowchart TD
 
   class R0,R1,E0,B0,B1,B2,B3,B4,B5A,S0,S1,S2,S3,S4,S5,S6A,S6B,S7A,S7B,S8A,S8B,S8C,S8D,I4,SC0,SA0A,IS0A,IS0,V6 done
   class SC1,RR0,V1,V2,V5,V7,ST0 active
-  class R2,E1,C0,B5B,I0,I1,I2,I3,A0,A1,A2,A3,A4,A5,RR1,SA0,SA1,IS1,Q0,Q1,Q2,Q3,V0,V3,V4,V8 todo
+  class R2,E1,C0,B5B,I0,I1,I2,I3,A0,A1,A2,A3,A4,A5,RR1,SA0,SA1,IS1,Q0,Q1,Q2,Q3,V0,V8 todo
+  class V3,V4 done
   class F0,G0 milestone
 ```
 
@@ -584,6 +585,25 @@ mutation without final-byte proof, or a diagnostic without an independent
 oracle is not an accepted row.
 
 ## Progress log
+
+- 2026-07-22: `V3` and `V4` are DONE/green.  The prospectively reviewed Qwen
+  final-output matmul barrier site is frozen by exact kernel, PC, mnemonic, and
+  occurrence.  Its one-trial Record/Replay campaign applies the mutation once,
+  preserves the oracle under the prospective non-detection policy, and passes
+  marker-contained before/after device-health checks in artifact
+  `consan-validation-gfx950-qwen-rr-final-barrier-fault-recursionfix-20260722-253`.
+  Qwen Record/Replay is green; `RR0` remains ACTIVE/blue only for the broader
+  dynamic-stack implementation frontier.
+
+- 2026-07-22: `V5` remains ACTIVE/blue and now includes the first current-tip
+  P0 test-corpus assessment.  A recursive device helper made Waitcheck expand
+  65,611 contexts from 75 blocks; a 262,144-node experiment still failed and
+  was reverted.  Recursive re-entry is now summarized at its continuation.
+  All 360 Waitcheck tests pass, the physical workload analyzes all 46 kernels,
+  and its three numerical checks pass.  SuperCollider remains orange because
+  20 of 739 LDS sites still fail placement; Record/Replay is red because
+  persistent dispatch-ID and EXEC-save SGPR state cannot be placed.  Sampled
+  and Inline Shadow remain gray.
 
 - 2026-07-22: `V6` and `V7` remain ACTIVE/blue, with their labels updated to
   the current physical-gfx950 frontier.  D128-pressure Inline now passes clean

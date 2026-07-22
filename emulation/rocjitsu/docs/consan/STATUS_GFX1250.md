@@ -298,6 +298,15 @@ do not promote matrix cells without the end-to-end evidence above.
   cell stays yellow and rotates to fault inventory without another timeout
   increase.
 
+- 2026-07-22: P3 SPMM F8 Record/Replay reviewed-fault artifact
+  `consan-validation-gfx1250-spmm-f8-ml-rr-fault-marker-health-20260722-237`
+  applies the exact selected barrier mutation (`requested=1`, `planned=1`,
+  `applied=1`) and preserves healthy marker-contained probes before and after.
+  The one-repetition CPU software-device workload reaches its 1,800-second
+  bound before producing an oracle, so the row is honestly rejected as
+  `not_run` and remains yellow.  This supplies mutation and containment
+  evidence, but not the missing accepted fault gate.
+
 - 2026-07-22: P3 SPMM F8 Record/Replay advances within yellow.  Bounded
   one-repetition artifact
   `consan-green-expansion-20260722-spmm-f8-ml-rr-final-209` completes all seven
