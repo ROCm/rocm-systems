@@ -41,29 +41,8 @@ def thread_limit_env() -> dict[str, str]:
 
 
 def get_thread_limit() -> int:
-    """Get the thread limit values for the test."""
-    # ROCPROFSYS_MAX_THREADS may have been explicitly set, so use that if it exists
-    import os
-
-    max_threads = os.getenv("ROCPROFSYS_MAX_THREADS")
-    if max_threads:
-        return int(max_threads)
-
-    rocprof_config = get_rocprof_config()
-    num_procs = rocprof_config.capabilities.num_procs
-    if num_procs < 128:
-        thread_count = 2048
-    else:
-        # Round up to nearest power of 2
-        n = 16 * num_procs - 1
-        n |= n >> 1
-        n |= n >> 2
-        n |= n >> 4
-        n |= n >> 8
-        n |= n >> 16
-        n |= n >> 32
-        thread_count = n + 1
-    return thread_count
+    """Get the thread limit for the test"""
+    return get_rocprof_config().capabilities.max_threads
 
 
 def get_overflow_thread_load_count() -> int:
