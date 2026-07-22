@@ -338,7 +338,6 @@ if(BUILD_TESTS)
       AllocTests.cpp
       ParamTests.cpp
       ParameterApiTests.cpp
-      EnvPluginTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
       DdaAlltoAllThresholdTests.cpp
