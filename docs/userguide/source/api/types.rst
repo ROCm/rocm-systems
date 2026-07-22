@@ -368,6 +368,17 @@ ncclConfig_t
   If :ref:`NCCL_RMA_EAGER_INIT` is set in the environment, it overrides this field
   before initialization.
 
+ .. c:macro:: winRegEagerCft
+
+  (since 2.31)
+
+  Controls whether window registration eagerly creates the communicator's flat
+  unicast Compute Fabric Transport (CFT) logical endpoint. Set to ``1`` to create
+  the logical endpoint during the first :c:func:`ncclCommWindowRegister` call on
+  a CFT-capable communicator. Subsequent window registrations reuse the logical
+  endpoint and bind their memory to it. The default value is ``0``, which creates
+  the logical endpoint when a CFT-enabled device communicator is created.
+
 .. _ncclsiminfo:
 
 ncclSimInfo_t

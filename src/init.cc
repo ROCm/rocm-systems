@@ -2447,6 +2447,7 @@ static ncclResult_t parseCommConfig(ncclComm_t comm, ncclConfig_t* config) {
       internalConfigPtr->launchOrderImplicit = defaultConfig.launchOrderImplicit;
       internalConfigPtr->numRmaSig = defaultConfig.numRmaSig;
       internalConfigPtr->rmaEagerInit = defaultConfig.rmaEagerInit;
+      internalConfigPtr->winRegEagerCft = defaultConfig.winRegEagerCft;
     }
   }
 
@@ -2569,6 +2570,13 @@ static ncclResult_t parseCommConfig(ncclComm_t comm, ncclConfig_t* config) {
     goto fail;
   }
 
+  if (internalConfigPtr->winRegEagerCft != NCCL_CONFIG_UNDEF_INT && internalConfigPtr->winRegEagerCft != 0 &&
+      internalConfigPtr->winRegEagerCft != 1) {
+    WARN("Invalid config winRegEagerCft attribute value %d", internalConfigPtr->winRegEagerCft);
+    ret = ncclInvalidArgument;
+    goto fail;
+  }
+
   /* default config value can be tuned on different platform. */
   NCCL_CONFIG_DEFAULT(internalConfigPtr, blocking, NCCL_CONFIG_UNDEF_INT, 1, "Blocking", "%d");
   NCCL_CONFIG_DEFAULT(internalConfigPtr, cgaClusterSize, NCCL_CONFIG_UNDEF_INT, 4, "CGA cluster size", "%d");
@@ -2597,6 +2605,7 @@ static ncclResult_t parseCommConfig(ncclComm_t comm, ncclConfig_t* config) {
                       "launchOrderImplicit", "%d");
   NCCL_CONFIG_DEFAULT(internalConfigPtr, numRmaSig, NCCL_CONFIG_UNDEF_INT, 1, "numRmaSig", "%d");
   NCCL_CONFIG_DEFAULT(internalConfigPtr, rmaEagerInit, NCCL_CONFIG_UNDEF_INT, 0, "rmaEagerInit", "%d");
+  NCCL_CONFIG_DEFAULT(internalConfigPtr, winRegEagerCft, NCCL_CONFIG_UNDEF_INT, 0, "winRegEagerCft", "%d");
 
   /* assign config to communicator */
   comm->config.blocking = internalConfigPtr->blocking;
@@ -2620,6 +2629,7 @@ static ncclResult_t parseCommConfig(ncclComm_t comm, ncclConfig_t* config) {
   comm->config.launchOrderImplicit = internalConfigPtr->launchOrderImplicit;
   comm->config.numRmaSig = internalConfigPtr->numRmaSig;
   comm->config.rmaEagerInit = internalConfigPtr->rmaEagerInit;
+  comm->config.winRegEagerCft = internalConfigPtr->winRegEagerCft;
   NCCLCHECKGOTO(envConfigOverride(comm), ret, fail);
 
   // Resolve to system default (serialize) if neither user config nor env var set it.
