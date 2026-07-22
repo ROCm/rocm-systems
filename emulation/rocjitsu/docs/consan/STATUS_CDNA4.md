@@ -43,7 +43,7 @@ records a typed reason.
 Every cell began gray at the current branch tip because the implementation and
 workload changed substantially since the first gfx950 campaign.  Text
 following a gray heart records historical evidence or a known prerequisite
-only.  The first current-tip D128-block run below promotes only the profiles it
+only.  The first current-tip D128 runs below promote only the profiles they
 actually revalidated; every other profile must still be revalidated from
 scratch before promotion.
 
@@ -55,7 +55,7 @@ scratch before promotion.
 | **P2 Sharktank TP2 family** | 🩶 historical: clean 936/936 native LDS access accepted | 🩶 historical: clean 840/840 access + 168/168 barrier accepted | 🩶 historical: aggregate rejected: one 140-access + 10-barrier slice executes 0 | 🩶 historical: aggregate rejected: one 140-access + 28-barrier slice lowers 0 |
 | **P3 CLIP BF16** | 🩶 historical: clean 45/45 native LDS access accepted | 🩶 historical: clean 39/39 access + 24/24 barrier accepted | 🩶 historical: clean 39/39 access + 20/20 qualified barrier accepted | 🩶 historical: clean 39/39 access + 24/24 barrier accepted |
 | **P4 hip-moi D128 block attention** | 🟨 current clean: both exact oracles pass; 12/12 accesses; complete analysis | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current scalar fallback lacks entry-local scratch for one connected component |
-| **P4 hip-moi D128 pressure attention** | 🩶 historical: clean 12/12 group-FLAT accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted | 🩶 historical: clean 12/12 access accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
+| **P4 hip-moi D128 pressure attention** | 🟨 current clean: all four exact oracles pass; 12/12 accesses; complete analysis | 🩶 historical: clean 12/12 access + 4/4 barrier accepted | 🩶 historical: clean 12/12 access accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
 | **P4 hip-moi MFMA attention** | 🩶 historical: clean 12/12 group-FLAT accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted | 🩶 historical: clean 12/12 access accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
 | **P4 hip-moi Stream-K arrival** | 🩶 historical: clean 4/4 access accepted | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: planner safely rejected persistent identity at a full ordinary-VGPR/AccVGPR boundary; scalar persistent state open |
 | **P4 hip-moi tree atomic-OR** | 🩶 historical: clean 4/4 access accepted | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier accepted |
@@ -286,6 +286,15 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-22: Physical D128-pressure artifact
+  `consan-validation-gfx950-d128-pressure-supercollider-tip-20260722-001`
+  accepts baseline and SuperCollider at clean current tip `aec5d5a3a9`.  All
+  four host-reference oracles pass in each row.  SuperCollider covers 12/12
+  accesses with complete static/dynamic analysis, zero incomplete state, and
+  a complete mismatch-free report; the physical device remains healthy.
+  Record/Replay, Sampled, and Inline Shadow were deliberately not run in this
+  artifact and remain gray.
 
 - 2026-07-22: Began current-tip physical revalidation with D128 block artifact
   `consan-validation-gfx950-d128-block-clean-tip-20260722-001`.  The baseline

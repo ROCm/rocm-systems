@@ -153,7 +153,7 @@ flowchart TD
     XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessed;<br/>SGEMM first problem 12/12 exact and fully covered"]
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
-    XT3I["XT3I ACTIVE<br/>SPMM F8 Sampled access/barrier relay fixes complete;<br/>paired and reviewed-fault acceptance remain"]
+    XT3I["XT3I ACTIVE<br/>SPMM F8 Sampled relay fixes complete; six clients exact;<br/>seventh-client duration, paired, and fault remain"]
     XT3J["XT3J DONE<br/>SPMM F8 Inline standard clean assessed;<br/>MT64x64 wrong-result rows isolate blocker"]
     XT3K["XT3K DONE<br/>SPMM F8 Inline ninth-barrier bank defect fixed;<br/>exact kernel fully passes"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
@@ -430,6 +430,16 @@ flowchart TD
   coverage, 163 visible records, and clean report reclamation.  The paired
   attempt itself remains rejected, so XT3I stays ACTIVE/blue for a fresh
   committed-tip paired run and reviewed fault.
+
+- 2026-07-22: Committed-tip paired attempt
+  `consan-green-expansion-20260722-spmm-f8-ml-sampled-overhead-barrierfix-clean-202`
+  accepts one-repetition controls at 239,881.84 and 240,990.89 ms.  Sampled
+  passes six of seven clients with 36 exact numeric rows, zero failures, and
+  six complete static/dynamic analysis verdicts.  The seventh object also
+  patches successfully with 34,936 patches, but the process reaches the
+  900-second bound during its execution.  The validator correctly rejects the
+  partial 7-applicable/6-complete aggregate.  This is the first post-fix run
+  with no placement failure; one evidence-based 1200-second retry remains.
 
 - 2026-07-22: V9A is DONE and V9B is the sole ACTIVE/blue node.  The current
   and historical Qwen runs use the same VMFB, and both reach the
