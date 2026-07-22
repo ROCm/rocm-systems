@@ -998,22 +998,31 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
                                 ConSanResult &result) {
   append_moi_resource_plans(state, options, result);
   append_moi_operational_resource_plans(state, options, result);
-  if (state.arch == ROCJITSU_CODE_ARCH_GFX1250 && options.automatic_moi_dispatch_id_sgprs &&
-      options.moi_dispatch_id_sgpr) {
+  if ((state.arch == ROCJITSU_CODE_ARCH_GFX1250 || state.arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      options.automatic_moi_dispatch_id_sgprs && options.moi_dispatch_id_sgpr) {
     for (ConSanCandidateResourcePlan &plan : result.resource_plans) {
       ConSanOptions owner_options = options;
       if (!options.moi_transient_sgpr_assignments.empty() &&
           !apply_moi_transient_sgpr_assignment(owner_options, plan.owner_descriptor_file_offsets)) {
-        continue;
+        if (state.arch == ROCJITSU_CODE_ARCH_GFX1250)
+          continue;
+        owner_options.moi_dispatch_id_sgpr.reset();
       }
-      if (!owner_options.moi_dispatch_id_sgpr)
+      if (plan.owner_descriptor_file_offsets.empty())
         continue;
-      const uint16_t dispatch_base = *owner_options.moi_dispatch_id_sgpr;
+      if (state.arch == ROCJITSU_CODE_ARCH_GFX1250 && !owner_options.moi_dispatch_id_sgpr)
+        continue;
+      const bool missing_dispatch = !owner_options.moi_dispatch_id_sgpr;
+      const uint16_t dispatch_base = owner_options.moi_dispatch_id_sgpr.value_or(0u);
+      const bool conflicts_with_cdna4_vcc =
+          !missing_dispatch && state.arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+          cdna4_sgpr_window_conflicts_with_physical_vcc(
+              dispatch_base, moi_dispatch_state_sgpr_count(owner_options), plan.current_sgpr_count);
       // max_referenced_sgpr_count is a count: equality means every guest
       // reference is below dispatch_base, while a greater count reaches or
       // crosses persistent dispatch state and cannot share this global pair.
-      if (!plan.owner_descriptor_file_offsets.empty() &&
-          plan.max_referenced_sgpr_count > dispatch_base) {
+      if (missing_dispatch || plan.max_referenced_sgpr_count > dispatch_base ||
+          conflicts_with_cdna4_vcc) {
         plan.source = ConSanRegisterAllocationSource::Unsupported;
         plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
         plan.scratch_vgpr.reset();

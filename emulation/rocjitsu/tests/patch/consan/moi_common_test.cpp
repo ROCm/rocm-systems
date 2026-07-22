@@ -6,6 +6,60 @@
 namespace rocjitsu {
 namespace {
 
+TEST(ConSanMoi, Cdna4HeterogeneousOwnersKeepUsableComponentAcrossMoiEngines) {
+  constexpr uint64_t kHighPressureEntry = 320u * sizeof(uint32_t);
+  for (ConSanMoiEngine engine :
+       {ConSanMoiEngine::RecordReplay, ConSanMoiEngine::Sampled, ConSanMoiEngine::InlineShadow}) {
+    for (uint16_t live_sgpr_count : {96u, 98u}) {
+      SCOPED_TRACE(testing::PrintToString(engine) +
+                   " live_sgprs=" + std::to_string(live_sgpr_count));
+      const std::vector<uint8_t> bytes =
+          make_cdna4_disconnected_scalar_pressure_code_object(live_sgpr_count);
+      ASSERT_FALSE(bytes.empty());
+      ConSanOptions options = moi_options(engine);
+      options.moi_track_barriers = false;
+      options.moi_track_atomics = false;
+      options.moi_runtime_sample_stride = 2u;
+      options.moi_report_buffer_address = 0x123456780000ull;
+      options.moi_report_buffer_size = engine == ConSanMoiEngine::InlineShadow
+                                           ? kInlineShadowFullLdsReportBufferSize
+                                           : 64u * 1024u * 1024u;
+
+      const ConSanResult result = try_patch_consan(bytes, options);
+
+      ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      EXPECT_TRUE(result.final_validation_passed);
+      ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+      ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+      EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 96u);
+      EXPECT_LT(*result.resolved_moi_exec_save_sgpr, 96u);
+
+      const auto low = std::ranges::find(result.site_dispositions, 0u,
+                                         &ConSanSiteDispositionRecord::text_offset);
+      const auto high = std::ranges::find(result.site_dispositions, kHighPressureEntry,
+                                          &ConSanSiteDispositionRecord::text_offset);
+      ASSERT_NE(low, result.site_dispositions.end());
+      ASSERT_NE(high, result.site_dispositions.end());
+      EXPECT_EQ(low->lowering_outcome, ConSanSiteLoweringOutcome::Patched);
+      EXPECT_EQ(high->lowering_outcome, ConSanSiteLoweringOutcome::ResourceFailed);
+      EXPECT_EQ(high->resource_reason, ConSanRegisterPlanReason::ForbiddenOverlap);
+      EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+        return patch.phase == ConSanPatchPhase::Instrumentation && patch.anchor_offset == 0u;
+      }));
+      EXPECT_TRUE(std::ranges::none_of(result.patches, [=](const ConSanPatchInfo &patch) {
+        return patch.phase == ConSanPatchPhase::Instrumentation &&
+               patch.anchor_offset == kHighPressureEntry;
+      }));
+      if (live_sgpr_count == 98u) {
+        EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+          return warning.find("reserved a high dispatch-ID SGPR pair") != std::string::npos;
+        }));
+      }
+    }
+  }
+}
+
 TEST(ConSanMoi, Gfx1250Wave32DescriptorUsesSixteenVgprGranules) {
   constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   const std::array<uint32_t, 3> text_words = {store[0], store[1],

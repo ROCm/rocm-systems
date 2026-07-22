@@ -1671,10 +1671,11 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
 configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSanResult &result,
                                                    std::span<const uint8_t> bytes,
                                                    rj_code_arch_t arch) {
-  const bool gfx1250_sampled =
-      options.moi_engine == ConSanMoiEngine::Sampled && arch == ROCJITSU_CODE_ARCH_GFX1250;
+  const bool component_local_sampled =
+      options.moi_engine == ConSanMoiEngine::Sampled &&
+      (arch == ROCJITSU_CODE_ARCH_GFX1250 || arch == ROCJITSU_CODE_ARCH_CDNA4);
   if ((options.moi_engine != ConSanMoiEngine::RecordReplay &&
-       options.moi_engine != ConSanMoiEngine::InlineShadow && !gfx1250_sampled) ||
+       options.moi_engine != ConSanMoiEngine::InlineShadow && !component_local_sampled) ||
       !options.automatic_moi_partial_exec_save_sgprs || !options.moi_exec_save_sgpr)
     return false;
 
@@ -1686,9 +1687,13 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   const auto ensure_owner = [&](uint64_t descriptor_offset) {
     parent.try_emplace(descriptor_offset, descriptor_offset);
   };
-  for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
+  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+        plan.source == ConSanRegisterAllocationSource::Unsupported)
+      continue;
     for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets)
       ensure_owner(descriptor_offset);
+  }
   const auto find_root = [&](uint64_t owner) {
     uint64_t root = owner;
     while (parent.at(root) != root)
@@ -1702,7 +1707,9 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     return root;
   };
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-    if (plan.owner_descriptor_file_offsets.empty())
+    if ((arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+         plan.source == ConSanRegisterAllocationSource::Unsupported) ||
+        plan.owner_descriptor_file_offsets.empty())
       continue;
     const uint64_t first = plan.owner_descriptor_file_offsets.front();
     for (uint64_t owner : plan.owner_descriptor_file_offsets) {
@@ -1787,7 +1794,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     std::optional<uint16_t> spill_scc;
     std::optional<uint16_t> spill_key;
     std::optional<uint16_t> spill_visible;
-    if (options.moi_engine == ConSanMoiEngine::RecordReplay || gfx1250_sampled) {
+    if (options.moi_engine == ConSanMoiEngine::RecordReplay || component_local_sampled) {
       for (uint32_t base = 0; base + count <= limit; base += 2u) {
         const uint16_t candidate = static_cast<uint16_t>(base);
         if (intersects(unavailable, candidate, count) ||
@@ -2028,7 +2035,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     }
     assigned_any = true;
   }
-  if (missed_required_assignment) {
+  const bool can_exclude_incompatible_component = arch == ROCJITSU_CODE_ARCH_CDNA4;
+  if (missed_required_assignment && !can_exclude_incompatible_component) {
     options.moi_transient_sgpr_assignments.clear();
     result.resolved_moi_transient_sgpr_assignments.clear();
     return false;
@@ -2054,7 +2062,9 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   uint32_t first = 0;
   bool found_owned_scope = false;
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-    if (plan.owner_descriptor_file_offsets.empty())
+    if ((arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+         plan.source == ConSanRegisterAllocationSource::Unsupported) ||
+        plan.owner_descriptor_file_offsets.empty())
       continue;
     found_owned_scope = true;
     first = std::max<uint32_t>(first, plan.max_referenced_sgpr_count);
@@ -2072,7 +2082,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     if (arch != ROCJITSU_CODE_ARCH_CDNA4)
       return false;
     return std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-      if (plan.owner_descriptor_file_offsets.empty())
+      if (plan.source == ConSanRegisterAllocationSource::Unsupported ||
+          plan.owner_descriptor_file_offsets.empty())
         return false;
       return cdna4_sgpr_window_conflicts_with_physical_vcc(base, count, plan.current_sgpr_count);
     });
@@ -2187,8 +2198,12 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   // assignments for the independent owners that do not.  Trying this before
   // the monolithic Inline spill fallback avoids spilling every kernel in a
   // generated library merely because one component has high scalar pressure.
-  if ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-      options.moi_engine == ConSanMoiEngine::InlineShadow) {
+  const bool supports_partial_owner_exec =
+      (is_rdna4_family_arch(arch) && options.moi_engine == ConSanMoiEngine::InlineShadow) ||
+      (arch == ROCJITSU_CODE_ARCH_CDNA4 && (options.moi_engine == ConSanMoiEngine::RecordReplay ||
+                                            options.moi_engine == ConSanMoiEngine::InlineShadow ||
+                                            options.moi_engine == ConSanMoiEngine::Sampled));
+  if (supports_partial_owner_exec) {
     const int32_t last_base = static_cast<int32_t>((ordinary_sgpr_limit - count) & ~1u);
     for (int32_t base = last_base; base >= 0; base -= 2) {
       const uint16_t candidate = static_cast<uint16_t>(base);
@@ -2219,12 +2234,15 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       options.automatic_moi_exec_save_sgprs = true;
       options.automatic_moi_partial_exec_save_sgprs = true;
       options.moi_exec_save_sgprs_persistent = true;
-      if (configure_automatic_moi_transient_sgpr_assignments(options, result, bytes, arch)) {
+      const bool assigned_component_local =
+          configure_automatic_moi_transient_sgpr_assignments(options, result, bytes, arch);
+      const bool can_exclude_incompatible_component = arch == ROCJITSU_CODE_ARCH_CDNA4;
+      if (assigned_component_local || can_exclude_incompatible_component) {
         result.resolved_moi_exec_save_sgpr = options.moi_exec_save_sgpr;
         result.moi_exec_save_sgprs_automatic = true;
         result.warnings.emplace_back(
-            "ConSan MOI reserved a high EXEC-save SGPR window and assigned "
-            "component-local scalar state to incompatible owners");
+            "ConSan MOI reserved a high EXEC-save SGPR window, assigned component-local "
+            "scalar state where available, and excluded incompatible owners");
         return true;
       }
       options.moi_transient_sgpr_assignments.clear();
@@ -2521,6 +2539,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   const auto qualify_owner_local_assignments = [&](uint16_t dispatch_base) {
     for (ConSanMoiTransientSgprAssignment &assignment : options.moi_transient_sgpr_assignments) {
       uint32_t max_referenced_sgpr_count = 0u;
+      bool physical_vcc_conflict = false;
       for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
         if (std::ranges::find(plan.owner_descriptor_file_offsets,
                               assignment.descriptor_file_offset) ==
@@ -2529,9 +2548,14 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         }
         max_referenced_sgpr_count =
             std::max<uint32_t>(max_referenced_sgpr_count, plan.max_referenced_sgpr_count);
+        physical_vcc_conflict |=
+            arch == ROCJITSU_CODE_ARCH_CDNA4 && cdna4_sgpr_window_conflicts_with_physical_vcc(
+                                                    dispatch_base, 2u, plan.current_sgpr_count);
       }
       assignment.dispatch_id_sgpr =
-          max_referenced_sgpr_count <= dispatch_base ? std::optional(dispatch_base) : std::nullopt;
+          max_referenced_sgpr_count <= dispatch_base && !physical_vcc_conflict
+              ? std::optional(dispatch_base)
+              : std::nullopt;
     }
     result.resolved_moi_transient_sgpr_assignments = options.moi_transient_sgpr_assignments;
   };
@@ -2572,14 +2596,26 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   // A large generated code object can contain one full-SGPR kernel alongside
   // many independent lower-pressure kernels.  Requiring one pair above the
   // maximum reference in the entire object would reject every site because
-  // of that one owner.  gfx1250 instead reserves the highest legal pair and
-  // lets resource-plan rebuilding reject only site groups whose owners reach
-  // that pair.  The pair remains code-object-wide, so this does not change the
-  // report ABI or any emitted probe sequence.
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  // of that one owner. Reserve the highest pair that is legal for at least one
+  // owner and let resource-plan rebuilding reject only incompatible groups.
+  // The pair remains code-object-wide, so this does not change the report ABI
+  // or any emitted probe sequence.
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
     const int32_t last_base =
         static_cast<int32_t>((ordinary_sgpr_limit - dispatch_state_count) & ~1u);
     for (int32_t base = last_base; base >= 20; base -= 2) {
+      const bool admits_owner =
+          std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+            return plan.source != ConSanRegisterAllocationSource::Unsupported &&
+                   !plan.owner_descriptor_file_offsets.empty() &&
+                   plan.max_referenced_sgpr_count <= static_cast<uint16_t>(base) &&
+                   (arch != ROCJITSU_CODE_ARCH_CDNA4 ||
+                    !cdna4_sgpr_window_conflicts_with_physical_vcc(static_cast<uint16_t>(base),
+                                                                   dispatch_state_count,
+                                                                   plan.current_sgpr_count));
+          });
+      if (arch == ROCJITSU_CODE_ARCH_CDNA4 && !admits_owner)
+        continue;
       if (options.moi_owner_sgpr &&
           range_overlaps(static_cast<uint16_t>(base), dispatch_state_count, *options.moi_owner_sgpr,
                          1u)) {
