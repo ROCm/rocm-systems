@@ -1810,7 +1810,7 @@ TEST(ConSanMoi, RecordReplayFindsDeadSgprsBelowAHighTransientReference) {
   EXPECT_EQ(result.resolved_moi_exec_save_sgpr, 0u);
   EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("liveness-dead EXEC-save SGPRs s0:s4") != std::string::npos;
+    return warning.find("liveness-dead EXEC-save SGPRs s0:s7") != std::string::npos;
   }));
 }
 
@@ -1839,7 +1839,7 @@ TEST(ConSanMoi, RecordReplayDeadSgprWindowRejectsAnyLiveLane) {
   EXPECT_EQ(result.resolved_moi_exec_save_sgpr, 4u);
   EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("liveness-dead EXEC-save SGPRs s4:s8") != std::string::npos;
+    return warning.find("liveness-dead EXEC-save SGPRs s4:s11") != std::string::npos;
   }));
 }
 
@@ -3194,6 +3194,47 @@ TEST(ConSanMoi, Rdna4FamilyDenseAccessesShareOneWordCallRelay) {
                                  &ConSanPatchInfo::kind),
               2u); // One local relay plus one appended return-PC dispatcher.
   }
+}
+
+TEST(ConSanMoi, Rdna4DenseRecordReplayBarriersUseRelocatedRouter) {
+  constexpr uint32_t kAccessCount = 9u;
+  constexpr size_t kLargeTextWords = 33'000u;
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+  std::vector<uint32_t> text_words(kLargeTextWords, filler);
+  size_t cursor = 32u;
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    text_words[cursor++] = 0xD8340000u | index * sizeof(uint32_t);
+    text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0 offset:index*4
+    text_words[cursor++] = 0xBE804EC1u; // s_barrier_signal -1
+    text_words[cursor++] = 0xBF94FFFFu; // s_barrier_wait -1
+  }
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size =
+      consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0, kAccessCount);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 64;
+
+  const ConSanResult result = try_patch_consan(
+      make_rdna4_lds_code_object(text_words, "rdna4_dense_record_replay_barriers"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
 }
 
 TEST(ConSanMoi, Gfx1250DenseAccessesPartitionRelayWindowsAcrossLargeKernel) {

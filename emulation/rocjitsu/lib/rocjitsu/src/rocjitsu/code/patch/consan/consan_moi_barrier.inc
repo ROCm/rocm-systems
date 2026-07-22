@@ -1021,14 +1021,22 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                           ? oversized_local_body_island
                           : local_indirect_allocator.claim_reachable(site.text_offset);
       if (!island_offset) {
-        const bool has_spill_backed_dense_router =
+        const bool has_spill_backed_inline_router =
             candidate_options.automatic_moi_inline_sgpr_spill &&
             moi_indirect_jump_sgprs(candidate_options) &&
             candidate_options.moi_inline_visible_evidence_sgpr;
+        const bool has_spill_backed_record_replay_router =
+            candidate_options.automatic_moi_record_replay_sgpr_spill &&
+            moi_indirect_jump_sgprs(candidate_options) &&
+            candidate_options.moi_record_replay_dispatch_key_sgpr &&
+            candidate_options.moi_record_replay_call_return_sgpr;
+        const bool has_spill_backed_dense_router =
+            has_spill_backed_inline_router || has_spill_backed_record_replay_router;
         const bool has_dense_router =
             arch == ROCJITSU_CODE_ARCH_GFX1250 ||
             (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
-             candidate_options.moi_engine == ConSanMoiEngine::InlineShadow);
+             (candidate_options.moi_engine == ConSanMoiEngine::InlineShadow ||
+              candidate_options.moi_engine == ConSanMoiEngine::RecordReplay));
         if (has_dense_router &&
             (candidate_options.moi_exec_save_sgpr || has_spill_backed_dense_router) &&
             candidate.kernel_descriptor_file_offset) {
@@ -1183,10 +1191,17 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       const auto special_state = moi_special_state_sgprs(group_options);
       const auto indirect_state = moi_indirect_jump_sgprs(group_options);
-      const bool spill_backed_router = group_options.automatic_moi_inline_sgpr_spill;
+      const bool spill_backed_inline_router = group_options.automatic_moi_inline_sgpr_spill;
+      const bool spill_backed_record_replay_router =
+          group_options.automatic_moi_record_replay_sgpr_spill;
+      const bool spill_backed_router =
+          spill_backed_inline_router || spill_backed_record_replay_router;
       if ((!spill_backed_router && (!group_options.moi_exec_save_sgpr || !special_state)) ||
           !indirect_state ||
-          (spill_backed_router && !group_options.moi_inline_visible_evidence_sgpr)) {
+          (spill_backed_inline_router && !group_options.moi_inline_visible_evidence_sgpr) ||
+          (spill_backed_record_replay_router &&
+           (!group_options.moi_record_replay_dispatch_key_sgpr ||
+            !group_options.moi_record_replay_call_return_sgpr))) {
         result.errors.emplace_back(
             "ConSan MOI dense barrier relay requires scalar special-state storage");
         return;
@@ -1195,12 +1210,15 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           spill_backed_router ? indirect_state->pc_sgpr : *group_options.moi_exec_save_sgpr;
       const uint16_t saved_scc_sgpr =
           spill_backed_router ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
-      const uint16_t key_sgpr = spill_backed_router
-                                    ? *group_options.moi_inline_visible_evidence_sgpr
-                                    : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 5u);
-      const uint16_t call_return_sgpr =
-          spill_backed_router ? jump_pc_sgpr
-                              : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 6u);
+      uint16_t key_sgpr = static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 5u);
+      uint16_t call_return_sgpr = static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 6u);
+      if (spill_backed_inline_router) {
+        key_sgpr = *group_options.moi_inline_visible_evidence_sgpr;
+        call_return_sgpr = jump_pc_sgpr;
+      } else if (spill_backed_record_replay_router) {
+        key_sgpr = *group_options.moi_record_replay_dispatch_key_sgpr;
+        call_return_sgpr = *group_options.moi_record_replay_call_return_sgpr;
+      }
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         if (arch == ROCJITSU_CODE_ARCH_GFX1250)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
