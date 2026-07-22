@@ -3395,11 +3395,11 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
       }
     }
 
-    std::map<size_t, std::vector<amd::BatchCopyOp>, std::greater<size_t>> swap_ops_by_size;
-    for (const auto& op : swapShaderOps) { swap_ops_by_size[op.size].push_back(op); }
-    for (const auto& swap_ops_by_size_entry : swap_ops_by_size) {
-      const auto& swap_ops = swap_ops_by_size_entry.second;
-      if (!ShaderSwapBufferBatch(swap_ops)) {
+    // The swap kernel is a single unified dispatch that distributes work
+    // globally across all copies proportional to each copy's body-op count, so
+    // mixed sizes are handled natively in one launch (no per-size grouping).
+    if (!swapShaderOps.empty()) {
+      if (!ShaderSwapBufferBatch(swapShaderOps)) {
         LogError("KernelBlitManager::ShaderSwapBufferBatch: Intra-device batch swap failed!");
         return false;
       }
