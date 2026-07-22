@@ -77,8 +77,9 @@ inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
       return true;
   }
 
-  // Every cluster-load form needs either demotion to a global load or an M0
-  // cluster-mask sequence. Operand inspection will choose the precise rule.
+  // Every cluster-load form is kept as a cluster load and wrapped to run with
+  // M0 forced to zero (save M0, set M0 = 0, load, restore M0). The semantic rule
+  // performs the rewrite.
   if (mnemonic.starts_with("cluster_load_"))
     return true;
 
@@ -88,10 +89,11 @@ inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
   if (mnemonic.starts_with("v_cvt_f32_fp8"))
     return true;
 
-  // These eight K=128 FP8/BF8 forms exist on B0 but must be split into K=64
-  // operations for A0. Match the closed family precisely: ordinary K=128
-  // F8F6F4 is the A0 replacement for another workaround and is not a split
-  // candidate itself.
+  // These eight K=128 FP8/BF8 forms and the standalone 32x16 FP4 WMMA exist on B0
+  // but have no proven A0 lowering yet, so they are classified to fail closed
+  // rather than being copied through. Match the closed family precisely: ordinary
+  // K=128 F8F6F4 is the A0 replacement for another workaround and is not in this
+  // set.
   const bool is_k128_fp8_bf8 = (mnemonic.starts_with("v_wmma_f16_16x16x128_") ||
                                 mnemonic.starts_with("v_wmma_f32_16x16x128_")) &&
                                (mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||

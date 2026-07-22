@@ -963,24 +963,21 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   return ExpandResult::success(std::move(words));
 }
 
-/// @brief Split a B0-only K=128 FP8/BF8 WMMA into two A0 K=64 WMMAs.
+/// @brief Lower a B0-only K=128 FP8/BF8 WMMA for A0.
 ///
-/// @details WMMA computes D=A*B+C. The first instruction consumes the low
-/// eight-VGPR halves of A and B with the original C. The second consumes the
-/// high halves and feeds the first D back as C. Matrix-reuse flags are cleared
-/// because each half names a different A/B range, and C negation bits are
-/// cleared on the second instruction because its C is the intermediate D.
+/// @details Fails closed. Splitting a K=128 WMMA into two A0 K=64 halves would
+/// emit bare low-precision K=64 WMMA, which are exactly the forms the legalizer
+/// rejects on input (their standalone two-dword base encoding is not safe to emit
+/// for A0). The safe replacement is the regular-Scale-prefixed encoding with
+/// neutral inline scales, but that lowering is not yet implemented, so the whole
+/// instruction fails closed rather than emitting a form that would itself need
+/// re-legalization.
 ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_t,
                                       std::span<const uint8_t>, const LivenessAnalysis &,
                                       TranslationContext &, const LaneLayout *,
                                       const LaneLayout *) {
-  // Fails closed. Splitting a K=128 WMMA into two K=64 halves would emit bare
-  // low-precision K=64 WMMA, which are exactly the forms the legalizer rejects on
-  // input (their standalone two-dword base encoding is not safe to emit for A0).
-  // The safe replacement is the regular-Scale-prefixed encoding with neutral
-  // inline scales, but that lowering is not yet implemented, so the whole
-  // instruction fails closed rather than emitting a form that would itself need
-  // re-legalization.
+  // Validate the opcode is one of the covered K=128 forms, then fail closed (see
+  // the function's doxygen for why no split is emitted).
   if (gfx1250_k128_wmma_replacement(inst.opcode()) == 0)
     return ExpandResult::failed("gfx1250 K=128 WMMA rule received an unsupported opcode");
   return ExpandResult::failed("gfx1250 K=128 WMMA A0 lowering is not yet implemented",

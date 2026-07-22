@@ -8709,10 +8709,12 @@ void init_c_code_object(rj_code_object_t &handle, const std::vector<uint8_t> &im
 }
 } // namespace
 
-TEST(RjCodeTranslateCApi, RequiresRevisionsForGfx1250SameArch) {
-  // A same-architecture gfx1250 translation is meaningless without both silicon
-  // revisions (A0/B0 share an ELF machine ID). The C API must fail closed when a
-  // gfx1250 side has an unspecified revision, rather than pass the object through.
+TEST(RjCodeTranslateCApi, RejectsSameArchGfx1250) {
+  // The C ABI carries no silicon revision, and gfx1250 A0/B0 share an ELF machine
+  // ID, so a same-architecture gfx1250 translation is direction-ambiguous. The C
+  // entry point must fail closed rather than pass the object through unchanged
+  // (which would silently skip any required workarounds). Revision-aware B0->A0 is
+  // reached through the C++ BinaryTranslator instead (see the tests below).
   constexpr auto mov = gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image =
@@ -8721,41 +8723,18 @@ TEST(RjCodeTranslateCApi, RequiresRevisionsForGfx1250SameArch) {
   init_c_code_object(source, image);
   ASSERT_TRUE(source.co->is_valid());
 
-  // Missing both revisions: fail closed.
   rj_code_dbt_options_t options{};
   options.guest_arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.host_arch = ROCJITSU_CODE_ARCH_GFX1250;
-  options.input_revision = ROCJITSU_CODE_REVISION_UNSPECIFIED;
-  options.output_revision = ROCJITSU_CODE_REVISION_UNSPECIFIED;
   rj_code_object_t *translated = nullptr;
   EXPECT_NE(rj_code_translate(&source, &options, &translated), ROCJITSU_STATUS_SUCCESS);
-  EXPECT_EQ(translated, nullptr);
-
-  // A revision provided for a non-gfx1250 side is also rejected.
-  rj_code_dbt_options_t stray{};
-  stray.guest_arch = ROCJITSU_CODE_ARCH_CDNA4;
-  stray.host_arch = ROCJITSU_CODE_ARCH_RDNA4;
-  stray.input_revision = ROCJITSU_CODE_REVISION_GFX1250_B0;
-  translated = nullptr;
-  EXPECT_NE(rj_code_translate(&source, &stray, &translated), ROCJITSU_STATUS_SUCCESS);
-  EXPECT_EQ(translated, nullptr);
-
-  // An unknown (out-of-range) revision value must be rejected outright, not
-  // silently treated as UNSPECIFIED (which would skip every gfx1250 workaround).
-  rj_code_dbt_options_t unknown{};
-  unknown.guest_arch = ROCJITSU_CODE_ARCH_GFX1250;
-  unknown.host_arch = ROCJITSU_CODE_ARCH_GFX1250;
-  unknown.input_revision = static_cast<rj_code_revision_t>(9999);
-  unknown.output_revision = ROCJITSU_CODE_REVISION_GFX1250_A0;
-  translated = nullptr;
-  EXPECT_NE(rj_code_translate(&source, &unknown, &translated), ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(translated, nullptr);
 }
 
 TEST(BinaryTranslatorEnforcesGfx1250Revisions, SameArchUnspecifiedRevisionFailsClosed) {
-  // Direct BinaryTranslator use (bypassing the C API) with same-arch gfx1250 and
-  // no revisions must also fail closed, so an internal caller cannot get a silent
-  // identity copy that skips the workarounds.
+  // Direct BinaryTranslator use with same-arch gfx1250 and no revisions must fail
+  // closed, so a caller cannot get a silent identity copy that skips the
+  // workarounds. This is the guard the C entry point relies on.
   constexpr auto cluster =
       gfx1250::build_vglobal(gfx1250::kClusterLoadB64Vglobal, {.saddr = 4, .vdst = 8, .vaddr = 12});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
@@ -8770,34 +8749,33 @@ TEST(BinaryTranslatorEnforcesGfx1250Revisions, SameArchUnspecifiedRevisionFailsC
   EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
 }
 
-TEST(RjCodeTranslateCApi, TranslatesGfx1250B0ToA0WithRevisions) {
+TEST(BinaryTranslatorEnforcesGfx1250Revisions, TranslatesGfx1250B0ToA0WithRevisions) {
   // With both revisions provided, a B0->A0 translation runs and selects the
   // workaround path: the cluster load stays a cluster load framed by an M0=0
-  // sequence (see the C++-level test), and translation succeeds through the C API.
+  // sequence (see the operand-level test), and translation succeeds. This is the
+  // revision-aware path the DBT hook and CLI drive through BinaryTranslator.
   constexpr auto cluster =
       gfx1250::build_vglobal(gfx1250::kClusterLoadB64Vglobal, {.saddr = 4, .vdst = 8, .vaddr = 12});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
       {cluster[0], cluster[1], cluster[2], kGfx1250SEndpgm});
-  rj_code_object_t source{};
-  init_c_code_object(source, image);
-  ASSERT_TRUE(source.co->is_valid());
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
 
-  rj_code_dbt_options_t options{};
-  options.guest_arch = ROCJITSU_CODE_ARCH_GFX1250;
-  options.host_arch = ROCJITSU_CODE_ARCH_GFX1250;
-  options.input_revision = ROCJITSU_CODE_REVISION_GFX1250_B0;
-  options.output_revision = ROCJITSU_CODE_REVISION_GFX1250_A0;
-  rj_code_object_t *translated = nullptr;
-  ASSERT_EQ(rj_code_translate(&source, &options, &translated), ROCJITSU_STATUS_SUCCESS);
-  ASSERT_NE(translated, nullptr);
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
 
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   const auto decoded =
-      decode_text_instructions(*translated->co->text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
   EXPECT_EQ(std::ranges::count_if(
                 decoded, [](const auto &inst) { return inst->mnemonic() == "cluster_load_b64"; }),
             1);
-  rj_code_object_destroy(translated);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250GeneratedVgprMsbTransitionsCarryPreviousState) {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
@@ -1103,6 +1104,84 @@ TEST(CfgAnalysis, Gfx1250DoesNotInheritBankFromLexicalPredecessor) {
   for (const auto &block : blocks)
     total_fixups += block->static_indirect_call_fixups().size();
   EXPECT_EQ(total_fixups, 0u);
+}
+
+TEST(CfgAnalysis, Gfx1250DoesNotReuseStashFromSkippedFallthroughPredecessor) {
+  // Diamond: a conditional branch jumps DIRECTLY into the readlane/swappc consumer
+  // block, while the lexical fallthrough path holds the WHOLE getpc/writelane stash.
+  //
+  //   A: s_cbranch_scc1 -> C                          (fallthrough to B)
+  //   B: s_set_vgpr_msb 0 ; getpc/add ; v_writelane   (fallthrough to C)
+  //   C: v_readlane s0/s1, v44 ; s_swap_pc_i64        (branch target of A)
+  //
+  // On the A->C edge the entire stash in B never executes, so the value in v44 is
+  // not proven to reach the swappc. C is a branch target — a real block leader — so
+  // recovery must reset at C and fail closed, even though B lexically falls through
+  // into C. The lane scan is linear: B has no terminator before C, so without a
+  // reset at C's leader B's recorded slot leaks into C and falsely recovers a single
+  // target. B re-establishes its VGPR-MSB bank locally (s_set_vgpr_msb 0) so the
+  // writelane actually records a slot — otherwise the post-cbranch bank-unknown state
+  // would mask the stash and the test could not distinguish the two behaviors.
+  //
+  // s_cbranch_scc1 next_pc = 0x04, target C = 0x28: delta 36 bytes = 9 dwords.
+  constexpr auto cbranch_to_consumer =
+      gfx1250::build_sopp(gfx1250::kSCbranchScc1Sopp, {.simm16 = 9});
+  constexpr auto set_bank_zero = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0});
+  std::vector<uint32_t> words = {
+      cbranch_to_consumer[0], // 0x00: s_cbranch_scc1 -> C at 0x28 (block A).
+      set_bank_zero[0],       // 0x04: s_set_vgpr_msb 0 (block B, fallthrough).
+      0xBE804700u,            // 0x08: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      48u,
+      0u,          // 0x0c: s_add_nc_u64 ..., lit64(48) -> target 0x3c.
+      0xD761002Cu, // 0x18: v_writelane_b32 v44, s0, 0.
+      0x02010000u,
+      0xD761002Cu, // 0x20: v_writelane_b32 v44, s1, 1.
+      0x02010201u,
+      0xD7600000u, // 0x28: v_readlane_b32 s0, v44, 0 (block C, branch target).
+      0x0201012Cu,
+      0xD7600001u, // 0x30: v_readlane_b32 s1, v44, 1.
+      0x0201032Cu,
+      0xBE9E4900u,                                // 0x38: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: would-be target / continuation.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  // Assert on the recovery pass output directly, not the post-filtered block
+  // fixups: the reviewer's concern is that the lane-stash SCAN must be block-local.
+  // A downstream incomplete-predecessor filter can also hide the bogus target, so
+  // check discover_indirect_branch_edges() emits NO fixup at all.
+  const auto *sec = co.text_sections().front();
+  const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
+  const size_t inst_data_size = sec->size() / sizeof(uint32_t);
+  std::vector<std::unique_ptr<Instruction>> owned;
+  for (size_t pc = 0, byte_offset = 0; pc < inst_data_size;) {
+    if (inst_data[pc] == 0) { // gfx1250 alignment padding, as in BasicBlock::build.
+      ++pc;
+      byte_offset += sizeof(uint32_t);
+      continue;
+    }
+    std::unique_ptr<Instruction> inst(decoder->decode(&inst_data[pc], byte_offset));
+    ASSERT_NE(inst, nullptr);
+    const uint32_t inst_words = static_cast<uint32_t>(inst->size()) / sizeof(uint32_t);
+    byte_offset += inst->size();
+    pc += inst_words;
+    owned.push_back(std::move(inst));
+  }
+  std::vector<const Instruction *> decoded_insts;
+  decoded_insts.reserve(owned.size());
+  for (const auto &inst : owned)
+    decoded_insts.push_back(inst.get());
+  const auto text =
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(sec->data()), sec->size());
+
+  const auto fixups = discover_indirect_branch_edges(
+      std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size()), text,
+      ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_TRUE(fixups.empty()) << "block-local recovery must not reuse a skipped-path stash";
 }
 
 TEST(CfgAnalysis, ReversePostOrderStraightLine) {

@@ -363,36 +363,17 @@ RJ_API_EXPORT const rj_code_inst_t *rj_code_inst_next(const rj_code_inst_t *inst
 /// @defgroup dbt Dynamic Binary Translation
 /// @{
 
-/// @brief Silicon revision for one side of a translation.
-///
-/// @details Separate from the architecture because some steppings share an ELF
-/// machine ID (e.g. gfx1250 A0 and B0) yet require different translation
-/// workarounds. Value 0 is UNSPECIFIED so a zero-initialized options struct
-/// defaults to it.
-typedef enum rj_code_revision_e {
-  /// @brief No revision provided. Required for non-gfx1250 architectures.
-  ROCJITSU_CODE_REVISION_UNSPECIFIED = 0,
-  /// @brief gfx1250 A0 stepping.
-  ROCJITSU_CODE_REVISION_GFX1250_A0 = 1,
-  /// @brief gfx1250 B0 stepping.
-  ROCJITSU_CODE_REVISION_GFX1250_B0 = 2,
-} rj_code_revision_t;
-
 /// @brief Options for rj_code_translate.
 ///
-/// @note This layout is NOT ABI-stable while DBT is in development: fields have
-/// been and may again be added. Callers must recompile against this header; a
-/// binary built against an older layout must not be mixed with a newer library.
+/// @details Silicon revision is intentionally NOT part of this struct. gfx1250 A0
+/// and B0 share an ELF machine ID, so a same-architecture gfx1250 translation is
+/// direction-ambiguous; rather than carry a revision through this C ABI, that case
+/// is rejected here. The revision-aware B0->A0 path is driven internally through
+/// the C++ BinaryTranslator (used by the DBT hook, which sources the revision from
+/// its guest configuration, and by the rj_dbt_translate CLI).
 typedef struct rj_code_dbt_options_t {
   rj_code_arch_t guest_arch;
   rj_code_arch_t host_arch;
-  /// @brief Input silicon revision. Required when guest_arch is gfx1250; leave
-  /// UNSPECIFIED otherwise. A translation of a gfx1250 object with an unspecified
-  /// revision fails closed rather than guessing a direction.
-  rj_code_revision_t input_revision;
-  /// @brief Output silicon revision. Required when host_arch is gfx1250; leave
-  /// UNSPECIFIED otherwise.
-  rj_code_revision_t output_revision;
 } rj_code_dbt_options_t;
 
 /// @brief Translate a code object from guest_arch to host_arch.

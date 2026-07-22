@@ -676,6 +676,52 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   return static_cast<size_t>(std::distance(insts.begin(), it));
 }
 
+/// @brief Mark every basic-block leader in the decoded instruction stream.
+///
+/// @details A leader is the first instruction of a basic block: index 0, any
+/// direct branch target, the fallthrough after a terminator, an instruction
+/// following an address discontinuity, and any caller-supplied extra leader.
+/// Returns a per-instruction bitmap (1 == leader). This is the single source of
+/// truth for both the temporary CFG skeleton and the block-local lane-stash
+/// scan, so the two agree on where a block begins.
+[[nodiscard]] std::vector<uint8_t> compute_block_leaders(std::span<const Instruction *const> insts,
+                                                         std::span<const uint64_t> extra_leaders) {
+  std::vector<uint8_t> leaders(insts.size(), 0);
+  if (insts.empty())
+    return leaders;
+  leaders.front() = 1;
+
+  const uint64_t section_end =
+      insts.back()->src_loc() + static_cast<uint64_t>(insts.back()->size());
+  for (uint64_t leader : extra_leaders) {
+    if (leader >= section_end)
+      continue;
+    if (auto index = instruction_index_for_offset(insts, leader))
+      leaders[*index] = 1;
+  }
+
+  for (size_t i = 0; i < insts.size(); ++i) {
+    const Instruction &inst = *insts[i];
+    const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+    // An address discontinuity or the instruction after any terminator begins a
+    // new block.
+    if (i + 1 < insts.size() && insts[i + 1]->src_loc() != next_offset)
+      leaders[i + 1] = 1;
+    if (is_block_terminator(inst) && next_offset < section_end && i + 1 < insts.size() &&
+        insts[i + 1]->src_loc() == next_offset)
+      leaders[i + 1] = 1;
+
+    if (auto delta = inst.branch_offset_bytes()) {
+      const int64_t target = static_cast<int64_t>(next_offset) + static_cast<int64_t>(*delta);
+      if (target >= 0 && static_cast<uint64_t>(target) < section_end) {
+        if (auto index = instruction_index_for_offset(insts, static_cast<uint64_t>(target)))
+          leaders[*index] = 1;
+      }
+    }
+  }
+  return leaders;
+}
+
 [[nodiscard]] bool sop1_same_sreg(const Instruction &inst, uint32_t word, std::string_view mnemonic,
                                   uint16_t sreg);
 
@@ -1026,41 +1072,11 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
   // The leader set is represented as an instruction-index bitmap instead of an
   // ordered set of offsets. The decoded instruction stream is already sorted,
   // and index marking avoids an O(number_of_instructions * log leaders)
-  // membership check on very large kernels.
-  std::vector<uint8_t> leaders(ctx.insts.size(), 0);
-  leaders.front() = 1;
-
-  const uint64_t section_end =
-      ctx.insts.back()->src_loc() + static_cast<uint64_t>(ctx.insts.back()->size());
-  for (uint64_t leader : extra_leaders) {
-    if (leader >= section_end)
-      continue;
-    if (auto index = instruction_index_for_offset(ctx.insts, leader))
-      leaders[*index] = 1;
-  }
-
-  for (size_t i = 0; i < ctx.insts.size(); ++i) {
-    const Instruction &inst = *ctx.insts[i];
-    const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
-    if (i + 1 < ctx.insts.size() && ctx.insts[i + 1]->src_loc() != next_offset)
-      leaders[i + 1] = 1;
-    if (is_block_terminator(inst) && next_offset < section_end) {
-      // Splitting after terminators makes each setpc/swappc the last
-      // instruction in its analysis block. That is important because the block
-      // transfer must summarize the state at the control-transfer boundary, not
-      // after unrelated fallthrough instructions.
-      if (i + 1 < ctx.insts.size() && ctx.insts[i + 1]->src_loc() == next_offset)
-        leaders[i + 1] = 1;
-    }
-
-    if (auto delta = inst.branch_offset_bytes()) {
-      const int64_t target = static_cast<int64_t>(next_offset) + static_cast<int64_t>(*delta);
-      if (target >= 0 && static_cast<uint64_t>(target) < section_end) {
-        if (auto index = instruction_index_for_offset(ctx.insts, static_cast<uint64_t>(target)))
-          leaders[*index] = 1;
-      }
-    }
-  }
+  // membership check on very large kernels. Splitting after terminators makes
+  // each setpc/swappc the last instruction in its analysis block, so the block
+  // transfer summarizes the state at the control-transfer boundary rather than
+  // after unrelated fallthrough instructions.
+  const std::vector<uint8_t> leaders = compute_block_leaders(ctx.insts, extra_leaders);
 
   std::vector<AnalysisBlock> blocks;
   blocks.reserve(std::ranges::count(leaders, uint8_t{1}));
@@ -1675,9 +1691,14 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
   // reasoning across the CFG. The lane-slot map is scanned in source order, so a
   // writelane that is jumped over, reached on only one predecessor, or belongs to
   // an earlier region must not seed a later consumer. Two guards enforce this:
-  //   1. Clear `slots` at every block terminator (below), so a stash only feeds a
-  //      readlane in the SAME straight-line block. The real compiler idiom emits
-  //      writelane/readlane/swappc contiguously, so true positives are preserved.
+  //   1. Reset all recovery state (builders, lane slots, reconstructed halves,
+  //      VGPR-MSB bank) at every basic-block LEADER, so a stash only feeds a
+  //      readlane in the SAME straight-line block. Resetting at leaders (not just
+  //      after terminators) is required: a conditional branch can jump directly
+  //      into the readlane/swappc block while the lexical fallthrough path holds
+  //      the stash, so the consumer's block leader must start from a clean state
+  //      even though its lexical predecessor fell through. The real compiler idiom
+  //      emits writelane/readlane/swappc contiguously, so true positives survive.
   //   2. Clear `slots` on any S_SET_VGPR_MSB / MODE write, because gfx1250 encodes
   //      only the low VGPR selector: the same VectorLaneSlot key can name a
   //      different physical VGPR once the DST/SRC0 MSB bank changes. Rather than
@@ -1685,6 +1706,11 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
   //      slots when the bank state may have moved.
   if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
     return;
+
+  // Leaders drive the block-local reset. No extra leaders here: recovered
+  // indirect targets are outputs of this pass, and direct branch targets alone
+  // are enough to keep a jumped-into consumer from reusing a skipped stash.
+  const std::vector<uint8_t> leaders = compute_block_leaders(ctx.insts, {});
 
   const auto changes_vgpr_msb_bank = [](std::string_view mnemonic) {
     return mnemonic == "s_set_vgpr_msb" || mnemonic == "s_setreg_b32" ||
@@ -1702,10 +1728,10 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
   // addresses its destination through the DST bank and v_readlane its source
   // through the SRC0 bank, so equal low selectors under differing banks name
   // different physical VGPRs. Track the current immediate; nullopt means the bank
-  // is unknown (a dynamic MODE write, or a block boundary — see the terminator
-  // handling below) and any lane transport must fail closed. The kernel entry
-  // block starts at the architectural default of bank 0 for every role; later
-  // blocks are marked unknown until they locally re-establish the bank.
+  // is unknown (a dynamic MODE write, or a block leader — see the reset below) and
+  // any lane transport must fail closed. The kernel entry block starts at the
+  // architectural default of bank 0 for every role; later blocks are marked
+  // unknown until they locally re-establish the bank.
   std::optional<uint8_t> vgpr_msb_imm = uint8_t{0};
   const auto role_bank = [&](unsigned shift) -> std::optional<uint8_t> {
     if (!vgpr_msb_imm)
@@ -1726,6 +1752,19 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
     const Instruction &inst = *ctx.insts[index];
     const InstructionFacts &facts = ctx.facts[index];
     const std::string_view mnemonic = inst.mnemonic();
+
+    // At every block leader after entry, discard all block-local recovery state:
+    // a jumped-into block must not inherit a lexical predecessor's stash, builders,
+    // reconstructed halves, or VGPR-MSB bank. The bank becomes unknown (only entry
+    // is guaranteed bank 0), so a leader that needs lane transport must locally
+    // re-establish it with s_set_vgpr_msb, else transport fails closed.
+    if (index != 0 && leaders[index]) {
+      builders = BlockState{};
+      slots.clear();
+      read_halves.fill(std::nullopt);
+      active_read_halves.clear();
+      vgpr_msb_imm = std::nullopt;
+    }
 
     if (!active_read_halves.empty()) {
       ensure_written_sgprs(ctx, index);
@@ -1843,24 +1882,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
         vgpr_msb_imm = std::nullopt;
       }
     }
-    if (is_block_terminator(inst)) {
-      builders = BlockState{};
-      read_halves.fill(std::nullopt);
-      active_read_halves.clear();
-      // Block-local recovery: a stash cannot flow across a terminator to a later
-      // block, so clearing here prevents a path-insensitive false single target.
-      slots.clear();
-      // The VGPR-MSB bank is scanned in lexical order, not CFG order, so a block
-      // reached by a branch/join must not inherit a lexically-preceding block's
-      // bank (that block may not be a predecessor, and real predecessors may
-      // disagree). Mark the bank UNKNOWN at every block boundary; a following block
-      // that needs lane transport must locally re-establish it with s_set_vgpr_msb
-      // first, otherwise the transport fails closed.
-      vgpr_msb_imm = std::nullopt;
-    }
-    if (is_program_terminator(inst)) {
-      slots.clear();
-    }
+    // No reset after a terminator is needed here: the instruction following any
+    // terminator is a block leader, and the leader reset at the top of the next
+    // iteration discards all recovery state before it is used.
   }
 }
 
