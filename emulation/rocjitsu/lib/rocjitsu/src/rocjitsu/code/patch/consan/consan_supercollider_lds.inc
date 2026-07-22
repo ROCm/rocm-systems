@@ -678,6 +678,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                  static_cast<uint64_t>(*delay_words) + 2u + 1u +
                                  lds_check_trap_precompare_words(site) + 1u +
                                  (2u + *action_words) * *required_vgprs + 1u;
+      if (site.dst_accvgpr && arch == ROCJITSU_CODE_ARCH_CDNA4)
+        requested_words += 2u * *required_vgprs;
       if (spill_vcc_save_to_vgpr)
         requested_words += 2u;
       if (spill_vcc_save_to_vgpr && gfx1250_vgpr_msb_mode.value_or(0u) != 0u)

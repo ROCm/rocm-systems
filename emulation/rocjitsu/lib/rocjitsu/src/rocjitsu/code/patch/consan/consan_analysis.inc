@@ -1242,6 +1242,7 @@ void record_lds_site(const Instruction &inst, ConSanKernelInfo &kernel,
   site.supported_mvp = is_supported_mvp_lds_site(site.kind, site.width_bits, mnemonic);
   if (site.kind == ConSanLdsAccessKind::Read) {
     site.dst_vgpr = vgpr_index(inst.dst_operand(0));
+    site.dst_accvgpr = register_index(inst.dst_operand(0), RegClass::ACC_VGPR);
     site.addr_vgpr = vgpr_index(inst.src_operand(0));
   } else if (site.kind == ConSanLdsAccessKind::Write) {
     site.addr_vgpr = vgpr_index(inst.src_operand(0));

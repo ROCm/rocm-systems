@@ -106,13 +106,24 @@ reserved_ranges_for_existing_patches(const AmdGpuCodeObject &code_object,
 }
 
 [[nodiscard]] uint16_t lds_check_trap_extra_scratch_vgprs(const ConSanLdsSite &site) {
-  return is_subdword_lds_store(site) ? 1u : 0u;
+  return is_subdword_lds_store(site) || site.dst_accvgpr ? 1u : 0u;
 }
 
 [[nodiscard]] uint32_t lds_check_trap_precompare_words(const ConSanLdsSite &site) {
   if (!is_subdword_lds_store(site))
     return 0u;
   return is_high_d16_lds_store(site) ? 3u : 2u;
+}
+
+[[nodiscard]] std::optional<std::array<uint32_t, 2>>
+build_cdna4_accvgpr_read_b32(uint16_t dst_vgpr, uint16_t src_accvgpr) {
+  if (dst_vgpr > 255u || src_accvgpr > 255u)
+    return std::nullopt;
+  return cdna4::build_vop3p(cdna4::kVAccvgprReadVop3p,
+                            {.vdst = static_cast<uint8_t>(dst_vgpr),
+                             .op_sel_hi_2 = 1u,
+                             .src0 = static_cast<uint16_t>(256u + src_accvgpr),
+                             .op_sel_hi = 3u});
 }
 
 constexpr uint64_t kLdsCheckTrapIndirectJumpWords = 7u;
@@ -397,6 +408,8 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
   const uint16_t saved_address_vgpr = static_cast<uint16_t>(
       report_scratch_vgpr + static_cast<uint16_t>(report_action_scratch_vgprs(options)));
   if (site.kind == ConSanLdsAccessKind::Read) {
+    if (site.dst_accvgpr && arch == ROCJITSU_CODE_ARCH_CDNA4)
+      duplicate_load[0] &= ~(uint32_t{1} << 25u);
     duplicate_load[1] =
         (duplicate_load[1] & 0x00FFFFFFu) | (static_cast<uint32_t>(scratch_vgpr) << 24u);
     if (preserve_address)
@@ -419,7 +432,9 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
   }
 
   auto wait_dscnt = build_s_wait_dscnt_word(0, arch);
-  auto first_compare_vgpr = check_trap_compare_vgpr(site, 0u, arch, gfx1250_vgpr_msb_mode);
+  auto first_compare_vgpr = site.dst_accvgpr && arch == ROCJITSU_CODE_ARCH_CDNA4
+                                ? std::optional<uint16_t>(compare_scratch_vgpr)
+                                : check_trap_compare_vgpr(site, 0u, arch, gfx1250_vgpr_msb_mode);
   if (!first_compare_vgpr) {
     errors.emplace_back("ConSan LDS check/trap proof selected site without compare VGPR");
     return std::nullopt;
@@ -492,7 +507,8 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
   const uint32_t total_words = static_cast<uint32_t>(
       (preserve_address ? 1u : 0u) + 2u + lds_check_trap_predelay_setup_words(site) + delay_words +
       2u + 1u + lds_check_trap_precompare_words(site) + 1u +
-      (2u + mismatch_action->size()) * *required_vgprs + 1u + compare_mode_switch_words);
+      (2u + mismatch_action->size()) * *required_vgprs + 1u + compare_mode_switch_words +
+      (site.dst_accvgpr ? 2u * *required_vgprs : 0u));
   std::vector<uint32_t> words;
   words.reserve(total_words);
   if (preserve_address) {
@@ -518,7 +534,17 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
     words.insert(words.end(), masked_store_value->begin(), masked_store_value->end());
   words.push_back(*save_vcc);
   for (uint16_t i = 0; i < *required_vgprs; ++i) {
-    const auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, gfx1250_vgpr_msb_mode);
+    auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, gfx1250_vgpr_msb_mode);
+    if (site.dst_accvgpr && arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      const auto acc_read = build_cdna4_accvgpr_read_b32(
+          compare_scratch_vgpr, static_cast<uint16_t>(*site.dst_accvgpr + i));
+      if (!acc_read) {
+        errors.emplace_back("ConSan LDS check/trap proof could not encode accumulator read");
+        return std::nullopt;
+      }
+      words.insert(words.end(), acc_read->begin(), acc_read->end());
+      compare_vgpr = compare_scratch_vgpr;
+    }
     const uint16_t compare_mode = arch == ROCJITSU_CODE_ARCH_GFX1250 && compare_vgpr
                                       ? static_cast<uint16_t>(*compare_vgpr / 256u)
                                       : 0u;

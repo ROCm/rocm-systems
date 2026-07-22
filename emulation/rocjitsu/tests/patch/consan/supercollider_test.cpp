@@ -3,6 +3,9 @@
 
 #include "consan_test_support.h"
 
+#include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
+
 namespace rocjitsu {
 namespace {
 
@@ -1750,6 +1753,126 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesCdna4ReadInPlace) {
     }
   }
   EXPECT_TRUE(preserves_wave64_vcc);
+}
+
+TEST(ConSan, ProbeLdsCheckTrapModeComparesCdna4AccvgprB128Reads) {
+  struct AccReadCase {
+    uint16_t acc_base;
+    std::array<uint32_t, 2> load;
+  };
+  constexpr std::array<AccReadCase, 2> cases = {{
+      {0u, {0xDBFE0000u, 0x000000FFu}},  // ds_read_b128 a[0:3], v255
+      {76u, {0xDBFE3C00u, 0x4C0000FEu}}, // ds_read_b128 a[76:79], v254 offset:15360
+  }};
+
+  for (const AccReadCase &test_case : cases) {
+    SCOPED_TRACE(test_case.acc_base);
+    std::vector<uint32_t> text_words(test_case.load.begin(), test_case.load.end());
+    text_words.insert(text_words.end(), 64u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+    text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+    const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words);
+    ConSanOptions options;
+    options.flavor = ConSanFlavor::SuperCollider;
+    options.probe_lds_check_trap = true;
+    options.scratch_vgpr = 20u;
+    options.delay_nops = 1u;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.final_validation_passed);
+    ASSERT_EQ(result.patches.size(), 1u);
+    ASSERT_EQ(result.kernels.size(), 1u);
+    ASSERT_EQ(result.kernels.front().lds_sites.size(), 1u);
+    EXPECT_FALSE(result.kernels.front().lds_sites.front().dst_vgpr);
+    EXPECT_EQ(result.kernels.front().lds_sites.front().dst_accvgpr, test_case.acc_base);
+
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    ASSERT_EQ(patched.text_sections().size(), 1u);
+    const Section *text = patched.text_sections().front();
+    const std::vector<uint32_t> body =
+        patched_words_at_file_offset(result, text->sectionOffset(), text->size());
+
+    const std::array<uint32_t, 2> duplicate = {
+        test_case.load[0] & ~(uint32_t{1} << 25u),
+        (test_case.load[1] & 0x00FFFFFFu) | (20u << 24u),
+    };
+    EXPECT_NE(std::search(body.begin(), body.end(), duplicate.begin(), duplicate.end()),
+              body.end());
+    for (uint16_t lane = 0; lane < 4u; ++lane) {
+      constexpr uint16_t compare_vgpr = 24u;
+      const auto acc_read =
+          cdna4::build_vop3p(cdna4::kVAccvgprReadVop3p,
+                             {.vdst = static_cast<uint8_t>(compare_vgpr),
+                              .op_sel_hi_2 = 1u,
+                              .src0 = static_cast<uint16_t>(256u + test_case.acc_base + lane),
+                              .op_sel_hi = 3u});
+      const std::array<uint32_t, 2> expected_acc_read = {
+          0xD3D84018u,
+          static_cast<uint32_t>(0x18000100u | (test_case.acc_base + lane)),
+      };
+      EXPECT_EQ(acc_read, expected_acc_read);
+      EXPECT_NE(std::search(body.begin(), body.end(), acc_read.begin(), acc_read.end()),
+                body.end());
+    }
+  }
+}
+
+TEST(ConSan, ProbeLdsCheckTrapModeSpillsCdna4AccvgprB128ScratchWithoutMovingBoundary) {
+  constexpr std::array<uint32_t, 2> load = {
+      0xDBFE3C00u,
+      0x4C0000FEu, // ds_read_b128 a[76:79], v254 offset:15360
+  };
+  std::vector<uint32_t> text_words(load.begin(), load.end());
+  text_words.insert(text_words.end(), 256u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  for (uint16_t vgpr = 0; vgpr < 256u; ++vgpr) {
+    text_words.push_back(
+        build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_CDNA4));
+  }
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words, "cdna4_accvgpr_b128_spill",
+                                                          kRdna4Wave64AllVgprsGranulated);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.delay_nops = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
+    return candidate.spilled_vgpr_count != 0u;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  EXPECT_EQ(patch->spilled_vgpr_count, 5u);
+  EXPECT_EQ(patch->required_private_segment_size, 32u);
+  EXPECT_EQ(patch->scratch_vgpr, 0u);
+
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(original.kernels().size(), 1u);
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD original_descriptor{};
+  KD patched_descriptor{};
+  std::memcpy(&original_descriptor,
+              bytes.data() + original.kernels().front().descriptor_file_offset,
+              sizeof(original_descriptor));
+  std::memcpy(&patched_descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(patched_descriptor));
+  EXPECT_EQ(AMDHSA_BITS_GET(patched_descriptor.compute_pgm_rsrc3,
+                            kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+            AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc3,
+                            kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET));
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeAlignsCdna4B32AutoReportTuple) {

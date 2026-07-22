@@ -141,6 +141,7 @@ struct ConSanLdsSite {
   uint32_t size = 0;
   uint32_t width_bits = 0;
   std::optional<uint16_t> dst_vgpr;
+  std::optional<uint16_t> dst_accvgpr;
   std::optional<uint16_t> addr_vgpr;
   std::optional<uint16_t> data_vgpr;
   std::optional<uint16_t> second_data_vgpr;
