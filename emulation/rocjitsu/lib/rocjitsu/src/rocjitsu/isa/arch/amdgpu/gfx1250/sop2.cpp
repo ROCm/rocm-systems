@@ -15,12 +15,14 @@ SAddCoU32Sop2::SAddCoU32Sop2(const MachineInst *inst)
            registered_exec_fn<SAddCoU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -43,6 +45,7 @@ SAddCoU32Sop2::SAddCoU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SSubCoU32Sop2::SSubCoU32Sop2(const MachineInst *inst)
@@ -50,12 +53,14 @@ SSubCoU32Sop2::SSubCoU32Sop2(const MachineInst *inst)
            registered_exec_fn<SSubCoU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -78,6 +83,7 @@ SSubCoU32Sop2::SSubCoU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SAddCoI32Sop2::SAddCoI32Sop2(const MachineInst *inst)
@@ -85,12 +91,14 @@ SAddCoI32Sop2::SAddCoI32Sop2(const MachineInst *inst)
            registered_exec_fn<SAddCoI32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -113,6 +121,7 @@ SAddCoI32Sop2::SAddCoI32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SSubCoI32Sop2::SSubCoI32Sop2(const MachineInst *inst)
@@ -120,12 +129,14 @@ SSubCoI32Sop2::SSubCoI32Sop2(const MachineInst *inst)
            registered_exec_fn<SSubCoI32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -148,6 +159,7 @@ SSubCoI32Sop2::SSubCoI32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SAddCoCiU32Sop2::SAddCoCiU32Sop2(const MachineInst *inst)
@@ -155,12 +167,16 @@ SAddCoCiU32Sop2::SAddCoCiU32Sop2(const MachineInst *inst)
            registered_exec_fn<SAddCoCiU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253),
+      scc_in(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &scc;
+  src_operands_[2] = &scc_in;
+  num_src_ = 3;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -183,6 +199,8 @@ SAddCoCiU32Sop2::SAddCoCiU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
+  scc_in.apply_fieldless_caps(false, false, false);
 }
 
 SSubCoCiU32Sop2::SSubCoCiU32Sop2(const MachineInst *inst)
@@ -190,12 +208,16 @@ SSubCoCiU32Sop2::SSubCoCiU32Sop2(const MachineInst *inst)
            registered_exec_fn<SSubCoCiU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253),
+      scc_in(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &scc;
+  src_operands_[2] = &scc_in;
+  num_src_ = 3;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -218,6 +240,8 @@ SSubCoCiU32Sop2::SSubCoCiU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
+  scc_in.apply_fieldless_caps(false, false, false);
 }
 
 SAbsdiffI32Sop2::SAbsdiffI32Sop2(const MachineInst *inst)
@@ -225,12 +249,14 @@ SAbsdiffI32Sop2::SAbsdiffI32Sop2(const MachineInst *inst)
            registered_exec_fn<SAbsdiffI32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -253,6 +279,7 @@ SAbsdiffI32Sop2::SAbsdiffI32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SLshlB32Sop2::SLshlB32Sop2(const MachineInst *inst)
@@ -260,12 +287,14 @@ SLshlB32Sop2::SLshlB32Sop2(const MachineInst *inst)
            registered_exec_fn<SLshlB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -288,6 +317,7 @@ SLshlB32Sop2::SLshlB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SLshlB64Sop2::SLshlB64Sop2(const MachineInst *inst)
@@ -295,12 +325,14 @@ SLshlB64Sop2::SLshlB64Sop2(const MachineInst *inst)
            registered_exec_fn<SLshlB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -323,6 +355,7 @@ SLshlB64Sop2::SLshlB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SLshrB32Sop2::SLshrB32Sop2(const MachineInst *inst)
@@ -330,12 +363,14 @@ SLshrB32Sop2::SLshrB32Sop2(const MachineInst *inst)
            registered_exec_fn<SLshrB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -358,6 +393,7 @@ SLshrB32Sop2::SLshrB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SLshrB64Sop2::SLshrB64Sop2(const MachineInst *inst)
@@ -365,12 +401,14 @@ SLshrB64Sop2::SLshrB64Sop2(const MachineInst *inst)
            registered_exec_fn<SLshrB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -393,6 +431,7 @@ SLshrB64Sop2::SLshrB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SAshrI32Sop2::SAshrI32Sop2(const MachineInst *inst)
@@ -400,12 +439,14 @@ SAshrI32Sop2::SAshrI32Sop2(const MachineInst *inst)
            registered_exec_fn<SAshrI32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -428,6 +469,7 @@ SAshrI32Sop2::SAshrI32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SAshrI64Sop2::SAshrI64Sop2(const MachineInst *inst)
@@ -435,12 +477,14 @@ SAshrI64Sop2::SAshrI64Sop2(const MachineInst *inst)
            registered_exec_fn<SAshrI64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -463,6 +507,7 @@ SAshrI64Sop2::SAshrI64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SLshl1AddU32Sop2::SLshl1AddU32Sop2(const MachineInst *inst)
@@ -470,12 +515,14 @@ SLshl1AddU32Sop2::SLshl1AddU32Sop2(const MachineInst *inst)
            registered_exec_fn<SLshl1AddU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -498,6 +545,7 @@ SLshl1AddU32Sop2::SLshl1AddU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SLshl2AddU32Sop2::SLshl2AddU32Sop2(const MachineInst *inst)
@@ -505,12 +553,14 @@ SLshl2AddU32Sop2::SLshl2AddU32Sop2(const MachineInst *inst)
            registered_exec_fn<SLshl2AddU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -533,6 +583,7 @@ SLshl2AddU32Sop2::SLshl2AddU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SLshl3AddU32Sop2::SLshl3AddU32Sop2(const MachineInst *inst)
@@ -540,12 +591,14 @@ SLshl3AddU32Sop2::SLshl3AddU32Sop2(const MachineInst *inst)
            registered_exec_fn<SLshl3AddU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -568,6 +621,7 @@ SLshl3AddU32Sop2::SLshl3AddU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SLshl4AddU32Sop2::SLshl4AddU32Sop2(const MachineInst *inst)
@@ -575,12 +629,14 @@ SLshl4AddU32Sop2::SLshl4AddU32Sop2(const MachineInst *inst)
            registered_exec_fn<SLshl4AddU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -603,6 +659,7 @@ SLshl4AddU32Sop2::SLshl4AddU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SMinI32Sop2::SMinI32Sop2(const MachineInst *inst)
@@ -610,12 +667,14 @@ SMinI32Sop2::SMinI32Sop2(const MachineInst *inst)
            registered_exec_fn<SMinI32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -638,6 +697,7 @@ SMinI32Sop2::SMinI32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SMinU32Sop2::SMinU32Sop2(const MachineInst *inst)
@@ -645,12 +705,14 @@ SMinU32Sop2::SMinU32Sop2(const MachineInst *inst)
            registered_exec_fn<SMinU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -673,6 +735,7 @@ SMinU32Sop2::SMinU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SMaxI32Sop2::SMaxI32Sop2(const MachineInst *inst)
@@ -680,12 +743,14 @@ SMaxI32Sop2::SMaxI32Sop2(const MachineInst *inst)
            registered_exec_fn<SMaxI32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -708,6 +773,7 @@ SMaxI32Sop2::SMaxI32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SMaxU32Sop2::SMaxU32Sop2(const MachineInst *inst)
@@ -715,12 +781,14 @@ SMaxU32Sop2::SMaxU32Sop2(const MachineInst *inst)
            registered_exec_fn<SMaxU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -743,6 +811,7 @@ SMaxU32Sop2::SMaxU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SAndB32Sop2::SAndB32Sop2(const MachineInst *inst)
@@ -750,12 +819,14 @@ SAndB32Sop2::SAndB32Sop2(const MachineInst *inst)
            registered_exec_fn<SAndB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -778,6 +849,7 @@ SAndB32Sop2::SAndB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SAndB64Sop2::SAndB64Sop2(const MachineInst *inst)
@@ -785,12 +857,14 @@ SAndB64Sop2::SAndB64Sop2(const MachineInst *inst)
            registered_exec_fn<SAndB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -813,6 +887,7 @@ SAndB64Sop2::SAndB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SOrB32Sop2::SOrB32Sop2(const MachineInst *inst)
@@ -820,12 +895,14 @@ SOrB32Sop2::SOrB32Sop2(const MachineInst *inst)
            registered_exec_fn<SOrB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -848,6 +925,7 @@ SOrB32Sop2::SOrB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SOrB64Sop2::SOrB64Sop2(const MachineInst *inst)
@@ -855,12 +933,14 @@ SOrB64Sop2::SOrB64Sop2(const MachineInst *inst)
            registered_exec_fn<SOrB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -883,6 +963,7 @@ SOrB64Sop2::SOrB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SXorB32Sop2::SXorB32Sop2(const MachineInst *inst)
@@ -890,12 +971,14 @@ SXorB32Sop2::SXorB32Sop2(const MachineInst *inst)
            registered_exec_fn<SXorB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -918,6 +1001,7 @@ SXorB32Sop2::SXorB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SXorB64Sop2::SXorB64Sop2(const MachineInst *inst)
@@ -925,12 +1009,14 @@ SXorB64Sop2::SXorB64Sop2(const MachineInst *inst)
            registered_exec_fn<SXorB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -953,6 +1039,7 @@ SXorB64Sop2::SXorB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SNandB32Sop2::SNandB32Sop2(const MachineInst *inst)
@@ -960,12 +1047,14 @@ SNandB32Sop2::SNandB32Sop2(const MachineInst *inst)
            registered_exec_fn<SNandB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -988,6 +1077,7 @@ SNandB32Sop2::SNandB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SNandB64Sop2::SNandB64Sop2(const MachineInst *inst)
@@ -995,12 +1085,14 @@ SNandB64Sop2::SNandB64Sop2(const MachineInst *inst)
            registered_exec_fn<SNandB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1023,6 +1115,7 @@ SNandB64Sop2::SNandB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SNorB32Sop2::SNorB32Sop2(const MachineInst *inst)
@@ -1030,12 +1123,14 @@ SNorB32Sop2::SNorB32Sop2(const MachineInst *inst)
            registered_exec_fn<SNorB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1058,6 +1153,7 @@ SNorB32Sop2::SNorB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SNorB64Sop2::SNorB64Sop2(const MachineInst *inst)
@@ -1065,12 +1161,14 @@ SNorB64Sop2::SNorB64Sop2(const MachineInst *inst)
            registered_exec_fn<SNorB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1093,6 +1191,7 @@ SNorB64Sop2::SNorB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SXnorB32Sop2::SXnorB32Sop2(const MachineInst *inst)
@@ -1100,12 +1199,14 @@ SXnorB32Sop2::SXnorB32Sop2(const MachineInst *inst)
            registered_exec_fn<SXnorB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1128,6 +1229,7 @@ SXnorB32Sop2::SXnorB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SXnorB64Sop2::SXnorB64Sop2(const MachineInst *inst)
@@ -1135,12 +1237,14 @@ SXnorB64Sop2::SXnorB64Sop2(const MachineInst *inst)
            registered_exec_fn<SXnorB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1163,6 +1267,7 @@ SXnorB64Sop2::SXnorB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SAndNot1B32Sop2::SAndNot1B32Sop2(const MachineInst *inst)
@@ -1170,12 +1275,14 @@ SAndNot1B32Sop2::SAndNot1B32Sop2(const MachineInst *inst)
            registered_exec_fn<SAndNot1B32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1198,6 +1305,7 @@ SAndNot1B32Sop2::SAndNot1B32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SAndNot1B64Sop2::SAndNot1B64Sop2(const MachineInst *inst)
@@ -1205,12 +1313,14 @@ SAndNot1B64Sop2::SAndNot1B64Sop2(const MachineInst *inst)
            registered_exec_fn<SAndNot1B64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1233,6 +1343,7 @@ SAndNot1B64Sop2::SAndNot1B64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SOrNot1B32Sop2::SOrNot1B32Sop2(const MachineInst *inst)
@@ -1240,12 +1351,14 @@ SOrNot1B32Sop2::SOrNot1B32Sop2(const MachineInst *inst)
            registered_exec_fn<SOrNot1B32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1268,6 +1381,7 @@ SOrNot1B32Sop2::SOrNot1B32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SOrNot1B64Sop2::SOrNot1B64Sop2(const MachineInst *inst)
@@ -1275,12 +1389,14 @@ SOrNot1B64Sop2::SOrNot1B64Sop2(const MachineInst *inst)
            registered_exec_fn<SOrNot1B64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1303,6 +1419,7 @@ SOrNot1B64Sop2::SOrNot1B64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SBfeU32Sop2::SBfeU32Sop2(const MachineInst *inst)
@@ -1310,12 +1427,14 @@ SBfeU32Sop2::SBfeU32Sop2(const MachineInst *inst)
            registered_exec_fn<SBfeU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1338,6 +1457,7 @@ SBfeU32Sop2::SBfeU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SBfeI32Sop2::SBfeI32Sop2(const MachineInst *inst)
@@ -1345,12 +1465,14 @@ SBfeI32Sop2::SBfeI32Sop2(const MachineInst *inst)
            registered_exec_fn<SBfeI32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1373,6 +1495,7 @@ SBfeI32Sop2::SBfeI32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SBfeU64Sop2::SBfeU64Sop2(const MachineInst *inst)
@@ -1380,12 +1503,14 @@ SBfeU64Sop2::SBfeU64Sop2(const MachineInst *inst)
            registered_exec_fn<SBfeU64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1408,6 +1533,7 @@ SBfeU64Sop2::SBfeU64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SBfeI64Sop2::SBfeI64Sop2(const MachineInst *inst)
@@ -1415,12 +1541,14 @@ SBfeI64Sop2::SBfeI64Sop2(const MachineInst *inst)
            registered_exec_fn<SBfeI64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1443,6 +1571,7 @@ SBfeI64Sop2::SBfeI64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SBfmB32Sop2::SBfmB32Sop2(const MachineInst *inst)
@@ -1625,11 +1754,13 @@ SCselectB32Sop2::SCselectB32Sop2(const MachineInst *inst)
            registered_exec_fn<SCselectB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
-  num_src_ = 2;
+  src_operands_[2] = &scc;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
@@ -1653,6 +1784,7 @@ SCselectB32Sop2::SCselectB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SCselectB64Sop2::SCselectB64Sop2(const MachineInst *inst)
@@ -1660,11 +1792,13 @@ SCselectB64Sop2::SCselectB64Sop2(const MachineInst *inst)
            registered_exec_fn<SCselectB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
-  num_src_ = 2;
+  src_operands_[2] = &scc;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
@@ -1688,6 +1822,7 @@ SCselectB64Sop2::SCselectB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SPackLlB32B16Sop2::SPackLlB32B16Sop2(const MachineInst *inst)
@@ -2015,13 +2150,12 @@ SFmaakF32Sop2::SFmaakF32Sop2(const MachineInst *inst)
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
-      literal(32, OperandType::OPR_SIMM32, 0), src2(32, OperandType::OPR_SIMM32, 0) {
+      literal(32, OperandType::OPR_SIMM32, 0) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
   src_operands_[2] = &literal;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
@@ -2046,9 +2180,6 @@ SFmaakF32Sop2::SFmaakF32Sop2(const MachineInst *inst)
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   literal =
-      Operand(32, OperandType::OPR_SIMM32,
-              static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  src2 =
       Operand(32, OperandType::OPR_SIMM32,
               static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
 }
@@ -2059,14 +2190,12 @@ SFmamkF32Sop2::SFmamkF32Sop2(const MachineInst *inst)
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       literal(32, OperandType::OPR_SIMM32, 0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
-      src2(32, OperandType::OPR_SIMM32, 0) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &literal;
   src_operands_[2] = &ssrc1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
@@ -2093,9 +2222,6 @@ SFmamkF32Sop2::SFmamkF32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
-  src2 =
-      Operand(32, OperandType::OPR_SIMM32,
-              static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
 }
 
 SFmacF32Sop2::SFmacF32Sop2(const MachineInst *inst)

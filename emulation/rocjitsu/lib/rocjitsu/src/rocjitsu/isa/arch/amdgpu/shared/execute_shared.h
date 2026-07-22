@@ -1709,6 +1709,15 @@ inline void execute_s_floor_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused
 }
 
 template <typename Inst>
+inline void execute_s_fmaak_f32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  float result =
+      std::fma(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)),
+               std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)),
+               std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.simm32)));
+  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, std::bit_cast<uint32_t>(result));
+}
+
+template <typename Inst>
 inline void execute_s_fmac_f16_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = std::fma(
       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))),
@@ -1722,6 +1731,14 @@ inline void execute_s_fmac_f32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]
   float result = std::fma(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)),
                           std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)),
                           std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.sdst)));
+  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, std::bit_cast<uint32_t>(result));
+}
+
+template <typename Inst>
+inline void execute_s_fmamk_f32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  float result = std::fma(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)),
+                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.simm32)),
+                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, std::bit_cast<uint32_t>(result));
 }
 
@@ -11257,10 +11274,11 @@ inline void execute_v_fma_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_fmaak_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_TERNARY(uint32_t, inst.simm32_, [](auto a, auto b, auto, auto k) {
-    return util::f32_to_f16_simd(util::stdx::fma(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b),
-                                                 util::f16_to_f32_simd(k)));
-  });
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY(
+      uint32_t, inst.simm32.encoding_value_, [](auto a, auto b, auto, auto k) {
+        return util::f32_to_f16_simd(util::stdx::fma(
+            util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), util::f16_to_f32_simd(k)));
+      });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -11269,23 +11287,23 @@ inline void execute_v_fmaak_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused
         static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
     float s1 = util::f16_to_f32(
         static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)));
-    float k = util::f16_to_f32(static_cast<uint16_t>(inst.simm32_));
+    float k = util::f16_to_f32(static_cast<uint16_t>(inst.simm32.encoding_value_));
     amdgpu::RegisterAccess(wf).write_lane(inst.vdst, lane, util::f32_to_f16(std::fma(s0, s1, k)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_fmaak_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_TERNARY(float32_t, inst.simm32_, [](auto a, auto b, auto, auto k) {
-    return util::stdx::fma(a, b, k);
-  });
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY(
+      float32_t, inst.simm32.encoding_value_,
+      [](auto a, auto b, auto, auto k) { return util::stdx::fma(a, b, k); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
     float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane));
-    float k = std::bit_cast<float>(inst.simm32_);
+    float k = std::bit_cast<float>(inst.simm32.encoding_value_);
     amdgpu::RegisterAccess(wf).write_lane(inst.vdst, lane,
                                           std::bit_cast<uint32_t>(std::fma(s0, s1, k)));
   }
@@ -11547,17 +11565,18 @@ inline void execute_v_fmac_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_v_fmamk_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_TERNARY(uint32_t, inst.simm32_, [](auto a, auto b, auto, auto k) {
-    return util::f32_to_f16_simd(util::stdx::fma(util::f16_to_f32_simd(a), util::f16_to_f32_simd(k),
-                                                 util::f16_to_f32_simd(b)));
-  });
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY(
+      uint32_t, inst.simm32.encoding_value_, [](auto a, auto b, auto, auto k) {
+        return util::f32_to_f16_simd(util::stdx::fma(
+            util::f16_to_f32_simd(a), util::f16_to_f32_simd(k), util::f16_to_f32_simd(b)));
+      });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     float s0 = util::f16_to_f32(
         static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
-    float k = util::f16_to_f32(static_cast<uint16_t>(inst.simm32_));
+    float k = util::f16_to_f32(static_cast<uint16_t>(inst.simm32.encoding_value_));
     float s2 = util::f16_to_f32(
         static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)));
     amdgpu::RegisterAccess(wf).write_lane(inst.vdst, lane, util::f32_to_f16(std::fma(s0, k, s2)));
@@ -11566,15 +11585,15 @@ inline void execute_v_fmamk_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused
 
 template <typename Inst>
 inline void execute_v_fmamk_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_TERNARY(float32_t, inst.simm32_, [](auto a, auto b, auto, auto k) {
-    return util::stdx::fma(a, k, b);
-  });
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY(
+      float32_t, inst.simm32.encoding_value_,
+      [](auto a, auto b, auto, auto k) { return util::stdx::fma(a, k, b); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-    float k = std::bit_cast<float>(inst.simm32_);
+    float k = std::bit_cast<float>(inst.simm32.encoding_value_);
     float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane));
     amdgpu::RegisterAccess(wf).write_lane(inst.vdst, lane,
                                           std::bit_cast<uint32_t>(std::fma(s0, k, s2)));

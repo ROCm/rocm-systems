@@ -3964,13 +3964,16 @@ VDivFmasF32Vop3::VDivFmasF32Vop3(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src2),
+      vcc(64, OperandType::OPR_VCC, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vcc;
+  num_src_ = 4;
   num_dst_ = 1;
+  vcc.apply_fieldless_caps(false, false, false);
 }
 
 void VDivFmasF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3983,13 +3986,16 @@ VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src2),
+      vcc(64, OperandType::OPR_VCC, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
-  num_src_ = 3;
+  src_operands_[3] = &vcc;
+  num_src_ = 4;
   num_dst_ = 1;
+  vcc.apply_fieldless_caps(false, false, false);
 }
 
 void VDivFmasF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6220,12 +6226,15 @@ VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxClassF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxClassF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6292,12 +6301,15 @@ VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxClassF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxClassF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6437,12 +6449,15 @@ VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxClassF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7191,12 +7206,15 @@ VCmpxFF16Vop3::VCmpxFF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxFF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7216,12 +7234,15 @@ VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLtF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7255,12 +7276,15 @@ VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxEqF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7294,12 +7318,15 @@ VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLeF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7333,12 +7360,15 @@ VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGtF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7372,12 +7402,15 @@ VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLgF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7411,12 +7444,15 @@ VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGeF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7450,12 +7486,15 @@ VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxOF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7489,12 +7528,15 @@ VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxUF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7528,12 +7570,15 @@ VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNgeF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7567,12 +7612,15 @@ VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNlgF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7606,12 +7654,15 @@ VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNgtF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7645,12 +7696,15 @@ VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNleF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7684,12 +7738,15 @@ VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNeqF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7723,12 +7780,15 @@ VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNltF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7762,12 +7822,15 @@ VCmpxTruF16Vop3::VCmpxTruF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxTruF16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxTruF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8056,12 +8119,15 @@ VCmpxFF32Vop3::VCmpxFF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxFF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8081,12 +8147,15 @@ VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLtF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8117,12 +8186,15 @@ VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxEqF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8153,12 +8225,15 @@ VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLeF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8189,12 +8264,15 @@ VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGtF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8225,12 +8303,15 @@ VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLgF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8261,12 +8342,15 @@ VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGeF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8297,12 +8381,15 @@ VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxOF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8333,12 +8420,15 @@ VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxUF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8369,12 +8459,15 @@ VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNgeF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8405,12 +8498,15 @@ VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNlgF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8441,12 +8537,15 @@ VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNgtF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8477,12 +8576,15 @@ VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNleF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8513,12 +8615,15 @@ VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNeqF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8549,12 +8654,15 @@ VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNltF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8585,12 +8693,15 @@ VCmpxTruF32Vop3::VCmpxTruF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxTruF32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxTruF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8879,12 +8990,15 @@ VCmpxFF64Vop3::VCmpxFF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxFF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8904,12 +9018,15 @@ VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLtF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8940,12 +9057,15 @@ VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxEqF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8976,12 +9096,15 @@ VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLeF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9012,12 +9135,15 @@ VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGtF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9048,12 +9174,15 @@ VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLgF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9084,12 +9213,15 @@ VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGeF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9120,12 +9252,15 @@ VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxOF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9156,12 +9291,15 @@ VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxUF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9192,12 +9330,15 @@ VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNgeF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9228,12 +9369,15 @@ VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNlgF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9264,12 +9408,15 @@ VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNgtF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9300,12 +9447,15 @@ VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNleF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9336,12 +9486,15 @@ VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNeqF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9372,12 +9525,15 @@ VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNltF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9408,12 +9564,15 @@ VCmpxTruF64Vop3::VCmpxTruF64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxTruF64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxTruF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9877,12 +10036,15 @@ VCmpxFI16Vop3::VCmpxFI16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxFI16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxFI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9902,12 +10064,15 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLtI16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9937,12 +10102,15 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxEqI16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9972,12 +10140,15 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLeI16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10007,12 +10178,15 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGtI16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10042,12 +10216,15 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNeI16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10077,12 +10254,15 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGeI16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10112,12 +10292,15 @@ VCmpxTI16Vop3::VCmpxTI16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxTI16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxTI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10137,12 +10320,15 @@ VCmpxFU16Vop3::VCmpxFU16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxFU16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxFU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10162,12 +10348,15 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLtU16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10197,12 +10386,15 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxEqU16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10232,12 +10424,15 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLeU16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10267,12 +10462,15 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGtU16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10302,12 +10500,15 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNeU16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10337,12 +10538,15 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGeU16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10372,12 +10576,15 @@ VCmpxTU16Vop3::VCmpxTU16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxTU16Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxTU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10665,12 +10872,15 @@ VCmpxFI32Vop3::VCmpxFI32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxFI32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxFI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10690,12 +10900,15 @@ VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLtI32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10718,12 +10931,15 @@ VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxEqI32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10746,12 +10962,15 @@ VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLeI32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10774,12 +10993,15 @@ VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGtI32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10802,12 +11024,15 @@ VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNeI32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10830,12 +11055,15 @@ VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGeI32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10858,12 +11086,15 @@ VCmpxTI32Vop3::VCmpxTI32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxTI32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxTI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10883,12 +11114,15 @@ VCmpxFU32Vop3::VCmpxFU32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxFU32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxFU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10908,12 +11142,15 @@ VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLtU32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10936,12 +11173,15 @@ VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxEqU32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10964,12 +11204,15 @@ VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLeU32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10992,12 +11235,15 @@ VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGtU32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11020,12 +11266,15 @@ VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNeU32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11048,12 +11297,15 @@ VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGeU32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11076,12 +11328,15 @@ VCmpxTU32Vop3::VCmpxTU32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxTU32Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxTU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11369,12 +11624,15 @@ VCmpxFI64Vop3::VCmpxFI64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxFI64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxFI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11394,12 +11652,15 @@ VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLtI64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11422,12 +11683,15 @@ VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxEqI64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11450,12 +11714,15 @@ VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLeI64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11478,12 +11745,15 @@ VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGtI64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11506,12 +11776,15 @@ VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNeI64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11534,12 +11807,15 @@ VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGeI64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11562,12 +11838,15 @@ VCmpxTI64Vop3::VCmpxTI64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxTI64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxTI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11587,12 +11866,15 @@ VCmpxFU64Vop3::VCmpxFU64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxFU64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxFU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11612,12 +11894,15 @@ VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLtU64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11640,12 +11925,15 @@ VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxEqU64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11668,12 +11956,15 @@ VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLeU64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11696,12 +11987,15 @@ VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGtU64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11724,12 +12018,15 @@ VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNeU64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11752,12 +12049,15 @@ VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGeU64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11780,12 +12080,15 @@ VCmpxTU64Vop3::VCmpxTU64Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxTU64Vop3>()),
       vdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
 void VCmpxTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
