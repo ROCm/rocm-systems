@@ -326,7 +326,7 @@ _rj_append_waitcheck_target_sources(rocjitsu_isa_cdna4)
 _rj_append_waitcheck_target_sources(rocjitsu_isa_rdna3)
 _rj_append_waitcheck_target_sources(rocjitsu_isa_rdna3_5)
 _rj_append_waitcheck_target_sources(rocjitsu_isa_rdna4)
-_rj_append_waitcheck_target_sources(rocjitsu_isa_gfx1250)
+_rj_append_waitcheck_target_sources(rocjitsu_isa_gfx1250_model)
 
 add_library(rocjitsu_waitcheck_objects OBJECT ${_rj_waitcheck_sources})
 rj_configure_target(

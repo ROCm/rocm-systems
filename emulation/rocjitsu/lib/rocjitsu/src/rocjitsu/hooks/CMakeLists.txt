@@ -66,24 +66,19 @@ target_link_libraries(
 target_link_libraries(
     rocjitsu_waitcheck_hooks
     PRIVATE
-        rocjitsu_analysis
-        rocjitsu_code
-        rocjitsu_isa
-        rocjitsu_isa_cdna1
-        rocjitsu_isa_cdna2
-        rocjitsu_isa_cdna3
-        rocjitsu_isa_cdna4
-        rocjitsu_isa_rdna1
-        rocjitsu_isa_rdna2
-        rocjitsu_isa_rdna3
-        rocjitsu_isa_rdna3_5
-        rocjitsu_isa_rdna4
-        rocjitsu_isa_gfx1250
-        rocjitsu_vm_amdgpu
+        rocjitsu_waitcheck_objects
         util
-        simdojo
         Threads::Threads
+        ZLIB::ZLIB
+        zstd::libzstd
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(
+        rocjitsu_waitcheck_hooks
+        PRIVATE "LINKER:--gc-sections,--exclude-libs,ALL,--no-undefined"
+    )
+endif()
 
 if(MSVC)
     target_compile_options(rocjitsu_hooks PRIVATE /W4 /WX)

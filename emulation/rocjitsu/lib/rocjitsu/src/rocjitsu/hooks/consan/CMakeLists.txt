@@ -7,9 +7,9 @@
 add_library(
     rocjitsu_dbi_hooks
     SHARED
-        rj_hsa_dbi_hook_config.cpp
-        rj_hsa_dbi_hook_moi_report.cpp
-        rj_hsa_dbi_hooks.cpp
+    rj_hsa_dbi_hook_config.cpp
+    rj_hsa_dbi_hook_moi_report.cpp
+    rj_hsa_dbi_hooks.cpp
 )
 set_target_properties(
     rocjitsu_dbi_hooks
@@ -27,23 +27,18 @@ target_include_directories(rocjitsu_dbi_hooks SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
 target_link_libraries(
     rocjitsu_dbi_hooks
     PRIVATE
-        rocjitsu_analysis
-        rocjitsu_code
-        rocjitsu_isa
-        rocjitsu_isa_cdna1
-        rocjitsu_isa_cdna2
-        rocjitsu_isa_cdna3
-        rocjitsu_isa_cdna4
-        rocjitsu_isa_rdna1
-        rocjitsu_isa_rdna2
-        rocjitsu_isa_rdna3
-        rocjitsu_isa_rdna3_5
-        rocjitsu_isa_rdna4
-        rocjitsu_isa_gfx1250
+        rocjitsu_waitcheck_objects
+        rocjitsu_dbt_internal
         util
-        simdojo
         Threads::Threads
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(
+        rocjitsu_dbi_hooks
+        PRIVATE "LINKER:--gc-sections,--exclude-libs,ALL,--no-undefined"
+    )
+endif()
 
 if(MSVC)
     target_compile_options(rocjitsu_dbi_hooks PRIVATE /W4 /WX)

@@ -41,7 +41,25 @@ target_link_libraries(rj_dbt_translate PRIVATE rocjitsu_tooling)
 rj_configure_target(rj_dbt_translate TOOL)
 
 add_executable(rj_waitcheck waitcheck_main.cpp)
-target_link_libraries(rj_waitcheck PRIVATE rocjitsu_tooling)
+target_sources(
+    rj_waitcheck
+    PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/code/executable.cpp
+)
+target_link_libraries(
+    rj_waitcheck
+    PRIVATE
+        rocjitsu_waitcheck_objects
+        util
+        Threads::Threads
+        ZLIB::ZLIB
+        zstd::libzstd
+)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(
+        rj_waitcheck
+        PRIVATE "LINKER:--gc-sections,--exclude-libs,ALL"
+    )
+endif()
 rj_configure_target(rj_waitcheck TOOL)
 
 add_executable(rj_co code_object_tool_main.cpp)
