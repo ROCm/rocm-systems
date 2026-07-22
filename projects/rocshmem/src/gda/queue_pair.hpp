@@ -35,11 +35,17 @@
  */
 
 #include <cassert>
+#include <cstddef>
+#include <cstdint>
 
+#include <algorithm>
+#include <functional>
+#include <iterator>
 #include <limits>
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
@@ -67,6 +73,81 @@ struct BufferHostInfo {
   BufferInfo*    info_ptr;
 
   BufferHostInfo(struct ibv_mr* mr, BufferInfo* info_ptr) : mr{mr}, info_ptr{info_ptr} { }
+};
+
+template <typename Iter>
+class iterator_freelist {
+private:
+  std::vector<Iter> container{};
+
+  /* Reserve space in container for std::distance(first, last) elements */
+  void reserve(Iter first, Iter last) {
+    container.reserve(std::distance(first, last));
+  }
+
+  void init(Iter first, Iter last) {
+    /* Push back iterators in range [first, last) to container in reverse order
+     * Sorted so that container.back() always has the smallest iterator */
+    auto N = std::distance(first, last);
+    while (first != last--) {
+      container.push_back(last);
+    }
+  }
+
+public:
+  using value_type      = Iter;
+  using difference_type = typename std::iterator_traits<Iter>::difference_type;
+  using size_type       = typename decltype(container)::size_type;
+
+  iterator_freelist() = default;
+
+  /* Initialize freelist with iterators in range [first, last) */
+  iterator_freelist(Iter first, Iter last) {
+    reserve(first, last);
+    init(first, last);
+  }
+
+  /* Initialize freelist with iterators in range [first, std::next(first, count)) */
+  iterator_freelist(Iter first, difference_type count)
+    : iterator_freelist{first, std::next(first, count)} { }
+
+  bool empty() const {
+    return container.empty();
+  }
+
+  size_type size() const {
+    return container.size();
+  }
+
+  Iter top() {
+    return container.back();
+  }
+
+  void push(Iter value) {
+    std::greater<Iter> compare{};
+    if (container.empty() || compare(top(), value)) {
+      /* value < top(), so push_back maintains sorted property */
+      container.push_back(value);
+    } else {
+      /* Use binary search to find insert position for value */
+      auto pos = std::upper_bound(container.cbegin(), container.cend(), value, compare);
+      container.insert(pos, value);
+    }
+  }
+
+  void pop() {
+    container.pop_back();
+  }
+
+  void reset(Iter first, Iter last) {
+    container.clear();
+    reserve(first, last);
+    init(first, last);
+  }
+
+  void reset(Iter first, difference_type count) {
+    reset(first, std::next(first, count));
+  }
 };
 
 /**
@@ -1254,6 +1335,7 @@ protected:
 private:
   // Used by host in buffer_register, buffer_unregister
   std::unordered_map<void*, BufferHostInfo> buffer_info_map{};
+  iterator_freelist<BufferInfo*> buffer_info_freelist{};
   struct ibv_pd* pd;
   struct ibv_mr* fetching_atomic_mr{nullptr};
   struct ibv_mr* nonfetching_atomic_mr{nullptr};
@@ -1304,6 +1386,9 @@ __host__ QueuePairBase<Provider>::QueuePairBase(uint32_t qpn, void *base_heap, s
 
   /* Reserve memory to register up to num_user_buffers */
   buffer_info_map.reserve(num_user_buffers);
+
+  /* Create buffer registration info freelist */
+  buffer_info_freelist = iterator_freelist<BufferInfo*>{buffer_info, num_user_buffers};
 }
 
 template <typename Provider>
@@ -1323,6 +1408,7 @@ __host__ QueuePairBase<Provider>::QueuePairBase(QueuePairBase&& other) noexcept
     fetching_atomic_freelist{std::move(other.fetching_atomic_freelist)},
     allocator               {std::move(other.allocator)},
     buffer_info_map         {std::move(other.buffer_info_map)},
+    buffer_info_freelist    {std::move(other.buffer_info_freelist)},
     pd                      {std::move(other.pd)},
     fetching_atomic_mr      {std::move(other.fetching_atomic_mr)},
     nonfetching_atomic_mr   {std::move(other.nonfetching_atomic_mr)} {
@@ -1393,6 +1479,7 @@ __host__ QueuePairBase<Provider>& QueuePairBase<Provider>::operator=(QueuePairBa
   fetching_atomic_freelist = std::move(other.fetching_atomic_freelist);
   allocator                = std::move(other.allocator);
   buffer_info_map          = std::move(other.buffer_info_map);
+  buffer_info_freelist     = std::move(other.buffer_info_freelist);
   pd                       = std::move(other.pd);
   fetching_atomic_mr       = std::move(other.fetching_atomic_mr);
   nonfetching_atomic_mr    = std::move(other.nonfetching_atomic_mr);
@@ -1467,7 +1554,8 @@ QueuePairBase<Provider>::allocate_and_register(size_t count, int access) {
 
 template <typename Provider>
 __host__ int QueuePairBase<Provider>::buffer_register(void *addr, size_t length) {
-  if (buffer_info_map.size() >= num_user_buffers) {
+  if (buffer_info_freelist.empty()) {
+    assert(buffer_info_map.size() == num_user_buffers);
     LOG_WARN("Unable to register user buffer (%p, %zu) with QP. "
              "Please increase the value of %s.",
              addr, length, envvar::gda::num_user_buffers.get_name().c_str());
@@ -1487,21 +1575,15 @@ __host__ int QueuePairBase<Provider>::buffer_register(void *addr, size_t length)
   struct ibv_mr* mr = ibv.reg_mr(pd, addr, length, access, &allocator);
   CHECK_NNULL(mr, "ibv_reg_mr (buffer_register)");
 
-
-  /* Search for next free buffer_info entry */
-  BufferInfo* info_ptr = nullptr;
-  for (size_t i = 0; i < num_user_buffers; i++) {
-    if (buffer_info[i].addr == 0) {
-      info_ptr = & buffer_info[i];
-      break;
-    }
-  }
-  assert(info_ptr);
+  /* Get pointer to next free buffer_info entry */
+  BufferInfo* info_ptr = buffer_info_freelist.top();
 
   /* Try inserting buffer host info into buffer_info_map; detects whether this is a duplicate */
   auto&& [it, inserted] = buffer_info_map.try_emplace(addr, mr, info_ptr);
 
   if (inserted) {
+    /* Insertion succceeded, pop the buffer_info entry from the freelist */
+    buffer_info_freelist.pop();
     /* Copy buffer info to device */
     BufferInfo info{reinterpret_cast<uintptr_t>(addr), length, to_provider_endianness(mr->lkey)};
     CHECK_HIP(hipMemcpy(info_ptr, &info, sizeof(BufferInfo), hipMemcpyHostToDevice));
@@ -1525,8 +1607,9 @@ __host__ int QueuePairBase<Provider>::buffer_unregister(void *addr) {
 
   if (it != buffer_info_map.end()) {
     auto&& [key, host_info] = *it;
-    /* Reset buffer_info entry */
+    /* Reset buffer_info entry and push to freelist */
     CHECK_HIP(hipMemset(host_info.info_ptr, 0, sizeof(BufferInfo)));
+    buffer_info_freelist.push(host_info.info_ptr);
     /* Deregister addr */
     int err = ibv.dereg_mr(host_info.mr);
     CHECK_ZERO(err, "ibv_dereg_mr (buffer_unregister)");
@@ -1554,6 +1637,8 @@ __host__ int QueuePairBase<Provider>::buffer_unregister_all() {
   /* Clear all buffer_info slots */
   CHECK_HIP(hipMemset(buffer_info, 0, sizeof(BufferInfo) * num_user_buffers));
 
+  /* Reset buffer_info_freelist */
+  buffer_info_freelist.reset(buffer_info, num_user_buffers);
   return ROCSHMEM_SUCCESS;
 }
 
