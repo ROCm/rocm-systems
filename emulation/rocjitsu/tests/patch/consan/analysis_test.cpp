@@ -603,7 +603,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_FALSE(result.warnings.empty());
+  EXPECT_TRUE(result.warnings.empty());
   ASSERT_EQ(result.kernels.size(), 1u);
   EXPECT_EQ(result.target_name, "gfx1201");
   EXPECT_EQ(result.arch_name, "rdna4");
@@ -697,8 +697,9 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_FALSE(atomic.raw_th);
   ASSERT_TRUE(atomic.returns_old_value);
   EXPECT_FALSE(*atomic.returns_old_value);
-  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Skip);
-  ASSERT_GE(kernel.preflight_reasons.size(), 1u);
+  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
+  EXPECT_NE(std::ranges::find(kernel.preflight_reasons, "non-instrumented DS atomics observed: 1"),
+            kernel.preflight_reasons.end());
   ASSERT_EQ(result.sync_events.size(), 3u);
   const ConSanSyncEvent &atomic_event = result.sync_events[0];
   EXPECT_EQ(atomic_event.kind, ConSanSyncEventKind::Atomic);
@@ -2788,7 +2789,7 @@ TEST(ConSan, MarksSupportedLdsKernelAsPreflightCandidate) {
   EXPECT_TRUE(result.elf_bytes.empty());
 }
 
-TEST(ConSan, FailClosedRejectsUnsupportedLdsKernel) {
+TEST(ConSan, FailClosedAdmitsSupportedLdsSitesAlongsideAtomic) {
   const std::vector<uint8_t> bytes = make_rdna4_unsupported_lds_code_object();
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
@@ -2796,12 +2797,13 @@ TEST(ConSan, FailClosedRejectsUnsupportedLdsKernel) {
 
   const auto result = try_patch_consan(bytes, options);
 
-  ASSERT_FALSE(result.errors.empty());
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_TRUE(result.errors.empty());
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
   ASSERT_EQ(result.kernels.size(), 1u);
   const ConSanKernelInfo &kernel = result.kernels.front();
-  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Reject);
-  ASSERT_GE(kernel.preflight_reasons.size(), 1u);
+  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
+  EXPECT_NE(std::ranges::find(kernel.preflight_reasons, "non-instrumented DS atomics observed: 1"),
+            kernel.preflight_reasons.end());
   EXPECT_FALSE(result.modified);
   EXPECT_TRUE(result.elf_bytes.empty());
 }

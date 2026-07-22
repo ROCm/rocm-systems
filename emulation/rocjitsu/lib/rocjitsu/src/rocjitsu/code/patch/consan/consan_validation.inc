@@ -124,7 +124,7 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
     if (kernel.preflight_action != ConSanPreflightAction::Skip)
       return false;
     return !kernel.has_text_range || !kernel.decoded || kernel.stats.decode_error_count != 0 ||
-           kernel.stats.lds_atomic_count != 0 || kernel.stats.ds_other_count != 0;
+           kernel.stats.ds_other_count != 0;
   });
 }
 

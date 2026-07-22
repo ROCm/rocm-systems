@@ -938,7 +938,7 @@ TEST(ConSan, ProbeTrampolineNopModeSkipsRocclrRuntimeHelpers) {
 }
 
 TEST(ConSan, ProbeTrampolineNopModeSkipsCodeObjectWithoutCandidateSites) {
-  const std::vector<uint8_t> bytes = make_rdna4_unsupported_lds_code_object();
+  const std::vector<uint8_t> bytes = make_rdna4_ds_atomic_code_object();
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.probe_trampoline_nop = true;
@@ -3578,7 +3578,13 @@ TEST(ConSan, ProbeLdsCheckTrapModeReportsExcessiveDelay) {
 }
 
 TEST(ConSan, ProbeLdsEndpgmModeCanRewritePreflightSkippedKernel) {
-  const std::vector<uint8_t> bytes = make_rdna4_unsupported_lds_code_object();
+  const std::array<uint32_t, 7> text_words = {
+      0xD8340000u, 0x00000000u, // ds_store_b32
+      0xD8D80000u, 0x00000000u, // ds_load_b32
+      0xD8500000u, 0x00000000u, // ds_nop
+      0xBFB00000u,              // s_endpgm
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.probe_lds_endpgm = true;
