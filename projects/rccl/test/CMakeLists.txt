@@ -177,6 +177,7 @@ if(BUILD_TESTS)
   set(TEST_SOURCE_FILES
     AllGatherTests.cpp
     AllReduceTests.cpp
+    AllReduceBias_test.cpp
     AllToAllTests.cpp
     AllToAllVTests.cpp
     AsymmetricVisibilityTests.cpp
