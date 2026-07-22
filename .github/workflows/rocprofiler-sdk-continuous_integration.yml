@@ -407,6 +407,22 @@ jobs:
       - name: Init/Update submodules
         run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
+      - name: Clone ROCDecode
+        uses: actions/checkout@v6
+        with:
+          repository: 'ROCm/rocDecode'
+          ref: 'release/rocm-rel-7.0'
+          set-safe-directory: true
+          path: 'rocDecode'
+
+      - name: Clone ROCJPEG
+        uses: actions/checkout@v6
+        with:
+          repository: 'ROCm/rocJPEG'
+          ref: 'release/rocm-rel-7.0'
+          set-safe-directory: true
+          path: 'rocJPEG'
+
       - name: Install requirements (venv)
         timeout-minutes: 10
         shell: bash
@@ -436,6 +452,8 @@ jobs:
           enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
           enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
           enable-rocprof-trace-decoder-build: 'true'
+          enable-rocdecode-build: ${{ env.ENABLE_ROCDECODE_BUILD }}
+          enable-rocjpeg-build: ${{ env.ENABLE_ROCJPEG_BUILD }}
           ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_runner }}-${{ matrix.system.gpu }}
           ccache-variant: sccache
 
