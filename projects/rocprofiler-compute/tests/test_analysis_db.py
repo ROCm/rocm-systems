@@ -930,6 +930,7 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
 
 
 def test_add_pc_sampling_data_keeps_shared_code_object_ids_per_pid(db_session):
+    """A reused code-object ID creates per-process stores without losing samples."""
     workload_path = "/fake/workload"
     workload = orm.Workload(name="w", sub_name="s")
     db_session.add(workload)
@@ -1182,6 +1183,7 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
 
 
 def test_add_code_object_isa_scopes_disassembly_by_pid(db_session):
+    """Each process's disassembly uses its own load base for reused code-object IDs."""
     workload_path = common.get_output_dir()
     Path(workload_path).mkdir(parents=True, exist_ok=True)
     try:

@@ -327,6 +327,7 @@ def test_pc_sampling_view_flattens_normalized_tables(db_session):
 
 
 def test_pc_sampling_view_aggregates_matching_states_across_processes(db_session):
+    """Matching states across processes aggregate all counts and stall reasons."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_pc_sampling_state(
@@ -383,6 +384,7 @@ def test_pc_sampling_view_keeps_display_identity_fields_separate(
     first_value: str,
     second_value: str,
 ):
+    """Different instruction or source values remain separate view rows."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_pc_sampling_state(
@@ -417,6 +419,7 @@ def test_pc_sampling_view_keeps_display_identity_fields_separate(
 
 
 def test_pc_sampling_view_keeps_different_kernels_separate(db_session):
+    """Matching states for different kernels remain separate view rows."""
     workload = Workload(name="w", sub_name="s")
     first_kernel = Kernel(kernel_name="first", workload=workload)
     second_kernel = Kernel(kernel_name="second", workload=workload)
@@ -450,6 +453,7 @@ def test_pc_sampling_view_keeps_different_kernels_separate(db_session):
 
 
 def test_pc_sampling_view_keeps_different_workloads_separate(db_session):
+    """Matching states for different workloads remain separate view rows."""
     first_workload = Workload(name="first", sub_name="s")
     second_workload = Workload(name="second", sub_name="s")
     first_kernel = Kernel(kernel_name="vecCopy", workload=first_workload)
@@ -484,6 +488,7 @@ def test_pc_sampling_view_keeps_different_workloads_separate(db_session):
 
 
 def test_pc_sampling_view_aggregates_host_trap_states_with_null_counts(db_session):
+    """Host-trap totals aggregate while issue, stall, and reason fields remain null."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_pc_sampling_state(
@@ -520,6 +525,7 @@ def test_pc_sampling_view_aggregates_host_trap_states_with_null_counts(db_sessio
 def test_pc_sampling_view_attaches_reasons_with_nullable_identity(
     db_session, nullable_field
 ):
+    """Null identity fields still group matching states and retain stall reasons."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     identity = {

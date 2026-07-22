@@ -236,12 +236,11 @@ def discover_pc_sampling_result_files(
 
 @demarcate
 def load_pc_sampling_results(workload_path: str) -> list[dict[str, Any]]:
-    """
-    Discover and parse every PC sampling ``rocprofiler-sdk-tool[0]`` record.
+    """Load and validate PC sampling result records for shared use.
 
-    Invalid result files are skipped after logging a parse warning. The json can
-    be multiple GB: parse once here and pass the records to every PC sampling
-    consumer instead of re-reading the files.
+    Invalid result files are skipped after logging a parse warning. Result files
+    can be multiple GB, so parse them once here and share the records with every
+    PC sampling consumer instead of re-reading the files.
     """
     tool_records = []
     for result_file in discover_pc_sampling_result_files(Path(workload_path)):
@@ -425,6 +424,7 @@ def is_single_panel_config(
 def _select_pc_sampling_result_files(
     direct_child_files: tuple[Path, ...],
 ) -> tuple[Path, ...]:
+    """Prefer PID-prefixed result files, falling back to the legacy file."""
     pid_result_files = _find_pid_prefixed_pc_sampling_result_files(direct_child_files)
     if pid_result_files:
         return pid_result_files
@@ -436,6 +436,7 @@ def _select_pc_sampling_result_files(
 def _find_pid_prefixed_pc_sampling_result_files(
     direct_child_files: tuple[Path, ...],
 ) -> tuple[Path, ...]:
+    """Return PID-prefixed result files in numeric PID order."""
     results_filename_suffix = "_ps_file_results.json"
     pid_result_candidates: list[Path] = []
 
@@ -463,6 +464,7 @@ def _find_pid_prefixed_pc_sampling_result_files(
 def _find_legacy_pc_sampling_result_file(
     direct_child_files: tuple[Path, ...],
 ) -> Optional[Path]:
+    """Return the unprefixed legacy result file, if present."""
     legacy_results_filename = "ps_file_results.json"
     return next(
         (
@@ -494,6 +496,10 @@ def _validate_pc_sampling_process_ids(
 
 
 def _parse_pc_sampling_result_file(json_path: Path) -> Optional[dict[str, Any]]:
+    """Extract the sole ``rocprofiler-sdk-tool`` record at index 0.
+
+    Log a warning and return ``None`` when the result file is malformed.
+    """
     try:
         with json_path.open(encoding="utf-8") as json_file:
             return json.load(json_file)["rocprofiler-sdk-tool"][0]

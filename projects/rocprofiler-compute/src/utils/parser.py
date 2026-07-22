@@ -405,6 +405,8 @@ def load_pc_sampling_data(
     if not tool_data_records:
         return pd.DataFrame()
 
+    # A profiling invocation configures one sampling method for every process,
+    # so the first record determines the shared method.
     pc_sampling_method = detect_pc_sampling_method(tool_data_records[0])
     if pc_sampling_method is None:
         console_warning("PC sampling: can not detect pc sampling method.")
