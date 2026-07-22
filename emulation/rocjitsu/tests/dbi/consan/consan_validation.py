@@ -46,6 +46,15 @@ HSA_TOOL_ENVIRONMENT = {
     "HSA_TOOLS_LIB",
     "HSA_TOOLS_ROCPROFILER_V1_TOOLS",
 }
+SOFTWARE_MODEL_ENVIRONMENT = {
+    "HSA_MODEL_LIB",
+    "HSAKMT_SIM_LIB",
+    "HSA_MODEL_TOPOLOGY",
+    "HSA_MODEL_NUM_THREADS",
+    "HSA_ENABLE_SDMA",
+    "HSA_ENABLE_SCRATCH_ASYNC_RECLAIM",
+    "HSA_ENABLE_INTERRUPT",
+}
 
 
 SETTING_CATEGORIES = {
@@ -483,7 +492,7 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=1,
         fault_families=("barrier-drop",),
-        targets=("gfx1250",),
+        targets=("gfx950", "gfx1250"),
     ),
     Workload(
         id="pytorch-torch-topk",
@@ -499,7 +508,7 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=1,
         fault_families=("barrier-drop",),
-        targets=("gfx1250",),
+        targets=("gfx950", "gfx1250"),
     ),
     Workload(
         id="pytorch-torch-sort",
@@ -515,7 +524,7 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=1,
         fault_families=("barrier-drop",),
-        targets=("gfx1250",),
+        targets=("gfx950", "gfx1250"),
     ),
     Workload(
         id="pytorch-scatter-reduce",
@@ -531,7 +540,7 @@ WORKLOADS = (
         tracks_atomics=True,
         overhead_processes=1,
         fault_families=("atomic-weaken-order", "atomic-weaken-scope"),
-        targets=("gfx1250", "gfx1201"),
+        targets=("gfx950", "gfx1250", "gfx1201"),
         moi_record_evidence_expected=False,
     ),
     Workload(
@@ -552,7 +561,7 @@ WORKLOADS = (
         # installed wheel.  The gfx1201 wheel chooses a native histogram
         # kernel with LDS accesses, split barriers, and LDS atomics; target
         # evidence and qualification remain separate.
-        targets=("gfx1250", "gfx1201"),
+        targets=("gfx950", "gfx1250", "gfx1201"),
     ),
     Workload(
         id="pytorch-norm-softmax",
@@ -568,7 +577,7 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=1,
         fault_families=("barrier-drop",),
-        targets=("gfx1250",),
+        targets=("gfx950", "gfx1250"),
     ),
     Workload(
         id="pytorch-rdna4-compiled-softmax",
@@ -1135,6 +1144,7 @@ def _pytorch_runtime_probe(
     """Proves that PyTorch can dispatch and that its HSA runtime loads ConSan."""
     probe_source = """
 import json
+import os
 import pathlib
 import sys
 
@@ -1153,7 +1163,12 @@ print(json.dumps({
     "arch": getattr(properties, "gcnArchName", None),
     "numeric_oracle": value.item() == 1.0,
     "hook_loaded": sys.argv[1] in maps,
-}))
+}), flush=True)
+# Large precompiled operator libraries can spend longer tearing down a
+# software target than executing this linkage canary.  The workload clients
+# finalize ConSan explicitly; this doctor probe only needs the flushed result
+# and process mappings, so skip unrelated runtime shutdown.
+os._exit(0)
 """
     environment = _clean_environment("supercollider", workload, hook, target)
     # This is a runtime-linkage canary, not a coverage row.  Avoid spending
@@ -1431,6 +1446,7 @@ def _clean_environment(
         for key, value in os.environ.items()
         if not key.startswith(CONTROLLED_ENV_PREFIX)
         and key not in HSA_TOOL_ENVIRONMENT | {"HIP_TARGET"}
+        and not (target == "gfx950" and key in SOFTWARE_MODEL_ENVIRONMENT)
     }
     if target is not None:
         environment["HIP_TARGET"] = target

@@ -1047,15 +1047,21 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   std::ranges::sort(branch_only_candidates, [](const auto &lhs, const auto &rhs) {
     return lhs.site->text_offset < rhs.site->text_offset;
   });
-  for (LdsCheckTrapCandidate &candidate : branch_only_candidates) {
-    DbiPatchPlacementPlanner tentative_planner = placement_planner;
-    auto placement = tentative_planner.plan_indirect_appended(
-        candidate.site->text_offset, candidate.site->size,
-        (candidate.requested_words + 1u) * sizeof(uint32_t));
-    if (!placement)
-      continue;
-    candidate.placement = *placement;
-    placement_planner = std::move(tentative_planner);
+  // The branch-only continuation route below is gfx1250-specific.  Reserving
+  // its appended bodies on another architecture would leave phantom planner
+  // allocations when that route is not emitted, shifting every later body
+  // away from the emitter's append cursor.
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+    for (LdsCheckTrapCandidate &candidate : branch_only_candidates) {
+      DbiPatchPlacementPlanner tentative_planner = placement_planner;
+      auto placement = tentative_planner.plan_indirect_appended(
+          candidate.site->text_offset, candidate.site->size,
+          (candidate.requested_words + 1u) * sizeof(uint32_t));
+      if (!placement)
+        continue;
+      candidate.placement = *placement;
+      placement_planner = std::move(tentative_planner);
+    }
   }
 
   // A forward SOPP relay graph has at most 32,768 distinct instruction slots
@@ -2216,7 +2222,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   // the same proven straight-line relay reservoirs used by ordinary entry
   // islands.  The two chains are disjoint, preserve every ordinary return,
   // and never make a live guest scalar carry a continuation.
-  if (!branch_only_candidates.empty() && selected_candidates.size() < max_patches) {
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && !branch_only_candidates.empty() &&
+      selected_candidates.size() < max_patches) {
     std::ranges::sort(branch_only_candidates, [](const auto &lhs, const auto &rhs) {
       return lhs.site->text_offset < rhs.site->text_offset;
     });

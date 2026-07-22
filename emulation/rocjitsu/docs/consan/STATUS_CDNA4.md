@@ -150,15 +150,31 @@ which generated solution enters the denominator.
 
 ## PyTorch expansion
 
-The existing PyTorch runner has portable exact-oracle operators that are
-appropriate gfx950 candidates.  The installed PyTorch build reports the
-physical MI355X and includes gfx950 in `torch.cuda.get_arch_list()`, but an
-ordinary `torch.arange` device operation and the first `torch.mode` oracle both
-fail with `hipErrorInvalidImage`.  Therefore this PyTorch installation is not
-runnable on gfx950 despite its advertised architecture list.  Every profile
-cell is red at the shared uninstrumented-runtime prerequisite; ConSan has not
-yet been invoked.  A gfx950-compatible PyTorch installation and a passing
-one-repetition baseline are required before profile assessment.
+The portable exact-oracle operators are now runnable on the physical gfx950.
+The earlier `hipErrorInvalidImage` was an environment error, not a PyTorch
+operator or ConSan defect: the selected interpreter contained a thin gfx1250
+wheel whose external kernel-pack directory had only `torch_gfx1250.kpack`,
+even though `torch.cuda.get_arch_list()` also advertised gfx950.  It remains
+untouched for software-target validation.
+
+A separate official ROCm 7.1 nightly environment at
+`$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-gfx950-venv` contains
+`torch==2.14.0.dev20260722+rocm7.1`.  Select it explicitly with
+`CONSAN_VALIDATION_PYTORCH_PYTHON`; do not reuse the gfx1250 interpreter.
+With workspace TheRock discovery tools and all software-model variables unset,
+the validator doctor reports `gfx950:sramecc+:xnack-`, passes its numeric
+dispatch, and confirms that the exact workspace ConSan hook is mapped.  The
+official wheel supplies its own HIP/HSA runtime libraries, as documented in
+`VALIDATION.md`; this is not evidence that PyTorch maps TheRock's runtime.
+One uninstrumented repetition of all six rows below passes its exact oracle.
+The validator now scrubs those software-model variables automatically for
+`--target gfx950` while preserving them unchanged for gfx1250.
+
+```sh
+export CONSAN_VALIDATION_PYTORCH_PYTHON="$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-gfx950-venv/bin/python"
+unset HSA_MODEL_LIB HSAKMT_SIM_LIB HSA_MODEL_TOPOLOGY HSA_MODEL_NUM_THREADS
+unset HSA_ENABLE_SDMA HSA_ENABLE_SCRATCH_ASYNC_RECLAIM HSA_ENABLE_INTERRUPT
+```
 
 The tensor-descriptor-add and cluster-synchronization rows from the gfx1250
 ledger are intentionally not copied.  Their runner implementations call
@@ -168,18 +184,17 @@ above), not from renaming architecture-specific source.
 
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Why it matters and next proof |
 |---|---|---|---|---|---|---|
-| P0 | `torch.mode`, large rows | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | Exact values/indices; historically produces a dense LDS/barrier object plus ordered LDS operations on gfx1250.  Inventory the independently generated gfx950 object rather than reusing those counts. |
-| P0 | `torch.topk`, FP64 spill and BF16 coverage cases | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | Exact values/indices across FP64 register pressure and BF16 access-width breadth.  This is the primary PyTorch spill and dense-placement stress row. |
-| P1 | `torch.sort` over segmented rows | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | Exact values/indices and a dense synchronized sorting kernel; useful after `topk` to distinguish operation-specific from generic placement failures. |
-| P1 | `torch.histc` with a shared-memory-sized bin count | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | Exact bin counts; expected to exercise LDS atomics and barriers.  Fresh gfx950 inventory must classify atomic access and ordering roles independently. |
-| P2 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | Exact collision sums and atomic-heavy execution.  Keep only if gfx950 inventory finds an applicable synchronization role or useful atomic-access coverage. |
-| P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | 🩶 Baseline blocked: invalid device image | Exact 3-4-5 norms and CPU-referenced softmax reductions.  Provides smaller reduction/barrier objects than sorting and top-k. |
+| P0 | `torch.mode`, large rows | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 199/23,298 supported accesses | 🟥 Current strict instrumentation rejects before execution: persistent scalar owner/epoch state cannot be placed below a CDNA4 AccVGPR boundary | 🟥 Current strict instrumentation rejects the bundled object before execution | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 6,708/13,537 accesses and 27/3,998 barriers | Exact values/indices.  Artifacts `consan-gfx950-pytorch-mode-{sc,rr,inline}-current-20260722-{004,003,005}` replace the former setup blocker with concrete per-profile frontiers; do not reuse gfx1250 counts. |
+| P0 | `torch.topk`, FP64 spill and BF16 coverage cases | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 3,056/230,438 supported accesses | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | Exact values/indices across FP64 register pressure and BF16 coverage. Artifact `consan-gfx950-pytorch-topk-sc-branchguard-20260722-009` records one repetition, zero dynamic-incomplete encounters, and the current-hook SHA. A CDNA4 transform rejection was fixed by preventing gfx1250-only branch-continuation reservations from shifting later appended bodies. |
+| P1 | `torch.sort` over segmented rows | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | Exact values/indices and a dense synchronized sorting kernel; useful after `topk` to distinguish operation-specific from generic placement failures. |
+| P1 | `torch.histc` with a shared-memory-sized bin count | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | Exact bin counts; expected to exercise LDS atomics and barriers.  Fresh gfx950 inventory must classify atomic access and ordering roles independently. |
+| P2 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | Exact collision sums and atomic-heavy execution.  Keep only if gfx950 inventory finds an applicable synchronization role or useful atomic-access coverage. |
+| P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | Exact 3-4-5 norms and CPU-referenced softmax reductions.  Provides smaller reduction/barrier objects than sorting and top-k. |
 
-The first PyTorch step is to install or build a wheel whose ordinary device
-kernels execute on this gfx950, then pass one uninstrumented repetition of
-each exact oracle.  Registry enablement and a single all-profile clean pass to
-inventory target-native objects follow.  Do not carry gfx1250 site counts,
-fault selectors, timing ratios, or applicability decisions into this table.
+The portable rows are now registered for gfx950.  The next step is an
+all-profile clean inventory, followed by focused repair of the first typed
+failure in each column.  Do not carry gfx1250 site counts, fault selectors,
+timing ratios, or applicability decisions into this table.
 
 ## Evidence baseline
 
@@ -200,8 +215,8 @@ instrumentation acceptance evidence.
 | Validation doctor | `f5c91c6d1d`: target-aware registry and workload-scoped doctor are active. The gfx950 `d128-block` doctor passes with the current hook, CDNA4 executable, workspace TheRock `rocminfo`, and hip-moi source/build. The all-workload doctor now resolves all five available hip-moi roles to CDNA4/MFMA artifacts and isolates the remaining missing inputs to the Qwen build tree plus a true CDNA4 Jakub counterpart. |
 | RocJitsu test corpus | `rocjitsu-test-corpus` `aa54cc86c9ebff3eb840743b36ff8d9b3b2d43c4`; gfx950 enables source-built HIP matmul, HipKittens, and rocBLAS cases.  Its packaged Tensile artifacts are gfx1250-only. |
 | gfx950 Tensile source pool | `rocm-libraries` `c2fafc16393d0ce47a0a5801d827d43f0d3714a4`; 36 gfx950 GEMM YAMLs are available for reduction and packaging, but none is presently a validation-registry row. |
-| PyTorch discovery | The available PyTorch build advertises gfx950 support and sees the MI355X, but both a basic device operation and `torch.mode` fail with `hipErrorInvalidImage`.  Portable operator rows remain gray pending revalidation, with this baseline blocker recorded explicitly; existing validation-registry entries are also gfx1250-only. |
-| Registry boundary | Current gfx950 target-specific resolution covers the hip-moi gtest roles only.  The corpus and PyTorch tables above are a planned expansion, not claims that `consan_validation.py` can run those rows today. |
+| PyTorch discovery | The gfx1250-only thin-wheel mismatch is diagnosed and isolated.  The separate official nightly environment passes `torch.arange` plus all six portable one-repetition exact oracles on gfx950.  Workload-scoped doctor confirms gfx950 numeric dispatch and exact-hook mapping. |
+| Registry boundary | The six portable PyTorch rows and native hip-moi roles are executable validation IDs for gfx950.  The corpus table remains planned expansion until its source-only rows are built and registered. |
 
 ## Implementation evidence
 
@@ -788,13 +803,26 @@ a ConSan detection.
   one iteration.  Workload-scoped doctor checks define every current-matrix
   row: TP1, TP2, CLIP, and the five native hip-moi roles are runnable; Qwen is
   blocked on its gfx950 VMFB and Jakub on its target-native executable.
-- 2026-07-22: Executable audits now separate corpus rows that run today from
-  source-only, compile-disabled, and wrong-target cases.  The available
-  PyTorch installation is not usable evidence: although it advertises gfx950
-  and sees the physical device, even a basic device kernel and `torch.mode`
-  fail with `hipErrorInvalidImage`.  All portable PyTorch profile cells remain
-  gray pending revalidation, with the shared baseline blocker called out in
-  each cell until a compatible build exists.
+- 2026-07-22: Resolved the PyTorch `hipErrorInvalidImage` setup blocker.  The
+  failing interpreter was a thin gfx1250 installation with no gfx950 kernel
+  pack despite its broad architecture-list metadata.  A separate official
+  ROCm 7.1 nightly environment now passes the validator doctor and all six
+  portable one-repetition exact baselines on the physical gfx950 without
+  modifying the gfx1250 environment.  Those rows are registered for gfx950;
+  the first strict Record/Replay `torch.mode` run now reaches ConSan and
+  records a pre-execution transform rejection rather than a runtime setup
+  failure.
+- 2026-07-22: The first physical gfx950 TopK SuperCollider assessment exposed
+  stale appended-cave mappings before execution.  The generic planner was
+  reserving bodies for a gfx1250-only branch-continuation route on CDNA4, then
+  correctly declining to emit that route; all later body offsets therefore
+  drifted from the append cursor.  Restricting both reservation and routing to
+  gfx1250 preserves that architecture's existing fallback while letting CDNA4
+  skip the inapplicable candidates.  Artifact
+  `consan-gfx950-pytorch-topk-sc-branchguard-20260722-009` passes every TopK
+  exact oracle in one repetition with zero dynamic-incomplete encounters;
+  3,056/230,438 supported accesses patch, so the cell is orange rather than
+  green.
 - 2026-07-22: Refreshed this ledger to use the same four-profile matrix and
   red/orange/yellow/green/gray maturity scale as the expanded gfx1250 ledger.
   Every current status is gray because the substantially changed current tip
@@ -812,10 +840,9 @@ a ConSan detection.
   reduced, generated, numerically checked, packaged, inventoried, and added to
   the validation registry.
 - 2026-07-22: Mapped only architecture-neutral PyTorch operator rows to the
-  proposed gfx950 expansion.  Existing PyTorch validation rows are currently
-  target-restricted to gfx1250, and target-specific descriptor/cluster source
-  was deliberately excluded.  Registry enablement and fresh gfx950 code-object
-  inventories precede any profile assessment.
+  gfx950 expansion.  Target-specific descriptor/cluster source remains
+  deliberately excluded; fresh gfx950 code-object inventories precede profile
+  promotion.
 
 - 2026-07-18: Stream-K Inline Shadow on the current safe planner is rejected
   before installation, not accepted as the older matrix wording implied.

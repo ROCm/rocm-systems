@@ -136,13 +136,29 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["pytorch-rdna4-sdpa"]["targets"], ("gfx1201",)
         )
         self.assertEqual(
-            workloads["pytorch-torch-histc"]["targets"], ("gfx1250", "gfx1201")
+            workloads["pytorch-torch-histc"]["targets"],
+            ("gfx950", "gfx1250", "gfx1201"),
         )
         self.assertEqual(
             workloads["llama-rdna4-mul-mat-vec-q"]["targets"], ("gfx1201",)
         )
         self.assertEqual(
             workloads["llama-rdna4-rms-norm"]["targets"], ("gfx1201",)
+        )
+
+    def test_gfx950_manifest_includes_portable_pytorch_workloads(self) -> None:
+        workload_ids = {
+            workload["id"] for workload in validation._manifest("gfx950")["workloads"]
+        }
+        self.assertTrue(
+            {
+                "pytorch-torch-mode",
+                "pytorch-torch-topk",
+                "pytorch-torch-sort",
+                "pytorch-scatter-reduce",
+                "pytorch-torch-histc",
+                "pytorch-norm-softmax",
+            }.issubset(workload_ids)
         )
 
     def test_text_manifest_filters_target_specific_workloads(self) -> None:
@@ -438,6 +454,28 @@ class ConSanValidationTest(unittest.TestCase):
             Path("/unused"),
         )
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
+
+    def test_gfx950_scrubs_software_model_environment_without_changing_gfx1250(
+        self,
+    ) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]
+        model_environment = {
+            name: f"configured-{name}" for name in validation.SOFTWARE_MODEL_ENVIRONMENT
+        }
+        with mock.patch.dict(os.environ, model_environment, clear=False):
+            gfx950 = validation._clean_environment(
+                None, workload, Path("/workspace/hook.so"), "gfx950"
+            )
+            gfx1250 = validation._clean_environment(
+                None, workload, Path("/workspace/hook.so"), "gfx1250"
+            )
+        self.assertTrue(
+            validation.SOFTWARE_MODEL_ENVIRONMENT.isdisjoint(gfx950)
+        )
+        self.assertEqual(
+            {name: gfx1250[name] for name in validation.SOFTWARE_MODEL_ENVIRONMENT},
+            model_environment,
+        )
 
     def test_gfx950_cdna4_atomics_only_admit_order_faults(self) -> None:
         for workload_id in ("streamk-arrival", "tree-atomic-or"):
