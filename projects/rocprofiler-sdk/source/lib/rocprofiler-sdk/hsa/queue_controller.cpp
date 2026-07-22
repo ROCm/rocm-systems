@@ -112,6 +112,110 @@ destroy_queue(hsa_queue_t* hsa_queue)
     return HSA_STATUS_SUCCESS;
 }
 
+#if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+hsa_status_t
+create_amd_queue(hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t num_descs)
+{
+    auto* controller = CHECK_NOTNULL(get_queue_controller());
+    auto  status     = controller->get_ext_table().hsa_amd_queue_create_fn(agent, descs, num_descs);
+    if(status != HSA_STATUS_SUCCESS) return status;
+
+    const bool inline_intercept = queue_interposition::supports_queue_interposition();
+
+    for(uint32_t desc_idx = 0; desc_idx < num_descs; ++desc_idx)
+    {
+        hsa_queue_t* queue = descs[desc_idx].queue;
+        if(!queue) continue;
+
+        for(const auto& [_, agent_info] : controller->get_supported_agents())
+        {
+            if(agent_info.get_hsa_agent().handle != agent.handle) continue;
+
+            std::unique_ptr<Queue> new_queue;
+            if(inline_intercept)
+            {
+                // Inline write-index wrappers intercept this plain queue directly (via the
+                // per-queue state registered in add_queue), so no ROCr-level packet
+                // interceptor needs to be attached here.
+                ROCP_INFO << "[queue-intercept] registering hsa_amd_queue_create queue via "
+                             "INLINE path for agent "
+                          << agent.handle;
+                new_queue = std::make_unique<Queue>(agent_info,
+                                                    controller->get_core_table(),
+                                                    controller->get_ext_table(),
+                                                    queue,
+                                                    [](write_interceptor_t, void*) {});
+            }
+            else if(descs[desc_idx].engine_type == HSA_AMD_QUEUE_ENGINE_COMPUTE)
+            {
+                // A queue created by hsa_amd_queue_create is a plain queue that cannot carry a
+                // ROCr packet interceptor (hsa_amd_queue_intercept_register only accepts an
+                // InterceptQueue). In non-inline mode we therefore discard the plain queue and
+                // build a ROCr InterceptQueue that mirrors the descriptor's compute parameters,
+                // then hand that back to the caller in place of the original queue.
+                //
+                // NOTE: the InterceptQueue is created via the classic hsa_queue_create path, so
+                // the descriptor's device-memory ring-buffer flag is not honored while a
+                // non-inline profiling context (e.g. --sys-trace / HIP graph tracing) is active;
+                // the queue falls back to a system-memory ring.
+                ROCP_INFO << "[queue-intercept] registering hsa_amd_queue_create queue via "
+                             "LEGACY path (InterceptQueue) for agent "
+                          << agent.handle;
+
+                const auto&    compute_params = descs[desc_idx].engine.compute;
+                const uint32_t ring_packets   = static_cast<uint32_t>(
+                    descs[desc_idx].queue_size_bytes / sizeof(hsa_kernel_dispatch_packet_t));
+
+                // Release the plain queue that hsa_amd_queue_create just handed us; the
+                // InterceptQueue built below replaces it. get_core_table() holds the real ROCr
+                // functions (saved before the interception wrappers were installed).
+                controller->get_core_table().hsa_queue_destroy_fn(queue);
+
+                hsa_queue_t* intercept_queue = nullptr;
+                new_queue                    = std::make_unique<Queue>(
+                    agent_info,
+                    ring_packets,
+                    compute_params.type,
+                    descs[desc_idx].callback,
+                    descs[desc_idx].callback_data,
+                    compute_params.private_segment_size,
+                    // Descriptor v1 does not expose group_segment_size; UINT32_MAX requests the
+                    // runtime default, matching the classic hsa_queue_create behavior.
+                    UINT32_MAX,
+                    controller->get_core_table(),
+                    controller->get_ext_table(),
+                    &intercept_queue);
+
+                queue                 = intercept_queue;
+                descs[desc_idx].queue = intercept_queue;
+            }
+            else
+            {
+                // Non-compute engines (e.g. SDMA) do not dispatch kernels; keep the plain queue
+                // and register it without a packet interceptor.
+                ROCP_INFO << "[queue-intercept] registering non-compute hsa_amd_queue_create "
+                             "queue (no packet interception) for agent "
+                          << agent.handle;
+                new_queue = std::make_unique<Queue>(agent_info,
+                                                    controller->get_core_table(),
+                                                    controller->get_ext_table(),
+                                                    queue,
+                                                    [](write_interceptor_t, void*) {});
+            }
+
+            controller->serializer(new_queue.get()).wlock([&](auto& serializer) {
+                serializer.add_queue(&queue, *new_queue);
+            });
+            controller->add_queue(queue, std::move(new_queue));
+            ROCP_INFO << "created queue (hsa_amd_queue_create) for HSA agent handle "
+                      << agent.handle;
+            break;
+        }
+    }
+    return HSA_STATUS_SUCCESS;
+}
+#endif
+
 constexpr rocprofiler_agent_t default_agent =
     rocprofiler_agent_t{.size                       = sizeof(rocprofiler_agent_t),
                         .id                         = rocprofiler_agent_id_t{.handle = 0},
@@ -369,6 +473,9 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
         {
             core_table.hsa_queue_create_fn  = hsa::create_queue;
             core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
+#if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+            ext_table.hsa_amd_queue_create_fn = hsa::create_amd_queue;
+#endif
         }
     }
 }

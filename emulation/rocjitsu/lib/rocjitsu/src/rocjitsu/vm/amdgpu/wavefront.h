@@ -8,9 +8,9 @@
 #define ROCJITSU_VM_AMDGPU_WAVEFRONT_H_
 
 #include "rocjitsu/base/api.h"
+#include "rocjitsu/isa/arch/amdgpu/vgpr_msb.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
-#include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/plugins/wavefront_state.h"
 #include "rocjitsu/vm/thread_context.h"

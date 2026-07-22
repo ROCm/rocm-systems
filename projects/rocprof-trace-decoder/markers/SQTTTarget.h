@@ -171,8 +171,11 @@ enum class BufferOpKind : uint8_t
 
 inline BufferOpKind classifyBufferOp(llvm::StringRef name)
 {
-    for (const char* prefix : {"llvm.amdgcn.raw.buffer.", "llvm.amdgcn.struct.buffer.",
-                               "llvm.amdgcn.raw.ptr.buffer.", "llvm.amdgcn.struct.ptr.buffer."})
+    for (const char* prefix :
+         {"llvm.amdgcn.raw.buffer.",
+          "llvm.amdgcn.struct.buffer.",
+          "llvm.amdgcn.raw.ptr.buffer.",
+          "llvm.amdgcn.struct.ptr.buffer."})
     {
         llvm::StringRef opcode = name;
         if (!opcode.consume_front(prefix)) continue;
