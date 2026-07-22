@@ -120,14 +120,14 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND rocprofiler-register_FOUND
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} videodecodemem.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode/roc_video_dec.cpp)
     add_executable(${PROJECT_NAME} ${SOURCES})
     # On TheRock installs libva is vendored under lib/rocm_sysdeps, but FFmpeg still
-    # links the system libva, so both load at runtime. Force the vendored libva to be
-    # an early direct dependency (--no-as-needed keeps it despite no direct symbol
-    # references) so its symbols win and it loads the matching VA driver.
+    # links the system libva, so both load at runtime. librocdecode already depends
+    # on the vendored libva, so force librocdecode to be the FIRST direct dependency
+    # of the executable -- ahead of FFmpeg -- so the vendored libva enters the global
+    # symbol scope first and wins VA symbol interposition, loading the matching
+    # vendored VA driver. It must be injected as a raw path because CMake
+    # topologically reorders normal link entries, placing FFmpeg ahead otherwise.
     if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
-      find_package(Libva QUIET)
-      if(Libva_FOUND)
-        set(LINK_LIBRARY_LIST -Wl,--no-as-needed Libva::va Libva::va_drm -Wl,--as-needed ${LINK_LIBRARY_LIST})
-      endif()
+      set(LINK_LIBRARY_LIST -Wl,--no-as-needed ${rocdecode_LIBRARY} -Wl,--as-needed ${LINK_LIBRARY_LIST})
     endif()
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
     # FFMPEG multi-version support
