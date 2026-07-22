@@ -1429,6 +1429,25 @@ def test_gfx1250_generated_operand_merges_packed_16bit_destinations(
     assert 'if (ev >= 0 && ev <= 127)' in operand_cpp
     assert 'packed_16bit_vgpr_dst(packed_16bit_dst_' in operand_cpp
     assert 'packed->shift ? 0x0000ffffu : 0xffff0000u' in operand_exec_cpp
+    assert 'uint8_t write_byte_mask = packed->shift' in operand_exec_cpp
+    assert 'rocjitsu::ExecutionPlugin::kHighHalfByteMask' in operand_exec_cpp
+    assert 'rocjitsu::ExecutionPlugin::kLowHalfByteMask' in operand_exec_cpp
+    assert (
+        'amdgpu::RegisterAccess(wf.cu()).read_vgpr_storage(idx, lane);'
+        in operand_exec_cpp
+    )
+    assert (
+        'amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, merged, write_byte_mask);'
+        in operand_exec_cpp
+    )
+    assert (
+        'amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + voff, lane, val);'
+        in operand_exec_cpp
+    )
+    assert (
+        'amdgpu::RegisterAccess(wf.cu()).write_vgpr64(idx, lane, val);'
+        in operand_exec_cpp
+    )
     assert 'amdgpu::apply_gpr_idx(wf, off, false)' in operand_exec_cpp
     assert 'void Operand::write_lane_chunk' in operand_cpp
     assert 'void write_lane_chunk(amdgpu::Wavefront &wf' in operand_h
@@ -1830,18 +1849,18 @@ def test_gfx1250_generated_dpp_cleanup_resolves_high_destination_bank(
     )
 
     for body in bodies:
-        assert 'amdgpu::RegisterAccess(wf).read_lane(vdst, ln)' in body
+        assert 'amdgpu::RegisterAccess(wf).read_operand_storage(vdst, ln)' in body
         assert (
-            'amdgpu::RegisterAccess(wf).write_lane(vdst, ln, sdwa_old_dst_[ln]);'
+            'amdgpu::RegisterAccess(wf).write_operand_storage(vdst, ln, sdwa_old_dst_[ln]);'
             in body
         )
         assert 'write_vgpr(vb + inst_.vdst, ln, sdwa_old_dst_[ln])' not in body
 
     cvt_f64 = _generated_method_body(vop1, 'VCvtF64I32Vop1', 'VCvtF32I32Vop1')
     assert 'uint64_t sdwa_old_dst_[64] = {};' in cvt_f64
-    assert 'amdgpu::RegisterAccess(wf).read_lane64(vdst, ln)' in cvt_f64
+    assert 'amdgpu::RegisterAccess(wf).read_operand_storage64(vdst, ln)' in cvt_f64
     assert (
-        'amdgpu::RegisterAccess(wf).write_lane64(vdst, ln, sdwa_old_dst_[ln]);'
+        'amdgpu::RegisterAccess(wf).write_operand_storage64(vdst, ln, sdwa_old_dst_[ln]);'
         in cvt_f64
     )
 
@@ -1860,13 +1879,15 @@ def test_generated_64bit_dpp_cleanup_preserves_both_physical_dwords(
         'rdna3_5',
         'rdna4',
     ):
-        vop1 = (amdgpu_generated_root / arch / 'vop1.cpp').read_text()
+        vop1 = _execution_source_path(
+            amdgpu_generated_root / arch / 'vop1.cpp'
+        ).read_text()
         cvt_f64 = _generated_method_body(vop1, 'VCvtF64I32Vop1', 'VCvtF32I32Vop1')
 
         assert 'uint64_t sdwa_old_dst_[64] = {};' in cvt_f64, arch
-        assert 'read_vgpr64(vb + inst_.vdst, ln)' in cvt_f64, arch
-        assert 'write_vgpr64(vb + inst_.vdst, ln,' in cvt_f64, arch
-        assert 'read_lane64(vdst, ln)' not in cvt_f64, arch
+        assert 'read_vgpr_storage64(vb + inst_.vdst, ln)' in cvt_f64, arch
+        assert 'write_vgpr_storage64(vb + inst_.vdst, ln,' in cvt_f64, arch
+        assert 'read_operand_storage64(vdst, ln)' not in cvt_f64, arch
 
 
 def test_generated_dpp_cleanup_uses_full_write_mask_for_dpp16(

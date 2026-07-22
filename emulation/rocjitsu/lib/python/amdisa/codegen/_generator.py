@@ -7261,17 +7261,25 @@ class CodeGenerator:
                             _dpp_old_dst_type = (
                                 'uint64_t' if _uses_64bit_dpp_dst else 'uint32_t'
                             )
-                            _dpp_dst_read_method = (
-                                'read_lane64' if _uses_64bit_dpp_dst else 'read_lane'
+                            _dpp_dst_storage_read_method = (
+                                'read_operand_storage64'
+                                if _uses_64bit_dpp_dst
+                                else 'read_operand_storage'
                             )
-                            _dpp_dst_write_method = (
-                                'write_lane64' if _uses_64bit_dpp_dst else 'write_lane'
+                            _dpp_dst_storage_write_method = (
+                                'write_operand_storage64'
+                                if _uses_64bit_dpp_dst
+                                else 'write_operand_storage'
                             )
-                            _dpp_physical_dst_read_method = (
-                                'read_vgpr64' if _uses_64bit_dpp_dst else 'read_vgpr'
+                            _dpp_physical_dst_storage_read_method = (
+                                'read_vgpr_storage64'
+                                if _uses_64bit_dpp_dst
+                                else 'read_vgpr_storage'
                             )
-                            _dpp_physical_dst_write_method = (
-                                'write_vgpr64' if _uses_64bit_dpp_dst else 'write_vgpr'
+                            _dpp_physical_dst_storage_write_method = (
+                                'write_vgpr_storage64'
+                                if _uses_64bit_dpp_dst
+                                else 'write_vgpr_storage'
                             )
                             _dpp_preamble = ''
 
@@ -7326,14 +7334,15 @@ class CodeGenerator:
                                 if _has_sdwa_encoding:
                                     _old_dst_read = (
                                         f'inst_.src0 == amdgpu::SRC_DPP\n'
-                                        f'            ? amdgpu::RegisterAccess(wf).{_dpp_dst_read_method}({_dst_name}, ln)\n'
-                                        f'            : amdgpu::RegisterAccess(wf.cu()).{_dpp_physical_dst_read_method}(vb + {_dst_reg_expr}, ln)'
+                                        f'            ? amdgpu::RegisterAccess(wf).{_dpp_dst_storage_read_method}({_dst_name}, ln)\n'
+                                        f'            : amdgpu::RegisterAccess(wf.cu()).{_dpp_physical_dst_storage_read_method}(vb + {_dst_reg_expr}, ln)'
                                         if _uses_logical_dpp_dst
-                                        else f'amdgpu::RegisterAccess(wf.cu()).{_dpp_physical_dst_read_method}(vb + {_dst_reg_expr}, ln)'
+                                        else f'amdgpu::RegisterAccess(wf.cu()).{_dpp_physical_dst_storage_read_method}(vb + {_dst_reg_expr}, ln)'
                                     )
                                     _dpp_preamble += (
                                         f'  {_dpp_old_dst_type} sdwa_old_dst_[64] = {{}};\n'
-                                        '  if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD ||\n'
+                                        '  if ((sdwa_dst_sel_ != amdgpu::sdwa::DWORD &&\n'
+                                        '       sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE) ||\n'
                                         '      inst_.src0 == amdgpu::SRC_DPP) {\n'
                                         '    uint32_t vb = wf.vgpr_alloc().base;\n'
                                         '    uint64_t ex = wf.exec();\n'
@@ -7344,9 +7353,9 @@ class CodeGenerator:
                                     )
                                 else:
                                     _old_dst_read = (
-                                        f'amdgpu::RegisterAccess(wf).{_dpp_dst_read_method}({_dst_name}, ln)'
+                                        f'amdgpu::RegisterAccess(wf).{_dpp_dst_storage_read_method}({_dst_name}, ln)'
                                         if _uses_logical_dpp_dst
-                                        else f'amdgpu::RegisterAccess(wf.cu()).{_dpp_physical_dst_read_method}(vb + {_dst_reg_expr}, ln)'
+                                        else f'amdgpu::RegisterAccess(wf.cu()).{_dpp_physical_dst_storage_read_method}(vb + {_dst_reg_expr}, ln)'
                                     )
                                     _old_dst_vb_setup = (
                                         ''
@@ -7461,9 +7470,9 @@ class CodeGenerator:
                                 '    uint32_t vb = wf.vgpr_alloc().base;\n'
                                 '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
                                 '      if (!(ex & (1ULL << ln))) continue;\n'
-                                f'      uint32_t dv = amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + {_dst_reg_expr}, ln);\n'
+                                f'      uint32_t dv = amdgpu::RegisterAccess(wf.cu()).read_vgpr_storage(vb + {_dst_reg_expr}, ln);\n'
                                 '      dv = amdgpu::sdwa::sdwa_dst_merge(dv, sdwa_old_dst_[ln], sdwa_dst_sel_, sdwa_dst_unused_);\n'
-                                f'      amdgpu::RegisterAccess(wf.cu()).write_vgpr(vb + {_dst_reg_expr}, ln, dv);\n'
+                                f'      amdgpu::RegisterAccess(wf.cu()).write_vgpr_storage(vb + {_dst_reg_expr}, ln, dv);\n'
                                 '    }\n'
                                 '  }\n'
                             )
@@ -7474,10 +7483,10 @@ class CodeGenerator:
                                     '    uint32_t vb = wf.vgpr_alloc().base;\n'
                                     '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
                                     '      if (!(ex & (1ULL << ln))) continue;\n'
-                                    f'      uint32_t dv = amdgpu::RegisterAccess(wf.cu()).read_vgpr(vb + {_dst_reg_expr}, ln);\n'
+                                    f'      uint32_t dv = amdgpu::RegisterAccess(wf.cu()).read_vgpr_storage(vb + {_dst_reg_expr}, ln);\n'
                                     '      float fv = std::bit_cast<float>(dv);\n'
                                     '      fv = std::clamp(fv, 0.0f, 1.0f);\n'
-                                    f'      amdgpu::RegisterAccess(wf.cu()).write_vgpr(vb + {_dst_reg_expr}, ln, std::bit_cast<uint32_t>(fv));\n'
+                                    f'      amdgpu::RegisterAccess(wf.cu()).write_vgpr_storage(vb + {_dst_reg_expr}, ln, std::bit_cast<uint32_t>(fv));\n'
                                     '    }\n'
                                     '  }\n'
                                 )
@@ -7519,9 +7528,9 @@ class CodeGenerator:
                                         else '      uint32_t vb = wf.vgpr_alloc().base;\n'
                                     )
                                     _restore_dst_line = (
-                                        f'          amdgpu::RegisterAccess(wf).{_dpp_dst_write_method}({_dst_name}, ln, sdwa_old_dst_[ln]);\n'
+                                        f'          amdgpu::RegisterAccess(wf).{_dpp_dst_storage_write_method}({_dst_name}, ln, sdwa_old_dst_[ln]);\n'
                                         if _uses_logical_dpp_dst
-                                        else f'          amdgpu::RegisterAccess(wf.cu()).{_dpp_physical_dst_write_method}(vb + {_dst_reg_expr}, ln,\n'
+                                        else f'          amdgpu::RegisterAccess(wf.cu()).{_dpp_physical_dst_storage_write_method}(vb + {_dst_reg_expr}, ln,\n'
                                         '              sdwa_old_dst_[ln]);\n'
                                     )
                                     _dpp_cleanup += (
@@ -9862,7 +9871,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     '  if (auto packed = packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, ev)) {',
                     '    uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);',
                     '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, false) : off;',
-                    '    uint32_t raw = amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane);',
+                    '    uint8_t byte_mask = packed->shift ? rocjitsu::ExecutionPlugin::kHighHalfByteMask : rocjitsu::ExecutionPlugin::kLowHalfByteMask;',
+                    '    uint32_t raw = amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane, byte_mask);',
                     '    return (raw >> packed->shift) & 0xffffu;',
                     '  }',
                 ]
@@ -10015,10 +10025,11 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
                     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, true) : off;
                     uint32_t idx = wf.vgpr_alloc().base + voff;
-                    uint32_t old = amdgpu::RegisterAccess(wf.cu()).read_vgpr(idx, lane);
+                    uint8_t write_byte_mask = packed->shift ? rocjitsu::ExecutionPlugin::kHighHalfByteMask : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
+                    uint32_t old = amdgpu::RegisterAccess(wf.cu()).read_vgpr_storage(idx, lane);
                     uint32_t keep_mask = packed->shift ? 0x0000ffffu : 0xffff0000u;
                     uint32_t merged = (old & keep_mask) | ((val & 0xffffu) << packed->shift);
-                    amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, merged);
+                    amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, merged, write_byte_mask);
                     return;
                   }
                 ''')
