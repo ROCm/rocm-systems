@@ -881,15 +881,28 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return result;
   };
 
-  // The implemented errata are deliberately one-way. Treating A0 input as B0
-  // output would silently preserve A0 workaround sequences while claiming the
-  // opposite direction, so fail before modifying the code object.
-  if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options_.input_revision == ProcessorRevision::Gfx1250A0 &&
-      options_.output_revision == ProcessorRevision::Gfx1250B0) {
-    append_error(result.diagnostics, DiagnosticKind::Legalization,
-                 "gfx1250 A0-to-B0 translation is not supported");
-    return leave_unchanged();
+  // A same-architecture gfx1250 translation is direction-specific: A0 and B0
+  // share an ELF machine ID, so both revisions must be given and must select a
+  // supported direction. Enforce this here as well as in the C API so a direct or
+  // future internal caller cannot bypass the check and get a silent identity copy
+  // that skips every required workaround.
+  if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250) {
+    if (options_.input_revision == ProcessorRevision::Unspecified ||
+        options_.output_revision == ProcessorRevision::Unspecified) {
+      append_error(result.diagnostics, DiagnosticKind::Legalization,
+                   "gfx1250 same-target translation requires both input and output silicon "
+                   "revisions");
+      return leave_unchanged();
+    }
+    // The implemented errata are deliberately one-way. Treating A0 input as B0
+    // output would silently preserve A0 workaround sequences while claiming the
+    // opposite direction, so fail before modifying the code object.
+    if (options_.input_revision == ProcessorRevision::Gfx1250A0 &&
+        options_.output_revision == ProcessorRevision::Gfx1250B0) {
+      append_error(result.diagnostics, DiagnosticKind::Legalization,
+                   "gfx1250 A0-to-B0 translation is not supported");
+      return leave_unchanged();
+    }
   }
 
   auto text = patcher.text_bytes();
@@ -1462,17 +1475,34 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       if (skip_scope)
         break;
 
-      // A consumer may only be replaced with a direct transfer window when the
-      // recovered fact is COMPLETE. An incomplete fact means at least one
-      // predecessor path left the PC pair unconstrained; even if every recorded
-      // concrete target is identical, a direct window would redirect that
-      // unconstrained path to the concrete target it never dynamically reaches.
-      // Keep the original dynamic consumer and rewrite each source-side builder
-      // instead (relocation/liveness), exactly as for the multi-target case.
+      // An incomplete fact means at least one predecessor left the PC pair
+      // unconstrained. That path has no recovered builder or target to relocate,
+      // yet its runtime SGPR pair may hold an original .text address; after DBT
+      // relocates .text, the retained dynamic transfer would jump to stale or moved
+      // bytes, and the unknown target block may be absent from the emitted scope.
+      // We cannot prove the unconstrained path is free of a relocatable text
+      // address, so fail closed for the whole consumer rather than relocate only
+      // the known builders.
       const bool any_incomplete = std::ranges::any_of(
           consumer.fixups, [](const IndirectCallFixup &fixup) { return fixup.source_incomplete; });
+      if (any_incomplete) {
+        auto failure = make_kernel_failure(
+            DiagnosticKind::Legalization,
+            "recovered indirect branch has an unconstrained predecessor path that cannot be "
+            "relocated",
+            source_call_offset, "indirect branch");
+        if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                text_relocations_begin, data_relocations_begin)) {
+          skip_scope = true;
+          break;
+        }
+        return leave_unchanged();
+      }
 
-      if (single_effective_target && !any_incomplete) {
+      // A complete consumer with one effective target can become a direct window.
+      // A complete multi-target consumer keeps the dynamic consumer and rewrites
+      // each source-side builder (relocation/liveness).
+      if (single_effective_target) {
         consumer.use_transfer_window = true;
         consumer.window_fixup = first;
       } else {

@@ -60,6 +60,13 @@ void dfs_reverse_post_order(const BasicBlock &start,
   // Predicated defs and EXEC-masked vector defs preserve old values on at least
   // one path or lane. Until EXEC state is tracked at each program point, those
   // writes cannot be treated as unconditional liveness kills.
+  //
+  // The VGPR/ACC_VGPR kill suppression below is also load-bearing for the gfx1250
+  // VGPR-MSB def handling: InstDefUse records NOTHING for an unknown-bank VGPR def
+  // (see expand_operand_register in def_use_chain.cpp) on the assumption that such
+  // a def never becomes a liveness kill. Every VGPR def is exec-masked, so this
+  // clear is what upholds that assumption. If this suppression is removed or made
+  // conditional, revisit that def handling so an unknown-bank def does not over-kill.
   if (du.has_predicated_def)
     return {};
   if (du.has_exec_masked_vector_def) {

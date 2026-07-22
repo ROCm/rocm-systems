@@ -942,6 +942,45 @@ TEST(CfgAnalysis, Gfx1250RecoversPcStashedInVgprLanes) {
   EXPECT_TRUE(has_successor_start(*consumer, target->start_offset()));
 }
 
+TEST(CfgAnalysis, Gfx1250WideVgprWriteInvalidatesStashedLane) {
+  // Same stash idiom as Gfx1250RecoversPcStashedInVgprLanes, but a width-2
+  // v_mov_b64 writes v[44:45] between the writelanes and the readlanes. That wide
+  // write overwrites the stashed VGPR, so the readlane no longer reconstructs the
+  // original PC and recovery must fail closed. A width-one-only invalidation would
+  // miss the b64 write and falsely recover a target.
+  constexpr auto clobber =
+      gfx1250::build_vop3(gfx1250::kVMovB64Vop3, {.vdst = 44, .src0 = 256 + 46});
+  std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      52u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(52).
+      0xD761002Cu,
+      0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x18: v_writelane_b32 v44, s1, 1.
+      clobber[0],  // 0x20: v_mov_b64 v[44:45], v[46:47] (wide write over v44).
+      clobber[1],
+      0xD7600000u,
+      0x0201012Cu, // 0x28: v_readlane_b32 s0, v44, 0.
+      0xD7600001u,
+      0x0201032Cu,                                // 0x30: v_readlane_b32 s1, v44, 1.
+      0xBE9E4900u,                                // 0x38: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x40: would-be target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  size_t total_fixups = 0;
+  for (const auto &block : blocks)
+    total_fixups += block->static_indirect_call_fixups().size();
+  EXPECT_EQ(total_fixups, 0u);
+}
+
 TEST(CfgAnalysis, Gfx1250DoesNotCarryLaneStashAcrossBlockBoundary) {
   // Same stash idiom, but an unconditional branch separates the writelane stashes
   // from the readlane/swappc consumer, so they land in different basic blocks. The
@@ -1009,6 +1048,50 @@ TEST(CfgAnalysis, Gfx1250DoesNotRecoverLaneStashWithDifferingRoleBanks) {
       0xBE9E4900u,                                // 0x34: s_swap_pc_i64 s[30:31], s[0:1].
       build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x38: continuation.
       build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: would-be target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  size_t total_fixups = 0;
+  for (const auto &block : blocks)
+    total_fixups += block->static_indirect_call_fixups().size();
+  EXPECT_EQ(total_fixups, 0u);
+}
+
+TEST(CfgAnalysis, Gfx1250DoesNotInheritBankFromLexicalPredecessor) {
+  // An s_set_vgpr_msb in the entry block establishes a bank, then s_branch jumps to
+  // a stash block that performs the full getpc/writelane/readlane/swappc idiom with
+  // NO local s_set_vgpr_msb. The stash block must NOT inherit the lexically-
+  // preceding block's bank (VGPR-MSB is scanned in source order, not CFG order):
+  // its bank is unknown at the block boundary, so the writelane cannot record a
+  // physical slot and recovery fails closed. Otherwise a false concrete target
+  // could be reconstructed.
+  //
+  // 0x00 s_set_vgpr_msb 0 ; 0x04 s_branch -> 0x0c (skips the 0x08 filler).
+  constexpr auto set_bank_zero = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0});
+  constexpr auto branch_to_stash = gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = 1});
+  std::vector<uint32_t> words = {
+      set_bank_zero[0],                           // 0x00: establish bank 0 (entry block).
+      branch_to_stash[0],                         // 0x04: s_branch -> stash block at 0x0c.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), // 0x08: bypassed filler.
+      0xBE804700u,                                // 0x0c: s_get_pc_i64 s[0:1] (stash block).
+      0xA980FE00u,
+      52u,
+      0u,          // 0x10: s_add_nc_u64 ..., lit64(52).
+      0xD761002Cu, // 0x1c: v_writelane_b32 v44, s0, 0.
+      0x02010000u,
+      0xD761002Cu, // 0x24: v_writelane_b32 v44, s1, 1.
+      0x02010201u,
+      0xD7600000u, // 0x2c: v_readlane_b32 s0, v44, 0.
+      0x0201012Cu,
+      0xD7600001u, // 0x34: v_readlane_b32 s1, v44, 1.
+      0x0201032Cu,
+      0xBE9E4900u,                                // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x40: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x44: would-be target.
   };
 
   TestCodeObject co(std::move(words));

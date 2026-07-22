@@ -945,8 +945,15 @@ bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup)
            existing.source_recovery_begin_offset == fixup.source_recovery_begin_offset &&
            existing.source_recovery_end_offset == fixup.source_recovery_end_offset;
   });
-  if (duplicate != out.end())
+  if (duplicate != out.end()) {
+    // Incompleteness is monotonic: if any iteration observes this fixup as
+    // incomplete, the merged record must stay incomplete. Otherwise a later
+    // fixed-point pass that rediscovers an earlier-complete fact as incomplete
+    // would be dropped here, leaving the consumer wrongly eligible for a direct
+    // window.
+    duplicate->source_incomplete = duplicate->source_incomplete || fixup.source_incomplete;
     return false;
+  }
   out.push_back(fixup);
   return true;
 }
@@ -1695,8 +1702,10 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
   // addresses its destination through the DST bank and v_readlane its source
   // through the SRC0 bank, so equal low selectors under differing banks name
   // different physical VGPRs. Track the current immediate; nullopt means the bank
-  // is unknown (a dynamic MODE write) and any lane transport must fail closed.
-  // Architectural entry state is bank 0 for every role.
+  // is unknown (a dynamic MODE write, or a block boundary — see the terminator
+  // handling below) and any lane transport must fail closed. The kernel entry
+  // block starts at the architectural default of bank 0 for every role; later
+  // blocks are marked unknown until they locally re-establish the bank.
   std::optional<uint8_t> vgpr_msb_imm = uint8_t{0};
   const auto role_bank = [&](unsigned shift) -> std::optional<uint8_t> {
     if (!vgpr_msb_imm)
@@ -1789,16 +1798,31 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
     }
 
     if (mnemonic != "v_writelane_b32") {
+      // Any ordinary write to a stashed VGPR invalidates that slot. Build the full
+      // VGPR def set (explicit destinations of ANY width, plus implicit vector
+      // defs) rather than only width-1 destination operands: a 64-bit-or-wider
+      // destination overlapping a stashed lane must still clear it. RegisterSet
+      // handles the operand width and implicit defs, and for_each yields each
+      // covered lane individually.
+      RegisterSet vgpr_defs;
       for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
-        const auto dst = operand_register(inst.dst_operand(dst_index), RegClass::VGPR);
-        if (!dst)
+        const Operand *op = inst.dst_operand(dst_index);
+        if (op == nullptr)
           continue;
+        if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::VGPR)
+          vgpr_defs.expand(*ref);
+      }
+      inst.implicit_defs(vgpr_defs);
+      vgpr_defs.for_each([&](RegisterRef ref) {
+        if (ref.cls != RegClass::VGPR)
+          return;
         // The write's physical bank is not generally known here, so conservatively
         // invalidate every slot whose low selector matches (all four banks). Slots
         // store the physical index (low + bank*256), so compare the low 8 bits.
-        std::erase_if(slots,
-                      [&](const auto &item) { return (item.first.vgpr & 0xffu) == dst->index; });
-      }
+        std::erase_if(slots, [&](const auto &item) {
+          return (item.first.vgpr & 0xffu) == (ref.index & 0xffu);
+        });
+      });
     }
 
     if (!builders.active_pairs().empty())
@@ -1826,6 +1850,13 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
       // Block-local recovery: a stash cannot flow across a terminator to a later
       // block, so clearing here prevents a path-insensitive false single target.
       slots.clear();
+      // The VGPR-MSB bank is scanned in lexical order, not CFG order, so a block
+      // reached by a branch/join must not inherit a lexically-preceding block's
+      // bank (that block may not be a predecessor, and real predecessors may
+      // disagree). Mark the bank UNKNOWN at every block boundary; a following block
+      // that needs lane transport must locally re-establish it with s_set_vgpr_msb
+      // first, otherwise the transport fails closed.
+      vgpr_msb_imm = std::nullopt;
     }
     if (is_program_terminator(inst)) {
       slots.clear();

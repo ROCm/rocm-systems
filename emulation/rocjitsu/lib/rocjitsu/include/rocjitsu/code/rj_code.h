@@ -367,8 +367,8 @@ RJ_API_EXPORT const rj_code_inst_t *rj_code_inst_next(const rj_code_inst_t *inst
 ///
 /// @details Separate from the architecture because some steppings share an ELF
 /// machine ID (e.g. gfx1250 A0 and B0) yet require different translation
-/// workarounds. Value 0 is UNSPECIFIED so a zero-initialized options struct — and
-/// any caller compiled against the older two-field struct — defaults to it.
+/// workarounds. Value 0 is UNSPECIFIED so a zero-initialized options struct
+/// defaults to it.
 typedef enum rj_code_revision_e {
   /// @brief No revision provided. Required for non-gfx1250 architectures.
   ROCJITSU_CODE_REVISION_UNSPECIFIED = 0,
@@ -378,6 +378,11 @@ typedef enum rj_code_revision_e {
   ROCJITSU_CODE_REVISION_GFX1250_B0 = 2,
 } rj_code_revision_t;
 
+/// @brief Options for rj_code_translate.
+///
+/// @note This layout is NOT ABI-stable while DBT is in development: fields have
+/// been and may again be added. Callers must recompile against this header; a
+/// binary built against an older layout must not be mixed with a newer library.
 typedef struct rj_code_dbt_options_t {
   rj_code_arch_t guest_arch;
   rj_code_arch_t host_arch;
