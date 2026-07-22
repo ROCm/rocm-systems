@@ -213,7 +213,7 @@ static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx94
   } else {
     return false;
   }
-  return rcclParamOobBalanced() ? true :threshold > 0 && totalBytes <= threshold;
+  return rcclParamOobBalanced() ? true : (threshold > 0 && totalBytes <= threshold);
 }
 
 // Check if symmteric kernels is requested for this collective
