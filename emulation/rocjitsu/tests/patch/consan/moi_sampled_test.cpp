@@ -2506,6 +2506,47 @@ TEST(ConSanMoi, SampledSharedAccessRelayPreservesEntryIslandForFarBarrier) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Rdna4SampledDenseBarrierRelayKeepsManyFarPairsReachable) {
+  constexpr uint32_t kBarrierCount = 10;
+  std::vector<uint32_t> words;
+  for (uint32_t i = 0; i < kBarrierCount; ++i) {
+    words.push_back(0xD8340000u); // ds_store_b32 v0, v0
+    words.push_back(0x00000000u);
+    words.push_back(0xBE804EC1u); // s_barrier_signal -1
+    words.push_back(0xBF94FFFFu); // s_barrier_wait -1
+  }
+  // Keep every barrier near the entry while forcing its appended body beyond
+  // SOPP reach. The dense relay must relocate one ordinary host and route all
+  // ten pairs through it instead of consuming scarce local NOP islands.
+  words.resize(33'000u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_RDNA4));
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_track_barriers = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_dispatch_id_sgpr = 70;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2u * kBarrierCount);
+  options.moi_runtime_sample_stride = 16384;
+  options.max_patches = 3u * kBarrierCount;
+
+  const ConSanResult result =
+      try_patch_consan(make_rdna4_lds_code_object(words, "rdna4_dense_sampled_barriers"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                               &ConSanPatchInfo::kind),
+            kBarrierCount);
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("no reachable entry island") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, SampledQualifiedBarrierAdmitsLongStraightLinePair) {
   std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});

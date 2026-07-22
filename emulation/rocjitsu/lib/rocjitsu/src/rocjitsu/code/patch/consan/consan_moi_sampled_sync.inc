@@ -997,7 +997,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
                                           : 0u;
   constexpr uint64_t kIndirectIslandWords = 7u;
   std::vector<ConSanPatchInfo> patches;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  const bool use_dense_barrier_relay = arch == ROCJITSU_CODE_ARCH_GFX1250 ||
+                                       (arch == ROCJITSU_CODE_ARCH_RDNA4 && selected.size() >= 8u);
+  if (use_dense_barrier_relay) {
     const auto special_state = moi_special_state_sgprs(options);
     if (!options.moi_exec_save_sgpr || !special_state) {
       result.errors.emplace_back(
@@ -1007,6 +1009,13 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     const uint16_t base = *options.moi_exec_save_sgpr;
     const uint16_t key_sgpr = static_cast<uint16_t>(base + 5u);
     const uint16_t call_return_sgpr = static_cast<uint16_t>(base + 6u);
+    const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
+      if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+        return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
+      if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+        return build_s_call_b64(call_return_sgpr, simm16, arch);
+      return std::nullopt;
+    };
     constexpr uint64_t kHostWords = kIndirectIslandWords + 1u;
     constexpr uint64_t kHostBytes = kHostWords * sizeof(uint32_t);
     constexpr uint64_t kDispatcherWordsPerSite = 20u;
@@ -1225,8 +1234,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       }
       std::memcpy(new_text.data() + island_offset, island_words.data(),
                   island_words.size() * sizeof(uint32_t));
-      const auto host_call =
-          instrumentation::build_s_call_i64(call_return_sgpr, /*next instruction=*/0, arch);
+      const auto host_call = build_direct_call(/*next instruction=*/0);
       if (!host_call) {
         result.errors.emplace_back(
             "ConSan MOI sampled dense barrier relay could not encode its host call");
@@ -1301,9 +1309,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         const Planned &planned = selected[body.selected_index];
         const ConSanBarrierSite &site = planned.candidate.barrier.site;
         const auto call_delta = compute_sopp_branch_simm16(site.text_offset, island_offset);
-        const auto call =
-            call_delta ? instrumentation::build_s_call_i64(call_return_sgpr, *call_delta, arch)
-                       : std::nullopt;
+        const auto call = call_delta ? build_direct_call(*call_delta) : std::nullopt;
         if (!call) {
           result.errors.emplace_back(
               "ConSan MOI sampled dense barrier relay could not encode a barrier call");
