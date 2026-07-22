@@ -416,6 +416,11 @@ TEST(Gfx12QuickScanTest, CapturesRareTokenByteOffset)
     if (!quick_scan::avx512_available()) GTEST_SKIP() << "quick_scan requires AVX-512";
 
     TokenStreamBuilder builder;
+    header_type header{};
+    header.header = 0b0010001;
+    header.version = 4;
+    for (size_t i = 0; i < 4; ++i) builder.writeBits(header.raw, 64);
+
     builder.writeBits(0, 4);
     builder.writeBits(0, 4);
 
@@ -429,7 +434,7 @@ TEST(Gfx12QuickScanTest, CapturesRareTokenByteOffset)
 
     ASSERT_EQ(n, 1);
     EXPECT_EQ(out[0].type, RdnaType::REG_INIT);
-    EXPECT_EQ(out[0].offset, 1);
+    EXPECT_EQ(out[0].offset, 33);
 }
 
 TEST(MI400QuickScanTest, CapturesRareTokenByteOffset)

@@ -4,7 +4,7 @@
 """
 Tests for the transpose example.
 Equivalent to rocprof-sys-rocm-tests.cmake
-    Note: MPI is not yet supported
+    Note: MPI multi-process execution is exercised if built with MPI support.
 
 This module tests the transpose HIP example with various instrumentation modes:
 - Baseline execution (no instrumentation)
@@ -198,6 +198,26 @@ class TestTranspose(RocprofsysTest):
             "transpose",
             env=transpose_env,
             run_args=self.TWO_KERNELS_RUN_ARGS,
+            check_target_arch=True,
+        )
+        self.assert_regex(result)
+
+    @pytest.mark.locks
+    @pytest.mark.timeout(60)
+    def test_mutex_locks(self, transpose_env):
+        """
+        Regression test for a self-deadlock: pthread_mutex_gotcha used to
+        intercept the trace cache's own internal lock (buffer_storage's
+        m_mutex), recursively re-entering it on the same thread while
+        recording the trace event for the lock acquisition itself. This
+        hung rocprof-sys-run indefinitely with -I mutex-locks enabled.
+        """
+        result = self.run_test(
+            "sys_run",
+            "transpose",
+            env=transpose_env,
+            sys_run_args=["-I", "mutex-locks"],
+            run_args=["2", "50", "10"],
             check_target_arch=True,
         )
         self.assert_regex(result)

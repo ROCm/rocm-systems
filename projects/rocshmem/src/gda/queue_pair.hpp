@@ -416,7 +416,7 @@ class QueuePair {
   __device__ void ionic_ring_doorbell_single(uint32_t pos);
 #endif
 
-  // TODO: make private once gin_qp_factory uses a proper init API
+  // TODO: make private once gin_rocshmem_gda_factory uses a proper init API
  public:
   /* GDAProvider::BNXT START */
   uint64_t *bnxt_dbr;

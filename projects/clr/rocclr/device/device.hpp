@@ -8,6 +8,7 @@
 #define DEVICE_HPP_
 
 #include "top.hpp"
+#include <atomic>
 #include "thread/thread.hpp"
 #include "thread/monitor.hpp"
 #include "platform/context.hpp"
@@ -52,6 +53,8 @@ class FillMemoryCommand;
 class CopyMemoryCommand;
 class CopyMemoryP2PCommand;
 class BatchCopyMemoryCommand;
+class BatchWriteMemoryCommand;
+class BatchReadMemoryCommand;
 class MapMemoryCommand;
 class UnmapMemoryCommand;
 class MigrateMemObjectsCommand;
@@ -1308,6 +1311,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
   virtual void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) = 0;
   virtual void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) = 0;
+  virtual void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) = 0;
+  virtual void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) = 0;
   virtual void submitMapMemory(amd::MapMemoryCommand& cmd) = 0;
   virtual void submitUnmapMemory(amd::UnmapMemoryCommand& cmd) = 0;
   virtual void submitKernel(amd::NDRangeKernelCommand& command) = 0;
@@ -1376,7 +1381,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
                                           bool attach_signal = false,
                                           const std::vector<const std::string*>* kernelNames = nullptr,
                                           bool pre_patched = false,
-                                          bool blocking = false) {
+                                          bool blocking = false,
+                                          const std::vector<uint8_t>* flatMetadataData = nullptr) {
     return false;
   }
 
@@ -1740,8 +1746,17 @@ class Device : public RuntimeObject {
 
   //<! Enum describing the access permissions of Virtual memory
   enum class VmmAccess { kNone = 0x0, kReadOnly = 0x1, kReadWrite = 0x3 };
-  //<! Enum describing the location of Virtual memory
-  enum class VmmLocationType { kNone = 0x0, kDevice = 0x1, kHost = 0x2 };
+  //<! Enum describing the location of Virtual memory. Values mirror hipMemLocationType
+  //<! so hip_vm.cpp can static_cast between them.
+  enum class VmmLocationType {
+    kNone = 0x0,
+    kDevice = 0x1,
+    kHost = 0x2,
+    kHostNuma = 0x3,
+    kHostNumaCurrent = 0x4
+  };
+
+  enum class VmmExportStatus { kSuccess, kError, kResourceNotReady };
 
   typedef std::pair<LinkAttribute, int32_t /* value */> LinkAttrType;
 
@@ -1753,7 +1768,7 @@ class Device : public RuntimeObject {
   // Max Scratch size is based on ISA and thus per device.
   // Def value is as per GFX9 being the least among supported devices.
   size_t maxStackSize_ = kMaxStackSize9X;
-  static cl_int gpu_error_;  //!< Store the GPU error cause during kernel launch
+  static std::atomic<cl_int> gpu_error_;  //!< Store the GPU error cause during kernel launch
 
   typedef std::list<CommandQueue*> CommandQueues;
 
@@ -2108,7 +2123,8 @@ class Device : public RuntimeObject {
    * @param count Number of access permissions
    */
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                            VmmLocationType = VmmLocationType::kDevice) = 0;
+                            VmmLocationType = VmmLocationType::kDevice,
+                            int numaNode = -1) = 0;
 
   /**
    * Get Access permisions for a virtual memory object.
@@ -2140,10 +2156,11 @@ class Device : public RuntimeObject {
    * @param flags any flags to be passed
    * @param shareableHandle exported handle, points to fdesc.
    */
-  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
-                                        void* shareableHandle, amd::Memory::HandleType handle_type) {
+  virtual VmmExportStatus ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
+                                                   void* shareableHandle,
+                                                   amd::Memory::HandleType handle_type) {
     ShouldNotCallThis();
-    return false;
+    return VmmExportStatus::kError;
   }
 
   /**
@@ -2204,6 +2221,10 @@ class Device : public RuntimeObject {
   virtual uint32_t getPreferredNumaNode() const {
     return static_cast<uint32_t>(-1); //!< PAL doesn't support it
   }
+
+  //! Number of host NUMA nodes (CPU agents) usable for host-NUMA VMM allocations.
+  //! Returns 0 when host-NUMA is unsupported (e.g. PAL).
+  virtual uint32_t numHostNumaNodes() const { return 0; }
 
   virtual void ReleaseGlobalSignal(void* signal) const {}
   virtual void RetainGlobalSignal(void* signal) const {}
@@ -2400,8 +2421,8 @@ class Device : public RuntimeObject {
 #endif
 #endif
 
-  static bool IsGPUInError() { return (gpu_error_ != CL_SUCCESS); }
-  static cl_int GetGPUError() { return gpu_error_; }
+  static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
+  static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
 
   bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle);
 

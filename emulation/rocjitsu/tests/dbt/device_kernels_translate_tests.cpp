@@ -8,6 +8,7 @@
 #error "device_kernels_translate_tests.cpp requires HAS_DEVICE_KERNELS"
 #endif
 
+#include "../test_paths.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
@@ -40,7 +41,7 @@ RJ_DIAGNOSTIC_POP
 
 namespace {
 
-std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
+using rocjitsu::test::kernel_path;
 
 const rocjitsu::Section *find_section(const rocjitsu::CodeObject &co, std::string_view name) {
   for (const auto &section : co.all_sections()) {

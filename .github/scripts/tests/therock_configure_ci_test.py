@@ -123,6 +123,22 @@ class ConfigureCITest(unittest.TestCase):
             therock_configure_ci.is_path_skippable(".github/workflows/labeler.yml")
         )
 
+        # Workflow/script files unrelated to TheRock CI are skippable without
+        # needing to be enumerated (issue #7849).
+        self.assertTrue(
+            therock_configure_ci.is_path_skippable(".github/workflows/rdc-ci.yml")
+        )
+        self.assertTrue(
+            therock_configure_ci.is_path_skippable(
+                ".github/workflows/amdsmi-manylinux-build.yml"
+            )
+        )
+        self.assertTrue(
+            therock_configure_ci.is_path_skippable(
+                ".github/workflows/rocjitsu-corpus-tests.yml"
+            )
+        )
+
         # Test non-skippable patterns
         self.assertFalse(
             therock_configure_ci.is_path_skippable("projects/rocminfo/src/main.cpp")
@@ -130,6 +146,17 @@ class ConfigureCITest(unittest.TestCase):
         self.assertFalse(therock_configure_ci.is_path_skippable("CMakeLists.txt"))
         self.assertFalse(
             therock_configure_ci.is_path_skippable("projects/rocminfo/test/test.cpp")
+        )
+
+        # TheRock CI workflow and script files are non-skippable so changes to
+        # them still trigger CI.
+        self.assertFalse(
+            therock_configure_ci.is_path_skippable(".github/workflows/therock-ci.yml")
+        )
+        self.assertFalse(
+            therock_configure_ci.is_path_skippable(
+                ".github/scripts/therock_configure_ci.py"
+            )
         )
 
     def test_check_for_non_skippable_path(self):

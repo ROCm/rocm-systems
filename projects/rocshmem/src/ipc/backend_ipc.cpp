@@ -34,6 +34,8 @@
 #include "ipc_team.hpp"
 #include "mpi_instance.hpp"
 #include "log.hpp"
+#include "memory/default_allocator.hpp"
+#include "memory/hip_allocator_vmm_common.hpp"
 
 namespace rocshmem {
 
@@ -112,13 +114,20 @@ IPCBackend::IPCBackend(TcpBootstrap *bootstrap):  Backend(bootstrap) {
 void IPCBackend::init() {
   ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque = default_host_ctx.get();
 
+  setup_symm_registration();
+
   setup_wrk_sync_buffers();
 
   rocshmem_collective_init();
 
-  setup_fence_buffer();
-
   teams_init();
+
+  /*
+   * Carve the fence region last. Its size (sizeof(int) * num_pes) is not a
+   * multiple of wrk_sync_pool_alignment for odd num_pes, so allocating it after
+   * every 64-bit-atomic region keeps those regions aligned.
+   */
+  setup_fence_buffer();
 
   setup_team_world();
 
@@ -137,6 +146,7 @@ IPCBackend::~IPCBackend() {
    * and team world
    */
   teams_destroy();
+  cleanup_symm_registration();
   cleanup_wrk_sync_buffer();
 
   // Close IPC handles for remote heap bases
@@ -345,19 +355,33 @@ void IPCBackend::ctx_destroy(Context *ctx) {
   delete ro_net_host_ctx;
 }
 
-void IPCBackend::reset_backend_stats() {
-  assert(false);
+void IPCBackend::accumulate_ctx_device_stats() {
+  ROCStats tmp;
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemcpy(&tmp, &ctx_array[i].ctxStats, sizeof(ROCStats),
+                        hipMemcpyDeviceToHost));
+    globalStats.hostAccumulateStats(tmp);
+  }
 }
 
-void IPCBackend::dump_backend_stats() {
-  assert(false);
+void IPCBackend::accumulate_default_host_ctx_stats() {
+  globalHostStats.accumulateStats(default_host_ctx->ctxHostStats);
 }
+
+void IPCBackend::reset_backend_stats() {
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemset(&ctx_array[i].ctxStats, 0, sizeof(ROCStats)));
+  }
+  default_host_ctx->ctxHostStats.resetStats();
+}
+
 
 void IPCBackend::initIPC() {
   const auto &heap_bases{heap.get_heap_bases()};
 
   ipcImpl.ipcHostInit(my_pe, heap_bases,
                       backend_comm);
+  ipcImpl.heap_size = heap.get_size();
 }
 
 void IPCBackend::initIPC(TcpBootstrap *bootstr) {
@@ -365,6 +389,7 @@ void IPCBackend::initIPC(TcpBootstrap *bootstr) {
 
   ipcImpl.ipcHostInit(my_pe, heap_bases,
                       bootstr);
+  ipcImpl.heap_size = heap.get_size();
 }
 
 void IPCBackend::global_exit(int status) {
@@ -392,7 +417,7 @@ void IPCBackend::setup_wrk_sync_buffers() {
 
   /**
    * Size of sync arrays for the teams
-  */
+   */
   wrk_sync_pool_size_ += sizeof(long) * max_num_teams *
                            (ROCSHMEM_BARRIER_SYNC_SIZE +
                             ROCSHMEM_REDUCE_SYNC_SIZE +
@@ -402,19 +427,23 @@ void IPCBackend::setup_wrk_sync_buffers() {
   /**
    * Size of work arrays for the teams
    * Accommodate largest possible data type for pWrk
-  */
+   */
   wrk_sync_pool_size_ += sizeof(double) * max_num_teams *
                            ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
 
   /**
    * Size of fence array
-  */
+   */
   wrk_sync_pool_size_ += sizeof(int) * num_pes;
+
+  /* Round up so the alignment guards in the carve functions cannot overflow it. */
+  wrk_sync_pool_size_ =
+      __builtin_align_up(wrk_sync_pool_size_, wrk_sync_pool_alignment);
 
   /**
    * Allocate a buffer of size wrk_sync_pool_size_, using fine-grained
    * memory allocator
-  */
+   */
   psync_allocator_->allocate((void**)&wrk_sync_pool_,
                                     wrk_sync_pool_size_);
   assert(wrk_sync_pool_);
@@ -478,11 +507,355 @@ void IPCBackend::cleanup_wrk_sync_buffer() {
 }
 
 void IPCBackend::setup_fence_buffer() {
-  /*
-  * Allocate memory for fence
-  */
+  /* Must be carved last (see init()); do not add pool regions after this. */
   fence_pool = reinterpret_cast<int *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(int) * num_pes;
+}
+
+void IPCBackend::setup_symm_registration() {
+#if HIP_VERSION >= 70000000
+  /*
+   * Allocate the device-visible symmetric-registration table in
+   * host+device accessible (fine-grained) memory. The pointer is shared by
+   * all contexts via IpcImpl::initFrom so registrations are observed without
+   * re-propagation.
+   */
+  int capacity = static_cast<int>(max_symm_regions_);
+  if (capacity <= 0) {
+    capacity = 1;
+  }
+
+  IpcSymmTable *table{nullptr};
+  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&table), sizeof(IpcSymmTable)));
+  assert(table);
+  CHECK_HIP(hipMemset(table, 0, sizeof(IpcSymmTable)));
+
+  IpcSymmRegion *regions{nullptr};
+  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&regions),
+                      sizeof(IpcSymmRegion) * capacity));
+  assert(regions);
+  CHECK_HIP(hipMemset(regions, 0, sizeof(IpcSymmRegion) * capacity));
+
+  IpcSymmTable host_table{};
+  host_table.count = 0;
+  host_table.capacity = capacity;
+  host_table.regions = regions;
+  CHECK_HIP(hipMemcpy(table, &host_table, sizeof(IpcSymmTable),
+                      hipMemcpyHostToDevice));
+  ipcImpl.symm_table = table;
+#else
+  ipcImpl.symm_table = nullptr;
+#endif
+}
+
+void IPCBackend::cleanup_symm_registration() {
+#if HIP_VERSION >= 70000000
+  /*
+   * Unregister anything the user left registered. buffer_unregister_symmetric
+   * mutates ipc_symm_records_, so iterate over a snapshot of the keys.
+   */
+  std::vector<uintptr_t> addrs;
+  addrs.reserve(ipc_symm_records_.size());
+  for (auto &kv : ipc_symm_records_) {
+    addrs.push_back(kv.first);
+  }
+  for (auto a : addrs) {
+    buffer_unregister_symmetric(reinterpret_cast<void *>(a));
+  }
+
+  if (ipcImpl.symm_table != nullptr) {
+    /*
+     * The table is in device memory; stage it on the host to recover the
+     * regions pointer before freeing.
+     */
+    IpcSymmTable host_table{};
+    CHECK_HIP(hipMemcpy(&host_table, ipcImpl.symm_table, sizeof(IpcSymmTable),
+                        hipMemcpyDeviceToHost));
+    if (host_table.regions != nullptr) {
+      CHECK_HIP(hipFree(host_table.regions));
+    }
+    CHECK_HIP(hipFree(ipcImpl.symm_table));
+    ipcImpl.symm_table = nullptr;
+  }
+#endif
+}
+
+int IPCBackend::buffer_register_symmetric([[maybe_unused]] void *addr,
+                                          [[maybe_unused]] size_t length,
+                                          [[maybe_unused]] void **registered_addr) {
+#if HIP_VERSION >= 70000000
+  if (registered_addr == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  IpcSymmTable *table = ipcImpl.symm_table;
+  if (table == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  HIPAllocator *alloc = heap.get_allocator();
+
+  /*
+   * Registration is collective and exchanges data via symm_allgather below. If
+   * a PE returned early on a local error, it would drop out of those collectives
+   * and either deadlock the remaining PEs or leave the symmetric region
+   * published on some PEs but not others.
+   *
+   * To keep all PEs on the same path, every step that can fail locally records
+   * a success flag, allgathers it, and proceeds only if all PEs succeeded.
+   * Otherwise all PEs roll back their partial state and return an error
+   * together.
+   */
+  auto all_pes_succeeded = [&](int local_success) {
+    std::vector<int> pe_success(num_pes, 0);
+    pe_success[my_pe] = local_success;
+    symm_allgather(pe_success.data(), sizeof(int));
+    for (int i = 0; i < num_pes; i++) {
+      if (!pe_success[i]) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  /*
+   * Stage 1: per-PE host-side setup. Validates the user buffer (VMM/per-buffer
+   * checks), maps it to a rocSHMEM-owned alias, runs capacity/overlap
+   * checks, and records it keyed by the alias. The alias is the address the
+   * caller uses for RMA and unregistration, and the local base published into
+   * the device translation table.
+   */
+  void *alias = nullptr;
+  int register_ok = (Backend::buffer_register_symmetric(addr, length, &alias) ==
+                     ROCSHMEM_SUCCESS) ? 1 : 0;
+  if (!all_pes_succeeded(register_ok)) {
+    if (register_ok) {
+      Backend::buffer_unregister_symmetric(alias);
+    }
+    return ROCSHMEM_ERROR;
+  }
+
+  /*
+   * Symmetric size check: registration is collective, so every PE must call
+   * with the same length. All-gather the sizes and compare. Every PE inspects
+   * the same gathered vector, so a mismatch makes all PEs unwind together.
+   */
+  {
+    std::vector<size_t> sizes(num_pes, 0);
+    sizes[my_pe] = length;
+    symm_allgather(sizes.data(), sizeof(size_t));
+    for (int i = 0; i < num_pes; i++) {
+      if (sizes[i] != length) {
+        Backend::buffer_unregister_symmetric(alias);
+        return ROCSHMEM_ERROR;
+      }
+    }
+  }
+
+  /* The alias is the symmetric address; key all IPC bookkeeping by it. */
+  uintptr_t key = reinterpret_cast<uintptr_t>(alias);
+
+  size_t handle_size = alloc->GetIpcHandleSize();
+
+  HIPIpcHandleVec *vec = alloc->AllocateIpcHandleVec(num_pes);
+
+  /*
+   * Stage 2: export this PE's IPC handle for its buffer (the original
+   * allocation). This runs before the collective handle exchange, so its
+   * outcome is made collective to avoid deadlocking the allgather below.
+   */
+  int export_ok = (alloc->GetIpcHandleFromPtr(addr, length,
+                       vec->GetHandleVecElem(my_pe)) == hipSuccess) ? 1 : 0;
+  if (!all_pes_succeeded(export_ok)) {
+    if (export_ok) {
+      (void)alloc->CloseExportedHandle(vec->GetHandleVecElem(my_pe));
+    }
+    delete vec;
+    Backend::buffer_unregister_symmetric(alias);
+    return ROCSHMEM_ERROR;
+  }
+
+  /* Keep this PE's handle bytes so the export can be released later. */
+  std::vector<char> local_handle(handle_size);
+  std::memcpy(local_handle.data(), vec->GetHandleVecElem(my_pe), handle_size);
+
+  /* Collective exchange of IPC handles (common base helper). */
+  symm_allgather(vec->GetHandleVecElem(0), handle_size);
+
+  /*
+   * Stage 3: build the array of peer-mapped base addresses on the host. The
+   * device reads this array in ipcPeerPtr, so a device-memory copy is published
+   * below; the host copy is retained for teardown (CloseIpcHandle).
+   */
+  std::vector<char *> host_peer_bases(num_pes, nullptr);
+
+  int open_ok = 1;
+  for (int i = 0; i < num_pes; i++) {
+    if (i == my_pe) {
+      /* Local accesses through the symmetric address resolve to the alias. */
+      host_peer_bases[i] = reinterpret_cast<char *>(alias);
+      continue;
+    }
+    void *p{nullptr};
+    if (alloc->OpenIpcHandle(&p, vec->GetHandleVecElem(i)) != hipSuccess) {
+      /* Close the peer mappings this PE opened so far. */
+      for (int j = 0; j < i; j++) {
+        if (j == my_pe) {
+          continue;
+        }
+        (void)alloc->CloseIpcHandle(host_peer_bases[j]);
+        host_peer_bases[j] = nullptr;
+      }
+      open_ok = 0;
+      break;
+    }
+    host_peer_bases[i] = reinterpret_cast<char *>(p);
+  }
+
+  /*
+   * Opening peer mappings is the last per-PE step that can fail. There is no
+   * further collective communication, but a per-PE early return would publish
+   * the region on some PEs and not others. Agree on the outcome so all PEs
+   * either keep the region or unwind it.
+   */
+  if (!all_pes_succeeded(open_ok)) {
+    if (open_ok) {
+      /* This PE mapped every peer; close the mappings it opened. */
+      for (int i = 0; i < num_pes; i++) {
+        if (i == my_pe) {
+          continue;
+        }
+        (void)alloc->CloseIpcHandle(host_peer_bases[i]);
+      }
+    }
+    (void)alloc->CloseExportedHandle(local_handle.data());
+    delete vec;
+    Backend::buffer_unregister_symmetric(alias);
+    return ROCSHMEM_ERROR;
+  }
+
+  delete vec;
+
+  /* Publish the peer-base array into device memory for ipcPeerPtr. */
+  char **peer_bases{nullptr};
+  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&peer_bases),
+                      num_pes * sizeof(char *)));
+  CHECK_HIP(hipMemcpy(peer_bases, host_peer_bases.data(),
+                      num_pes * sizeof(char *), hipMemcpyHostToDevice));
+
+  /*
+   * Publish the region into the device-visible table. The table lives in
+   * device memory, so read/update it through host staging copies rather than
+   * dereferencing the device pointer from the host.
+   */
+  IpcSymmTable host_table{};
+  CHECK_HIP(hipMemcpy(&host_table, table, sizeof(IpcSymmTable),
+                      hipMemcpyDeviceToHost));
+  int slot = host_table.count;
+
+  /*
+   * Guard the device-table bound. The base class already enforces
+   * max_symm_regions_ (== table capacity), so this should never trigger; it
+   * protects the regions[] write from overflow if the host/device bookkeeping
+   * ever diverges. Roll back the IPC-specific state acquired above.
+   */
+  if (slot >= host_table.capacity) {
+    for (int i = 0; i < num_pes; i++) {
+      if (i == my_pe) {
+        continue;
+      }
+      (void)alloc->CloseIpcHandle(host_peer_bases[i]);
+    }
+    (void)hipFree(peer_bases);
+    (void)alloc->CloseExportedHandle(local_handle.data());
+    Backend::buffer_unregister_symmetric(alias);
+    return ROCSHMEM_ERROR;
+  }
+
+  IpcSymmRegion host_region{};
+  host_region.local_base = key;
+  host_region.length = length;
+  host_region.peer_bases = peer_bases;
+  CHECK_HIP(hipMemcpy(&host_table.regions[slot], &host_region,
+                      sizeof(IpcSymmRegion), hipMemcpyHostToDevice));
+
+  host_table.count = slot + 1;
+  CHECK_HIP(hipMemcpy(table, &host_table, sizeof(IpcSymmTable),
+                      hipMemcpyHostToDevice));
+
+  /* Record IPC-specific bookkeeping for unregister. */
+  IpcSymmRecord rec;
+  rec.slot = slot;
+  rec.dev_peer_bases = peer_bases;
+  rec.peer_bases = std::move(host_peer_bases);
+  rec.local_handle = std::move(local_handle);
+  ipc_symm_records_[key] = std::move(rec);
+
+  *registered_addr = alias;
+  return ROCSHMEM_SUCCESS;
+#else
+  return ROCSHMEM_ERROR;
+#endif
+}
+
+int IPCBackend::buffer_unregister_symmetric([[maybe_unused]] void *addr) {
+#if HIP_VERSION >= 70000000
+  if (addr == nullptr || ipcImpl.symm_table == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t key = reinterpret_cast<uintptr_t>(addr);
+  auto it = ipc_symm_records_.find(key);
+  if (it == ipc_symm_records_.end()) {
+    return ROCSHMEM_ERROR;
+  }
+
+  HIPAllocator *alloc = heap.get_allocator();
+  IpcSymmTable *table = ipcImpl.symm_table;
+
+  int slot = it->second.slot;
+  std::vector<char *> &peer_bases = it->second.peer_bases;
+
+  /* Close peer mappings and release our exported handle. */
+  for (int i = 0; i < num_pes; i++) {
+    if (i == my_pe) {
+      continue;
+    }
+    CHECK_HIP(alloc->CloseIpcHandle(peer_bases[i]));
+  }
+  (void)alloc->CloseExportedHandle(it->second.local_handle.data());
+
+  /*
+   * Compact the device table by moving the last region into the freed slot.
+   * The table is in device memory, so stage the header on the host and perform
+   * the region move with a device-to-device copy.
+   */
+  IpcSymmTable host_table{};
+  CHECK_HIP(hipMemcpy(&host_table, table, sizeof(IpcSymmTable),
+                      hipMemcpyDeviceToHost));
+  int last = host_table.count - 1;
+  if (slot != last) {
+    CHECK_HIP(hipMemcpy(&host_table.regions[slot], &host_table.regions[last],
+                        sizeof(IpcSymmRegion), hipMemcpyDeviceToDevice));
+    for (auto &kv : ipc_symm_records_) {
+      if (kv.second.slot == last) {
+        kv.second.slot = slot;
+        break;
+      }
+    }
+  }
+  host_table.count = last;
+  CHECK_HIP(hipMemcpy(table, &host_table, sizeof(IpcSymmTable),
+                      hipMemcpyHostToDevice));
+
+  CHECK_HIP(hipFree(it->second.dev_peer_bases));
+  ipc_symm_records_.erase(it);
+
+  /* Common host-side bookkeeping. */
+  return Backend::buffer_unregister_symmetric(addr);
+#else
+  return ROCSHMEM_ERROR;
+#endif
 }
 
 void IPCBackend::rocshmem_collective_init() {
@@ -492,6 +865,9 @@ void IPCBackend::rocshmem_collective_init() {
   size_t one_sync_size_bytes {sizeof(*barrier_sync)};
   size_t sync_size_bytes {one_sync_size_bytes * ROCSHMEM_BARRIER_SYNC_SIZE};
 
+  /* Guard: barrier_sync is accessed with 64-bit atomics; keep it 8-byte aligned. */
+  wrk_sync_pool_top_ =
+      __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
   barrier_sync = reinterpret_cast<int64_t*>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sync_size_bytes;
 
@@ -519,6 +895,9 @@ void IPCBackend::teams_init() {
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
+  /* Guard: the pSync pools are accessed with 64-bit atomics; keep them 8-byte aligned. */
+  wrk_sync_pool_top_ =
+      __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
   barrier_pSync_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_BARRIER_SYNC_SIZE
                             * max_num_teams;

@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information.
  ************************************************************************/
 
-#include "dda_all_reduce_ipc.h"
+#include "dda_all_reduce.h"
 
 #include "algorithms/CollCommon.h"
 #include "algorithms/all_reduce/all_reduce_dda.h"
@@ -12,7 +12,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "ipc_gpu_barrier.h"
-#include "ipc_init_detail.h"
+#include "dda_init_detail.h"
 
 #include <cuda_runtime.h>
 
@@ -23,9 +23,9 @@
 
 namespace {
 
-using nccl_dda_ipc_detail::DdaIpcBarrierState;
-using nccl_dda_ipc_detail::ddaMaxNBlocksForScratch;
-using nccl_dda_ipc_detail::kDdaNranks;
+using nccl_dda_detail::DdaIpcBarrierState;
+using nccl_dda_detail::ddaMaxNBlocksForScratch;
+using nccl_dda_detail::kDdaNranks;
 
 /** Flat below this size; tree above (see ddaAllReduceFlatIpc / ddaAllReduceTreeIpc). */
 constexpr size_t kDdaFlatTreeThresholdBytes = 1ULL << 18;
@@ -37,16 +37,16 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
     size_t count,
     ncclComm* comm,
     cudaStream_t stream) {
-  if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcScratch == nullptr ||
-      comm->ddaIpcPeerPtrsDev == nullptr || comm->ddaIpcBarrierState == nullptr) {
+  if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr ||
+      comm->ddaPeerPtrsDev == nullptr || comm->ddaIpcBarrierState == nullptr) {
     return ncclInvalidUsage;
   }
-  if (count * sizeof(T) > comm->ddaIpcScratchBytes) {
+  if (count * sizeof(T) > comm->ddaScratchBytes) {
     WARN(
         "DDA IPC allreduce: element count %zu needs %zu bytes; comm scratch is %zu bytes",
         count,
         count * sizeof(T),
-        comm->ddaIpcScratchBytes);
+        comm->ddaScratchBytes);
     return ncclInvalidArgument;
   }
 
@@ -75,12 +75,12 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
       static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
   meta::comms::IpcGpuBarrier barrierHost = barrierState->barrierHost;
 
-  void* peerPtrsDev = comm->ddaIpcPeerPtrsDev;
+  void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   if (treeOk) {
     CUDACHECK(cudaMemcpyAsync(
-        comm->ddaIpcScratch,
+        comm->ddaScratch,
         sendbuff,
         count * sizeof(T),
         cudaMemcpyDeviceToDevice,
@@ -120,20 +120,32 @@ bool ncclAllReduceDdaIpcEligible(
     size_t count,
     ncclDataType_t datatype,
     ncclRedOp_t op) {
-  if (comm == nullptr || comm->bootstrap == nullptr) {
+  (void)sendbuff;
+  (void)recvbuff;
+  if (comm == nullptr) {
     return false;
   }
-  if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcScratch == nullptr ||
-      comm->ddaIpcPeerPtrsDev == nullptr || comm->ddaIpcBarrierState == nullptr) {
-    return false;
-  }
-  if (count == 0) {
+  // IPC path: requires its own handler + barrier state, a single node, and
+  // exactly kDdaNranks ranks (the IPC kernels fix the rank count at compile
+  // time).
+  if (comm->ddaIpcMemHandler == nullptr ||
+      comm->ddaIpcBarrierState == nullptr) {
     return false;
   }
   if (comm->nNodes != 1) {
     return false;
   }
-  if (comm->nRanks != nccl_dda_ipc_detail::kDdaNranks) {
+  if (comm->nRanks != kDdaNranks) {
+    return false;
+  }
+  // Checks shared by both DDA all-reduce backends.
+  if (comm->bootstrap == nullptr) {
+    return false;
+  }
+  if (comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+    return false;
+  }
+  if (count == 0) {
     return false;
   }
   if (op != ncclSum) {
@@ -143,25 +155,22 @@ bool ncclAllReduceDdaIpcEligible(
       datatype != ncclBfloat16) {
     return false;
   }
-  size_t need = count * 4;
-  if (datatype == ncclFloat16 || datatype == ncclBfloat16) {
-    need = count * 2;
-  }
-  if (need > comm->ddaIpcScratchBytes) {
+  const size_t bytes = count * ncclTypeSize(datatype);
+  if (bytes > comm->ddaScratchBytes) {
     return false;
   }
-  if ((count *  ncclTypeSize(datatype)) % 16) {
-    // 16 byte alignment as we do 16-byte loads in DDA kernel
+  if (bytes % 16) {
+    // 16-byte alignment: the DDA kernels do 16-byte vectorized loads.
     return false;
   }
-  if ((count *  ncclTypeSize(datatype)) > kDdaFlatTreeThresholdBytes) {
-    if (count % comm->nRanks || ((count / comm->nRanks * ncclTypeSize(datatype)) % 16)) {
-      // In two-shot algo, each rank is reduces count/nRanks_ elements so we
-      // need to make sure that is 16-byte aligned
+  if (bytes > kDdaFlatTreeThresholdBytes) {
+    if (count % comm->nRanks ||
+        ((count / comm->nRanks) * ncclTypeSize(datatype)) % 16) {
+      // Two-shot/tree path: each rank reduces count/nRanks elements, so that
+      // per-rank slice must also be 16-byte aligned.
       return false;
-    }	
+    }
   }
-
   return true;
 }
 

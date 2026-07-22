@@ -37,10 +37,13 @@ constexpr uint16_t kVopdAddNcU32 = 16;
 constexpr uint16_t kVopdLshlrevB32 = 17;
 constexpr uint16_t kVopdAndB32 = 18;
 
-Operand make_src0(uint32_t bits, [[maybe_unused]] bool vopd3, bool use_literal, uint32_t literal,
-                  uint16_t encoded) {
-  if (use_literal && encoded == 255)
+Operand make_src0(uint32_t bits, [[maybe_unused]] bool vopd3, bool use_literal,
+                  bool literal_uses_f64_high_bits, uint32_t literal, uint16_t encoded) {
+  if (use_literal && encoded == 255) {
+    if (literal_uses_f64_high_bits)
+      return Operand(bits, OperandType::OPR_SIMM32, (static_cast<uint64_t>(literal) << 32), true);
     return Operand(bits, OperandType::OPR_SIMM32, static_cast<int>(literal));
+  }
   return Operand(bits, OperandType::OPR_SRC, encoded);
 }
 
@@ -236,8 +239,8 @@ Vopd::Vopd(const MachineInst *inst)
   constexpr uint32_t y_bits = 32;
   dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
   dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
-  srcx0_ = make_src0(x_bits, false, has_literal_, literal_, srcx0);
-  srcy0_ = make_src0(y_bits, false, has_literal_, literal_, srcy0);
+  srcx0_ = make_src0(x_bits, false, has_literal_, false, literal_, srcx0);
+  srcy0_ = make_src0(y_bits, false, has_literal_, false, literal_, srcy0);
   srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
   srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
 

@@ -67,8 +67,13 @@ enum class CoherenceState : uint8_t {
 };
 
 /// @brief Tag and metadata for a single cache line.
+///
+/// @details @c vmid identifies the owning process address space. Lines with the
+/// same line address but different vmids are distinct entries, because guest VAs
+/// are per-process and may alias across processes.
 struct CacheTag {
   uint64_t tag = 0;
+  uint32_t vmid = 0;
   bool valid = false;
   bool dirty = false;
   CoherenceState coherence = CoherenceState::INVALID;
@@ -104,14 +109,15 @@ public:
   ///
   /// @param addr The memory address to look up.
   /// @param tag_out If non-null and hit, set to point at the matching tag.
+  /// @param vmid Owning process address space (lines are tagged by (vmid, addr)).
   /// @retval true Cache hit.
   /// @retval false Cache miss.
-  bool lookup(uint64_t addr, CacheTag **tag_out = nullptr) {
+  bool lookup(uint64_t addr, CacheTag **tag_out = nullptr, uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag) {
+      if (t.valid && t.tag == tag && t.vmid == vmid) {
         policy_.access(set, w);
         if (tag_out)
           *tag_out = &t;
@@ -124,10 +130,12 @@ public:
   /// @brief Allocate a cache line for an address, evicting the LRU victim if needed.
   ///
   /// @param addr The memory address to allocate for.
-  /// @param evicted_tag If non-null, filled with the evicted tag (caller checks dirty).
+  /// @param vmid Owning process address space recorded in the new line's tag.
+  /// @param evicted_tag If non-null, filled with the evicted tag (caller checks dirty,
+  ///        and uses @c evicted_tag->vmid for the writeback address space).
   /// @param evicted_data If non-null, the evicted line data is copied here.
   /// @returns Pointer to the allocated tag entry.
-  CacheTag *allocate(uint64_t addr, CacheTag *evicted_tag = nullptr,
+  CacheTag *allocate(uint64_t addr, uint32_t vmid = 0, CacheTag *evicted_tag = nullptr,
                      uint8_t *evicted_data = nullptr) {
     uint32_t set = set_index(addr);
     uint64_t tag = tag_bits(addr);
@@ -137,6 +145,7 @@ public:
       auto &t = tag_at(set, w);
       if (!t.valid) {
         t.tag = tag;
+        t.vmid = vmid;
         t.valid = true;
         t.dirty = false;
         t.coherence = CoherenceState::INVALID;
@@ -154,6 +163,7 @@ public:
       std::memcpy(evicted_data, line_data(set, victim_way), LINE_SIZE);
 
     vt.tag = tag;
+    vt.vmid = vmid;
     vt.valid = true;
     vt.dirty = false;
     vt.coherence = CoherenceState::INVALID;
@@ -163,12 +173,13 @@ public:
 
   /// @brief Invalidate the cache line for an address (if present).
   /// @param addr The memory address whose cache line to invalidate.
-  void invalidate(uint64_t addr) {
+  /// @param vmid Owning process address space.
+  void invalidate(uint64_t addr, uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag) {
+      if (t.valid && t.tag == tag && t.vmid == vmid) {
         t.valid = false;
         t.dirty = false;
         t.coherence = CoherenceState::INVALID;
@@ -191,12 +202,13 @@ public:
   /// @param dst Destination buffer for the read data.
   /// @param offset Byte offset within the cache line.
   /// @param size Number of bytes to read.
-  void read_line(uint64_t addr, uint8_t *dst, uint32_t offset, uint32_t size) const {
+  void read_line(uint64_t addr, uint8_t *dst, uint32_t offset, uint32_t size,
+                 uint32_t vmid = 0) const {
     uint32_t set = set_index(addr);
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       const auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag) {
+      if (t.valid && t.tag == tag && t.vmid == vmid) {
         assert(offset + size <= LINE_SIZE);
         std::memcpy(dst, line_data(set, w) + offset, size);
         return;
@@ -210,12 +222,13 @@ public:
   /// @param src Source buffer containing data to write.
   /// @param offset Byte offset within the cache line.
   /// @param size Number of bytes to write.
-  void write_line(uint64_t addr, const uint8_t *src, uint32_t offset, uint32_t size) {
+  void write_line(uint64_t addr, const uint8_t *src, uint32_t offset, uint32_t size,
+                  uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag) {
+      if (t.valid && t.tag == tag && t.vmid == vmid) {
         assert(offset + size <= LINE_SIZE);
         std::memcpy(line_data(set, w) + offset, src, size);
         return;
@@ -227,12 +240,12 @@ public:
   /// @brief Fill an entire cache line with data (used after allocate on a miss).
   /// @param addr The memory address identifying the cache line.
   /// @param data Source buffer containing a full cache line of data.
-  void fill_line(uint64_t addr, const uint8_t *data) {
+  void fill_line(uint64_t addr, const uint8_t *data, uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag) {
+      if (t.valid && t.tag == tag && t.vmid == vmid) {
         std::memcpy(line_data(set, w), data, LINE_SIZE);
         return;
       }
@@ -245,12 +258,12 @@ public:
   /// Used by atomic RMW operations that need to read-modify-write in place.
   /// @param addr The memory address identifying the cache line.
   /// @returns Pointer to the line data, or nullptr if not found.
-  uint8_t *line_data_for_write(uint64_t addr) {
+  uint8_t *line_data_for_write(uint64_t addr, uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag) {
+      if (t.valid && t.tag == tag && t.vmid == vmid) {
         policy_.access(set, w);
         return line_data(set, w);
       }

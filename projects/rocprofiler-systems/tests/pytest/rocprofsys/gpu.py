@@ -81,9 +81,10 @@ class GPUInfo:
 
         Returns glob patterns that match any device ID (0-9), since the device
         number in the filename depends on device_type_index which varies by
-        GPU topology.
+        GPU topology. The optional trailing suffix matches per-output indices
+        such as ``rocprof-device-0-SQ_WAVES-0.txt``.
         """
-        return [f"rocprof-device-[0-9]-{name}.txt" for name in self.counter_names]
+        return [f"rocprof-device-[0-9]-{name}*.txt" for name in self.counter_names]
 
 
 def get_rocminfo(rocm_path: Optional[Path] = None) -> Optional[Path]:

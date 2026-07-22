@@ -14,6 +14,7 @@
 /// INVALID sentinel and prevent a future edit from silently aliasing one target
 /// onto another.
 
+// \NPI new GPU: extend these tests with its MACH/triple -> target mapping.
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"

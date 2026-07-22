@@ -75,9 +75,13 @@
 
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
-#include "dda_all_reduce_ipc.h"
+#include "dda_all_reduce.h"
 #include "ipc_init.h"
+#include "fabric_init.h"
 #include  <cpuid.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include "kernel_config.h"
 
 #ifndef STR2
   #define STR2(v) #v
@@ -187,7 +191,7 @@ std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 1);
 
 /**
- * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes. 
+ * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
 RCCL_PARAM( InitChannels, "INIT_CHANNELS", -1) ;
 
@@ -290,15 +294,18 @@ static ncclResult_t ncclInit() {
       NCCLCHECK(ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue));
       // Check BIOS string and hypervisor presence on ecx bit 31
       if (strncmp("Hyper-V UEFI Release", strValue, 20) != 0 && (ecx & (1u << 31)) == 0) {
-        FILE* file;
-        if ((file = fopen("/proc/cmdline", "r")) != NULL) {
-          if (feof(file) == 0 && ferror(file) == 0) {
-            int len = fread(strValue, 1, 2047, file);
-            strValue[len] = '\0';
+        char cmdline[2048] = {0};
+        const char* cmdlinePtr = NULL;
+        FILE* file = fopen("/proc/cmdline", "r");
+        if (file != NULL) {
+          size_t len = fread(cmdline, 1, sizeof(cmdline) - 1, file);
+          if (len > 0 && ferror(file) == 0) {
+            cmdline[len] = '\0';
+            cmdlinePtr = cmdline;
           }
           fclose(file);
         }
-        if (strstr(strValue, "iommu=pt") == NULL)
+        if (!ncclIommuPassthroughOk(cmdlinePtr))
           WARN("Missing \"iommu=pt\" from kernel command line which can lead to system instablity or hang!");
       }
 #ifndef HIP_UNCACHED_MEMORY
@@ -459,8 +466,9 @@ static ncclResult_t commFree(ncclComm_t comm) {
 
   if (comm->symmetricSupport) {
     NCCLCHECK(ncclSymkFinalize(comm));
-    NCCLCHECK(ncclDevrFinalize(comm));
   }
+  // RCCL: !symmetricSupport comms still init devrState via the non-sym window-register path (dev_runtime.cc), so finalize unconditionally to free lsaRankList.
+  NCCLCHECK(ncclDevrFinalize(comm));
   NCCLCHECK(ncclRasCommFini(comm));
 
   /* in commReclaim, we have guaranteed only last rank which calls ncclCommDestroy() will
@@ -505,7 +513,11 @@ static ncclResult_t commFree(ncclComm_t comm) {
   free(comm->collNetHeads);
   free(comm->clique.ranks);
 
-  NCCLCHECK(ncclDdaIpcCommFini(comm));
+  if (ncclDdaUseFabricPath(comm)) {
+    NCCLCHECK(ncclDdaFabricCommFini(comm));
+  } else {
+    NCCLCHECK(ncclDdaIpcCommFini(comm));
+  }
 
   if (comm->bootstrap)
     NCCLCHECK(bootstrapClose(comm->bootstrap));
@@ -655,13 +667,17 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   ncclMemoryStackConstruct(&comm->memPermanent);
   ncclMemoryStackConstruct(&comm->memScoped);
   comm->destructorHead = nullptr;
-  
+
   comm->ddaIpcMemHandler = nullptr;
-  comm->ddaIpcScratch = nullptr;
-  comm->ddaIpcScratchBytes = 0;
-  comm->ddaIpcPeerPtrsDev = nullptr;
+  comm->ddaScratch = nullptr;
+  comm->ddaScratchBytes = 0;
+  comm->ddaScratchIsVmm = false;
+  comm->ddaPeerPtrsDev = nullptr;
   comm->ddaIpcBarrierState = nullptr;
-  
+  comm->ddaFabricBarrierState = nullptr;
+  comm->ddaFabricMemHandler = nullptr;
+  comm->ddaFabricMaxBlocks = 0;
+
   comm->rank = rank;
   comm->nRanks = ndev;
   comm->pxnDisable = RCCL_VALUE_UNSET;
@@ -1371,6 +1387,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   int* nvbPeers = NULL;
   struct ncclProxyConnector proxyConn;
   int* pxnPeers = NULL;
+  int64_t* localBusIds = NULL;
   int *topParentLocalRanks = NULL;
   int p2pLevel = -1;
   bool globalNicFused = false;
@@ -1580,11 +1597,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
      * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
      * edge-disjoint Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
      * additional channels are balanced via greedy heuristics to saturate Fat-Tree/Clos fabrics.
-     * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels 
-     * is required during Preset. Therefore, nChannels cannot be auto-calculated 
+     * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels
+     * is required during Preset. Therefore, nChannels cannot be auto-calculated
      * based on nNodes at this stage.
-     * Recommended: Set nChannels via environment variable (e.g., 6 channels for 
-     * optimal 4-node load balancing). Missing channel data is backfilled 
+     * Recommended: Set nChannels via environment variable (e.g., 6 channels for
+     * optimal 4-node load balancing). Missing channel data is backfilled
      * by repairMissingChannels() during Postset.
      * */
     int numChannels = rcclParamInitChannels() > 0 ? rcclParamInitChannels() : 6 /* 2 X (comm->nNodes - 1)  */;
@@ -1632,8 +1649,27 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   timers[TIMER_INIT_GRAPHS] = clockNano() - timers[TIMER_INIT_GRAPHS];
 
   bool allXgmi, hasPeerAccess;
+  int localDevCount;
   allXgmi = true;
   hasPeerAccess = true;
+
+  if (CUDACLEARERROR(cudaGetDeviceCount(&localDevCount)) != cudaSuccess) {
+    WARN("cudaGetDeviceCount failed; treating all peers as non-accessible for "
+         "clique setup");
+    localDevCount = 0;
+  }
+
+  // RCCL: HIP_VISIBLE_DEVICES may differ per rank, so precompute each rank's
+  // busId so we compare them later.
+  NCCLCHECKGOTO(ncclCalloc(&localBusIds, nranks), ret, fail);
+  for (int j = 0; j < nranks; j++) {
+    int cudaDevJ = comm->peerInfo[j].cudaDev;
+    if (cudaDevJ < 0 || cudaDevJ >= localDevCount ||
+        getBusId(cudaDevJ, &localBusIds[j]) != ncclSuccess) {
+      localBusIds[j] = -1;
+    }
+  }
+
   // Check that all the GPUs have peer access to one another and are XGMI connected
   for (int i = 0; i < nranks && hasPeerAccess; i++) {
     int cudaDev1 = comm->peerInfo[i].cudaDev;
@@ -1641,8 +1677,22 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       if (i == j) continue;
       int cudaDev2 = comm->peerInfo[j].cudaDev;
       int p2p;
-      if (hipDeviceCanAccessPeer(&p2p, cudaDev1, cudaDev2) != hipSuccess || !p2p)
-      {
+
+      // RCCL: HIP_VISIBLE_DEVICES may differ per rank, so check that the peer
+      // device is visible in this process and that its busId matches.
+      if (cudaDev1 < 0 || cudaDev1 >= localDevCount || cudaDev2 < 0 ||
+          cudaDev2 >= localDevCount) {
+        hasPeerAccess = false;
+        break;
+      }
+
+      if (localBusIds[j] == -1 || localBusIds[j] != comm->peerInfo[j].busId) {
+        hasPeerAccess = false;
+        break;
+      }
+
+      if (hipDeviceCanAccessPeer(&p2p, cudaDev1, cudaDev2) != hipSuccess ||
+          !p2p) {
         hasPeerAccess = false;
         break;
       }
@@ -1904,7 +1954,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       INFO(NCCL_GRAPH, "CPUs with mixed vendors were detected.");
     }
   }
-  
+
   // Now that we know nNodes, alloc nodeRanks and compute localRanks for each node
   NCCLCHECKGOTO(ncclCalloc(&comm->nodeRanks, comm->nNodes), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&comm->rankToLocalRank, comm->nRanks), ret, fail);
@@ -2248,6 +2298,7 @@ exit:
   free(rings);
   free(nvbPeers);
   free(pxnPeers);
+  free(localBusIds);
   return ret;
 fail:
   goto exit;
@@ -2545,10 +2596,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     } else if (rocshmemHeapSize > (size_t)(2147483648)) {
 	    rocshmemHeapSize = (size_t)(1024*1024*1024); //increase symmetric allocation size for heap size > 2GB
     }
-    
+
     comm->sourceRshmem = (void *)rocshmem::rocshmem_malloc(rocshmemHeapSize);
     comm->destRshmem = (void *)rocshmem::rocshmem_malloc(rocshmemHeapSize);
-    INFO(NCCL_INIT, "Symmetric memory allocated: size %zu", rocshmemHeapSize); 
+    INFO(NCCL_INIT, "Symmetric memory allocated: size %zu", rocshmemHeapSize);
 
     comm->enableRocshmem = rcclParamRocshmemEnabled();
     comm->rocshmemThreshold = rcclParamRocshmemThreshold();
@@ -2573,9 +2624,14 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
-  if (!job->parent && !job->isGrow && comm->nNodes == 1 && comm->nRanks == 8) {
-  	NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
-  }
+
+  if (!job->parent && !job->isGrow) {
+    if (ncclDdaUseFabricPath(comm)) {
+      NCCLCHECKGOTO(ncclDdaFabricCommInit(comm), res, fail);
+    } else if (comm->nNodes == 1 && comm->nRanks == 8) {
+      NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
+    }
+  } 
   // update communicator state
   comm->initState = ncclSuccess;
 
@@ -2605,7 +2661,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         // honor user input if user explicitly disables PAT
         const char* patEnableEnv = ncclGetEnv("NCCL_PAT_ENABLE");
         bool userDisabledPat = (patEnableEnv != nullptr) && (std::atoi(patEnableEnv) == 0);
-        comm->forcePatEnable = !userDisabledPat;
+        comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
         NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
         comm->forcePatEnable = false;
         // inherit PXN disable from parent comm
@@ -3553,7 +3609,7 @@ ncclResult_t ncclCommDestroy_impl(ncclComm_t comm) {
 #ifdef ENABLE_ROCSHMEM
   if (comm->enableRocshmem) {
     rocshmem::rocshmem_free(comm->sourceRshmem);
-    rocshmem::rocshmem_free(comm->destRshmem);	 
+    rocshmem::rocshmem_free(comm->destRshmem);
     //TODO: subcomm check
     rocshmem::rocshmem_team_t  team;
     if (!ncclCommToRshmemTeam.empty()) {

@@ -9,7 +9,6 @@
 # -----------------------------------------------------------------------------
 
 import csv
-import fcntl
 import math
 from abc import ABC
 from collections import namedtuple
@@ -34,6 +33,7 @@ from typing import Any
 
 import utils.hip_interface as hip
 import utils.hiprtc_interface as hiprtc
+from utils import utils_profile
 
 # =============================================================================
 # GLOBAL VARIABLES
@@ -109,6 +109,7 @@ class Bench_base(ABC):
         self.mall_bw_src: str
         self.l2_bw_src: str
         self.l1_bw_src: str
+        self.l0_bw_src: str
         self.lds_bw_src: str
         self.fp16_src: str
         self.fp32_src: str
@@ -147,18 +148,16 @@ class Bench_base(ABC):
 
         lock_file = lock_dir / f"rocprof-compute-benchmark-{gpu_uuid}.lock"
 
-        with open(lock_file, "a", encoding="utf-8") as f:
-            try:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                msg = (
-                    f"Waiting for GPU {device} (UUID: {gpu_uuid[:8]}...) - "
-                    "another rocprof-compute benchmark is in progress..."
-                )
-                print(msg, flush=True)
-                fcntl.flock(f, fcntl.LOCK_EX)  # Blocking wait
-                msg = f"Acquired lock for GPU {device}, proceeding with benchmark."
-                print(msg, flush=True)
+        with utils_profile.file_lock(
+            lock_file,
+            wait_message=(
+                f"Waiting for GPU {device} (UUID: {gpu_uuid[:8]}...) - "
+                "another rocprof-compute benchmark is in progress..."
+            ),
+            acquired_message=(
+                f"Acquired lock for GPU {device}, proceeding with benchmark."
+            ),
+        ):
             yield
 
     def show_progress(self, pct: float) -> None:
@@ -257,7 +256,7 @@ class Bench_base(ABC):
     def set_cache_kernel_selector(self) -> None:
         self.cache_kernel_selector = {}
 
-        for level in ["L1", "L2", "MALL"]:
+        for level in ["L0", "L1", "L2", "MALL"]:
             if level in self.cache_sizes.keys():
                 self.cache_kernel_selector[level] = (
                     f"Cache_bw<float, {self.cache_sizes[level]}, 256>"
@@ -536,6 +535,10 @@ class Bench_base(ABC):
     # MALL cache bandwidth benchmark
     def mall_bw_bench(self, device: int) -> PerfMetrics:
         return self.cache_bw_bench(device, "MALL", 1)
+
+    # L0 cache bandwidth benchmark
+    def l0_bw_bench(self, device: int) -> PerfMetrics:
+        return self.cache_bw_bench(device, "L0", 100)
 
     # L1 cache bandwidth benchmark
     def l1_bw_bench(self, device: int) -> PerfMetrics:

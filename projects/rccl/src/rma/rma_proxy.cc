@@ -78,7 +78,7 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
   uint64_t offset;
   ncclResult_t ret = ncclSuccess;
   ALIGN_SIZE(alignedSize, hostPageSize);
-#if HIP_VERSION >= 71260540
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
   if (ncclCuMemEnable() && sym_buffer) {
     CUCHECK(cuMemGetHandleForAddressRange((void *)fd, (CUdeviceptr)addr, alignedSize,
                                           CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0));
@@ -200,10 +200,18 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclGin_t* ginCo
 static ncclResult_t ncclRmaProxyCtxAllocGraph(struct ncclComm* comm, ncclGin_t* ginComm, struct ncclRmaProxyCtx* rmaProxyCtx) {
   // The clean up in case of failure will be done by the ncclRmaProxyDestroyContext function invoked by the caller.
   size_t signalsBufSize = (comm->nRanks + 1) * sizeof(uint64_t);
+
+  // RCCL: Strip DMA-BUF like ncclRmaProxyCtxAlloc: cpuAccessSignals may be
+  // host memory (GDRCopy off), whose dmabuf export fails (INVALID_AGENT).
+  ncclNetProperties_t props_tmp = rmaProxyCtx->props;
+  if (rcclParamRmaProxyUseDMABUF() == 0) {
+    props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
+  }
+
   // Allocate the CPU-accessible signal for graph capture and then register the memory region with the GIN plugin.
   NCCLCHECK(allocMemCPUAccessible(&rmaProxyCtx->cpuAccessSignals, &rmaProxyCtx->cpuAccessSignalsDev,
                                   comm->nRanks + 1, 0, &rmaProxyCtx->cpuAccessSignalsGdrHandle, comm->memManager));
-  NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, rmaProxyCtx->props, rmaProxyCtx->cpuAccessSignalsDev, signalsBufSize,
+  NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, props_tmp, rmaProxyCtx->cpuAccessSignalsDev, signalsBufSize,
                                  NCCL_PTR_CUDA, NCCL_NET_MR_FLAG_FORCE_SO,
                                  &rmaProxyCtx->cpuAccessSignalsMhandle, &rmaProxyCtx->cpuAccessSignalsGinHandle));
   // Allocate the host buffer to track the expected values of the signals
@@ -369,7 +377,7 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t s
   struct ncclRmaProxyState* rmaProxyState = &comm->rmaState.rmaProxyState;
   for (int n = 0; n < rmaProxyState->ginCommCount; n++) {
     ncclNetProperties_t props_tmp = rmaProxyState->props[n];
-#if HIP_VERSION >= 71260540
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
     if (!ncclCuMemEnable()) {
       props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
     }
@@ -440,8 +448,10 @@ ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) {
   struct ncclRmaProxyState *rmaProxyState = &comm->rmaState.rmaProxyState;
   rmaProxyState->comm = comm;
   if (rmaProxyState->ncclGin == NULL) {
-    WARN("GIN not supported.");
-    return ncclInvalidUsage;
+    // Device-initiated GIN backends (e.g. rocshmem GDA) don't register an
+    // RMA plugin — the GPU posts WQEs directly without host proxy involvement.
+    // Silently skip; ginCommCount stays 0 so subsequent register calls are no-ops.
+    return ncclSuccess;
   }
   if (ncclParamGinEnable() == 0) {
     WARN("GIN is disabled.");

@@ -198,6 +198,7 @@ set(TEST_SRC
     hipMemGetAddressRange.cc
     hipMallocMipmappedArray.cc
     hipFreeMipmappedArray.cc
+    hipMipmappedArrayMemoryLeak.cc
     hipHostAlloc.cc
     hipMemSetMemPool.cc
     hipMemGetMemPool.cc)

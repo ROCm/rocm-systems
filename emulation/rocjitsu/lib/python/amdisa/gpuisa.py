@@ -40,6 +40,7 @@ class Operand:
         is_binary_ucode_required: True if the operand is missing from the
             encoding but implied by the type of the operand.
         order: Order of the operand.
+        data_format_name: ISA data format name from the XML operand signature.
     """
 
     name: str
@@ -50,6 +51,7 @@ class Operand:
     is_implicit: bool
     is_binary_ucode_required: bool
     order: int
+    data_format_name: str = ''
 
 
 @dataclass

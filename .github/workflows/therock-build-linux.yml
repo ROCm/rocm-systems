@@ -1,0 +1,132 @@
+# TEMPORARY: Build-only workflow for MI455 (gfx125X)
+# This workflow is used to separate MI455 builds from the main therock-ci-linux
+# matrix, allowing MI455 tests to depend only on this build without waiting for
+# other GPU families' tests.
+# TODO: Remove this workflow once MI455 test infrastructure is stable and we have
+# sufficient MI455 machine capacity to run tests without blocking PRs.
+name: TheRock Build Linux
+
+on:
+  workflow_call:
+    inputs:
+      cmake_options:
+        type: string
+      package_version:
+        type: string
+        required: true
+      amdgpu_families:
+        type: string
+        default: "gfx94X-dcgpu"
+      build_runs_on:
+        type: string
+        default: "azure-linux-scale-rocm"
+
+permissions:
+  contents: read
+
+jobs:
+  therock-build-linux:
+    name: Build Linux Packages
+    runs-on: ${{ inputs.build_runs_on }}
+    permissions:
+      id-token: write
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:a382085df3ba2419b58aa9051350883a0d0b732a4bc0a4ef60458f8161bb08c6 # 2026-06-11
+      options: -v /runner/config:/home/awsconfig/
+    strategy:
+      fail-fast: true
+    env:
+      CACHE_DIR: ${{ github.workspace }}/.container-cache
+      CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+      TEATIME_FORCE_INTERACTIVE: 0
+      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
+    steps:
+      - name: "Checking out repository for rocm-systems"
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Checkout TheRock repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: "ROCm/TheRock"
+          path: "TheRock"
+          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
+
+      - name: Install python deps
+        run: |
+          pip install -r TheRock/requirements.txt
+
+      # safe.directory must be set before Runner health status
+      - name: Adjust git config
+        run: |
+          git config --global --add safe.directory $PWD
+          git config fetch.parallel 10
+
+      - name: Setup ccache
+        run: |
+          ./TheRock/build_tools/setup_ccache.py \
+            --config-preset "github-oss-dev" \
+            --dir "$(dirname $CCACHE_CONFIGPATH)" \
+            --local-path "$CACHE_DIR/ccache"
+
+      - name: Runner health status
+        run: |
+          ./TheRock/build_tools/health_status.py
+
+      - name: Fetch sources
+        timeout-minutes: 30
+        run: |
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
+
+      - name: Patch rocm-systems
+        run: |
+          # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
+          # rm ./TheRock/patches/amd-mainline/rocm-systems/0003-Use-is_versioned-true-consistently-in-both-Comgr-Loa.patch
+
+      - name: Configure Projects
+        env:
+          amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
+          package_version: ${{ inputs.package_version }}
+          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ -DTHEROCK_ENABLE_RCCL=OFF ${{ inputs.cmake_options }}"
+          BUILD_DIR: build
+        run: |
+          python TheRock/build_tools/github_actions/build_configure.py
+
+      - name: Build therock-artifacts and therock-dist
+        run: cmake --build TheRock/build --target therock-artifacts therock-dist -- -k 0
+
+      - name: Report
+        if: ${{ !cancelled() }}
+        run: |
+          echo "Full SDK du:"
+          echo "------------"
+          du -h -d 1 TheRock/build/dist/rocm
+          echo "Artifacts:"
+          echo "----------"
+          du -h -d 1 TheRock/build/artifacts
+          echo "CCache Stats:"
+          echo "-------------"
+          ccache -s
+
+      - name: Configure AWS Credentials
+        if: ${{ always() && !github.event.pull_request.head.repo.fork }}
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+
+      - name: Push artifacts
+        run: |
+          python3 TheRock/build_tools/artifact_manager.py push \
+            --run-id ${{ github.run_id }} \
+            --build-dir TheRock/build \
+            --stage all
+
+      - name: Post Build Upload
+        if: always()
+        run: |
+          python TheRock/build_tools/github_actions/post_build_upload.py \
+            --run-id ${{ github.run_id }} \
+            --artifact-group ${{ env.AMDGPU_FAMILIES }} \
+            --build-dir TheRock/build \
+            --upload

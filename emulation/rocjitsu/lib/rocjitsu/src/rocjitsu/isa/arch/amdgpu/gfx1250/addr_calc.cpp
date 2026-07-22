@@ -154,7 +154,6 @@ uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &
   uint64_t base = (static_cast<uint64_t>(cu.read_sgpr(sbase + 1)) << 32) | cu.read_sgpr(sbase);
   int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   uint32_t scale = inst.scale_offset ? access_size_bytes : 1;
-  off *= scale;
   if (has_smem_offset(inst.soffset))
     off += static_cast<int64_t>(read_sreg_m0_operand(wf, inst.soffset)) * scale;
   uint64_t addr = base + off;

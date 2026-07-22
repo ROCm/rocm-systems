@@ -74,6 +74,15 @@ struct cbdata_t
 // operations so we can gate new traces while one is active.
 common::Synchronized<std::optional<int64_t>> client;
 
+// True once the HSA runtime is registered. Gates start_context() so pre-init
+// start requests are deferred and replayed by initialize().
+std::atomic<bool>&
+hsa_inited()
+{
+    static std::atomic<bool> inited{false};
+    return inited;
+}
+
 hsa_status_t
 thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callback_data)
 {
@@ -472,6 +481,8 @@ DispatchThreadTracer::start_context()
 {
     using corr_id_map_t = hsa::queue_info_session_t::external_corr_id_map_t;
 
+    // Only installs queue-controller callbacks (cached and applied to queues as
+    // they are created), so this is safe to call before hsa_init.
     CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization();
 
     // Only one thread should be attempting to enable/disable this context
@@ -561,6 +572,14 @@ DeviceThreadTracer::resource_deinit()
 void
 DeviceThreadTracer::start_context()
 {
+    // Per-agent resources don't exist until HSA is registered; the request is
+    // cached in the active-context array and replayed by initialize().
+    if(!hsa_inited().load())
+    {
+        ROCP_INFO << "Device thread trace start requested before hsa_init; deferring";
+        return;
+    }
+
     ROCP_INFO << "Start device thread trace context";
     std::unique_lock<std::mutex> lk(agent_mut);
 
@@ -616,6 +635,16 @@ initialize(HsaApiTable* table)
     {
         if(ctx->device_thread_trace) ctx->device_thread_trace->resource_init();
         if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->resource_init();
+    }
+
+    // HSA resources now exist; allow start_context() to program the hardware.
+    hsa_inited().store(true);
+
+    // Replay device contexts started before hsa_init() (their start_context()
+    // returned early above). Dispatch mode needs no replay.
+    for(auto& ctx : context::get_active_contexts())
+    {
+        if(ctx->device_thread_trace) ctx->device_thread_trace->start_context();
     }
 }
 

@@ -96,7 +96,12 @@ def gen_vector_cmp_class(
             if has_abs:
                 L.append('    if (inst_.abs & (1u << 0)) s0_raw &= 0x7FFFu;')
             L.append('    if (inst_.neg & (1u << 0)) s0_raw ^= 0x8000u;')
-        L.append(f'    uint32_t mask = {src[1]}.read_lane(wf, lane);')
+        if is_vop3:
+            L.append(
+                f'    uint32_t mask = ::rocjitsu::amdgpu::read_vop3_true16_src({src[1]}, wf, lane, opsel, 1);'
+            )
+        else:
+            L.append(f'    uint32_t mask = {src[1]}.read_lane(wf, lane);')
         L.append('    bool match = false;')
         L.append('    uint16_t f16_exp = (s0_raw >> 10) & 0x1F;')
         L.append('    uint16_t f16_mant = s0_raw & 0x3FF;')

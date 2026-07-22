@@ -23,6 +23,11 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
   CUDACHECK(cuDeviceGet(&currentDev, cudaDev));
   // Ignore error if CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED is not supported
   (void) cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev);
+
+  // RCCL: On ROCm builds where this attribute is unsupported the query records
+  // a pending HIP error; clear it so a successful init leaves no dirty HIP error
+  (void) hipGetLastError();
+
   if (!flag) return ncclSuccess;
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)

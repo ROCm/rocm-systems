@@ -154,8 +154,8 @@ struct CuidFileEntry {
   std::string bdf;             // PCIe Bus:Device.Function
   std::string mac_address;     // For NIC
 
-  bool is_temporary; // Indicates if the CUID is temporary (not derived from a
-                     // true hardware fingerprint)
+  bool is_temporary = false; // Indicates if the CUID is temporary (not derived
+                             // from a true hardware fingerprint)
 
   time_t last_update; // Unix timestamp
 

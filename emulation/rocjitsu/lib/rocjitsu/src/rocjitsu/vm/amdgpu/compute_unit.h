@@ -129,6 +129,12 @@ public:
   /// @brief Execute up to kFunctionalQuantum instructions, then yield.
   virtual bool advance() = 0;
 
+  /// @brief End the current functional-mode quantum after this instruction.
+  ///
+  /// Used by wait-like instructions such as s_sleep so other simulated
+  /// components can publish the state on which the wavefront is polling.
+  void request_functional_yield() { functional_yield_requested_ = true; }
+
   /// @brief Signal that work has been dispatched; begin processing.
   ///
   /// @details Schedules an engine event that calls advance() repeatedly
@@ -225,6 +231,7 @@ public:
 
   /// @brief Return the Local Data Share (LDS).
   Lds &lds() { return lds_; }
+  const Lds &lds() const { return lds_; }
 
   /// @brief Clear LDS contents (zero-fill).
   void clear_lds() { lds_.clear(); }
@@ -537,6 +544,7 @@ protected:
   simdojo::Port *cpl_ = nullptr; ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
   uint64_t step_count_ = 0;
+  bool functional_yield_requested_ = false;
 };
 
 /// @brief Execution-mode-aware compute unit shell.
@@ -556,7 +564,11 @@ public:
   /// @brief Execute work up to the quantum limit, then yield.
   bool advance() override {
     if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
+      // A request left by direct step() execution must not shorten this quantum.
+      functional_yield_requested_ = false;
       for (uint32_t i = 0; i < kFunctionalQuantum && step(); ++i) {
+        if (std::exchange(functional_yield_requested_, false))
+          break;
       }
     } else {
       /// @todo: Support CLOCKED pipeline cycle.

@@ -45,7 +45,7 @@ __global__ void ddaAllGatherIpc(
       true /* hasSubsequentMemAccess */>();
 
   allGather<T, NRANKS>(
-      ipcbuffs, recvbuff, selfRank, idxStart, idxEnd, idxStride, false);
+      ipcbuffs, recvbuff, selfRank, NRANKS, idxStart, idxEnd, idxStride, false);
 
   // barrier to ensure remote ranks won't free their buffers until I'm done
   barrier.syncOnSameBlockIdx<

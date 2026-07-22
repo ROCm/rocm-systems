@@ -204,11 +204,6 @@ endif()
 target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ROCPROF_TRACE_DECODER_BUILDING_LIBRARY)
 set_target_properties(rocprof-trace-decoder-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-option(SQTT_LOGGING "Enable SQTT logging" OFF)
-if(SQTT_LOGGING)
-    target_compile_definitions(rocprof-trace-decoder-objects PRIVATE SQTT_LOGGING)
-endif()
-
 option(ARCH_MODEL "Enable ARCH_MODEL stitcher path" OFF)
 if(ARCH_MODEL)
     target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ARCH_MODEL)

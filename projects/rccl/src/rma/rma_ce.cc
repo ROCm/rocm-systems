@@ -8,13 +8,14 @@
 #include <assert.h>
 #include "nccl.h"
 #include "alloc.h"
+#include "rocmwrap.h"
 #include "checks.h"
 #include "comm.h"
 #include "collectives.h"
 // [RCCL] cudawrap.h intentionally not included: its CUCHECKGOTO routes calls through
-// pfn_* CUDA driver pointers (cudawrap.cc is excluded from the RCCL build), which would
-// turn hipStreamBatchMemOp into an undefined pfn_hipStreamBatchMemOp. We rely on
-// rocmwrap.h's direct-HIP CUCHECKGOTO and call hipStreamBatchMemOp directly, matching ce_coll.cc.
+// pfn_* CUDA driver pointers (cudawrap.cc is excluded from the RCCL build).
+// Batch mem ops go through ncclCuStreamBatchMemOp (rocmwrap.h decl, HIP impl
+// in rma_proxy_launch.cc)
 #include "rma/rma.h"
 #include "rma/rma_ce.h"
 
@@ -191,8 +192,7 @@ ncclResult_t ncclRmaCePutLaunch(struct ncclComm* comm, struct ncclKernelPlan* pl
       ackOps[1].writeValue.address = ackAddr;
       ackOps[1].writeValue.value64 = 0;
       ackOps[1].writeValue.flags = 0;
-      // [RCCL] direct HIP call; ncclCuStreamBatchMemOp wrapper is excluded from the RCCL build.
-      CUCHECKGOTO(hipStreamBatchMemOp(stream, 2, ackOps, 0), ret, fail);
+      NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, 2, ackOps), ret, fail);
     }
 
     if (bytes > 0) {
@@ -222,13 +222,13 @@ ncclResult_t ncclRmaCePutLaunch(struct ncclComm* comm, struct ncclKernelPlan* pl
         NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceCtx->signalsWin, ceCtx->signalOffset + rankSlot, peerLsaRank, &peerSignal), ret, fail);
         ceCtx->signalOpSeqs[task->peer]++;
         // [RCCL] cuStreamWriteValue64 driver entry isn't available on HIP; use a
-        // single-op hipStreamBatchMemOp write (flags=0; no CU_STREAM_WRITE_VALUE_DEFAULT equiv).
+        // single-op batch write
         hipStreamBatchMemOpParams writeOp[1] = {};
         writeOp[0].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_64;
         writeOp[0].writeValue.address = (CUdeviceptr)ceCtx->signalOpSeqsDev;
         writeOp[0].writeValue.value64 = ceCtx->signalOpSeqs[task->peer];
-        writeOp[0].writeValue.flags = 0;
-        CUCHECKGOTO(hipStreamBatchMemOp(stream, 1, writeOp, 0), ret, fail);
+        writeOp[0].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
+        NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, 1, writeOp), ret, fail);
         CUDACHECKGOTO(cudaMemcpyAsync(peerSignal, ceCtx->signalOpSeqsDev, sizeof(uint64_t), cudaMemcpyDeviceToDevice, stream), ret, fail);
       } else {
         // Graph: write signal=1 to peer's graphSignalsDev (separate from non-graph signals)
@@ -290,8 +290,7 @@ ncclResult_t ncclRmaCeWaitLaunch(struct ncclComm* comm, struct ncclKernelPlan* p
         batchParams[opIdx].waitValue.flags = CU_STREAM_WAIT_VALUE_GEQ;
         opIdx++;
       }
-      // [RCCL] direct HIP call; ncclCuStreamBatchMemOp wrapper is excluded from the RCCL build.
-      CUCHECKGOTO(hipStreamBatchMemOp(stream, opIdx, batchParams, 0), ret, fail);
+      NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, opIdx, batchParams), ret, fail);
     }
     else {
       // Graph: wait-reset-ack cycle using separate graphSignalsDev (isolated from non-graph)
@@ -311,8 +310,7 @@ ncclResult_t ncclRmaCeWaitLaunch(struct ncclComm* comm, struct ncclKernelPlan* p
           signalOps[1].writeValue.address = graphSignalAddr;
           signalOps[1].writeValue.value64 = 0;
           signalOps[1].writeValue.flags = 0;
-          // [RCCL] direct HIP call; ncclCuStreamBatchMemOp wrapper is excluded from the RCCL build.
-          CUCHECKGOTO(hipStreamBatchMemOp(stream, 2, signalOps, 0), ret, fail);
+          NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, 2, signalOps), ret, fail);
 
           void* peerAck;
           NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceCtx->signalsWin, ceCtx->graphAckOffset + comm->rank * sizeof(uint64_t), peerLsaRank, &peerAck), ret, fail);

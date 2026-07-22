@@ -4,6 +4,7 @@
 #include "core/rocprofiler-sdk.hpp"
 #include "api.hpp"
 #include "binary/analysis.hpp"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/synchronized.hpp"
 #include "core/common.hpp"
@@ -96,7 +97,7 @@ get_roctx_client()
 {
     if(!g_roctx_client)
     {
-        const auto _domains = tim::delimit(
+        const auto _domains = rocprofsys::delimit(
             config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
                 .value_or(std::string{}),
             " ,;:\t\n");

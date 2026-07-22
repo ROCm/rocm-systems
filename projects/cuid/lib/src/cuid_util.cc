@@ -21,6 +21,7 @@
  */
 
 #include "cuid_util.h"
+#include "smbios_util.h"
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -385,15 +386,22 @@ amdcuid_status_t
 CuidUtilities::make_fallback_fingerprint(const std::string &id,
                                          uint64_t &fingerprint) {
   std::string system_id;
+  amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
 
-  std::ifstream machine_id_file("/etc/machine-id");
-  if (machine_id_file.is_open())
-    std::getline(machine_id_file, system_id);
+  if (geteuid() == 0) {
+    // If running as root, get platform serial number
+    status = SmbiosUtil::get_system_serial(system_id);
+  }
+  if (geteuid() != 0 || system_id.empty() || status != AMDCUID_STATUS_SUCCESS) {
+    std::ifstream machine_id_file("/etc/machine-id");
+    if (machine_id_file.is_open())
+      std::getline(machine_id_file, system_id);
 
-  if (system_id.empty()) {
-    std::ifstream hostname_file("/etc/hostname");
-    if (hostname_file.is_open())
-      std::getline(hostname_file, system_id);
+    if (system_id.empty()) {
+      std::ifstream hostname_file("/etc/hostname");
+      if (hostname_file.is_open())
+        std::getline(hostname_file, system_id);
+    }
   }
 
   std::string id_hex;
@@ -402,9 +410,8 @@ CuidUtilities::make_fallback_fingerprint(const std::string &id,
 
   std::string combined = id_hex + system_id;
   uint8_t digest[32];
-  amdcuid_status_t status =
-      sha256_unkeyed(reinterpret_cast<const uint8_t *>(combined.data()),
-                     combined.size(), digest);
+  status = sha256_unkeyed(reinterpret_cast<const uint8_t *>(combined.data()),
+                          combined.size(), digest);
   if (status != AMDCUID_STATUS_SUCCESS)
     return status;
 
@@ -436,7 +443,7 @@ CuidUtilities::generate_derived_cuid(const amdcuid_primary_id *primary_id,
   // copy 110 LSB bits of hash to derived_id->hash
   // Using only first 14 bytes (112 bits) of hash, then will mask last 2 bits
   memcpy(derived_id->hash, hash, 14);
-  derived_id->hash[13] &= 0xFC; // 11111100
+  derived_id->hash[13] &= 0x3F; // 00111111
 
   // Get the unit id parts from the primary ID
   uint8_t reserved_2 = 0;
@@ -450,14 +457,18 @@ CuidUtilities::generate_derived_cuid(const amdcuid_primary_id *primary_id,
   // insert reserved bits part 1 at bits 64-71
   id_bits[8] = reserved_1;
 
-  // copy next 6 bytes (46 bits) from hash and mask off last 2 bits for bits
-  // 72-117
+  // copy next 6 bytes (45 bits) from hash and mask off last 3 bits for bits
+  // 72-116
   memcpy(id_bits + 9, derived_id->hash + 8, 6);
-  id_bits[14] &= 0xFC;
+  id_bits[14] &= 0x1F;
+
+  // bit 117: temp bit carried over from primary ID
+  id_bits[14] |= (primary_id->raw_bits[14] & 0x20);
 
   // bits 118-121: reserved bits part 2 (4 bits)
-  id_bits[14] |= (reserved_2 >> 2); // upper 2 bits of reserved bits part 2
-  id_bits[15] |= (reserved_2 & 0x03)
+  id_bits[14] |= (reserved_2 & 0xC)
+                 << 4; // upper 2 bits of reserved bits part 2
+  id_bits[15] |= (reserved_2 & 0x3)
                  << 6; // lower 2 bits of reserved bits part 2
   // last 6 bits are padding (bits 122-127)
   id_bits[15] &= 0xC0;
@@ -482,7 +493,8 @@ amdcuid_status_t CuidUtilities::generate_primary_cuid(
   uint8_t unit_id_part2 = (unit_id >> 8) & 0x1F;
 
   // Bits 0-63: Serial number (8 bytes)
-  memcpy(id_bits, &serial_number, 8);
+  for (int i = 0; i < 8; i++)
+    id_bits[i] = (serial_number >> (8 * i)) & 0xFF;
 
   // Bits 64-71: UnitID part 1 (1 byte)
   id_bits[8] = unit_id_part1;
@@ -499,12 +511,11 @@ amdcuid_status_t CuidUtilities::generate_primary_cuid(
   id_bits[12] = vendor_id & 0xFF;
   id_bits[13] = (vendor_id >> 8) & 0xFF;
 
-  // Bits 112-116: UnitID part 2 (5 bits) + Bits 118-121: Component Type (4
-  // bits)
+  // Bits 112-116: UnitID part 2 (5 bits) + Bit 117: temp indicator (1 bit) +
+  // Bits 118-121: Component Type (4 bits)
   uint8_t temp_bit = temp ? 1 : 0;
-  id_bits[14] =
-      (unit_id_part2 << 3) | (temp_bit << 2) | ((device_type & 0xC) >> 2);
-  id_bits[15] = (device_type & 0x3) << 6; // Last 6 bits are padding
+  id_bits[14] = (unit_id_part2) | (temp_bit << 5) | ((device_type & 0x3) << 6);
+  id_bits[15] = (device_type & 0xC) << 4; // Last 6 bits are padding
 
   memcpy(primary_id->raw_bits, id_bits, 16);
 

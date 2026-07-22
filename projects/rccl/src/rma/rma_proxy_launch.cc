@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <cuda_runtime.h>
 #include <cuda.h>
+#include "rocmwrap.h"
 #include "nccl.h"
 #include "alloc.h"
 #include "checks.h"
@@ -17,10 +18,6 @@
 #include "rma/rma.h"
 #include "rma/rma_proxy.h"
 #include "dev_runtime.h"
-
-#ifndef CU_STREAM_WRITE_VALUE_DEFAULT
-#define CU_STREAM_WRITE_VALUE_DEFAULT 0
-#endif
 
 ncclResult_t ncclCuStreamBatchMemOp(hipStream_t stream, unsigned int numOps, hipStreamBatchMemOpParams* batchParams) {
   ncclResult_t ret = ncclSuccess;

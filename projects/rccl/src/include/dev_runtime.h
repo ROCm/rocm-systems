@@ -30,6 +30,12 @@ struct ncclDevrWindow {
   struct ncclComm* comm; // comm for intrusive map window <> comm look up
   void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS]; // IB MR handles per GIN connection (proxy-only path)
   ncclGinWindow_t rmaDevWins[NCCL_GIN_MAX_CONNECTIONS]; // device-side GIN window handles (proxy-only path)
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // RCCL: intra-node IPC peer table (NULL when inactive), sized to lsaSize.
+  void** ipcPeerPtrs;
+  void** ipcPeerPtrsAllocBase;
+  int ipcPeerCount;
+#endif
 };
 
 struct ncclDevrWindowSorted;
@@ -113,6 +119,7 @@ void freeDevCommRequirements(
 bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win);
 bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win);
 
+
 // Get the corresponding pointer in another lsa rank's symmetric memory window
 ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank, void** outPtr);
 
@@ -127,4 +134,15 @@ ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm* comm, struct ncclDevrWindo
 
 // Copies the devComm data from "rank" to "lsaBarrier".  Assumes the same memory layout at source and destination.
 void ncclDevCommCopyLsaData(void* dstRankPtr, void const* srcRankPtr);
+
+// Get the LSA flat VA for self rank corresponding to a primary (ncclMemAlloc) address.
+// If addr is already in the LSA flat range, returns addr unchanged.
+// If addr matches a registered memory's primaryAddr, returns lsaFlatBase + lsaSelf*bigSize + bigOffset.
+// outAddr is set to nullptr if addr cannot be resolved.
+ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr);
+
+// LSA flat window base + stride for GIN Anvil symmetric registration (ncclGetLsaPointer layout).
+ncclResult_t ncclDevrGetGinAnvilMemLayout(struct ncclDevrState* devr, void* addr,
+                                          uintptr_t* outLsaFlatBase, uint32_t* outStride4G);
+
 #endif

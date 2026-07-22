@@ -2,7 +2,7 @@
 
 ## rocprofsys Package
 
-This package contains the code infrastructure required to run pytests. It contains 5 main components:
+This package contains the code infrastructure required to run pytests. It contains 6 main components:
 
 ### capabilities.py
 
@@ -10,7 +10,11 @@ Contains functions that allow pytests to discover what the current system suppor
 
 ### config.py
 
-Contains configuration information used by every test. This includes the location of core binaries, an instance of the `SystemCapabilities` class, base environments, and some core helper functions.
+Contains configuration information used by every test. This includes the location of core binaries, an instance of the `SystemCapabilities` class, the computed `LD_LIBRARY_PATH` and some core helper functions.
+
+### environment.py
+
+Contains `TestEnvironment`, which models the per-run environment as three layers ordered from lowest to highest precedence: `base` (framework defaults for the test type), `test` (settings supplied by the test, plus framework-injected values like `ROCPROFSYS_OUTPUT_PATH`), and `user` (the inherited shell environment). A runner builds these layers and merges them (highest layer wins) into the environment handed to the subprocess.
 
 ### gpu.py
 

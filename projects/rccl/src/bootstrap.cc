@@ -1609,10 +1609,12 @@ static ncclResult_t socketRingAllGather(struct ncclSocket* nextSock, struct nccl
   BOOTSTRAP_PROF_OPEN(tFirst);
   for (int step = 0; step < totalSteps; step++) {
     bool isFinalUnidirectional = (step == totalSteps - 1) && (nranks % 2 == 0);
-    int sendSliceRing0 = (rank - step + nranks) % nranks;
-    int recvSliceRing0 = (rank - step - 1 + nranks) % nranks;
-    int sendSliceRing1 = (rank + step) % nranks;
-    int recvSliceRing1 = (rank + step + 1) % nranks;
+    // Use size_t slice indices so that `slice * size` stays 64-bit. An int multiply overflows
+    // with a large payload (the ~100 MB XML at 64 ranks), giving a bad pointer / EFAULT "Bad address".
+    size_t sendSliceRing0 = (rank - step + nranks) % nranks;
+    size_t recvSliceRing0 = (rank - step - 1 + nranks) % nranks;
+    size_t sendSliceRing1 = (rank + step) % nranks;
+    size_t recvSliceRing1 = (rank + step + 1) % nranks;
     if (isFinalUnidirectional) {
       NCCLCHECKGOTO(socketSendRecv(nextSock, data + sendSliceRing0 * size, size, prevSock, data + recvSliceRing0 * size, size), res, exit);
     } else {
@@ -1680,10 +1682,12 @@ static ncclResult_t netBiDirRingAllGather(ncclNet_t* net,
   BOOTSTRAP_PROF_OPEN(tFirst);
   for (int step = 0; step < totalSteps; step++) {
     bool isFinalUnidirectional = (step == totalSteps - 1) && (nranks % 2 == 0);
-    int sendSliceRing0 = (rank - step + nranks) % nranks;     // Ring0 send to next
-    int recvSliceRing0 = (rank - step - 1 + nranks) % nranks; // Ring0 recv from prev
-    int sendSliceRing1 = (rank + step) % nranks;              // Ring1 send to prev
-    int recvSliceRing1 = (rank + step + 1) % nranks;          // Ring1 recv from next
+    // Use size_t slice indices so that `slice * size` is computed in 64-bit, for the
+    // same overflow reason described in socketRingAllGather.
+    size_t sendSliceRing0 = (rank - step + nranks) % nranks;     // Ring0 send to next
+    size_t recvSliceRing0 = (rank - step - 1 + nranks) % nranks; // Ring0 recv from prev
+    size_t sendSliceRing1 = (rank + step) % nranks;              // Ring1 send to prev
+    size_t recvSliceRing1 = (rank + step + 1) % nranks;          // Ring1 recv from next
     if (isFinalUnidirectional) {
       // Final step on even N: only ring0 over the forward QP pair.
       res = netSendRecv(net, sendComm, data + sendSliceRing0 * size, size, sendH,

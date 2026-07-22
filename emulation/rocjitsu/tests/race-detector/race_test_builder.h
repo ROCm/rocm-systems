@@ -111,10 +111,10 @@ public:
     waves_[wave]->dispatch(PendingWaitCount{vmcnt, lgkmcnt});
   }
 
-  /// Barrier: flush all waves' WAVE_COMPLETE events (simulates s_barrier).
+  /// Barrier: flush all waves' barrier-pending events (simulates s_barrier).
   void barrier() {
     for (auto *w : waves_) {
-      w->flushWaveCompleteMemoryEvents();
+      w->flushBarrierPendingEvents();
     }
   }
 

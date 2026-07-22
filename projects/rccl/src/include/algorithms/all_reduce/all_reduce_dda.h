@@ -42,7 +42,7 @@ __global__ void ddaAllReduceFlatIpc(
 
   // pattern=2: full reduce into recvbuff (one-shot, not scatter)
   reduceScatter<T, NRANKS, hasAcc>(
-      ipcbuffs, recvbuff, acc, selfRank, idxStart, idxEnd, idxStride, 2);
+      ipcbuffs, recvbuff, acc, selfRank, NRANKS, idxStart, idxEnd, idxStride, 2);
 
   barrier.syncOnSameBlockIdx<
       true /* hasPreviousMemAccess */,
@@ -78,6 +78,7 @@ __global__ void ddaAllReduceTreeIpc(
       ipcbuffs[selfRank],
       acc,
       selfRank,
+      NRANKS,
       idxStart,
       idxEnd,
       idxStride,
@@ -88,7 +89,7 @@ __global__ void ddaAllReduceTreeIpc(
       true /* hasSubsequentMemAccess */>();
 
   allGather<T, NRANKS>(
-      ipcbuffs, recvbuff, selfRank, idxStart, idxEnd, idxStride, true);
+      ipcbuffs, recvbuff, selfRank, NRANKS, idxStart, idxEnd, idxStride, true);
 
   barrier.syncOnSameBlockIdx<
       true /* hasPreviousMemAccess */,

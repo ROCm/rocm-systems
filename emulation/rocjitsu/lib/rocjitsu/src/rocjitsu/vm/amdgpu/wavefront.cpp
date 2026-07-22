@@ -8,6 +8,10 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
+
+const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
+
 void Wavefront::halt() {
   cu_.plugin_group().onAmdgpuWavefrontHalted(*this);
   state_ = WfState::HALTED;

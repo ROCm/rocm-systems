@@ -8,7 +8,7 @@
 #include "log.hpp"
 #include "rocprof-sys-instrument.hpp"
 
-#include <timemory/utility/join.hpp>
+#include <spdlog/fmt/fmt.h>
 
 #include <stdexcept>
 
@@ -168,7 +168,7 @@ module_function::should_coverage_instrument() const
     {
         messages.emplace_back(
             2, "Skipping", "function",
-            TIMEMORY_JOIN("-", "less-than", absolute_min_instructions, "instructions"),
+            fmt::format("less-than-{}-instructions", absolute_min_instructions),
             function_name);
         return false;
     }
@@ -207,7 +207,7 @@ module_function::should_instrument(bool coverage) const
     {
         messages.emplace_back(
             2, "Skipping", "function",
-            TIMEMORY_JOIN("-", "less-than", absolute_min_instructions, "instructions"),
+            fmt::format("less-than-{}-instructions", absolute_min_instructions),
             function_name);
         return false;
     }
@@ -413,7 +413,6 @@ module_function::get_visibility() const
 bool
 module_function::is_internal_constrained() const
 {
-    using ::timemory::join::join;
     auto _basename = [](std::string_view _v) {
         return std::string{ tim::filepath::basename(_v) };
     };
@@ -463,14 +462,13 @@ module_function::is_internal_constrained() const
            litr.second.find(_module_real) != litr.second.end() ||
            litr.second.find(module_name) != litr.second.end())
             return _report("Excluding", "module",
-                           join(" ", "internal library", litr.first), 3);
+                           fmt::format("internal library {}", litr.first), 3);
 
         for(const auto& fitr : litr.second)
         {
-            using ::timemory::join::join;
             if(fitr.second.find(function_name) != fitr.second.end())
                 return _report("Excluding", "function",
-                               join(" ", "internal library", litr.first), 3);
+                               fmt::format("internal library {}", litr.first), 3);
         }
     }
 

@@ -241,10 +241,10 @@ ROCm application
   └── ROCR / HIP runtime
         └── libhsakmt
               ├── open("/dev/kfd")    ──►  interposer.cpp intercepts
-              ├── ioctl(kfd_fd, …)   ──►  SimulatedDriver::ioctl()
-              ├── mmap(kfd_fd, …)    ──►  SimulatedDriver::mmap()
+              ├── ioctl(kfd_fd, …)   ──►  SimulatedKfd::ioctl()
+              ├── mmap(kfd_fd, …)    ──►  SimulatedKfd::mmap()
               ├── fopen("/sys/…")    ──►  interposer.cpp redirects → Sysfs temp dir
-              └── close(kfd_fd)      ──►  SimulatedDriver::close()
+              └── close(kfd_fd)      ──►  SimulatedKfd::close()
 ```
 
 ### Components
@@ -252,7 +252,7 @@ ROCm application
 | File | Purpose |
 |------|---------|
 | `interposer.cpp` | LD_PRELOAD shim: intercepts `open`, `ioctl`, `mmap`, `munmap`, `fopen`, `close` via syscall |
-| `simulated_driver.h/cpp` | `SimulatedDriver`: handles all KFD ioctls, owns doorbell/event pages |
+| `simulated_kfd.h/cpp` | `SimulatedKfd`: handles all KFD ioctls, owns doorbell/event pages |
 | `sysfs.h/cpp` | `Sysfs`: generates a per-process `/tmp/rocjitsu_topology_*` directory that ROCR reads instead of the real `/sys/devices/virtual/kfd/kfd/topology` |
 
 ### KFD ioctl surface
@@ -308,7 +308,7 @@ convenience wrapper that releases the last reference and tears down the VM.
 #include <rocjitsu/rocjitsu.h>
 
 rj_vm_t *vm = NULL;
-rj_vm_create("configs/amdgpu_cdna4.json", &vm);
+rj_vm_create("configs/gfx950_cdna4.json", &vm);
 
 uint64_t ticks = 0;
 rj_vm_run(vm, &ticks);

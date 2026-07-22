@@ -863,6 +863,10 @@ int main(int argc, char** argv) {
     }
     auto input_frames = read_frames(input_file_names);
     std::cout << "Read " << input_file_names.size() << " frames from disk." << std::endl;
+    if (input_frames.empty()) {
+        std::cerr << "Error: No input frames were read!" << std::endl;
+        return EXIT_FAILURE;
+    }
     auto start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < num_iterations; i++) {
         decode_frames(dec_info, input_frames);

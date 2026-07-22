@@ -58,7 +58,6 @@ rocprofiler_add_interface_library(rocprofiler-sdk-dl
                                   "Build flags for dynamic linking library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-rt "Build flags for runtime library"
                                   INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-sdk-atomic "atomic library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-gtest "Google Test library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-abseil "Abseil logging library"
                                   INTERNAL)

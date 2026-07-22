@@ -339,11 +339,7 @@ ncclResult_t IbCastPortRecoverySenderQpsToRts(struct ncclIbResiliency* resCtx, s
     } else {
       ahAttr.dlid = remDevInfo->lid;
     }
-    resCtx->portRecoveryAh[localDevIndex] = sendCommDev->base.pd->context->ops.create_ah(sendCommDev->base.pd, &ahAttr);
-    if (!resCtx->portRecoveryAh[localDevIndex]) {
-      WARN("NET/IB: %s: Failed to create AH for recovery QP on device %d (comm=%p)", __func__, localDevIndex, resCtx->baseComm);
-      return ncclSystemError;
-    }
+    NCCLCHECK(wrap_ibv_create_ah(&resCtx->portRecoveryAh[localDevIndex], sendCommDev->base.pd, &ahAttr));
     resCtx->portRecoveryRemoteQpn[localDevIndex] = remQpInfo->qpn;
 
     INFO(NCCL_NET, "NET/IB: %s: To RTS done on recovery UD QP (index=%d, qp_num=%u, remote_qpn=%u, deviceIndex=%d, comm=%p)", __func__, localQpIndex, localQp->qp->qp_num, remQpInfo->qpn, localDevIndex, resCtx->baseComm);
@@ -393,11 +389,7 @@ ncclResult_t IbCastPortRecoveryReceiverQpsCreateToRts(struct ncclIbResiliency* r
     } else {
       ahAttr.dlid = remDevInfo->lid;
     }
-    resCtx->portRecoveryAh[localDevIndex] = recvCommDev->base.pd->context->ops.create_ah(recvCommDev->base.pd, &ahAttr);
-    if (!resCtx->portRecoveryAh[localDevIndex]) {
-      WARN("NET/IB: %s: Failed to create AH for recovery QP on device %d (comm=%p)", __func__, localDevIndex, resCtx->baseComm);
-      return ncclSystemError;
-    }
+    NCCLCHECK(wrap_ibv_create_ah(&resCtx->portRecoveryAh[localDevIndex], recvCommDev->base.pd, &ahAttr));
     resCtx->portRecoveryRemoteQpn[localDevIndex] = remQpInfo->qpn;
     INFO(NCCL_NET, "NET/IB: %s: To RTS done on recovery UD QP (index=%d, qp_num=%u, remote_qpn=%u, deviceIndex=%d, comm=%p)", __func__, localQpIndex, localQp->qp->qp_num, remQpInfo->qpn, localDevIndex, resCtx->baseComm);
   }
@@ -407,7 +399,7 @@ ncclResult_t IbCastPortRecoveryReceiverQpsCreateToRts(struct ncclIbResiliency* r
 ncclResult_t IbCastPortRecoveryQpsDestroy(struct ncclIbResiliency* resCtx, int nQps) {
   for (int qpIndex = 0; qpIndex < nQps; qpIndex++) {
     if (resCtx->portRecoveryAh[qpIndex]) {
-      resCtx->portRecoveryAh[qpIndex]->context->ops.destroy_ah(resCtx->portRecoveryAh[qpIndex]);
+      NCCLCHECK(wrap_ibv_destroy_ah(resCtx->portRecoveryAh[qpIndex]));
       resCtx->portRecoveryAh[qpIndex] = nullptr;
     }
     struct ncclIbQp* recoveryQp = &resCtx->portRecoveryQps[qpIndex];

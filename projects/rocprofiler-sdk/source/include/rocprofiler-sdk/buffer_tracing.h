@@ -339,6 +339,27 @@ typedef struct rocprofiler_buffer_tracing_kernel_dispatch_record_t
 } rocprofiler_buffer_tracing_kernel_dispatch_record_t;
 
 /**
+ * @brief Summary record emitted once per successful hipGraphLaunch invocation.
+ *
+ * graph_exec_id is the process-monotonic ID delivered with EXEC_CREATE
+ * callbacks via the ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH domain.
+ */
+typedef struct rocprofiler_buffer_tracing_hip_graph_record_t
+{
+    uint64_t                          size;
+    rocprofiler_buffer_tracing_kind_t kind;
+    uint32_t                          operation;
+    rocprofiler_correlation_id_t      correlation_id;
+    rocprofiler_thread_id_t           thread_id;
+    rocprofiler_timestamp_t           start_timestamp;
+    rocprofiler_timestamp_t           end_timestamp;
+    rocprofiler_agent_id_t            agent_id;
+    rocprofiler_queue_id_t            queue_id;
+    rocprofiler_graph_exec_id_t       graph_exec_id;
+    uint64_t                          kernel_dispatch_count;
+} rocprofiler_buffer_tracing_hip_graph_record_t;
+
+/**
  * @brief ROCProfiler Buffer Page Migration event record from KFD.
  */
 typedef struct rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t

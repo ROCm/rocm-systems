@@ -12,6 +12,7 @@
 #include "debug.h"
 #include "checks.h"
 #include "alloc.h"
+#include <inttypes.h>
 #include <stdlib.h>
 #include "archinfo.h"
 #include <cinttypes>
@@ -20,7 +21,7 @@
 #define MAX_STR_LEN 255
 #define MAX_ATTR_COUNT 16
 #define MAX_SUBS 512	//Changed the value from 128 to 512 for CPX mode
-
+#define UALOE_GPU_FABRIC_UUID_LEN 16
 #define NODE_TYPE_NONE 0
 #define NODE_TYPE_OPEN 1
 #define NODE_TYPE_CLOSE 2
@@ -296,6 +297,18 @@ static ncclResult_t xmlSetAttrLong(struct ncclXmlNode* node, const char* attrNam
     node->attrs[index].key[MAX_STR_LEN] = '\0';
   }
   snprintf(node->attrs[index].value, MAX_STR_LEN, "%#" PRIx64, (uint64_t)value);
+  return ncclSuccess;
+}
+
+static ncclResult_t xmlSetAttrUint64(struct ncclXmlNode* node, const char* attrName, const uint64_t value) {
+  int index;
+  NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
+  if (index == -1) {
+    index = node->nAttrs++;
+    strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
+    node->attrs[index].key[MAX_STR_LEN] = '\0';
+  }
+  snprintf(node->attrs[index].value, MAX_STR_LEN, "0x%" PRIx64, value);
   return ncclSuccess;
 }
 

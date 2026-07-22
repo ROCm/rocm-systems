@@ -33,6 +33,7 @@ public:
     void        write_instruction(const instruction_t& inst) override;
     std::string get_result() override;
     void        flush(const std::filesystem::path& output_file_path) override;
+    bool        empty() const;
 
 private:
     static void create_parent_dir(const std::filesystem::path& output_file_path);

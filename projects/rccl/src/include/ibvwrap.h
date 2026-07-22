@@ -17,6 +17,8 @@
 #endif
 
 #include "core.h"
+#include <errno.h>
+#include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -66,6 +68,36 @@ ncclResult_t wrap_ibv_modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int
 ncclResult_t wrap_ibv_destroy_qp(struct ibv_qp *qp);
 ncclResult_t wrap_ibv_query_ece(struct ibv_qp *qp, struct ibv_ece *ece, int* supported);
 ncclResult_t wrap_ibv_set_ece(struct ibv_qp *qp, struct ibv_ece *ece, int* supported);
+
+static inline ncclResult_t wrap_ibv_create_ah(struct ibv_ah **ret, struct ibv_pd *pd, struct ibv_ah_attr *attr) {
+  if (ret) *ret = NULL; /*don't leave a stale pointer behind if creation fails*/
+  if (ret == NULL || pd == NULL || pd->context == NULL || attr == NULL) {
+    WARN("wrap_ibv_create_ah() called with invalid arguments (ret=%p, pd=%p, context=%p, attr=%p)", ret, pd, pd ? pd->context : NULL, attr);
+    return ncclSystemError;
+  }
+  struct ibv_ah *ah = pd->context->ops.create_ah(pd, attr); /*returns NULL on failure, with errno set*/
+  if (ah == NULL) {
+    WARN("ibv_create_ah() failed: %s", strerror(errno));
+    return ncclSystemError;
+  }
+  ah->context = pd->context;
+  ah->pd = pd;
+  *ret = ah;
+  return ncclSuccess;
+}
+
+static inline ncclResult_t wrap_ibv_destroy_ah(struct ibv_ah *ah) {
+  if (ah == NULL || ah->context == NULL) {
+    WARN("wrap_ibv_destroy_ah() called with invalid AH (ah=%p, context=%p)", ah, ah ? ah->context : NULL);
+    return ncclSystemError;
+  }
+  int ret = ah->context->ops.destroy_ah(ah); /*returns 0 on success, or the value of errno on failure*/
+  if (ret != IBV_SUCCESS) {
+    WARN("ibv_destroy_ah() failed with error %s (%d)", strerror(ret), ret);
+    return ncclSystemError;
+  }
+  return ncclSuccess;
+}
 
 static inline ncclResult_t wrap_ibv_post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr) {
   int ret = qp->context->ops.post_send(qp, wr, bad_wr); /*returns 0 on success, or the value of errno on failure (which indicates the failure reason)*/

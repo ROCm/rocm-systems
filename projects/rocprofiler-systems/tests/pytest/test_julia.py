@@ -70,31 +70,12 @@ def _resolve_julia_lib_paths(julia_binary: str) -> Optional[tuple[str, str]]:
 
 
 @pytest.fixture
-def julia_environment(rocprof_config) -> Optional[dict[str, str]]:
-    """Environment variables for HPC Julia tests."""
+def julia_lib_paths(rocprof_config) -> Optional[tuple[str, str]]:
+    """Resolve the Julia-specific library paths, or None if unavailable."""
     if not rocprof_config.capabilities.julia_exec:
         return None
 
-    lib_paths = _resolve_julia_lib_paths(str(rocprof_config.capabilities.julia_exec))
-    if lib_paths is None:
-        return None
-
-    paths = [
-        lib_paths[0],
-        lib_paths[1],
-        rocprof_config.get_library_path(),
-    ]
-
-    return {
-        "ROCPROFSYS_TRACE": "ON",
-        "ROCPROFSYS_PROFILE": "ON",
-        "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_USE_PID": "OFF",
-        "ROCPROFSYS_ROCM_DOMAINS": "hip_api,hsa_api,kernel_dispatch,memory_copy",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count,peak_rss",
-        "ROCPROFSYS_COUT_OUTPUT": "ON",
-        "LD_LIBRARY_PATH": ":".join(filter(None, paths)),
-    }
+    return _resolve_julia_lib_paths(str(rocprof_config.capabilities.julia_exec))
 
 
 # =============================================================================
@@ -106,9 +87,21 @@ class TestJulia(RocprofsysTest):
     @pytest.mark.hpc
     @pytest.mark.gpu
     @pytest.mark.parametrize("mode", ["sys_run"])
-    def test_vecadd(self, mode, julia_environment, rocprof_config):
-        if julia_environment is None:
+    def test_vecadd(self, mode, julia_lib_paths, rocprof_config):
+        if julia_lib_paths is None:
             pytest.skip("Unable to resolve Julia library paths")
+
+        paths = [julia_lib_paths[0], julia_lib_paths[1], self.library_path]
+        julia_environment = {
+            "ROCPROFSYS_TRACE": "ON",
+            "ROCPROFSYS_PROFILE": "ON",
+            "ROCPROFSYS_TIME_OUTPUT": "OFF",
+            "ROCPROFSYS_USE_PID": "OFF",
+            "ROCPROFSYS_ROCM_DOMAINS": "hip_api,hsa_api,kernel_dispatch,memory_copy",
+            "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count,peak_rss",
+            "ROCPROFSYS_COUT_OUTPUT": "ON",
+            "LD_LIBRARY_PATH": ":".join(filter(None, paths)),
+        }
         result = self.run_test(
             mode,
             "vecadd.jl",

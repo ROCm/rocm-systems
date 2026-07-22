@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
@@ -96,6 +97,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCDECODE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCJPEG_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_STREAM)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_CORE_RANGE_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_GRAPH)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -301,6 +303,11 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
                 operation);
             break;
         }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
+        {
+            val = rocprofiler::hip::graph::name_by_id(operation);
+            break;
+        }
     };
 
     if(!val)
@@ -448,6 +455,11 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API:
         {
             ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxCoreRange>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
+        {
+            ops = rocprofiler::hip::graph::get_ids();
             break;
         }
     };
@@ -606,6 +618,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
         case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
         case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
+        case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }

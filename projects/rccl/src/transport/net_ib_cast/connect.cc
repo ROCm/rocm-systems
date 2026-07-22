@@ -23,6 +23,8 @@ NCCL_PARAM(IbCastFifoTc, "IB_FIFO_TC", -1);
 NCCL_PARAM(IbCastEceEnable,"IB_ECE_ENABLE",1);
 
 extern int64_t ncclParamIbCastOooRq();
+extern int64_t ncclParamIbCastResiliencyPortFailover();
+extern int64_t ncclParamIbCastReceiverSideMatchingScheme();
 
 struct ncclIbDevExtraProps {
   bool oooRq;
@@ -64,6 +66,27 @@ static bool nccl_channel_last_ud[MAX_IB_DEVS][ncclIbChannelTypeMax];
 
 static inline bool IbCastIsCtsOffloadEnabled(int isP2p) {
   return IbCastOffloadEnabled && !(isP2p && rcclParamIbCastP2pDisableCts());
+}
+
+static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
+  // Order matters here:
+  // BY_ORDER -> ctsoffload
+  // BY_ID -> failover
+  // BY_INDEX -> default or user requested
+
+  if (useCtsOffload) {
+    return BY_ORDER;
+  }
+
+  if (ncclParamIbCastOooRq() || (ncclParamIbCastResiliencyPortFailover() == 1)) {
+    return BY_ID;
+  }
+
+  int64_t requested = ncclParamIbCastReceiverSideMatchingScheme();
+  if (requested == -2 || requested == BY_ORDER) {
+    return BY_INDEX;
+  }
+  return requested;
 }
 
 ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int cqSize) {
@@ -828,11 +851,10 @@ ib_recv_dev_list:
   // Read isP2p from handle
   isP2p = handle->isP2p;
   comm->useCtsOffload = IbCastIsCtsOffloadEnabled(isP2p) && !handle->isRMA;
-  if (comm->useCtsOffload) {
-    comm->base.recvMatchingScheme = BY_ORDER;
-  }
+  comm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(comm->useCtsOffload);
 
-  INFO(NCCL_NET, "NET/IB: IbCastConnect isP2p=%d isRMA=%d", isP2p, handle->isRMA);
+  INFO(NCCL_NET, "NET/IB: IbCastConnect isP2p=%d isRMA=%d useCtsOffload=%d recvMatchingScheme=%d",
+       isP2p, handle->isRMA, comm->useCtsOffload, comm->base.recvMatchingScheme);
   comm->base.nqps = IbCastCalculateNqps(isP2p, comm->base.vProps.ndevs, 
                                          remoteVProps.ndevs, __func__);
   if (handle->isRMA) {
@@ -1389,10 +1411,9 @@ ib_recv:
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
 
   rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p);
-  if (rComm->useCtsOffload) {
-    rComm->base.recvMatchingScheme = BY_ORDER;
-  }
-  INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d useCtsOffload=%d (IbP2pDisableCts=%d)", remMeta.isP2p, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts());
+  rComm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(rComm->useCtsOffload);
+  INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d useCtsOffload=%d (IbP2pDisableCts=%ld) recvMatchingScheme=%d",
+       remMeta.isP2p, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts(), rComm->base.recvMatchingScheme);
   rComm->base.nqps = IbCastCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs,
                                          remMeta.ndevs, __func__);
   rComm->base.nDataQps = std::max(rComm->base.vProps.ndevs, remMeta.ndevs);
@@ -1499,10 +1520,21 @@ ib_recv:
     if (rComm->flushEnabled) {
       if (rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering()) {
 #if defined(HIP_UNCACHED_MEMORY)
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), /*manager=*/nullptr, ncclMemPersist, hipDeviceMallocUncached), ret, fail);
+        const unsigned int gpuFlushFlags = hipDeviceMallocUncached;
 #else
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), /*manager=*/nullptr, ncclMemPersist, hipDeviceMallocFinegrained), ret, fail);
+        const unsigned int gpuFlushFlags = hipDeviceMallocFinegrained;
 #endif
+        // RCCL: allocate the GDR flush buffer directly via HIP (never cuMem/VMM)
+        // so hsa_amd_portable_export_dmabuf can export it. cuMem/VMM allocations
+        // fail to export through the HSA portable exporter on some ROCm/NIC stacks.
+        CUDACHECKGOTO(
+          hipExtMallocWithFlags((void**)&rCommDev->gpuFlush.gpuFlushGpuMem,
+                                sizeof(int), gpuFlushFlags),
+          ret, fail);
+        CUDACHECKGOTO(hipMemset(rCommDev->gpuFlush.gpuFlushGpuMem, 0,
+                                sizeof(int)),
+                      ret, fail);
+
         if (useDmaBuf) {
           uint64_t exportOffset = 0;
           void *aligned_ptr = NULL;
@@ -1626,7 +1658,7 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
       struct ncclIbRecvCommDev* commDev = comm->devs + i;
       if (comm->flushEnabled) {
         if (commDev->gpuFlush.gpuFlushGpuMem != nullptr) {
-          NCCLCHECK(ncclCudaFree(commDev->gpuFlush.gpuFlushGpuMem, /*manager=*/nullptr));
+          CUDACHECK(hipFree(commDev->gpuFlush.gpuFlushGpuMem));
           commDev->gpuFlush.gpuFlushGpuMem = nullptr;
           if (commDev->gpuFlush.gpuMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.gpuMr));
           commDev->gpuFlush.gpuMr = nullptr;

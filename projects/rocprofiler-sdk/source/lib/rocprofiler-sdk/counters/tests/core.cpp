@@ -800,6 +800,7 @@ rocprofiler-sdk:
           - gfx12
           - gfx1200
           - gfx1201
+          - gfx1250
           expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM
     )";
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
@@ -856,6 +857,7 @@ rocprofiler-sdk:
           - gfx12
           - gfx1200
           - gfx1201
+          - gfx1250
           block: GRBM
           event: 2
     - name: TEST_YAML_LOAD
@@ -885,6 +887,7 @@ rocprofiler-sdk:
           - gfx12
           - gfx1200
           - gfx1201
+          - gfx1250
           expression: reduce(GRBM_GUI_ACTIVE,max)
     )";
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);

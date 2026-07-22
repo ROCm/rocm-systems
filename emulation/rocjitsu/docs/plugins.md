@@ -52,7 +52,7 @@ When `file` is in `RJ_SINKS`, each plugin writes to
 
 ```bash
 # Interactive use (default) — output goes to stderr
-RJ_RACE=1 LD_PRELOAD=librocjitsu_kmd.so ./my_app
+RJ_RACE=1 LD_PRELOAD=librocjitsu.so ./my_app
 
 # Save race reports to files (for test harnesses)
 RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output LD_PRELOAD=... ./my_app
@@ -92,5 +92,5 @@ Multiple plugins can be active simultaneously via `ExecutionPluginGroup`.
 
 1. Implement `ExecutionPlugin` in a new `.cpp`/`.h` pair under `vm/plugins/`.
 2. Add the source to `CMakeLists.txt`.
-3. Register the plugin in `simulated_driver.cpp` (gated by an environment variable).
+3. Register the plugin in `simulated_kfd.cpp` (gated by an environment variable).
 4. Use `sink().write()` for all output — never write to stderr directly.

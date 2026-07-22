@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -582,8 +582,9 @@ write_otf2(const output_config&                                          cfg,
                     continue;
 
                 using value_type = common::mpl::unqualified_type_t<decltype(itr)>;
-                auto name        = buffer_names.at(itr.kind, itr.operation);
-                auto paradigm    = OTF2_PARADIGM_HIP;
+
+                auto name     = buffer_names.at(itr.kind, itr.operation);
+                auto paradigm = OTF2_PARADIGM_HIP;
                 if constexpr(std::is_same<value_type,
                                           rocprofiler_buffer_tracing_marker_api_record_t>::value)
                 {

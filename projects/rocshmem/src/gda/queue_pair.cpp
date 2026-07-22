@@ -485,3 +485,33 @@ __device__ uint32_t QueuePair::get_lkey(uintptr_t addr) {
 }
 
 }  // namespace rocshmem
+
+// Exported C function for GIN QP factory to initialize __constant__ constmem.
+// Lives in librocshmem.a so HIP_SYMBOL(constmem) resolves via device linking.
+// Callable from librccl.so via -rdynamic symbol export.
+extern "C" void rocshmem_gin_init_constmem(int provider, int rank) {
+  using namespace rocshmem;
+
+  // Initialize constmem.gda_provider for QP device dispatch
+  GDAProvider gda_prov = static_cast<GDAProvider>(provider);
+  constmem_t* cm_addr{nullptr};
+  if (hipGetSymbolAddress(reinterpret_cast<void**>(&cm_addr),
+                          HIP_SYMBOL(constmem)) == hipSuccess) {
+    CHECK_HIP(hipMemcpy(&cm_addr->gda_provider, &gda_prov, sizeof(gda_prov), hipMemcpyDefault));
+  }
+
+  // Initialize logd_constants for device-side error reporting
+  log_pe_number = rank;
+  uint32_t log_flags = 0;
+  if (envvar::log_flags.show_error) log_flags |= logd_constants::SHOW_ERROR;
+  if (envvar::log_flags.show_warn)  log_flags |= logd_constants::SHOW_WARN;
+  if (envvar::log_flags.show_info)  log_flags |= logd_constants::SHOW_INFO;
+  if (envvar::log_flags.show_trace) log_flags |= logd_constants::SHOW_TRACE;
+  if (envvar::log_flags.show_color) log_flags |= logd_constants::SHOW_COLOR;
+  struct logd_constants host_logd{rank, log_flags};
+  struct logd_constants* logd_addr{nullptr};
+  if (hipGetSymbolAddress(reinterpret_cast<void**>(&logd_addr),
+                          HIP_SYMBOL(logd_constants)) == hipSuccess) {
+    CHECK_HIP(hipMemcpy(logd_addr, &host_logd, sizeof(host_logd), hipMemcpyDefault));
+  }
+}

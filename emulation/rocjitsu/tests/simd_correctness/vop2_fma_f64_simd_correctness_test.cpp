@@ -168,6 +168,44 @@ struct ForceScalarGuard {
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
 };
 
+void check_fmac_literal_src0(bool force_scalar) {
+  ForceScalarGuard gate_guard;
+  util::set_force_scalar_for_testing(force_scalar);
+
+  Fixture fx;
+  ASSERT_NE(fx.cu, nullptr);
+  ASSERT_NE(fx.wf, nullptr);
+
+  constexpr uint32_t kLiteralHighWord = 0x3DF00000u;
+  constexpr uint64_t kLiteralBits = static_cast<uint64_t>(kLiteralHighWord) << 32;
+  const double literal = std::bit_cast<double>(kLiteralBits);
+  const double multiplier = 3.0;
+  const uint64_t multiplier_bits = std::bit_cast<uint64_t>(multiplier);
+  const uint64_t expected = std::bit_cast<uint64_t>(std::fma(literal, multiplier, literal));
+
+  uint32_t vb = fx.wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    fx.write64(vb + 2, lane, multiplier_bits);
+    fx.write64(vb + 4, lane, kLiteralBits);
+  }
+  fx.wf->set_exec(~0ULL);
+
+  uint32_t enc = vop2_encode(/*opcode=*/4, /*vdst=*/4, /*vsrc1=*/2, /*src0=*/255);
+  uint32_t words[4] = {enc, kLiteralHighWord, 0u, 0u};
+  Instruction *inst = fx.decoder->decode(words);
+  ASSERT_NE(inst, nullptr) << "v_fmac_f64 literal decode failed";
+  fx.cu->execute_instruction(inst, *fx.wf);
+  delete inst;
+
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    EXPECT_EQ(fx.read64(vb + 4, lane), expected) << "lane " << lane;
+}
+
+TEST(Vop2FmaF64SimdCorrectness, InlineLiteralSrc0UsesDoubleHighBits) {
+  check_fmac_literal_src0(/*force_scalar=*/true);
+  check_fmac_literal_src0(/*force_scalar=*/false);
+}
+
 void check_fmac(uint64_t exec) {
   ForceScalarGuard gate_guard;
 

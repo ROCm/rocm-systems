@@ -2124,6 +2124,31 @@ bool KernelBlitManager::writeBufferRect(const void* srcHost, device::Memory& dst
   return result;
 }
 
+struct alignas(16) FillPatternPayload {
+  uint64_t lo;
+  uint64_t hi;
+};
+
+// startByte rotates the pattern so the payload is byte-correct for a region whose
+// byte-offset-from-fill-start is startByte % patternSize.  This works for all supported
+// patternSizes (1/2/4/8/16) since patternSize is always a power of two, making the
+// bitwise AND a valid modulo.
+static inline void tilePatternBytes(unsigned char* dst, size_t dstSize, const void* pattern,
+                                    size_t patternSize, size_t startByte) {
+  const auto* src = static_cast<const unsigned char*>(pattern);
+  for (size_t i = 0; i < dstSize; ++i) {
+    dst[i] = src[(startByte + i) & (patternSize - 1)];
+  }
+}
+
+static inline FillPatternPayload buildTilePattern(const void* pattern, size_t patternSize,
+                                                  size_t startByte) {
+  FillPatternPayload payload = {};
+  tilePatternBytes(reinterpret_cast<unsigned char*>(&payload), sizeof(payload), pattern,
+                   patternSize, startByte);
+  return payload;
+}
+
 bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, size_t patternSize,
                                    const amd::Coord3D& surface, const amd::Coord3D& origin,
                                    const amd::Coord3D& size, bool entire, bool forceBlit) const {
@@ -2137,71 +2162,135 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
     result = HostBlitManager::fillBuffer(memory, pattern, patternSize, size, origin, size, entire);
     synchronize();
     return result;
-  } else {
-    // Pack the fill buffer info, that handles unaligned memories.
-    std::vector<FillBufferInfo> packed_vector{};
-    FillBufferInfo::PackInfo(memory, size[0], origin[0], pattern, patternSize, packed_vector);
-
-    size_t overall_offset = origin[0];
-    for (auto& packed_obj : packed_vector) {
-      constexpr uint32_t kFillType = FillBufferAligned;
-      uint32_t kpattern_size = (packed_obj.pattern_expanded_)
-                                   ? HostBlitManager::FillBufferInfo::kExtendedSize
-                                   : patternSize;
-      size_t kfill_size = packed_obj.fill_size_ / kpattern_size;
-      uint64_t koffset = overall_offset;
-      overall_offset += packed_obj.fill_size_;
-
-      size_t globalWorkOffset[3] = {0, 0, 0};
-      uint32_t alignment = (kpattern_size & 0xf) == 0   ? 2 * sizeof(uint64_t)
-                           : (kpattern_size & 0x7) == 0 ? sizeof(uint64_t)
-                           : (kpattern_size & 0x3) == 0 ? sizeof(uint32_t)
-                           : (kpattern_size & 0x1) == 0 ? sizeof(uint16_t)
-                                                        : sizeof(uint8_t);
-
-      // Program kernels arguments for the fill operation
-      Memory* mem = &gpuMem(memory);
-      setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, koffset);
-      const size_t localWorkSize = 256;
-      size_t globalWorkSize = std::min(dev().settings().limit_blit_wg_ * localWorkSize, kfill_size);
-      globalWorkSize = amd::alignUp(globalWorkSize, localWorkSize);
-
-      Memory& gpuCB = gpu().xferWrite().Acquire(patternSize);
-      void* constBuf = gpuCB.map(&gpu(), Resource::NoWait);
-      // If pattern has been expanded, use the expanded pattern, otherwise use the default pattern
-      if (packed_obj.pattern_expanded_) {
-        memcpy(constBuf, &packed_obj.expanded_pattern_, kpattern_size);
-      } else {
-        memcpy(constBuf, pattern, kpattern_size);
-      }
-      gpuCB.unmap(&gpu());
-      Memory* pGpuCB = &gpuCB;
-      setArgument(kernels_[kFillType], 1, sizeof(cl_mem), &pGpuCB);
-      uint64_t offset = origin[0];
-
-      // Adjust the pattern size in the copy type size
-      kpattern_size /= alignment;
-      setArgument(kernels_[kFillType], 2, sizeof(uint32_t), &kpattern_size);
-      setArgument(kernels_[kFillType], 3, sizeof(alignment), &alignment);
-
-      // Calculate max id
-      uint64_t end_ptr = memory.virtualAddress() + koffset + kfill_size * kpattern_size * alignment;
-      setArgument(kernels_[kFillType], 4, sizeof(end_ptr), &end_ptr);
-      uint32_t next_chunk = globalWorkSize * kpattern_size;
-      setArgument(kernels_[kFillType], 5, sizeof(uint32_t), &next_chunk);
-      uint32_t lws = localWorkSize;
-      setArgument(kernels_[kFillType], 6, sizeof(lws), &lws);
-
-      // Create ND range object for the kernel's execution
-      amd::NDRangeContainer ndrange(1, globalWorkOffset, &globalWorkSize, &localWorkSize);
-
-      // Execute the blit
-      address parameters = kernels_[kFillType]->parameters().values();
-      result = gpu().submitKernelInternal(ndrange, *kernels_[kFillType], parameters);
-      gpu().xferWrite().Release(gpuCB);
-    }
   }
 
+  const uintptr_t fill_buf_addr = memory.virtualAddress() + origin[0];
+
+  constexpr uint32_t kFillType = FillBufferUnAligned;
+
+  Memory* mem = &gpuMem(memory);
+
+  assert((patternSize == 1 || patternSize == 2 || patternSize == 4 || patternSize == 8 ||
+          patternSize == 16) &&
+         "fillBuffer supports pattern sizes of 1/2/4/8/16 bytes");
+
+  // Body region uses uint64 stores unconditionally. Tile region uses ulong2 stores.
+  // Payloads are built after region offsets are computed so they can be rotated
+  // by regionByteOffset % patternSize, making every region byte-correct even when
+  // the destination address is not aligned to patternSize.
+  constexpr size_t bodyElemSize = sizeof(uint64_t);
+
+  // Calculate head, body, body-tail, tail, and tiled body counts
+  // Head/tail are byte counts. Body/body-tail are element counts.
+  constexpr size_t tile_size = 2 * sizeof(uint64_t);
+  uintptr_t end_addr = fill_buf_addr + size[0];
+
+  uintptr_t body_aligned_start = alignUp(fill_buf_addr, bodyElemSize);
+  uintptr_t body_aligned_end = alignDown(end_addr, bodyElemSize);
+
+  size_t head_count = 0;
+  size_t body_count = 0;
+  size_t body_tile_count = 0;
+  size_t body_tail_count = 0;
+  size_t tail_count = 0;
+  uintptr_t tile_start = fill_buf_addr;  // unused when body_tile_count == 0
+
+  if (body_aligned_end <= body_aligned_start) {
+    // Tiny or sufficiently misaligned buffer: no room for a body uint64 element.
+    // Route every byte through the head cleanup region. Head count is
+    // bounded by 2*bodyElemSize - 2 = 14 (e.g. patternSize=1, addr=1,
+    // size=14); still fits within the 16-lane cleanup region.
+    head_count = size[0];
+  } else {
+    tile_start = alignUp(body_aligned_start, tile_size);
+    uintptr_t tile_end = alignDown(body_aligned_end, tile_size);
+    head_count = body_aligned_start - fill_buf_addr;
+    body_tile_count =
+        (tile_end > tile_start) ? (tile_end - tile_start) / tile_size : 0;
+    body_count =
+        (tile_start > body_aligned_start)
+            ? static_cast<size_t>((tile_start - body_aligned_start) / bodyElemSize)
+            : static_cast<size_t>(0);
+    body_tail_count =
+        (body_aligned_end > tile_end)
+            ? static_cast<size_t>((body_aligned_end - tile_end) / bodyElemSize)
+            : static_cast<size_t>(0);
+    tail_count = static_cast<size_t>(end_addr - body_aligned_end);
+  }
+
+  assert(head_count <= (2 * bodyElemSize - 2) &&
+         "head_count must fit cleanup region (small-buffer case may be up to 2*bodyElemSize-2)");
+  // body_aligned_start is 8-aligned, tile_start = alignUp(body_aligned_start, 16),
+  // so (tile_start - body_aligned_start) / bodyElemSize is structurally 0 or 1.
+  assert(body_count <= 1 && "body_count is structurally 0 or 1");
+  assert(body_tail_count <= 1 && "body_tail_count is structurally 0 or 1");
+  assert(tail_count < bodyElemSize && "tail_count should be less than body element size");
+  const size_t cleanup_total = head_count + body_count + body_tail_count + tail_count;
+  assert(cleanup_total <= 16 && "cleanup region must fit in the kernel's 16-lane cleanup gate");
+  if (cleanup_total > 16) {
+    LogPrintfError(
+        "fillBuffer: cleanup region size %zu exceeds 16-lane kernel gate "
+        "(head=%zu body=%zu body_tail=%zu tail=%zu, fill_buf_addr=0x%lx, size=%zu, patternSize=%zu)",
+        cleanup_total, head_count, body_count, body_tail_count, tail_count,
+        fill_buf_addr, size[0], patternSize);
+    return false;
+  }
+
+  const size_t tail_offset =
+      head_count + body_count * bodyElemSize + body_tile_count * tile_size + body_tail_count * bodyElemSize;
+  const size_t body_offset = head_count;
+  const size_t body_tail_offset = head_count + body_count * bodyElemSize + body_tile_count * tile_size;
+  const size_t tile_offset = static_cast<size_t>(tile_start - fill_buf_addr);
+
+  // Build rotated payloads: each region's payload is rotated by its byte-offset-from-fill-start
+  // modulo patternSize so that the stored bytes are correct regardless of destination alignment.
+  // When all offsets are 0 (aligned case), all three payloads agree with the unrotated pattern.
+  const FillPatternPayload tiled_pattern =
+      buildTilePattern(pattern, patternSize, tile_offset % patternSize);
+  const uint64_t body_pattern =
+      buildTilePattern(pattern, patternSize, body_offset % patternSize).lo;
+  const uint64_t body_tail_pattern =
+      buildTilePattern(pattern, patternSize, body_tail_offset % patternSize).lo;
+
+  constexpr size_t localWorkSize = 256;
+  const size_t work_items = std::max(alignUp(body_tile_count, localWorkSize), localWorkSize);
+  size_t globalWorkSize = std::min(dev().settings().limit_blit_wg_ * localWorkSize, work_items);
+  const size_t body_tile_passes = (body_tile_count + globalWorkSize - 1) / globalWorkSize;
+
+  // Use xferWrite to acquire constant buffer for pattern (PAL-specific approach)
+  Memory& gpuCB = gpu().xferWrite().Acquire(patternSize);
+  void* constBuf = gpuCB.map(&gpu(), Resource::NoWait);
+  memcpy(constBuf, pattern, patternSize);
+  gpuCB.unmap(&gpu());
+  Memory* pGpuCB = &gpuCB;
+
+  struct Ushort4 {
+    uint16_t s0, s1, s2, s3;
+  } counts = {static_cast<uint16_t>(head_count), static_cast<uint16_t>(body_count),
+              static_cast<uint16_t>(body_tail_count), static_cast<uint16_t>(tail_count)};
+  static_assert(sizeof(size_t) == sizeof(uint64_t),
+                "Kernel arg passing assumes 64-bit size_t");
+  setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, origin[0]);
+  setArgument(kernels_[kFillType], 1, sizeof(cl_mem), &pGpuCB);
+  setArgument(kernels_[kFillType], 2, sizeof(tiled_pattern), &tiled_pattern);
+  setArgument(kernels_[kFillType], 3, sizeof(body_pattern), &body_pattern);
+  setArgument(kernels_[kFillType], 4, sizeof(body_tail_pattern), &body_tail_pattern);
+  setArgument(kernels_[kFillType], 5, sizeof(body_tile_count), &body_tile_count);
+  setArgument(kernels_[kFillType], 6, sizeof(body_tile_passes), &body_tile_passes);
+  setArgument(kernels_[kFillType], 7, sizeof(globalWorkSize), &globalWorkSize /* stride */);
+  setArgument(kernels_[kFillType], 8, sizeof(patternSize), &patternSize);
+  setArgument(kernels_[kFillType], 9, sizeof(tail_offset), &tail_offset);
+  setArgument(kernels_[kFillType], 10, sizeof(cl_mem), &mem, origin[0] + body_offset);
+  setArgument(kernels_[kFillType], 11, sizeof(cl_mem), &mem, origin[0] + body_tail_offset);
+  setArgument(kernels_[kFillType], 12, sizeof(cl_mem), &mem, origin[0] + tail_offset);
+  setArgument(kernels_[kFillType], 13, sizeof(cl_mem), &mem, origin[0] + tile_offset);
+  setArgument(kernels_[kFillType], 14, sizeof(counts), &counts);
+
+  size_t globalWorkOffset[3] = {0, 0, 0};
+  amd::NDRangeContainer ndrange(1, globalWorkOffset, &globalWorkSize, &localWorkSize);
+  address parameters = kernels_[kFillType]->parameters().values();
+  result = gpu().submitKernelInternal(ndrange, *kernels_[kFillType], parameters);
+  gpu().xferWrite().Release(gpuCB);
   synchronize();
 
   return result;

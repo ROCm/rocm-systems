@@ -8,6 +8,7 @@
 #include "nccl.h"
 #include "debug.h"
 #include "rocmwrap.h"
+#include "kernel_config.h"
 #include "hsa/hsa.h"
 #include "param.h"
 #include "bootstrap.h"
@@ -40,16 +41,6 @@ NCCL_PARAM(CuMemHostEnable, "CUMEM_HOST_ENABLE", -1);
 CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
 
 static int ncclCuMemSupported = 0;
-
-// cuMem VMM API availability by HIP/driver version.
-#define NCCL_CUMEM_NATIVE_MIN_VERSION   71260540
-#define NCCL_CUMEM_BACKPORT_MIN_VERSION 70051831
-#define NCCL_CUMEM_BACKPORT_MAX_VERSION 70060000
-
-#define NCCL_CUMEM_VERSION_SUPPORTED(version)                  \
-  ((version) >= NCCL_CUMEM_NATIVE_MIN_VERSION ||               \
-   ((version) >= NCCL_CUMEM_BACKPORT_MIN_VERSION &&            \
-    (version) < NCCL_CUMEM_BACKPORT_MAX_VERSION))
 
 #define KERNEL_VERSION_CODE(major, minor) ((major << 16) | (minor << 8))
 
@@ -116,7 +107,10 @@ static int ncclCumemHostEnable = -1;
 int ncclCuMemHostEnable() {
   if (ncclCumemHostEnable != -1)
     return ncclCumemHostEnable;
-#if HIP_VERSION < 71260540
+  // NOTE: the cuMem *host* allocation path is NOT part of the ROCm 7.0.2.x
+  // backport (it relies on hipDeviceAttributeHostNumaId, which is absent there),
+  // so it has its own native-only gate rather than NCCL_CUMEM_VERSION_SUPPORTED().
+#if !NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
   ncclCumemHostEnable = 0;
   return ncclCumemHostEnable;
 #else
@@ -124,7 +118,7 @@ int ncclCuMemHostEnable() {
   int cudaDriverVersion;
   int paramValue = -1;
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
-  if (cudaDriverVersion < 71260540) {
+  if (!NCCL_CUMEM_HOST_VERSION_SUPPORTED(cudaDriverVersion)) {
     ncclCumemHostEnable = 0;
   }
   else {
@@ -132,7 +126,7 @@ int ncclCuMemHostEnable() {
     if (paramValue != -1)
       ncclCumemHostEnable = paramValue;
     else
-      ncclCumemHostEnable = (cudaDriverVersion >= 71260540) ? 1 : 0;
+      ncclCumemHostEnable = NCCL_CUMEM_HOST_VERSION_SUPPORTED(cudaDriverVersion) ? 1 : 0;
     if (ncclCumemHostEnable) {
       // Verify that host allocations actually work.  Docker in particular is known to disable "get_mempolicy",
       // causing such allocations to fail (this can be fixed by invoking Docker with "--cap-add SYS_NICE").
@@ -247,89 +241,29 @@ static void initOnceFunc() {
 
   //check OS kernel support
   if(!rcclParamForceEnableDMABUF()) {
-    struct utsname utsname;
-    FILE *fp = NULL;
-    char kernel_opt1[28] = "CONFIG_DMABUF_MOVE_NOTIFY=y";
-    char kernel_opt2[20] = "CONFIG_PCI_P2PDMA=y";
+    const char* kernel_opt1 = "CONFIG_DMABUF_MOVE_NOTIFY=y";
+    const char* kernel_opt2 = "CONFIG_PCI_P2PDMA=y";
     char kernel_conf_file[128];
     char buf[256];
     int found_opt1 = 0;
     int found_opt2 = 0;
 
-    //check for kernel name exists
-    if (uname(&utsname) == -1) INFO(NCCL_INIT,"Could not get kernel name");
-    //format and store the kernel conf file location
-    const char* possiblePaths[] = {
-      "/proc/config.gz",
-      "/boot/config-%s",
-      "/usr/src/linux-%s/.config",
-      "/usr/src/linux/.config",
-      "/usr/lib/modules/%s/config",
-      "/usr/lib/ostree-boot/config-%s",
-      "/usr/lib/kernel/config-%s",
-      "/usr/src/linux-headers-%s/.config",
-      "/lib/modules/%s/build/.config",
-    };
+    std::string content;
+    if (ncclKernelConfigReadFirstAvailable(&content, kernel_conf_file, sizeof(kernel_conf_file))) {
+      found_opt1 = ncclKernelConfigContentHasOption(content, kernel_opt1);
+      found_opt2 = ncclKernelConfigContentHasOption(content, kernel_opt2);
+      if (found_opt1) INFO(NCCL_INIT,"%s in %s", kernel_opt1, kernel_conf_file);
+      if (found_opt2) INFO(NCCL_INIT,"%s in %s", kernel_opt2, kernel_conf_file);
 
-    // Check if zcat is available in the system
-    int has_zcat = (system("which zcat > /dev/null 2>&1") == 0);
-
-    for (const auto& path : possiblePaths) {
-      // Reset flags for each file
-      found_opt1 = 0;
-      found_opt2 = 0;
-
-      // Special handling for /proc/config.gz
-      snprintf(kernel_conf_file, sizeof(kernel_conf_file), path, utsname.release);
-
-      if (strstr(path, "/proc/config.gz") != NULL) {
-        // Skip if zcat is unavailable or /proc/config.gz does not exist.
-        // popen() succeeds even when the file is missing, producing an empty
-        // stream that falsely triggers the "not found" error path.
-        if (!has_zcat || access("/proc/config.gz", R_OK) != 0) {
-          INFO(NCCL_INIT, "Skipping %s (zcat %s, file %s)", kernel_conf_file,
-               has_zcat ? "available" : "unavailable",
-               access("/proc/config.gz", R_OK) == 0 ? "exists" : "not found");
-          continue;
-        }
-        fp = popen("zcat /proc/config.gz 2>/dev/null", "r");
-      } else {
-        fp = fopen(kernel_conf_file, "r");
+      if (!found_opt1 || !found_opt2) {
+        dmaBufSupport = 0;
+        INFO(NCCL_INIT, "CONFIG_DMABUF_MOVE_NOTIFY and CONFIG_PCI_P2PDMA should be set for DMA_BUF in %s", kernel_conf_file);
+        INFO(NCCL_INIT, "DMA_BUF_SUPPORT Failed due to OS kernel support");
+        goto error;
       }
 
-      if (fp != NULL){
-        //look for kernel_opt1 and kernel_opt2 in the conf file and check
-        while (fgets(buf, sizeof(buf), fp) != NULL) {
-          if (strstr(buf, kernel_opt1) != NULL) {
-            found_opt1 = 1;
-            INFO(NCCL_INIT,"%s in %s", kernel_opt1, kernel_conf_file);
-          }
-          if (strstr(buf, kernel_opt2) != NULL) {
-            found_opt2 = 1;
-            INFO(NCCL_INIT,"%s in %s", kernel_opt2, kernel_conf_file);
-          }
-        }
-
-        // Close file handle
-        if (strstr(path, "/proc/config.gz") != NULL) {
-          pclose(fp);
-        } else {
-          fclose(fp);
-        }
-
-        // Check if both options were found
-        if (!found_opt1 || !found_opt2) {
-          dmaBufSupport = 0;
-          INFO(NCCL_INIT, "CONFIG_DMABUF_MOVE_NOTIFY and CONFIG_PCI_P2PDMA should be set for DMA_BUF in %s", kernel_conf_file);
-          INFO(NCCL_INIT, "DMA_BUF_SUPPORT Failed due to OS kernel support");
-        }
-
-        if(dmaBufSupport) INFO(NCCL_INIT, "DMA_BUF Support Enabled");
-        else goto error;
-        break;
-      }
-    }
-    if(fp == NULL) {
+      INFO(NCCL_INIT, "DMA_BUF Support Enabled");
+    } else {
       // Fallback: check /proc/kallsyms for DMA-BUF and P2PDMA kernel symbols.
       // Works inside Docker containers where /boot/config-* is unavailable.
       INFO(NCCL_INIT, "Could not open kernel conf file, trying /proc/kallsyms fallback");

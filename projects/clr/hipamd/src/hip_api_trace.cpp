@@ -9,6 +9,7 @@
 
 #include "hip_internal.hpp"
 
+#include <atomic>
 #include <cstdint>
 
 #if defined(HIP_ROCPROFILER_REGISTER) && HIP_ROCPROFILER_REGISTER > 0
@@ -1557,18 +1558,25 @@ template <typename Tp> void ToolsInit(Tp* table) {
 #endif
 }
 
-template <typename Tp> Tp& GetDispatchTableImpl() {
+template <typename Tp> Tp* GetDispatchTableImpl(std::atomic<bool>& registered) {
   // using a static inside a function prevents static initialization fiascos
   static auto dispatch_table = Tp{};
-
-  // Change all the function pointers to point to the HIP runtime implementation functions
-  UpdateDispatchTable(&dispatch_table);
-
-  // Profiler Registration, may wrap the function pointers
-  ToolsInit(&dispatch_table);
-
-  return dispatch_table;
+  static auto* table = [] {
+    UpdateDispatchTable(&dispatch_table);
+    return &dispatch_table;
+  }();
+  if (!registered.load(std::memory_order_acquire)) {
+    bool expected = false;
+    if (registered.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+      ToolsInit(table);
+    }
+  }
+  return table;
 }
+
+std::atomic<bool> hip_dispatch_registered{false};
+std::atomic<bool> hip_compiler_dispatch_registered{false};
+std::atomic<bool> hip_tools_dispatch_registered{false};
 }  // namespace
 
 // At the -O3 optimization level, these functions are vectorized (gcc 11.4.1),
@@ -1582,16 +1590,13 @@ template <typename Tp> Tp& GetDispatchTableImpl() {
 #define NO_VECTORIZE
 #endif
 NO_VECTORIZE const HipDispatchTable* GetHipDispatchTable() {
-  static auto* _v = &GetDispatchTableImpl<HipDispatchTable>();
-  return _v;
+  return GetDispatchTableImpl<HipDispatchTable>(hip_dispatch_registered);
 }
 NO_VECTORIZE const HipCompilerDispatchTable* GetHipCompilerDispatchTable() {
-  static auto* _v = &GetDispatchTableImpl<HipCompilerDispatchTable>();
-  return _v;
+  return GetDispatchTableImpl<HipCompilerDispatchTable>(hip_compiler_dispatch_registered);
 }
 const HipToolsDispatchTable* GetHipToolsDispatchTable() {
-  static auto* _v = &GetDispatchTableImpl<HipToolsDispatchTable>();
-  return _v;
+  return GetDispatchTableImpl<HipToolsDispatchTable>(hip_tools_dispatch_registered);
 }
 }  // namespace hip
 

@@ -25,6 +25,7 @@ namespace amdgpu {
 
 // Forward declaration - wavefront accesses registers through its CU.
 class ComputeUnitCore;
+class Lds;
 
 /// @brief Wavefront execution state.
 enum class WfState : uint8_t {
@@ -167,6 +168,17 @@ public:
   /// @brief Set the per-WG LDS base offset.
   void set_lds_base(uint32_t base) { lds_base_ = base; }
 
+  /// @brief Return the LDS backing selected for this workgroup placement.
+  ///
+  /// CU-mode workgroups use their owning CU's LDS. WGP-mode workgroups can
+  /// instead use a backing shared by the two sibling CUs in the WGP.
+  Lds &lds();
+  const Lds &lds() const;
+
+  /// @brief Override the LDS backing for this workgroup placement.
+  /// Passing nullptr restores the owning CU's LDS.
+  void set_lds(Lds *lds) { lds_ = lds; }
+
   /// @brief Return this workgroup's rank within its cluster.
   uint32_t cluster_rank() const { return cluster_rank_; }
 
@@ -196,11 +208,24 @@ public:
 
   /// @brief Return the EXEC mask.
   /// @returns EXEC mask (one bit per lane, 1 = active).
-  uint64_t exec() const { return exec_; }
+  uint64_t exec() const { return exec_ & lane_mask(); }
 
-  /// @brief Set the EXEC mask.
+  /// @brief Return the raw architectural EXEC register pair.
+  ///
+  /// Wave32 instructions may use EXEC_HI as scalar scratch even though its
+  /// bits do not select active lanes. Operand decoding therefore needs the
+  /// unmasked register value, while vector execution should use exec().
+  uint64_t exec_raw() const { return exec_; }
+
+  /// @brief Set the active-lane portion of the EXEC register pair.
   /// @param val New EXEC mask value.
-  void set_exec(uint64_t val) { exec_ = val & lane_mask(); }
+  ///
+  /// Wave32 leaves EXEC_HI available as scalar scratch. Vector instructions
+  /// that update the execution mask must therefore preserve the non-lane bits.
+  void set_exec(uint64_t val) { exec_ = (exec_ & ~lane_mask()) | (val & lane_mask()); }
+
+  /// @brief Set the raw architectural EXEC register pair.
+  void set_exec_raw(uint64_t val) { exec_ = val; }
 
   /// @brief Return the VCC scalar register pair.
   /// @returns Raw VCC register value.
@@ -439,6 +464,8 @@ public:
     wg_id_ = 0;
     dispatch_id_ = 0;
     process_id_ = 0;
+    lds_base_ = 0;
+    lds_ = nullptr;
     cluster_rank_ = 0;
     cluster_size_ = 1;
     num_sgprs_ = 0;
@@ -479,6 +506,7 @@ protected:
   uint32_t dispatch_id_ = 0;  ///< Dispatch ID (set per dispatch, unique per dispatch).
   uint32_t process_id_ = 0;   ///< Owning process ID (PASID analog, set per dispatch).
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
+  Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
   uint32_t cluster_rank_ = 0; ///< Workgroup rank inside the dispatch cluster.
   uint32_t cluster_size_ = 1; ///< Number of workgroups in the dispatch cluster.
 

@@ -141,7 +141,11 @@ template <typename Pred> void WaveRaceState::resolveWaitCnt(int limit, Pred isTa
       retired++;
       retireEventRegisters(eid);
       detector->markEventWaveComplete(eid);
-      waveCompleteMemoryEvents.push_back(eid);
+      // Trimmable WAVE_COMPLETE events may be removed from the registry
+      // immediately. Only keep non-trimmable events for later barrier retire;
+      // otherwise a later barrier could try to retire stale EventIds.
+      if (!detector->events().isTrimmable(eid))
+        barrierPendingEvents.push_back(eid);
     } else {
       waveMemoryEvents[write++] = eid;
     }
@@ -163,12 +167,12 @@ void WaveRaceState::sWaitCntLgkmcnt(int lgkmcnt) {
   });
 }
 
-void WaveRaceState::flushWaveCompleteMemoryEvents() {
+void WaveRaceState::flushBarrierPendingEvents() {
   ProfileScope ps(*profiler_, "removeEvents");
-  for (EventId eventId : waveCompleteMemoryEvents) {
+  for (EventId eventId : barrierPendingEvents) {
     detector->retireEvent(eventId);
   }
-  waveCompleteMemoryEvents.clear();
+  barrierPendingEvents.clear();
 }
 
 void WaveRaceState::checkVgprRead(int reg, int lane, uint8_t byteMask) const {
