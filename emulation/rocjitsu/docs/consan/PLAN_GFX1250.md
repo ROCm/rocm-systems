@@ -101,7 +101,7 @@ flowchart TD
     VW["VW DONE<br/>WMMA attention frozen clean, fault, resource,<br/>and provenance bundle accepted"]
     V6B["V6B DONE<br/>remaining rows' resource and timing gates"]
     V7["V7 DONE<br/>one committed tip reruns all 40<br/>non-omitted gfx1250 cells"]
-    V9["V9 TODO<br/>Qwen Sampled current-tip performance;<br/>broader runtime cost remains"]
+    V9["V9 ACTIVE<br/>Qwen Sampled current-tip signal;<br/>bounded runtime localization"]
     G0["G0 TODO<br/>current STATUS_GFX1250 matrix<br/>simultaneously green"]
   end
 
@@ -121,7 +121,7 @@ flowchart TD
     XP2A["XP2A DONE<br/>torch.topk exact oracles and dense Record/Replay<br/>106/106 diagnostic vertical"]
     XP2B["XP2B DONE<br/>torch.topk Sampled exact client completes;<br/>construction indexes validated"]
     XP2C["XP2C DONE<br/>torch.topk unrestricted Record/Replay exact/dynamic;<br/>113,760/160,848 accesses, all barriers"]
-    XP2D["XP2D ACTIVE<br/>torch.topk Record/Replay 791-site residual;<br/>current owner-local routing revalidation"]
+    XP2D["XP2D DONE<br/>torch.topk Record/Replay current-tip regression bounded;<br/>signal follows both complete transformations"]
     XP2E["XP2E DONE<br/>torch.topk Inline construction scaled;<br/>both large objects finish patching"]
     XP2F["XP2F DONE<br/>torch.topk Inline execution signal;<br/>reproduced on independent software path"]
     XP2G["XP2G DONE<br/>torch.topk Inline one-site discriminator bounded;<br/>relay reservation rejects before execution"]
@@ -380,9 +380,21 @@ flowchart TD
   class XT2C1 done
   class XP5S,XP1A done
   class XP3C done
-  class XP2D active
-  class G0,V9,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
+  class XP2D done
+  class V9 active
+  class G0,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
 ```
+
+- 2026-07-22: XP2D is DONE as a bounded current-tip investigation, not as a
+  green-cell claim.  Exact one-repetition artifacts `196` and `197` both
+  transform the large top-k and sort objects, then signal before either
+  value-and-index oracle; excluding the runtime dispatch pair only from
+  spill-backed owners does not change that boundary.  Artifact `198` confirms
+  that three waitcheck warnings belong to the original PyTorch object rather
+  than ConSan spill emission, so both speculative changes were reverted.  The
+  P0 Record/Replay cell is orange on current evidence.  V9 becomes the sole
+  ACTIVE/blue node for bounded localization of the P0 Qwen Sampled signal;
+  this rotates toward higher-impact work without widening another top-k run.
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
 other-architecture regression matrices remain useful follow-up engineering.
