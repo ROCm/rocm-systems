@@ -2188,7 +2188,11 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
     plan.result_address_vgpr_count = 2u;
     return plan;
   }
-  if (site.width_bits != 32u)
+  // Record/Replay only needs the atomic's effective address and, for CAS, its
+  // dynamic success mask. Both 32- and 64-bit global/flat atomics use the same
+  // 64-bit address forms; the wider value merely occupies more consecutive
+  // guest VGPRs. Other widths still need an explicit operand-layout proof.
+  if (site.width_bits != 32u && site.width_bits != 64u)
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedWidth);
   const uint32_t expected_size =
       arch == ROCJITSU_CODE_ARCH_CDNA4 ? 2u * sizeof(uint32_t) : 3u * sizeof(uint32_t);
@@ -2208,10 +2212,13 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
   constexpr int32_t kSigned24Max = (1 << 23) - 1;
   const bool is_compare_exchange = site.mnemonic.find("cmpswap") != std::string::npos ||
                                    site.mnemonic.find("cmpxchg") != std::string::npos;
-  const uint16_t data_count = is_compare_exchange ? 2u : 1u;
-  const bool returned_value_aliases_address = site.returns_old_value.value_or(false) &&
-                                              site.dst_vgpr &&
-                                              overlaps(*site.addr_vgpr, 2u, *site.dst_vgpr, 1u);
+  const uint16_t value_word_count = static_cast<uint16_t>(site.width_bits / 32u);
+  const uint16_t data_count =
+      static_cast<uint16_t>(value_word_count * (is_compare_exchange ? 2u : 1u));
+  const uint16_t destination_count = site.returns_old_value.value_or(false) ? value_word_count : 0u;
+  const bool returned_value_aliases_address =
+      site.returns_old_value.value_or(false) && site.dst_vgpr &&
+      overlaps(*site.addr_vgpr, 2u, *site.dst_vgpr, destination_count);
 
   if (site.mnemonic.starts_with("flat_atomic")) {
     if (*site.raw_saddr != flat_no_saddr)
@@ -2226,7 +2233,8 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
     if (overlaps(scratch_vgpr, scratch_vgpr_count, *site.addr_vgpr, 2u) ||
         overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-        (site.dst_vgpr && overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, 1u)))
+        (site.dst_vgpr &&
+         overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count)))
       return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
     plan.kind = returned_value_aliases_address
                     ? ConSanMoiAtomicAddressKind::FlatGuestPairMaterialized
@@ -2257,7 +2265,8 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
     if (!requires_materialization) {
       if (overlaps(scratch_vgpr, scratch_vgpr_count, *site.addr_vgpr, 2u) ||
           overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-          (site.dst_vgpr && overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, 1u)))
+          (site.dst_vgpr &&
+           overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count)))
         return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
       plan.kind = ConSanMoiAtomicAddressKind::VglobalGuestPair;
       plan.support = ConSanMoiAtomicAddressSupport::Supported;
@@ -2274,7 +2283,8 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
       return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
     if (overlaps(scratch_vgpr, scratch_vgpr_count - 2u, *site.addr_vgpr, 2u) ||
         overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-        (site.dst_vgpr && overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, 1u)))
+        (site.dst_vgpr &&
+         overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count)))
       return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
     plan.kind = ConSanMoiAtomicAddressKind::VglobalGuestPairMaterialized;
     plan.support = ConSanMoiAtomicAddressSupport::Supported;
@@ -2302,7 +2312,8 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
   if (overlaps(result_address_vgpr, 2u, *site.addr_vgpr, 1u))
     return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
   if (overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-      (site.dst_vgpr && overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, 1u)) ||
+      (site.dst_vgpr &&
+       overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count)) ||
       overlaps(scratch_vgpr, scratch_vgpr_count - 2u, *site.addr_vgpr, 1u))
     return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
 

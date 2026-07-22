@@ -459,18 +459,37 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       errors.emplace_back("ConSan MOI atomic record CAS lacks compare/result operands");
       return std::nullopt;
     }
-    const uint16_t compare_vgpr = static_cast<uint16_t>(*candidate.site.data_vgpr + 1u);
-    const auto compare_succeeded = instrumentation::build_v_cmp_eq_u32_vcc(
+    const uint16_t value_word_count = static_cast<uint16_t>(candidate.site.width_bits / 32u);
+    const uint16_t compare_vgpr =
+        static_cast<uint16_t>(*candidate.site.data_vgpr + value_word_count);
+    const auto compare_low = instrumentation::build_v_cmp_eq_u32_vcc(
         vector_source_vgpr(compare_vgpr), *candidate.site.dst_vgpr, arch);
-    if (!compare_succeeded) {
+    if (!compare_low) {
       errors.emplace_back("ConSan MOI atomic record CAS could not capture its outcome mask");
       return std::nullopt;
     }
-    words.push_back(*compare_succeeded);
-    words.push_back(
-        build_v_mov_b32_e32(static_cast<uint16_t>(*options.scratch_vgpr + 3u), kRdna4VccLo, arch));
-    words.push_back(
-        build_v_mov_b32_e32(static_cast<uint16_t>(*options.scratch_vgpr + 4u), kRdna4VccHi, arch));
+    const uint16_t success_lo = static_cast<uint16_t>(*options.scratch_vgpr + 3u);
+    const uint16_t success_hi = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
+    words.push_back(*compare_low);
+    words.push_back(build_v_mov_b32_e32(success_lo, kRdna4VccLo, arch));
+    words.push_back(build_v_mov_b32_e32(success_hi, kRdna4VccHi, arch));
+    if (candidate.site.width_bits == 64u) {
+      const auto compare_high = instrumentation::build_v_cmp_eq_u32_vcc(
+          vector_source_vgpr(static_cast<uint16_t>(compare_vgpr + 1u)),
+          static_cast<uint16_t>(*candidate.site.dst_vgpr + 1u), arch);
+      const auto intersect_lo =
+          instrumentation::build_v_and_b32(success_lo, kRdna4VccLo, success_lo, arch);
+      const auto intersect_hi =
+          instrumentation::build_v_and_b32(success_hi, kRdna4VccHi, success_hi, arch);
+      if (!compare_high || !intersect_lo || !intersect_hi) {
+        errors.emplace_back(
+            "ConSan MOI atomic record 64-bit CAS could not combine its outcome masks");
+        return std::nullopt;
+      }
+      words.push_back(*compare_high);
+      words.push_back(*intersect_lo);
+      words.push_back(*intersect_hi);
+    }
   }
   const auto save_active_exec =
       instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kRdna4ExecLo, arch);

@@ -1520,6 +1520,8 @@ TEST(ConSanMoi, AtomicAddressPlanFailsClosedForUnsupportedShapesAndAliases) {
   EXPECT_EQ(classify(changed), ConSanMoiAtomicAddressSupport::Supported);
   changed = base;
   changed.width_bits = 64u;
+  EXPECT_EQ(classify(changed), ConSanMoiAtomicAddressSupport::Supported);
+  changed.width_bits = 128u;
   EXPECT_EQ(classify(changed), ConSanMoiAtomicAddressSupport::UnsupportedWidth);
   changed = base;
   changed.raw_saddr = rdna4::OPR_SREG_NULL;

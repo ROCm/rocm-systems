@@ -71,10 +71,15 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   constexpr uint64_t kIndirectIslandWords = 7u;
   const bool has_spill_backed_scalar_assignment = std::ranges::any_of(
       options.moi_transient_sgpr_assignments, &ConSanMoiTransientSgprAssignment::spill_backed);
-  const uint64_t access_relay_words =
-      arch == ROCJITSU_CODE_ARCH_GFX1250
-          ? 24u
-          : kIndirectIslandWords + (has_spill_backed_scalar_assignment ? 1u : 0u);
+  // A stranded RDNA4 access group can need a relocatable entry host in
+  // addition to its per-access comparisons and branches. A singleton can need
+  // an indirect compare/branch stub plus fixed key setup and termination.
+  // Ten words per access cover the observed small-group worst case without
+  // assuming that the seven-word indirect-jump island is also a sufficient
+  // dispatcher slot.
+  const uint64_t access_relay_words = arch == ROCJITSU_CODE_ARCH_GFX1250
+                                          ? 24u
+                                          : 10u + (has_spill_backed_scalar_assignment ? 1u : 0u);
   const bool has_unreachable_function_candidate =
       std::ranges::any_of(candidates, [&](const ConSanMoiCandidate *candidate) {
         return !candidate->in_kernel &&
@@ -858,8 +863,10 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       const uint64_t reserved_words = group.size() * access_relay_words;
       if (dispatcher_words.size() > reserved_words || dispatcher_offset > new_text.size() ||
           dispatcher_words.size() * sizeof(uint32_t) > new_text.size() - dispatcher_offset) {
-        result.errors.emplace_back(
-            "ConSan MOI first-light probe dense dispatcher exceeds its reserved relay space");
+        result.errors.emplace_back("ConSan MOI first-light probe dense dispatcher requires " +
+                                   std::to_string(dispatcher_words.size()) + " words for " +
+                                   std::to_string(group.size()) + " sites, but reserved " +
+                                   std::to_string(reserved_words));
         return;
       }
       std::memcpy(new_text.data() + dispatcher_offset, dispatcher_words.data(),
