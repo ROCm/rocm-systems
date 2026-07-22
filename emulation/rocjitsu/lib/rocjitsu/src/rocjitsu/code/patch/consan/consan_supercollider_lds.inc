@@ -75,9 +75,17 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   std::vector<ScReservoirOwnerContext> reservoir_owner_contexts;
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (decoder) {
+    // Decoding only preflight candidates is a scalability fallback for truly
+    // large generated libraries.  Smaller bundled libraries still need the
+    // surrounding functions as potential relay donors; excluding them made a
+    // 1.8 MiB PyTorch helper lose all 27 otherwise-placeable sites.  Keep the
+    // complete CFG below this bound and retain the bounded path for the 23 MiB
+    // and 40 MiB top-k objects that motivated it.
+    constexpr uint64_t kScBoundedCfgMinimumImageBytes = 4u * 1024u * 1024u;
     const bool restrict_to_preflight_candidates =
         result.functions.empty() && options.flavor == ConSanFlavor::SuperCollider &&
-        !options.fault_dry_run && options.sc_perturb_kind == ConSanPerturbationKind::None;
+        !options.fault_dry_run && options.sc_perturb_kind == ConSanPerturbationKind::None &&
+        code_object.image_size() >= kScBoundedCfgMinimumImageBytes;
     std::vector<uint64_t> extra_leaders;
     if (restrict_to_preflight_candidates) {
       for (const ConSanKernelInfo &kernel : result.kernels) {
