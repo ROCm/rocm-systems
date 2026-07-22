@@ -1163,8 +1163,6 @@ function(add_other_tests)
         add_rocshmem_functional_test(NAME flood_getnbi RANKS 8 WORKGROUPS 64 THREADS 1024)
     end_test_group()
 
-    Temporarily disabled flood_g test
-    flood_g - only works with IPC (not GDA, not RO)
     begin_test_group(CATEGORY "FLOOD;RMA;GET" TIER full BACKENDS "ipc" GPUS "all")
         add_rocshmem_functional_test(NAME flood_g RANKS 8 WORKGROUPS 64 THREADS 1024)
     end_test_group()
