@@ -745,6 +745,12 @@ class BlockingContext {
         std::this_thread::yield();
       }
     };
+    // hipStreamAddCallback runs the callback only after all work already enqueued
+    // on the stream completes, and holds back any work enqueued afterwards until
+    // the callback returns. Spinning here therefore blocks the stream reliably:
+    // later operations on this stream cannot begin until unblock_stream() runs,
+    // independent of the order in which their completion signals are observed, so
+    // nothing can slip past this callback out of order.
     HIP_CHECK(hipStreamAddCallback(stream, blocking_callback, (void*)&blocked, 0));
   }
 

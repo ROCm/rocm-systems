@@ -12,6 +12,11 @@
 // symbol's storage has been initialized on the host and mapped onto the target
 // device before the operation runs. If an entry point skips that step, the
 // corresponding test should observe stale or invalid data in g_managed_*.
+//
+// Every test must be the first operation in its process to touch a managed
+// symbol: deferred init is one-shot per device and never reset, so once any test
+// runs it, later tests no longer exercise it. This holds because ctest runs each
+// test case in its own process.
 
 constexpr int kN = 1024;
 constexpr int kBlockSize = 256;
@@ -28,6 +33,7 @@ __managed__ int g_managed_a[kN];
 __managed__ int g_managed_b[kN];
 __managed__ int g_managed_3d[k3dDim][k3dDim][k3dDim];
 __managed__ int g_managed_initialized[kStaticInitLen] = {1, 2, 3, 4, 5, 6, 7, 8};
+__managed__ int g_managed_launch[kN];
 
 static __global__ void AddConst(int* data, int n, int addend) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -288,6 +294,41 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D) {
   }
 }
 
+// Regression guard: deferred managed-variable initialization must not perform a
+// host-synchronous copy on the null stream, which would deadlock a
+// device-to-device hipMemcpy3D issued on a blocked null stream.
+HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D_SyncBehavior) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  const hipExtent extent = make_hipExtent(k3dDim * sizeof(int), k3dDim, k3dDim);
+  hipPitchedPtr src{};
+  hipPitchedPtr dst{};
+  HIP_CHECK(hipMalloc3D(&src, extent));
+  HIP_CHECK(hipMalloc3D(&dst, extent));
+
+  HipTest::BlockingContext b_context{nullptr};
+  hipStream_t kernel_stream{nullptr};
+
+  b_context.block_stream();
+  REQUIRE(b_context.is_blocked());
+
+  hipMemcpy3DParms parms = {};
+  parms.srcPtr = src;
+  parms.dstPtr = dst;
+  parms.extent = extent;
+  parms.kind = hipMemcpyDeviceToDevice;
+
+  HIP_CHECK(hipMemcpy3D(&parms));
+
+  HIP_CHECK_ERROR(hipStreamQuery(kernel_stream), hipErrorNotReady);
+  b_context.unblock_stream();
+  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(hipStreamQuery(kernel_stream) == hipSuccess);
+
+  HIP_CHECK(hipFree(src.ptr));
+  HIP_CHECK(hipFree(dst.ptr));
+}
+
 HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemset3D) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
@@ -312,6 +353,33 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemset3D) {
         REQUIRE(g_managed_3d[z][y][x] == kExpected);
       }
     }
+  }
+}
+
+// Regression guard for the same deferred-initialization deadlock as
+// Unit_hipManagedKeyword_hipMemcpy3D_SyncBehavior, but exercised through a kernel
+// launch on a blocked null stream.
+HIP_TEST_CASE(Unit_hipManagedKeyword_hipLaunchKernel_SyncBehavior) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  HipTest::BlockingContext b_context{nullptr};
+  hipStream_t kernel_stream{nullptr};
+
+  b_context.block_stream();
+  REQUIRE(b_context.is_blocked());
+
+  AddConst<<<dim3(kNumBlocks), dim3(kBlockSize), 0, kernel_stream>>>(g_managed_launch, kN,
+                                                                     kKernelAddValue);
+  HIP_CHECK(hipGetLastError());
+
+  HIP_CHECK_ERROR(hipStreamQuery(kernel_stream), hipErrorNotReady);
+  b_context.unblock_stream();
+  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(hipStreamQuery(kernel_stream) == hipSuccess);
+
+  for (int i = 0; i < kN; ++i) {
+    INFO("Index " << i);
+    REQUIRE(g_managed_launch[i] == kKernelAddValue);
   }
 }
 

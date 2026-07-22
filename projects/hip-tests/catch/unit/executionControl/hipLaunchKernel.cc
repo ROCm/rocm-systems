@@ -31,6 +31,24 @@ HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Basic) {
   }
 }
 
+// Verifies a kernel launch does not block the host: issued on a deliberately
+// blocked stream, it must return before the stream is unblocked.
+HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Synchronization_Behavior) {
+  HipTest::BlockingContext b_context{nullptr};
+  hipStream_t kernel_stream{nullptr};
+
+  b_context.block_stream();
+  REQUIRE(b_context.is_blocked());
+
+  HIP_CHECK(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 1, 1}, nullptr,
+                            0, kernel_stream));
+
+  HIP_CHECK_ERROR(hipStreamQuery(kernel_stream), hipErrorNotReady);
+  b_context.unblock_stream();
+  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(hipStreamQuery(kernel_stream) == hipSuccess);
+}
+
 HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Parameters) {
   SECTION("blockDim.x == maxBlockDimX") {
     const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX, 0);
