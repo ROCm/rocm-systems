@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_db import db_analysis
+from utils import analysis_orm as orm
 from utils import schema
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
@@ -791,3 +792,148 @@ def test_validate_dual_issue_metrics_skips_non_metric_table_dfs():
         )
 
     console_warning_mock.assert_not_called()
+
+
+# =============================================================================
+# PC-sampling population
+# =============================================================================
+
+
+def make_pc_sampling_tool_data():
+    """Two offsets under two kernels sharing one code object, with counts."""
+    stall = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_WAITCNT"
+    inst_type = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU"
+    return {
+        "metadata": {"pid": 42},
+        "buffer_records": {
+            "pc_sample_host_trap": [],
+            "pc_sample_stochastic": [
+                {
+                    "inst_index": 0,
+                    "record": {
+                        "pc": {"code_object_id": 5, "code_object_offset": 0x10},
+                        "dispatch_id": 0,
+                        "wave_issued": False,
+                        "snapshot": {"stall_reason": stall},
+                        "inst_type": inst_type,
+                    },
+                },
+                {
+                    "inst_index": 1,
+                    "record": {
+                        "pc": {"code_object_id": 5, "code_object_offset": 0x20},
+                        "dispatch_id": 1,
+                        "wave_issued": True,
+                        "snapshot": {},
+                        "inst_type": inst_type,
+                    },
+                },
+            ],
+            "kernel_dispatch": [
+                {
+                    "start_timestamp": 0,
+                    "end_timestamp": 0,
+                    "dispatch_info": {
+                        "dispatch_id": 0,
+                        "kernel_id": 100,
+                        "agent_id": {"handle": 1},
+                    },
+                },
+                {
+                    "start_timestamp": 0,
+                    "end_timestamp": 0,
+                    "dispatch_info": {
+                        "dispatch_id": 1,
+                        "kernel_id": 101,
+                        "agent_id": {"handle": 1},
+                    },
+                },
+            ],
+        },
+        "strings": {
+            "pc_sample_instructions": ["v_mov", "v_add"],
+            "pc_sample_comments": ["/s/a.cpp:1", "/s/a.cpp:2"],
+        },
+        "kernel_symbols": [
+            {"kernel_id": 100, "code_object_id": 5, "formatted_kernel_name": "vecCopy"},
+            {"kernel_id": 101, "code_object_id": 5, "formatted_kernel_name": "vecAdd"},
+        ],
+        "code_objects": [{"code_object_id": 5, "load_base": 0x1000}],
+        "agents": [],
+    }
+
+
+def test_add_pc_sampling_data_no_tool_data_is_noop(db_session):
+    """A workload without tool data inserts no rows."""
+    workload = orm.Workload(name="w", sub_name="s")
+    db_session.add(workload)
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pc_sampling_tool_data_per_workload = {"/fake/workload": None}
+
+    analyzer.add_pc_sampling_data("/fake/workload", workload, {})
+    db_session.commit()
+
+    assert db_session.query(orm.CodeObjectStore).count() == 0
+    assert db_session.query(orm.InstructionLine).count() == 0
+
+
+def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
+    """Instruction lines are inserted, attributed to their dispatch kernel, and
+    the code object records pid/load_base."""
+    workload_path = "/fake/workload"
+    workload = orm.Workload(name="w", sub_name="s")
+    db_session.add(workload)
+    kernel_objs = {
+        "vecCopy": orm.Kernel(kernel_name="vecCopy", workload=workload),
+        "vecAdd": orm.Kernel(kernel_name="vecAdd", workload=workload),
+    }
+    for kernel in kernel_objs.values():
+        db_session.add(kernel)
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pc_sampling_tool_data_per_workload = {
+        workload_path: make_pc_sampling_tool_data()
+    }
+    analyzer.add_pc_sampling_data(workload_path, workload, kernel_objs)
+    db_session.commit()
+
+    code_object = db_session.query(orm.CodeObjectStore).one()
+    assert code_object.pid == 42
+    assert code_object.load_base == 0x1000
+
+    lines = db_session.query(orm.InstructionLine).all()
+    kernel_by_offset = {
+        line.code_object_offset: line.kernel.kernel_name for line in lines
+    }
+    assert kernel_by_offset == {0x10: "vecCopy", 0x20: "vecAdd"}
+
+    # The stalled sample carries a stall-reason count; both carry an inst type.
+    stalled = next(line for line in lines if line.code_object_offset == 0x10)
+    assert stalled.pc_sample_state.stall_count == 1
+    assert {
+        r.stall_reason_lookup.text for r in stalled.pc_sample_state.stall_reasons
+    } == {"WAITCNT"}
+
+
+def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
+    """Lines whose kernel is absent from kernel_objs (filtered out) are dropped
+    along with their sample state and child counts, not attributed to no kernel."""
+    workload_path = "/fake/workload"
+    workload = orm.Workload(name="w", sub_name="s")
+    db_session.add(workload)
+    # Only vecCopy survives filtering; vecAdd's line must be dropped.
+    kernel_objs = {"vecCopy": orm.Kernel(kernel_name="vecCopy", workload=workload)}
+    db_session.add(kernel_objs["vecCopy"])
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pc_sampling_tool_data_per_workload = {
+        workload_path: make_pc_sampling_tool_data()
+    }
+    analyzer.add_pc_sampling_data(workload_path, workload, kernel_objs)
+    db_session.commit()
+
+    lines = db_session.query(orm.InstructionLine).all()
+    assert [line.code_object_offset for line in lines] == [0x10]
+    assert all(line.kernel is not None for line in lines)
+    # No orphaned child rows for the dropped line.
+    assert db_session.query(orm.PCSampleState).count() == 1
