@@ -50,7 +50,7 @@ scratch before promotion.
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
 | **P0 Qwen3-0.6B prefill** | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown |
-| **P1 Sharktank TP1 prefill** | 🟨 current clean and paired: exact oracle, 120/120 accesses, complete analysis, 1.13x; reviewed exact-one fault detected one instability but contradicted its frozen external-oracle policy | 🟩 current accepted bundle: exact clean and paired oracle, complete 120/120 accesses plus 31/31 barriers, 1.29x paired slowdown, reviewed exact-one detected/pass fault, containment, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟨 current VCC-safe spill-backed clean and paired runs pass the exact oracle with complete 120/120 accesses plus 31/31 barriers and 243.9x slowdown; reviewed fault remains |
+| **P1 Sharktank TP1 prefill** | 🟨 current clean and paired: exact oracle, 120/120 accesses, complete analysis, 1.13x; reviewed exact-one fault detected one instability but contradicted its frozen external-oracle policy | 🟩 current accepted bundle: exact clean and paired oracle, complete 120/120 accesses plus 31/31 barriers, 1.29x paired slowdown, reviewed exact-one detected/pass fault, containment, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟩 current VCC-safe spill-backed bundle: exact clean and paired oracle, complete 120/120 accesses plus 31/31 barriers, 243.9x paired slowdown, reviewed exact-one pass/no-diagnosis fault, containment, health, and clean provenance |
 | **P1 Sharktank TP1 decode/combined** | 🟨 current clean and paired: both exact oracles, 240/240 accesses, complete analysis, 1.33x maximum; reviewed exact-one fault was schedule-masked and contradicted its frozen detection policy | 🟨 current clean and paired: both exact oracles, complete 240/240 accesses plus 62/62 barriers, and 1.41x maximum paired slowdown; the first prospectively reviewed exact-one barrier drop preserved the oracle without a Record/Replay diagnostic, so the fault gate remains open | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟨 current VCC-safe spill-backed clean and paired runs pass both exact oracles with complete 240/240 accesses plus 62/62 barriers and 31.2x maximum slowdown; reviewed fault remains |
 | **P2 Sharktank TP2 family** | 🟨 current clean and paired: all three exact oracles pass with complete 936/936 access coverage; reviewed exact-one fault was schedule-masked and contradicted its frozen detection policy | 🟨 current clean and paired: all three exact oracles pass with complete 936/936 accesses plus 168/168 barriers and 1.57x combined paired slowdown; two prospectively reviewed exact-one barrier drops produced no Record/Replay diagnostic, so the fault gate remains open | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟨 current VCC-safe spill-backed clean and paired runs pass all three exact oracles with complete 936/936 accesses plus 168/168 barriers and 167.0x maximum slowdown; reviewed fault remains |
 | **P3 CLIP BF16** | 🟨 current clean: cosine oracle passes; 45/45 accesses; complete analysis | 🟨 current one-process clean passes the cosine oracle with complete 45/45 accesses plus 24/24 barriers; a separate ten-process stress keeps full coverage but reproduces a replay conflict in 2/10 processes, so paired evidence is rejected | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟥 current lowering is complete at 45/45 accesses plus 24/24 barriers, but the warmup cosine oracle fails with NaN |
@@ -287,6 +287,18 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-22: TP1 prefill Inline Shadow is green at clean commit
+  `5d196e32f4` with hook SHA-256 `2495cd05...2f065f`.  Fresh inventory artifact
+  `consan-validation-gfx950-tp1-prefill-inventory-cdna4-sgpr-spill-20260722-067`
+  freezes 31 singleton barrier sequences.  Prospectively reviewed artifact
+  `consan-validation-gfx950-tp1-prefill-inline-cdna4-sgpr-spill-fault-20260722-068`
+  applies exactly one final-byte barrier-to-NOP mutation in the attention
+  kernel, matches its precommitted pass-oracle/no-diagnosis contract, retains
+  complete 120/120 access and 30/30 surviving-barrier coverage, reclaims all
+  4,747,424 report bytes, and passes target health before and after.  Together
+  with the current clean and paired artifacts recorded below, this completes
+  that profile's clean, overhead, fault, containment, and provenance bundle.
 
 - 2026-07-22: Commit `85c831f0c5` converts the corrected CDNA4 VCC boundary
   from a fail-closed Inline regression into safe component-local scalar spill.

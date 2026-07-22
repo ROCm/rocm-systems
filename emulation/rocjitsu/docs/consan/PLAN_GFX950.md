@@ -104,7 +104,7 @@ flowchart TD
     SA0["SA0 TODO<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
     SA1["SA1 TODO<br/>Sampled immediate and host-scan agreement"]
     IS0A["IS0A DONE<br/>per-owner CDNA4 persistent tuples<br/>below AccVGPR and VCC boundaries"]
-    IS0["IS0 ACTIVE<br/>VCC-safe component-local Inline scalar spill;<br/>TP1/TP2 clean recovery"]
+    IS0["IS0 ACTIVE<br/>TP1 prefill green;<br/>TP1 decode + TP2 fault gates open"]
     IS1["IS1 TODO<br/>Stream-K scalar state installed;<br/>AcqRel metadata race remains"]
     F0["F0 MILESTONE<br/>all four standard-v1 profiles<br/>feature-complete on focused tests"]
   end
@@ -485,6 +485,14 @@ mutation without final-byte proof, or a diagnostic without an independent
 oracle is not an accepted row.
 
 ## Progress log
+
+- 2026-07-22: `IS0` remains ACTIVE/blue but its TP1-prefill slice is green.
+  The current VCC-safe clean and paired bundle is joined by fresh inventory
+  and a prospectively reviewed exact-one barrier-drop artifact.  The mutation
+  matches its frozen pass/no-diagnosis policy, retains complete surviving
+  coverage and bounded cleanup, and passes physical-device health before and
+  after.  `IS0` now tracks only TP1 decode/combined and TP2 reviewed-fault
+  closure; its Mermaid box stays blue accordingly.
 
 - 2026-07-22: `IS0` becomes ACTIVE/blue after current-tip physical TP1
   decode/combined and TP2 diagnostics invalidate their older Inline evidence.
