@@ -144,6 +144,11 @@ extern bool IbCastUseInline;
 #define WR_IMM_RX_REQ_IDX_SHIFT 24
 #define WR_IMM_SPLIT_DATA_FLAG 0x00800000
 #define WR_IMM_SIZE_MASK 0x007fffff
+// QP sharing BY_ID imm_data layout: reqId in bits[7:0], receiver commId in bits[23:8].
+// reqId fits in 8 bits (NET_IB_MAX_REQUESTS <= 256); commId fits in 16 bits.
+#define WR_IMM_BYID_REQ_ID_MASK   0xff
+#define WR_IMM_BYID_COMM_ID_SHIFT 8
+#define WR_IMM_BYID_COMM_ID_MASK  0xffff
 extern int IbCastGdrFlushDisable;
 extern bool IbCastAinicRoce;
 extern bool rcclCtsInlineData;

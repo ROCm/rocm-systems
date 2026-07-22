@@ -91,8 +91,11 @@ int IbCastCountPeerTotalRefcount(int ibDevN, const union ncclSocketAddress* peer
 // Allocate a commId and register in the global comm table (mutex-protected)
 uint16_t IbCastAllocCommId(void* comm, bool isSend);
 
-// Free a commId
+// Free a commId (self-locking; for callers NOT holding g_IbCastSharedQpMutex)
 void IbCastFreeCommId(uint16_t commId);
+
+// Free a commId; caller MUST already hold g_IbCastSharedQpMutex (teardown paths)
+void IbCastFreeCommIdLocked(uint16_t commId);
 
 // Destroy all CQs for a group when cqRefcount reaches 0
 void IbCastCleanupGroupCqs(struct IbCastSharedQp* slot0Entry);

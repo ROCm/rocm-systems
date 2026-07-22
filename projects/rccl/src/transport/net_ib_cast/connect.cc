@@ -76,6 +76,12 @@ static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
     return BY_ORDER;
   }
 
+  // QP sharing routes completions by commId encoded in imm_data/wr_id, which is
+  // wired for the BY_ID path. Force BY_ID whenever sharing is enabled.
+  if (rcclParamIbCastCommNGroups() > 0) {
+    return BY_ID;
+  }
+
   if (ncclParamIbCastOooRq() || (ncclParamIbCastResiliencyPortFailover() == 1)) {
     return BY_ID;
   }
@@ -1868,6 +1874,11 @@ ib_recv:
         rComm->base.qps[q].qp = recvSlot->qp;
         rComm->base.qps[q].devIndex = recvSlot->devIndex;
         rComm->base.qps[q].ctsQpSlot = recvSlot->ctsQpSlot;
+        // Adopted QPs skip IbCastReceiverQpsCreateToRts (which sets remDevIdx at
+        // creation), so set it here from the remote metadata. Without this the
+        // CTS write in IbCastPostFifo uses remDevs[0].rkey instead of the
+        // sender's actual device rkey -> IBV_WC_REM_ACCESS_ERR.
+        rComm->base.qps[q].remDevIdx = remMeta.qpInfo[q].devIndex;
         rComm->base.activeQps[q] = &rComm->base.qps[q];
 
         meta.qpInfo[q].qpn = recvSlot->qp->qp_num;
@@ -2102,7 +2113,7 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
       if (comm->base.resiliency) {
         NCCLCHECK(IbCastResiliencyClose(comm->base.resiliency));
       }
-      IbCastFreeCommId(comm->base.commId);
+      IbCastFreeCommIdLocked(comm->base.commId);  // caller holds g_IbCastSharedQpMutex
 
       // Deregister per-comm MRs (not shared)
       for (int i = 0; i < comm->base.vProps.ndevs; i++) {
@@ -2180,7 +2191,7 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
           IbCastCleanupGroupCqs(slot0);
         }
       }
-      IbCastFreeCommId(comm->base.commId);
+      IbCastFreeCommIdLocked(comm->base.commId);  // caller holds g_IbCastSharedQpMutex
 
       // GPU flush cleanup remains per-comm
       for (int i = 0; i < comm->base.vProps.ndevs; i++) {

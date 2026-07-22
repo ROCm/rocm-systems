@@ -147,21 +147,18 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     uint32_t immData;
     if (comm->base.recvMatchingScheme != BY_INDEX) {
       immData = (uint32_t)(reqs[0]->id % UINT32_MAX);
-      // TODO - QP sharing
-      //        check for matchingScheme BY_ID or BY_ORDER, do we have free bits available for encoding rxReqIdx & remCommId
-      //        if no, free bits available, then for this matchingSchemes we need to disable QP sharing or change matchingScheme to BY_INDEX if QP sharing is enabled.
-      //if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0 && comm->remCommId != 0) {
-      //  immData = ((uint32_t)rxReqIdx << WR_IMM_RX_REQ_IDX_SHIFT) | (uint32_t)comm->remCommId;
-      //}
-    } else {
-      uint32_t rxReqIdx = (uint32_t)slots[0].rxReqIndex;
-      // TODO - QP Sharing: MSB(bits 31-24) 8bits rxReqIdx & LSB 16bits remCommId
-      // QP Sharing: encode receiver's commId + rxReqIndex in imm_data
+      // QP Sharing (BY_ID): the receiver polls a shared QP, so encode the receiver's
+      // commId alongside the request id to route the completion to the right comm.
+      // Layout: reqId in bits[7:0], remCommId in bits[23:8]. reqId is the low byte
+      // of reqs[0]->id (receiver does recvReqs[id % NET_IB_MAX_REQUESTS], <=256).
       if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0 && comm->remCommId != 0) {
-        immData = ((uint32_t)rxReqIdx << WR_IMM_RX_REQ_IDX_SHIFT) | (uint32_t)comm->remCommId;
-      } else {
-        immData = (rxReqIdx << WR_IMM_RX_REQ_IDX_SHIFT);
+        immData = ((uint32_t)reqs[0]->id & WR_IMM_BYID_REQ_ID_MASK) |
+                  (((uint32_t)comm->remCommId & WR_IMM_BYID_COMM_ID_MASK) << WR_IMM_BYID_COMM_ID_SHIFT);
       }
+    } else {
+      // BY_INDEX (non-sharing CAST default): rxReqIndex in imm_data[31:24].
+      uint32_t rxReqIdx = (uint32_t)slots[0].rxReqIndex;
+      immData = (rxReqIdx << WR_IMM_RX_REQ_IDX_SHIFT);
       if (nqps > 1) {
         immData |= WR_IMM_SPLIT_DATA_FLAG;
       }
@@ -182,7 +179,9 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     lastWr->opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
     lastWr->imm_data = htobe32(immData);
   }
-  // QP Sharing: encode commId in upper 16 bits of final wr_id
+  // QP Sharing: encode the sender's own commId in wr_id[63:48] so IbCastTest can
+  // route the send completion to the right comm on a shared QP. The scheduler
+  // (BY_INDEX) is disabled under sharing, so wr_id is not remapped here.
   if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0) {
     lastWr->wr_id = wr_id | ((uint64_t)comm->base.commId << WR_ID_RX_COMM_ID_SHIFT);
   } else {
@@ -788,36 +787,37 @@ static inline ncclResult_t IbCastRequestRetrieveFromCompletion(struct ncclIbNetC
     TRACE(NCCL_NET, "NET/IB: %s: Retrieving a receive request (wr_id=0x%lx, opcode=%s, imm_data=0x%x, byte_len=%d)",
           __func__, wc->wr_id, ibvWcOpcodeStr(wc->opcode), be32toh(wc->imm_data), wc->byte_len);
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
-    // TODO - QP sharing:
-    //        though at sender side all 32 bits of imm_data seems to encode reqs[0]->id (32bits max), here at receiver it is limiting the requests to 256 (8 bits) only.
-    //        if so then we are good with using similar mechanism for QP sharing encoding of remmCommid(lsb 16 bits) and rxReqIdx (msb 8 bits) ?
-    //        find out what is max value for NET_IB_MAX_REQUESTS across all use case (cast/fusion).
-    *req = recvComm->recvReqs[be32toh(wc->imm_data) % NET_IB_MAX_REQUESTS];
+    uint32_t immDataHost = be32toh(wc->imm_data);
+    // QP Sharing (BY_ID): imm_data carries reqId in bits[7:0] and the receiver's
+    // commId in bits[23:8]; route the completion to that comm's recvReqs. On a
+    // shared QP `base` is the polling comm, not necessarily the target.
+    if (rcclParamIbCastCommNGroups() > 0) {
+      uint16_t immCommId = (immDataHost >> WR_IMM_BYID_COMM_ID_SHIFT) & WR_IMM_BYID_COMM_ID_MASK;
+      uint8_t reqSlot = immDataHost & WR_IMM_BYID_REQ_ID_MASK;
+      if (immCommId != 0 && immCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[immCommId].used) {
+        recvComm = (struct ncclIbRecvComm*)g_IbCastCommTable[immCommId].comm;
+      }
+      *req = recvComm->recvReqs[reqSlot % NET_IB_MAX_REQUESTS];
+    } else {
+      *req = recvComm->recvReqs[immDataHost % NET_IB_MAX_REQUESTS];
+    }
   } else if (!base->isSend && wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM && base->recvMatchingScheme == BY_INDEX) {
-    // QP Sharing: recv-side completion routing via imm_data
+    // BY_INDEX (non-sharing CAST default): rxReqIndex is echoed in imm_data[31:24].
     uint32_t immDataHost = be32toh(wc->imm_data);
     uint8_t reqIdx = (immDataHost >> WR_IMM_RX_REQ_IDX_SHIFT) & WR_IMM_RX_REQ_IDX_MASK;
-    uint16_t immCommId = immDataHost & WR_ID_RX_COMM_ID_MASK;
-    if ((rcclParamIbCastCommNGroups() > 0) && (immCommId != 0) && (immCommId < IBCAST_MAX_COMMS) && (g_IbCastCommTable[immCommId].used)) {
-      struct ncclIbRecvComm* targetComm = (struct ncclIbRecvComm*)g_IbCastCommTable[immCommId].comm;
-      *req = &targetComm->base.reqs[reqIdx];
-    } else {
-      *req = &base->reqs[reqIdx];
-    }
+    *req = &base->reqs[reqIdx];
   } else if (!base->isSend && wc->opcode == IBV_WC_RDMA_READ) { // Flush request completion
     NCCLCHECK(IbCastRequestRetrieveAsIndex(base->reqs, (wc->wr_id - NCCL_IB_FLUSH_REQ_WR_ID_OFFSET), req));
   } else if (!base->isSend) {
-    // TODO - QP sharing for (non-wr-imm) rdma wr messages, fetch req based on wr_id; target base is already routed from the caller.
+    // Non-wr-imm recv (e.g. signalled CTS completion). base is the polling comm.
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
     *req = recvComm->recvReqs[wc->wr_id & 0xFFFF];
   } else {
-    // TODO - QP sharing:
-    //        for sender the caller has routed the targetBase based on wr_id
+    // Sender completion. targetBase was routed by IbCastTest via commId in wr_id[63:48];
+    // the low byte is the request slot. (BY_ID / BY_ORDER: no scheduler remap.)
     struct ncclIbSendComm* sendComm = (struct ncclIbSendComm*)base;
     if (base->recvMatchingScheme == BY_INDEX) {
-      // TODO - QP sharing
-      //        for remapped wr_id at sender side use the origWrId from remappedWr for extracting commId
-      // BY_INDEX: wr_id was remapped by CAST scheduler for RTT timing
+      // BY_INDEX: wr_id was remapped by the CAST scheduler for RTT timing.
       struct ncclIbRemapWrId* remapWrId = (struct ncclIbRemapWrId*)wc->wr_id;
       assert(remapWrId != NULL);
       assert(remapWrId->state == NCCL_NET_IB_REMAP_USED);
@@ -825,9 +825,6 @@ static inline ncclResult_t IbCastRequestRetrieveFromCompletion(struct ncclIbNetC
       if (remapWrId->parms.enable) IbCastQpSchedUpdateTxStats(remapWrId, base);
       IbCastQpSchedFreeRemap(remapWrId);
     } else {
-      // TODO - QP sharing
-      //        check and confirm for recvMatchingScheme BY_ID/BY_ORDER do we even have QP sharing use-case
-      // BY_ID / other: wr_id is raw slot-encoded value (no remap)
       *req = sendComm->sendReqs[wc->wr_id & 0xff][0];
     }
   }
@@ -1231,9 +1228,13 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
           }
           NCCLCHECK(IbCastResiliencyHandleCompletionError(r->base->resiliency, wc, i));
         } else {
-          // QP sharing: route completions to the target comm encoded in wr_id.
+          // QP sharing: route completions to the target comm encoded in wr_id[63:48].
+          // Sender completions carry the commId directly (scheduler is disabled under
+          // sharing, so wr_id is not remapped). Recv RECV_RDMA_WITH_IMM completions
+          // carry commId in imm_data instead and are routed in the retrieve step, so
+          // only redirect targetBase for the send / non-imm cases here.
           struct ncclIbNetCommBase* targetBase = (struct ncclIbNetCommBase*)r->base;
-          if (rcclParamIbCastCommNGroups() > 0) {
+          if (rcclParamIbCastCommNGroups() > 0 && wc->opcode != IBV_WC_RECV_RDMA_WITH_IMM) {
               uint16_t wridCommId = (wc->wr_id >> WR_ID_RX_COMM_ID_SHIFT) & WR_ID_RX_COMM_ID_MASK;
               if (wridCommId != 0 && wridCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[wridCommId].used) {
                 if (g_IbCastCommTable[wridCommId].isSend) {

@@ -120,11 +120,21 @@ uint16_t IbCastAllocCommId(void* comm, bool isSend) {
     return id;
 }
 
+// Caller MUST hold g_IbCastSharedQpMutex. Used by the teardown paths, which take
+// the mutex across the whole shared-QP cleanup block.
+void IbCastFreeCommIdLocked(uint16_t commId) {
+    if (commId > 0 && commId < IBCAST_MAX_COMMS) {
+        g_IbCastCommTable[commId].used = false;
+        g_IbCastCommTable[commId].comm = NULL;
+    }
+}
+
+// Self-locking variant for callers that do NOT already hold the mutex
+// (e.g. the connect/accept non-sharing fallback paths).
 void IbCastFreeCommId(uint16_t commId) {
     if (commId > 0 && commId < IBCAST_MAX_COMMS) {
         std::lock_guard<std::mutex> lock(g_IbCastSharedQpMutex);
-        g_IbCastCommTable[commId].used = false;
-        g_IbCastCommTable[commId].comm = NULL;
+        IbCastFreeCommIdLocked(commId);
     }
 }
 

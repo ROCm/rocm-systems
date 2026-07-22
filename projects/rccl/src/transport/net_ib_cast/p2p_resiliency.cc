@@ -17,6 +17,7 @@ NCCL_PARAM(IbCastResiliencyPortFailoverProbeDelay, "IB_RESILIENCY_PORT_FAILOVER_
 extern int64_t ncclParamIbCastPkey();
 extern int64_t ncclParamIbCastRetryCnt();
 extern int64_t ncclParamIbCastTimeout();
+extern int64_t rcclParamIbCastCommNGroups();
 
 #define MSEC_TO_NSEC 1000000ULL
 
@@ -604,9 +605,12 @@ static ncclResult_t IbCastResiliencyProbeProgress(struct ncclIbResiliencySend* s
 ncclResult_t IbCastResiliencyInit(struct ncclIbNetCommBase* baseComm, struct ncclIbResiliency** resCtx) {
   assert(baseComm != NULL);
   assert(resCtx != NULL);
-  if (ncclParamIbCastResiliencyPortFailover() == 0) {
-    INFO(NCCL_NET, "NET/IB: %s: Resiliency is disabled on the %s communicator (comm=%p)", __func__,
-         baseComm->isSend ? "send" : "recv", baseComm);
+  if (ncclParamIbCastResiliencyPortFailover() == 0 || rcclParamIbCastCommNGroups() > 0) {
+    // Resiliency and QP sharing are kept orthogonal for now: disable resiliency
+    // when QP sharing is enabled.
+    INFO(NCCL_NET, "NET/IB: %s: Resiliency is disabled on the %s communicator (comm=%p)%s", __func__,
+         baseComm->isSend ? "send" : "recv", baseComm,
+         (rcclParamIbCastCommNGroups() > 0) ? " (QP sharing enabled)" : "");
     *resCtx = NULL;
     return ncclSuccess;
   }
