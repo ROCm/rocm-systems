@@ -1960,7 +1960,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
     rj_code_arch_t arch, uint32_t record_index, uint32_t record_count, size_t fence_records_offset,
     uint64_t cave_text_offset, uint64_t return_text_offset,
-    std::optional<uint16_t> call_return_sgpr, std::vector<std::string> &errors) {
+    std::optional<uint16_t> call_return_sgpr, std::span<const uint32_t> displaced_tail_words,
+    std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI fence record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -2112,6 +2113,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   if (select_low_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         0u, static_cast<uint8_t>(*vgpr_msb_mode), arch));
+  words.insert(words.end(), displaced_tail_words.begin(), displaced_tail_words.end());
   if (call_return_sgpr) {
     words.push_back(build_s_setpc_b64(*call_return_sgpr, arch));
   } else if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,

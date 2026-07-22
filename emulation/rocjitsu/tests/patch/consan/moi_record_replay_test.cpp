@@ -3484,6 +3484,61 @@ TEST(ConSanMoi, AtomicRecordUsesLocalIndirectIslandForFarAppendedHelper) {
   EXPECT_TRUE(patched.is_valid());
 }
 
+TEST(ConSanMoi, FenceRecordRelocatesSccDeadPrefixForCompactFarEntry) {
+  constexpr size_t kLargeTextWords = 33000u;
+  const auto atomic = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/true, /*scope=*/3,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(atomic);
+  std::vector<uint32_t> text_words = {
+      0xEE0B007Cu,  0x000C0000u,  0x00000000u, // global_wb scope:system
+      0xBFC30000u,                             // s_wait_bvhcnt 0
+      0xBFC20000u,                             // s_wait_samplecnt 0
+      0xBFC10000u,                             // s_wait_storecnt 0
+      0xBFC80000u,                             // s_wait_loadcnt_dscnt 0
+      (*atomic)[0], (*atomic)[1], (*atomic)[2],
+  };
+  // The atomic record patch consumes the only ordinary local indirect island.
+  text_words.resize(18u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  text_words.resize(kLargeTextWords - 1u, build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_RDNA4));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  const uint64_t original_text_size = text_words.size() * sizeof(uint32_t);
+  ASSERT_FALSE(compute_sopp_branch_simm16(0u, original_text_size));
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+  mutate_elf_symbol(bytes, 1, [](Elf64_Sym &symbol) { symbol.st_size = 10u * sizeof(uint32_t); });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 30;
+  options.moi_owner_vgpr = 16;
+  options.moi_epoch_vgpr = 17;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto fence = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
+                                       &ConSanPatchInfo::kind);
+  ASSERT_NE(fence, result.patches.end());
+  EXPECT_EQ(fence->anchor_offset, 0u);
+  EXPECT_EQ(fence->original_size, 7u * sizeof(uint32_t));
+  const auto island = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.anchor_offset == 0u && patch.trampoline_offset == 0u;
+  });
+  ASSERT_NE(island, result.patches.end());
+  EXPECT_EQ(island->trampoline_size, fence->original_size);
+  EXPECT_GE(fence->trampoline_offset, original_text_size);
+  EXPECT_FALSE(compute_sopp_branch_simm16(fence->anchor_offset, fence->trampoline_offset));
+  EXPECT_TRUE(result.final_validation_passed);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  EXPECT_TRUE(patched.is_valid());
+}
+
 TEST(ConSanMoi, AtomicRecordKeepsAcquireResultBeforeReporting) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_flat_atomic_release_acquire_code_object();
   ASSERT_FALSE(bytes.empty());
