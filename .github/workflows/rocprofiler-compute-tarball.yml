@@ -182,7 +182,7 @@ jobs:
           $INSTALL_DIR/rocprofiler-compute/bin/rocprof-compute --version
 
       - name: Install Lmod
-        run: sudo apt-get install -y lmod
+        run: apt-get install -y lmod
 
       - name: Access rocprofiler-compute using modulefile
         run: |
