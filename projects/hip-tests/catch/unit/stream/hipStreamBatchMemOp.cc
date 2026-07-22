@@ -264,7 +264,7 @@ for (int d = deviceCount - 1; d >= 0; d--) {
     HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtrs[d])));
     hipCtx_t popped = nullptr;
     HIP_CHECK(hipCtxPopCurrent(&popped));
-    HIP_CHECK(hipCtxDestroy(popped]));
+    HIP_CHECK(hipCtxDestroy(popped));
   }
 }
 
