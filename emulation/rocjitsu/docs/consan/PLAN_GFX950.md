@@ -272,6 +272,17 @@ flowchart TD
 
 ## Reconnaissance conclusions
 
+- 2026-07-22: CLIP BF16 SuperCollider is green within ACTIVE/blue `SC1`.
+  Its retained one-repetition paired artifact passes every cosine oracle with
+  complete 45/45 access coverage at 1.07x slowdown.  A newly reviewed direct
+  consume barrier correctly rejects its frozen detection hypothesis; the
+  distinct final barrier at `0x50cc` then accepts its prospectively reviewed
+  qualified-miss contract in artifact
+  `consan-validation-gfx950-clip-supercollider-fault-final-20260722-110`.
+  Mutation accounting is exactly 1/1/1, the cosine oracle passes, cleanup is
+  empty, execution is bounded, and physical health passes before and after at
+  clean commit `a9d447665d`.
+
 - 2026-07-22: TP2 SuperCollider is green within ACTIVE/blue `SC1`.
   Prospectively reviewed physical artifact
   `consan-validation-gfx950-tp2-supercollider-fault-attention-publish-20260722-108`
