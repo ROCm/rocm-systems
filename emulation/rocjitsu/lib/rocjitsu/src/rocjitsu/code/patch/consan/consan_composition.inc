@@ -644,7 +644,9 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     build_sync_event_inventory(code_object_bytes, result);
     build_singleton_sync_sequences(code_object, *decoder, arch, result);
     const bool allow_extended_barrier_pairs =
-        options.fault_drop_barrier || options.abort_unmatched_barrier_wait ||
+        options.fault_drop_barrier || options.fault_move_barrier ||
+        options.fault_mutate_barrier_id_scope || options.fault_mutate_barrier_participants ||
+        options.abort_unmatched_barrier_wait ||
         (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_track_barriers);
     associate_barrier_sync_sequences(code_object, *decoder, arch, allow_extended_barrier_pairs,
                                      result);

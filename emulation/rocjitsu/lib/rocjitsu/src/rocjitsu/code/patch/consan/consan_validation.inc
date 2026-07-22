@@ -1799,9 +1799,24 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       for (size_t i = 1; i < barrier_id_scope_patches.size(); ++i) {
         const ConSanPatchInfo &previous = *barrier_id_scope_patches[i - 1u];
         const ConSanPatchInfo &current = *barrier_id_scope_patches[i];
-        if (previous.anchor_offset + previous.original_size != current.anchor_offset) {
+        const uint64_t gap_begin = previous.anchor_offset + previous.original_size;
+        if (gap_begin > current.anchor_offset) {
           errors.emplace_back(
-              "ConSan mutation proof found an omitted or noncontiguous barrier group member");
+              "ConSan mutation proof found overlapping or out-of-order barrier group members");
+          break;
+        }
+        const uint64_t gap_size = current.anchor_offset - gap_begin;
+        if (lifecycle_shape && gap_size > 0u) {
+          errors.emplace_back(
+              "ConSan mutation proof found an omitted or noncontiguous barrier lifecycle member");
+          break;
+        }
+        if (pair_shape && gap_size > 0u &&
+            !std::equal(original_text.begin() + gap_begin,
+                        original_text.begin() + current.anchor_offset,
+                        replacement_text.begin() + gap_begin)) {
+          errors.emplace_back(
+              "ConSan mutation proof found changed bytes between barrier group members");
           break;
         }
       }

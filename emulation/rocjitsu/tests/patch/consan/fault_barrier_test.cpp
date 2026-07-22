@@ -1189,6 +1189,46 @@ TEST(ConSan, FaultBarrierIdScopeDryRunSelectsExactLogicalSequence) {
   EXPECT_EQ(qualification.cluster_or_multi_device, ConSanQualificationEvidence::None);
 }
 
+TEST(ConSan, FaultBarrierIdScopePairsBoundedSignalWaitWithInterveningInstructions) {
+  const std::array<uint32_t, 5> text_words = {
+      0xBE804EC1u, // s_barrier_signal -1
+      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
+      0xBF94FFFFu, // s_barrier_wait -1
+      0xBFB00000u, // s_endpgm
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "barrier_id_scope_bounded_pair");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.fault_dry_run = true;
+  options.fault_mutate_barrier_id_scope = true;
+  options.fault_barrier_target_id = -3;
+
+  const ConSanResult discovery = try_patch_consan(bytes, options);
+  const auto sequence = std::ranges::find(
+      discovery.sync_sequences, ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(sequence, discovery.sync_sequences.end()) << testing::PrintToString(discovery.warnings);
+
+  options.fault_barrier_sequence_identity = sequence->identity;
+  options.fault_require_exactly_one = true;
+  const ConSanResult selected = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(selected)) << testing::PrintToString(selected.errors);
+  EXPECT_EQ(selected.requested_fault_mutations, 1u);
+  EXPECT_EQ(selected.planned_fault_mutations, 1u);
+  ASSERT_EQ(selected.fault_plans.size(), 1u);
+  EXPECT_EQ(selected.fault_plans.front().kind, ConSanFaultMutationKind::BarrierIdScope);
+
+  options.fault_dry_run = false;
+  const ConSanResult applied = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(applied)) << testing::PrintToString(applied.errors);
+  EXPECT_TRUE(applied.modified);
+  EXPECT_EQ(applied.applied_fault_mutations, 1u);
+  EXPECT_TRUE(applied.final_validation_passed);
+}
+
 TEST(ConSan, FaultBarrierIdScopeDryRunRejectsInexactAndInvalidTargets) {
   const std::array<uint32_t, 3> text_words = {
       0xBE804EC1u, // s_barrier_signal -1
