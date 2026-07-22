@@ -29,3 +29,13 @@ install(
     DESTINATION ${SHARE_INSTALL_PREFIX}/tools/
     COMPONENT ${TESTS_COMPONENT}
 )
+
+# test_dual_copy_guard.py loads run_amdsmi_dual_copy_test.py relative to its
+# REPO_ROOT (SHARE_INSTALL_PREFIX in the installed layout), so the runner must
+# ship under tests/ -- otherwise the guard's four unit tests raise SkipTest and
+# the drift-guard logic is never exercised in the installed test run.
+install(
+    PROGRAMS ${PROJECT_SOURCE_DIR}/tests/run_amdsmi_dual_copy_test.py
+    DESTINATION ${SHARE_INSTALL_PREFIX}/tests/
+    COMPONENT ${TESTS_COMPONENT}
+)
