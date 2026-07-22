@@ -734,6 +734,9 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
     struct ibv_send_wr wr;
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = (req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
+    if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0) {
+      wr.wr_id |= ((uint64_t)comm->base.commId << WR_ID_RX_COMM_ID_SHIFT);
+    }
 
     wr.wr.rdma.remote_addr = (uint64_t)data[last];
     wr.wr.rdma.rkey = mhandle->mrs[i]->rkey;
@@ -807,7 +810,10 @@ static inline ncclResult_t IbCastRequestRetrieveFromCompletion(struct ncclIbNetC
     uint8_t reqIdx = (immDataHost >> WR_IMM_RX_REQ_IDX_SHIFT) & WR_IMM_RX_REQ_IDX_MASK;
     *req = &base->reqs[reqIdx];
   } else if (!base->isSend && wc->opcode == IBV_WC_RDMA_READ) { // Flush request completion
-    NCCLCHECK(IbCastRequestRetrieveAsIndex(base->reqs, (wc->wr_id - NCCL_IB_FLUSH_REQ_WR_ID_OFFSET), req));
+    // wr_id[63:48] may carry a commId for completion routing (zero if sharing is
+    // disabled). Strip it to recover the original request index.
+    uint64_t flushWrId = (wc->wr_id & ~((uint64_t)WR_ID_RX_COMM_ID_MASK << WR_ID_RX_COMM_ID_SHIFT));
+    NCCLCHECK(IbCastRequestRetrieveAsIndex(base->reqs, (flushWrId - NCCL_IB_FLUSH_REQ_WR_ID_OFFSET), req));
   } else if (!base->isSend) {
     // Non-wr-imm recv (e.g. signalled CTS completion). base is the polling comm.
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
