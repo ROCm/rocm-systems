@@ -16,6 +16,8 @@ import re
 import os
 import sys
 import shutil
+import signal
+import traceback
 
 try:
     import yaml
@@ -74,6 +76,10 @@ SKIP_RETURN_CODE = 77
 # CTests set their timeout to DEFAULT_TIMEOUT + CTEST_TIMEOUT_BUFFER
 DEFAULT_TIMEOUT = 300
 CTEST_TIMEOUT_BUFFER = 30  # Not overridable
+
+# Timeouts for the "rocprofiler-systems-pytest-config" prerequisite test
+CONFIG_TIMEOUT = 15
+CONFIG_TIMEOUT_BUFFER = 5
 
 # Accepted runner types when using parametrized "mode" marker
 ROCPROFSYS_RUNNER_CLASSES = {
@@ -1091,7 +1097,7 @@ def _emit_prerequisite_block() -> list[str]:
         'set_tests_properties("rocprofiler-systems-pytest-config" PROPERTIES',
         '    FIXTURES_SETUP "rocprofsys-global-tmp-files"',
         '    LABELS "prerequisite;global"',
-        "    TIMEOUT 10",
+        f"    TIMEOUT {CONFIG_TIMEOUT + CONFIG_TIMEOUT_BUFFER}",
         ")",
         "",
     ]
@@ -1434,7 +1440,53 @@ def _standardize_test_name(
     item.extra_keyword_matches.add(formatted_name.lower())
 
 
+def _config_timeout_handler(signum, frame):
+    """SIGALRM handler for ``--show-config-only``: dump where we hung, then hard-exit."""
+    sys.stderr.write(
+        "\n" + "=" * 70 + "\n"
+        f"[rocprofiler-systems-pytest-config] ERROR: configuration probing exceeded "
+        f"{CONFIG_TIMEOUT}s and was aborted.\n"
+        "Stack trace at the point of timeout:\n" + "-" * 70 + "\n"
+    )
+    traceback.print_stack(frame, file=sys.stderr)
+    sys.stderr.write("=" * 70 + "\n")
+    sys.stderr.flush()
+    # os._exit avoids re-entering the (possibly blocked) interpreter state and ensures
+    # the process actually dies even if we interrupted an uninterruptible-looking call.
+    os._exit(2)
+
+
 def _generate_rocprofsys_config_header() -> list[str]:
+    """Generate the config header under an internal SIGALRM watchdog.
+
+    The system probes below (rocminfo, GPU detection, MPI/oshrun version, AMD-SMI/PAPI)
+    can block indefinitely. Without a guard a hang would surface as a silent CTest
+    ``***Timeout``; the watchdog instead prints a diagnostic stack trace and hard-exits.
+    A plain exception would be swallowed by a blocking syscall, so the handler forces
+    an immediate non-zero exit (see :func:`_config_timeout_handler`).
+    """
+    _watchdog_active = hasattr(signal, "SIGALRM")  # False on non-POSIX platforms
+    _previous_handler = None
+    if _watchdog_active:
+        try:
+            _previous_handler = signal.signal(signal.SIGALRM, _config_timeout_handler)
+            signal.alarm(CONFIG_TIMEOUT)
+        except ValueError:
+            # signal handlers can only be installed from the main thread of the main
+            # interpreter; if config probing runs elsewhere, skip the watchdog rather
+            # than crash the probe.
+            _watchdog_active = False
+
+    try:
+        return _build_rocprofsys_config_header()
+    finally:
+        if _watchdog_active:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, _previous_handler)
+
+
+def _build_rocprofsys_config_header() -> list[str]:
+    """Collect system configuration and format it as printable header lines."""
     try:
         rocprof_config = get_rocprof_config()
         cap = rocprof_config.capabilities
