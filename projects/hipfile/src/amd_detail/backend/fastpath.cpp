@@ -204,20 +204,18 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
     try {
         switch (type) {
             case IoType::Read:
-                std::fprintf(stderr, "fastpath read pid: %d size: %zu\n", static_cast<int>(getpid()), size);
+                std::fprintf(stderr, "fastpath read pid: %d size: %zu\n", getpid(), size);
                 nbytes = Context<Hip>::get()->hipAmdFileRead(handle, devptr, size, file_offset);
                 break;
             case IoType::Write:
-                std::fprintf(stderr, "fastpath write pid: %d size: %zu\n", static_cast<int>(getpid()), size);
+                std::fprintf(stderr, "fastpath write pid: %d size: %zu\n", getpid(), size);
                 nbytes = Context<Hip>::get()->hipAmdFileWrite(handle, devptr, size, file_offset);
                 break;
             default:
                 throw std::runtime_error("Invalid IoType");
         }
-        if (static_cast<ssize_t>(nbytes) < 0) {
-            const int io_errno{errno};
-            std::fprintf(stderr, "fastpath pid: %d errno: %d\n", static_cast<int>(getpid()), io_errno);
-        }
+        ssize_t res = static_cast<ssize_t>(nbytes);
+        std::fprintf(stderr, "fastpath pid: %d nbytes: %zd\n", getpid(), res);
         ioTracker.complete(nbytes);
     }
     catch (...) {
