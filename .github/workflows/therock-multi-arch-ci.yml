@@ -127,6 +127,8 @@ jobs:
       # Enable cross-repo artifact reuse: query TheRock for baseline runs
       stage_reuse_baseline_repository: "ROCm/TheRock"
       stage_reuse_mode: "reuse-stage"
+      # rocm-systems affects compiler-runtime stage (base/runtime); reuse math-libs
+      stage_reuse_external_rebuild_stages: "compiler-runtime"
       repository: ROCm/TheRock
       ref: users/geomin12/superrepo-multi-arch
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
