@@ -31,9 +31,21 @@ Explicit environment variables are encoding and debugging controls. They do
 not bypass liveness, ownership, or overlap checks, and ordinary runs do not
 require them.
 
-The ordinary-VGPR architectural limit is 256. Scalar preservation uses fresh
-descriptor-backed SGPR windows; ConSan does not implement an SGPR spill stack.
-A probe requiring new scalar state fails explicitly when no safe window exists.
+The ordinary-VGPR architectural limit is 256. ConSan does not implement a
+general SGPR spill stack. Record/Replay and InlineShadow do have a narrower
+private-memory recipe that preserves a fixed transient scalar probe window:
+each borrowed uniform SGPR is copied through one spill-managed VGPR, stored per
+lane, reloaded, and restored with `v_readfirstlane_b32`. On gfx1201 and gfx1250,
+InlineShadow can select that recipe automatically when no 28-register dead
+window exists. Scalar state needed before that save or after its restore—most
+notably indirect-router PC, key, and SCC state—must still come from registers
+proved dead at every routed site. A probe fails explicitly when neither that
+bounded recipe nor a safe ordinary window exists.
+
+Hardware dispatch identity normally occupies a persistent SGPR pair. If a
+gfx1201 InlineShadow or Sampled owner has no such pair, emitted probes can use
+the report's frozen literal dispatch identity instead. This removes persistent
+scalar pressure but does not solve transient or indirect-router allocation.
 
 SuperCollider's indirect path reserves disjoint scalar state above the owning
 kernel's maximum referenced SGPR: VCC preservation, an SCC save, and an aligned
@@ -143,9 +155,9 @@ from removing private-size mutation.
 | InlineShadow access probes | Dead, fresh-growth, and spill-backed VGPR windows, including private-epoch fallback. |
 | Reachable shared helpers | One all-owner-compatible dead, fresh, or common spill plan. |
 | Private-epoch entry/barrier temporaries | Saved and restored through the target-specific private path. |
-| Dynamic scalar state | Automatic descriptor-backed SGPR windows with EXEC, VCC, and SCC preservation. |
+| Dynamic scalar state | Dead/fresh descriptor-backed windows, plus bounded private-memory preservation for Record/Replay and InlineShadow transient probe windows. Indirect-router scalars must still be dead/fresh. |
 | Barrier and atomic VGPR temporaries | Dead, fresh-growth, and spill-backed common plans. |
-| SGPR or AccVGPR spilling | Not implemented. |
+| General SGPR or AccVGPR spilling | Not implemented. |
 | Dynamic-stack kernels | Supported InlineShadow access recipe; other spill consumers fail closed. |
 | Unresolved indirect ownership | Not instrumented. |
 
