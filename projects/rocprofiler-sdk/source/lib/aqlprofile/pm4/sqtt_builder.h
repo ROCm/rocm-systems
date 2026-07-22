@@ -465,11 +465,8 @@ public:
                             Primitives::sqtt_buffer_size_value(sqtt_size, baddr_hi);
                         if(Primitives::GFXIP_LEVEL == 11)
                         {
-                            // gfx11 packs BASE_HI into the SIZE register, so SIZE is the latch that
-                            // commits the base address. Mirror the Swapbuffer()/BUF1 order (and
-                            // gfx12's BASE_HI-last order): write BASE (low bits) first, then SIZE
-                            // (size + BASE_HI) last, otherwise the hardware latches a stale
-                            // BASE_LO.
+                            // gfx11 packs BASE_HI into SIZE. Write BASE first and SIZE last to
+                            // commit the complete address, matching the gfx12 BASE_HI-last order.
                             WriteConfigPacket(
                                 cmd_buffer, Primitives::SQ_THREAD_TRACE_BASE_ADDR, baddr_lo);
                             WriteConfigPacket(
@@ -535,10 +532,8 @@ public:
                         }
                         else
                         {
-                            // gfx11 packs BASE_HI into the BUF1_SIZE register, so that register is
-                            // the latch that commits the base address. Mirror gfx12's BASE_LO-then-
-                            // BASE_HI(latch) order: write BASE_LO first, then SIZE (size + BASE_HI)
-                            // last, otherwise the hardware latches the stale BASE_LO.
+                            // gfx11 packs BASE_HI into BUF1_SIZE. Write SIZE last to commit the
+                            // complete address, matching the gfx12 BASE_HI-last order.
                             WriteConfigPacket(
                                 cmd_buffer,
                                 Primitives::SQ_THREAD_TRACE_BUF1_SIZE_ADDR,
@@ -881,10 +876,8 @@ public:
         }
         else if(Primitives::GFXIP_LEVEL == 11)
         {
-            // gfx11 packs the high address bits into the SIZE register (SIZE and BASE_HI are the
-            // same register), so SIZE is the latch that commits the base address. Write BASE (low
-            // bits) first, then SIZE (size + BASE_HI) last, otherwise the hardware latches the
-            // stale BASE_LO. BUF0 lives in SQ_THREAD_TRACE_BASE/SIZE; BUF1 in the BUF1 registers.
+            // gfx11 packs BASE_HI into SIZE. Write BASE first and SIZE last to commit the complete
+            // address. BUF0 uses SQ_THREAD_TRACE_BASE/SIZE; BUF1 uses the BUF1 registers.
             const unsigned base_lo = Low32(base_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
             const unsigned base_hi = High32(base_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
 

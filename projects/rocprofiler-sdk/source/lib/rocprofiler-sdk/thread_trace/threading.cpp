@@ -98,9 +98,7 @@ copy_data_sync(void*         dst,
     // Workaround for ROCM-25606
     if(dependency) signal_wait(*dependency);
 
-    // The final drain can legitimately be empty when the last full buffer was already consumed.
-    // Treat a zero-byte transfer as a no-op; gfx11.5 may not raise its async-copy completion
-    // signal.
+    // Empty final drains do not require an async transfer.
     if(size == 0) return;
 
     signal_reset(signal.sig);
@@ -369,8 +367,7 @@ producer_loop(
         else if(parameters.gfx11_workarounds && !saw_buffer_swap && !startup_retry_performed &&
                 std::chrono::steady_clock::now() >= startup_retry_deadline)
         {
-            // A rare gfx11 start can complete without the SQTT block ever producing data. Preserve
-            // any partial trace, then reinitialize once while the producer is already active.
+            // Preserve any partial startup data, then reinitialize once with the producer active.
             if(!stop_trace()) break;
             iterate_trace();
             send_header();

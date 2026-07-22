@@ -786,9 +786,7 @@ public:
     {
         // Mask to check if memory error was received
         TT_CONTROL_UTC_ERR_MASK = SQ_THREAD_TRACE_STATUS__WRITE_ERROR_MASK,
-        // Navi reports buffer-full in STATUS2, one bit per buffer. Both bits are OR'd together so
-        // the full/swap decision is immune to the gfx11 erratum where the per-buffer full bit may
-        // be reported against the wrong buffer.
+        // Either per-buffer STATUS2 full bit requests a swap.
         TT_CONTROL_FULL_MASK =
             SQ_THREAD_TRACE_STATUS2__BUF0_FULL_MASK | SQ_THREAD_TRACE_STATUS2__BUF1_FULL_MASK,
         TT_WRITE_PTR_MASK = SQ_THREAD_TRACE_WPTR__OFFSET_MASK,

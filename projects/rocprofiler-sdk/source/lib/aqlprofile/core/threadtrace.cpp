@@ -424,10 +424,7 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
 
     out->_size       = sizeof(aqlprofile_att_buffer_status_t);
     out->is_too_late = false;
-    // gfx11 erratum: the per-buffer full indication (STATUS2 BUF0_FULL/BUF1_FULL) can be reported
-    // against the wrong buffer under some conditions. GetBufferFullMask() covers both bits and the
-    // buffer to drain is chosen by the swap counter below, so the swap logic only depends on "a
-    // buffer is full" and is therefore immune to which of the two bits the hardware flipped.
+    // Either per-buffer full bit requests a swap; the swap counter selects the buffer to drain.
     out->needs_swap = (status & sqttbuilder->GetBufferFullMask()) != 0;
 
     auto it = manager->config.buffer_data.find(shader_engine_id);
@@ -440,9 +437,7 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
 
         auto& buffer_data = it->second;
         out->read_size    = manager->config.capacity_per_se;
-        // gfx11 erratum: the final 32-byte write granule of a wrapped SQTT buffer may be
-        // incomplete/garbage, so discard it from the reported size. gfx11.5 (GFX115X_GPU_ID) is
-        // not affected.
+        // Exclude the final 32-byte block from gfx11 readable data.
         if(pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID)
             out->read_size -= sqttbuilder->GetWritePtrBlk();
         out->num_swaps = manager->buffer_swaps.fetch_add(1);
