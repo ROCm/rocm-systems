@@ -434,9 +434,15 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
   }
   auto skip_action = build_s_cbranch_vccz_word(static_cast<int16_t>(mismatch_action->size()), arch);
   constexpr uint16_t kRdna4VccLo = 106;
-  const uint32_t save_vcc = build_s_mov_b32(vcc_save_sgpr, kRdna4VccLo, arch);
-  const uint32_t restore_vcc = build_s_mov_b32(kRdna4VccLo, vcc_save_sgpr, arch);
-  if (!wait_dscnt || !skip_action) {
+  const std::optional<uint32_t> save_vcc =
+      arch == ROCJITSU_CODE_ARCH_CDNA4
+          ? instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo, arch)
+          : std::optional<uint32_t>(build_s_mov_b32(vcc_save_sgpr, kRdna4VccLo, arch));
+  const std::optional<uint32_t> restore_vcc =
+      arch == ROCJITSU_CODE_ARCH_CDNA4
+          ? instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr, arch)
+          : std::optional<uint32_t>(build_s_mov_b32(kRdna4VccLo, vcc_save_sgpr, arch));
+  if (!wait_dscnt || !skip_action || !save_vcc || !restore_vcc) {
     errors.emplace_back("ConSan LDS check/trap proof could not encode sequence");
     return std::nullopt;
   }
@@ -510,7 +516,7 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
   words.push_back(*wait_dscnt);
   if (masked_store_value)
     words.insert(words.end(), masked_store_value->begin(), masked_store_value->end());
-  words.push_back(save_vcc);
+  words.push_back(*save_vcc);
   for (uint16_t i = 0; i < *required_vgprs; ++i) {
     const auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, gfx1250_vgpr_msb_mode);
     const uint16_t compare_mode = arch == ROCJITSU_CODE_ARCH_GFX1250 && compare_vgpr
@@ -549,6 +555,6 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
     words.push_back(*skip_action);
     words.insert(words.end(), mismatch_action->begin(), mismatch_action->end());
   }
-  words.push_back(restore_vcc);
+  words.push_back(*restore_vcc);
   return words;
 }

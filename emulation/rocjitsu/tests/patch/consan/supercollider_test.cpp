@@ -1737,6 +1737,19 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesCdna4ReadInPlace) {
   EXPECT_EQ(rewritten_words[1], 0x04000002u);
   EXPECT_EQ(rewritten_words[4], 0xD86C0004u);
   EXPECT_EQ(rewritten_words[5], 0x06000002u);
+  const auto all_rewritten_words = patched_words_at_file_offset<13>(result, 0x100);
+  bool preserves_wave64_vcc = false;
+  for (uint16_t save_sgpr = 0; save_sgpr < 106; save_sgpr += 2) {
+    const auto save = build_cdna4_s_mov_b64(save_sgpr, 106, ROCJITSU_CODE_ARCH_CDNA4);
+    const auto restore = build_cdna4_s_mov_b64(106, save_sgpr, ROCJITSU_CODE_ARCH_CDNA4);
+    if (save && restore &&
+        std::ranges::find(all_rewritten_words, *save) != all_rewritten_words.end() &&
+        std::ranges::find(all_rewritten_words, *restore) != all_rewritten_words.end()) {
+      preserves_wave64_vcc = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(preserves_wave64_vcc);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeAlignsCdna4B32AutoReportTuple) {

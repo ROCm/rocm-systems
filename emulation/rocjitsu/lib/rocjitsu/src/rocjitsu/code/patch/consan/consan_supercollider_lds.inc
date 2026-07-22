@@ -662,7 +662,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           options.report_buffer_address && arch == ROCJITSU_CODE_ARCH_CDNA4 ? 1u : 0u;
       const Instruction *site_inst =
           find_instruction_at_text_offset(kernel_scope, site.text_offset);
-      auto vcc_save = choose_vcc_save_sgpr(site_inst, kernel_liveness, min_preferred_vcc_save_sgpr);
+      auto vcc_save =
+          choose_vcc_save_sgpr(site_inst, kernel_liveness, min_preferred_vcc_save_sgpr, arch);
       const bool spill_vcc_save_to_vgpr = !vcc_save && arch == ROCJITSU_CODE_ARCH_GFX1250;
       if (spill_vcc_save_to_vgpr)
         vcc_save = 0u;
