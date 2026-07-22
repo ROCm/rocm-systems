@@ -8,8 +8,8 @@ timing, provenance, or green cell from another architecture.
 
 The executable authority is
 [`consan_validation.py`](../../tests/dbi/consan/consan_validation.py), with the
-experiment contract described by [VALIDATION.md](VALIDATION.md).  Porting work
-and dependencies are tracked in [PLAN_GFX950.md](PLAN_GFX950.md).
+experiment contract described by [VALIDATION.md](VALIDATION.md).  This status
+matrix is the authoritative progress tracker for gfx950.
 
 End-to-end evidence is the primary project metric.  Focused decoder, builder,
 spill, and resource tests are prerequisites and debugging tools; they cannot
