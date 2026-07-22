@@ -5,7 +5,6 @@
 
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
-#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
@@ -120,6 +119,26 @@ uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
     return 0x7FFFFF; // positive half of signed 24-bit
   default:
     return 0;
+  }
+}
+
+// VGPR-count encoding granule for @p arch. Descriptor VGPR count =
+// (GRANULATED_WORKITEM_VGPR_COUNT + 1) * granule. Matches LLVM's
+// AMDGPUBaseInfo::getVGPREncodingGranule().
+uint32_t vgpr_encoding_granule(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return 16;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return 8;
+  default:
+    return 4;
   }
 }
 
