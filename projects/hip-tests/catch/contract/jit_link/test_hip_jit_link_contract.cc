@@ -15,6 +15,13 @@
 // type are AMD-only in this tree; the NVIDIA backend does not expose them, so
 // this whole translation unit builds only on AMD. Parity would require NVIDIA to
 // surface an equivalent JIT-link API (CUDA's cuLink* family) through HIP.
+#if HT_NVIDIA
+// @asserts: hipLinkCreate - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
+HIP_TEST_CASE(Contract_JitLink_NvidiaUnsupported_IsSkipped) {
+  HIP_SKIP_TEST("The HIP JIT-linker lifecycle APIs are not exposed by the NVIDIA backend.");
+}
+#endif  // HT_NVIDIA
+
 #if HT_AMD
 namespace {
 constexpr uint32_t kDummyInput = 0x12345678;

@@ -34,6 +34,13 @@ HIP_TEST_CASE(Contract_OccupancyVariable_WindowsUnsupported_IsSkipped) {
 }
 #endif
 
+#if HT_NVIDIA
+// @asserts: hipOccupancyMaxPotentialBlockSizeWithFlags - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
+HIP_TEST_CASE(Contract_OccupancyVariable_NvidiaUnsupported_IsSkipped) {
+  HIP_SKIP_TEST("The occupancy-variable helper family is not exposed by the NVIDIA backend.");
+}
+#endif  // HT_NVIDIA
+
 #if HT_AMD && !defined(_WIN32)
 
 namespace {

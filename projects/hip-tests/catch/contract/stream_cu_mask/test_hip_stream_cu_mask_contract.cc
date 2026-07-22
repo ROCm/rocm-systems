@@ -15,6 +15,13 @@
 // hipExtStreamGetCUMask) is an AMD extension with no NVIDIA equivalent (CUDA has
 // no compute-unit masking on streams), so this whole translation unit builds
 // only on AMD. Parity is unlikely without a NVIDIA-side CU/SM-mask concept.
+#if HT_NVIDIA
+// @asserts: hipExtStreamCreateWithCUMask - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
+HIP_TEST_CASE(Contract_StreamCuMask_NvidiaUnsupported_IsSkipped) {
+  HIP_SKIP_TEST("The stream CU-mask extension APIs are not exposed by the NVIDIA backend.");
+}
+#endif  // HT_NVIDIA
+
 #if HT_AMD
 namespace {
 constexpr uint32_t kMaskWordBits = 32;

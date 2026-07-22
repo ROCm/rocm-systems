@@ -21,6 +21,13 @@
 // the NVIDIA-backend headers leave incomplete. These contracts also require two
 // or more cooperative GPUs, so they build only on AMD. Parity would require the
 // NVIDIA headers to complete cudaLaunchParams and provide the ext launch entry.
+#if HT_NVIDIA
+// @asserts: hipLaunchCooperativeKernelMultiDevice - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
+HIP_TEST_CASE(Contract_MultiDeviceLaunch_NvidiaUnsupported_IsSkipped) {
+  HIP_SKIP_TEST("The cooperative multi-device launch family is not exposed by the NVIDIA backend.");
+}
+#endif  // HT_NVIDIA
+
 #if HT_AMD
 
 // In-source kernel used by the host-symbol multi-device launches. It publishes a

@@ -33,6 +33,13 @@
 // CUaddress_mode/CUfilter_mode rather than the cuda* runtime enums), so this
 // whole translation unit builds only on AMD. Parity is unlikely while CUDA keeps
 // the texref API removed; matching would mean retargeting onto texture objects.
+#if HT_NVIDIA
+// @asserts: hipTexRefSetAddressMode - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
+HIP_TEST_CASE(Contract_TextureReference_NvidiaUnsupported_IsSkipped) {
+  HIP_SKIP_TEST("The deprecated texture-reference API is not exposed by the NVIDIA backend.");
+}
+#endif  // HT_NVIDIA
+
 #if HT_AMD
 
 namespace {

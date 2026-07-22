@@ -288,6 +288,9 @@ contract:
   Contract_StreamMemoryOps_RejectsInvalidInputs:
     <<: *level_0
     tags: [stream_memory_ops]
+  Contract_StreamCuMask_NvidiaUnsupported_IsSkipped:
+    <<: *level_0
+    tags: [stream_cu_mask]
   Contract_StreamCuMask_DefaultMaskRoundTrips_AllCUsActive:
     <<: *level_0
     tags: [stream_cu_mask]
@@ -483,6 +486,9 @@ contract:
   Contract_Kernel_InvalidConfiguration_RecordsReturnedError:
     <<: *level_0
     tags: [kernel]
+  Contract_CallConfig_NvidiaUnsupported_IsSkipped:
+    <<: *level_0
+    tags: [call_config]
   Contract_CallConfig_ConfigureSetupLaunch_WritesExpectedValue:
     <<: *level_0
     tags: [call_config]
@@ -588,6 +594,9 @@ contract:
   Contract_OccupancyExt_ClusterQueries_CapabilityGatedRange:
     <<: *level_0
     tags: [occupancy_ext]
+  Contract_OccupancyVariable_NvidiaUnsupported_IsSkipped:
+    <<: *level_0
+    tags: [occupancy_variable]
   Contract_OccupancyVariable_PotentialBlockSizeWithFlags_ReturnsUsableValues:
     <<: *level_0
     tags: [occupancy_variable]
@@ -801,6 +810,9 @@ contract:
   Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInstantiate:
     <<: *level_0
     tags: [graph_memcpy3d_node]
+  Contract_MultiDeviceLaunch_NvidiaUnsupported_IsSkipped:
+    <<: *level_0
+    tags: [multi_device_launch]
   Contract_MultiDeviceLaunch_CooperativeKernel_WritesPerDeviceValue:
     <<: *level_0
     tags: [multi_device_launch]
@@ -819,6 +831,9 @@ contract:
   Contract_DriverLaunchEx_DrvLaunchKernelEx_WritesExpectedValue:
     <<: *level_0
     tags: [driver_launch_ex]
+  Contract_KernelNameRef_NvidiaUnsupported_IsSkipped:
+    <<: *level_0
+    tags: [kernel_name_ref]
   Contract_KernelNameRef_ByPtr_NamesHostKernel:
     <<: *level_0
     tags: [kernel_name_ref]
@@ -1353,6 +1368,9 @@ contract:
   Contract_DriverTexture_Create_InvalidArgs_AreRejected:
     <<: *level_0
     tags: [driver_texture_object]
+  Contract_TextureReference_NvidiaUnsupported_IsSkipped:
+    <<: *level_0
+    tags: [texture_reference]
   Contract_TextureReference_SetGetAddressMode_RoundTrips:
     <<: *level_0
     tags: [texture_reference]
@@ -1368,6 +1386,9 @@ contract:
   Contract_TextureReference_SetGetMaxAnisotropy_RoundTrips:
     <<: *level_0
     tags: [texture_reference]
+  Contract_TextureReferenceSymbol_NvidiaUnsupported_IsSkipped:
+    <<: *level_0
+    tags: [texture_reference_symbol]
   Contract_TextureReferenceSymbol_GetTextureReference_ResolvesSymbol:
     <<: *level_0
     tags: [texture_reference_symbol]
@@ -1554,6 +1575,9 @@ contract:
   Contract_Extension_ExtGetLastError_TracksErrorState:
     <<: *level_0
     tags: [extension]
+  Contract_Logging_NvidiaUnsupported_IsSkipped:
+    <<: *level_0
+    tags: [logging]
   Contract_Logging_EnableThenDisable_IsAcceptedOrUnsupported:
     <<: *level_0
     tags: [logging]
@@ -1698,6 +1722,9 @@ contract:
   Contract_ModuleExec_LaunchCooperativeKernel_NullFunction_IsRejected:
     <<: *level_0
     tags: [module_exec]
+  Contract_JitLink_NvidiaUnsupported_IsSkipped:
+    <<: *level_0
+    tags: [jit_link]
   Contract_JitLink_Create_NullState_IsRejected:
     <<: *level_0
     tags: [jit_link]

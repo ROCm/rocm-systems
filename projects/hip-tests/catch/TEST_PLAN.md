@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 592 | 592 | 0 |
-| **total** | **592** | **592** | **0** |
+| `contract` | 601 | 601 | 0 |
+| **total** | **601** | **601** | **0** |
 
 ## Tier: `contract`
 
@@ -78,12 +78,13 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_AsyncTransfer_InvalidDirection_ReturnsConsistentError` | hipMemcpyAsync | rejects an invalid hipMemcpyKind with a non-success status that matches the recorded last error |
 | `Contract_AsyncTransfer_ZeroBytes_Succeeds` | hipMemcpyAsync | a zero-byte async copy succeeds and leaves the destination unchanged |
 
-### `call_config` (2 cases)
+### `call_config` (3 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_CallConfig_ConfigureSetupLaunch_RepeatedStagingIsIndependent` | hipLaunchByPtr | repeated configure/setup/launch sequences stage independent argument stacks that do not leak between calls |
 | `Contract_CallConfig_ConfigureSetupLaunch_WritesExpectedValue` | hipLaunchByPtr | legacy configure/setup/launch staging path launches a kernel that writes the expected value |
+| `Contract_CallConfig_NvidiaUnsupported_IsSkipped` | hipConfigureCall | NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists |
 
 ### `capture_to_graph` (3 cases)
 
@@ -653,7 +654,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Ipc_GetMemHandle_SucceedsForDeviceAllocation` | hipIpcGetMemHandle | produces an IPC mem handle for a valid device allocation, or reports the capability unsupported |
 | `Contract_Ipc_MemHandle_SameProcessRoundTrip` | hipIpcOpenMemHandle | opening a self-produced IPC mem handle either yields a non-null mapping or is skipped as an unsupported same-process operation |
 
-### `jit_link` (6 cases)
+### `jit_link` (7 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -663,6 +664,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_JitLink_CreateDestroy_RoundTrips` | hipLinkCreate | a created link state round-trips through hipLinkDestroy without error |
 | `Contract_JitLink_Create_NullState_IsRejected` | hipLinkCreate | rejects a null output state pointer |
 | `Contract_JitLink_Destroy_InvalidHandle_IsRejected` | hipLinkDestroy | rejects a null link state handle |
+| `Contract_JitLink_NvidiaUnsupported_IsSkipped` | hipLinkCreate | NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists |
 
 ### `kernel` (4 cases)
 
@@ -685,12 +687,13 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_KernelLaunch_GetSymbolSize_MatchesDeclaredSize` | hipGetSymbolSize | the reported size of a device global array matches its declared byte size |
 | `Contract_KernelLaunch_LaunchKernelEx_WritesExpectedValue` | hipLaunchKernelEx | a minimal extended-launch configuration executes the kernel and publishes the expected value |
 
-### `kernel_name_ref` (2 cases)
+### `kernel_name_ref` (3 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_KernelNameRef_ByFunction_NamesResolvedKernel` | hipKernelNameRef | resolves a hipFunction_t (from hipGetFuncBySymbol) to a non-empty name mentioning the kernel identifier |
 | `Contract_KernelNameRef_ByPtr_NamesHostKernel` | hipKernelNameRefByPtr | resolves a host kernel function pointer to a non-empty name mentioning the kernel identifier |
+| `Contract_KernelNameRef_NvidiaUnsupported_IsSkipped` | hipKernelNameRef | NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists |
 
 ### `kernel_object_attributes` (3 cases)
 
@@ -727,11 +730,12 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_LibraryFile_LoadFromFile_MissingFile_IsRejected` | hipLibraryLoadFromFile | loading from a nonexistent path is rejected with a non-success status |
 | `Contract_LibraryFile_LoadFromFile_ResolvesKnownKernel` | hipLibraryLoadFromFile | loading a code object from a file yields a valid library whose known kernel resolves |
 
-### `logging` (2 cases)
+### `logging` (3 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_Logging_EnableThenDisable_IsAcceptedOrUnsupported` | hipExtEnableLogging | enable and disable are each accepted-or-unsupported and report a consistent capability |
+| `Contract_Logging_NvidiaUnsupported_IsSkipped` | hipExtEnableLogging | NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists |
 | `Contract_Logging_SetLoggingParams_IsAcceptedOrUnsupported` | hipExtSetLoggingParams | configuring benign logging level/buffer/mask is accepted or reported unsupported |
 
 ### `managed_memory` (5 cases)
@@ -918,13 +922,14 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_ModuleLoadFile_LoadNullFilename_IsRejected` | hipModuleLoad | rejects a null filename with a non-success error |
 | `Contract_ModuleLoadFile_LoadNullModule_IsRejected` | hipModuleLoad | rejects a null module out-parameter with a non-success error |
 
-### `multi_device_launch` (3 cases)
+### `multi_device_launch` (4 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_MultiDeviceLaunch_CooperativeKernel_WritesPerDeviceValue` | hipLaunchCooperativeKernelMultiDevice | each device runs its per-device kernel and observes its own written value |
 | `Contract_MultiDeviceLaunch_ExtMultiKernel_WritesPerDeviceValue` | hipExtLaunchMultiKernelMultiDevice | extended multi-device launch produces the same per-device observable writes |
 | `Contract_MultiDeviceLaunch_ModuleCooperativeKernel_WritesPerDeviceValue` | hipModuleLaunchCooperativeKernelMultiDevice | each device runs its module-resolved function and observes its own written value |
+| `Contract_MultiDeviceLaunch_NvidiaUnsupported_IsSkipped` | hipLaunchCooperativeKernelMultiDevice | NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists |
 
 ### `occupancy` (3 cases)
 
@@ -943,10 +948,11 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_DisableCachingOverrideSucceeds` | hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags | the disable-caching-override flag is accepted and yields a non-negative block count |
 | `Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_RejectsInvalidInputs` | hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags | rejects a null output pointer and an invalid flag value with hipErrorInvalidValue |
 
-### `occupancy_variable` (5 cases)
+### `occupancy_variable` (6 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_OccupancyVariable_NvidiaUnsupported_IsSkipped` | hipOccupancyMaxPotentialBlockSizeWithFlags | NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists |
 | `Contract_OccupancyVariable_PotentialBlockSizeWithFlags_MatchesPlainVariant` | hipOccupancyMaxPotentialBlockSizeWithFlags | under default flags suggests the same block size as the plain hipOccupancyMaxPotentialBlockSize |
 | `Contract_OccupancyVariable_PotentialBlockSizeWithFlags_ReturnsUsableValues` | hipOccupancyMaxPotentialBlockSizeWithFlags | returns a non-negative min grid size and positive block size; the reserved flag does not change the contract |
 | `Contract_OccupancyVariable_VariableSMemWithFlags_ReturnsUsableValues` | hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags | accepts the smem functor and returns a non-negative min grid size and positive block size under the reserved default flag |
@@ -1080,7 +1086,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_StreamCaptureMode_GetCaptureInfoV2_ReportsNoneOutsideCapture` | hipStreamGetCaptureInfo_v2 | reports None status for a stream that is not capturing |
 | `Contract_StreamCaptureMode_GetCaptureInfoV2_ReturnsDependencyNode` | hipStreamGetCaptureInfo_v2 | exposes the captured memset as the single current dependency node |
 
-### `stream_cu_mask` (4 cases)
+### `stream_cu_mask` (5 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -1088,6 +1094,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_StreamCuMask_CreateWithDefaultMask_Succeeds` | hipExtStreamCreateWithCUMask | creating a stream with a valid all-CUs mask yields a non-null stream |
 | `Contract_StreamCuMask_DefaultMaskRoundTrips_AllCUsActive` | hipExtStreamGetCUMask | the CU mask read back from a stream equals the all-CUs mask it was created with |
 | `Contract_StreamCuMask_GetRejectsInvalidArgs` | hipExtStreamGetCUMask | rejects a null mask pointer or zero mask size with hipErrorInvalidValue |
+| `Contract_StreamCuMask_NvidiaUnsupported_IsSkipped` | hipExtStreamCreateWithCUMask | NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists |
 
 ### `stream_event` (7 cases)
 
@@ -1148,17 +1155,18 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Texture_GetResourceViewDesc_RoundTripsArrayResource` | hipGetTextureObjectResourceViewDesc | the queried resource-view desc round-trips every field the object was created with (or is cleanly unsupported) |
 | `Contract_Texture_GetTextureDesc_RoundTripsReadMode` | hipGetTextureObjectTextureDesc | the queried texture desc round-trips the readMode and normalizedCoords the object was created with |
 
-### `texture_reference` (5 cases)
+### `texture_reference` (6 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_TextureReference_NvidiaUnsupported_IsSkipped` | hipTexRefSetAddressMode | NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists |
 | `Contract_TextureReference_SetGetAddressMode_RoundTrips` | hipTexRefSetAddressMode | deprecated texref address mode set then get round-trips per-reference state (or unsupported skip) |
 | `Contract_TextureReference_SetGetFilterMode_RoundTrips` | hipTexRefSetFilterMode | deprecated texref filter mode set then get round-trips per-reference state (or unsupported skip) |
 | `Contract_TextureReference_SetGetFlags_RoundTrips` | hipTexRefSetFlags | deprecated texref flags set then get round-trips per-reference state (or unsupported skip) |
 | `Contract_TextureReference_SetGetFormat_RoundTrips` | hipTexRefSetFormat | deprecated texref array format and channel count set then get round-trip (or unsupported skip) |
 | `Contract_TextureReference_SetGetMaxAnisotropy_RoundTrips` | hipTexRefSetMaxAnisotropy | deprecated texref max-anisotropy set then get round-trips per-reference state (or unsupported skip) |
 
-### `texture_reference_symbol` (9 cases)
+### `texture_reference_symbol` (10 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -1171,6 +1179,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_TextureReferenceSymbol_ModuleTexRef_AddressAndArrayRoundTrip` | hipTexRefSetAddress | module-backed texref round-trips a bound device address and HIP array through set/get |
 | `Contract_TextureReferenceSymbol_ModuleTexRef_MipmappedArrayRoundTrip` | hipTexRefSetMipmappedArray | module-backed texref round-trips a bound mipmapped array handle through set/get |
 | `Contract_TextureReferenceSymbol_ModuleTexRef_SetAddress2D_IsAccepted` | hipTexRefSetAddress2D | binds a pitched 2D allocation to a module-backed texref and records the base device address |
+| `Contract_TextureReferenceSymbol_NvidiaUnsupported_IsSkipped` | hipGetTextureReference | NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists |
 
 ### `transfer` (4 cases)
 

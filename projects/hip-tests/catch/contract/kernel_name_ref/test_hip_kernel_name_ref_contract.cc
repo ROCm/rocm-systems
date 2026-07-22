@@ -14,6 +14,13 @@
 // name-reflection entry points with no NVIDIA-backend equivalent, so this whole
 // translation unit builds only on AMD. Parity would require a NVIDIA-side
 // kernel-name reflection API.
+#if HT_NVIDIA
+// @asserts: hipKernelNameRef - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
+HIP_TEST_CASE(Contract_KernelNameRef_NvidiaUnsupported_IsSkipped) {
+  HIP_SKIP_TEST("The kernel-name reflection APIs are not exposed by the NVIDIA backend.");
+}
+#endif  // HT_NVIDIA
+
 #if HT_AMD
 
 // Kernel-name reflection contracts for the AMD name-lookup entry points

@@ -11,6 +11,13 @@
 // hipExtDisableLogging, hipExtSetLoggingParams) are AMD extension APIs, so the
 // whole domain is gated like the other AMD extension contracts. Parity would
 // require a NVIDIA-side logging-control API.
+#if HT_NVIDIA
+// @asserts: hipExtEnableLogging - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
+HIP_TEST_CASE(Contract_Logging_NvidiaUnsupported_IsSkipped) {
+  HIP_SKIP_TEST("The HIP extended logging APIs are not exposed by the NVIDIA backend.");
+}
+#endif  // HT_NVIDIA
+
 #if HT_AMD
 
 namespace {

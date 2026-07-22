@@ -15,6 +15,13 @@
 // expose these entry points, so this whole translation unit builds only on AMD.
 // Parity would require NVIDIA to provide these legacy launch entry points (or
 // the tests to be re-expressed on the portable launch APIs).
+#if HT_NVIDIA
+// @asserts: hipConfigureCall - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
+HIP_TEST_CASE(Contract_CallConfig_NvidiaUnsupported_IsSkipped) {
+  HIP_SKIP_TEST("The legacy call-configuration launch path is not exposed by the NVIDIA backend.");
+}
+#endif  // HT_NVIDIA
+
 #if HT_AMD
 
 namespace {

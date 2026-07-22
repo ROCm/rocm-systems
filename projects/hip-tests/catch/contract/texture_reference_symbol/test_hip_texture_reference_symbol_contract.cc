@@ -35,6 +35,13 @@
 // reference tests. On CUDA 12+/NVIDIA the translation unit compiles empty. The
 // backend portion uses HT_AMD/HT_NVIDIA for consistency with the rest of the
 // suite; the CUDA-version dependency is guarded behind defined(CUDA_VERSION).
+#if HT_NVIDIA && (!defined(CUDA_VERSION) || CUDA_VERSION >= CUDA_12000)
+// @asserts: hipGetTextureReference - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
+HIP_TEST_CASE(Contract_TextureReferenceSymbol_NvidiaUnsupported_IsSkipped) {
+  HIP_SKIP_TEST("CUDA 12 and newer remove the texture-reference APIs used by this contract on the NVIDIA backend.");
+}
+#endif  // HT_NVIDIA && (!defined(CUDA_VERSION) || CUDA_VERSION >= CUDA_12000)
+
 #if HT_AMD || (HT_NVIDIA && defined(CUDA_VERSION) && CUDA_VERSION < CUDA_12000)
 
 // File-scope device texture globals with EXTERNAL linkage. The compiler emits
