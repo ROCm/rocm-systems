@@ -11,11 +11,7 @@
 
 namespace {
 template <typename T, typename RedOp, typename Proto, bool isNetOffload = false>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
 __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#else
-__device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#endif
 #ifdef ENABLE_WARP_SPEED
   int warp = threadIdx.x / WARP_SIZE;
   ncclRing* ring = ncclShmem.warpComm ? &ncclShmem.warpChannel[warp].ring : &ncclShmem.channel.ring;

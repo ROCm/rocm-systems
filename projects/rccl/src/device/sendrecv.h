@@ -51,11 +51,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     } while (cursor < bytes);
   }
 
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
   __device__ void run(){
-#else
-  __device__ __attribute__((noinline)) void run() {
-#endif
     const int tid = threadIdx.x;
   const int tn = blockDim.x;
   const int wid = tid / WARP_SIZE;
