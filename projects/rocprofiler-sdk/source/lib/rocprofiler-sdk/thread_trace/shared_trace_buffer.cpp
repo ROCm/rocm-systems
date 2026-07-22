@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/thread_trace/shared_trace_buffer.hpp"
 
 #include "lib/common/logging.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 
@@ -66,9 +67,11 @@ struct shared_state_t
     decltype(hsa_amd_memory_pool_free)* free_fn     = nullptr;  // captured for shutdown free
 };
 
-// Namespace-scope so it outlives finalize() (see shared_trace_lease.cpp for the full
-// rationale). Freed once via free_shared_buffers().
-common::Synchronized<shared_state_t> g_buffer_state{};
+// Held in a static_object (see shared_trace_lease.cpp for the rationale) so it stays alive
+// through registration::finalize() on the attach path, without leaking. free_shared_buffers()
+// frees the contents.
+common::Synchronized<shared_state_t>& g_buffer_state =
+    *common::static_object<common::Synchronized<shared_state_t>>::construct();
 }  // namespace
 
 void
