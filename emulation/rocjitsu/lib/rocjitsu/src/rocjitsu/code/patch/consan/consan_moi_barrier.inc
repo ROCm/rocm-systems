@@ -562,6 +562,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
 
 void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                                  const ConSanOptions &options, rj_code_arch_t arch,
+                                                 const MoiResourcePlanningState &resource_state,
                                                  ConSanResult &result) {
   if (!options.moi_track_barriers)
     return;
@@ -1039,7 +1040,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
               candidate_options.moi_engine == ConSanMoiEngine::RecordReplay));
         if (has_dense_router &&
             (candidate_options.moi_exec_save_sgpr || has_spill_backed_dense_router) &&
-            candidate.kernel_descriptor_file_offset) {
+            !planned.owner_descriptor_file_offsets.empty()) {
           dense_fallback_indices.push_back(planned_index);
         } else {
           result.warnings.emplace_back(
@@ -1128,35 +1129,13 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     constexpr uint64_t kSpillBackedIslandWords = 12u;
     constexpr uint64_t kDispatcherWordsPerSite = 20u;
 
-    std::vector<uint64_t> leaders;
-    std::vector<BasicBlock::CodeRange> code_ranges;
-    leaders.reserve(result.kernels.size() + result.functions.size());
-    code_ranges.reserve(result.kernels.size() + result.functions.size());
-    for (const ConSanKernelInfo &kernel : result.kernels) {
-      if (!kernel.has_text_range)
-        continue;
-      leaders.push_back(kernel.entry_text_offset);
-      if (kernel.code_size != 0u)
-        code_ranges.push_back({.start_offset = kernel.entry_text_offset, .size = kernel.code_size});
+    const auto &blocks = resource_state.blocks;
+    std::map<std::pair<bool, std::string>, std::vector<size_t>> groups;
+    for (size_t index : dense_fallback_indices) {
+      const BarrierRecordCandidate &candidate = planned_candidates[index].candidate;
+      groups[{candidate.kernel_descriptor_file_offset.has_value(), candidate.container_name}]
+          .push_back(index);
     }
-    for (const ConSanFunctionInfo &function : result.functions) {
-      leaders.push_back(function.entry_text_offset);
-      if (function.code_size != 0u)
-        code_ranges.push_back(
-            {.start_offset = function.entry_text_offset, .size = function.code_size});
-    }
-    std::ranges::sort(leaders);
-    leaders.erase(std::ranges::unique(leaders).begin(), leaders.end());
-    std::unique_ptr<Decoder> decoder = Decoder::create(arch);
-    if (!decoder) {
-      result.errors.emplace_back("ConSan MOI dense barrier relay could not create a decoder");
-      return;
-    }
-    const auto blocks = BasicBlock::build(code_object, *decoder, arch, leaders, code_ranges);
-
-    std::map<uint64_t, std::vector<size_t>> groups;
-    for (size_t index : dense_fallback_indices)
-      groups[*planned_candidates[index].candidate.kernel_descriptor_file_offset].push_back(index);
     std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
     occupied_ranges.reserve(result.patches.size() + patches.size() + selected_candidates.size());
     const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
@@ -1191,12 +1170,43 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       return claimed_after != claimed_hosts.begin() && std::prev(claimed_after)->second > begin;
     };
 
-    for (const auto &[descriptor_offset, indices] : groups) {
-      const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
-      if (kernel == nullptr || indices.empty())
+    for (const auto &[owner_key, indices] : groups) {
+      if (indices.empty())
         continue;
+      const bool in_kernel = owner_key.first;
+      const BarrierRecordCandidate &first_candidate = planned_candidates[indices.front()].candidate;
+      const ConSanKernelInfo *kernel =
+          in_kernel && first_candidate.kernel_descriptor_file_offset
+              ? kernel_for_descriptor(result, *first_candidate.kernel_descriptor_file_offset)
+              : nullptr;
+      const auto function =
+          !in_kernel
+              ? std::ranges::find_if(result.functions,
+                                     [&](const auto &candidate) {
+                                       return candidate.entry_text_offset ==
+                                                  first_candidate.container_entry_text_offset &&
+                                              "function:" + candidate.name == owner_key.second;
+                                     })
+              : result.functions.end();
+      if ((in_kernel &&
+           (kernel == nullptr || !kernel->has_text_range || kernel->code_size == 0u)) ||
+          (!in_kernel && (function == result.functions.end() || function->code_size == 0u)))
+        continue;
+      const uint64_t owner_begin =
+          in_kernel ? kernel->entry_text_offset : function->entry_text_offset;
+      const uint64_t owner_end =
+          owner_begin + (in_kernel ? kernel->code_size : function->code_size);
+      const std::string &owner_name = in_kernel ? kernel->name : function->name;
+      const std::vector<uint64_t> &group_owner =
+          planned_candidates[indices.front()].owner_descriptor_file_offsets;
+      if (group_owner.empty() || std::ranges::any_of(indices, [&](size_t index) {
+            return planned_candidates[index].owner_descriptor_file_offsets != group_owner;
+          })) {
+        result.errors.emplace_back(
+            "ConSan MOI dense barrier relay has inconsistent dispatch ownership");
+        return;
+      }
       ConSanOptions group_options = options;
-      const std::array<uint64_t, 1> group_owner = {descriptor_offset};
       if (!apply_moi_transient_sgpr_assignment(group_options, group_owner)) {
         result.errors.emplace_back(
             "ConSan MOI dense barrier relay lost its transient scalar assignment");
@@ -1247,24 +1257,37 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       anchors.reserve(indices.size());
       for (size_t index : indices)
         anchors.push_back(planned_candidates[index].candidate.site.text_offset);
+      const ConSanCandidateResourcePlan *group_resource =
+          resource_plan_for_site(result, ConSanResourceSiteKind::Barrier,
+                                 planned_candidates[indices.front()].candidate.site.text_offset);
+      std::vector<const MoiKernelResourceContext *> group_owner_contexts;
+      group_owner_contexts.reserve(group_owner.size());
+      for (uint64_t descriptor_offset : group_owner) {
+        const auto context = resource_state.context_by_descriptor.find(descriptor_offset);
+        if (context != resource_state.context_by_descriptor.end())
+          group_owner_contexts.push_back(context->second);
+      }
 
       std::optional<uint64_t> host_offset;
       std::vector<uint32_t> displaced_words;
       uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
-      const uint64_t kernel_end = kernel->entry_text_offset + kernel->code_size;
       auto block =
-          std::lower_bound(blocks.begin(), blocks.end(), kernel->entry_text_offset,
+          std::lower_bound(blocks.begin(), blocks.end(), owner_begin,
                            [](const std::unique_ptr<BasicBlock> &candidate, uint64_t entry) {
                              return candidate->end_offset() <= entry;
                            });
-      for (; block != blocks.end() && (*block)->start_offset() < kernel_end; ++block) {
-        if ((*block)->start_offset() < kernel->entry_text_offset ||
-            (*block)->end_offset() > kernel_end || (*block)->size() < host_bytes)
+      for (; block != blocks.end() && (*block)->start_offset() < owner_end; ++block) {
+        if ((*block)->start_offset() < owner_begin || (*block)->end_offset() > owner_end ||
+            (*block)->size() < host_bytes)
           continue;
         for (const Instruction &instruction : (*block)->instructions()) {
           const uint64_t candidate_host = instruction.src_loc();
           if (candidate_host + host_bytes > (*block)->end_offset() ||
-              overlaps_existing(candidate_host, candidate_host + host_bytes))
+              overlaps_existing(candidate_host, candidate_host + host_bytes) ||
+              group_resource == nullptr ||
+              !moi_relocatable_host_preserves_transient_sgprs(resource_state, group_options,
+                                                              *group_resource, group_owner_contexts,
+                                                              **block, instruction, host_bytes))
             continue;
           const uint64_t relay_offset = candidate_host + sizeof(uint32_t);
           uint64_t max_distance = 0u;
@@ -1298,7 +1321,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       if (!host_offset) {
         result.warnings.emplace_back(
             "ConSan MOI inline-shadow barrier epoch found no relocatable dense relay host in " +
-            kernel->name);
+            owner_name);
         continue;
       }
       claimed_hosts.emplace(*host_offset, *host_offset + host_bytes);
@@ -1485,7 +1508,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       host_info.original_size = static_cast<uint32_t>(host_bytes);
       host_info.trampoline_offset = host_body_offset;
       host_info.trampoline_size = static_cast<uint32_t>(host_words.size() * sizeof(uint32_t));
-      host_info.owner_descriptor_file_offsets = {descriptor_offset};
+      host_info.owner_descriptor_file_offsets = group_owner;
       patches.push_back(std::move(host_info));
       ConSanPatchInfo dispatcher_info;
       dispatcher_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
@@ -1494,7 +1517,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       dispatcher_info.trampoline_offset = dispatcher_offset;
       dispatcher_info.trampoline_size =
           static_cast<uint32_t>(dispatcher_words.size() * sizeof(uint32_t));
-      dispatcher_info.owner_descriptor_file_offsets = {descriptor_offset};
+      dispatcher_info.owner_descriptor_file_offsets = group_owner;
       patches.push_back(std::move(dispatcher_info));
 
       for (const DenseBarrierBody &body : bodies) {
@@ -1537,7 +1560,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
 }
 
 void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
-                                   rj_code_arch_t arch, ConSanResult &result) {
+                                   rj_code_arch_t arch,
+                                   const MoiResourcePlanningState &resource_state,
+                                   ConSanResult &result) {
   if (!options.moi_track_barriers)
     return;
   // Sampled consumes only associated complete barrier sequences and publishes
@@ -1564,7 +1589,8 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
     ConSanOptions barrier_options = options;
     if (barrier_options.automatic_moi_inline_sgpr_spill)
       barrier_options.moi_exec_save_sgpr.reset();
-    try_apply_inline_shadow_barrier_epoch_patch(bytes, barrier_options, arch, result);
+    try_apply_inline_shadow_barrier_epoch_patch(bytes, barrier_options, arch, resource_state,
+                                                result);
     return;
   }
   if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250 &&
@@ -1633,7 +1659,7 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
   selected_candidates.reserve(max_candidates);
   std::unordered_set<uint64_t> selected_offsets;
   const MoiPatchAnchorRangeIndex occupied_anchors(result);
-  MoiResourcePlanningState resource_state(bytes, arch, options, result);
+  MoiResourcePlanningState standalone_resource_state(bytes, arch, options, result);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;
@@ -1662,9 +1688,9 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
     ConSanCandidateResourcePlan plan =
         existing_plan
             ? *existing_plan
-            : plan_moi_resource_site(resource_state, options, ConSanResourceSiteKind::Barrier,
-                                     candidate_index, site.text_offset,
-                                     candidate.kernel_descriptor_file_offset,
+            : plan_moi_resource_site(standalone_resource_state, options,
+                                     ConSanResourceSiteKind::Barrier, candidate_index,
+                                     site.text_offset, candidate.kernel_descriptor_file_offset,
                                      /*scratch_count=*/6u);
     if (!existing_plan)
       result.resource_plans.push_back(plan);

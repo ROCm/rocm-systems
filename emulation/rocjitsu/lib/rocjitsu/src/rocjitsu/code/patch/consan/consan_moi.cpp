@@ -365,7 +365,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         "placement");
   }
   if (result.errors.empty())
-    try_apply_barrier_epoch_patch(code_object_bytes, effective_options, arch, result);
+    try_apply_barrier_epoch_patch(code_object_bytes, effective_options, arch,
+                                  resource_planning_state, result);
   if (result.errors.empty())
     try_apply_inline_atomic_ordering_patch(code_object_bytes, effective_options, arch, result);
   if (result.errors.empty())

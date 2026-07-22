@@ -1018,6 +1018,73 @@ struct MoiResourcePlanningState {
   }
 };
 
+[[nodiscard]] uint16_t moi_exec_save_sgpr_count(const ConSanOptions &options, rj_code_arch_t arch);
+
+[[nodiscard]] bool moi_relocatable_host_preserves_transient_sgprs(
+    const MoiResourcePlanningState &state, const ConSanOptions &options,
+    const ConSanCandidateResourcePlan &resource_plan,
+    std::span<const MoiKernelResourceContext *const> owner_contexts, BasicBlock &block,
+    const Instruction &host_instruction, uint64_t host_bytes) {
+  const bool has_owner_override = std::ranges::any_of(
+      resource_plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
+        return find_moi_transient_sgpr_assignment(options, descriptor_offset) != nullptr;
+      });
+  if (!has_owner_override)
+    return true;
+  if (!state.valid || !options.moi_exec_save_sgpr)
+    return false;
+
+  const auto overlaps_range = [](const RegisterSet &set, uint16_t base, uint16_t count) {
+    for (uint16_t index = 0; index < count; ++index) {
+      if (set.contains({RegClass::SGPR, static_cast<uint16_t>(base + index), 1u}))
+        return true;
+    }
+    return false;
+  };
+  const auto overlaps_window = [&](const RegisterSet &set) {
+    if (options.automatic_moi_record_replay_sgpr_spill) {
+      if (!options.moi_inline_indirect_pc_sgpr || !options.moi_inline_indirect_scc_sgpr ||
+          !options.moi_record_replay_dispatch_key_sgpr ||
+          !options.moi_record_replay_call_return_sgpr)
+        return true;
+      return overlaps_range(set, *options.moi_inline_indirect_pc_sgpr, 2u) ||
+             overlaps_range(set, *options.moi_inline_indirect_scc_sgpr, 1u) ||
+             overlaps_range(set, *options.moi_record_replay_dispatch_key_sgpr, 1u) ||
+             overlaps_range(set, *options.moi_record_replay_call_return_sgpr, 2u);
+    }
+    if (options.automatic_moi_inline_sgpr_spill) {
+      if (!options.moi_inline_indirect_pc_sgpr || !options.moi_inline_indirect_scc_sgpr ||
+          !options.moi_inline_visible_evidence_sgpr)
+        return true;
+      return overlaps_range(set, *options.moi_inline_indirect_pc_sgpr, 2u) ||
+             overlaps_range(set, *options.moi_inline_indirect_scc_sgpr, 1u) ||
+             overlaps_range(set, *options.moi_inline_visible_evidence_sgpr, 1u);
+    }
+    return overlaps_range(set, *options.moi_exec_save_sgpr,
+                          moi_exec_save_sgpr_count(options, state.arch));
+  };
+
+  bool found_owner_context = false;
+  for (const MoiKernelResourceContext *context : owner_contexts) {
+    if (context == nullptr || !context->block_set.contains(&block))
+      continue;
+    if (overlaps_window(context->liveness->live_before(host_instruction)))
+      return false;
+    found_owner_context = true;
+  }
+  if (!found_owner_context)
+    return false;
+  for (const Instruction &instruction : block.instructions()) {
+    if (instruction.src_loc() < host_instruction.src_loc() ||
+        instruction.src_loc() >= host_instruction.src_loc() + host_bytes)
+      continue;
+    const InstDefUse def_use(instruction);
+    if (overlaps_window(def_use.defs | def_use.uses))
+      return false;
+  }
+  return true;
+}
+
 [[nodiscard]] ConSanCandidateResourcePlan
 plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &options,
                        ConSanResourceSiteKind site_kind, size_t candidate_index,

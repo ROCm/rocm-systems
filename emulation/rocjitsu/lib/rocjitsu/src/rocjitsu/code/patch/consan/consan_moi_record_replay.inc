@@ -174,12 +174,6 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           group.candidates.empty() ? nullptr
                                    : resource_plan_for_candidate(result, *group.candidates.front());
       ConSanOptions group_options = options;
-      const bool has_owner_override =
-          group_resource != nullptr &&
-          std::ranges::any_of(
-              group_resource->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
-                return find_moi_transient_sgpr_assignment(options, descriptor_offset) != nullptr;
-              });
       if (group_resource != nullptr)
         (void)apply_moi_transient_sgpr_assignment(group_options,
                                                   group_resource->owner_descriptor_file_offsets);
@@ -296,53 +290,6 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
 
           std::optional<DenseEntryHost> best_host;
           uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
-          const auto host_preserves_owner_scalar_window = [&](BasicBlock &block,
-                                                              const Instruction &host_instruction) {
-            if (!has_owner_override)
-              return true;
-            if (!resource_state.valid || !group_options.moi_exec_save_sgpr ||
-                group_resource == nullptr)
-              return false;
-            const auto overlaps_window = [&](const RegisterSet &set) {
-              const auto overlaps_range = [&](uint16_t base, uint16_t count) {
-                for (uint16_t index = 0; index < count; ++index)
-                  if (set.contains({RegClass::SGPR, static_cast<uint16_t>(base + index), 1u}))
-                    return true;
-                return false;
-              };
-              if (!group_options.automatic_moi_record_replay_sgpr_spill)
-                return overlaps_range(*group_options.moi_exec_save_sgpr,
-                                      moi_exec_save_sgpr_count(group_options, arch));
-              if (!group_options.moi_inline_indirect_pc_sgpr ||
-                  !group_options.moi_inline_indirect_scc_sgpr ||
-                  !group_options.moi_record_replay_dispatch_key_sgpr ||
-                  !group_options.moi_record_replay_call_return_sgpr)
-                return true;
-              return overlaps_range(*group_options.moi_inline_indirect_pc_sgpr, 2u) ||
-                     overlaps_range(*group_options.moi_inline_indirect_scc_sgpr, 1u) ||
-                     overlaps_range(*group_options.moi_record_replay_dispatch_key_sgpr, 1u) ||
-                     overlaps_range(*group_options.moi_record_replay_call_return_sgpr, 2u);
-            };
-            bool found_owner_context = false;
-            for (const MoiKernelResourceContext *context : group_owner_contexts) {
-              if (context == nullptr || !context->block_set.contains(&block))
-                continue;
-              if (overlaps_window(context->liveness->live_before(host_instruction)))
-                return false;
-              found_owner_context = true;
-            }
-            if (!found_owner_context)
-              return false;
-            for (const Instruction &instruction : block.instructions()) {
-              if (instruction.src_loc() < host_instruction.src_loc() ||
-                  instruction.src_loc() >= host_instruction.src_loc() + host_bytes)
-                continue;
-              const InstDefUse def_use(instruction);
-              if (overlaps_window(def_use.defs | def_use.uses))
-                return false;
-            }
-            return true;
-          };
           auto block =
               std::lower_bound(dense_host_blocks.begin(), dense_host_blocks.end(), owner_begin,
                                [](const std::unique_ptr<BasicBlock> &candidate, uint64_t entry) {
@@ -357,7 +304,10 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
               const uint64_t host_offset = instruction.src_loc();
               if (host_offset + host_bytes > (*block)->end_offset() ||
                   overlaps_instrumented_site(host_offset, host_offset + host_bytes) ||
-                  !host_preserves_owner_scalar_window(**block, instruction))
+                  group_resource == nullptr ||
+                  !moi_relocatable_host_preserves_transient_sgprs(
+                      resource_state, group_options, *group_resource, group_owner_contexts, **block,
+                      instruction, host_bytes))
                 continue;
               const uint64_t relay_offset = host_offset + sizeof(uint32_t);
               uint64_t max_distance = 0;

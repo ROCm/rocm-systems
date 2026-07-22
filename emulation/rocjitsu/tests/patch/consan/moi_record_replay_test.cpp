@@ -3335,6 +3335,61 @@ TEST(ConSanMoi, Rdna4DenseRecordReplayBarriersUseRelocatedRouter) {
             kAccessCount);
 }
 
+TEST(ConSanMoi, Rdna4DenseFunctionBarriersUseRelocatableRouter) {
+  constexpr uint32_t kSiteCount = 17u;
+  const std::array<uint32_t, 2> kernel_words = {
+      pack_sopk(/*s_call_b64=*/0x14, /*sdst=*/30, /*simm16=*/1),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, ROCJITSU_CODE_ARCH_RDNA4);
+  std::vector<uint32_t> function_words(32u, filler);
+  for (uint32_t index = 0; index < kSiteCount; ++index) {
+    function_words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    function_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+    function_words.push_back(0xBE804EC1u); // s_barrier_signal -1
+    function_words.push_back(0xBF94FFFFu); // s_barrier_wait -1
+  }
+  // Keep every function-local relay target beyond SOPP reach and leave no
+  // NOP island. Access and barrier dispatchers must each use a relocatable
+  // host proven against every kernel that owns this function.
+  function_words.resize(33'000u, filler);
+  function_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size =
+      consan_moi_report_buffer_min_bytes(kSiteCount, 0, 0, 0, kSiteCount);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 64u;
+
+  const ConSanResult result = try_patch_consan(
+      make_rdna4_code_object_with_local_function(kernel_words, function_words), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            kSiteCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
+                               &ConSanPatchInfo::kind),
+            kSiteCount);
+  EXPECT_EQ(std::ranges::count_if(result.site_dispositions,
+                                  [](const auto &site) {
+                                    return site.site_kind == ConSanResourceSiteKind::Barrier &&
+                                           !site.in_kernel &&
+                                           site.lowering_outcome ==
+                                               ConSanSiteLoweringOutcome::Patched;
+                                  }),
+            kSiteCount);
+}
+
 TEST(ConSanMoi, Gfx1250DenseAccessesPartitionRelayWindowsAcrossLargeKernel) {
   constexpr uint32_t kAccessesPerWindow = 9u;
   constexpr uint32_t kSecondWindowWord = 65'580u;
