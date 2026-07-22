@@ -122,7 +122,7 @@ flowchart TD
     V2["V2 ACTIVE<br/>Qwen SC/RR clean; Sampled rejects;<br/>Inline planning timeout"]
     V3["V3 DONE<br/>P0 Qwen fault inventory<br/>and exact policy frozen"]
     V4["V4 DONE<br/>P0 Qwen contained exact<br/>barrier-fault campaign"]
-    V5["V5 ACTIVE<br/>P0 corpus recursion fixed;<br/>SC + shared MOI placement open"]
+    V5["V5 ACTIVE<br/>P0 corpus recursion fixed;<br/>SC + all-MOI placement open"]
     V6["V6 DONE<br/>D128 block, D128 pressure, MFMA<br/>Inline bundles green"]
     V7["V7 ACTIVE<br/>D128-pressure one-process paired accepted;<br/>peak memory and broader rows open"]
     V8["V8 TODO<br/>freeze one committed tip, rebuild,<br/>and rerun authoritative matrix"]
@@ -584,6 +584,12 @@ mutation without final-byte proof, or a diagnostic without an independent
 oracle is not an accepted row.
 
 ## Progress log
+
+- 2026-07-22: `V5` remains ACTIVE/blue after Inline Shadow reproduces the
+  same heterogeneous-object dispatch-ID/EXEC-save SGPR rejection as
+  Record/Replay and Sampled in artifact
+  `consan-gfx950-hip-matmul-inline-clean-20260722-258`.  All three MOI cells
+  are now assessed red behind one shared owner-qualified planning task.
 
 - 2026-07-22: `V5` remains ACTIVE/blue after the first Sampled HIP-matmul
   assessment.  Like Record/Replay, Sampled analyzes all 46 kernels and then
