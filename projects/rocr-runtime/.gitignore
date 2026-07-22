@@ -5,11 +5,12 @@
 #
 !.gitignore
 !.mailmap
-.github*
+!.github
 patches-*
 build/
 outgoing/
 Makefile
+!.claude
 
 # documentation artifacts
 _build/
