@@ -360,6 +360,7 @@ add_executable(
     patch/error_report_test.cpp
     code/code_object_target_id_test.cpp
     code/amdgpu_code_object_test.cpp
+    code/relocation_function_table_test.cpp
     dbt/semantic_scratch_test.cpp
     dbt/waitcnt_translator_test.cpp
     dbt/virtual_lds_dispatch_rewrite_test.cpp
@@ -383,6 +384,7 @@ add_executable(
     simd_correctness/vop2_simd_correctness_test.cpp
     simd_correctness/vop2_carry_simd_correctness_test.cpp
     simd_correctness/vop2_fma_simd_correctness_test.cpp
+    simd_correctness/vop2_fma_f16_rdna_simd_correctness_test.cpp
     simd_correctness/vop2_fma_f64_simd_correctness_test.cpp
     simd_correctness/vop2_cndmask_simd_correctness_test.cpp
     simd_correctness/vop2_minmax_simd_correctness_test.cpp
@@ -433,6 +435,16 @@ if(HAS_DEVICE_KERNELS)
     target_sources(
         rocjitsu_tests
         PRIVATE dbt/multikernel_indirect_branch_test.cpp
+    )
+endif()
+if(HAS_GFX1250_DEVICE_KERNELS)
+    target_sources(
+        rocjitsu_tests
+        PRIVATE dbt/relocation_function_table_hip_test.cpp
+    )
+    target_compile_definitions(
+        rocjitsu_tests
+        PRIVATE HAS_GFX1250_DEVICE_KERNELS=1
     )
 endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)

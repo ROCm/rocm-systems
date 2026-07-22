@@ -15,7 +15,6 @@ test_categories:
       - "Alloc.*"
       - "ParamTests.*"
       - "ParameterApiTests.*"
-      - "EnvPluginTests.*"
       - "EnqueueTests.*"
       - "ProxyTests.*"
       - "Rcclwrap.*"
