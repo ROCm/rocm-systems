@@ -598,6 +598,10 @@ TEST(WaveDebugTest, CwsrDeserializeRecoversSerializedWaveState) {
     EXPECT_EQ(out[i].m0, in[i].m0);
     EXPECT_EQ(out[i].wave_id, in[i].wave_id);
     EXPECT_EQ(out[i].wave_stopped, in[i].wave_stopped);
+    EXPECT_EQ(out[i].spi_ttmps_setup, in[i].spi_ttmps_setup);
+    EXPECT_EQ(out[i].group_ids, in[i].group_ids);
+    EXPECT_EQ(out[i].wave_in_group, in[i].wave_in_group);
+    EXPECT_EQ(out[i].queue_packet_id, in[i].queue_packet_id);
     for (uint32_t s = 0; s < in[i].num_sgprs; ++s)
       EXPECT_EQ(out[i].sgprs[s], in[i].sgprs[s]) << "wave " << i << " sgpr " << s;
     for (uint32_t r = 0; r < in[i].num_vgprs; ++r)
