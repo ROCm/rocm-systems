@@ -119,6 +119,7 @@ public:
   const amd::options::PrefixOption* Substitute() const { return &substitute; }
 
   bool TrampolineEnabled() const { return trampoline_enabled_; }
+  bool TrampolineNoWaEnabled() const { return trampoline_no_wa_enabled_; }
 
   bool ParseOptions(const std::string& options);
   void Reset();
@@ -140,6 +141,7 @@ private:
   amd::options::PrefixOption substitute;
   amd::options::OptionParser option_parser;
   bool trampoline_enabled_ = false;
+  bool trampoline_no_wa_enabled_ = false;
 };
 
 LoaderOptions::LoaderOptions(std::ostream& error) :
@@ -161,10 +163,16 @@ LoaderOptions::LoaderOptions(std::ostream& error) :
   option_parser.AddOption(&substitute);
 
   // LOADER_ENABLE_TRAMPOLINE=1: enable gfx125x kernel-entry trampolines.
-  // Trampolines are disabled by default; this env var is for testing only.
+  // LOADER_ENABLE_TRAMPOLINE_NO_WA=1: enable trampolines without the global_wb
+  // cache-writeback workaround (s_mov + s_set_pc only). Trampolines are disabled
+  // by default; these env vars are for testing only.
   const char* enable_trampoline = getenv("LOADER_ENABLE_TRAMPOLINE");
   if (enable_trampoline && std::strcmp(enable_trampoline, "1") == 0) {
     trampoline_enabled_ = true;
+  }
+  const char* enable_trampoline_no_wa = getenv("LOADER_ENABLE_TRAMPOLINE_NO_WA");
+  if (enable_trampoline_no_wa && std::strcmp(enable_trampoline_no_wa, "1") == 0) {
+    trampoline_no_wa_enabled_ = true;
   }
 }
 
@@ -224,19 +232,45 @@ static constexpr size_t kTrampolineStubStride =
 // and readable, which the allocation's zero-fill already guarantees.
 static constexpr size_t kInstPrefUnitBytes = 128;  // GFX11+ CP I$ prefetch line size
 
+// The GFX1250 unclaused-VMEM workaround prologue (llvm PR #208467). The compiler
+// emits these 4 dwords -- global_wb <scope:SCOPE_CU> followed by v_nop -- at every
+// hardware kernel entry so the first VMEM instruction is unclaused. It is exactly
+// the sequence the entry trampoline itself prepends, so when a kernel's entry
+// already begins with it the trampoline would only duplicate the workaround.
+static constexpr uint32_t kGfx1250UnclausedVmemPrologue[4] = {
+    0xEE0B007C,  // global_wb <scope:SCOPE_CU>
+    0x00000000,  // :
+    0x00000000,  // :
+    0x7E000000,  // v_nop
+};
+
 static void BuildTrampolineGfx1250(uint8_t* buf, uint64_t target) {
   auto* w = reinterpret_cast<uint32_t*>(buf);
 
-  w[0] = 0xEE0B007C;  // global_wb <scope:SCOPE_CU>
-  w[1] = 0x00000000;  // :
-  w[2] = 0x00000000;  // :
-  w[3] = 0x7E000000;  // v_nop (padding)
+  w[0] = kGfx1250UnclausedVmemPrologue[0];  // global_wb <scope:SCOPE_CU>
+  w[1] = kGfx1250UnclausedVmemPrologue[1];  // :
+  w[2] = kGfx1250UnclausedVmemPrologue[2];  // :
+  w[3] = kGfx1250UnclausedVmemPrologue[3];  // v_nop (padding)
   w[4] = 0xBEE400FF;  // s_mov_b32 s100, target_lo
   w[5] = static_cast<uint32_t>(target);
   w[6] = 0xBEE500FF;  // s_mov_b32 s101, target_hi
   w[7] = static_cast<uint32_t>(target >> 32);
   w[8] = 0xBE804864;  // s_set_pc_i64 s[100:101]
   for (size_t i = 9; i < kTrampolineStubStride / sizeof(uint32_t); ++i)
+    w[i] = 0xBF9F0000;  // s_code_end (prefetch-safe padding)
+}
+
+// Minimal stub: load the 64-bit entry address into s[100:101] and set PC, with no
+// global_wb / v_nop cache-writeback workaround.
+static void BuildTrampolineGfx1250NoWa(uint8_t* buf, uint64_t target) {
+  auto* w = reinterpret_cast<uint32_t*>(buf);
+
+  w[0] = 0xBEE400FF;  // s_mov_b32 s100, target_lo
+  w[1] = static_cast<uint32_t>(target);
+  w[2] = 0xBEE500FF;  // s_mov_b32 s101, target_hi
+  w[3] = static_cast<uint32_t>(target >> 32);
+  w[4] = 0xBE804864;  // s_set_pc_i64 s[100:101]
+  for (size_t i = 5; i < kTrampolineStubStride / sizeof(uint32_t); ++i)
     w[i] = 0xBF9F0000;  // s_code_end (prefetch-safe padding)
 }
 
@@ -790,14 +824,33 @@ bool Segment::IsAddressInSegment(uint64_t addr)
   return vaddr <= addr && addr < vaddr + size;
 }
 
-void Segment::Copy(uint64_t addr, const void* src, size_t size)
+bool Segment::IsAddressInSegment(uint64_t addr, size_t copy_size)
+{
+  if (addr < vaddr) { return false; }
+  const uint64_t offset = addr - vaddr;
+  // Mirror the 1-arg bound (offset < size, i.e. addr < vaddr + size). Express
+  // the exclusive end offset + copy_size <= size without overflow via
+  // copy_size <= size - offset (equivalent to addr + copy_size <= vaddr + size).
+  return offset < size && copy_size <= size - offset;
+}
+
+bool Segment::Copy(uint64_t addr, const void* src, size_t size)
 {
   // loader must do copies before freezing.
   assert(!frozen);
 
   if (size > 0) {
+    // addr/size can be derived from attacker-controlled code-object fields
+    // (e.g. a relocation's section sh_addr + r_offset). Offset() only asserts
+    // the start address via IsAddressInSegment() and that assert compiles out
+    // under NDEBUG, so validate the entire destination range here to prevent a
+    // heap out-of-bounds write when loading a crafted code object.
+    if (!IsAddressInSegment(addr, size)) {
+      return false;
+    }
     owner->context()->SegmentCopy(segment, agent, ptr, Offset(addr), src, size);
   }
+  return true;
 }
 
 void Segment::Print(std::ostream& out)
@@ -1340,9 +1393,12 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   }
 
   // Kernel-entry trampolines (gfx125x). Disabled by default for gfx125x.
-  // Set LOADER_ENABLE_TRAMPOLINE=1 to enable (for testing only).
+  // Set LOADER_ENABLE_TRAMPOLINE=1 or LOADER_ENABLE_TRAMPOLINE_NO_WA=1 to enable
+  // (for testing only). NO_WA selects the minimal stub without global_wb.
+  trampoline_no_wa_gfx125x_ = loaderOptions.TrampolineNoWaEnabled();
   trampoline_enabled_gfx125x_ =
-      loaderOptions.TrampolineEnabled() && CodeObjectIsaIsGfx125Family(codeIsa);
+      (loaderOptions.TrampolineEnabled() || trampoline_no_wa_gfx125x_) &&
+      CodeObjectIsaIsGfx125Family(codeIsa);
   kd_fixups_.clear();
 
   uint32_t majorVersion, minorVersion;
@@ -1507,6 +1563,8 @@ hsa_status_t ExecutableImpl::LoadSegmentV1(hsa_agent_t agent,
     void* ptr = context_->SegmentAlloc(segment, agent, s->memSize(), s->align(), true);
     if (!ptr) { return HSA_STATUS_ERROR_OUT_OF_RESOURCES; }
     new_seg = std::make_shared<Segment>(this, agent, segment, ptr, s->memSize(), s->vaddr(), s->offset());
+    // Copy() return unchecked: imageSize <= memSize was validated above and the
+    // destination is this segment's own [vaddr, vaddr + imageSize) range.
     new_seg->Copy(s->vaddr(), segment_data, s->imageSize());
     objects.push_back(new_seg);
 
@@ -1557,8 +1615,42 @@ hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
   return HSA_STATUS_SUCCESS;
 }
 
+// Returns true if the kernel entry at entry_vaddr already begins with the GFX1250
+// unclaused-VMEM workaround prologue (see kGfx1250UnclausedVmemPrologue). The check
+// reads the post-relocation host shadow of the code segment (valid pre-Freeze).
+static bool KernelEntryHasUnclausedVmemPrologue(Context* context, Segment* code_seg,
+                                                uint64_t entry_vaddr) {
+  static constexpr size_t kPrologueBytes = sizeof(kGfx1250UnclausedVmemPrologue);
+  if (!code_seg->IsAddressInSegment(entry_vaddr) ||
+      !code_seg->IsAddressInSegment(entry_vaddr + kPrologueBytes - 1)) {
+    return false;
+  }
+  void* host = context->SegmentHostAddress(code_seg->ElfSegment(), code_seg->Agent(),
+                                           code_seg->Ptr(), code_seg->Offset(entry_vaddr));
+  if (host == nullptr) return false;
+  const uint32_t* w = reinterpret_cast<const uint32_t*>(host);
+  return w[0] == kGfx1250UnclausedVmemPrologue[0] &&
+         w[1] == kGfx1250UnclausedVmemPrologue[1] &&
+         w[2] == kGfx1250UnclausedVmemPrologue[2] &&
+         w[3] == kGfx1250UnclausedVmemPrologue[3];
+}
+
 hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
-  const size_t n = kd_fixups_.size();
+  // Skip kernels whose entry already carries the compiler-inserted unclaused-VMEM
+  // workaround prologue (llvm PR #208467): a trampoline would only duplicate the
+  // global_wb/v_nop that is already there, so dispatch can go straight to the real
+  // entry. Kernels still needing the workaround keep their trampoline.
+  std::vector<KdFixup> fixups;
+  fixups.reserve(kd_fixups_.size());
+  for (const auto& f : kd_fixups_) {
+    if (KernelEntryHasUnclausedVmemPrologue(context_, f.code_seg, f.kd_vaddr + f.entry_off)) {
+      continue;
+    }
+    fixups.push_back(f);
+  }
+  if (fixups.empty()) return HSA_STATUS_SUCCESS;
+
+  const size_t n = fixups.size();
 
   // Size the trailing prefetch guard from the largest CP instruction-prefetch
   // window among this pool's kernels (INST_PREF_SIZE lines * 128 B). The forward
@@ -1567,7 +1659,7 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
   // remainder, (INST_PREF_SIZE*128 - stub_size), can spill past the pool and needs
   // a guard. (Clamp to 0 when the window fits within a stub slot.)
   uint32_t max_pref_lines = 0;
-  for (const auto& f : kd_fixups_) max_pref_lines = std::max(max_pref_lines, f.inst_pref);
+  for (const auto& f : fixups) max_pref_lines = std::max(max_pref_lines, f.inst_pref);
   const size_t pref_bytes = static_cast<size_t>(max_pref_lines) * kInstPrefUnitBytes;
   const size_t guard = pref_bytes > kTrampolineStubStride ? pref_bytes - kTrampolineStubStride : 0;
   const size_t pool = n * kTrampolineStubStride + guard;
@@ -1586,7 +1678,7 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
   trampoline_segments_.push_back(tramp);  // frozen in ExecutableImpl::Freeze
 
   for (size_t i = 0; i < n; ++i) {
-    const KdFixup& f = kd_fixups_[i];
+    const KdFixup& f = fixups[i];
     const uint64_t stub_off = i * kTrampolineStubStride;
     // Device addresses are valid pre-Freeze (RegionMemory::ptr_ is set at alloc).
     const uint64_t kd_dev = reinterpret_cast<uint64_t>(f.code_seg->Address(f.kd_vaddr));
@@ -1595,8 +1687,15 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
     const uint64_t stub_dev = reinterpret_cast<uint64_t>(tramp->Address(stub_off));
 
     uint8_t blob[kTrampolineStubStride];
-    BuildTrampolineGfx1250(blob, entry_dev);    // stub jumps to the real entry
+    if (trampoline_no_wa_gfx125x_) {
+      BuildTrampolineGfx1250NoWa(blob, entry_dev);
+    } else {
+      BuildTrampolineGfx1250(blob, entry_dev);
+    }
     tramp->Copy(stub_off, blob, sizeof(blob));  // -> trampoline host shadow
+
+    // Gated by LOADER_ENABLE_LOGGING=1 (see Logger).
+    logger_ << "Loader: injecting gfx125x entry trampoline for kernel " << f.name << "\n";
 
     // Redirect dispatch onto the stub: kernel_object(kd_dev) + new_off == stub.
     int64_t new_off = static_cast<int64_t>(stub_dev) - static_cast<int64_t>(kd_dev);
@@ -1664,8 +1763,8 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
       // entry; captured here to size the trampoline's prefetch guard.
       uint32_t inst_pref = AMDHSA_BITS_GET(
           kd.compute_pgm_rsrc3, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE);
-      kd_fixups_.push_back(
-          {SymbolSegment(agent, sym), sym->VAddr(), kd.kernel_code_entry_byte_offset, inst_pref});
+      kd_fixups_.push_back({SymbolSegment(agent, sym), sym->VAddr(),
+                            kd.kernel_code_entry_byte_offset, inst_pref, sym->GetSymbolName()});
     }
 
     uint32_t kernarg_segment_size = kd.kernarg_size; // FIXME: If 0 then the compiler is not specifying the size.
@@ -1752,6 +1851,8 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
       // removed.
       uint64_t target_address = sym->GetSection()->addr() + sym->SectionOffset() + ((size_t)(&((amd_kernel_code_t*)0)->runtime_loader_kernel_symbol));
       uint64_t source_value = (uint64_t) (uintptr_t) &kernel_symbol->debug_info;
+      // Copy() return unchecked: debugger backdoor for compiler-generated kernel
+      // symbols; target is a fixed offsetof within the symbol's loaded section.
       SymbolSegment(agent, sym)->Copy(target_address, &source_value, sizeof(source_value));
   } else {
     assert(!"Unexpected symbol type in LoadDefinitionSymbol");
@@ -1880,6 +1981,11 @@ hsa_status_t ExecutableImpl::ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::
   code::RelocationSection* rsec = rel->section();
   code::Section* sec = rsec->targetSection();
   Segment* rseg = SectionSegment(agent, sec);
+  // SectionSegment() returns nullptr when no loaded segment covers the target
+  // section (crafted sh_info/sh_addr); reject rather than dereferencing it.
+  if (!rseg) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
+  // sec->addr() + rel->offset() can wrap on crafted input; Copy()'s range check
+  // rejects any wrapped destination that falls outside the target segment.
   size_t reladdr = sec->addr() + rel->offset();
   switch (rel->type()) {
     case R_AMDGPU_V1_32_LOW:
@@ -1917,14 +2023,14 @@ hsa_status_t ExecutableImpl::ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::
       switch (rel->type()) {
         case R_AMDGPU_V1_32_HIGH:
           addr32 = uint32_t((addr >> 32) & 0xFFFFFFFF);
-          rseg->Copy(reladdr, &addr32, sizeof(addr32));
+          if (!rseg->Copy(reladdr, &addr32, sizeof(addr32))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
           break;
         case R_AMDGPU_V1_32_LOW:
           addr32 = uint32_t(addr & 0xFFFFFFFF);
-          rseg->Copy(reladdr, &addr32, sizeof(addr32));
+          if (!rseg->Copy(reladdr, &addr32, sizeof(addr32))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
           break;
         case R_AMDGPU_V1_64:
-          rseg->Copy(reladdr, &addr, sizeof(addr));
+          if (!rseg->Copy(reladdr, &addr, sizeof(addr))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
           break;
         default:
           return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
@@ -1959,7 +2065,7 @@ hsa_status_t ExecutableImpl::ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::
       status = context_->SamplerCreate(agent, &hsa_sampler_descriptor, &hsa_sampler);
       if (status != HSA_STATUS_SUCCESS) { return status; }
       assert(hsa_sampler.handle);
-      rseg->Copy(reladdr, &hsa_sampler, sizeof(hsa_sampler));
+      if (!rseg->Copy(reladdr, &hsa_sampler, sizeof(hsa_sampler))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2022,7 +2128,7 @@ hsa_status_t ExecutableImpl::ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::
                                   NULL, // TODO: image_data?
                                   &hsa_image);
       if (status != HSA_STATUS_SUCCESS) { return status; }
-      rseg->Copy(reladdr, &hsa_image, sizeof(hsa_image));
+      if (!rseg->Copy(reladdr, &hsa_image, sizeof(hsa_image))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2046,6 +2152,9 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocationSection(hsa_agent_t agent, am
 hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa::code::Relocation *rel)
 {
   Segment* relSeg = VirtualAddressSegment(rel->offset());
+  // VirtualAddressSegment() returns nullptr when no loaded segment covers the
+  // attacker-controlled r_offset; reject rather than dereferencing it.
+  if (!relSeg) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
   uint64_t symAddr = 0;
   switch (rel->symbol()->type()) {
     case STT_OBJECT:
@@ -2053,6 +2162,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
     case STT_FUNC:
     {
       Segment* symSeg = VirtualAddressSegment(rel->symbol()->value());
+      if (!symSeg) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       symAddr = reinterpret_cast<uint64_t>(symSeg->Address(rel->symbol()->value()));
       break;
     }
@@ -2084,7 +2194,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
       }
 
       uint32_t symAddr32 = uint32_t((symAddr >> 32) & 0xFFFFFFFF);
-      relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32));
+      if (!relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2096,7 +2206,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
       }
 
       uint32_t symAddr32 = uint32_t(symAddr & 0xFFFFFFFF);
-      relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32));
+      if (!relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2108,7 +2218,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
       }
 
       uint32_t symAddr32 = uint32_t(symAddr);
-      relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32));
+      if (!relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2119,7 +2229,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
         return HSA_STATUS_ERROR_VARIABLE_UNDEFINED;
       }
 
-      relSeg->Copy(rel->offset(), &symAddr, sizeof(symAddr));
+      if (!relSeg->Copy(rel->offset(), &symAddr, sizeof(symAddr))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2127,7 +2237,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
     {
       int64_t baseDelta = reinterpret_cast<uint64_t>(relSeg->Address(0)) - relSeg->VAddr();
       uint64_t relocatedAddr = baseDelta + rel->addend();
-      relSeg->Copy(rel->offset(), &relocatedAddr, sizeof(relocatedAddr));
+      if (!relSeg->Copy(rel->offset(), &relocatedAddr, sizeof(relocatedAddr))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 

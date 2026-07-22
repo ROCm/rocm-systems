@@ -2367,7 +2367,7 @@ void VirtMemoryTestBasic::TestGpuAccessToHostMemoryAllocation(hsa_agent_t cpu_ag
   // Create memory handle from system memory
   hsa_amd_vmem_alloc_handle_t mem_handle;
   ASSERT_SUCCESS(hsa_amd_vmem_handle_create(cpu_pool, vmem_alloc_size, MEMORY_TYPE_NONE, 0, &mem_handle));
-  
+
   // Map the reserved VA to above memory only handle
   ASSERT_SUCCESS(hsa_amd_vmem_map(vmem_data, vmem_alloc_size, 0, mem_handle, 0));
 
@@ -2490,8 +2490,8 @@ void VirtMemoryTestBasic::TestGpuAccessToHostMemoryAllocation(hsa_agent_t cpu_ag
   if (queue) hsa_queue_destroy(queue);
 }
 
-void VirtMemoryTestBasic::ImportedShareableHandleSetAccessAfterFdClose(
-    hsa_agent_t gpu_agent, hsa_amd_memory_pool_t pool) {
+void VirtMemoryTestBasic::ImportedShareableHandleSetAccessAfterFdClose(hsa_agent_t agent,
+                                                                       hsa_amd_memory_pool_t pool) {
   rocrtst::pool_info_t pool_i;
   ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
   if (!pool_i.alloc_allowed || pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
@@ -2521,13 +2521,13 @@ void VirtMemoryTestBasic::ImportedShareableHandleSetAccessAfterFdClose(
    * importer does not retain the exporter's allocation handle. */
   ASSERT_SUCCESS(hsa_amd_vmem_handle_release(exported_handle));
 
-  /* Peer GPU access only: imported shareable handles do not support CPU set_access
+  /* Peer agent access only: imported shareable handles do not support CPU set_access
    * (no mmap_offset on the dmabuf import path). */
-  hsa_amd_memory_access_desc_t access_desc = {HSA_ACCESS_PERMISSION_RW, gpu_agent};
+  hsa_amd_memory_access_desc_t access_desc = {HSA_ACCESS_PERMISSION_RW, agent};
   ASSERT_SUCCESS(hsa_amd_vmem_set_access(addr, alloc_size, &access_desc, 1));
 
   hsa_access_permission_t perm = HSA_ACCESS_PERMISSION_NONE;
-  ASSERT_SUCCESS(hsa_amd_vmem_get_access(addr, &perm, gpu_agent));
+  ASSERT_SUCCESS(hsa_amd_vmem_get_access(addr, &perm, agent));
   ASSERT_EQ(perm, HSA_ACCESS_PERMISSION_RW);
 
   ASSERT_SUCCESS(hsa_amd_vmem_unmap(addr, alloc_size));
@@ -2560,6 +2560,16 @@ void VirtMemoryTestBasic::ImportedShareableHandleSetAccessAfterFdClose(void) {
         hsa_amd_agent_iterate_memory_pools(gpus[i], rocrtst::GetGlobalMemoryPool, &gpu_pool));
     if (gpu_pool.handle == 0) continue;
     ImportedShareableHandleSetAccessAfterFdClose(gpus[i], gpu_pool);
+  }
+
+  std::vector<hsa_agent_t> aies;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateAIEAgents, &aies));
+  for (unsigned int i = 0; i < aies.size(); ++i) {
+    hsa_amd_memory_pool_t aie_pool = {};
+    ASSERT_SUCCESS(
+        hsa_amd_agent_iterate_memory_pools(aies[i], rocrtst::GetGlobalMemoryPool, &aie_pool));
+    if (aie_pool.handle == 0) continue;
+    ImportedShareableHandleSetAccessAfterFdClose(aies[i], aie_pool);
   }
 
   if (verbosity() > 0) {

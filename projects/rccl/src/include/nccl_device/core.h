@@ -47,7 +47,8 @@ struct ncclTeam {
 };
 
 #if __cplusplus
-template<typename T> struct ncclSymPtr;
+template <typename T>
+struct ncclSymPtr;
 #endif
 
 #if __cplusplus
@@ -105,28 +106,29 @@ struct ncclDevCommRequirements {
   int worldGinBarrierCount;
 };
 
-#define NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER {                               \
-    sizeof(ncclDevCommRequirements_t),           /* size */                    \
-    NCCL_API_MAGIC,                              /* magic */                   \
-    NCCL_VERSION_CODE,                           /* version */                 \
+#define NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER \
+  { \
+    sizeof(ncclDevCommRequirements_t),           /* size */ \
+    NCCL_API_MAGIC,                              /* magic */ \
+    NCCL_VERSION_CODE,                           /* version */ \
     nullptr,                                     /* resourceRequirementsList*/ \
-    nullptr,                                     /* teamRequirementsList */    \
-    false,                                       /* lsaMultimem */             \
-    0,                                           /* barrierCount */            \
-    0,                                           /* lsaBarrierCount */         \
-    0,                                           /* railGinBarrierCount */     \
-    0,                                           /* lsaLLA2ABlockCount */      \
-    0,                                           /* lsaLLA2ASlotCount */       \
-    false,                                       /* ginForceEnable */          \
-    4,                                           /* ginContextCount */         \
-    0,                                           /* ginSignalCount */          \
-    0,                                           /* ginCounterCount */         \
-    NCCL_GIN_CONNECTION_NONE,                    /* ginConnectionType */       \
-    false,                                       /* ginExclusiveContexts */    \
-    0,                                           /* ginQueueDepth */           \
-    NCCL_CONFIG_UNDEF_INT,                       /* ginTrafficClass */         \
-    0,                                           /* worldGinBarrierCount */    \
-}
+    nullptr,                                     /* teamRequirementsList */ \
+    false,                                       /* lsaMultimem */ \
+    0,                                           /* barrierCount */ \
+    0,                                           /* lsaBarrierCount */ \
+    0,                                           /* railGinBarrierCount */ \
+    0,                                           /* lsaLLA2ABlockCount */ \
+    0,                                           /* lsaLLA2ASlotCount */ \
+    false,                                       /* ginForceEnable */ \
+    4,                                           /* ginContextCount */ \
+    0,                                           /* ginSignalCount */ \
+    0,                                           /* ginCounterCount */ \
+    NCCL_GIN_CONNECTION_NONE,                    /* ginConnectionType */ \
+    false,                                       /* ginExclusiveContexts */ \
+    0,                                           /* ginQueueDepth */ \
+    NCCL_CONFIG_UNDEF_INT,                       /* ginTrafficClass */ \
+    0,                                           /* worldGinBarrierCount */ \
+  }
 
 struct ncclDevResourceRequirements {
   ncclDevResourceRequirements_t* next;
@@ -145,11 +147,12 @@ struct ncclTeamRequirements {
   ncclMultimemHandle_t* outMultimemHandle; // If non-null, target assigned during ncclDevCommCreate.
 };
 
-#define NCCL_COMM_PROPERTIES_INITIALIZER {                           \
-  sizeof(ncclCommProperties_t),                  /* size */          \
-  NCCL_API_MAGIC,                                /* magic */         \
-  NCCL_VERSION_CODE,                             /* version */       \
-}
+#define NCCL_COMM_PROPERTIES_INITIALIZER \
+  { \
+    sizeof(ncclCommProperties_t),                  /* size */ \
+    NCCL_API_MAGIC,                                /* magic */ \
+    NCCL_VERSION_CODE,                             /* version */ \
+  }
 
 typedef enum {
   NCCL_GIN_TYPE_NONE = 0,
@@ -177,13 +180,17 @@ struct ncclCommProperties {
 };
 
 NCCL_EXTERN_C __host__ ncclResult_t ncclCommQueryProperties(ncclComm_t comm, ncclCommProperties_t* props);
-NCCL_EXTERN_C __host__ ncclResult_t ncclDevCommCreate(ncclComm_t comm, ncclDevCommRequirements_t const* reqs, ncclDevComm_t* outDevComm);
+NCCL_EXTERN_C __host__ ncclResult_t ncclDevCommCreate(ncclComm_t comm, ncclDevCommRequirements_t const* reqs,
+                                                      ncclDevComm_t* outDevComm);
 NCCL_EXTERN_C __host__ ncclResult_t ncclDevCommDestroy(ncclComm_t comm, ncclDevComm_t const* devComm);
 
 NCCL_EXTERN_C __host__ ncclResult_t ncclGetLsaMultimemDevicePointer(ncclWindow_t window, size_t offset, void** outPtr);
-NCCL_EXTERN_C __host__ ncclResult_t ncclGetMultimemDevicePointer(ncclWindow_t window, size_t offset, ncclMultimemHandle_t multimem, void** outPtr);
-NCCL_EXTERN_C __host__ ncclResult_t ncclGetLsaDevicePointer(ncclWindow_t window, size_t offset, int lsaRank, void** outPtr);
-NCCL_EXTERN_C __host__ ncclResult_t ncclGetPeerDevicePointer(ncclWindow_t window, size_t offset, int peer, void** outPtr);
+NCCL_EXTERN_C __host__ ncclResult_t ncclGetMultimemDevicePointer(ncclWindow_t window, size_t offset,
+                                                                 ncclMultimemHandle_t multimem, void** outPtr);
+NCCL_EXTERN_C __host__ ncclResult_t ncclGetLsaDevicePointer(ncclWindow_t window, size_t offset, int lsaRank,
+                                                            void** outPtr);
+NCCL_EXTERN_C __host__ ncclResult_t ncclGetPeerDevicePointer(ncclWindow_t window, size_t offset, int peer,
+                                                             void** outPtr);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Team API:
@@ -250,17 +257,22 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetLocalPointer(ncclWindow_t w, si
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetLsaPointer(ncclWindow_t w, size_t offset, int peer);
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetPeerPointer(ncclWindow_t w, size_t offset, int peer);
 NCCL_DEVICE_INLINE void* ncclGetPeerPointer(ncclWindow_t w, size_t offset, ncclTeam tm, int peer);
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetMultimemPointer(ncclWindow_t w, size_t offset, ncclMultimemHandle mmHandle);
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetMultimemPointer(ncclWindow_t w, size_t offset,
+                                                                 ncclMultimemHandle mmHandle);
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetLsaMultimemPointer(ncclWindow_t w, size_t offset, ncclDevComm const&);
 #endif
 
 #if __CUDACC__
 // Convenience for combining ncclGet***Pointer() with resource handle.
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetResourceBufferLocalPointer(ncclDevComm const&, ncclDevResourceHandle);
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaPointer(ncclDevComm const&, ncclDevResourceHandle, int peer);
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetResourceBufferPeerPointer(ncclDevComm const&, ncclDevResourceHandle, ncclTeam, int peer);
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetResourceBufferMultimemPointer(ncclDevComm const&, ncclDevResourceHandle, ncclMultimemHandle);
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaMultimemPointer(ncclDevComm const&, ncclDevResourceHandle);
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaPointer(ncclDevComm const&, ncclDevResourceHandle,
+                                                                          int peer);
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetResourceBufferPeerPointer(ncclDevComm const&, ncclDevResourceHandle,
+                                                                           ncclTeam, int peer);
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetResourceBufferMultimemPointer(
+  ncclDevComm const&, ncclDevResourceHandle, ncclMultimemHandle);
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaMultimemPointer(ncclDevComm const&,
+                                                                                  ncclDevResourceHandle);
 #endif
 
 #endif // _NCCL_DEVICE_CORE_H_

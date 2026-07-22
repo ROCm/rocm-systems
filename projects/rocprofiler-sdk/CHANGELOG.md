@@ -95,6 +95,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - HIP graph attribution fields and trace:
   - Kernel and memory-copy records gain `graph_exec_id` and `graph_node_id` fields in JSON and rocpd output. rocpd conversion exposes these fields in CSV, OTF2, and Perfetto output.
   - New `--hip-graph-trace` CLI flag emits per-launch summary records (one row per successful `hipGraphLaunch`) in JSON and rocpd output, including `graph_exec_id` and `kernel_dispatch_count`. Automatically enabled by `--hip-trace` / `--hip-runtime-trace` since HIP graphs are part of the HIP runtime.
+- rocSHMEM API tracing support:
+  - `--rocshmem-trace` flag to enable tracing of rocSHMEM host-stream APIs.
+  - Included in the `--sys-trace` and `--runtime-trace` aggregate tracing options.
+  - Emitted directly to the JSON and rocpd (default, `.db`) output formats; CSV, Perfetto (`.pftrace`), and OTF2 output are produced from the rocpd database via `rocpd convert`.
 
 **Documentation:**
 

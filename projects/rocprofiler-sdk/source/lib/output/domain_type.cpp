@@ -64,6 +64,7 @@ DEFINE_BUFFER_TYPE_NAME(PC_SAMPLING_HOST_TRAP,
                         "pc_sampling_host_trap_stats")
 DEFINE_BUFFER_TYPE_NAME(ROCDECODE, "ROCDECODE_API", "rocdecode_api_trace", "rocdecode_api_stats")
 DEFINE_BUFFER_TYPE_NAME(ROCJPEG, "ROCJPEG_API", "rocjpeg_api_trace", "rocjpeg_api_stats")
+DEFINE_BUFFER_TYPE_NAME(ROCSHMEM, "ROCSHMEM_API", "rocshmem_api_trace", "rocshmem_api_stats")
 DEFINE_BUFFER_TYPE_NAME(PC_SAMPLING_STOCHASTIC,
                         "PC_SAMPLING_STOCHASTIC",
                         "pc_sampling_stochastic",

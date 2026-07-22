@@ -35,21 +35,15 @@ struct FabricGpuBarrierResources {
 };
 
 class FabricGpuBarrier {
- public:
+public:
   using FlagType = uint32_t;
 
   __host__ FabricGpuBarrier() = default;
 
   // Allocates this rank's flag buffer, exchanges peer flag-buffer pointers via
   // fabric shareable handles and builds a device-resident pointer table.
-  static __host__
-      std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier>
-      mallocAndInit(
-          int nRanks,
-          int nBlocks,
-          int selfRank,
-          void* bootstrap,
-          struct ncclMemManager* manager);
+  static __host__ std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier> mallocAndInit(
+    int nRanks, int nBlocks, int selfRank, void* bootstrap, struct ncclMemManager* manager);
 
   template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
   __device__ __forceinline__ void syncOnSameBlockIdx() {
@@ -62,10 +56,9 @@ class FabricGpuBarrier {
     static_assert(hasPreviousMemAccess || hasSubsequentMemAccess);
 
     constexpr MemFenceType fenceType =
-        hasPreviousMemAccess && hasSubsequentMemAccess
-        ? MemFenceType::RELEASE_ACQUIRE
-        : (!hasPreviousMemAccess ? MemFenceType::ACQUIRE_ONLY
-                                 : MemFenceType::RELEASE_ONLY);
+      hasPreviousMemAccess && hasSubsequentMemAccess ?
+        MemFenceType::RELEASE_ACQUIRE :
+        (!hasPreviousMemAccess ? MemFenceType::ACQUIRE_ONLY : MemFenceType::RELEASE_ONLY);
 
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
@@ -77,26 +70,21 @@ class FabricGpuBarrier {
     // signaled or waited on, hanging the barrier. Every rank walks peers in the
     // same increasing order, so the interleaved signal/wait cannot deadlock.
     FlagType* selfBuf = peerFlags_[selfRank_];
-    for (int peerRank = threadIdx.x; peerRank < nRanks_;
-         peerRank += blockDim.x) {
+    for (int peerRank = threadIdx.x; peerRank < nRanks_; peerRank += blockDim.x) {
       FlagType* peerBuf = peerFlags_[peerRank];
 
       // Signal the peer that this rank reached the barrier for this block.
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
-        putFlag<std::memory_order_relaxed>(
-            peerBuf + getFlagIdx(selfRank_, blockIdx.x));
+        putFlag<std::memory_order_relaxed>(peerBuf + getFlagIdx(selfRank_, blockIdx.x));
       } else {
-        putFlag<std::memory_order_release>(
-            peerBuf + getFlagIdx(selfRank_, blockIdx.x));
+        putFlag<std::memory_order_release>(peerBuf + getFlagIdx(selfRank_, blockIdx.x));
       }
 
       // Wait for the peer's signal in this rank's own buffer.
       if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
-        waitFlag<std::memory_order_relaxed>(
-            selfBuf + getFlagIdx(peerRank, blockIdx.x));
+        waitFlag<std::memory_order_relaxed>(selfBuf + getFlagIdx(peerRank, blockIdx.x));
       } else {
-        waitFlag<std::memory_order_acquire>(
-            selfBuf + getFlagIdx(peerRank, blockIdx.x));
+        waitFlag<std::memory_order_acquire>(selfBuf + getFlagIdx(peerRank, blockIdx.x));
       }
     }
     if constexpr (hasSubsequentMemAccess) {
@@ -104,21 +92,14 @@ class FabricGpuBarrier {
     }
   }
 
- private:
+private:
   int nBlocks_{-1};
   int selfRank_{-1};
   int nRanks_{-1};
   FlagType** peerFlags_{nullptr};
 
-  __host__ FabricGpuBarrier(
-      int nBlocks,
-      int selfRank,
-      int nRanks,
-      FlagType** peerFlags)
-      : nBlocks_(nBlocks),
-        selfRank_(selfRank),
-        nRanks_(nRanks),
-        peerFlags_(peerFlags) {}
+  __host__ FabricGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags)
+    : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags) {}
 
   __device__ inline int getFlagIdx(int rank, int block) {
     return block * nRanks_ + rank;

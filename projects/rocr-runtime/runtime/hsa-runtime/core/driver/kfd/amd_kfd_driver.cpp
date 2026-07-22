@@ -224,12 +224,22 @@ hsa_status_t KfdDriver::GetCacheProperties(uint32_t node_id, uint32_t processor_
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t
-KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
-                          core::MemoryRegion::AllocateFlags alloc_flags,
-                          void **mem, size_t size, uint32_t agent_node_id) {
+hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
+                                       core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                                       uint32_t agent_node_id, core::DriverMemoryHandle* handle) {
   const MemoryRegion &m_region(static_cast<const MemoryRegion &>(mem_region));
   HsaMemFlags kmt_alloc_flags(m_region.mem_flags());
+  void* mem = nullptr;
+
+  // Fills the caller's handle from whatever mem holds: a VA for fragment and
+  // mapped allocations, or the opaque memory-only handle for NoAddress
+  // allocations. For KFD both are the allocation word reinterpreted as uint64_t.
+  // Export-only fields stay at their defaults and are filled lazily on export.
+  auto populate_handle = [&]() {
+    handle->handle = reinterpret_cast<uint64_t>(mem);
+    handle->vaddr = mem;
+    handle->size = size;
+  };
 
   kmt_alloc_flags.ui32.ExecuteAccess =
       (alloc_flags & core::MemoryRegion::AllocateExecutable ? 1 : 0);
@@ -295,15 +305,15 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
         ((alloc_flags & (~core::MemoryRegion::AllocateRestrict)) == 0);
 
     if (useSubAlloc) {
-      *mem = m_region.fragment_alloc(size);
+      mem = m_region.fragment_alloc(size);
 
       if ((alloc_flags & core::MemoryRegion::AllocateAsan) &&
-          HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(*mem)) != HSAKMT_STATUS_SUCCESS) {
-        m_region.fragment_free(*mem);
-        *mem = nullptr;
+          HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
+        m_region.fragment_free(mem);
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
 
+      populate_handle();
       return HSA_STATUS_SUCCESS;
     }
   }
@@ -320,14 +330,15 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
   //// Allocate memory.
   //// If it fails attempt to release memory from the block allocator and retry.
 
-  auto status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, kmt_alloc_flags, mem));
+  auto status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, kmt_alloc_flags, &mem));
   if (status == HSAKMT_STATUS_NO_MEMORY) {
     m_region.owner()->Trim();
-    status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, kmt_alloc_flags, mem));
+    status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, kmt_alloc_flags, &mem));
   }
   if (status == HSAKMT_STATUS_SUCCESS) {
     if (kmt_alloc_flags.ui32.NoAddress) {
-      // returns mem
+      // returns mem (opaque memory-only handle, no virtual address)
+      populate_handle();
       return HSA_STATUS_SUCCESS;
     }
 
@@ -349,28 +360,30 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
 
         if (map_node_count == 0) {
           // No need to pin since no GPU in the platform.
+          populate_handle();
           return HSA_STATUS_SUCCESS;
         }
 
         map_node_id = &core::Runtime::runtime_singleton_->gpu_ids()[0];
       } else {
         // No need to pin it for CPU exclusive access.
+        populate_handle();
         return HSA_STATUS_SUCCESS;
       }
     }
 
     MAKE_NAMED_SCOPE_GUARD(memoryGuard, [&]() {
-      if (*mem != nullptr) {
-        HSAKMT_CALL(hsaKmtFreeMemory(*mem, size));
-        *mem = nullptr;
+      if (mem != nullptr) {
+        HSAKMT_CALL(hsaKmtFreeMemory(mem, size));
+        mem = nullptr;
       }
     });
 
     uint64_t alternate_va = 0;
 
-    const bool is_resident =
-      (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(*mem, size, &alternate_va, map_flag,
-                                             map_node_count, const_cast<uint32_t*>(map_node_id))) == HSAKMT_STATUS_SUCCESS);
+    const bool is_resident = (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(
+                                  mem, size, &alternate_va, map_flag, map_node_count,
+                                  const_cast<uint32_t*>(map_node_id))) == HSAKMT_STATUS_SUCCESS);
 
     // On Windows/DXG, allow allocations to succeed even if MakeResident
     // is best-effort; WDDM will demand-page on GPU access.
@@ -386,20 +399,24 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     }
 
     if ((alloc_flags & core::MemoryRegion::AllocateAsan) &&
-        HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(*mem)) != HSAKMT_STATUS_SUCCESS) {
+        HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
 
     memoryGuard.Dismiss();
+    populate_handle();
     return HSA_STATUS_SUCCESS;
   }
 
   return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 }
 
-hsa_status_t KfdDriver::FreeMemory(void *mem, size_t size) {
-  HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(const_cast<void *>(mem)));
-  return (HSAKMT_CALL(hsaKmtFreeMemory(mem, size)) == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+hsa_status_t KfdDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
+  void* mem = reinterpret_cast<void*>(handle.handle);
+  HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(mem));
+  return (HSAKMT_CALL(hsaKmtFreeMemory(mem, handle.size)) == HSAKMT_STATUS_SUCCESS)
+      ? HSA_STATUS_SUCCESS
+      : HSA_STATUS_ERROR;
 }
 
 hsa_status_t KfdDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
@@ -612,11 +629,14 @@ hsa_status_t KfdDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
-                                              const core::Agent& agent,
-                                              core::DriverMemoryHandle* handle, uint64_t* offset) {
+hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
+                                              const core::Agent& agent, uint64_t* offset) {
   // Create handle by exporting and importing the memory from the owning agent.
-  (void)va;
+
+  // On input, handle is the allocation handle. For KFD the native allocation id is the
+  // allocation's virtual address.
+  void* mem = reinterpret_cast<void*>(handle->handle);
+  const size_t size = handle->size;
 
   int source_fd = -1;
 
@@ -628,7 +648,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
    */
 
   core::DriverMemoryHandle kfd_alloc = {};
-  kfd_alloc.handle = reinterpret_cast<uint64_t>(mem);
+  kfd_alloc.handle = handle->handle;
   kfd_alloc.size = size;
   if (ExportMemoryHandleImpl(agent, kfd_alloc, core::ShareType::DMABUF_FD,
                              EXPORT_MEMORY_FLAGS_KFD_DMABUF, &source_fd,
@@ -667,13 +687,13 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
     return HSA_STATUS_ERROR;
   }
 
+  // handle->handle is replaced by the imported BO; handle->size carries over from allocation.
   handle->handle = targetHandle.handle;
   /*
    * Do not hold a shareable dmabuf_fd open for the lifetime of the handle. It is created lazily
    * (and closed again) when access is set in Runtime::VMemorySetAccessPerHandle.
    */
   handle->dmabuf_fd = -1;
-  handle->size = size;
   return HSA_STATUS_SUCCESS;
 }
 

@@ -113,7 +113,7 @@ struct GetROType<long double> {
  *****************************************************************************/
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int ROContext::reduce(rocshmem_team_t team, T *dest,
+__device__ int ROContext::reduce_wg(rocshmem_team_t team, T *dest,
                                  const T *source, int nreduce) {
   if (!is_thread_zero_in_block()) {
     __syncthreads();
@@ -129,6 +129,15 @@ __device__ int ROContext::reduce(rocshmem_team_t team, T *dest,
 
   __syncthreads();
   return ROCSHMEM_SUCCESS;
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int ROContext::reduce_wave([[maybe_unused]] rocshmem_team_t team,
+                                      [[maybe_unused]] T *dest,
+                                      [[maybe_unused]] const T *source,
+                                      [[maybe_unused]] int nreduce) {
+  LOGD_WARN("reduce_wave is not available on reverse offload backend");
+  return ROCSHMEM_ERROR;
 }
 
 template <typename T>
@@ -396,7 +405,7 @@ __device__ void ROContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
 }
 
 template <typename T>
-__device__ void ROContext::fcollect(rocshmem_team_t team, T *dest,
+__device__ void ROContext::fcollect_wg(rocshmem_team_t team, T *dest,
                                     const T *source, int nelems) {
   if (!is_thread_zero_in_block()) {
     __syncthreads();
@@ -741,6 +750,16 @@ __device__ inline int ROContext::tile_min_reduce_wg([[maybe_unused]] rocshmem_te
 // Rooted SUM Reduction operations
 // Rooted MAX Reduction operations
 // Rooted MIN Reduction operations
+
+template <typename T>
+__device__ int ROContext::fcollect_wave([[maybe_unused]] rocshmem_team_t team,
+                                        [[maybe_unused]] T *dest,
+                                        [[maybe_unused]] const T *source,
+                                        [[maybe_unused]] int nelems) {
+  LOGD_WARN("fcollect_wave is not available on reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_REVERSE_OFFLOAD_RO_NET_GPU_TEMPLATES_HPP_

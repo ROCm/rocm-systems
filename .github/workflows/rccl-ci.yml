@@ -1,0 +1,173 @@
+name: RCCL cluster CI
+
+# Runs the RCCL suites via rccl-suite.yml, each on the cluster it needs. A
+# per-cluster provision job warms a shared ROCm + OpenMPI cache, then that
+# cluster's suites fan out reusing it, and a cleanup job releases this run's ROCm
+# reference. The resolved ROCm version stays warm across runs; fetch-rocm.sh
+# evicts older, unreferenced nightly/rc versions on a version bump.
+# ROCm is a version prefix (default "7.14"); lib/fetch-rocm.sh picks the greatest
+# available build. See each job / component for details.
+
+on:
+  workflow_dispatch:
+    inputs:
+      rocm_release:
+        description: 'ROCm version to fetch, matched as a prefix (e.g. "7.14" = newest 7.14.*; "7.14.0rc1" pins exactly). Empty = per-cluster default.'
+        type: string
+        required: false
+        default: '7.14.0a20260612'
+      rocm_amdgpu_family:
+        description: 'Specific GPU family fallback if no multi-arch tarball is found.'
+        type: string
+        required: false
+        default: 'gfx950-dcgpu'
+      amdgpu_targets:
+        description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
+        type: string
+        required: false
+        default: 'gfx950'
+  pull_request:
+    paths:
+      - 'projects/rocshmem/**'
+      - 'projects/rccl/**'
+      - 'projects/rccl-tests/**'
+      - 'projects/rccl/tools/ci/**'
+      - '.github/workflows/rccl-ci.yml'
+      - '.github/workflows/rccl-suite.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  # --- Per-cluster shared setup: fetch ROCm + build OpenMPI once, into that
+  # cluster's cache. Suites fan out from the matching provision job. Adding a
+  # cluster = one more provision-<cluster> call here. ---
+  provision-ruby:
+    name: Provision (ruby)
+    uses: ./.github/workflows/rccl-provision.yml
+    with:
+      runs_on: '["ruby-linux-slurm-scale-runner"]'
+      cache_root: /apps/rccl-ci
+      partition: interactive
+      # device-api is pinned to a known-good nightly: 7.14.* (rc1+) hit a cuMem
+      # P2P regression (HIP 'invalid argument' at p2p_tmp.cc:358). Unpin once the
+      # cuMem fix ("[Bytedance][MI355x] cuMem regression in RCCL CE collective")
+      # lands in a nightly/RC.
+      rocm_release: ${{ inputs.rocm_release || '7.14.0a20260612' }}
+      rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+
+  provision-tw:
+    name: Provision (Tensorwave)
+    uses: ./.github/workflows/rccl-provision.yml
+    with:
+      runs_on: '["self-hosted", "tw-gfx950-ainic-ROCm-scale-runner"]'
+      cache_root: /it-share/rccl-ci
+      partition: amd-tw
+      # Dedicated RCCL CI nodes on Tensorwave (mia1-p01-g[22,26,28,32]).
+      reservation: rccl_ci
+      rocm_release: ${{ inputs.rocm_release || '7.14.0a20260612' }}
+      rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+
+  # --- Suites: each `needs` its cluster's provision and reuses that warm cache.
+  # Adding a suite to a cluster = one more job like these. ---
+
+  # device-API suite.
+  device-api:
+    name: device-API
+    needs: provision-ruby
+    uses: ./.github/workflows/rccl-suite.yml
+    with:
+      suite: device-api
+      runs_on: '["ruby-linux-slurm-scale-runner"]'
+      cache_root: /apps/rccl-ci
+      partition: interactive
+      timeout_minutes: 240
+      rocm_release: ${{ needs.provision-ruby.outputs.rocm_release }}
+      rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+      amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
+
+  # GIN suite (WIP). Failures show red with logs on this job. non_gating keeps
+  # test failures from blocking; build/infra failures gate via gin-build-gate
+  # below. AICOMRCCL-1478: enable full gating once GIN lands in develop.
+  gin:
+    name: GIN
+    needs: provision-tw
+    uses: ./.github/workflows/rccl-suite.yml
+    with:
+      suite: gin
+      runs_on: '["self-hosted", "tw-gfx950-ainic-ROCm-scale-runner"]'
+      cache_root: /it-share/rccl-ci
+      partition: amd-tw
+      # Dedicated RCCL CI nodes on Tensorwave (mia1-p01-g[22,26,28,32]).
+      reservation: rccl_ci
+      timeout_minutes: 300
+      non_gating: true
+      rocm_release: ${{ needs.provision-tw.outputs.rocm_release }}
+      rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+      amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
+
+  # Gates GIN on build/infra failures only; test failures stay non-gating (red
+  # with logs on the GIN job above). AICOMRCCL-1478.
+  gin-build-gate:
+    name: GIN build gate
+    needs: gin
+    if: ${{ needs.gin.outputs.build_failed == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "GIN build/infra failed; see the GIN job logs." >&2
+          exit 1
+
+  # --- Per-cluster cleanup: release this run's ROCm reference (always). The tree
+  # stays warm; a later version bump prunes it in fetch-rocm.sh. rocm-ref.sh only
+  # touches the local cache (no network). `needs` provision + all its suites. ---
+  cleanup-ruby:
+    name: Cleanup ROCm (ruby)
+    needs: [provision-ruby, device-api]
+    if: always()
+    runs-on: ruby-linux-slurm-scale-runner
+    env:
+      ROCM_RELEASE: ${{ needs.provision-ruby.outputs.rocm_release }}
+      ROCM_RELEASE_CHANNEL: ${{ needs.provision-ruby.outputs.rocm_channel }}
+      ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+      RCCL_DEVICE_API_CACHE: /apps/rccl-ci
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          # Sparse-checkout: only the CI helper scripts are needed here.
+          sparse-checkout: projects/rccl/tools/ci
+
+      - name: Release ROCm reference
+        env:
+          ROCM_REF_TOKEN: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          "${{ github.workspace }}/projects/rccl/tools/ci/lib/rocm-ref.sh" release
+
+  cleanup-tw:
+    name: Cleanup ROCm (Tensorwave)
+    needs: [provision-tw, gin]
+    if: always()
+    runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
+    env:
+      ROCM_RELEASE: ${{ needs.provision-tw.outputs.rocm_release }}
+      ROCM_RELEASE_CHANNEL: ${{ needs.provision-tw.outputs.rocm_channel }}
+      ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+      RCCL_DEVICE_API_CACHE: /it-share/rccl-ci
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: projects/rccl/tools/ci
+
+      - name: Release ROCm reference
+        env:
+          ROCM_REF_TOKEN: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          "${{ github.workspace }}/projects/rccl/tools/ci/lib/rocm-ref.sh" release

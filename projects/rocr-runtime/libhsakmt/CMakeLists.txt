@@ -236,6 +236,7 @@ else()
   set_property ( TARGET ${HSAKMT_TARGET} PROPERTY VERSION "${LIB_VERSION_STRING}" )
   set_property ( TARGET ${HSAKMT_TARGET} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
 
+  set(HSAKMT_FIND_NUMA_DEPENDENCY OFF)
   find_package(PkgConfig)
   # get OS-info for OS-specific build dependencies
   get_os_info()
@@ -247,6 +248,18 @@ else()
     find_package(NUMA)
     if(NUMA_FOUND)
       set(NUMA "${NUMA_LIBRARIES}")
+      # In BUILD_SHARED_LIBS mode hsakmt-config.cmake loads hsakmtTargets.cmake.
+      # Because hsakmt is static, its private imported dependencies are exported
+      # through LINK_ONLY and must be recreated by the package config. The
+      # staticdrm package path links the raw library name instead.
+      if(BUILD_SHARED_LIBS)
+        foreach(_numa_library IN LISTS NUMA_LIBRARIES)
+          if(TARGET "${_numa_library}")
+            set(HSAKMT_FIND_NUMA_DEPENDENCY ON)
+            break()
+          endif()
+        endforeach()
+      endif()
     else()
       find_library(NUMA NAMES numa REQUIRED)
     endif()
