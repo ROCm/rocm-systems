@@ -64,6 +64,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Renamed `num_hbm_channels` to `num_memory_channels` in machine specifications to unify memory channel reporting across GPU families.
 
+* Changed PC sampling analysis database and dispatch CSV output to include a nullable `pid` field.
+  * Dispatch identity now includes the process ID, preserving dispatches that reuse the same kernel and dispatch ID in different processes.
+
 ### Removed
 
 * Removed the multi-node analysis options ``--nodes``, ``--list-nodes`` (analyze mode) and the experimental ``--spatial-multiplexing`` option (profile and analyze modes). These features did not work as expected and will be redesigned in a future release.
