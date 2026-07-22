@@ -102,6 +102,15 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
           "ConSan MOI workgroup shadow requires fixed LDS that fits with its exact mirror");
       return std::nullopt;
     }
+    // RDNA4 LDS contents are not guaranteed to begin zeroed. In practice,
+    // even an eager entry-prologue clear can leave reused LDS looking like a
+    // coherent prior access in large multi-entry modules. Qualify every local
+    // cell with the current workgroup key instead, as the gfx1250 large-mirror
+    // path already does. This also removes the clear and its entry barrier.
+    if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+      layout = plan_consan_moi_generation_tagged_workgroup_shadow(
+          descriptor.group_segment_fixed_size, max_workgroup_lds_bytes);
+    }
     // A near-capacity exact mirror is still useful when either its cells are
     // compacted or its eager clear is replaced by a validity bitmap. Preserve
     // exact local identity and select the representation requested by the

@@ -500,7 +500,7 @@ TEST(ConSanMoi, CompactWorkgroupShadowUsesOneWordPerGuestCell) {
   EXPECT_TRUE(layout->compact);
 }
 
-TEST(ConSanMoi, InlineShadowReservesExactWorkgroupLocalLdsMirror) {
+TEST(ConSanMoi, Rdna4InlineShadowUsesGenerationTaggedWorkgroupLocalLdsMirror) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,
       0x00000000u, // ds_store_b32
@@ -537,6 +537,8 @@ TEST(ConSanMoi, InlineShadowReservesExactWorkgroupLocalLdsMirror) {
     EXPECT_EQ(patch->workgroup_shadow_base, 4352u);
     EXPECT_EQ(patch->workgroup_shadow_size, 8704u);
     EXPECT_EQ(patch->required_group_segment_size, 13056u);
+    EXPECT_TRUE(patch->workgroup_shadow_lazy_initialization);
+    EXPECT_FALSE(patch->workgroup_shadow_compact);
   }
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
@@ -640,34 +642,16 @@ TEST(ConSanMoi, InlineShadowReservesExactWorkgroupLocalLdsMirror) {
   std::vector<uint32_t> prologue_words(prologue->trampoline_size / sizeof(uint32_t));
   std::memcpy(prologue_words.data(), text->data() + prologue->trampoline_offset,
               prologue->trampoline_size);
-  const auto select_first_x_wave = build_v_cmp_gt_u32_e32_vcc(
-      scalar_positive_inline_u32(32u), /*workitem_id_x=*/0, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto select_x_zero = build_v_cmp_eq_u32_e32_vcc(
-      scalar_positive_inline_u32(0), /*workitem_id_x=*/0, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto select_y_zero = build_v_cmp_eq_u32_e32_vcc(
-      scalar_positive_inline_u32(0), /*workitem_id_y=*/1, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto narrow_zero_coordinate =
-      build_s_and_saveexec_b64(static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 6u),
-                               /*vcc=*/106u, ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(select_first_x_wave);
-  ASSERT_TRUE(select_x_zero);
-  ASSERT_TRUE(select_y_zero);
-  ASSERT_TRUE(narrow_zero_coordinate);
-  EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(), *select_first_x_wave), 1);
-  EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(), *select_x_zero), 0);
-  EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(), *select_y_zero), 1);
-  EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(), *narrow_zero_coordinate), 2)
-      << "the shadow initializer must retain the first x-row of a 2D workgroup";
   const auto store_wide =
       build_ds_store_b64(/*vaddr=*/24, /*vdata=*/25, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(store_wide);
-  EXPECT_TRUE(contains_subsequence(prologue_words, *store_wide));
+  EXPECT_FALSE(contains_subsequence(prologue_words, *store_wide));
   EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(),
                        *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_RDNA4)),
-            1);
+            0);
   EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(),
                        *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_RDNA4)),
-            1);
+            0);
 }
 
 TEST(ConSanMoi, InlineShadowFallsBackToExternalMirrorWhenLocalMirrorDoesNotFit) {
@@ -1834,7 +1818,7 @@ TEST(ConSanMoi, InlineShadowPrivateEpochUsesWave32OwnerShift) {
   EXPECT_TRUE(contains_subsequence(words, expected_owner));
 }
 
-TEST(ConSanMoi, InlineWorkgroupShadowPrivateEpochPrologueInitializesLocalMirror) {
+TEST(ConSanMoi, Rdna4InlinePrivateEpochUsesGenerationTaggedLocalMirror) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,
       0x00000000u, // ds_store_b32
@@ -1871,6 +1855,8 @@ TEST(ConSanMoi, InlineWorkgroupShadowPrivateEpochPrologueInitializesLocalMirror)
   EXPECT_EQ(access->workgroup_shadow_base, 4352u);
   EXPECT_EQ(access->workgroup_shadow_size, 8704u);
   EXPECT_EQ(access->required_group_segment_size, 13056u);
+  EXPECT_TRUE(access->workgroup_shadow_lazy_initialization);
+  EXPECT_FALSE(access->workgroup_shadow_compact);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -1891,15 +1877,15 @@ TEST(ConSanMoi, InlineWorkgroupShadowPrivateEpochPrologueInitializesLocalMirror)
   ASSERT_TRUE(shadow_offset);
   ASSERT_TRUE(shadow_base);
   ASSERT_TRUE(store_wide);
-  EXPECT_NE(std::ranges::find(words, *shadow_offset), words.end());
-  EXPECT_TRUE(contains_subsequence(words, *shadow_base));
-  EXPECT_TRUE(contains_subsequence(words, *store_wide));
+  EXPECT_EQ(std::ranges::find(words, *shadow_offset), words.end());
+  EXPECT_FALSE(contains_subsequence(words, *shadow_base));
+  EXPECT_FALSE(contains_subsequence(words, *store_wide));
   EXPECT_EQ(
       std::count(words.begin(), words.end(), *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_RDNA4)),
-      1);
+      0);
   EXPECT_EQ(
       std::count(words.begin(), words.end(), *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_RDNA4)),
-      1);
+      0);
 }
 
 TEST(ConSanMoi, InlineShadowDescriptorFullUsesPrivateEpochWithoutSpillOverlap) {
