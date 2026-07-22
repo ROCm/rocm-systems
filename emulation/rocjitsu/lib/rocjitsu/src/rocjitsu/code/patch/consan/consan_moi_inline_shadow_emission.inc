@@ -965,7 +965,10 @@
   const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(exec_base + 2u);
   const uint16_t empty_exec_sgpr = exec_base;
   const uint16_t ready_exec_sgpr = temporary_exec_sgpr;
-  const uint16_t retry_count_sgpr = static_cast<uint16_t>(exec_base + 8u);
+  // +8:+9 retain the guest VCC across the complete probe. Keep the scalar
+  // retry counter in the diagnostic-temporary region, which is consumed only
+  // after the transaction has finished.
+  const uint16_t retry_count_sgpr = static_cast<uint16_t>(exec_base + 20u);
   const uint16_t low_dispatch_exec_sgpr = static_cast<uint16_t>(exec_base + 18u);
   const uint16_t saved_address_lo_vgpr = static_cast<uint16_t>(old_value_vgpr + 2u);
   const uint16_t saved_address_hi_vgpr = static_cast<uint16_t>(old_value_vgpr + 3u);

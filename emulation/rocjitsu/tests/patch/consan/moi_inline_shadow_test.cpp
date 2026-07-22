@@ -2251,12 +2251,19 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   // Both uniform representatives and metadata-distinct lane representatives
   // retry bounded cross-wave reservation contention. The outer partition loop
   // supplies the other backward EXEC branch.
-  const uint16_t retry_count_sgpr = 38u;
+  // s38:s39 preserve the guest VCC for an EXEC-save base of s30. The retry
+  // counter must use the later diagnostic-temporary region instead.
+  const uint16_t retry_count_sgpr = 50u;
   const std::array<uint32_t, 2> initialize_retries = {
       build_s_mov_b32(retry_count_sgpr, /*literal source=*/255u, ROCJITSU_CODE_ARCH_RDNA4),
       2048u,
   };
   EXPECT_TRUE(contains_subsequence(text_words, initialize_retries));
+  const std::array<uint32_t, 2> clobber_saved_vcc = {
+      build_s_mov_b32(/*sdst=*/38, /*literal source=*/255u, ROCJITSU_CODE_ARCH_RDNA4),
+      2048u,
+  };
+  EXPECT_FALSE(contains_subsequence(text_words, clobber_saved_vcc));
   EXPECT_NE(std::find(text_words.begin(), text_words.end(),
                       build_s_sleep(/*delay=*/1, ROCJITSU_CODE_ARCH_RDNA4)),
             text_words.end());
