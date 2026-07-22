@@ -104,7 +104,7 @@ flowchart TD
     SA0["SA0 TODO<br/>Sampled TP2 admission/selection<br/>and broader runtime coverage"]
     SA1["SA1 TODO<br/>Sampled immediate and host-scan agreement"]
     IS0A["IS0A DONE<br/>per-owner CDNA4 persistent tuples<br/>below AccVGPR and VCC boundaries"]
-    IS0["IS0 ACTIVE<br/>TP1 prefill + decode green;<br/>TP2 fault gate open"]
+    IS0["IS0 DONE<br/>VCC-safe scalar spill;<br/>TP1 + TP2 bundles green"]
     IS1["IS1 TODO<br/>Stream-K scalar state installed;<br/>AcqRel metadata race remains"]
     F0["F0 MILESTONE<br/>all four standard-v1 profiles<br/>feature-complete on focused tests"]
   end
@@ -264,8 +264,8 @@ flowchart TD
   classDef blocked fill:#9e2a2b,stroke:#ffd0d0,color:#ffffff,stroke-width:3px
   classDef milestone fill:#6f42c1,stroke:#e2d5ff,color:#ffffff,stroke-width:3px
 
-  class R0,R1,E0,B0,B1,B2,B3,B4,B5A,S0,S1,S2,S3,S4,S5,S6A,S6B,S7A,S7B,S8A,S8B,S8C,S8D,I4,SC0,SA0A,IS0A done
-  class RR0,IS0,V5,V6,V7,ST0 active
+  class R0,R1,E0,B0,B1,B2,B3,B4,B5A,S0,S1,S2,S3,S4,S5,S6A,S6B,S7A,S7B,S8A,S8B,S8C,S8D,I4,SC0,SA0A,IS0A,IS0 done
+  class RR0,V5,V6,V7,ST0 active
   class R2,E1,C0,B5B,I0,I1,I2,I3,A0,A1,A2,A3,A4,A5,SC1,RR1,SA0,SA1,IS1,Q0,Q1,Q2,Q3,V0,V1,V2,V3,V4,V8 todo
   class F0,G0 milestone
 ```
@@ -485,6 +485,14 @@ mutation without final-byte proof, or a diagnostic without an independent
 oracle is not an accepted row.
 
 ## Progress log
+
+- 2026-07-22: `IS0` is DONE/green in both its label and Mermaid class.  The
+  fresh TP2 inventory and prospectively reviewed exact-one fault close its
+  final open gate: the independently characterized barrier drop reproduces
+  the frozen failing oracle without a false Inline diagnostic, all surviving
+  coverage and report cleanup are complete, and physical-device health passes
+  before and after.  TP1 prefill, TP1 decode/combined, and TP2 now each retain
+  current clean, paired, reviewed-fault, containment, and provenance bundles.
 
 - 2026-07-22: `IS0` remains ACTIVE/blue with only its TP2 reviewed-fault gate
   open.  Fresh TP1 decode/combined inventory and a prospectively reviewed
