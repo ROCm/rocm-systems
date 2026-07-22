@@ -5,6 +5,7 @@
 # Common Tests
 set(TEST_SRC
     hipManagedKeyword.cc
+    hipManagedKeywordDeferredInit.cc
 )
 
 hip_add_exe_to_target(NAME TypeQualifiers

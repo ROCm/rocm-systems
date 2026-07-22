@@ -1386,7 +1386,9 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{host} @endcond
  **/
 typedef struct {
-  uint32_t gfx_activity;  //!< In %
+  uint32_t gfx_activity;  //!< In %. Reported as N/A via the sentinel 0x0000FFFF
+                          //!< (a uint16_t max value carried in this uint32_t field,
+                          //!< inherited from average_gfx_activity), not 0xFFFFFFFF.
   uint32_t umc_activity;  //!< In %
   uint32_t mm_activity;   //!< In %
   uint32_t reserved[13];
@@ -7635,6 +7637,8 @@ amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
  *  @param[in] processor_handle Device which to query
  *
  *  @param[out] info Reference to the gpu engine usage structure. Must be allocated by user.
+ *  When @p gfx_activity is unavailable it is reported as N/A using the sentinel
+ *  0x0000FFFF (a uint16_t max value carried in the uint32_t field), not 0xFFFFFFFF.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */

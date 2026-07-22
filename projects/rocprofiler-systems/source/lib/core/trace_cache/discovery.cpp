@@ -4,6 +4,7 @@
 #include "core/trace_cache/discovery.hpp"
 
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "core/config.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cacheable.hpp"
@@ -142,7 +143,7 @@ merge_perfetto_files()
     if(cached_mpi_rank != 0) return;
 
     auto _filename      = config::get_perfetto_output_filename();
-    auto _output_folder = tim::filepath::dirname(_filename);
+    auto _output_folder = path::parent_path(_filename);
     auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
     auto _script_dir    = get_env(env_vars::SCRIPT_PATH, std::string{});
 

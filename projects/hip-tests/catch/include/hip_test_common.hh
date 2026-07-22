@@ -259,17 +259,18 @@ inline bool isQuickLevel() {
   }
 
 #if HT_NVIDIA
-#define CTX_CREATE()                                                                               \
+#define CTX_CREATE_DEV(deviceId)                                                                   \
   hipCtx_t context;                                                                                \
-  initHipCtx(&context);
+  initHipCtx(&context, deviceId);
+#define CTX_CREATE() CTX_CREATE_DEV(0)
 #define CTX_DESTROY() HIPCHECK(hipCtxDestroy(context));
 #define ARRAY_DESTROY(array) HIPCHECK(hipArrayDestroy(array));
 #define HIP_TEX_REFERENCE hipTexRef
 #define HIP_ARRAY hipArray_t
-static void initHipCtx(hipCtx_t* pcontext) {
+static void initHipCtx(hipCtx_t* pcontext, int deviceId = 0) {
   HIPCHECK(hipInit(0));
   hipDevice_t device;
-  HIPCHECK(hipDeviceGet(&device, 0));
+  HIPCHECK(hipDeviceGet(&device, deviceId));
   HIPCHECK(hipCtxCreate(pcontext, 0, device));
 }
 
@@ -280,6 +281,7 @@ static void initHipCtx(hipCtx_t* pcontext) {
 #define HIP_TEST_DRIVER_INIT() HIP_CHECK(hipInit(0))
 #else
 #define CTX_CREATE()
+#define CTX_CREATE_DEV(deviceId)
 #define CTX_DESTROY()
 #define ARRAY_DESTROY(array) HIPCHECK(hipFreeArray(array));
 #define HIP_TEX_REFERENCE textureReference*

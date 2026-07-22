@@ -72,6 +72,24 @@ struct LivenessAnalysisOptions {
   /// prevents 8-bit destination fields from truncating v256 and above.
   uint16_t max_free_vgpr = static_cast<uint16_t>(
       std::min(amdgpu::CdnaIsaBase::MAX_VGPRS_PER_WF, amdgpu::RdnaIsaBase::MAX_VGPRS_PER_WF));
+
+  /// @brief Restrict instruction-level live-before materialization to selected instructions.
+  ///
+  /// @details Block-level dataflow still analyzes every instruction in the
+  /// kernel scope. This option only controls which per-instruction RegisterSet
+  /// snapshots are stored for live_before()/find_free_*() queries.
+  bool restrict_live_before_to_instructions = false;
+
+  /// @brief Instruction pointers that need live-before snapshots when filtering is enabled.
+  ///
+  /// @details Semantic DBT lowerings need live-before snapshots only at the
+  /// handful of instructions that may allocate scratch registers. Materializing
+  /// snapshots for every instruction in a large kernel is expensive and does
+  /// not help lowerings that never query them. Callers can pass an empty span
+  /// together with restrict_live_before_to_instructions=true to request no
+  /// instruction-level snapshots. Pointers outside the analyzed block scope are
+  /// ignored.
+  std::span<const Instruction *const> live_before_instructions = {};
 };
 
 /// @brief Reverse-post-order traversal of one kernel's implicit CFG.
@@ -109,9 +127,13 @@ public:
   /// @details Semantic lowerings use this to allocate temporary VGPRs while
   /// replacing one guest instruction with a host instruction sequence. The
   /// selected registers are dead at the replacement point according to this
-  /// kernel-scope live-before set.
+  /// kernel-scope live-before set. Some host operands also require the base of
+  /// a register tuple to be aligned; @p base_alignment lets those lowerings ask
+  /// liveness for a power-of-two-aligned dead run that is also encodable for
+  /// the target instruction.
   [[nodiscard]] std::optional<uint16_t> find_free_run(const Instruction *inst, uint16_t count,
-                                                      uint16_t search_start = 0) const;
+                                                      uint16_t search_start = 0,
+                                                      uint16_t base_alignment = 1) const;
 
   /// @brief Find an even-aligned dead SGPR pair immediately before an instruction.
   ///
@@ -125,7 +147,8 @@ public:
                                                        uint16_t search_start = 0) const;
 
 private:
-  void analyze(KernelBlockScope blocks, std::span<const ScopedCfgEdge> extra_edges);
+  void analyze(KernelBlockScope blocks, const LivenessAnalysisOptions &options,
+               std::span<const ScopedCfgEdge> extra_edges);
 
   uint16_t min_free_vgpr_ = 0;
   uint16_t max_free_vgpr_ = 0;
