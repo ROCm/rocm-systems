@@ -704,15 +704,13 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::pullRed(Coop coop, ncclCftLeId leId, size
                                                void* smemDestination, uint32_t bytes) {
 #if NCCL_CFT_ENABLE
   coop.sync();
-  if (nccl::cft::internal::elected(coop)) {
 #ifdef NCCL_DEVICE_CFT_ENABLE_DEBUG
-    assert(reinterpret_cast<uintptr_t>(smemDestination) % 16 == 0 &&
-           "ncclCft::pullRed requires 'smemDestination' to be 16 bytes aligned.");
-    assert(bytes % 16 == 0 && "ncclCft::pullRed requires 'bytes' to be a multiple of 16.");
+  assert(reinterpret_cast<uintptr_t>(smemDestination) % 16 == 0 &&
+         "ncclCft::pullRed requires 'smemDestination' to be 16 bytes aligned.");
+  assert(bytes % 16 == 0 && "ncclCft::pullRed requires 'bytes' to be a multiple of 16.");
 #endif
-    nccl::cft::internal::Red<RedOp>::pullred(leId, leOffset, smemDestination, bytes, this->cftSmem);
-    this->txCount += bytes;
-  }
+  nccl::cft::internal::Red<RedOp>::pullred(leId, leOffset, smemDestination, bytes, this->cftSmem);
+  this->txCount += nccl::cft::internal::elected(coop) ? bytes : 0;
   (void)red;
 #else
   (void)coop;
