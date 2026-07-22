@@ -328,6 +328,19 @@ struct reader_t
         const reader_types::timeline_event_t& event) const;
 
     /**
+     * @brief Get function arguments for an event, by its opaque handle.
+     *
+     * Opaque-handle overload of get_arguments; see get_call_stack(event_id_t)
+     * for the opacity-preserving delegation rationale. Unlike the folded
+     * name/value pairs in event_detail_t::properties, this preserves each
+     * argument's position and type (arg_data_t).
+     * @param id Opaque event handle.
+     * @return List of argument data (empty if not available).
+     */
+    [[nodiscard]] reader_types::arg_data_list_t get_arguments(
+        const reader_types::event_id_t& id) const;
+
+    /**
      * @brief Get correlated events via stack_id matching
      * @param event Timeline event to find correlations for
      * @return List of related events (e.g., CPU region -> GPU kernel correlation)

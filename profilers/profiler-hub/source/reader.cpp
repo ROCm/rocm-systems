@@ -178,6 +178,12 @@ reader_t::get_arguments(const reader_types::timeline_event_t& event) const
     return m_impl->get_arguments(event);
 }
 
+reader_types::arg_data_list_t
+reader_t::get_arguments(const reader_types::event_id_t& id) const
+{
+    return m_impl->get_arguments(id);
+}
+
 reader_types::timeline_event_list_t
 reader_t::get_correlated_events(const reader_types::timeline_event_t& event) const
 {

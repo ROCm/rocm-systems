@@ -164,6 +164,9 @@ struct reader_t::impl
     [[nodiscard]] reader_types::arg_data_list_t get_arguments(
         const reader_types::timeline_event_t& event);
 
+    [[nodiscard]] reader_types::arg_data_list_t get_arguments(
+        const reader_types::event_id_t& id);
+
     [[nodiscard]] reader_types::timeline_event_list_t get_correlated_events(
         const reader_types::timeline_event_t& event);
 

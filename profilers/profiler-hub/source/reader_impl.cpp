@@ -2027,6 +2027,23 @@ reader_t::impl::get_arguments(const reader_types::timeline_event_t& event)
     return args;
 }
 
+// Opaque-handle overload: build a minimal timeline_event_t from the handle's private
+// {row_id, type} and delegate to the timeline_event_t overload above -- the same internal
+// bridge as get_call_stack(event_id_t). The decode lives entirely inside the reader, so
+// event_id_t opacity (task 028) is preserved: no public type/row_id accessor is added,
+// and the consumer only ever holds the opaque handle. resolve_event_metadata reads only
+// unique_identifier.{id,type}, so this minimal event is sufficient; types with no
+// arguments (sample / pmc_event) fall through to the empty-return semantics of the
+// delegate.
+reader_types::arg_data_list_t
+reader_t::impl::get_arguments(const reader_types::event_id_t& id)
+{
+    reader_types::timeline_event_t ev{};
+    ev.unique_identifier = { reader_types::detail::event_id_access::row_id(id),
+                             reader_types::detail::event_id_access::type(id) };
+    return get_arguments(ev);
+}
+
 reader_types::timeline_event_list_t
 reader_t::impl::get_correlated_events(const reader_types::timeline_event_t& event)
 {
