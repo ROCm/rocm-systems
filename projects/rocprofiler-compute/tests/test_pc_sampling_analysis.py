@@ -1459,6 +1459,27 @@ def test_load_pc_sampling_results_returns_empty_without_result_files(
     assert load_pc_sampling_results(str(workload_path)) == []
 
 
+@pytest.mark.parametrize(
+    "process_ids",
+    [
+        pytest.param([101, None], id="missing_pid"),
+        pytest.param([101, 101], id="duplicate_pid"),
+    ],
+)
+def test_load_pc_sampling_results_multiple_records_require_unique_process_ids(
+    tmp_path: Path,
+    process_ids: list[int | None],
+) -> None:
+    for file_index, process_id in enumerate(process_ids):
+        write_results_json(
+            tmp_path / f"{file_index}_ps_file_results.json",
+            pid=process_id,
+        )
+
+    with pytest.raises(SystemExit):
+        load_pc_sampling_results(str(tmp_path))
+
+
 # ═══════════════════════════════════════════════════════════════
 # process_pc_sampling_kernel_trace
 # ═══════════════════════════════════════════════════════════════
@@ -1560,22 +1581,6 @@ def test_process_pc_sampling_unmapped_kernel_id() -> None:
     df = process_pc_sampling_kernel_trace(tool_data)
     assert len(df) == 1
     assert df.iloc[0]["Kernel_Name"] is None
-
-
-@pytest.mark.parametrize(
-    "process_ids",
-    [
-        pytest.param([101, None], id="missing_pid"),
-        pytest.param([101, 101], id="duplicate_pid"),
-    ],
-)
-def test_process_pc_sampling_multiple_records_require_unique_process_ids(
-    process_ids: list[int | None],
-) -> None:
-    tool_data_records = [make_tool_data(pid=process_id) for process_id in process_ids]
-
-    with pytest.raises(SystemExit):
-        process_pc_sampling_kernel_traces(tool_data_records)
 
 
 def test_process_pc_sampling_single_record_allows_missing_process_id() -> None:
