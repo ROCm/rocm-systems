@@ -24,6 +24,7 @@
 #include "lib/rocprofiler-sdk/thread_trace/hsa_util.hpp"
 
 #include "lib/common/logging.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 
@@ -51,9 +52,11 @@ struct shared_queue_state_t
     std::map<uint64_t, agent_queue_t> agents = {};  // keyed by hsa_agent_t.handle
 };
 
-// Namespace-scope so it outlives finalize() (see shared_trace_lease.cpp for the full
-// rationale). Freed once via free_shared_queues().
-common::Synchronized<shared_queue_state_t> g_queue_state{};
+// Held in a static_object (see shared_trace_lease.cpp for the rationale) so it stays alive
+// through registration::finalize() on the attach path, without leaking. free_shared_queues()
+// frees the contents.
+common::Synchronized<shared_queue_state_t>& g_queue_state =
+    *common::static_object<common::Synchronized<shared_queue_state_t>>::construct();
 }  // namespace
 
 void
