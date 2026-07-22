@@ -36,6 +36,23 @@ For using profiling options for PC sampling the configuration needed are:
 
    $ rocprof-compute profile -n pc_test --no-roof --experimental --pc-sampling --pc-sampling-method stochastic -VVV -- target_app
 
+Profile multi-process workloads
+-------------------------------
+
+The same profile command supports applications that create multiple processes.
+ROCm Compute Profiler writes a separate PC sampling result and code-object
+information file for each process. The numeric prefix is the process ID (PID),
+and it associates each result with the code objects loaded by that process.
+For example, a workload with PIDs 4312 and 4313 produces files like these:
+
+.. code-block:: shell-session
+
+   $ ls <workload_dir>/*_ps_file_results.json <workload_dir>/*_code_obj_info.json
+   <workload_dir>/4312_code_obj_info.json
+   <workload_dir>/4312_ps_file_results.json
+   <workload_dir>/4313_code_obj_info.json
+   <workload_dir>/4313_ps_file_results.json
+
 Analysis options
 ================
 For using analysis options for PC sampling the configuration needed are:
@@ -131,6 +148,57 @@ Sorting a single kernel by sample ``count`` instead of ``offset``:
    │     188 │ N/A           │ global_store_dwordx4 v[4:5], v[0:3], off            │                2 │ 0x4204   │   13821 │              0 │           13821 │ [('ARBITER_WIN_EX_STALL', 7300), ('ARBITER_NOT_WIN', 6521)]                         │ matmul_fp32_throughput(float*, float │
    │         │               │                                                     │                  │          │         │                │                 │                                                                                     │ __vector(4)*, int)                   │
    ╘═════════╧═══════════════╧═════════════════════════════════════════════════════╧══════════════════╧══════════╧═════════╧════════════════╧═════════════════╧═════════════════════════════════════════════════════════════════════════════════════╧══════════════════════════════════════╛
+
+Analyze multi-process workloads
+-------------------------------
+
+Pass the workload directory to ``analyze`` as usual. No additional
+multi-process option is required:
+
+.. code-block:: shell
+
+   $ rocprof-compute analyze -p <workload_dir>
+
+Analyze mode automatically loads PC sampling data for all processes in the
+workload directory and creates one unified report. Rows from different
+processes are combined when their kernel name, instruction offset, instruction
+text, and source line match. The ``count`` values are summed. For stochastic
+method, ``count_issued``, ``count_stalled``, and the counts for each stall
+reason are also summed.
+
+For example, suppose two processes contain the same displayed instruction:
+
+.. list-table:: Example multi-process aggregation
+   :header-rows: 1
+
+   * - Result
+     - ``count``
+     - ``count_issued``
+     - ``count_stalled``
+     - ``stall_reason``
+   * - PID 4312
+     - 120
+     - 100
+     - 20
+     - ``WAITCNT: 12, ALU_DEPENDENCY: 8``
+   * - PID 4313
+     - 80
+     - 60
+     - 20
+     - ``WAITCNT: 8, ALU_DEPENDENCY: 12``
+   * - Unified result
+     - 200
+     - 160
+     - 40
+     - ``WAITCNT: 20, ALU_DEPENDENCY: 20``
+
+Sorting and ``--pc-sampling-rows`` are applied after all processes are
+combined. For example, ``--pc-sampling-rows 10`` selects the ten rows with the
+highest unified counts when the sorting type is ``count``.
+
+.. note::
+
+   Analyze mode remains compatible with workloads profiled with previous versions of ROCm Compute Profiler.
 
 .. _pc-sampling-note:
 
