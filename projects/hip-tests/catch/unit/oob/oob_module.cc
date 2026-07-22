@@ -29,7 +29,8 @@ constexpr char kElfMagic[4] = {0x7f, 'E', 'L', 'F'};
 Bytes ReadFile(std::string_view path) {
   std::ifstream f(std::string(path), std::ios::binary | std::ios::ate);
   REQUIRE(f.good());
-  auto size = f.tellg();
+  std::streamsize size = f.tellg();
+  REQUIRE(size >= 0);
   f.seekg(0);
   Bytes buf(static_cast<size_t>(size));
   f.read(buf.data(), size);
