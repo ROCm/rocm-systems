@@ -257,6 +257,17 @@ do not promote matrix cells without the end-to-end evidence above.
 
 ## Progress log
 
+- 2026-07-22: A production TopK run rejected the proposed spill-backed
+  Sampled scalar-state experiment.  One-repetition artifact
+  `consan-validation-gfx1250-pytorch-topk-sampled-spill-clean-20260722-218`
+  preserves both exact FP64/BF16 oracles and dynamic completeness, but falls
+  back to 102,598/161,136 accesses and 15,182/15,182 barriers with 11,888
+  root `forbidden_overlap` failures; no spill plan is selected.  The
+  synthetic-only implementation was withdrawn in `5b13b2c4a6` rather than
+  retaining a coverage regression.  The last accepted owner-local frontier
+  remains 102,639 accesses and 15,950 barriers, and the Sampled cell remains
+  yellow while a real production-triggered scalar-spill design is open.
+
 - 2026-07-22: P0 TopK Sampled gains bounded owner-local scalar recovery.
   Owner/component liveness now selects the eight transient SGPRs independently
   on gfx1250 instead of requiring one global window across every high-pressure

@@ -123,8 +123,8 @@ flowchart TD
     V3["V3 TODO<br/>P0 Qwen fault inventory and exact policies"]
     V4["V4 TODO<br/>P0 Qwen contained fault campaign"]
     V5["V5 ACTIVE<br/>TP2 SC/RR/Inline clean + paired;<br/>Sampled admission and remaining faults open"]
-    V6["V6 ACTIVE<br/>D128 barrier-drop campaign accepted;<br/>remaining workload faults open"]
-    V7["V7 ACTIVE<br/>D128 paired overhead accepted;<br/>peak memory and broader rows open"]
+    V6["V6 ACTIVE<br/>D128-pressure Inline detects barrier drop;<br/>diagnostic capacity and remaining faults open"]
+    V7["V7 ACTIVE<br/>D128-pressure one-process paired accepted;<br/>peak memory and broader rows open"]
     V8["V8 TODO<br/>freeze one committed tip, rebuild,<br/>and rerun authoritative matrix"]
     ST0["ST0 ACTIVE<br/>maintain STATUS_CDNA4.md<br/>from current physical evidence"]
     G0["G0 MILESTONE<br/>gfx950 e2e acceptance"]
@@ -485,6 +485,13 @@ mutation without final-byte proof, or a diagnostic without an independent
 oracle is not an accepted row.
 
 ## Progress log
+
+- 2026-07-22: `V6` and `V7` remain ACTIVE/blue, with their labels updated to
+  the current physical-gfx950 frontier.  D128-pressure Inline now passes clean
+  at 12/12 accesses plus 4/4 barriers and has accepted one-process paired
+  evidence.  Its exact-one barrier drop produces valid diagnostics but
+  overflows the diagnostic buffer, so `V6` correctly stays blue rather than
+  turning green; capacity planning is the remaining gate for this slice.
 
 - 2026-07-22: `IS0` is DONE/green in both its label and Mermaid class.  The
   fresh TP2 inventory and prospectively reviewed exact-one fault close its

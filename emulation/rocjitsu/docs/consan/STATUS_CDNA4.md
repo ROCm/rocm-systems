@@ -55,7 +55,7 @@ scratch before promotion.
 | **P2 Sharktank TP2 family** | 🟨 current clean and paired: all three exact oracles pass with complete 936/936 access coverage; reviewed exact-one fault was schedule-masked and contradicted its frozen detection policy | 🟨 current clean and paired: all three exact oracles pass with complete 936/936 accesses plus 168/168 barriers and 1.57x combined paired slowdown; two prospectively reviewed exact-one barrier drops produced no Record/Replay diagnostic, so the fault gate remains open | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟩 current VCC-safe spill-backed bundle: all three exact clean and paired oracles, complete 936/936 accesses plus 168/168 barriers, 167.0x maximum slowdown, reviewed exact-one fail/no-diagnosis fault, containment, health, and clean provenance |
 | **P3 CLIP BF16** | 🟨 current clean: cosine oracle passes; 45/45 accesses; complete analysis | 🟨 current one-process clean passes the cosine oracle with complete 45/45 accesses plus 24/24 barriers; a separate ten-process stress keeps full coverage but reproduces a replay conflict in 2/10 processes, so paired evidence is rejected | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟥 current lowering is complete at 45/45 accesses plus 24/24 barriers, but the warmup cosine oracle fails with NaN |
 | **P4 hip-moi D128 block attention** | 🟩 current accepted bundle: exact clean, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟧 current oracle passes with 6/12 accesses and 4/4 barriers; six shared-helper accesses hit the typed dynamic-stack resource limit | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current scalar fallback lacks entry-local scratch for one connected component |
-| **P4 hip-moi D128 pressure attention** | 🟩 current accepted bundle: four exact clean oracles, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟧 current four-oracle run passes with 6/12 accesses and 4/4 barriers; six shared-helper accesses hit the typed dynamic-stack resource limit | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
+| **P4 hip-moi D128 pressure attention** | 🟩 current accepted bundle: four exact clean oracles, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟧 current four-oracle run passes with 6/12 accesses and 4/4 barriers; six shared-helper accesses hit the typed dynamic-stack resource limit | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟨 current scalar-state fix passes all four exact clean oracles with complete 12/12 access plus 4/4 barrier coverage and a one-process paired 22.6x slowdown; an exact-one barrier drop produces 12 valid diagnostics but overflows the statically sized diagnostic buffer, so the fault gate remains open |
 | **P4 hip-moi MFMA attention** | 🟩 current accepted bundle: two exact clean oracles, 12/12 group-FLAT coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟧 current two-oracle run passes with 6/12 accesses and 4/4 barriers; six shared-helper accesses hit the typed dynamic-stack resource limit | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before either oracle | 🟥 current scalar owner/epoch prologue has no entry-local VGPR scratch; the client signals before either oracle |
 | **P4 hip-moi Stream-K arrival** | 🟩 current accepted bundle: exact clean, 4/4 coverage, paired 143.70x, reviewed exact-one CDNA4 atomic-order fault, containment, health, and clean provenance | 🟧 current oracle passes with 4/4 accesses, 4/4 barriers, and 16/16 fences; all 10 shared-helper atomics hit the typed dynamic-stack limit | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: planner safely rejected persistent identity at a full ordinary-VGPR/AccVGPR boundary; scalar persistent state open |
 | **P4 hip-moi tree atomic-OR** | 🟩 current accepted bundle: both exact clean tests, 4/4 coverage, paired 185.5x, reviewed exact-one producer-release atomic-order fault, containment, health, and clean provenance | 🟧 current oracles pass with 4/4 accesses, 4/4 barriers, and 16/16 fences; all 10 shared-helper atomics hit the typed dynamic-stack limit | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🟥 current dynamic-stack owner has a full ordinary VGPR bank, so persistent scalar placement rejects the object before an oracle |
@@ -287,6 +287,24 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-22: D128-pressure Inline Shadow advances from gray to yellow at
+  commit `a6714e31f0`.  A disconnected full-VGPR dynamic-stack component had
+  selected code-object-wide scalar persistence while planning entry scratch
+  only for its own owners.  The planner now transactionally proves scratch
+  for every emitted owner before committing scalar mode.  Clean artifact
+  `consan-validation-gfx950-d128-pressure-inline-multicomponent-clean-20260722-074`
+  passes all four exact oracles in one repetition with complete 12/12 access
+  plus 4/4 barrier coverage.  One-process paired artifact
+  `consan-validation-gfx950-d128-pressure-inline-single-overhead-20260722-078`
+  measures 4,028 ms against 178-ms and 160-ms controls (22.6x against the
+  slower paired control).  Fresh inventory `...-inventory-20260722-076`
+  freezes four singleton barriers.  Exact-one fault artifact
+  `...-fault-20260722-077` removes the first barrier, fails the exact oracle,
+  and produces 12 valid Inline diagnostics, but 18,036 further diagnostics
+  overflow the statically sized 12-record buffer.  That is useful detection
+  evidence, not a green bundle: bounded diagnostic-capacity planning remains
+  the fault gate.
 
 - 2026-07-22: TP2 Inline Shadow is green and closes `IS0`.  Fresh inventory
   artifact `consan-validation-gfx950-tp2-inline-spill-inventory-20260722-071`
