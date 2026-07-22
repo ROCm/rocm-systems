@@ -106,7 +106,9 @@ NCCL_DEVICE_INLINE static void ringDoorbell(efa_cuda_qp* qp, uint64_t* submitted
                                             cuda::atomic_ref<uint32_t, ncclGinScope<mode>>& dbrung_ref,
                                             uint32_t db_rung, uint32_t target) {
   *qp->sq.wq.db = target;
-  __threadfence_system();   /* order the doorbell MMIO write */
+  /* Order the doorbell MMIO write. Use acq_rel (MEMBAR.ALL.SYS) instead of
+   * __threadfence_system (MEMBAR.SC.SYS). */
+  cuda::atomic_thread_fence(cuda::memory_order_acq_rel, cuda::thread_scope_system);
   scopedAtomicAdd<ncclGinScope<mode>, cuda::memory_order_relaxed>(submitted_count_ptr, (uint64_t)(target - db_rung));
   dbrung_ref.store(target, cuda::memory_order_release);
 }
@@ -294,8 +296,11 @@ NCCL_DEVICE_INLINE static void postRdmaWrite(nccl_ofi_gin_gdaki_dev_endpoint_han
        * Each group must publish its own writes: __threadfence_system()
        * orders only the calling thread's writes, and the handoff (base_ref)
        * is device/block scope, so a later thread's fence cannot publish this
-       * group's writes for it. Runs on both the ring and the defer path. */
-      __threadfence_system();
+       * group's writes for it. Runs on both the ring and the defer path.
+       *
+       * Use acq_rel (MEMBAR.ALL.SYS) instead of __threadfence_system
+       * (MEMBAR.SC.SYS). */
+      cuda::atomic_thread_fence(cuda::memory_order_acq_rel, cuda::thread_scope_system);
       /* Doorbell-order rendezvous: take the turn in strict slot order. */
       while (base_ref.load(cuda::memory_order_acquire) != chunk_base) {
         /* spin */
