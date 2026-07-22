@@ -24,6 +24,8 @@ typedef ncclGin_t* getNcclGin_t(void* ginPluginLib);
 
 extern getNcclGin_t getNcclGin_v13;
 extern getNcclGin_t getNcclGin_v14;
+
+extern int64_t ncclParamGinEnable();
 NCCL_PARAM(GinPluginRefCount, "GIN_PLUGIN_REF_COUNT", 0);
 #define NCCL_GIN_VERSION_COUNT 2
 int ncclGinVersion[NCCL_GIN_VERSION_COUNT] = {14, 13};
@@ -179,7 +181,10 @@ static ncclResult_t ncclGinPluginAssignToComm(struct ncclComm* comm, int pluginI
     comm->sharedRes->ginState.ginVersion = pluginLibs[pluginIndex].version;
     // NOTE: The following cast is valid because ncclGinType_t variant values
     // should match NCCL_NET_DEVICE_GIN_* values from `enum ncclNetDeviceType`.
-    comm->sharedRes->ginState.ginType = static_cast<ncclGinType_t>(props.netDeviceType);
+    // Honor NCCL_GIN_ENABLE: when disabled, keep ginType NONE so globalGinSupport
+    // resolves to NONE and GIN bring-up is cleanly rejected downstream.
+    comm->sharedRes->ginState.ginType =
+        ncclParamGinEnable() ? static_cast<ncclGinType_t>(props.netDeviceType) : NCCL_GIN_TYPE_NONE;
     comm->ginPluginIndex = pluginIndex;
 
     ncclGinProperties_t ginProperties;

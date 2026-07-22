@@ -61,6 +61,9 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
     /*id=*/2 + stage
   };
 
+  // Zero the AMD software warp-span barrier slots before any coop sync (no-op on NVIDIA).
+  ncclCoopNamedBarrierInit();
+
   // Construct outbox only for stage=0. The LSA path uses both scratch buffers and
   // requests; the rail-only path uses only the request FIFO.
   alignas(ncclGinOutboxSession<ncclCoopWarpSpan>) char outbox_storage[sizeof(ncclGinOutboxSession<ncclCoopWarpSpan>)];

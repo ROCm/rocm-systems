@@ -657,6 +657,31 @@ add_custom_command(
 )
 add_custom_target(rma_header_symlinks DEPENDS "${RMA_HIPIFY_DIR}/rma.h")
 
+# nccl_device/{core,comm,gin}.h share basenames with the top-level src/include/
+# {core,comm,gin}.h, so add_file_unique() renames the nccl_device copies to
+# *_tmp.h in the hipify tree. Hipified sources have their #includes rewritten to
+# the _tmp names, but the IR bitcode wrapper (bindings/ir/nccl_device_wrapper.h)
+# is staged verbatim (not hipified) and includes "nccl_device/core.h" directly.
+# Symlink the un-suffixed names back to the _tmp outputs, same as net_ib/ and
+# rma/ above, so the EMIT_LLVM_IR build can resolve them.
+set(NCCL_DEVICE_HIPIFY_DIR "${HIPIFY_DIR}/src/include/nccl_device")
+set(NCCL_DEVICE_HEADER_SYMLINKS "")
+foreach(_hdr core comm gin)
+  add_custom_command(
+    OUTPUT  "${NCCL_DEVICE_HIPIFY_DIR}/${_hdr}.h"
+    DEPENDS "${NCCL_DEVICE_HIPIFY_DIR}/${_hdr}_tmp.h"
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+            "${_hdr}_tmp.h" "${NCCL_DEVICE_HIPIFY_DIR}/${_hdr}.h"
+    COMMENT "Symlinking nccl_device/${_hdr}_tmp.h -> ${_hdr}.h"
+  )
+  list(APPEND NCCL_DEVICE_HEADER_SYMLINKS "${NCCL_DEVICE_HIPIFY_DIR}/${_hdr}.h")
+endforeach()
+add_custom_target(nccl_device_header_symlinks DEPENDS ${NCCL_DEVICE_HEADER_SYMLINKS})
+
+# Create the symlinks before the nccl_device headers are copied into
+# ${PROJECT_BINARY_DIR}/include (consumed by the IR bitcode build).
+add_dependencies(copy_nccl_device_headers nccl_device_header_symlinks)
+
 
 # Generate device/host tables and all the collective functions that are going to be in librccl.so
 #==================================================================================================
