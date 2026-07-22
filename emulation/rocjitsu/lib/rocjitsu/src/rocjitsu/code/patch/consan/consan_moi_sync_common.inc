@@ -2439,7 +2439,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
             inline_atomic_release_capacity, snapshot_table_base, inline_causal_snapshot_capacity,
             token_table_base, inline_acquired_token_capacity,
             /*emit_guest_instruction=*/true,
-            /*import_claimed_predecessor=*/arch == ROCJITSU_CODE_ARCH_GFX1250,
+            /*import_claimed_predecessor=*/is_rdna4_family_arch(arch),
             /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors)) {
       errors.emplace_back(
           "ConSan MOI inline release could not emit a versioned causal transaction");
@@ -2469,7 +2469,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   // slot retains the predecessor payload across the guest, acquire import,
   // causal snapshot, and successor commit.
   const bool claimed_acquire_release =
-      (arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) &&
+      (arch == ROCJITSU_CODE_ARCH_CDNA4 || is_rdna4_family_arch(arch)) &&
       candidate.event_kind == ConSanMoiAtomicEventKind::AcquireRelease && !is_compare_exchange;
   if (claimed_acquire_release) {
     if (!append_inline_versioned_release_transaction(

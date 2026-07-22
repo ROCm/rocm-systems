@@ -786,7 +786,9 @@ WORKLOADS = (
             "hip-moi-build/tests/"
             "hip_moi_instrumented_rdna4_wmma_streamk_tree_atomic_or_test"
         ),
-        clean_filter="HipMoiRdna4WmmaStreamKTreeAtomicOr.*",
+        clean_filter=(
+            "HipMoiRdna4WmmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersWmmaPartials"
+        ),
         overhead_filter=(
             "HipMoiRdna4WmmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersWmmaPartials"
         ),

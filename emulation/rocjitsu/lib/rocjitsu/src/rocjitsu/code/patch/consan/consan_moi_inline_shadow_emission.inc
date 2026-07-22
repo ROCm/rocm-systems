@@ -136,11 +136,11 @@
 
   const auto append_current_workgroup_key = [&](uint16_t destination_vgpr,
                                                 uint16_t temporary_vgpr) {
-    if (workgroup_local_shadow && !generation_tagged_local_shadow) {
-      // An LDS shadow is workgroup-local and therefore omits the generation
-      // field used to disambiguate global shadow cells. Atomic release/token
-      // tables are global, however, so validate them with the persistent
-      // workgroup key for both compact and full-width local shadows.
+    if (workgroup_local_shadow) {
+      // An LDS shadow is workgroup-local. Its optional generation tag guards
+      // reuse of the local cells; it is not the identity used by the global
+      // atomic release/token tables. Validate those tables with the persistent
+      // workgroup key for every local-shadow representation.
       if (options.moi_workgroup_key_vgpr) {
         words.push_back(build_v_mov_b32_e32(
             destination_vgpr, vector_source_vgpr(*options.moi_workgroup_key_vgpr), arch));

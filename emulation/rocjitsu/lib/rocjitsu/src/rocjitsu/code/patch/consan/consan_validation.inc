@@ -2870,7 +2870,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     // and ABI offset 4, so their encodings are identical; release-only
     // transactions retain the single-store shape.
     const bool claimed_acquire_release_arch =
-        arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
+        arch == ROCJITSU_CODE_ARCH_CDNA4 || is_rdna4_family_arch(arch);
     bool valid = cas_positions.size() == 2u &&
                  (owner_between == 1u || (claimed_acquire_release_arch && owner_between == 6u));
 

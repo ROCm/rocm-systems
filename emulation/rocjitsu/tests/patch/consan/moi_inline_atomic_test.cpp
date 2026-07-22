@@ -159,6 +159,8 @@ TEST(ConSanMoi, SharedHelperInlineAtomicSpillUsesAutomaticStateAcrossOwners) {
                                             release_claim->begin(), release_claim->end());
   ASSERT_NE(acquire_position, cave_words.end());
   ASSERT_NE(release_position, cave_words.end());
+  EXPECT_EQ(count_subsequence(cave_words, *release_claim), 2u)
+      << "RDNA4 acquire-release must claim and commit one serialized transaction";
   EXPECT_LT(acquire_position, release_position)
       << "acquire-release must import the prior handoff before replacing it";
   EXPECT_EQ(std::count_if(result.patches.begin(), result.patches.end(),
@@ -166,6 +168,47 @@ TEST(ConSanMoi, SharedHelperInlineAtomicSpillUsesAutomaticStateAcrossOwners) {
                             return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
                           }),
             2);
+}
+
+TEST(ConSanMoi, GenerationTaggedLocalAtomicLookupUsesPersistentWorkgroupKey) {
+  std::vector<uint8_t> bytes = make_rdna4_lds_and_ordered_flat_atomic_handoff_code_object();
+  ASSERT_FALSE(bytes.empty());
+  mutate_first_kernel_descriptor(
+      bytes, [](KD &descriptor) { descriptor.group_segment_fixed_size = 1024u; });
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_atomics = true;
+  options.moi_inline_workgroup_shadow = true;
+  options.scratch_vgpr = 16;
+  options.moi_owner_vgpr = 48;
+  options.moi_epoch_vgpr = 49;
+  options.moi_workgroup_key_vgpr = 50;
+  options.moi_exec_save_sgpr = 40;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_report_generation = 2u;
+  options.max_patches = 16;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto load_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore &&
+           patch.anchor_offset == 14u * sizeof(uint32_t);
+  });
+  ASSERT_NE(load_patch, result.patches.end());
+  EXPECT_GT(load_patch->workgroup_shadow_size, 0u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const std::vector<uint32_t> words =
+      text_words_at_offset(patched, load_patch->trampoline_offset, load_patch->trampoline_size);
+  const uint32_t materialize_workgroup_key = build_v_mov_b32_e32(
+      *options.scratch_vgpr, vector_source_vgpr(*options.moi_workgroup_key_vgpr),
+      ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_NE(std::ranges::find(words, materialize_workgroup_key), words.end())
+      << "local-shadow atomic tokens are keyed by workgroup, not report generation";
 }
 
 TEST(ConSanMoi, InlineAtomicReleaseHashUsesFullAddressAndPowerOfTwoCapacity) {
@@ -1834,8 +1877,8 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
   const auto slot_stride = build_v_lshlrev_b32_e32(
       /*vdst=*/10, scalar_positive_inline_u32(5), /*vsrc1=*/10, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(slot_stride);
-  EXPECT_EQ(std::count(release_words.begin(), release_words.end(), *slot_stride), 1)
-      << "32-byte release slots require index << 5";
+  EXPECT_EQ(std::count(release_words.begin(), release_words.end(), *slot_stride), 2)
+      << "release publication imports and then replaces its 32-byte predecessor slot";
   EXPECT_EQ(std::count(acquire_words.begin(), acquire_words.end(), *slot_stride), 2)
       << "acquire pre-reads and validates its 32-byte release slot";
   const auto token_stride_low = build_v_lshlrev_b32_e32(
