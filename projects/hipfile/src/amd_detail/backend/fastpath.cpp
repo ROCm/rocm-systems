@@ -202,10 +202,12 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
     try {
         switch (type) {
             case IoType::Read:
+                fprintf(stderr, "fastpath read size: %zu\n", size);
                 nbytes = Context<Hip>::get()->hipAmdFileRead(handle, devptr, size, file_offset);
                 ioTracker.complete(nbytes);
                 break;
             case IoType::Write:
+                fprintf(stderr, "fastpath write size: %zu\n", size);
                 nbytes = Context<Hip>::get()->hipAmdFileWrite(handle, devptr, size, file_offset);
                 ioTracker.complete(nbytes);
                 break;
