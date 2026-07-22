@@ -62,6 +62,18 @@ in the following table.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
 
+    * - | ``NCCL_ENV_PLUGIN``
+        | Loads an external environment plugin that intercepts all RCCL parameter
+          lookups. See :ref:`using-rccl-env-plugin` for full details.
+      - | Absolute path to a plugin ``.so`` file, or ``none`` to disable.
+        | Default: unset (reads from process environment).
+
+    * - | ``NCCL_ENV_JSON_FILE``
+        | Path to a JSON configuration file used by ``librccl-env-json.so``.
+          Has no effect unless ``NCCL_ENV_PLUGIN`` points to that plugin.
+      - | Absolute path to a flat JSON file mapping variable names to string values.
+        | Default: unset (falls back to ``getenv()`` for all lookups).
+
 Logging and debugging
 =====================
 

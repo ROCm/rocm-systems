@@ -12,6 +12,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
     rocjitsu_isa
+    rocjitsu_isa_registry
     rocjitsu_isa_cdna1
     rocjitsu_isa_cdna2
     rocjitsu_isa_cdna3
@@ -527,6 +528,32 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1"
             "LSAN_OPTIONS=exitcode=23"
         LABELS waitcheck
+    )
+endif()
+
+# Exercise the Linux-only model ISA contract in a decoder-only final link.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(rocjitsu_model_only_test model_only_isa_test.cpp)
+    target_include_directories(
+        rocjitsu_model_only_test
+        PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR}
+    )
+    target_link_libraries(
+        rocjitsu_model_only_test
+        PRIVATE
+            rocjitsu_dbt_internal
+            rocjitsu_isa_gfx1250_model
+            simdojo_headers
+            GTest::gtest_main
+    )
+    rj_configure_target(rocjitsu_model_only_test TEST)
+    rj_add_gtest_tests(rocjitsu_model_only_test)
+    add_test(
+        NAME ModelOnlyIsaTest.SymbolBoundary
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_model_only_test> -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
     )
 endif()
 

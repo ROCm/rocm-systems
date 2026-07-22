@@ -16,6 +16,7 @@
 // \NPI new GPU: extend these tests with its MACH/triple -> target mapping.
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/code/rj_code.h"
 
 #include <gtest/gtest.h>
@@ -257,6 +258,30 @@ TEST(GfxCodeObjectTargets, CApiAcceptsGfx1201ForBasicBlockList) {
 
 TEST(GfxCodeObjectTargets, CApiAcceptsGfx1250ForBasicBlockList) {
   expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_TARGET_GFX1250);
+}
+
+TEST(KernelSymbolTest, DemanglesMangledKernelSymbol) {
+  EXPECT_EQ(demangle_kernel_symbol("_Z11racy_kernelPKfPf"), "racy_kernel(float const*, float*)");
+}
+
+TEST(KernelSymbolTest, DisplayNameIsHeaderSafe) {
+  constexpr std::string_view tensile_symbol =
+      "Cijk_Ailk_Bjlk_S_B_UserArgs_MT8x8x8_SN_LDSB0_ISA1151_WG8_8_1_WGMXCC1";
+
+  EXPECT_EQ(kernel_display_name("_Z11racy_kernelPKfPf"), "racy_kernel");
+
+  // This is a fixture for a real-world HIP/Clang-style nested template symbol.
+  // The important behavior is that display names keep useful template context
+  // while stripping the argument list and whitespace that would break the
+  // race-detector's space-delimited log headers.
+  EXPECT_EQ(kernel_display_name("_ZN2at6native29vectorized_elementwise_kernelILi4ENS0_"
+                                "15CUDAFunctor_addIfEESt5arrayIPcLm3EEEEviT0_T1_"),
+            "at::native::vectorized_elementwise_kernel<4,at::native::CUDAFunctor_add<float>,std::"
+            "array<char*,3ul>>");
+  EXPECT_EQ(kernel_display_name("_ZN12_GLOBAL__N_16kernelEPf"), "(anonymousnamespace)::kernel");
+  EXPECT_EQ(kernel_display_name("_Z3fooIPFviEEvv"), "foo<void(*)(int)>");
+  EXPECT_EQ(kernel_display_name("__amd_rocclr_copyBuffer"), "__amd_rocclr_copyBuffer");
+  EXPECT_EQ(kernel_display_name(tensile_symbol), tensile_symbol);
 }
 
 } // namespace
