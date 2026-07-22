@@ -15,10 +15,8 @@ inline constexpr uint32_t kMaxSgprs = 106;
 inline constexpr uint16_t kGfx12HwRegHwId1 = 23;
 inline constexpr uint16_t kGfx12HwIdOwnerBits = 10;
 inline constexpr uint8_t kRdna4ScopeDevice = 2;
-inline constexpr uint32_t kRdna4VectorFlatNoSaddr =
-    static_cast<uint32_t>(rdna4::OPR_SREG_NULL);
-inline constexpr uint32_t kGfx1250VectorFlatNoSaddr =
-    static_cast<uint32_t>(gfx1250::OPR_SREG_NULL);
+inline constexpr uint32_t kRdna4VectorFlatNoSaddr = static_cast<uint32_t>(rdna4::OPR_SREG_NULL);
+inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(gfx1250::OPR_SREG_NULL);
 
 [[nodiscard]] constexpr uint32_t vector_flat_no_saddr(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA4)
@@ -28,8 +26,7 @@ inline constexpr uint32_t kGfx1250VectorFlatNoSaddr =
   return kRdna4VectorFlatNoSaddr;
 }
 
-[[nodiscard]] constexpr bool is_vector_flat_no_saddr(uint32_t raw_saddr,
-                                                      rj_code_arch_t arch) {
+[[nodiscard]] constexpr bool is_vector_flat_no_saddr(uint32_t raw_saddr, rj_code_arch_t arch) {
   return raw_saddr == vector_flat_no_saddr(arch);
 }
 
@@ -571,23 +568,28 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
                   "ds_store_b16_d16_hi"}))
     return true;
 
-  return equals_any(
-      mnemonic, {"ds_load_b32",     "ds_load_b64",       "ds_load_b96",   "ds_load_b128",
-                 "ds_load_tr8_b64", "ds_load_tr16_b128", "ds_read_b32",   "ds_read_b64",
-                 "ds_read_b128",    "ds_store_b32",      "ds_store_b64",  "ds_store_b128",
-                 "ds_write_b32",    "ds_write_b64",      "ds_write_b128", "ds_add_f32",
-                 "ds_add_f64",      "ds_add_u32",        "ds_add_u64",    "ds_cmpstore_rtn_b32"});
+  return equals_any(mnemonic,
+                    {"ds_load_b32",        "ds_load_b64",       "ds_load_b96",  "ds_load_b128",
+                     "ds_load_tr8_b64",    "ds_load_tr16_b128", "ds_read_b32",  "ds_read_b64",
+                     "ds_read_b64_tr_b16", "ds_read_b128",      "ds_store_b32", "ds_store_b64",
+                     "ds_store_b128",      "ds_write_b32",      "ds_write_b64", "ds_write_b128",
+                     "ds_add_f32",         "ds_add_f64",        "ds_add_u32",   "ds_add_u64",
+                     "ds_cmpstore_rtn_b32"});
 }
 
 [[nodiscard]] std::optional<uint32_t>
 two_address_native_lds_offset_scale(std::string_view mnemonic) {
-  if (mnemonic == "ds_load_2addr_b32" || mnemonic == "ds_store_2addr_b32")
+  if (equals_any(mnemonic,
+                 {"ds_load_2addr_b32", "ds_store_2addr_b32", "ds_read2_b32", "ds_write2_b32"}))
     return 4u;
-  if (mnemonic == "ds_load_2addr_b64" || mnemonic == "ds_store_2addr_b64")
+  if (equals_any(mnemonic,
+                 {"ds_load_2addr_b64", "ds_store_2addr_b64", "ds_read2_b64", "ds_write2_b64"}))
     return 8u;
-  if (mnemonic == "ds_load_2addr_stride64_b32" || mnemonic == "ds_store_2addr_stride64_b32")
+  if (equals_any(mnemonic, {"ds_load_2addr_stride64_b32", "ds_store_2addr_stride64_b32",
+                            "ds_read2st64_b32", "ds_write2st64_b32"}))
     return 256u;
-  if (mnemonic == "ds_load_2addr_stride64_b64" || mnemonic == "ds_store_2addr_stride64_b64")
+  if (equals_any(mnemonic, {"ds_load_2addr_stride64_b64", "ds_store_2addr_stride64_b64",
+                            "ds_read2st64_b64", "ds_write2st64_b64"}))
     return 512u;
   return std::nullopt;
 }
@@ -1151,9 +1153,8 @@ append_dynamic_access_event_index_store(std::vector<uint32_t> &words, uint64_t c
 append_dynamic_atomic_event_index_store(std::vector<uint32_t> &words, uint64_t counter_address,
                                         uint64_t field_address, uint16_t slot_vgpr,
                                         uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  return append_dynamic_record_event_index_store(words, kDynamicAtomicRecordLayout,
-                                                 counter_address, field_address, slot_vgpr,
-                                                 scratch_vgpr, arch);
+  return append_dynamic_record_event_index_store(words, kDynamicAtomicRecordLayout, counter_address,
+                                                 field_address, slot_vgpr, scratch_vgpr, arch);
 }
 
 [[nodiscard]] bool overlaps_scratch_range(uint16_t value, uint16_t scratch_vgpr, uint16_t count) {

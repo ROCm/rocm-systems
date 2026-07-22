@@ -942,6 +942,55 @@ TEST(ConSanMoi, Cdna4FirstLightProbeEmitsNativeVariableLengthRecipes) {
   EXPECT_TRUE(contains_subsequence(rewritten_words, *lane_rank_hi));
 }
 
+TEST(ConSanMoi, Cdna4RecordReplayNormalizesTransposeAndTwoAddressLdsRanges) {
+  const auto check = [](uint32_t word0, uint32_t word1, std::string_view expected_mnemonic,
+                        std::initializer_list<uint32_t> expected_byte_offsets) {
+    std::vector<uint32_t> text_words(520, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+    text_words[0] = word0;
+    text_words[1] = word1;
+    text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+    const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words);
+    ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+    options.scratch_vgpr = 20;
+    options.moi_owner_vgpr = 40;
+    options.moi_epoch_vgpr = 41;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size =
+        consan_moi_report_buffer_min_bytes(expected_byte_offsets.size(), 0, 0, 0);
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    EXPECT_TRUE(result.final_validation_passed);
+    ASSERT_EQ(result.moi_candidates.size(), 1u);
+    EXPECT_EQ(result.moi_candidates.front().mnemonic, expected_mnemonic);
+    ASSERT_EQ(result.site_dispositions.size(), 1u);
+    EXPECT_EQ(result.site_dispositions.front().disposition, ConSanSiteDisposition::Supported);
+    EXPECT_EQ(result.site_dispositions.front().lowering_outcome,
+              ConSanSiteLoweringOutcome::Patched);
+
+    const ConSanMoiAutoReportInventory inventory =
+        inventory_consan_moi_auto_report(result, options, bytes);
+    EXPECT_EQ(inventory.access_range_count, expected_byte_offsets.size());
+    ASSERT_EQ(result.patches.size(), 1u);
+    const std::vector<uint32_t> rewritten_words =
+        patched_words_at_file_offset(result, 0x100, result.patches.front().original_size);
+    for (uint32_t byte_offset : expected_byte_offsets) {
+      const auto mov_offset = instrumentation::build_v_mov_b32_literal(
+          /*vdst=*/22, byte_offset, ROCJITSU_CODE_ARCH_CDNA4);
+      ASSERT_TRUE(mov_offset);
+      EXPECT_TRUE(contains_subsequence(rewritten_words, *mov_offset))
+          << "missing byte offset " << byte_offset;
+    }
+  };
+
+  check(0xD9C60800u, 0x0E000001u, "ds_read_b64_tr_b16", {2048u});
+  check(0xD8EE0400u, 0x0800000Bu, "ds_read2_b64", {0u, 32u});
+  check(0xD89E0400u, 0x0006080Bu, "ds_write2st64_b64", {0u, 2048u});
+}
+
 TEST(ConSanMoi, Cdna4FirstLightProbeDescriptorGrowthUsesEightVgprGranules) {
   const auto guest = build_cdna4_ds_store_b32(
       /*vaddr=*/6, /*vdata=*/7, /*byte_offset=*/4, ROCJITSU_CODE_ARCH_CDNA4);
