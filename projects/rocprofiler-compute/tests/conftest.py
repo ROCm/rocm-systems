@@ -292,8 +292,7 @@ def binary_handler_profile_rocprof_compute(request):
                 ],
             )
 
-        # Run torch_trace and triton_trace tests in a subprocess instead of calling
-        # main() in-process.
+        # Run torch_trace and triton_trace tests in a subprocess.
         force_subprocess = any(
             request.node.get_closest_marker(marker) is not None
             for marker in ("torch_trace", "triton_trace")
@@ -394,8 +393,8 @@ def binary_handler_profile_rocprof_compute(request):
                     command_rocprof_compute, num_ranks
                 )
 
-            # Run the command in a subprocess for capture_output, multi-rank, or
-            # forced tests.
+            # Run in a subprocess for capture_output, multi-rank, or the
+            # torch_trace/triton_trace tests.
             if capture_output or num_ranks > 1 or force_subprocess:
                 # Use rocprof_compute_script_path instead of rocprof-compute
                 if num_ranks == 1:

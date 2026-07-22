@@ -42,8 +42,8 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
 
         forced_comgr = self._forced_comgr
 
-        # Build LD_PRELOAD: preserve user's existing, then append our libs
-        # Order: [user's existing LD_PRELOAD] : [forced comgr] : [our profiler libs]
+        # Build LD_PRELOAD: the user's existing value, then the forced comgr,
+        # then the profiler tool libraries.
         ld_preload_parts = [
             os.environ.get("LD_PRELOAD"),  # User's existing LD_PRELOAD (if any)
             str(forced_comgr) if forced_comgr is not None else None,  # Forced comgr

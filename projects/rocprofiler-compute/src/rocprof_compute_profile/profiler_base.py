@@ -159,11 +159,10 @@ class RocProfCompute_Base:
         self.__profiler = profiler_mode
         self._soc = soc  # OmniSoC obj
 
-        # ROCm stack pre-flight state populated during pre-processing.
+        # ROCm stack pre-flight state, populated during pre-processing.
         self._stack_resolution: Optional[StackResolution] = None
         self._launch: Rocprofv3Launch = Rocprofv3Launch()
-        # Original workload command (before any ROCTX-injection rewrite),
-        # captured in sanitize() and used for the ROCm stack pre-flight.
+        # Workload command before ROCTX-injection rewrite, captured in sanitize().
         self._workload_cmd: list[str] = []
 
     def get_args(self) -> argparse.Namespace:
@@ -273,9 +272,7 @@ class RocProfCompute_Base:
                 if script_index is None and skip_flag is None:
                     raise NoScriptInCommandError(args.remaining)
 
-            # Capture the workload command before ROCTX injection rewrites it,
-            # so the ROCm stack pre-flight inspects the real workload rather
-            # than the inject_roctx launcher.
+            # Capture the workload command before ROCTX injection rewrites it.
             self._workload_cmd = list(args.remaining)
 
             if selected_frameworks:

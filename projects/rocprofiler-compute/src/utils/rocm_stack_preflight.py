@@ -92,10 +92,11 @@ def _rocprofiler_mismatch_message(
     lib_stem: str,
     tool_lib: Path,
     workload_lib: Path,
+    recommend_sdk_backend: bool = False,
 ) -> str:
     """Return the error message for a conflicting rocprofiler library."""
     library = lib_stem[: -len(".so")] if lib_stem.endswith(".so") else lib_stem
-    return "\n".join([
+    lines = [
         f"Incompatible ROCm stacks: the workload provides a different "
         f"'{library}' than the profiler tool.",
         f"  Profiler tool : {tool_lib}",
@@ -103,7 +104,13 @@ def _rocprofiler_mismatch_message(
         "Two rocprofiler stacks in one process cause rocprofiler registration to "
         "fail (error 16). Run the workload against the profiler's ROCm, or install "
         "a matching ROCm for the profiler.",
-    ])
+    ]
+    if recommend_sdk_backend:
+        lines.append(
+            "Alternatively, use the rocprofiler-sdk backend "
+            "(set ROCPROF=rocprofiler-sdk)."
+        )
+    return "\n".join(lines)
 
 
 def _read_needed_soname(elf_path: Path, lib_stem: str) -> Optional[str]:
@@ -483,12 +490,8 @@ def _file_digest(path: str) -> Optional[str]:
 def _same_library(a: Optional[Path], b: Optional[Path]) -> bool:
     """Return True if ``a`` and ``b`` are the same shared library.
 
-    A dual-stack conflict only arises when two *different* builds of a library
-    co-load. This is packaging-agnostic: two paths are the same library when
-    they resolve to the same file (realpath or hardlink) or are byte-identical.
-    A workload copy that is identical to the profiler tool's copy therefore is
-    not a genuine second stack, regardless of directory layout (e.g. the
-    profiler's ROCm wheel and the workload's sibling wheel of the same build).
+    Two paths are the same library when they resolve to the same file (real
+    path or hard link) or have identical contents.
     """
     if a is None or b is None:
         return False
@@ -530,14 +533,9 @@ def _discover_workload_stack(
     """Resolve the workload's copy of each stack library.
 
     Combines the runtime environment, an import probe of the workload's
-    modules, and static inspection of site-packages and RPATH/RUNPATH.
-
-    A candidate is dropped when it lives under the profiler's own ``ROCM_PATH``
-    or is the same library as the profiler tool's copy (see ``_same_library``).
-    The latter is packaging-agnostic: a single-distribution layout that merely
-    splits identical libraries across sibling directories resolves to an empty
-    workload stack, so the preflight no-ops instead of flagging a false
-    dual-stack conflict.
+    modules, and static inspection of site-packages and RPATH/RUNPATH. A
+    candidate under the profiler's ``ROCM_PATH``, or identical to the profiler
+    tool's copy (see ``_same_library``), is excluded.
     """
     rocm_root = Path(os.path.realpath(os.getenv("ROCM_PATH", "/opt/rocm")))
     tool_stack = tool_stack or {}
@@ -604,8 +602,7 @@ def resolve_rocm_stacks(
 
     Returns ``None`` when the stacks cannot be resolved.
     """
-    # Backend decisions compare the workload stack against the tool stack;
-    # without a tool path there is nothing to resolve.
+    # Without the rocprofiler-sdk tool path there is nothing to compare against.
     if not tool_path:
         console_debug(
             "stack", "no rocprofiler-sdk tool path; skipping ROCm stack pre-flight"
@@ -838,7 +835,10 @@ def plan_rocprofv3(resolution: StackResolution) -> Rocprofv3Launch:
         if _soname_majors_differ(tool_sdk, workload_sdk, ROCPROFILER_SDK_LIB_STEM):
             raise IncompatibleRocmStackError(
                 _rocprofiler_mismatch_message(
-                    ROCPROFILER_SDK_LIB_STEM, tool_sdk, workload_sdk
+                    ROCPROFILER_SDK_LIB_STEM,
+                    tool_sdk,
+                    workload_sdk,
+                    recommend_sdk_backend=True,
                 )
             )
         rocprofv3 = _workload_stack_rocprofv3(workload_sdk)

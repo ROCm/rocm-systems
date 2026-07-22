@@ -3,10 +3,9 @@
 
 """Tests for the ROCm stack pre-flight.
 
-Focuses on the accuracy of each conflict check in both directions: the
-double-comgr output signature, the comgr forcing decision, the early failure on
-a conflicting rocprofiler library, the rocprofv3 redirect/fail-fast decision,
-workload-stack discovery, and GPU-backed end-to-end runs.
+Covers the double-comgr output signature, the comgr forcing decision, early
+failure on a conflicting rocprofiler library, the rocprofv3 redirect and
+fail-fast decisions, workload-stack discovery, and GPU-backed end-to-end runs.
 """
 
 import importlib.util
@@ -266,13 +265,7 @@ class TestWorkloadStackDiscovery:
     def test_excludes_library_identical_to_tool(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        """A workload lib byte-identical to the tool's copy is not a conflict.
-
-        Packaging-agnostic: a single distribution that splits identical
-        libraries across sibling directories (e.g. a profiler ROCm wheel and
-        the workload's sibling wheel of the same build) must resolve to an
-        empty workload stack so the preflight no-ops.
-        """
+        """A workload library byte-identical to the tool's copy is excluded."""
         from utils import rocm_stack_preflight as preflight
 
         tool_lib = _make_lib(tmp_path / "devel/lib", "libamd_comgr.so.3")
