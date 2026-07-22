@@ -102,7 +102,7 @@ flowchart TD
     V6B["V6B DONE<br/>remaining rows' resource and timing gates"]
     V7["V7 DONE<br/>one committed tip reruns all 40<br/>non-omitted gfx1250 cells"]
     V9A["V9A DONE<br/>Qwen Sampled 151936-workgroup initializer<br/>isolated exact at 3/3 accesses and 4/4 barriers"]
-    V9B["V9B ACTIVE<br/>Qwen Sampled full-object cumulative cost;<br/>dense-dispatch burden localization"]
+    V9B["V9B TODO<br/>Qwen Sampled full-object cumulative cost;<br/>dense-dispatch burden localization"]
     G0["G0 TODO<br/>current STATUS_GFX1250 matrix<br/>simultaneously green"]
   end
 
@@ -153,7 +153,7 @@ flowchart TD
     XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessed;<br/>SGEMM first problem 12/12 exact and fully covered"]
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
-    XT3I["XT3I TODO<br/>SPMM F8 Sampled paired run;<br/>one of two objects at fixed 180-second bound"]
+    XT3I["XT3I ACTIVE<br/>SPMM F8 Sampled clean already exact/complete;<br/>paired and reviewed-fault acceptance"]
     XT3J["XT3J DONE<br/>SPMM F8 Inline standard clean assessed;<br/>MT64x64 wrong-result rows isolate blocker"]
     XT3K["XT3K DONE<br/>SPMM F8 Inline ninth-barrier bank defect fixed;<br/>exact kernel fully passes"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
@@ -384,9 +384,17 @@ flowchart TD
   class XP3C done
   class XP2D done
   class V9A done
-  class V9B active
-  class G0,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
+  class XT3I active
+  class G0,V9B,XT2C2,XT2C3,XT3E,XF,XG todo
 ```
+
+- 2026-07-22: XT3I becomes the sole ACTIVE/blue node and V9B rotates to
+  TODO/gray.  Qwen Sampled is now localized to the already documented broad
+  dense-dispatch cost, while `015_spmm_f8_ml` Sampled already has an exact,
+  unrestricted clean client with complete 19,960-access and 806-barrier-member
+  coverage.  The latter therefore offers the narrower path to a green cell:
+  reuse the established one-repetition contract to close paired overhead and
+  reviewed-fault evidence without changing Sampled's general design.
 
 - 2026-07-22: V9A is DONE and V9B is the sole ACTIVE/blue node.  The current
   and historical Qwen runs use the same VMFB, and both reach the
