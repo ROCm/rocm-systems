@@ -122,7 +122,7 @@ flowchart TD
     V2["V2 ACTIVE<br/>Qwen SC/RR clean; Sampled rejects;<br/>Inline planning timeout"]
     V3["V3 DONE<br/>P0 Qwen fault inventory<br/>and exact policy frozen"]
     V4["V4 DONE<br/>P0 Qwen contained exact<br/>barrier-fault campaign"]
-    V5["V5 ACTIVE<br/>P0 corpus recursion fixed;<br/>SC AccVGPR + MOI runtime open"]
+    V5["V5 ACTIVE<br/>P0 HIP-matmul: SC final-load boundary;<br/>RR clean, static resource gap"]
     V6["V6 DONE<br/>D128 block, D128 pressure, MFMA<br/>Inline bundles green"]
     V7["V7 ACTIVE<br/>D128-pressure one-process paired accepted;<br/>peak memory and broader rows open"]
     V8["V8 TODO<br/>freeze one committed tip, rebuild,<br/>and rerun authoritative matrix"]
@@ -584,6 +584,19 @@ mutation without final-byte proof, or a diagnostic without an independent
 oracle is not an accepted row.
 
 ## Progress log
+
+- 2026-07-22: `V5` remains ACTIVE/blue.  SuperCollider patches all 739
+  accesses, but prefix 729—the final `ds_read_b128` in a six-load burst—is the
+  first numerical failure; descriptor growth and the same scratch window are
+  already present in passing prefix 728.  Record/Replay's apparent private
+  spill fault was instead an SCC-preservation bug in the compact scalar-epoch
+  barrier cave.  The cave reused the SCC snapshot as an overflow temporary,
+  corrupting a guest SCC-dependent branch after the barrier.  A temporary-free
+  saturating increment now preserves SCC; focused host tests, all 400
+  `ConSanMoi.*` tests, the bounded physical reproducer, and the unrestricted
+  HIP-matmul run pass.  All 109 barriers patch; 30 accesses in an unexecuted
+  dynamic-stack HybridStreamKTree kernel retain a typed resource failure, so
+  the corpus Record/Replay cell is yellow rather than green.
 
 - 2026-07-22: `V5` remains ACTIVE/blue after Inline Shadow reproduces the
   same heterogeneous-object dispatch-ID/EXEC-save SGPR rejection as

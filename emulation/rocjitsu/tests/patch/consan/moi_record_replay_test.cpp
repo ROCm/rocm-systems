@@ -3127,6 +3127,31 @@ TEST(ConSanMoi, Cdna4AccvgprBoundaryRecordReplayUsesScalarEpochCoalescing) {
                             kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
             AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc3,
                             kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET));
+
+  const auto barrier_patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier, &ConSanPatchInfo::kind);
+  ASSERT_NE(barrier_patch, result.patches.end());
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  const uint16_t scc_save = static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 4u);
+  const std::vector<uint32_t> barrier_words = text_words_at_offset(
+      patched, barrier_patch->trampoline_offset, barrier_patch->trampoline_size);
+  const std::vector<uint32_t> expected_epoch_update = {
+      *instrumentation::build_s_cselect_b32(scc_save, scalar_positive_inline_u32(1),
+                                            scalar_positive_inline_u32(0),
+                                            ROCJITSU_CODE_ARCH_CDNA4),
+      *barrier,
+      *instrumentation::build_s_cmp_eq_u32(*result.resolved_moi_persistent_epoch_sgpr,
+                                           /*literal=*/255u, ROCJITSU_CODE_ARCH_CDNA4),
+      consan_moi_exact_shadow::max_epoch,
+      *instrumentation::build_s_cbranch_scc1(/*offset_dwords=*/2, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_add_u32(*result.resolved_moi_persistent_epoch_sgpr,
+                      *result.resolved_moi_persistent_epoch_sgpr, scalar_positive_inline_u32(1),
+                      ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),
+      *instrumentation::build_s_cmp_lg_u32(scc_save, scalar_positive_inline_u32(0),
+                                           ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  EXPECT_TRUE(contains_subsequence(barrier_words, expected_epoch_update));
 }
 
 TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {

@@ -328,19 +328,19 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
       errors.emplace_back("ConSan MOI scalar inline barrier requires scalar special-state storage");
       return std::nullopt;
     }
-    const uint16_t temporary = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u);
-    const uint16_t maximum = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 5u);
-    constexpr uint16_t kScalarInlineMinusOne = 0xC1;
     const auto save_scc = instrumentation::build_s_cselect_b32(special_state->scc_save_sgpr,
                                                                scalar_positive_inline_u32(1),
                                                                scalar_positive_inline_u32(0), arch);
-    const auto high_is_zero =
-        instrumentation::build_s_cmp_eq_u32(temporary, scalar_positive_inline_u32(0), arch);
-    const auto saturate = instrumentation::build_s_cselect_b32(
-        *options.moi_persistent_epoch_sgpr, *options.moi_persistent_epoch_sgpr, maximum, arch);
+    const auto at_maximum = instrumentation::build_s_cmp_eq_u32(
+        *options.moi_persistent_epoch_sgpr, /*literal=*/255u, arch);
+    // The compare consumes the following literal word. If the epoch is already
+    // saturated, skip the two-word CDNA4-compatible increment sequence. This
+    // needs no temporary SGPRs: in particular, the SCC snapshot at exec-save
+    // +4 must remain intact until restore_scc.
+    const auto skip_increment = instrumentation::build_s_cbranch_scc1(/*offset_dwords=*/2, arch);
     const auto restore_scc = instrumentation::build_s_cmp_lg_u32(
         special_state->scc_save_sgpr, scalar_positive_inline_u32(0), arch);
-    if (!save_scc || !high_is_zero || !saturate || !restore_scc) {
+    if (!save_scc || !at_maximum || !skip_increment || !restore_scc) {
       errors.emplace_back("ConSan MOI scalar inline barrier could not encode epoch state");
       return std::nullopt;
     }
@@ -367,30 +367,17 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
       words.push_back(*save_scc);
     }
     words.push_back(original_barrier_word);
+    words.push_back(*at_maximum);
+    words.push_back(consan_moi_exact_shadow::max_epoch);
+    words.push_back(*skip_increment);
     if (!append_moi_entry_salu_write(words,
                                      build_s_add_u32(*options.moi_persistent_epoch_sgpr,
                                                      *options.moi_persistent_epoch_sgpr,
                                                      scalar_positive_inline_u32(1), arch),
-                                     arch) ||
-        !append_moi_entry_salu_write(
-            words,
-            build_s_lshr_b32(temporary, *options.moi_persistent_epoch_sgpr,
-                             scalar_positive_inline_u32(consan_moi_exact_shadow::epoch_bits), arch),
-            arch) ||
-        !append_moi_entry_salu_write(
-            words, build_s_mov_b32(maximum, scalar_positive_inline_u32(1), arch), arch) ||
-        !append_moi_entry_salu_write(
-            words,
-            build_s_lshl_b32(maximum, maximum,
-                             scalar_positive_inline_u32(consan_moi_exact_shadow::epoch_bits), arch),
-            arch) ||
-        !append_moi_entry_salu_write(
-            words, build_s_add_u32(maximum, maximum, kScalarInlineMinusOne, arch), arch)) {
+                                     arch)) {
       errors.emplace_back("ConSan MOI scalar inline barrier could not encode saturating add");
       return std::nullopt;
     }
-    words.push_back(*high_is_zero);
-    words.push_back(*saturate);
     if (publish_visible_evidence) {
       if (!append_visible_evidence(words) ||
           !append_restore_moi_special_state(words, options, arch)) {

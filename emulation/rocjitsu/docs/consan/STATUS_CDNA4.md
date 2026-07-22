@@ -117,7 +117,7 @@ enablement work and may not be counted as current gfx950 execution evidence.
 
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Why it matters and next proof |
 |---|---|---|---|---|---|---|
-| P0 | `hip_matmul_matmul::m128_n128_k128` | 🟧 All three upstream numerical checks pass, Waitcheck analyzes all 46 kernels after recursive-call summarization, 719/739 supported LDS accesses are patched, and the automatic report is mismatch-free; 20 remaining placement/lowering failures keep static coverage incomplete | 🟥 Current clean execution rejects the 1.84 MiB code object because persistent dispatch-ID and EXEC-save SGPR state cannot be placed, then exits by signal before the numerical oracle | 🟥 Current clean execution reaches the same early code-object-wide persistent dispatch-ID and EXEC-save SGPR placement rejection before the numerical oracle | 🟥 Current clean execution reaches the same early code-object-wide persistent dispatch-ID and EXEC-save SGPR placement rejection before the numerical oracle | Native gfx950 MFMA kernels use shared-memory tiling, repeated workgroup barriers, and a double-buffered LDS path.  Current-tip one-repetition artifacts are `consan-gfx950-hip-matmul-supercollider-recursionfix-20260722-252`, `consan-gfx950-hip-matmul-record-replay-clean-20260722-251`, and `consan-gfx950-hip-matmul-sampled-clean-20260722-257`, and `consan-gfx950-hip-matmul-inline-clean-20260722-258`; next localize the 20 SuperCollider placement failures and address the shared MOI scalar-placement boundary. |
+| P0 | `hip_matmul_matmul::m128_n128_k128` | 🟧 All 739/739 supported LDS accesses patch, including the 20 AccVGPR-destination B128 reads.  All three checks pass through prefix 728; prefix 729, the final ordinary `ds_read_b128` in a six-load burst, is the first numerical failure despite using the same descriptor allocation and scratch window as prefix 728 | 🟨 All three one-repetition numerical oracles pass in the unrestricted run after fixing scalar-epoch barrier SCC preservation; 709/739 accesses and all 109/109 barriers patch.  The remaining 30 typed resource failures belong to an unexecuted dynamic-stack HybridStreamKTree kernel packaged in the same code object, so static completeness is still false | 🟥 The retained current clean assessment rejects before execution at the former scalar-placement boundary; the newly integrated access-only AccVGPR fallback does not admit this synchronized object and has not promoted the cell | 🟥 The retained current clean assessment rejects before execution at the former scalar-placement boundary; current owner-qualified planning has not yet been rerun for this profile | Native gfx950 MFMA kernels use shared-memory tiling, repeated workgroup barriers, and a double-buffered LDS path.  Current one-repetition evidence includes the SuperCollider prefix artifacts and `/tmp/consan-gfx950-rr-hip-matmul-sccfix.log`.  Record/Replay now executes cleanly; its remaining promotion gate is the typed dynamic-stack resource gap in the packaged but unexecuted HybridStreamKTree kernel. |
 | P0 | `hipkittens_gemm_bf16fp32_16x32::m256_n256_k256` | 🩶 Build assessment blocked | 🩶 Build assessment blocked | 🩶 Build assessment blocked | 🩶 Build assessment blocked | Explicit gfx950 case with dynamic LDS, wide DS reads/writes, direct global-to-LDS traffic, a deep barrier schedule, and MFMA.  Its source and target definition are present, but the local corpus build requires an unavailable CPU-reference dependency that is outside the current validation setup; no ConSan profile has run. |
 | P1 | `hipkittens_gemm_fp8fp32_4wave::m256_n256_k256` | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | Explicit gfx950 four-wave FP8 case; currently listed in `skip_compile_tests`.  Remove that corpus-level blocker only after recording the compiler failure or confirming a current toolchain build, then inventory its LDS/barrier shapes. |
 | P1 | `hipkittens_gemm_mxfp8_4wave::m256_n256_k256` | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | Explicit gfx950 four-wave microscaling GEMM; also currently compile-skipped.  It is the closest packaged low-precision companion to the BF16 row. |
@@ -287,6 +287,43 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-22: Record/Replay HIP-matmul now executes cleanly without an expert
+  patch bound.  The first compact scalar-epoch barrier had reused its reserved
+  SCC snapshot as an epoch-overflow temporary and also touched one unreserved
+  SGPR.  The barrier is followed by a guest SCC-dependent branch, so the bad
+  restore selected the wrong control path and faulted the GPU.  The replacement
+  compares the epoch against a literal maximum, skips the increment when
+  saturated, and restores SCC without any temporary SGPR.  The focused host
+  regression, all 400 `ConSanMoi.*` tests, the one-access/one-barrier physical
+  reproducer, and the unrestricted physical run pass.  The unrestricted run
+  patches 709/739 accesses and 109/109 barriers; all 30 resource failures are
+  in the packaged, unexecuted dynamic-stack HybridStreamKTree kernel.  The
+  three selected numerical oracles pass, promoting Record/Replay from red to
+  yellow while static completeness remains open.
+
+- 2026-07-22: SuperCollider now lowers all 739/739 HIP-matmul LDS accesses,
+  including the 20 B128 reads whose destinations are AccVGPR tuples, without
+  changing `ACCUM_OFFSET`.  Focused host validation and the full 740-test
+  ConSan suite pass.  Physical artifact
+  `consan-gfx950-hip-matmul-supercollider-accvgpr-20260722-263` nevertheless
+  changes the first numerical result from 44 to 42.  Patch-prefix bisection
+  proves that 728 patches pass and 729 fail; artifact
+  `consan-gfx950-hip-matmul-supercollider-site729-20260722-264` retains that
+  exact boundary.  Patch 729 is the sixth ordinary `ds_read_b128` in its
+  double-buffered owner, not an accumulator read.  Its original 206-VGPR
+  metadata allocates 208 VGPRs; passing prefix 728 already uses v206:v212 and
+  already grows the descriptor to 216.  The original and duplicate load words
+  plus branch arithmetic are exact, localizing the next fix to the final-load
+  interaction rather than descriptor growth.  Static completeness therefore
+  advances, but the cell stays orange.
+
+- 2026-07-22: The earlier private-segment hypothesis is disproved.  A native
+  forced-spill test passes both 16-byte and 32-byte zero-to-nonzero private
+  growth, and HIP-matmul passes with its first access probe both with and
+  without persistent-state initialization when barrier tracking is disabled.
+  Enabling the first compact barrier alone reproduced the fault and led to the
+  SCC-preservation fix above.
 
 - 2026-07-22: The owner-qualified CDNA4 scalar-planning change moves the P0
   HIP-matmul Record/Replay frontier beyond its earlier heterogeneous-object
