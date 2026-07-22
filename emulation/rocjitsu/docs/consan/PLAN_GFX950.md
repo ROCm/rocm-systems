@@ -496,6 +496,13 @@ oracle is not an accepted row.
   its separate persistent-VGPR/AccVGPR boundary instead of consuming the
   active implementation lane.
 
+- 2026-07-22: `IS0` stays ACTIVE/blue after commit `85c831f0c5` closes its
+  VCC-safe scalar-placement implementation gap.  Four focused safety tests and
+  all 733 ConSan host tests pass.  Clean and paired physical runs recover TP1
+  prefill, TP1 decode/combined, and TP2 Inline with complete coverage and exact
+  oracles, promoting all three cells from red to yellow.  The box remains blue
+  only for prospective reviewed-fault closure, not implementation uncertainty.
+
 - 2026-07-22: Refreshed the Mermaid states to distinguish unfinished work
   from work actually in flight.  Broad, partially explored implementation
   nodes are TODO/gray rather than indefinitely ACTIVE/blue.  The only blue
