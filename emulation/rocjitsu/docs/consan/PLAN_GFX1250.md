@@ -153,7 +153,7 @@ flowchart TD
     XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessed;<br/>SGEMM first problem 12/12 exact and fully covered"]
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
-    XT3I["XT3I ACTIVE<br/>SPMM F8 Sampled relay fixes complete; six clients exact;<br/>seventh-client duration, paired, and fault remain"]
+    XT3I["XT3I ACTIVE<br/>SPMM F8 Sampled clean and paired accepted;<br/>reviewed fault and final promotion remain"]
     XT3J["XT3J DONE<br/>SPMM F8 Inline standard clean assessed;<br/>MT64x64 wrong-result rows isolate blocker"]
     XT3K["XT3K DONE<br/>SPMM F8 Inline ninth-barrier bank defect fixed;<br/>exact kernel fully passes"]
     XT3D["XT3D DONE<br/>full SGEMM first problem complete;<br/>quadratic 115,776-event frontier isolated"]
@@ -387,6 +387,16 @@ flowchart TD
   class XT3I active
   class G0,V9B,XT2C2,XT2C3,XT3E,XF,XG todo
 ```
+
+- 2026-07-22: XT3I's committed-tip 1200-second paired retry is accepted.
+  Artifact
+  `consan-green-expansion-20260722-spmm-f8-ml-sampled-overhead-final-clean-203`
+  passes all seven workload clients with exact numeric results, complete
+  172,468/172,468 access and 6,120/6,120 barrier-member coverage, and clean
+  provenance at `14fe6871bf`.  Sampled takes 1,125,794.07 ms versus the paired
+  230,928.55-ms baseline, a 4.88x workload-time slowdown.  XT3I stays
+  ACTIVE/blue only for a fresh inventory, reviewed fault, containment, and
+  final promotion; no further clean rerun is needed.
 
 - 2026-07-22: XT3I becomes the sole ACTIVE/blue node and V9B rotates to
   TODO/gray.  Qwen Sampled is now localized to the already documented broad

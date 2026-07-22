@@ -50,15 +50,15 @@ scratch before promotion.
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
 | **P0 Qwen3-0.6B prefill** | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown | 🩶 Unknown |
-| **P1 Sharktank TP1 prefill** | 🩶 historical: clean 120/120 native LDS access accepted | 🩶 historical: clean 104/104 access + 31/31 barrier accepted | 🩶 historical: clean 104/104 access + 7/7 qualified barrier accepted | 🩶 historical: clean 104/104 access + 31/31 barrier accepted |
-| **P1 Sharktank TP1 decode/combined** | 🩶 historical: clean 240/240 native LDS access accepted | 🩶 historical: clean 208/208 access + 62/62 barrier accepted | 🩶 historical: clean 208/208 access + 14/14 qualified barrier accepted | 🩶 historical: clean 208/208 access + 62/62 barrier accepted across six sequential runs |
-| **P2 Sharktank TP2 family** | 🩶 historical: clean 936/936 native LDS access accepted | 🩶 historical: clean 840/840 access + 168/168 barrier accepted | 🩶 historical: aggregate rejected: one 140-access + 10-barrier slice executes 0 | 🩶 historical: aggregate rejected: one 140-access + 28-barrier slice lowers 0 |
-| **P3 CLIP BF16** | 🩶 historical: clean 45/45 native LDS access accepted | 🩶 historical: clean 39/39 access + 24/24 barrier accepted | 🩶 historical: clean 39/39 access + 20/20 qualified barrier accepted | 🩶 historical: clean 39/39 access + 24/24 barrier accepted |
-| **P4 hip-moi D128 block attention** | 🟨 current clean: both exact oracles pass; 12/12 accesses; complete analysis | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current scalar fallback lacks entry-local scratch for one connected component |
+| **P1 Sharktank TP1 prefill** | 🟨 current clean: exact oracle passes; 120/120 accesses; complete analysis | 🩶 historical: clean 104/104 access + 31/31 barrier accepted | 🩶 historical: clean 104/104 access + 7/7 qualified barrier accepted | 🩶 historical: clean 104/104 access + 31/31 barrier accepted |
+| **P1 Sharktank TP1 decode/combined** | 🟨 current clean: decode and combined oracles pass; aggregate 240/240 accesses; complete analysis | 🩶 historical: clean 208/208 access + 62/62 barrier accepted | 🩶 historical: clean 208/208 access + 14/14 qualified barrier accepted | 🩶 historical: clean 208/208 access + 62/62 barrier accepted across six sequential runs |
+| **P2 Sharktank TP2 family** | 🟨 current clean: prefill, decode, and combined oracles pass; aggregate 936/936 accesses; complete analysis | 🩶 historical: clean 840/840 access + 168/168 barrier accepted | 🩶 historical: aggregate rejected: one 140-access + 10-barrier slice executes 0 | 🩶 historical: aggregate rejected: one 140-access + 28-barrier slice lowers 0 |
+| **P3 CLIP BF16** | 🟨 current clean: cosine oracle passes; 45/45 accesses; complete analysis | 🩶 historical: clean 39/39 access + 24/24 barrier accepted | 🩶 historical: clean 39/39 access + 20/20 qualified barrier accepted | 🩶 historical: clean 39/39 access + 24/24 barrier accepted |
+| **P4 hip-moi D128 block attention** | 🟩 current accepted bundle: exact clean, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary | 🟥 current scalar fallback lacks entry-local scratch for one connected component |
 | **P4 hip-moi D128 pressure attention** | 🟨 current clean: all four exact oracles pass; 12/12 accesses; complete analysis | 🩶 historical: clean 12/12 access + 4/4 barrier accepted | 🩶 historical: clean 12/12 access accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
-| **P4 hip-moi MFMA attention** | 🩶 historical: clean 12/12 group-FLAT accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted | 🩶 historical: clean 12/12 access accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
-| **P4 hip-moi Stream-K arrival** | 🩶 historical: clean 4/4 access accepted | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: planner safely rejected persistent identity at a full ordinary-VGPR/AccVGPR boundary; scalar persistent state open |
-| **P4 hip-moi tree atomic-OR** | 🩶 historical: clean 4/4 access accepted | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier accepted |
+| **P4 hip-moi MFMA attention** | 🟨 current clean: both exact oracles pass; 12/12 group-FLAT accesses; complete analysis | 🩶 historical: clean 12/12 access + 4/4 barrier accepted | 🩶 historical: clean 12/12 access accepted | 🩶 historical: clean 12/12 access + 4/4 barrier accepted |
+| **P4 hip-moi Stream-K arrival** | 🟨 current clean: exact oracle passes; 4/4 accesses; complete analysis | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: planner safely rejected persistent identity at a full ordinary-VGPR/AccVGPR boundary; scalar persistent state open |
+| **P4 hip-moi tree atomic-OR** | 🟨 current clean: both exact tests pass; 4/4 accesses; complete analysis | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier + 16/16 fence accepted | 🩶 historical: clean 4/4 access + 10/10 atomic accepted | 🩶 historical: clean 4/4 access + 10/10 atomic + 4/4 barrier accepted |
 | **P4 hip-moi Jakub attention** | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending | 🩶 Applicability inventory pending |
 
 ### Current-matrix executable audit
@@ -286,6 +286,25 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-22: Completed the first current-tip green gfx950 cell.  D128-block
+  SuperCollider combines the clean artifact, accepted one-repetition paired
+  artifact `consan-validation-gfx950-d128-block-supercollider-overhead-tip-20260722-001`,
+  fresh inventory, and reviewed fault artifact
+  `consan-validation-gfx950-d128-block-supercollider-fault-tip-20260722-001`.
+  The paired baseline is 128.5 ms and SuperCollider is 112.16x slower.  The
+  exact-one mutation rewrites the reviewed `s_barrier` at PC `0x874c` to
+  `s_nop 0`; requested/planned/applied are 1/1/1.  Its precommitted qualified
+  detector miss and failing workload oracle occur exactly as expected, with
+  12/12 complete coverage, bounded termination, and healthy physical-device
+  probes before and after.
+
+- 2026-07-22: Current-tip SuperCollider clean revalidation now also accepts
+  TP1 prefill (120/120), TP1 decode/combined (240/240), TP2 family (936/936),
+  CLIP BF16 (45/45), MFMA attention (12/12), Stream-K arrival (4/4), and tree
+  atomic-OR (4/4).  Every workload oracle passes and every admitted object is
+  statically and dynamically complete.  These cells are yellow because clean
+  evidence alone does not satisfy the fault/resource/frozen promotion gates.
 
 - 2026-07-22: Physical D128-pressure artifact
   `consan-validation-gfx950-d128-pressure-supercollider-tip-20260722-001`
