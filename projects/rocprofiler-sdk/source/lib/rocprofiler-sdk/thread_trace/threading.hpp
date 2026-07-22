@@ -124,6 +124,7 @@ struct triple_buffer_producer_data_t
     std::shared_ptr<triple_buffer_shared_data_t> shared{};
     std::unique_ptr<hsa::SQTTBufferingPackets>   buffer_packet{};
     int64_t                                      shader_engine_id{0};
+    bool                                         gfx11_workarounds{false};
 };
 
 // Worker flags have three states: stop (either stopped or stopping), running and (global)destructor

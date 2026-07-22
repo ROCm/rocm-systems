@@ -76,7 +76,7 @@ struct cbdata_t
 common::Synchronized<std::optional<int64_t>> client;
 
 // True once the HSA runtime is registered. Gates start_context() so pre-init
-// start requests are deferred and replayed by start_active_contexts().
+// start requests are deferred and replayed by initialize().
 std::atomic<bool>&
 hsa_inited()
 {
@@ -315,14 +315,16 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
 
         auto start_packets = control_packet_copy->before_krn_pkt;
         ROCP_FATAL_IF(start_packets.empty()) << "ATT start packet list is empty";
-        auto producer_data             = triple_buffer_producer_data_t{};
-        producer_data.producer_running = worker_flag;
-        producer_data.start_pkt_signal = shared_signal;
-        producer_data.control_packet   = std::move(control_packet_copy);
-        producer_data.copy_data_fn     = copy_data_sync;
-        producer_data.shared           = worker_data;
-        producer_data.buffer_packet    = std::move(buffer_packet);
-        producer_data.shader_engine_id = shader_engine_id;
+        auto producer_data              = triple_buffer_producer_data_t{};
+        producer_data.producer_running  = worker_flag;
+        producer_data.start_pkt_signal  = shared_signal;
+        producer_data.control_packet    = std::move(control_packet_copy);
+        producer_data.copy_data_fn      = copy_data_sync;
+        producer_data.shared            = worker_data;
+        producer_data.buffer_packet     = std::move(buffer_packet);
+        producer_data.shader_engine_id  = shader_engine_id;
+        const auto* rocp_agent          = CHECK_NOTNULL(agent::get_agent(agent_id));
+        producer_data.gfx11_workarounds = ((rocp_agent->gfx_target_version / 10000) % 100) == 11;
 
         // Other call sites (kfd, internal_threading) wrap each std::thread
         // creation in its own pre/post pair, so match that convention.
@@ -604,7 +606,7 @@ void
 DeviceThreadTracer::start_context()
 {
     // Per-agent resources don't exist until HSA is registered; the request is
-    // cached in the active-context array and replayed by start_active_contexts().
+    // cached in the active-context array and replayed by initialize().
     if(!hsa_inited().load())
     {
         ROCP_INFO << "Device thread trace start requested before hsa_init; deferring";
@@ -671,17 +673,12 @@ initialize(HsaApiTable* table)
         if(ctx->device_thread_trace) ctx->device_thread_trace->resource_init();
         if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->resource_init();
     }
-}
 
-void
-start_active_contexts()
-{
     // HSA resources now exist; allow start_context() to program the hardware.
     hsa_inited().store(true);
 
     // Replay device contexts started before hsa_init() (their start_context()
-    // returned early). Must run after the queue infrastructure is initialized
-    // (see registration.cpp); starting the SQTT hardware earlier hangs the GPU.
+    // returned early above). Dispatch mode needs no replay.
     for(auto& ctx : context::get_active_contexts())
     {
         if(ctx->device_thread_trace) ctx->device_thread_trace->start_context();

@@ -181,7 +181,10 @@ producer_loop(
     const size_t num_buffers = parameters.shared->num_buffers;
     const auto   sqtt_bandwidth =
         std::max(1.0, common::get_env("ROCPROFILER_SQTT_BANDWIDTH", SQTT_BANDWIDTH_DEFAULT));
-    const auto interval_microseconds = static_cast<size_t>(1E6 * buffer_size / sqtt_bandwidth);
+    const auto estimated_fill_us   = static_cast<size_t>(1E6 * buffer_size / sqtt_bandwidth);
+    const auto polling_interval_us = parameters.gfx11_workarounds
+                                         ? std::max<size_t>(1, estimated_fill_us / 2)
+                                         : estimated_fill_us;
 
     auto& buffer_packet = *CHECK_NOTNULL(parameters.buffer_packet);
 
@@ -191,12 +194,16 @@ producer_loop(
     bool     do_sleep{false};
     bool     saw_buffer_swap{false};
     bool     startup_poll_completed{false};
+    bool     startup_retry_performed{false};
     uint64_t next_chunk_index = 0;
     int64_t  shader_engine_id = parameters.shader_engine_id;
 
     auto sleep_fn = [&]() {
         sched_yield();
-        std::this_thread::sleep_for(std::chrono::microseconds(interval_microseconds));
+        // Sub-millisecond sleeps routinely overshoot the buffer-fill window on Linux. Yield-poll
+        // instead; for larger buffers, sleep for half the estimated fill time.
+        if(!parameters.gfx11_workarounds || polling_interval_us >= 1000)
+            std::this_thread::sleep_for(std::chrono::microseconds(polling_interval_us));
     };
 
     // Linear scan for any free (unfilled) slot. Returns num_buffers if none.
@@ -296,7 +303,8 @@ producer_loop(
     // Wait until ATT start packets have been executed
     parameters.shared->producer_waiting.store(true, std::memory_order_release);
     signal_wait(*parameters.start_pkt_signal);
-    auto startup_poll_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(5);
+    auto startup_poll_deadline  = std::chrono::steady_clock::now() + std::chrono::milliseconds(5);
+    auto startup_retry_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
 
     while(worker_flag.load() == WORKER_FLAG_RUNNING)
     {
@@ -319,7 +327,8 @@ producer_loop(
         }
         if(!query_completed) break;
 
-        if(auto status = buffer_packet.query_buffer_status())
+        auto status = buffer_packet.query_buffer_status();
+        if(status)
         {
             saw_buffer_swap = true;
             ROCP_TRACE << "Sending buffer swap";
@@ -356,6 +365,20 @@ producer_loop(
             // buffer, so skip the backoff when a flip just occurred.
             do_sleep = false;
             submit_wait_timeout();
+        }
+        else if(parameters.gfx11_workarounds && !saw_buffer_swap && !startup_retry_performed &&
+                std::chrono::steady_clock::now() >= startup_retry_deadline)
+        {
+            // A rare gfx11 start can complete without the SQTT block ever producing data. Preserve
+            // any partial trace, then reinitialize once while the producer is already active.
+            if(!stop_trace()) break;
+            iterate_trace();
+            send_header();
+            att_queue_submit_and_wait_last(queue, parameters.control_packet->before_krn_pkt);
+
+            startup_retry_performed = true;
+            startup_poll_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(5);
+            do_sleep              = false;
         }
     }
 

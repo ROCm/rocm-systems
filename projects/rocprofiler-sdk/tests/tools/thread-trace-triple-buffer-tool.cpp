@@ -295,7 +295,8 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
         static bool ignore_size = std::getenv("STARTSTOP") ? atoi(std::getenv("STARTSTOP")) : false;
         if(!ignore_size && total_size < MIN_TRACE_SIZE)
-            throw std::runtime_error("Trace is too small!");
+            throw std::runtime_error("Trace is too small: " + std::to_string(total_size) +
+                                     " bytes");
     }
     else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT &&
             record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume)
