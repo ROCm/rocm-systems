@@ -41,8 +41,8 @@ Profile multi-process workloads
 
 The same profile command supports applications that create multiple processes.
 ROCm Compute Profiler writes a separate PC sampling result and code-object
-information file for each process. The numeric prefix is the process ID (PID),
-and it associates each result with the code objects loaded by that process.
+information file for each process. The process ID (PID) prefix associates each
+result with the code objects loaded by that process.
 For example, a workload with PIDs 4312 and 4313 produces files like these:
 
 .. code-block:: shell-session
@@ -162,9 +162,9 @@ multi-process option is required:
 Analyze mode automatically loads PC sampling data for all processes in the
 workload directory and creates one unified report. Rows from different
 processes are combined when their kernel name, instruction offset, instruction
-text, and source line match. The ``count`` values are summed. For stochastic
-method, ``count_issued``, ``count_stalled``, and the counts for each stall
-reason are also summed.
+text, and source line match. The ``count`` values are summed. For the
+``stochastic`` method, ``count_issued``, ``count_stalled``, and the counts for
+each stall reason are also summed.
 
 For example, suppose two processes contain the same displayed instruction:
 
