@@ -63,7 +63,7 @@ Expected output:
 ## Profiling with rocprofiler-systems
 
 ```bash
-rocprof-sys-run -- mpirun -np 2 ./rocshmem
+mpirun -np 2 rocprof-sys-run -- ./rocshmem
 ```
 
 ### Recommended Configuration
@@ -71,15 +71,16 @@ rocprof-sys-run -- mpirun -np 2 ./rocshmem
 | Variable | Value | Purpose |
 | --- | --- | --- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `rocshmem_api` | Enable rocSHMEM host-stream API tracing |
-| `ROCPROFSYS_PROFILE` | `ON` | Generate call-stack profile |
+| `ROCPROFSYS_USE_ROCPD` | `ON` | Generate rocpd database |
 | `ROCPROFSYS_USE_SAMPLING` | `OFF` | Disable statistical sampling (use instrumentation only) |
 
 ```bash
-rocprof-sys-run \
+mpirun -np 2 rocprof-sys-run \
     -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,rocshmem_api \
-    -e ROCPROFSYS_PROFILE=ON \
-    -- mpirun -np 2 ./rocshmem
+    -e ROCPROFSYS_USE_ROCPD=ON \
+    -- ./rocshmem
 ```
 
-The resulting Perfetto trace will contain `rocm_rocshmem_api` spans for each of
-the nine host-stream API calls made by each PE.
+The resulting rocpd database will contain `rocm_rocshmem_api` spans for each of
+the nine host-stream API calls made by each PE. It can be viewed with
+[ROCm Optiq](https://github.com/ROCm/roc-optiq) visualizer.
