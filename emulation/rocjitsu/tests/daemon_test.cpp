@@ -137,7 +137,10 @@ TEST(RocjitsuCliDaemon, LaunchesApplicationAfterDaemonIsReady) {
   ASSERT_NE(mkdtemp(tmp_dir.data()), nullptr) << "mkdtemp failed: " << strerror(errno);
   struct TempCleanup {
     std::string path;
-    ~TempCleanup() { std::filesystem::remove_all(path); }
+    ~TempCleanup() {
+      std::error_code error;
+      std::filesystem::remove_all(path, error);
+    }
   } cleanup{tmp_dir};
   const std::string runtime_dir = tmp_dir + "/rocjitsu";
   const std::string socket_path = runtime_dir + "/daemon.sock";
