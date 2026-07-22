@@ -629,7 +629,6 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
     int numSegments;
     bool hasSysmemSegment;
     size_t totalSize;
-    int winRegEagerCft;
   };
   struct segmentInfo* globalSegmentInfo = nullptr;
   const int globalLsaTeamBaseIdx = devr->lsaSize * (comm->rank / devr->lsaSize);
@@ -655,7 +654,6 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
   globalSegmentInfo[comm->rank].numSegments = numSegments;
   globalSegmentInfo[comm->rank].hasSysmemSegment = hasSysmemSegment;
   globalSegmentInfo[comm->rank].totalSize = size;
-  globalSegmentInfo[comm->rank].winRegEagerCft = comm->config.winRegEagerCft;
   NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, globalSegmentInfo, sizeof(*globalSegmentInfo)), ret, fail_mem);
   mem->globalHasSysmemSegment = false;
   for (int r = 0; r < comm->nRanks; r++) {
@@ -663,11 +661,6 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
       mem->maxGlobalNumSegments = globalSegmentInfo[r].numSegments;
     }
     if (globalSegmentInfo[r].hasSysmemSegment) mem->globalHasSysmemSegment = true;
-    if (globalSegmentInfo[r].winRegEagerCft != comm->config.winRegEagerCft) {
-      WARN("Communicator ranks have mismatched winRegEagerCft configuration.");
-      ret = ncclInvalidArgument;
-      goto fail_mem;
-    }
   }
 
   NCCLCHECKGOTO(ncclCalloc(&mem->lsaNumSegments, devr->lsaSize), ret, fail_mem);
@@ -693,8 +686,7 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
     mem->primaryAddr = (char*)devr->lsaFlatBase + devr->lsaSelf * devr->bigSize + mem->bigOffset;
   }
 
-  if (comm->gpuCftSupport > 0 &&
-      (comm->config.winRegEagerCft || devr->le.baseId != NCCL_LE_ID_INVALID)) {
+  if (comm->gpuCftSupport > 0 && devr->le.baseId != NCCL_LE_ID_INVALID) {
     ncclTeam_t flatTeam = ncclTeamCft(comm);
     struct ncclDevrTeam* tmCft = nullptr;
     NCCLCHECKGOTO(symTeamObtain(comm, flatTeam, /*multimem=*/false, /*uc=*/true, /*mc=*/false, &tmCft, nullptr), ret,

@@ -108,7 +108,6 @@ typedef struct ncclConfig_v23100 {
   int launchOrderImplicit;
   int numRmaSig;
   int rmaEagerInit;
-  int winRegEagerCft;
 } ncclConfig_t;
 
 /* Config initializer must be assigned to initialize config structure when it is created.
@@ -138,7 +137,6 @@ typedef struct ncclConfig_v23100 {
   NCCL_CONFIG_UNDEF_INT,                    /* launchOrderImplicit */   \
   NCCL_CONFIG_UNDEF_INT,                    /* numRmaSig */             \
   NCCL_CONFIG_UNDEF_INT,                    /* rmaEagerInit */          \
-  NCCL_CONFIG_UNDEF_INT,                    /* winRegEagerCft */        \
 }
 
 /* A single vendor-specific option expressed as a key-value pair. Multiple options can be
