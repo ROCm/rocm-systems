@@ -1332,63 +1332,513 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
 }
 
 /******************************************************************************
- **************** TILE API STUB IMPLEMENTATIONS (NOT IMPLEMENTED) *************
+ ******************** TILE API RMA IMPLEMENTATIONS ****************************
  *****************************************************************************/
 
+__device__ __forceinline__ void GDAContext::tile_finish_put(int pe, int qp_index,
+                                                            ActiveWFInfo &wf_info) {
+  int local_pe{-1};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
+    ipcImpl_.ipcQuiet();
+  } else {
+    qps[qp_index].quiet(wf_info);
+  }
+}
+
+__device__ __forceinline__ void GDAContext::tile_finish_get(int pe, int qp_index,
+                                                            ActiveWFInfo &wf_info) {
+  tile_finish_put(pe, qp_index, wf_info);
+}
+
 // RMA PUT operations - Type-erased interface
-__device__ inline int GDAContext::tile_put([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
-                                    [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
-                                    [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
-                                    [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
-                                    [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for GDA backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int GDAContext::tile_put(void* dst_data, const void* src_data,
+                                           const size_t* dst_strides, const size_t* src_strides,
+                                           const size_t* start_coord, const size_t* boundary,
+                                           int ndim, size_t element_size, int pe,
+                                           [[maybe_unused]] uint64_t flags) {
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+
+  if (ndim == 2) {
+    const auto src_stride_0 = src_strides[0];
+    const auto src_stride_1 = src_strides[1];
+    const auto dst_stride_0 = dst_strides[0];
+    const auto dst_stride_1 = dst_strides[1];
+    const auto tile_extent_0 = boundary[0] - start_coord[0];
+    const auto tile_extent_1 = boundary[1] - start_coord[1];
+
+    char* src_base = static_cast<char*>(const_cast<void*>(src_data));
+    char* dst_base = static_cast<char*>(dst_data) +
+                     (start_coord[0] * dst_stride_0 + start_coord[1] * dst_stride_1) * element_size;
+
+    if (src_stride_1 == 1 && dst_stride_1 == 1 &&
+        src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
+      size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
+      internal_putmem_nbi(dst_base, src_base, total_size, pe, qp_index, wf_info);
+    } else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+      for (size_t i = 0; i < tile_extent_0; i++) {
+        char* src_row = src_base + i * src_stride_0 * element_size;
+        char* dst_row = dst_base + i * dst_stride_0 * element_size;
+        size_t row_size = tile_extent_1 * element_size;
+        internal_putmem_nbi(dst_row, src_row, row_size, pe, qp_index, wf_info);
+      }
+    } else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+      for (size_t j = 0; j < tile_extent_1; j++) {
+        char* src_col = src_base + j * src_stride_1 * element_size;
+        char* dst_col = dst_base + j * dst_stride_1 * element_size;
+        size_t col_size = tile_extent_0 * element_size;
+        internal_putmem_nbi(dst_col, src_col, col_size, pe, qp_index, wf_info);
+      }
+    } else {
+      for (size_t i = 0; i < tile_extent_0; i++) {
+        for (size_t j = 0; j < tile_extent_1; j++) {
+          char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
+          char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
+          internal_putmem_nbi(dst_elem, src_elem, element_size, pe, qp_index, wf_info);
+        }
+      }
+    }
+  } else if (ndim == 1) {
+    const auto tile_extent = boundary[0] - start_coord[0];
+    char* src_ptr = static_cast<char*>(const_cast<void*>(src_data));
+    char* dst_ptr = static_cast<char*>(dst_data) + start_coord[0] * dst_strides[0] * element_size;
+
+    if (src_strides[0] == 1 && dst_strides[0] == 1) {
+      internal_putmem_nbi(dst_ptr, src_ptr, tile_extent * element_size, pe, qp_index, wf_info);
+    } else {
+      for (size_t i = 0; i < tile_extent; i++) {
+        internal_putmem_nbi(dst_ptr + i * dst_strides[0] * element_size,
+                            src_ptr + i * src_strides[0] * element_size,
+                            element_size, pe, qp_index, wf_info);
+      }
+    }
+  }
+
+  tile_finish_put(pe, qp_index, wf_info);
+  return ROCSHMEM_SUCCESS;
 }
 
-__device__ inline int GDAContext::tile_put_wave([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
-                                         [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
-                                         [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
-                                         [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
-                                         [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for GDA backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int GDAContext::tile_put_wave(void* dst_data, const void* src_data,
+                                                const size_t* dst_strides, const size_t* src_strides,
+                                                const size_t* start_coord, const size_t* boundary,
+                                                int ndim, size_t element_size, int pe,
+                                                [[maybe_unused]] uint64_t flags) {
+  int local_pe{-1};
+  const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
+
+  if (ipc_avail) {
+    void* remote_base = shmem_ptr(dst_data, pe);
+    if (!remote_base) {
+      return ROCSHMEM_ERROR;
+    }
+
+    if (ndim == 2) {
+      const auto src_stride_0 = src_strides[0];
+      const auto src_stride_1 = src_strides[1];
+      const auto dst_stride_0 = dst_strides[0];
+      const auto dst_stride_1 = dst_strides[1];
+      const auto tile_extent_0 = boundary[0] - start_coord[0];
+      const auto tile_extent_1 = boundary[1] - start_coord[1];
+
+      char* src_base = static_cast<char*>(const_cast<void*>(src_data));
+      char* dst_base = static_cast<char*>(remote_base) +
+                       (start_coord[0] * dst_stride_0 + start_coord[1] * dst_stride_1) * element_size;
+      int wave_tid = get_flat_block_id() % WF_SIZE;
+
+      if (src_stride_1 == 1 && dst_stride_1 == 1 &&
+          src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
+        size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
+        memcpy_wave<MemcpyKind::Put>(dst_base, src_base, total_size);
+      } else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+        for (size_t i = wave_tid; i < tile_extent_0; i += WF_SIZE) {
+          char* src_row = src_base + i * src_stride_0 * element_size;
+          char* dst_row = dst_base + i * dst_stride_0 * element_size;
+          size_t row_size = tile_extent_1 * element_size;
+          memcpy_lane<MemcpyKind::Put>(dst_row, src_row, row_size);
+        }
+      } else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+        for (size_t j = wave_tid; j < tile_extent_1; j += WF_SIZE) {
+          char* src_col = src_base + j * src_stride_1 * element_size;
+          char* dst_col = dst_base + j * dst_stride_1 * element_size;
+          size_t col_size = tile_extent_0 * element_size;
+          memcpy_lane<MemcpyKind::Put>(dst_col, src_col, col_size);
+        }
+      } else {
+        int total_elements = tile_extent_0 * tile_extent_1;
+        for (int idx = wave_tid; idx < total_elements; idx += WF_SIZE) {
+          int i = idx / tile_extent_1;
+          int j = idx % tile_extent_1;
+          char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
+          char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
+          memcpy_lane<MemcpyKind::Put>(dst_elem, src_elem, element_size);
+        }
+      }
+    } else if (ndim == 1) {
+      const auto tile_extent = boundary[0] - start_coord[0];
+      char* src_ptr = static_cast<char*>(const_cast<void*>(src_data));
+      char* dst_ptr = static_cast<char*>(remote_base) + start_coord[0] * dst_strides[0] * element_size;
+      int wave_tid = get_flat_block_id() % WF_SIZE;
+
+      if (src_strides[0] == 1 && dst_strides[0] == 1) {
+        memcpy_wave<MemcpyKind::Put>(dst_ptr, src_ptr, tile_extent * element_size);
+      } else {
+        for (size_t i = wave_tid; i < tile_extent; i += WF_SIZE) {
+          memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst_strides[0] * element_size,
+                                       src_ptr + i * src_strides[0] * element_size,
+                                       element_size);
+        }
+      }
+    }
+
+    if (is_thread_zero_in_wave()) {
+      ipcImpl_.ipcQuiet();
+    }
+  } else if (is_thread_zero_in_wave()) {
+    tile_put(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
+             ndim, element_size, pe, flags);
+  }
+
+  return ROCSHMEM_SUCCESS;
 }
 
-__device__ inline int GDAContext::tile_put_wg([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
-                                       [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
-                                       [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
-                                       [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
-                                       [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for GDA backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int GDAContext::tile_put_wg(void* dst_data, const void* src_data,
+                                              const size_t* dst_strides, const size_t* src_strides,
+                                              const size_t* start_coord, const size_t* boundary,
+                                              int ndim, size_t element_size, int pe,
+                                              [[maybe_unused]] uint64_t flags) {
+  int local_pe{-1};
+  const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
+
+  if (ipc_avail) {
+    void* remote_base = shmem_ptr(dst_data, pe);
+    if (!remote_base) {
+      return ROCSHMEM_ERROR;
+    }
+
+    if (ndim == 2) {
+      const auto src_stride_0 = src_strides[0];
+      const auto src_stride_1 = src_strides[1];
+      const auto dst_stride_0 = dst_strides[0];
+      const auto dst_stride_1 = dst_strides[1];
+      const auto tile_extent_0 = boundary[0] - start_coord[0];
+      const auto tile_extent_1 = boundary[1] - start_coord[1];
+
+      char* src_base = static_cast<char*>(const_cast<void*>(src_data));
+      char* dst_base = static_cast<char*>(remote_base) +
+                       (start_coord[0] * dst_stride_0 + start_coord[1] * dst_stride_1) * element_size;
+      int thread_id = get_flat_block_id();
+      int block_size = get_flat_block_size();
+
+      if (src_stride_1 == 1 && dst_stride_1 == 1 &&
+          src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
+        size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
+        if (thread_id == 0) {
+          memcpy_lane<MemcpyKind::Put>(dst_base, src_base, total_size);
+        }
+      } else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+        for (size_t i = thread_id; i < tile_extent_0; i += block_size) {
+          char* src_row = src_base + i * src_stride_0 * element_size;
+          char* dst_row = dst_base + i * dst_stride_0 * element_size;
+          size_t row_size = tile_extent_1 * element_size;
+          memcpy_lane<MemcpyKind::Put>(dst_row, src_row, row_size);
+        }
+      } else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+        for (size_t j = thread_id; j < tile_extent_1; j += block_size) {
+          char* src_col = src_base + j * src_stride_1 * element_size;
+          char* dst_col = dst_base + j * dst_stride_1 * element_size;
+          size_t col_size = tile_extent_0 * element_size;
+          memcpy_lane<MemcpyKind::Put>(dst_col, src_col, col_size);
+        }
+      } else {
+        int total_elements = tile_extent_0 * tile_extent_1;
+        for (int idx = thread_id; idx < total_elements; idx += block_size) {
+          int i = idx / tile_extent_1;
+          int j = idx % tile_extent_1;
+          char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
+          char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
+          memcpy_lane<MemcpyKind::Put>(dst_elem, src_elem, element_size);
+        }
+      }
+    } else if (ndim == 1) {
+      const auto tile_extent = boundary[0] - start_coord[0];
+      char* src_ptr = static_cast<char*>(const_cast<void*>(src_data));
+      char* dst_ptr = static_cast<char*>(remote_base) + start_coord[0] * dst_strides[0] * element_size;
+      int thread_id = get_flat_block_id();
+      int block_size = get_flat_block_size();
+
+      if (src_strides[0] == 1 && dst_strides[0] == 1) {
+        size_t total_size = tile_extent * element_size;
+        if (thread_id == 0) {
+          memcpy_lane<MemcpyKind::Put>(dst_ptr, src_ptr, total_size);
+        }
+      } else {
+        for (size_t i = thread_id; i < tile_extent; i += block_size) {
+          memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst_strides[0] * element_size,
+                                       src_ptr + i * src_strides[0] * element_size,
+                                       element_size);
+        }
+      }
+    }
+
+    if (get_flat_block_id() == 0) {
+      ipcImpl_.ipcQuiet();
+    }
+    __builtin_amdgcn_s_barrier();
+  } else if (is_thread_zero_in_block()) {
+    tile_put(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
+             ndim, element_size, pe, flags);
+    __builtin_amdgcn_s_barrier();
+  } else {
+    __builtin_amdgcn_s_barrier();
+  }
+
+  return ROCSHMEM_SUCCESS;
 }
 
 // RMA GET operations - Type-erased interface
-__device__ inline int GDAContext::tile_get([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
-                                    [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
-                                    [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
-                                    [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
-                                    [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for GDA backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int GDAContext::tile_get(void* dst_data, const void* src_data,
+                                           const size_t* dst_strides, const size_t* src_strides,
+                                           const size_t* start_coord, const size_t* boundary,
+                                           int ndim, size_t element_size, int pe,
+                                           [[maybe_unused]] uint64_t flags) {
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+
+  if (ndim == 2) {
+    const auto src_stride_0 = src_strides[0];
+    const auto src_stride_1 = src_strides[1];
+    const auto dst_stride_0 = dst_strides[0];
+    const auto dst_stride_1 = dst_strides[1];
+    const auto tile_extent_0 = boundary[0] - start_coord[0];
+    const auto tile_extent_1 = boundary[1] - start_coord[1];
+
+    char* src_base = static_cast<char*>(const_cast<void*>(src_data)) +
+                     (start_coord[0] * src_stride_0 + start_coord[1] * src_stride_1) * element_size;
+    char* dst_base = static_cast<char*>(dst_data);
+
+    if (src_stride_1 == 1 && dst_stride_1 == 1 &&
+        src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
+      size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
+      internal_getmem_nbi(dst_base, src_base, total_size, pe, qp_index, wf_info);
+    } else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+      for (size_t i = 0; i < tile_extent_0; i++) {
+        char* src_row = src_base + i * src_stride_0 * element_size;
+        char* dst_row = dst_base + i * dst_stride_0 * element_size;
+        size_t row_size = tile_extent_1 * element_size;
+        internal_getmem_nbi(dst_row, src_row, row_size, pe, qp_index, wf_info);
+      }
+    } else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+      for (size_t j = 0; j < tile_extent_1; j++) {
+        char* src_col = src_base + j * src_stride_1 * element_size;
+        char* dst_col = dst_base + j * dst_stride_1 * element_size;
+        size_t col_size = tile_extent_0 * element_size;
+        internal_getmem_nbi(dst_col, src_col, col_size, pe, qp_index, wf_info);
+      }
+    } else {
+      for (size_t i = 0; i < tile_extent_0; i++) {
+        for (size_t j = 0; j < tile_extent_1; j++) {
+          char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
+          char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
+          internal_getmem_nbi(dst_elem, src_elem, element_size, pe, qp_index, wf_info);
+        }
+      }
+    }
+  } else if (ndim == 1) {
+    const auto tile_extent = boundary[0] - start_coord[0];
+    char* src_ptr = static_cast<char*>(const_cast<void*>(src_data)) +
+                    start_coord[0] * src_strides[0] * element_size;
+    char* dst_ptr = static_cast<char*>(dst_data);
+
+    if (src_strides[0] == 1 && dst_strides[0] == 1) {
+      internal_getmem_nbi(dst_ptr, src_ptr, tile_extent * element_size, pe, qp_index, wf_info);
+    } else {
+      for (size_t i = 0; i < tile_extent; i++) {
+        internal_getmem_nbi(dst_ptr + i * dst_strides[0] * element_size,
+                            src_ptr + i * src_strides[0] * element_size,
+                            element_size, pe, qp_index, wf_info);
+      }
+    }
+  }
+
+  tile_finish_get(pe, qp_index, wf_info);
+  return ROCSHMEM_SUCCESS;
 }
 
-__device__ inline int GDAContext::tile_get_wave([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
-                                         [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
-                                         [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
-                                         [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
-                                         [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for GDA backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int GDAContext::tile_get_wave(void* dst_data, const void* src_data,
+                                                const size_t* dst_strides, const size_t* src_strides,
+                                                const size_t* start_coord, const size_t* boundary,
+                                                int ndim, size_t element_size, int pe,
+                                                [[maybe_unused]] uint64_t flags) {
+  int local_pe{-1};
+  const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
+
+  if (ipc_avail) {
+    void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
+    if (!remote_base) {
+      return ROCSHMEM_ERROR;
+    }
+
+    if (ndim == 2) {
+      const auto src_stride_0 = src_strides[0];
+      const auto src_stride_1 = src_strides[1];
+      const auto dst_stride_0 = dst_strides[0];
+      const auto dst_stride_1 = dst_strides[1];
+      const auto tile_extent_0 = boundary[0] - start_coord[0];
+      const auto tile_extent_1 = boundary[1] - start_coord[1];
+
+      char* src_base = static_cast<char*>(remote_base) +
+                       (start_coord[0] * src_stride_0 + start_coord[1] * src_stride_1) * element_size;
+      char* dst_base = static_cast<char*>(dst_data);
+      int wave_tid = get_flat_block_id() % WF_SIZE;
+
+      if (src_stride_1 == 1 && dst_stride_1 == 1 &&
+          src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
+        size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
+        memcpy_wave<MemcpyKind::Get>(dst_base, src_base, total_size);
+      } else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+        for (size_t i = wave_tid; i < tile_extent_0; i += WF_SIZE) {
+          char* src_row = src_base + i * src_stride_0 * element_size;
+          char* dst_row = dst_base + i * dst_stride_0 * element_size;
+          size_t row_size = tile_extent_1 * element_size;
+          memcpy_lane<MemcpyKind::Get>(dst_row, src_row, row_size);
+        }
+      } else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+        for (size_t j = wave_tid; j < tile_extent_1; j += WF_SIZE) {
+          char* src_col = src_base + j * src_stride_1 * element_size;
+          char* dst_col = dst_base + j * dst_stride_1 * element_size;
+          size_t col_size = tile_extent_0 * element_size;
+          memcpy_lane<MemcpyKind::Get>(dst_col, src_col, col_size);
+        }
+      } else {
+        int total_elements = tile_extent_0 * tile_extent_1;
+        for (int idx = wave_tid; idx < total_elements; idx += WF_SIZE) {
+          int i = idx / tile_extent_1;
+          int j = idx % tile_extent_1;
+          char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
+          char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
+          memcpy_lane<MemcpyKind::Get>(dst_elem, src_elem, element_size);
+        }
+      }
+    } else if (ndim == 1) {
+      const auto tile_extent = boundary[0] - start_coord[0];
+      char* src_ptr = static_cast<char*>(remote_base) + start_coord[0] * src_strides[0] * element_size;
+      char* dst_ptr = static_cast<char*>(dst_data);
+      int wave_tid = get_flat_block_id() % WF_SIZE;
+
+      if (src_strides[0] == 1 && dst_strides[0] == 1) {
+        memcpy_wave<MemcpyKind::Get>(dst_ptr, src_ptr, tile_extent * element_size);
+      } else {
+        for (size_t i = wave_tid; i < tile_extent; i += WF_SIZE) {
+          memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst_strides[0] * element_size,
+                                       src_ptr + i * src_strides[0] * element_size,
+                                       element_size);
+        }
+      }
+    }
+
+    if (is_thread_zero_in_wave()) {
+      ipcImpl_.ipcQuiet();
+    }
+  } else if (is_thread_zero_in_wave()) {
+    tile_get(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
+             ndim, element_size, pe, flags);
+  }
+
+  return ROCSHMEM_SUCCESS;
 }
 
-__device__ inline int GDAContext::tile_get_wg([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
-                                       [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
-                                       [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
-                                       [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
-                                       [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for GDA backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int GDAContext::tile_get_wg(void* dst_data, const void* src_data,
+                                              const size_t* dst_strides, const size_t* src_strides,
+                                              const size_t* start_coord, const size_t* boundary,
+                                              int ndim, size_t element_size, int pe,
+                                              [[maybe_unused]] uint64_t flags) {
+  int local_pe{-1};
+  const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
+
+  if (ipc_avail) {
+    void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
+    if (!remote_base) {
+      return ROCSHMEM_ERROR;
+    }
+
+    if (ndim == 2) {
+      const auto src_stride_0 = src_strides[0];
+      const auto src_stride_1 = src_strides[1];
+      const auto dst_stride_0 = dst_strides[0];
+      const auto dst_stride_1 = dst_strides[1];
+      const auto tile_extent_0 = boundary[0] - start_coord[0];
+      const auto tile_extent_1 = boundary[1] - start_coord[1];
+
+      char* src_base = static_cast<char*>(remote_base) +
+                       (start_coord[0] * src_stride_0 + start_coord[1] * src_stride_1) * element_size;
+      char* dst_base = static_cast<char*>(dst_data);
+      int thread_id = get_flat_block_id();
+      int block_size = get_flat_block_size();
+
+      if (src_stride_1 == 1 && dst_stride_1 == 1 &&
+          src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
+        size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
+        if (thread_id == 0) {
+          memcpy_lane<MemcpyKind::Get>(dst_base, src_base, total_size);
+        }
+      } else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+        for (size_t i = thread_id; i < tile_extent_0; i += block_size) {
+          char* src_row = src_base + i * src_stride_0 * element_size;
+          char* dst_row = dst_base + i * dst_stride_0 * element_size;
+          size_t row_size = tile_extent_1 * element_size;
+          memcpy_lane<MemcpyKind::Get>(dst_row, src_row, row_size);
+        }
+      } else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+        for (size_t j = thread_id; j < tile_extent_1; j += block_size) {
+          char* src_col = src_base + j * src_stride_1 * element_size;
+          char* dst_col = dst_base + j * dst_stride_1 * element_size;
+          size_t col_size = tile_extent_0 * element_size;
+          memcpy_lane<MemcpyKind::Get>(dst_col, src_col, col_size);
+        }
+      } else {
+        int total_elements = tile_extent_0 * tile_extent_1;
+        for (int idx = thread_id; idx < total_elements; idx += block_size) {
+          int i = idx / tile_extent_1;
+          int j = idx % tile_extent_1;
+          char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
+          char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
+          memcpy_lane<MemcpyKind::Get>(dst_elem, src_elem, element_size);
+        }
+      }
+    } else if (ndim == 1) {
+      const auto tile_extent = boundary[0] - start_coord[0];
+      char* src_ptr = static_cast<char*>(remote_base) + start_coord[0] * src_strides[0] * element_size;
+      char* dst_ptr = static_cast<char*>(dst_data);
+      int thread_id = get_flat_block_id();
+      int block_size = get_flat_block_size();
+
+      if (src_strides[0] == 1 && dst_strides[0] == 1) {
+        size_t total_size = tile_extent * element_size;
+        if (thread_id == 0) {
+          memcpy_lane<MemcpyKind::Get>(dst_ptr, src_ptr, total_size);
+        }
+      } else {
+        for (size_t i = thread_id; i < tile_extent; i += block_size) {
+          memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst_strides[0] * element_size,
+                                       src_ptr + i * src_strides[0] * element_size,
+                                       element_size);
+        }
+      }
+    }
+
+    if (get_flat_block_id() == 0) {
+      ipcImpl_.ipcQuiet();
+    }
+    __builtin_amdgcn_s_barrier();
+  } else if (is_thread_zero_in_block()) {
+    tile_get(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
+             ndim, element_size, pe, flags);
+    __builtin_amdgcn_s_barrier();
+  } else {
+    __builtin_amdgcn_s_barrier();
+  }
+
+  return ROCSHMEM_SUCCESS;
 }
 
 // Allgather operations - Type-erased interface

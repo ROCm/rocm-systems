@@ -419,6 +419,10 @@ class GDAContext : public Context {
   __device__ void internal_getmem_nbi_wave(void *dest, const void *source,
       size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
 
+  __device__ void tile_finish_put(int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__ void tile_finish_get(int pe, int qp_index, ActiveWFInfo &wf_info);
+
   __device__
   void internal_quiet(ActiveWFInfo &wf_info);
 
@@ -484,7 +488,7 @@ class GDAContext : public Context {
 
  public:
   /**************************************************************************
-   ****************** TILE API METHODS (NOT IMPLEMENTED) ********************
+   ****************** TILE API METHODS **************************************
    *************************************************************************/
 
   // RMA PUT operations - Type-erased interface
