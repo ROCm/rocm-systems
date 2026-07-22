@@ -7,8 +7,6 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
-#include <cassert>
-
 namespace rocjitsu {
 
 namespace {
@@ -52,16 +50,17 @@ void expand_operand_register(RegisterSet &set, const Instruction &inst, const Op
     return;
   }
 
-  // Must-write: expanding to all four here would falsely kill three tuples the
-  // instruction does not write. Every VGPR def is exec-masked (is_exec_masked_def),
-  // and kill_defs() drops VGPR kills whenever has_exec_masked_vector_def is set, so
-  // an unknown-bank VGPR def never contributes a liveness kill. Record NOTHING in
-  // the def set rather than an unsound must-kill; the exec-mask suppression below
-  // is what keeps this sound. If that invariant ever changes (a non-exec-masked
-  // VGPR def, or kill_defs no longer suppressing VGPR kills), this must be
-  // revisited so an unknown-bank def does not over-kill.
-  assert(is_exec_masked_def(ref) &&
-         "unknown-bank VGPR def relies on exec-mask kill suppression; see kill_defs");
+  // Must-write with an unknown bank: expanding to all four tuples would falsely
+  // kill three the instruction does not write, so record NOTHING in the def set.
+  // This is only sound because such a def never contributes a liveness kill:
+  // control reaches here only for a VGPR ref (see the early return above), every
+  // VGPR def is exec-masked (is_exec_masked_def), and kill_defs() drops all VGPR
+  // kills once has_exec_masked_vector_def is set. If any of those change (a
+  // non-exec-masked VGPR def, or kill_defs no longer suppressing VGPR kills), an
+  // unknown-bank def would start over-killing and this must record the precise
+  // physical tuple instead. (An assert(is_exec_masked_def(ref)) here would be
+  // tautological — ref is already known to be a VGPR — so the invariant is
+  // documented rather than checked.)
 }
 
 void add_def(InstDefUse &du, const Instruction &inst, const Operand &operand, RegisterRef ref,

@@ -214,7 +214,11 @@ std::vector<uint32_t> make_table_dispatch_text() {
   return words;
 }
 
-std::vector<uint32_t> make_direct_table_dispatch_text() {
+// Direct indexed dispatch that reaches the table base by adding @p add_literal to
+// the getpc result. Callers pick the literal to match whatever text base the
+// analysis is told to assume, including a two's-complement negative value when the
+// table sits below .text.
+std::vector<uint32_t> make_direct_table_dispatch_text_with_addend(uint64_t add_literal) {
   std::vector<uint32_t> words;
   auto append32 = [&](uint32_t word) { words.push_back(word); };
   auto append64 = [&](uint64_t encoding) {
@@ -231,7 +235,7 @@ std::vector<uint32_t> make_direct_table_dispatch_text() {
   add.ssrc0 = 54;
   add.ssrc1 = 254;
   append32(std::bit_cast<uint32_t>(add));
-  append64(0x2000u - 0x1004u);
+  append64(add_literal);
 
   auto table_load = std::bit_cast<gfx1250::SmemMachineInst>(uint64_t{0xf4002000u});
   table_load.sbase = 27; // encoded in SGPR-pair units: s[54:55].
@@ -249,6 +253,56 @@ std::vector<uint32_t> make_direct_table_dispatch_text() {
   auto setpc = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804800u);
   setpc.ssrc0 = 30;
   append32(std::bit_cast<uint32_t>(setpc));
+  return words;
+}
+
+std::vector<uint32_t> make_direct_table_dispatch_text() {
+  return make_direct_table_dispatch_text_with_addend(0x2000u - 0x1004u);
+}
+
+// Same direct indexed dispatch as make_direct_table_dispatch_text(), but the
+// table base is built with TWO s_add_nc_u64 literal adds instead of one. The
+// patcher can only rewrite a single recorded add offset, so discovery must refuse
+// to resolve this (fail closed) rather than emit a dispatch whose first addend
+// still executes.
+std::vector<uint32_t> make_double_add_table_dispatch_text() {
+  std::vector<uint32_t> words;
+  auto append32 = [&](uint32_t word) { words.push_back(word); };
+  auto append64 = [&](uint64_t encoding) {
+    words.push_back(static_cast<uint32_t>(encoding));
+    words.push_back(static_cast<uint32_t>(encoding >> 32));
+  };
+
+  auto getpc = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804700u);
+  getpc.sdst = 54;
+  append32(std::bit_cast<uint32_t>(getpc)); // 0x00: s_get_pc_i64 s[54:55].
+
+  auto add = std::bit_cast<gfx1250::Sop2MachineInst>(0xa9800000u);
+  add.sdst = 54;
+  add.ssrc0 = 54;
+  add.ssrc1 = 254;
+  append32(std::bit_cast<uint32_t>(add)); // 0x04: s_add_nc_u64 (first add).
+  append64(0x800u);                       // 0x08: literal; getpc value 0x1004 + 0x800 = 0x1804.
+
+  append32(std::bit_cast<uint32_t>(add)); // 0x10: s_add_nc_u64 (second add).
+  append64(0x2000u - 0x1804u);            // 0x14: literal; 0x1804 + 0x7FC = 0x2000 (table base).
+
+  auto table_load = std::bit_cast<gfx1250::SmemMachineInst>(uint64_t{0xf4002000u});
+  table_load.sbase = 27; // s[54:55].
+  table_load.sdata = 0;
+  table_load.scale_offset = 1;
+  table_load.soffset = 2;
+  append64(std::bit_cast<uint64_t>(table_load)); // 0x18: s_load_b64.
+
+  auto swap = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804900u);
+  swap.sdst = 30;
+  swap.ssrc0 = 0;
+  append32(std::bit_cast<uint32_t>(swap)); // 0x20: s_swap_pc_i64.
+  append32(0xbfb00000u);                   // 0x24: s_endpgm continuation.
+
+  auto setpc = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804800u);
+  setpc.ssrc0 = 30;
+  append32(std::bit_cast<uint32_t>(setpc)); // 0x28: s_set_pc_i64.
   return words;
 }
 
@@ -399,6 +453,30 @@ TEST(RelocationFunctionTable, PatcherRejectsRelativeTextAddendWithoutExactOffset
   EXPECT_FALSE(patcher.replace_text(bytes, incomplete_mapping));
 }
 
+TEST(RelocationFunctionTable, PatcherRejectsConflictingRelative64PlacementsAcrossScopes) {
+  const auto image = make_relocation_function_table_elf();
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  CodeObjectPatcher patcher(object);
+
+  const std::array<uint32_t, 6> expanded_text = {0xbf800000u, 0xbf800000u, 0xbf800000u,
+                                                 0xbf800000u, 0xbf800000u, 0xbf800000u};
+  // A shared source block emitted into more than one kernel-local scope produces
+  // the SAME source offset with DIFFERENT relocated placements. A RELATIVE64
+  // function pointer is dereferenced at runtime, so no single rewrite is correct:
+  // the patcher must fail closed rather than collapse to one arbitrary clone. The
+  // fixture dereferences source offset 4 as a RELATIVE64 addend; provide two
+  // conflicting targets for it (plus the required mapping for source offset 12).
+  constexpr std::array<TextOffsetRelocation, 3> conflicting = {
+      TextOffsetRelocation{.source_offset = 4, .target_offset = 8},
+      TextOffsetRelocation{.source_offset = 4, .target_offset = 16},
+      TextOffsetRelocation{.source_offset = 12, .target_offset = 20},
+  };
+  const auto bytes = std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(expanded_text.data()), sizeof(expanded_text));
+  EXPECT_FALSE(patcher.replace_text(bytes, conflicting));
+}
+
 TEST(RelocationFunctionTable, ResolvesDynamicDispatchThroughGotAndTableLoads) {
   const auto text_words = make_table_dispatch_text();
   const auto image = make_relocation_function_table_elf(text_words);
@@ -443,6 +521,55 @@ TEST(RelocationFunctionTable, ResolvesRcclDirectIndexedTableDispatch) {
   EXPECT_EQ(dispatches[0].return_sreg, 30u);
   EXPECT_EQ(dispatches[0].source_getpc_offset, 0u);
   EXPECT_EQ(dispatches[0].source_address_add_offset, 4u);
+  EXPECT_EQ(dispatches[0].source_table_address_vaddr, 0x2000u);
+}
+
+TEST(RelocationFunctionTable, RejectsChainedAddressAddDispatch) {
+  const auto text_words = make_double_add_table_dispatch_text();
+  auto image = make_relocation_function_table_elf(text_words);
+  remove_got_reference(image);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+
+  const auto tables = discover_relocation_function_tables(object);
+  ASSERT_EQ(tables.size(), 1u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::array<uint64_t, 1> leaders{44};
+  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto dispatches = discover_relocation_table_dispatches(blocks, tables, 0x1000);
+  // The base is built with two literal adds; only one add offset can be relocated,
+  // so the dispatch must fail closed rather than resolve to a value whose first
+  // addend would still execute.
+  EXPECT_TRUE(dispatches.empty());
+}
+
+TEST(RelocationFunctionTable, ResolvesBackwardTableAddress) {
+  // The table sits BELOW the assumed text base, so the address is built by adding a
+  // two's-complement negative literal to the getpc result, which wraps modulo
+  // 2^64. Discovery must perform modulo arithmetic and still recognize the table,
+  // rather than treating the expected wraparound as overflow and rejecting a valid
+  // kernel. Assume text base 0x4000 (above the 0x2000 table); getpc value is
+  // 0x4004, so the literal is the wrapped 0x2000 - 0x4004.
+  constexpr uint64_t kAssumedTextVaddr = 0x4000u;
+  const uint64_t backward_addend = 0x2000u - (kAssumedTextVaddr + 0x4u);
+  const auto text_words = make_direct_table_dispatch_text_with_addend(backward_addend);
+  auto image = make_relocation_function_table_elf(text_words);
+  remove_got_reference(image);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+
+  const auto tables = discover_relocation_function_tables(object);
+  ASSERT_EQ(tables.size(), 1u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::array<uint64_t, 1> leaders{32};
+  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto dispatches = discover_relocation_table_dispatches(blocks, tables, kAssumedTextVaddr);
+  ASSERT_EQ(dispatches.size(), 1u);
+  EXPECT_EQ(dispatches[0].table_index, 0u);
   EXPECT_EQ(dispatches[0].source_table_address_vaddr, 0x2000u);
 }
 

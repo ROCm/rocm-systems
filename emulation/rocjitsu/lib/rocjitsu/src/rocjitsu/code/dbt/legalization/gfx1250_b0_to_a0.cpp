@@ -11,6 +11,8 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include "util/log.h"
+
 #include <array>
 #include <cstring>
 #include <string_view>
@@ -24,12 +26,23 @@ namespace {
 /// rules. Prefix-classified WMMA/SWMMAC and cluster-load instructions are
 /// handled separately because their contextual workarounds apply to families.
 ///
-/// NOT-YET-SUPPORTED (classified here but with no semantic expander):
-/// s_barrier_signal_isfirst, v_cvt_pk_fp8_f32, and v_cvt_sr_fp8_f32 are classified
-/// as needing an expansion but have no rule to produce one, so translating a kernel
-/// that uses them hard-fails (fail-closed) rather than passing the instruction
-/// through unchanged. Classifying them keeps that failure explicit and located.
-/// Add the semantic rule (and drop this note) once the expansion is implemented.
+/// NOT-YET-SUPPORTED (classified as needing an expansion but with no semantic
+/// expander, so translating a kernel that uses them fails closed rather than
+/// passing the instruction through unchanged):
+///   * s_barrier_signal_isfirst,
+///   * v_cvt_pk_fp8_f32, v_cvt_sr_fp8_f32 (only when CLAMP selects the B0-only
+///     mode; the ordinary form stays on the copy path),
+///   * v_wmma_scale / v_wmma_scale16 forms without an implemented rule,
+///   * the bare low-precision WMMA/SWMMAC families added below
+///     (v_wmma_f32_16x16x128_f8f6f4, the K=64 FP8/BF8 WMMA family, and the
+///     FP8/BF8 SWMMAC family), and
+///   * integer IU8/IU4 WMMA/SWMMAC.
+/// Separately, a 64-bit source using FLAT_SCRATCH_BASE_HI is classified via
+/// operand inspection (see uses_flat_scratch_base_hi_64bit_source), and the
+/// barrier-state and sleep/monitor families are DEFERRED with a pass-through
+/// warning rather than fail-closed (see is_deferred_gfx1250_family).
+/// Classifying the fail-closed cases keeps the failure explicit and located; add
+/// the semantic rule (and update this note) once each expansion is implemented.
 inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
     "s_barrier_signal_isfirst",
     "ds_load_2addr_b32",
@@ -91,6 +104,24 @@ inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
   if (mnemonic.starts_with("v_wmma_scale"))
     return true;
 
+  // Additional low-precision WMMA/SWMMAC forms are not yet supported on this
+  // target and are classified so translation fails closed rather than copying
+  // them through unchanged (see the not-yet-supported note above). These have no
+  // semantic rule yet:
+  //   * the bare K=128 F8F6F4 WMMA,
+  //   * the K=64 FP8/BF8 WMMA family, and
+  //   * the FP8/BF8 SWMMAC family (the integer SWMMAC is handled below).
+  const auto ends_with_fp8_bf8_pair = [&] {
+    return mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||
+           mnemonic.ends_with("_bf8_fp8") || mnemonic.ends_with("_bf8_bf8");
+  };
+  if (mnemonic == "v_wmma_f32_16x16x128_f8f6f4")
+    return true;
+  if (mnemonic.starts_with("v_wmma_f32_16x16x64_") && ends_with_fp8_bf8_pair())
+    return true;
+  if (mnemonic.starts_with("v_swmmac_") && ends_with_fp8_bf8_pair())
+    return true;
+
   // The A0 co-execution distance exceeds B0 only for integer IU8/IU4 WMMA or
   // SWMMAC. FP16/BF16 need four safe slots on both steppings, while floating
   // FP8 forms need no additional A0 padding. The integer forms remain
@@ -122,6 +153,39 @@ inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
   return encoding.clamp != 0;
 }
 
+/// @brief True when any source operand uses the special FLAT_SCRATCH_BASE_HI
+/// value in a 64-bit source position.
+/// @details This special scalar source is not usable in a 64-bit source position
+/// on this target, but the restriction is operand-sensitive rather than tied to a
+/// mnemonic family, so it needs per-operand inspection. A 32-bit use of the same
+/// value is unaffected. Encoding value 231 identifies the special source (see
+/// gfx1250/operand_types.h).
+[[nodiscard]] bool uses_flat_scratch_base_hi_64bit_source(const Instruction &inst) {
+  constexpr int kFlatScratchBaseHiEncoding = 231;
+  constexpr int k64BitOperand = 64;
+  for (int i = 0; i < inst.num_src_operands(); ++i) {
+    const Operand *op = inst.src_operand(i);
+    if (op != nullptr && op->size_bits() == k64BitOperand &&
+        op->encoding_value() == kFlatScratchBaseHiEncoding)
+      return true;
+  }
+  return false;
+}
+
+/// @brief True for instruction families whose A0 handling is deferred pending
+/// confirmation of the exact affected set.
+/// @details The barrier-state query and the sleep/monitor families may need
+/// target-specific handling that is not yet implemented. Rather than fail closed
+/// (which would refuse otherwise-translatable kernels that use very common ops
+/// such as s_sleep), these are passed through unchanged for now and a warning is
+/// emitted so the omission is visible. Revisit once the precise affected set is
+/// confirmed; if a concrete workaround is required, move the relevant members to
+/// requires_errata_expansion() so they fail closed instead.
+[[nodiscard]] bool is_deferred_gfx1250_family(std::string_view mnemonic) {
+  return mnemonic == "s_get_barrier_state" || mnemonic == "s_sleep" || mnemonic == "s_sleep_var" ||
+         mnemonic == "s_monitor_sleep";
+}
+
 } // namespace
 
 const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &inst) {
@@ -133,8 +197,15 @@ const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &
   if (fp8_clamp_family && !requires_fp8_clamp_emulation(inst))
     return nullptr;
 
-  if (!requires_errata_expansion(inst.mnemonic()))
+  if (!requires_errata_expansion(inst.mnemonic()) &&
+      !uses_flat_scratch_base_hi_64bit_source(inst)) {
+    // Deferred families pass through unchanged but warn, so the not-yet-handled
+    // case is visible rather than silent. See is_deferred_gfx1250_family.
+    if (is_deferred_gfx1250_family(mnemonic))
+      util::Logger::warn("gfx1250 translation passes through '", mnemonic,
+                         "' unchanged; target-specific handling is not yet implemented");
     return nullptr;
+  }
 
   // The runtime uses only the action and target opcode for this revision-specific
   // classification. Source keys remain zero because matching is performed on

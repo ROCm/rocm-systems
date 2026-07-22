@@ -1462,7 +1462,17 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       if (skip_scope)
         break;
 
-      if (single_effective_target) {
+      // A consumer may only be replaced with a direct transfer window when the
+      // recovered fact is COMPLETE. An incomplete fact means at least one
+      // predecessor path left the PC pair unconstrained; even if every recorded
+      // concrete target is identical, a direct window would redirect that
+      // unconstrained path to the concrete target it never dynamically reaches.
+      // Keep the original dynamic consumer and rewrite each source-side builder
+      // instead (relocation/liveness), exactly as for the multi-target case.
+      const bool any_incomplete = std::ranges::any_of(
+          consumer.fixups, [](const IndirectCallFixup &fixup) { return fixup.source_incomplete; });
+
+      if (single_effective_target && !any_incomplete) {
         consumer.use_transfer_window = true;
         consumer.window_fixup = first;
       } else {

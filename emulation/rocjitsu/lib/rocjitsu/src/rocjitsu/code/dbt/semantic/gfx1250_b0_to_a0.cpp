@@ -35,6 +35,15 @@ namespace {
 constexpr uint8_t kGfx1250Null = 124;
 constexpr uint8_t kGfx1250M0 = 125;
 
+/// @brief VOP3P opcode of the WMMA-scale prefix half of a scaled-WMMA pair.
+/// @details The scale prefix that fuses with a following WMMA is not a standalone
+/// named VOP3P op in the generated opcode table (it is a structural VOP3PX2/PX3
+/// prefix), so its opcode is named here rather than pulled from gfx1250 opcodes.
+/// kWmmaScaleSrc2PrefixOp is the VOP3PX2 scale-src2 prefix; kWmmaScale16PrefixOp
+/// is the VOP3PX3 Scale16 prefix.
+constexpr uint16_t kWmmaScaleSrc2PrefixOp = 0x35;
+constexpr uint16_t kWmmaScale16PrefixOp = 0x3a;
+
 /// @brief Append a generated instruction's words to one replacement sequence.
 template <size_t N>
 void append_words(std::vector<uint32_t> &output, const std::array<uint32_t, N> &words) {
@@ -50,6 +59,13 @@ void append_words(std::vector<uint32_t> &output, const std::array<uint32_t, N> &
 /// expansion and may be an S_SETREG* write to MODE, which must not immediately
 /// precede S_SET_VGPR_MSB. Once an expansion has emitted any instruction, that
 /// instruction already provides the required separation.
+///
+/// An S_WAIT_XCNT 0 is emitted immediately before each S_SET_VGPR_MSB: changing
+/// the VGPR-bank selection while cross-lane/memory work (XCNT) is still
+/// outstanding could let instruction replay observe a different VGPR mapping.
+/// Draining XCNT first makes the bank change observable to a consistent register
+/// view. The S_WAIT_XCNT precedes the S_SET_VGPR_MSB and does not affect the
+/// S_NOP separation from a preceding MODE write.
 void append_gfx1250_vgpr_msb_transition(std::vector<uint32_t> &words, uint8_t &current_mode,
                                         uint8_t new_mode) {
   if (current_mode == new_mode)
@@ -58,6 +74,7 @@ void append_gfx1250_vgpr_msb_transition(std::vector<uint32_t> &words, uint8_t &c
   if (words.empty())
     append_words(words, gfx1250::build_sopp(gfx1250::kSNopSopp, {.simm16 = 0}));
 
+  append_words(words, gfx1250::build_sopp(gfx1250::kSWaitXcntSopp, {.simm16 = 0}));
   const uint16_t immediate =
       static_cast<uint16_t>(new_mode) | (static_cast<uint16_t>(current_mode) << 8);
   append_words(words, gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = immediate}));
@@ -553,8 +570,8 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
   gfx1250::Vop3pMachineInst matrix{};
   std::memcpy(&scale, inst.raw_encoding(), sizeof(scale));
   std::memcpy(&matrix, inst.raw_encoding() + 2, sizeof(matrix));
-  if (scale.op != 0x3a || (matrix.op != gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p &&
-                           matrix.op != gfx1250::kVWmmaF3232x16x128F4Vop3p)) {
+  if (scale.op != kWmmaScale16PrefixOp || (matrix.op != gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p &&
+                                           matrix.op != gfx1250::kVWmmaF3232x16x128F4Vop3p)) {
     return ExpandResult::failed("gfx1250 Scale16 WMMA rule received an unsupported base opcode");
   }
 
@@ -689,7 +706,7 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
   const auto build_pass = [&](uint16_t pass_scale_a, uint16_t pass_scale_b, bool accumulate_d) {
     std::array<uint32_t, 4> pass = {inst.raw_encoding()[0], inst.raw_encoding()[1],
                                     inst.raw_encoding()[2], inst.raw_encoding()[3]};
-    set_word_field(pass[0], 0x35, 16, 8);
+    set_word_field(pass[0], kWmmaScaleSrc2PrefixOp, 16, 8);
     set_word_field(pass[1], gfx1250_vgpr_src(pass_scale_a), 0, 9);
     set_word_field(pass[1], gfx1250_vgpr_src(pass_scale_b), 9, 9);
     set_word_field(pass[1], gfx1250_vgpr_src(0), 18, 9);
@@ -1142,9 +1159,9 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
 inline constexpr std::array<TranslationRule, 37> kGfx1250B0ToA0ExpandRules = {{
     {gfx1250::encoding::kSopp, gfx1250::kSClauseSopp, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_s_clause, nullptr, nullptr},
-    {gfx1250::encoding::kVop3p, 0x35, RuleAction::Expand, 0, 0, nullptr,
+    {gfx1250::encoding::kVop3p, kWmmaScaleSrc2PrefixOp, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_wmma_scale_src2, nullptr, nullptr},
-    {gfx1250::encoding::kVop3p, 0x3a, RuleAction::Expand, 0, 0, nullptr,
+    {gfx1250::encoding::kVop3p, kWmmaScale16PrefixOp, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_wmma_scale16, nullptr, nullptr},
     {gfx1250::encoding::kVop3p, gfx1250::kVWmmaI3216x16x64Iu8Vop3p, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_wmma_iu8_spacing, nullptr, nullptr},

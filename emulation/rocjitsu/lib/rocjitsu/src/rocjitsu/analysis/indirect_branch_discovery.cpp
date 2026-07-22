@@ -929,10 +929,21 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 }
 
 bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup) {
+  // Deduplicate only FULLY identical fixups. A consumer with several distinct
+  // s_getpc builders reaching the same target keeps the translator rewriting each
+  // builder to its relocated address, so the builder identity
+  // (source_getpc_offset and the recovery range) must participate in the compare.
+  // Collapsing on {call, target, sreg} alone would drop a distinct builder, which
+  // then keeps its stale pre-relocation address and can branch into unrelated
+  // translated bytes. This mirrors the lattice value identity, which likewise
+  // includes source_getpc_offset.
   const auto duplicate = std::ranges::find_if(out, [&](const IndirectCallFixup &existing) {
     return existing.source_call_offset == fixup.source_call_offset &&
            existing.source_target_offset == fixup.source_target_offset &&
-           existing.source_call_sreg == fixup.source_call_sreg;
+           existing.source_call_sreg == fixup.source_call_sreg &&
+           existing.source_getpc_offset == fixup.source_getpc_offset &&
+           existing.source_recovery_begin_offset == fixup.source_recovery_begin_offset &&
+           existing.source_recovery_end_offset == fixup.source_recovery_end_offset;
   });
   if (duplicate != out.end())
     return false;
@@ -1324,14 +1335,18 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
 
 void emit_fixups_for_values(const AnalysisContext &ctx, size_t inst_index, uint16_t pair_lo,
                             std::span<const PcValue> values,
-                            std::vector<IndirectCallFixup> &recovered) {
+                            std::vector<IndirectCallFixup> &recovered, bool incomplete = false) {
   // A complete lattice value can contain multiple concrete targets. That is not
   // an error by itself; it represents a bounded static dispatch where different
   // predecessor paths materialize different PC constants before joining at one
-  // setpc/swappc consumer.
+  // setpc/swappc consumer. When @p incomplete, at least one predecessor left the
+  // pair unconstrained; the concrete targets are still recorded (for relocation
+  // and liveness) but flagged so the translator does not build a direct window.
   for (const PcValue &value : values) {
-    if (auto fixup = fixup_for_value(ctx, inst_index, pair_lo, value))
+    if (auto fixup = fixup_for_value(ctx, inst_index, pair_lo, value)) {
+      fixup->source_incomplete = incomplete;
       append_unique(recovered, *fixup);
+    }
   }
 }
 
@@ -1568,8 +1583,8 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
       continue;
     }
 
-    emit_fixups_for_values(ctx, consumer.inst_index, consumer.pair_lo, it->second.values,
-                           recovered);
+    emit_fixups_for_values(ctx, consumer.inst_index, consumer.pair_lo, it->second.values, recovered,
+                           it->second.incomplete);
   }
   return unresolved;
 }
@@ -1674,6 +1689,30 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
   std::array<std::optional<StashedPcHalf>, REGISTER_SET_MAX_SGPRS> read_halves;
   std::set<uint16_t> active_read_halves;
 
+  // Block-local VGPR-MSB bank state. gfx1250 vector operands encode only the low
+  // eight bits of a VGPR index; s_set_vgpr_msb supplies the high two bits per role
+  // (immediate byte {DST[7:6], SRC2[5:4], SRC1[3:2], SRC0[1:0]}). v_writelane
+  // addresses its destination through the DST bank and v_readlane its source
+  // through the SRC0 bank, so equal low selectors under differing banks name
+  // different physical VGPRs. Track the current immediate; nullopt means the bank
+  // is unknown (a dynamic MODE write) and any lane transport must fail closed.
+  // Architectural entry state is bank 0 for every role.
+  std::optional<uint8_t> vgpr_msb_imm = uint8_t{0};
+  const auto role_bank = [&](unsigned shift) -> std::optional<uint8_t> {
+    if (!vgpr_msb_imm)
+      return std::nullopt;
+    return static_cast<uint8_t>((*vgpr_msb_imm >> shift) & 0x3u);
+  };
+  // Physical VGPR = low selector + bank * 256, or nullopt when the bank is unknown.
+  const auto physical_vgpr = [&](uint16_t low, unsigned bank_shift) -> std::optional<uint16_t> {
+    const auto bank = role_bank(bank_shift);
+    if (!bank)
+      return std::nullopt;
+    return static_cast<uint16_t>(low + static_cast<uint16_t>(*bank) * 256u);
+  };
+  constexpr unsigned kDstBankShift = 6;  // s_set_vgpr_msb immediate DST field.
+  constexpr unsigned kSrc0BankShift = 0; // s_set_vgpr_msb immediate SRC0 field.
+
   for (size_t index = 0; index < ctx.insts.size(); ++index) {
     const Instruction &inst = *ctx.insts[index];
     const InstructionFacts &facts = ctx.facts[index];
@@ -1702,8 +1741,12 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
       const auto dst = operand_register(inst.dst_operand(0), RegClass::VGPR);
       const auto src = operand_register(inst.src_operand(0), RegClass::SGPR);
       const auto lane = inline_lane(inst.src_operand(1));
-      if (dst && src && lane) {
-        const VectorLaneSlot written_slot{dst->index, *lane};
+      // Key by the PHYSICAL destination VGPR (low selector + DST bank). If the
+      // bank is unknown, fail closed: do not record a slot under an ambiguous
+      // physical register.
+      const auto dst_phys = dst ? physical_vgpr(dst->index, kDstBankShift) : std::nullopt;
+      if (dst && src && lane && dst_phys) {
+        const VectorLaneSlot written_slot{*dst_phys, *lane};
         slots.erase(written_slot);
         for (uint16_t pair_lo : builders.active_pairs()) {
           const PcValue *value = builders.builder(pair_lo);
@@ -1722,8 +1765,11 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
       const auto src = operand_register(inst.src_operand(0), RegClass::VGPR);
       const auto lane = inline_lane(inst.src_operand(1));
       invalidate_written_sgprs(ctx, index, builders);
-      if (dst && src && lane) {
-        auto slot = slots.find(VectorLaneSlot{src->index, *lane});
+      // Look up by the PHYSICAL source VGPR (low selector + SRC0 bank). An unknown
+      // bank cannot match any recorded slot, so it fails closed.
+      const auto src_phys = src ? physical_vgpr(src->index, kSrc0BankShift) : std::nullopt;
+      if (dst && src && lane && src_phys) {
+        auto slot = slots.find(VectorLaneSlot{*src_phys, *lane});
         if (slot != slots.end()) {
           read_halves[dst->index] = slot->second;
           active_read_halves.insert(dst->index);
@@ -1747,17 +1793,32 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
         const auto dst = operand_register(inst.dst_operand(dst_index), RegClass::VGPR);
         if (!dst)
           continue;
-        std::erase_if(slots, [&](const auto &item) { return item.first.vgpr == dst->index; });
+        // The write's physical bank is not generally known here, so conservatively
+        // invalidate every slot whose low selector matches (all four banks). Slots
+        // store the physical index (low + bank*256), so compare the low 8 bits.
+        std::erase_if(slots,
+                      [&](const auto &item) { return (item.first.vgpr & 0xffu) == dst->index; });
       }
     }
 
     if (!builders.active_pairs().empty())
       invalidate_written_sgprs(ctx, index, builders);
-    // A VGPR-MSB/MODE change can repoint the low VGPR selector at a different
-    // physical register, so any lane slot recorded under the old bank is no longer
-    // trustworthy. Drop them (fail closed).
-    if (changes_vgpr_msb_bank(mnemonic))
+    // Track / invalidate the VGPR-MSB bank state. An immediate s_set_vgpr_msb sets
+    // a known bank; a dynamic MODE write (s_setreg_b32) makes the bank unknown, so
+    // later transport fails closed. Either way, existing slots recorded under the
+    // previous bank are no longer trustworthy, so drop them.
+    if (changes_vgpr_msb_bank(mnemonic)) {
       slots.clear();
+      if (mnemonic == "s_set_vgpr_msb") {
+        if (const auto *imm = inst.src_operand(0))
+          vgpr_msb_imm = static_cast<uint8_t>(imm->encoding_value() & 0xff);
+        else
+          vgpr_msb_imm = std::nullopt;
+      } else {
+        // s_setreg_b32 / s_setreg_imm32_b32 to MODE: treat the bank as unknown.
+        vgpr_msb_imm = std::nullopt;
+      }
+    }
     if (is_block_terminator(inst)) {
       builders = BlockState{};
       read_halves.fill(std::nullopt);

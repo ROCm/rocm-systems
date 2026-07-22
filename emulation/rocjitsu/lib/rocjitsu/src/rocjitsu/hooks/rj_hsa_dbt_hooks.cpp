@@ -3787,6 +3787,21 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return HSA_STATUS_ERROR;
   }
 
+  // gfx1250 A0 and B0 share an ELF machine ID, so a same-arch/same-mach match does
+  // NOT prove the code object is already the target silicon revision. The hook
+  // config does not yet carry silicon revisions, so a same-target gfx1250 load
+  // cannot be proven safe to pass through unchanged (it might require B0->A0
+  // workarounds). Fail closed rather than silently passing it through until the
+  // hook can select revisions. Other architectures are unambiguous by mach.
+  if (source_target.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      config->target.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      source_target.mach == config->target.mach) {
+    std::fprintf(stderr,
+                 "[rocjitsu-hooks] gfx1250 same-target load cannot be handled without silicon "
+                 "revision information; failing load\n");
+    return HSA_STATUS_ERROR;
+  }
+
   if (source_target.arch == config->target.arch && source_target.mach == config->target.mach) {
     log_message(kLogInfo,
                 "source target %s arch %s already matches requested target; passing through",

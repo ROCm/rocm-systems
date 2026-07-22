@@ -156,20 +156,30 @@ void transfer_instruction(PairState &state, const Instruction &inst,
     }
     if (address_pair && addend) {
       const auto address = state.find(*address_pair);
-      if (address != state.end() && address->second.kind == PairValueKind::Address) {
+      // Only track a SINGLE address add. getpc produces an Address with
+      // source_address_add_offset == 0; the first add sets it to this add's offset.
+      // A second add would chain (target + addend1 + addend2), but the patcher only
+      // rewrites the one recorded source_address_add_offset literal, so the earlier
+      // addend would still execute. Refuse to track a second add and leave the pair
+      // untracked below (fail closed) rather than record a value the relocation
+      // cannot faithfully reproduce.
+      if (address != state.end() && address->second.kind == PairValueKind::Address &&
+          address->second.source_address_add_offset == 0) {
         result = address->second;
-        if (*addend <= std::numeric_limits<uint64_t>::max() - result->value) {
-          result->value += *addend;
-          result->source_address_add_offset = inst.src_loc();
-          // RCCL materializes ncclDevFuncTable_{1,2,4} directly with getpc plus
-          // a literal and then performs an indexed s_load_b64 from that base.
-          if (const auto table = table_at_address(tables, result->value)) {
-            result->kind = PairValueKind::TableBase;
-            result->value = *table;
-            result->source_table_address_vaddr = tables[*table].table_vaddr;
-          }
-        } else {
-          result.reset();
+        // s_add_nc_u64 is modulo-2^64. A table or GOT below .text is addressed
+        // with a two's-complement negative literal whose add wraps around; that is
+        // the architecturally correct result, not an error. Add modulo and let the
+        // table/GOT membership check below decide whether the result is a real
+        // base — a wrapped value that matches no table simply stays an untracked
+        // Address.
+        result->value += *addend;
+        result->source_address_add_offset = inst.src_loc();
+        // RCCL materializes ncclDevFuncTable_{1,2,4} directly with getpc plus
+        // a literal and then performs an indexed s_load_b64 from that base.
+        if (const auto table = table_at_address(tables, result->value)) {
+          result->kind = PairValueKind::TableBase;
+          result->value = *table;
+          result->source_table_address_vaddr = tables[*table].table_vaddr;
         }
       }
     }
