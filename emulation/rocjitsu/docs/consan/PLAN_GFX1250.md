@@ -121,7 +121,7 @@ flowchart TD
     XP2A["XP2A DONE<br/>torch.topk exact oracles and dense Record/Replay<br/>106/106 diagnostic vertical"]
     XP2B["XP2B DONE<br/>torch.topk Sampled exact client completes;<br/>construction indexes validated"]
     XP2C["XP2C DONE<br/>torch.topk unrestricted Record/Replay exact/dynamic;<br/>113,760/160,848 accesses, all barriers"]
-    XP2D["XP2D TODO<br/>torch.topk Record/Replay 791-site residual;<br/>site/subgroup scalar routing required"]
+    XP2D["XP2D ACTIVE<br/>torch.topk Record/Replay 791-site residual;<br/>current owner-local routing revalidation"]
     XP2E["XP2E DONE<br/>torch.topk Inline construction scaled;<br/>both large objects finish patching"]
     XP2F["XP2F DONE<br/>torch.topk Inline execution signal;<br/>reproduced on independent software path"]
     XP2G["XP2G DONE<br/>torch.topk Inline one-site discriminator bounded;<br/>relay reservation rejects before execution"]
@@ -148,7 +148,7 @@ flowchart TD
     XT3L["XT3L DONE<br/>causal reduced-SGEMM Inline fault<br/>diagnosed; four-profile row green"]
     XT3M["XT3M DONE<br/>quick F8/HGEMM Inline resource retest;<br/>49/189 exact rows, zero failures"]
     XT3N["XT3N DONE<br/>quick F8 SuperCollider current paired<br/>fault and containment bundle green"]
-    XT3O["XT3O ACTIVE<br/>HGEMM Record/Replay isolation fixed;<br/>clean pass; paired acceptance remains"]
+    XT3O["XT3O DONE<br/>HGEMM Record/Replay dispatch isolation;<br/>clean, paired, and reviewed fault green"]
     XT3B["XT3B DONE<br/>quick-GEMM SuperCollider assessed;<br/>SGEMM first problem 12/12 exact and fully covered"]
     XT3G["XT3G DONE<br/>quick SGEMM Sampled first problem;<br/>12/12 exact, 640/640 accesses, 40/40 barriers"]
     XT3H["XT3H DONE<br/>quick SGEMM Inline assessed;<br/>first problem exact, aggregate dynamic incomplete"]
@@ -371,7 +371,7 @@ flowchart TD
   class XT3A done
   class XP3 done
   class XT3L,XT3M,XT3N done
-  class XT3O active
+  class XT3O done
   class XP3B done
   class XP3A done
   class XP3D done
@@ -380,7 +380,8 @@ flowchart TD
   class XT2C1 done
   class XP5S,XP1A done
   class XP3C done
-  class G0,V9,XP2D,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
+  class XP2D active
+  class G0,V9,XT2C2,XT2C3,XT3E,XT3I,XF,XG todo
 ```
 
 Broader partial-EXEC, dynamic-stack, high-register, cache/fence-shape, and
@@ -428,6 +429,18 @@ highest-value fix.  No coverage denominator, selector, expected diagnostic, or
 performance value is copied from another architecture.
 
 ## Progress log
+
+- 2026-07-21: XT3O is DONE/green at clean revision `82a0a1dd8b`.
+  Current-tip one-repetition paired artifact
+  `consan-green-expansion-20260721-hgemm-rr-dispatchfix-paired-193`
+  accepts both exact controls and Record/Replay with complete 8,162/8,162
+  access, 292/292 barrier, and 80/80 fence coverage.  It measures 203,079.00
+  ms against a 100,540.62-ms mean paired control, or 2.02x.  Reviewed artifact
+  `consan-green-expansion-20260721-hgemm-rr-dispatchfix-fault-195` applies the
+  unchanged late-barrier selector exactly once, matches its frozen
+  pass-oracle/no-diagnosis contract, retains complete surviving analysis,
+  reclaims all report memory, and passes target health before and after.
+  XP2D becomes ACTIVE/blue for the P0 top-k Record/Replay residual.
 
 - 2026-07-21: XT3O remains ACTIVE/blue, with its implementation and clean-run
   blocker resolved in `6270cbbfd2`.  All 688 focused ConSan tests pass.  The
