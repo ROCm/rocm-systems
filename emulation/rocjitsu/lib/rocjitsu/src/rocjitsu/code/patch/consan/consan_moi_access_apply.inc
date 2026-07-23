@@ -108,7 +108,9 @@ write_moi_entry_island(std::vector<uint8_t> &text, const PlannedPatch &planned_p
 }
 
 struct MoiAppendedBodyOptions {
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  explicit MoiAppendedBodyOptions(rj_code_arch_t arch) : arch(arch) {}
+
+  rj_code_arch_t arch;
   size_t deferred_guest_word_count = 0u;
   std::span<const uint32_t> scalar_save_words = {};
   std::span<const uint32_t> scalar_restore_words = {};
@@ -174,13 +176,17 @@ template <typename PlannedPatch>
 [[nodiscard]] std::optional<std::vector<uint32_t>>
 assemble_moi_appended_body(const PlannedPatch &planned_patch, std::span<const uint32_t> probe_words,
                            std::string_view probe_name, std::vector<std::string> &errors,
-                           const MoiAppendedBodyOptions &options = {}) {
+                           const MoiAppendedBodyOptions &options) {
   std::vector<uint32_t> body;
   if (options.trailing_guest_word_count > probe_words.size()) {
     errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                         " VGPR-bank guest split exceeds the probe body");
     return std::nullopt;
   }
+  // These checks are defensive backstops for plans assembled by ConSan's
+  // internal callers. Public options cannot directly construct either invalid
+  // combination, but release builds must not silently emit a corrupt body if a
+  // future planner violates the contract.
   if (!moi_appended_body_vgpr_msb_mode_is_valid(options.arch, options.gfx1250_vgpr_msb_mode)) {
     errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                         " has a VGPR-MSB mode on a non-gfx1250 body");
