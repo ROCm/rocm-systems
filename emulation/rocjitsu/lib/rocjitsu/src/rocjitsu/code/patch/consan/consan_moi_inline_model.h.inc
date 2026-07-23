@@ -8,38 +8,17 @@ struct alignas(8) ConSanMoiInlineExactShadowSlot {
 static_assert(sizeof(ConSanMoiInlineExactShadowSlot) == 24);
 static_assert(alignof(ConSanMoiInlineExactShadowSlot) == 8);
 
-/// Select the largest power-of-two dispatch fanout whose full-LDS exact shadow
-/// consumes at most half of the automatic report ceiling. The remaining half
-/// is available to the report header, diagnostics, atomic-release state, and
-/// causal metadata.
-[[nodiscard]] constexpr uint32_t
-consan_moi_inline_exact_dispatch_bank_count_for_lds(uint64_t max_lds_bytes) {
-  constexpr uint32_t kMaximumDispatchBankCount = 256u;
-  constexpr uint32_t kGuestLdsGranuleBytes = 4u;
-  const uint64_t lds_cell_count =
-      (static_cast<uint64_t>(max_lds_bytes) + kGuestLdsGranuleBytes - 1u) / kGuestLdsGranuleBytes;
-  const uint64_t exact_bytes_per_bank = lds_cell_count * sizeof(ConSanMoiInlineExactShadowSlot);
-  const uint64_t exact_shadow_budget = kConSanMoiAutoReportBufferCeilingBytes / 2u;
-  if (exact_bytes_per_bank > exact_shadow_budget)
-    return 0u;
-  uint32_t bank_count = 1u;
-  while (bank_count < kMaximumDispatchBankCount &&
-         exact_bytes_per_bank <= exact_shadow_budget / (bank_count * 2u)) {
-    bank_count *= 2u;
-  }
-  return bank_count;
-}
-
 // A code object owns one report buffer while several hardware dispatches can
 // execute concurrently. Hash the dispatch and workgroup identities into
 // independent exact-shadow banks so correct, unrelated workgroups do not
-// serialize every LDS cell through one versioned slot. The planner selects the
-// largest fitting fanout for each report's LDS inventory and carries it in the
-// layout; explicit legacy buffers retain the original maximum fanout.
-inline constexpr uint32_t kConSanMoiInlineMaximumDispatchBankCount = 256u;
-static_assert(consan_moi_inline_exact_dispatch_bank_count_for_lds(
-                  consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250)) != 0u,
-              "the configured LDS aperture cannot fit one InlineShadow dispatch bank");
+// serialize every LDS cell through one versioned slot. The full dispatch and
+// packed workgroup identities remain in each slot and are still authoritative;
+// banking only removes avoidable contention. Keep enough banks for the broad
+// dispatches produced by real reduction workloads while retaining a full-LDS
+// report below the automatic per-buffer ceiling.
+inline constexpr uint32_t kConSanMoiInlineExactDispatchBankCount = 256u;
+static_assert((kConSanMoiInlineExactDispatchBankCount &
+               (kConSanMoiInlineExactDispatchBankCount - 1u)) == 0u);
 
 struct alignas(8) ConSanMoiInlineAtomicReleaseSlot {
   uint32_t version = 0;

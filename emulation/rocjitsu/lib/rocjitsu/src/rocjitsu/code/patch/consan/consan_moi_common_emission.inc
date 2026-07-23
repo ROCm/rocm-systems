@@ -85,9 +85,9 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
 
 [[nodiscard]] std::optional<ConSanMoiWorkgroupShadowLayout> common_moi_workgroup_shadow_layout(
     std::span<const uint8_t> image, const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
-    const ConSanOptions &options, std::vector<std::string> &warnings, bool prefer_compact = false) {
+    std::vector<std::string> &warnings, bool prefer_compact = false) {
   std::optional<ConSanMoiWorkgroupShadowLayout> common;
-  const uint32_t max_workgroup_lds_bytes = consan_moi_max_workgroup_lds_bytes(options, arch);
+  const uint32_t max_workgroup_lds_bytes = consan_moi_max_workgroup_lds_bytes(arch);
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
     if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset) {
       warnings.emplace_back("ConSan MOI workgroup shadow descriptor exceeds ELF bytes");
@@ -446,10 +446,11 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
   return true;
 }
 
-[[nodiscard]] bool apply_lds_descriptor_requirements(
-    CodeObjectPatcher &patcher, const ConSanResult &result, const AmdGpuCodeObject &code_object,
-    const MoiDescriptorLdsRequirements &requirements, const ConSanOptions &options,
-    rj_code_arch_t arch, std::vector<std::string> &errors) {
+[[nodiscard]] bool
+apply_lds_descriptor_requirements(CodeObjectPatcher &patcher, const ConSanResult &result,
+                                  const AmdGpuCodeObject &code_object,
+                                  const MoiDescriptorLdsRequirements &requirements,
+                                  rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
     const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
     const auto active_kernel =
@@ -471,7 +472,7 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
     }
     KD descriptor{};
     std::memcpy(&descriptor, current_image.data() + active_descriptor_offset, sizeof(descriptor));
-    if (required_bytes > consan_moi_max_workgroup_lds_bytes(options, arch) ||
+    if (required_bytes > consan_moi_max_workgroup_lds_bytes(arch) ||
         descriptor.group_segment_fixed_size > required_bytes) {
       errors.emplace_back("ConSan MOI LDS-plan descriptor has an incompatible fixed-LDS size");
       return false;
@@ -540,8 +541,7 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
 [[nodiscard]] bool
 apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResult &result,
                                   const MoiDescriptorLdsRequirements &requirements,
-                                  const ConSanOptions &options, rj_code_arch_t arch,
-                                  std::vector<std::string> &errors) {
+                                  rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
     if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset ||
         kernel_for_descriptor(result, descriptor_offset) == nullptr) {
@@ -550,7 +550,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     }
     KD descriptor{};
     std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
-    if (required_bytes > consan_moi_max_workgroup_lds_bytes(options, arch) ||
+    if (required_bytes > consan_moi_max_workgroup_lds_bytes(arch) ||
         descriptor.group_segment_fixed_size > required_bytes) {
       errors.emplace_back("ConSan MOI LDS-plan descriptor has an incompatible fixed-LDS size");
       return false;
@@ -613,7 +613,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   auto lds_byte_offset_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
   if (!lds_byte_offset_vgpr)
     return std::nullopt;
-  if (reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
+  if (!options.moi_spill_overlaps_guest_operands &&
+      reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
                                              errors))
     return std::nullopt;
   if (options.moi_dynamic_access_records && has_recent_saveexec(bytes, candidate)) {
@@ -637,7 +638,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     return std::nullopt;
   }
   const std::optional<std::vector<ConSanMoiAccessRange>> access_ranges =
-      candidate_access_ranges(bytes, candidate);
+      candidate_access_ranges(bytes, candidate, arch);
   if (!access_ranges || access_ranges->empty()) {
     errors.emplace_back("ConSan MOI first-light probe requires a supported LDS access range");
     return std::nullopt;
@@ -668,13 +669,17 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     derived_owner_words.push_back(*owner_init);
     derived_owner_words.insert(derived_owner_words.end(), owner_mask->begin(), owner_mask->end());
   }
-  ConSanMoiWorkgroupSources workgroup_sources;
-  if (candidate.kernel_descriptor_file_offset) {
+  const auto persistent_workgroup_sources =
+      record_replay_persistent_workgroup_sources(options, arch);
+  ConSanMoiWorkgroupSources workgroup_sources =
+      persistent_workgroup_sources.value_or(ConSanMoiWorkgroupSources{});
+  if (!persistent_workgroup_sources && candidate.kernel_descriptor_file_offset) {
     const auto descriptor_workgroup_sources = moi_descriptor_workgroup_sources(
         bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
     if (!descriptor_workgroup_sources)
       return std::nullopt;
-    workgroup_sources = *descriptor_workgroup_sources;
+    workgroup_sources =
+        record_replay_workgroup_sources(*descriptor_workgroup_sources, options, arch);
   }
 
   std::vector<uint32_t> words;
@@ -1284,7 +1289,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   if (candidate.size == 0 || candidate.size % sizeof(uint32_t) != 0)
     return false;
   const std::optional<std::vector<ConSanMoiAccessRange>> ranges =
-      candidate_access_ranges(bytes, candidate);
+      candidate_access_ranges(bytes, candidate, arch);
   if (!ranges || ranges->empty())
     return false;
   for (const ConSanMoiAccessRange &range : *ranges) {

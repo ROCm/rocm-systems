@@ -263,10 +263,10 @@ apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
 }
 
 [[nodiscard]] bool is_ds_atomic(std::string_view mnemonic) {
-  return starts_with_any(mnemonic,
-                         {"ds_add", "ds_sub", "ds_rsub", "ds_inc", "ds_dec", "ds_min", "ds_max",
-                          "ds_and", "ds_or", "ds_xor", "ds_mskor", "ds_cmpstore", "ds_storexchg",
-                          "ds_condxchg", "ds_cond_sub", "ds_sub_clamp", "ds_pk_add"});
+  return starts_with_any(mnemonic, {"ds_add", "ds_sub", "ds_rsub", "ds_inc", "ds_dec", "ds_min",
+                                    "ds_max", "ds_and", "ds_or", "ds_xor", "ds_mskor",
+                                    "ds_cmpstore", "ds_cmpst", "ds_storexchg", "ds_condxchg",
+                                    "ds_cond_sub", "ds_sub_clamp", "ds_pk_add"});
 }
 
 [[nodiscard]] bool is_ds_read(std::string_view mnemonic) {

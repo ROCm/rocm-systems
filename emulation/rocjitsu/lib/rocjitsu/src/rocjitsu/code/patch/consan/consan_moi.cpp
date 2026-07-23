@@ -172,8 +172,10 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   // output, otherwise-unused adjacent SGPRs may still carry entry ABI state.
   constexpr size_t kCompactRecordReplayBarrierMemberLimit = 32u;
   effective_options.moi_record_replay_dense_barrier_router =
-      is_rdna4_family_arch(arch) && effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
-      supported_barrier_members > kCompactRecordReplayBarrierMemberLimit;
+      effective_options.moi_record_replay_dense_barrier_router ||
+      ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+       effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
+       supported_barrier_members > kCompactRecordReplayBarrierMemberLimit);
   const auto has_operational_atomic = [&](const auto &container, bool in_kernel) {
     return std::ranges::any_of(container.atomic_sites, [&](const ConSanAtomicSite &site) {
       return atomic_event_kind_for_site(result, container.name, in_kernel, site).has_value();
@@ -284,10 +286,9 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (configure_automatic_moi_exec_save_sgprs(effective_options, result, code_object_bytes, arch))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
-  if (configure_gfx1250_record_replay_owner_dispatch_assignments(effective_options, result,
-                                                                 code_object_bytes, arch)) {
+  if (configure_gfx1250_record_replay_dispatch_id_overrides(effective_options, result,
+                                                            code_object_bytes, arch))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
-  }
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_sgprs(effective_options, result, arch) ||
       !validate_moi_ordinary_scalar_state(effective_options, result, arch)) {
@@ -494,6 +495,8 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
                                  std::span<const uint8_t> code_object_bytes) {
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = options.moi_engine;
+  const rj_code_arch_t arch =
+      result.arch_name == "cdna4" ? ROCJITSU_CODE_ARCH_CDNA4 : ROCJITSU_CODE_ARCH_INVALID;
 
   size_t selected_candidate_count = 0;
   bool selected_flat_candidate = false;
@@ -520,7 +523,7 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
         });
     if (!supported)
       continue;
-    const auto ranges = candidate_access_ranges(code_object_bytes, candidate);
+    const auto ranges = candidate_access_ranges(code_object_bytes, candidate, arch);
     if (!ranges || ranges->empty())
       continue;
     ++selected_candidate_count;
@@ -623,11 +626,11 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     const bool descriptor_opaque_lds = inventory.access_range_count != 0u &&
                                        inventory.inline_lds_bytes < selected_native_lds_extent;
     if (selected_flat_candidate || selected_dynamic_lds_owner || descriptor_opaque_lds) {
-      const uint64_t external_lds_bytes = options.moi_max_workgroup_lds_bytes.value_or(
+      const uint64_t external_lds_bytes =
           result.arch_name == "gfx1250"
               ? consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250)
-              : static_cast<uint32_t>(kConSanMoiInlineShadowConservativeExactShadowEntries *
-                                      consan_moi_exact_shadow::granule_bytes));
+              : static_cast<uint64_t>(kConSanMoiInlineShadowConservativeExactShadowEntries) *
+                    consan_moi_exact_shadow::granule_bytes;
       inventory.inline_lds_bytes =
           std::max<uint64_t>(inventory.inline_lds_bytes, external_lds_bytes);
     }

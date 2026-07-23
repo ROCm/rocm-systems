@@ -228,7 +228,8 @@ consan_moi_inline_atomic_release_lookup(const ConSanMoiInlineAtomicReleaseSlot &
     return 0;
   const uint32_t mixed = workgroup_key ^ (workgroup_key >> 6u) ^ consumer_owner_id ^
                          (consumer_owner_id >> 6u) ^ (producer_owner_id << 1u) ^
-                         (producer_owner_id >> 5u) ^ (release_sequence ? 0x9e3779b9u : 0u);
+                         (producer_owner_id >> 5u) ^
+                         (release_sequence ? 0x9e3779b9u : 0u);
   return mixed & (table_capacity - 1u);
 }
 
@@ -339,7 +340,8 @@ consan_moi_inline_publish_acquired_token_transaction(
     }
     destinations[i] = consan_moi_inline_acquired_epoch_token_slot_index(
         token.workgroup_key, token.consumer_owner_id, token.producer_owner_id, table.size(),
-        token.kind == static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence));
+        token.kind ==
+            static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence));
     for (size_t prior = 0; prior < i; ++prior) {
       if (destinations[prior] == destinations[i]) {
         result.duplicate_destination = true;
@@ -411,7 +413,8 @@ consan_moi_inline_acquired_epoch_token_lookup(const ConSanMoiInlineAcquiredEpoch
       !consan_moi_inline_release_version_is_ready(slot.source_release_version) ||
       slot.reserved != 0)
     return ConSanMoiInlineAcquiredEpochTokenLookup::Collision;
-  if (slot.kind == static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence) ||
+  if (slot.kind ==
+          static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence) ||
       slot.workgroup_key != workgroup_key || slot.consumer_owner_id != consumer_owner_id ||
       slot.producer_owner_id != producer_owner_id)
     return ConSanMoiInlineAcquiredEpochTokenLookup::Collision;
@@ -423,7 +426,6 @@ consan_moi_inline_shadow_report_buffer_layout_for_bytes(
     uint64_t report_buffer_size,
     uint32_t requested_diagnostic_capacity = kConSanMoiInlineShadowDefaultDiagnosticCapacity) {
   ConSanMoiReportBufferLayout layout;
-  layout.inline_exact_dispatch_bank_count = kConSanMoiInlineMaximumDispatchBankCount;
   if (report_buffer_size < sizeof(ConSanMoiReportHeader) ||
       report_buffer_size > std::numeric_limits<size_t>::max())
     return layout;
@@ -504,9 +506,6 @@ consan_moi_report_layout_has_required_capacities(const ConSanMoiReportBufferLayo
            layout.sampled_pending_acquire_capacity != 0;
   if (engine == ConSanMoiEngine::InlineShadow)
     return layout.diagnostic_capacity != 0 && layout.exact_shadow_entry_capacity != 0 &&
-           layout.inline_exact_dispatch_bank_count != 0 &&
-           (layout.inline_exact_dispatch_bank_count &
-            (layout.inline_exact_dispatch_bank_count - 1u)) == 0u &&
            (!track_atomics || layout.inline_atomic_release_capacity != 0);
   return layout.access_record_capacity != 0 &&
          (!track_barriers || layout.barrier_record_capacity != 0) &&

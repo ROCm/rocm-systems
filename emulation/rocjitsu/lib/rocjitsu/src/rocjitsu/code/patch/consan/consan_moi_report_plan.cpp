@@ -79,7 +79,6 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
           .fence_record_capacity = layout.fence_record_capacity,
           .diagnostic_capacity = layout.diagnostic_capacity,
           .exact_shadow_entry_capacity = layout.exact_shadow_entry_capacity,
-          .inline_exact_dispatch_bank_count = layout.inline_exact_dispatch_bank_count,
           .inline_atomic_release_capacity = layout.inline_atomic_release_capacity,
           .inline_acquired_epoch_token_capacity = layout.inline_acquired_epoch_token_capacity,
           .inline_causal_snapshot_capacity = layout.inline_causal_snapshot_capacity,
@@ -116,8 +115,6 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
          override_layout.fence_record_capacity == expected.fence_record_capacity &&
          override_layout.diagnostic_capacity == expected.diagnostic_capacity &&
          override_layout.exact_shadow_entry_capacity == expected.exact_shadow_entry_capacity &&
-         override_layout.inline_exact_dispatch_bank_count ==
-             expected.inline_exact_dispatch_bank_count &&
          override_layout.inline_atomic_release_capacity ==
              expected.inline_atomic_release_capacity &&
          override_layout.inline_acquired_epoch_token_capacity ==
@@ -241,19 +238,8 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
     return false;
   }
   const uint64_t exact_shadow_cells = rounded_lds_bytes / consan_moi_exact_shadow::granule_bytes;
-  if (exact_shadow_cells > std::numeric_limits<uint32_t>::max()) {
-    plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
-    return false;
-  }
-  layout.inline_exact_dispatch_bank_count =
-      consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes);
-  if (layout.inline_exact_dispatch_bank_count == 0u) {
-    plan.outcome = ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity;
-    plan.reason = ConSanMoiAutoReportPlanReason::PerBufferCeiling;
-    return false;
-  }
   uint64_t exact_shadow_count = 0;
-  if (!checked_multiply(exact_shadow_cells, layout.inline_exact_dispatch_bank_count,
+  if (!checked_multiply(exact_shadow_cells, kConSanMoiInlineExactDispatchBankCount,
                         exact_shadow_count)) {
     plan.reason = ConSanMoiAutoReportPlanReason::ByteSizeOverflow;
     return false;
@@ -440,19 +426,13 @@ consan_moi_report_layout_from_override(const ConSanMoiReportLayoutOverride &over
     inventory.sampled_watchpoint_count = override_layout.sampled_watchpoint_capacity;
     break;
   case ConSanMoiEngine::InlineShadow:
-    if (override_layout.inline_exact_dispatch_bank_count == 0u ||
-        override_layout.inline_exact_dispatch_bank_count >
-            kConSanMoiInlineMaximumDispatchBankCount ||
-        (override_layout.inline_exact_dispatch_bank_count &
-         (override_layout.inline_exact_dispatch_bank_count - 1u)) != 0u ||
-        override_layout.exact_shadow_entry_capacity %
-            override_layout.inline_exact_dispatch_bank_count) {
+    if (override_layout.exact_shadow_entry_capacity % kConSanMoiInlineExactDispatchBankCount) {
       return {};
     }
     inventory.diagnostic_count = override_layout.diagnostic_capacity;
     inventory.inline_lds_bytes =
         (static_cast<uint64_t>(override_layout.exact_shadow_entry_capacity) /
-         override_layout.inline_exact_dispatch_bank_count) *
+         kConSanMoiInlineExactDispatchBankCount) *
         consan_moi_exact_shadow::granule_bytes;
     inventory.inline_atomic_release_count = override_layout.inline_atomic_release_capacity;
     inventory.inline_causal_snapshot_count = override_layout.inline_causal_snapshot_capacity;

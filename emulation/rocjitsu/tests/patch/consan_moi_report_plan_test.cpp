@@ -87,11 +87,8 @@ TEST(ConSanMoiAutoReportPlan, InlineRoundsDeclaredLdsAndKeepsOrderingTablesIndep
   };
   const auto plan = plan_consan_moi_auto_report(inventory);
   ASSERT_TRUE(plan.complete());
-  const uint32_t expected_dispatch_banks =
-      consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes);
-  const uint64_t expected_exact_shadow_entries = 1025u * expected_dispatch_banks;
-  EXPECT_EQ(plan.layout.inline_exact_dispatch_bank_count, expected_dispatch_banks);
-  EXPECT_EQ(plan.layout.exact_shadow_entry_capacity, expected_exact_shadow_entries);
+  constexpr uint64_t kExpectedExactShadowEntries = 1025u * kConSanMoiInlineExactDispatchBankCount;
+  EXPECT_EQ(plan.layout.exact_shadow_entry_capacity, kExpectedExactShadowEntries);
   EXPECT_EQ(plan.layout.inline_atomic_release_capacity, 3u);
   EXPECT_EQ(plan.layout.inline_causal_snapshot_capacity, 5u);
   EXPECT_EQ(plan.layout.inline_acquired_epoch_token_capacity, 7u);
@@ -100,7 +97,7 @@ TEST(ConSanMoiAutoReportPlan, InlineRoundsDeclaredLdsAndKeepsOrderingTablesIndep
             sizeof(ConSanMoiReportHeader) + 4 * sizeof(ConSanMoiDiagnosticRecord));
   EXPECT_EQ(plan.layout.inline_atomic_release_slots_offset,
             plan.layout.exact_shadow_entries_offset +
-                expected_exact_shadow_entries * sizeof(ConSanMoiInlineExactShadowSlot));
+                kExpectedExactShadowEntries * sizeof(ConSanMoiInlineExactShadowSlot));
   EXPECT_EQ(plan.layout.inline_causal_snapshots_offset,
             plan.layout.inline_atomic_release_slots_offset +
                 3 * sizeof(ConSanMoiInlineAtomicReleaseSlot));
@@ -113,7 +110,7 @@ TEST(ConSanMoiAutoReportPlan, InlineRoundsDeclaredLdsAndKeepsOrderingTablesIndep
                                      7 * sizeof(ConSanMoiInlineAcquiredEpochTokenSlot));
 }
 
-TEST(ConSanMoiAutoReportPlan, InlineLdsUsesPerLayoutDispatchBanking) {
+TEST(ConSanMoiAutoReportPlan, InlineFullLdsRetainsBroadDispatchBanking) {
   constexpr uint64_t kFullLdsBytes = 64u * 1024u;
   const ConSanMoiAutoReportInventory inventory{
       .engine = ConSanMoiEngine::InlineShadow,
@@ -123,12 +120,10 @@ TEST(ConSanMoiAutoReportPlan, InlineLdsUsesPerLayoutDispatchBanking) {
   const auto plan = plan_consan_moi_auto_report(inventory);
 
   ASSERT_TRUE(plan.complete());
-  const uint32_t expected_dispatch_banks =
-      consan_moi_inline_exact_dispatch_bank_count_for_lds(kFullLdsBytes);
-  EXPECT_EQ(plan.layout.inline_exact_dispatch_bank_count, expected_dispatch_banks);
-  EXPECT_EQ(expected_dispatch_banks, 128u);
+  EXPECT_GE(kConSanMoiInlineExactDispatchBankCount, 256u);
   EXPECT_EQ(plan.layout.exact_shadow_entry_capacity,
-            (kFullLdsBytes / consan_moi_exact_shadow::granule_bytes) * expected_dispatch_banks);
+            (kFullLdsBytes / consan_moi_exact_shadow::granule_bytes) *
+                kConSanMoiInlineExactDispatchBankCount);
   EXPECT_LE(plan.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
 }
 
@@ -151,8 +146,6 @@ TEST(ConSanMoiAutoReportPlan, InlineExactOverrideRoundTripsDispatchBankedLayout)
       *override_layout, ConSanMoiEngine::InlineShadow, plan.required_bytes);
   EXPECT_TRUE(restored.valid);
   EXPECT_EQ(restored.exact_shadow_entry_capacity, plan.layout.exact_shadow_entry_capacity);
-  EXPECT_EQ(restored.inline_exact_dispatch_bank_count,
-            plan.layout.inline_exact_dispatch_bank_count);
   EXPECT_EQ(restored.diagnostic_capacity, plan.layout.diagnostic_capacity);
   EXPECT_EQ(restored.inline_compact_token_mapping_capacity, 6u);
   EXPECT_EQ(restored.inline_compact_token_mappings_offset,
@@ -161,11 +154,6 @@ TEST(ConSanMoiAutoReportPlan, InlineExactOverrideRoundTripsDispatchBankedLayout)
 
   auto corrupt = *override_layout;
   --corrupt.exact_shadow_entry_capacity;
-  EXPECT_FALSE(consan_moi_report_layout_from_override(corrupt, ConSanMoiEngine::InlineShadow,
-                                                      plan.required_bytes)
-                   .valid);
-  corrupt = *override_layout;
-  corrupt.inline_exact_dispatch_bank_count /= 2u;
   EXPECT_FALSE(consan_moi_report_layout_from_override(corrupt, ConSanMoiEngine::InlineShadow,
                                                       plan.required_bytes)
                    .valid);
@@ -261,27 +249,24 @@ TEST(ConSanMoiAutoReportPlan, AdaptiveSampledBanksFitWithoutDroppingLogicalRange
 }
 
 TEST(ConSanMoiAutoReportPlan, InlineBoundaryChangesOnlyAtWholeLdsCells) {
+  const uint64_t available = kConSanMoiAutoReportBufferCeilingBytes - sizeof(ConSanMoiReportHeader);
+  const uint64_t fitting_cells =
+      available / (sizeof(ConSanMoiInlineExactShadowSlot) * kConSanMoiInlineExactDispatchBankCount);
   ConSanMoiAutoReportInventory inventory{
       .engine = ConSanMoiEngine::InlineShadow,
-      .inline_lds_bytes = 4096u,
+      .inline_lds_bytes = fitting_cells * consan_moi_exact_shadow::granule_bytes,
   };
-  const auto aligned = plan_consan_moi_auto_report(inventory);
-  ASSERT_TRUE(aligned.complete());
+  const auto accepted = plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(accepted.complete());
+  EXPECT_LE(accepted.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
+  EXPECT_LT(kConSanMoiAutoReportBufferCeilingBytes - accepted.required_bytes,
+            sizeof(ConSanMoiInlineExactShadowSlot) * kConSanMoiInlineExactDispatchBankCount);
 
-  ++inventory.inline_lds_bytes;
-  const auto next_cell = plan_consan_moi_auto_report(inventory);
-  ASSERT_TRUE(next_cell.complete());
-  EXPECT_EQ(next_cell.layout.inline_exact_dispatch_bank_count,
-            aligned.layout.inline_exact_dispatch_bank_count);
-  EXPECT_EQ(next_cell.layout.exact_shadow_entry_capacity,
-            aligned.layout.exact_shadow_entry_capacity +
-                aligned.layout.inline_exact_dispatch_bank_count);
-
-  inventory.inline_lds_bytes += consan_moi_exact_shadow::granule_bytes - 1u;
-  const auto same_cell = plan_consan_moi_auto_report(inventory);
-  ASSERT_TRUE(same_cell.complete());
-  EXPECT_EQ(same_cell.layout.exact_shadow_entry_capacity,
-            next_cell.layout.exact_shadow_entry_capacity);
+  inventory.inline_lds_bytes += consan_moi_exact_shadow::granule_bytes;
+  const auto rejected = plan_consan_moi_auto_report(inventory);
+  EXPECT_EQ(rejected.outcome, ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
+  EXPECT_EQ(rejected.reason, ConSanMoiAutoReportPlanReason::PerBufferCeiling);
+  EXPECT_GT(rejected.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
 }
 
 TEST(ConSanMoiAutoReportPlan, EveryAbiCapacityRejectsOnePastUint32) {

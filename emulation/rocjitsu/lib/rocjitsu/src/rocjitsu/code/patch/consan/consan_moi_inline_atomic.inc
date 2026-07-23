@@ -382,13 +382,17 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     derived_owner_word = *owner_init;
   }
 
-  ConSanMoiWorkgroupSources workgroup_sources;
-  if (candidate.kernel_descriptor_file_offset) {
+  const auto persistent_workgroup_sources =
+      record_replay_persistent_workgroup_sources(options, arch);
+  ConSanMoiWorkgroupSources workgroup_sources =
+      persistent_workgroup_sources.value_or(ConSanMoiWorkgroupSources{});
+  if (!persistent_workgroup_sources && candidate.kernel_descriptor_file_offset) {
     const auto descriptor_workgroup_sources = moi_descriptor_workgroup_sources(
         bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
     if (!descriptor_workgroup_sources)
       return std::nullopt;
-    workgroup_sources = *descriptor_workgroup_sources;
+    workgroup_sources =
+        record_replay_workgroup_sources(*descriptor_workgroup_sources, options, arch);
   }
 
   if (candidate.site.file_offset > bytes.size() ||

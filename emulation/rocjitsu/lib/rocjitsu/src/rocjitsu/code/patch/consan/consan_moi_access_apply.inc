@@ -116,7 +116,8 @@ template <typename PlannedPatch>
     std::optional<uint16_t> gfx1250_vgpr_msb_mode = std::nullopt,
     size_t trailing_guest_word_count = 0u, std::span<const uint32_t> entry_prefix_words = {},
     std::optional<uint32_t> probe_guest_instruction_offset = std::nullopt,
-    uint32_t *body_guest_instruction_offset = nullptr) {
+    uint32_t *body_guest_instruction_offset = nullptr,
+    bool restore_vgpr_spill_before_trailing_guest = false) {
   std::vector<uint32_t> body;
   if (trailing_guest_word_count > probe_words.size()) {
     errors.emplace_back("ConSan MOI " + std::string(probe_name) +
@@ -136,6 +137,9 @@ template <typename PlannedPatch>
   const size_t probe_body_begin = body.size();
   body.insert(body.end(), probe_words.begin(), probe_words.begin() + probe_prefix_words);
   body.insert(body.end(), scalar_restore_words.begin(), scalar_restore_words.end());
+  if (restore_vgpr_spill_before_trailing_guest && planned_patch.spill)
+    body.insert(body.end(), planned_patch.spill->restore_words.begin(),
+                planned_patch.spill->restore_words.end());
   if (select_low_vgpr_bank) {
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), ROCJITSU_CODE_ARCH_GFX1250));
@@ -158,7 +162,7 @@ template <typename PlannedPatch>
   if (select_low_vgpr_bank && planned_patch.spill)
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), 0u, ROCJITSU_CODE_ARCH_GFX1250));
-  if (planned_patch.spill)
+  if (planned_patch.spill && !restore_vgpr_spill_before_trailing_guest)
     body.insert(body.end(), planned_patch.spill->restore_words.begin(),
                 planned_patch.spill->restore_words.end());
   if (select_low_vgpr_bank && planned_patch.spill) {

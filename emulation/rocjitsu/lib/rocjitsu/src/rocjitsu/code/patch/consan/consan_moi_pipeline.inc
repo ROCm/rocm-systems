@@ -81,7 +81,9 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       result.warnings.emplace_back("ConSan MOI fence record patch skipped an overlapping patch");
       continue;
     }
-    const uint16_t scratch_count = inline_atomic_scratch_count(candidate.communication_site, arch);
+    const uint16_t scratch_count =
+        std::max<uint16_t>(inline_atomic_scratch_count(candidate.communication_site, arch),
+                           arch == ROCJITSU_CODE_ARCH_CDNA4 ? 8u : 0u);
     const ConSanCandidateResourcePlan *existing_plan =
         resource_plan_for_site(result, ConSanResourceSiteKind::Fence, fence.text_offset);
     ConSanCandidateResourcePlan plan =
@@ -319,7 +321,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     auto cave_words = build_fence_record_cave_words(
         active_bytes, planned.candidate, planned.address_plan, candidate_options,
         planned.spill ? &*planned.spill : nullptr,
-        planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index, record_count,
+        planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
+        arch == ROCJITSU_CODE_ARCH_CDNA4 ? layout.fence_record_capacity : record_count,
         layout.fence_records_offset, cave_text_offset, return_text_offset, std::nullopt,
         displaced_tail_words, result.errors);
     if (!cave_words)
@@ -337,7 +340,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
             active_bytes, planned.candidate, planned.address_plan, candidate_options,
             planned.spill ? &*planned.spill : nullptr,
             planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
-            record_count, layout.fence_records_offset, cave_text_offset, return_text_offset,
+            arch == ROCJITSU_CODE_ARCH_CDNA4 ? layout.fence_record_capacity : record_count,
+            layout.fence_records_offset, cave_text_offset, return_text_offset,
             static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u),
             /*displaced_tail_words=*/{}, result.errors);
         if (!cave_words)
@@ -605,8 +609,9 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       result.resource_plans.push_back(plan_moi_resource_site(
           state, options, ConSanResourceSiteKind::Fence, index, candidate.fence.text_offset,
           candidate.kernel_descriptor_file_offset,
-          inline_atomic_scratch_count(candidate.communication_site, state.arch), nullptr,
-          &candidate.communication_site));
+          std::max<uint16_t>(inline_atomic_scratch_count(candidate.communication_site, state.arch),
+                             state.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 8u : 0u),
+          nullptr, &candidate.communication_site));
     }
   }
 }
@@ -1012,9 +1017,13 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
       ConSanOptions owner_options = options;
       if (!options.moi_transient_sgpr_assignments.empty() &&
           !apply_moi_transient_sgpr_assignment(owner_options, plan.owner_descriptor_file_offsets)) {
+        if (state.arch == ROCJITSU_CODE_ARCH_GFX1250)
+          continue;
         owner_options.moi_dispatch_id_sgpr.reset();
       }
       if (plan.owner_descriptor_file_offsets.empty())
+        continue;
+      if (state.arch == ROCJITSU_CODE_ARCH_GFX1250 && !owner_options.moi_dispatch_id_sgpr)
         continue;
       const bool missing_dispatch = !owner_options.moi_dispatch_id_sgpr;
       const uint16_t dispatch_base = owner_options.moi_dispatch_id_sgpr.value_or(0u);

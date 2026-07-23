@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
-#include "embedded_schema.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
-#include "rocjitsu/config/config_loader.h"
 
 namespace rocjitsu {
 namespace {
@@ -80,14 +78,14 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
       9, static_cast<uint32_t>(exact_shadow_base >> 32u), ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
   const uint32_t dispatch_bank_stride =
-      (layout.exact_shadow_entry_capacity / layout.inline_exact_dispatch_bank_count) *
+      (layout.exact_shadow_entry_capacity / kConSanMoiInlineExactDispatchBankCount) *
       sizeof(ConSanMoiInlineExactShadowSlot);
   const uint32_t copy_dispatch_id =
       build_v_mov_b32_e32(12, *result.resolved_moi_dispatch_id_sgpr, ROCJITSU_CODE_ARCH_RDNA4);
   const auto mix_workgroup_key = build_v_xor_b32_e32(12, vector_source_vgpr(/*workgroup key=*/13),
                                                      12, ROCJITSU_CODE_ARCH_RDNA4);
   const auto select_dispatch_bank = build_v_and_b32_e32_literal(
-      12, layout.inline_exact_dispatch_bank_count - 1u, 12, ROCJITSU_CODE_ARCH_RDNA4);
+      12, kConSanMoiInlineExactDispatchBankCount - 1u, 12, ROCJITSU_CODE_ARCH_RDNA4);
   const auto scale_dispatch_bank =
       build_v_mul_lo_u32_vop3_literal(12, dispatch_bank_stride, 12, ROCJITSU_CODE_ARCH_RDNA4);
   const auto start_cell_shift = build_v_lshrrev_b32_e32(
@@ -523,75 +521,17 @@ TEST(ConSanMoi, WorkgroupShadowLayoutUsesOneEightByteSlotPerFourByteLdsCell) {
   EXPECT_FALSE(plan_consan_moi_workgroup_shadow(21848u));
 }
 
-TEST(ConSanMoi, Gfx1250WorkgroupShadowUsesConfiguredAperture) {
-  constexpr uint32_t kConfiguredLdsBytes =
-      consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250);
-  constexpr uint32_t kOriginalLdsBytes = kConfiguredLdsBytes / 4u;
-  const auto layout =
-      plan_consan_moi_compact_workgroup_shadow(kOriginalLdsBytes, kConfiguredLdsBytes);
+TEST(ConSanMoi, Gfx1250WorkgroupShadowPlansBeyond64KiB) {
+  constexpr uint32_t kOriginalLdsBytes = 71936u;
+  const auto layout = plan_consan_moi_compact_workgroup_shadow(
+      kOriginalLdsBytes, consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250));
 
   ASSERT_TRUE(layout);
   EXPECT_EQ(layout->base, kOriginalLdsBytes);
-  EXPECT_LE(layout->required_group_segment_size, kConfiguredLdsBytes);
+  EXPECT_GT(layout->required_group_segment_size, 64u * 1024u);
+  EXPECT_LE(layout->required_group_segment_size, 320u * 1024u);
   EXPECT_TRUE(layout->compact);
   EXPECT_TRUE(layout->lazy_initialization);
-  EXPECT_FALSE(plan_consan_moi_compact_workgroup_shadow(kConfiguredLdsBytes, kConfiguredLdsBytes));
-}
-
-TEST(ConSanMoi, Gfx1250WorkgroupLdsMatchesSimulatorConfig) {
-  const auto loaded =
-      config::load_config(std::string(CONFIG_DIR) + "/gfx1250.json", rocjitsu::kEmbeddedSchema);
-
-  ASSERT_TRUE(loaded.device.present);
-  EXPECT_EQ(consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250),
-            loaded.device.lds_size_kb * 1024u);
-}
-
-TEST(ConSanMoi, RuntimeLdsApertureOverridesConfiguredDefault) {
-  ConSanOptions options;
-  options.moi_max_workgroup_lds_bytes = 96u * 1024u;
-
-  EXPECT_EQ(consan_moi_max_workgroup_lds_bytes(options, ROCJITSU_CODE_ARCH_GFX1250), 96u * 1024u);
-  options.moi_max_workgroup_lds_bytes.reset();
-  EXPECT_EQ(consan_moi_max_workgroup_lds_bytes(options, ROCJITSU_CODE_ARCH_GFX1250),
-            consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250));
-}
-
-TEST(ConSanMoi, InlineExactDispatchBankSelectionCoversFitBoundaries) {
-  constexpr uint64_t kExactShadowBudget = kConSanMoiAutoReportBufferCeilingBytes / 2u;
-  constexpr uint64_t kLargestFittingCellCount =
-      kExactShadowBudget / sizeof(ConSanMoiInlineExactShadowSlot);
-  constexpr uint32_t kLargestFittingLdsBytes = static_cast<uint32_t>(kLargestFittingCellCount * 4u);
-
-  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(4u), 256u);
-  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(64u * 1024u), 128u);
-  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(1024u * 1024u), 8u);
-  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(kLargestFittingLdsBytes), 1u);
-  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(kLargestFittingLdsBytes + 4u), 0u);
-}
-
-TEST(ConSanMoi, InlineExactDispatchBanksTrackConfiguredLdsAperture) {
-  constexpr uint64_t kConfiguredLdsBytes =
-      consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250);
-  constexpr uint64_t kExactBytesPerBank =
-      ((kConfiguredLdsBytes + consan_moi_exact_shadow::granule_bytes - 1u) /
-       consan_moi_exact_shadow::granule_bytes) *
-      sizeof(ConSanMoiInlineExactShadowSlot);
-  constexpr uint64_t kExactShadowBudget = kConSanMoiAutoReportBufferCeilingBytes / 2u;
-  constexpr uint32_t kConfiguredDispatchBankCount =
-      consan_moi_inline_exact_dispatch_bank_count_for_lds(kConfiguredLdsBytes);
-  const ConSanMoiAutoReportInventory inventory{
-      .engine = ConSanMoiEngine::InlineShadow,
-      .inline_lds_bytes = kConfiguredLdsBytes,
-  };
-  const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
-
-  ASSERT_TRUE(plan.complete());
-  EXPECT_EQ(plan.layout.inline_exact_dispatch_bank_count, kConfiguredDispatchBankCount);
-  EXPECT_LE(kExactBytesPerBank * kConfiguredDispatchBankCount, kExactShadowBudget);
-  if (kConfiguredDispatchBankCount < kConSanMoiInlineMaximumDispatchBankCount) {
-    EXPECT_GT(kExactBytesPerBank * (kConfiguredDispatchBankCount * 2u), kExactShadowBudget);
-  }
 }
 
 TEST(ConSanMoi, LazyWorkgroupShadowAddsTwoBitValidityState) {

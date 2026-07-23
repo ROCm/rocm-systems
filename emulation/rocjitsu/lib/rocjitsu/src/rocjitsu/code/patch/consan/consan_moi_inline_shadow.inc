@@ -515,12 +515,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
               direct_workgroup_shadow_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
           if (inserted) {
             cached->second = common_moi_workgroup_shadow_layout(
-                bytes, *resources, arch, options, result.warnings, compact_token_available);
+                bytes, *resources, arch, result.warnings, compact_token_available);
           }
           workgroup_shadow = cached->second;
         } else {
           workgroup_shadow = common_moi_workgroup_shadow_layout(
-              bytes, *resources, arch, options, result.warnings, compact_token_available);
+              bytes, *resources, arch, result.warnings, compact_token_available);
         }
       }
       if (has_dynamic_lds_owner && !warned_dynamic_lds_external_shadow) {
@@ -847,8 +847,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     if (!apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
                                             result.errors))
       return;
-    if (!apply_lds_descriptor_requirements(patcher, result, code_object, lds_requirements, options,
-                                           arch, result.errors))
+    if (!apply_lds_descriptor_requirements(patcher, result, code_object, lds_requirements, arch,
+                                           result.errors))
       return;
     const std::span<const uint8_t> old_text = patcher.text_bytes();
     if (old_text.empty()) {
@@ -1457,8 +1457,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             return info;
           },
           [&](std::vector<uint8_t> &image, ConSanResult &current_result) {
-            return apply_lds_descriptor_requirements(image, current_result, lds_requirements,
-                                                     options, arch, current_result.errors);
+            return apply_lds_descriptor_requirements(image, current_result, lds_requirements, arch,
+                                                     current_result.errors);
           },
           result))
     return;
@@ -2339,7 +2339,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     std::optional<uint16_t> private_owner_shift,
     std::optional<uint32_t> private_sample_sequence_offset, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset = nullptr) {
-  const auto access_ranges = candidate_access_ranges(bytes, candidate);
+  const auto access_ranges = candidate_access_ranges(bytes, candidate, arch);
   if (!access_ranges || access_ranges->empty()) {
     errors.emplace_back("ConSan MOI sampled probe requires at least one LDS access range");
     return std::nullopt;

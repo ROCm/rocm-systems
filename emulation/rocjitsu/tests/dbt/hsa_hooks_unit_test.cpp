@@ -142,11 +142,8 @@ std::vector<bool> g_transform_override_track_atomics;
 std::vector<uint32_t> g_transform_override_runtime_sample_strides;
 std::vector<uint64_t> g_transform_override_report_sizes;
 std::vector<std::optional<uint64_t>> g_transform_override_sc_report_addresses;
-std::vector<std::optional<uint32_t>> g_transform_override_max_workgroup_lds_bytes;
 std::vector<std::optional<rocjitsu::ConSanMoiReportLayoutOverride>>
     g_transform_override_report_layouts;
-hsa_region_segment_t g_fake_region_segment = HSA_REGION_SEGMENT_GLOBAL;
-size_t g_fake_region_size = 0;
 std::vector<std::vector<uint8_t>> g_fake_allocations;
 std::vector<hsa_amd_memory_pool_t> g_fake_allocation_pools;
 std::vector<size_t> g_fake_allocation_sizes;
@@ -434,10 +431,7 @@ hsa_status_t HSA_API fake_region_get_info(hsa_region_t region, hsa_region_info_t
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   switch (attribute) {
   case HSA_REGION_INFO_SEGMENT:
-    *static_cast<hsa_region_segment_t *>(value) = g_fake_region_segment;
-    return HSA_STATUS_SUCCESS;
-  case HSA_REGION_INFO_SIZE:
-    *static_cast<size_t *>(value) = g_fake_region_size;
+    *static_cast<hsa_region_segment_t *>(value) = HSA_REGION_SEGMENT_GLOBAL;
     return HSA_STATUS_SUCCESS;
   case HSA_REGION_INFO_RUNTIME_ALLOC_ALLOWED:
     *static_cast<bool *>(value) = true;
@@ -500,7 +494,6 @@ rocjitsu::ConSanResult transform_override(std::span<const uint8_t> bytes,
   g_transform_override_track_atomics.push_back(options.moi_track_atomics);
   g_transform_override_runtime_sample_strides.push_back(options.moi_runtime_sample_stride);
   g_transform_override_sc_report_addresses.push_back(options.report_buffer_address);
-  g_transform_override_max_workgroup_lds_bytes.push_back(options.moi_max_workgroup_lds_bytes);
   g_transform_override_report_sizes.push_back(options.moi_report_buffer_size);
   g_transform_override_report_layouts.push_back(options.moi_report_layout);
   rocjitsu::ConSanResult result = g_transform_override_result;
@@ -943,11 +936,8 @@ void reset_code_object_observations() {
   g_transform_override_track_atomics.clear();
   g_transform_override_runtime_sample_strides.clear();
   g_transform_override_sc_report_addresses.clear();
-  g_transform_override_max_workgroup_lds_bytes.clear();
   g_transform_override_report_sizes.clear();
   g_transform_override_report_layouts.clear();
-  g_fake_region_segment = HSA_REGION_SEGMENT_GLOBAL;
-  g_fake_region_size = 0;
   g_transform_override_result = {};
 }
 
@@ -1015,33 +1005,6 @@ TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay
   EXPECT_EQ(g_transform_override_flavors.front(), rocjitsu::ConSanFlavor::Moi);
   ASSERT_EQ(g_transform_override_engines.size(), 1u);
   EXPECT_EQ(g_transform_override_engines.front(), rocjitsu::ConSanMoiEngine::RecordReplay);
-}
-
-TEST(HsaHooksUnitTest, ConSanUsesRuntimeGroupRegionForLdsAperture) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "inline-shadow");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", "4096");
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", "65536");
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "0");
-
-  reset_code_object_observations();
-  g_fake_region_segment = HSA_REGION_SEGMENT_GROUP;
-  g_fake_region_size = 96u * 1024u;
-  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
-
-  FakeApiTable api;
-  InstalledDbiHook hook(api);
-  ASSERT_TRUE(hook.installed()) << hook.error();
-
-  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
-  hsa_code_object_reader_t reader{};
-  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
-                                                                  &reader),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
-                                                              reader, nullptr, nullptr),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(g_transform_override_max_workgroup_lds_bytes.size(), 1u);
-  EXPECT_EQ(g_transform_override_max_workgroup_lds_bytes.front(), 96u * 1024u);
 }
 
 TEST(HsaHooksUnitTest, ConSanLegacySelectionRemainsActive) {

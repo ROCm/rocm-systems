@@ -117,13 +117,17 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     derived_owner_vgpr = value_vgpr;
     derived_owner_word = *owner_init;
   }
-  ConSanMoiWorkgroupSources workgroup_sources;
-  if (candidate.kernel_descriptor_file_offset) {
+  const auto persistent_workgroup_sources =
+      record_replay_persistent_workgroup_sources(options, arch);
+  ConSanMoiWorkgroupSources workgroup_sources =
+      persistent_workgroup_sources.value_or(ConSanMoiWorkgroupSources{});
+  if (!persistent_workgroup_sources && candidate.kernel_descriptor_file_offset) {
     const auto descriptor_workgroup_sources = moi_descriptor_workgroup_sources(
         bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
     if (!descriptor_workgroup_sources)
       return std::nullopt;
-    workgroup_sources = *descriptor_workgroup_sources;
+    workgroup_sources =
+        record_replay_workgroup_sources(*descriptor_workgroup_sources, options, arch);
   }
 
   std::vector<uint32_t> words;
@@ -1033,7 +1037,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             arch == ROCJITSU_CODE_ARCH_GFX1250 ||
             (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
              (candidate_options.moi_engine == ConSanMoiEngine::InlineShadow ||
-              candidate_options.moi_engine == ConSanMoiEngine::RecordReplay));
+              candidate_options.moi_engine == ConSanMoiEngine::RecordReplay)) ||
+            (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+             candidate_options.moi_engine == ConSanMoiEngine::RecordReplay &&
+             candidate_options.moi_record_replay_dense_barrier_router);
         if (has_dense_router &&
             (candidate_options.moi_exec_save_sgpr || has_spill_backed_dense_router) &&
             !planned.owner_descriptor_file_offsets.empty()) {
@@ -1264,7 +1271,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         if (arch == ROCJITSU_CODE_ARCH_GFX1250)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
-        if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+        if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA4)
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };

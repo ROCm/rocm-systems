@@ -658,7 +658,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     const auto access = access_by_offset.find(patch.anchor_offset);
     if (access == access_by_offset.end())
       continue;
-    const auto ranges = candidate_access_ranges(bytes, *access->second);
+    const auto ranges = candidate_access_ranges(bytes, *access->second, arch);
     if (!ranges || ranges->empty())
       continue;
     selected_windows.push_back({&patch, access->second, patch.sampled_first_slot,
@@ -2008,8 +2008,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     std::span<const uint8_t> bytes, const FenceRecordCandidate &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &options,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
-    rj_code_arch_t arch, uint32_t record_index, uint32_t record_count, size_t fence_records_offset,
-    uint64_t cave_text_offset, uint64_t return_text_offset,
+    rj_code_arch_t arch, uint32_t record_index, uint32_t record_capacity_or_count,
+    size_t fence_records_offset, uint64_t cave_text_offset, uint64_t return_text_offset,
     std::optional<uint16_t> call_return_sgpr, std::span<const uint32_t> displaced_tail_words,
     std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
@@ -2049,7 +2049,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
     if (!owner_shift)
       return std::nullopt;
-    const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
+    const uint16_t value_vgpr =
+        static_cast<uint16_t>(*options.scratch_vgpr + (arch == ROCJITSU_CODE_ARCH_CDNA4 ? 5u : 2u));
     const auto owner_init = instrumentation::build_v_lshrrev_b32(
         value_vgpr, scalar_positive_inline_u32(*owner_shift), kRdna4WorkitemIdX, arch);
     if (!owner_init) {
@@ -2060,13 +2061,16 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     derived_owner_word = *owner_init;
   }
 
-  ConSanMoiWorkgroupSources workgroup_sources;
-  if (candidate.kernel_descriptor_file_offset) {
+  const auto persistent_workgroup_sources =
+      record_replay_persistent_workgroup_sources(options, arch);
+  ConSanMoiWorkgroupSources workgroup_sources =
+      persistent_workgroup_sources.value_or(ConSanMoiWorkgroupSources{});
+  if (!persistent_workgroup_sources && candidate.kernel_descriptor_file_offset) {
     const auto sources = moi_descriptor_workgroup_sources(
         bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
     if (!sources)
       return std::nullopt;
-    workgroup_sources = *sources;
+    workgroup_sources = record_replay_workgroup_sources(*sources, options, arch);
   }
 
   std::vector<uint32_t> words;
@@ -2102,12 +2106,21 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     }
     words.insert(words.end(), address_words->begin(), address_words->end());
   }
-  if (derived_owner_word)
+  if (derived_owner_word && arch != ROCJITSU_CODE_ARCH_CDNA4)
     words.push_back(*derived_owner_word);
   for (uint64_t offset = 0; offset < candidate.fence.size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
     std::memcpy(&word, bytes.data() + candidate.fence.file_offset + offset, sizeof(word));
     words.push_back(word);
+  }
+  const uint16_t address_vgpr = address_plan.result_address_vgpr;
+  const uint16_t recorded_address_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 6u);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    words.push_back(
+        build_v_mov_b32_e32(recorded_address_vgpr, vector_source_vgpr(address_vgpr), arch));
+    words.push_back(
+        build_v_mov_b32_e32(static_cast<uint16_t>(recorded_address_vgpr + 1u),
+                            vector_source_vgpr(static_cast<uint16_t>(address_vgpr + 1u)), arch));
   }
   if (!append_save_moi_special_state(words, options, arch)) {
     errors.emplace_back("ConSan MOI fence record patch could not save VCC/SCC");
@@ -2115,52 +2128,185 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   }
 
   const uint64_t base = *options.moi_report_buffer_address;
-  const uint64_t record_base = base + fence_records_offset +
-                               static_cast<uint64_t>(record_index) * sizeof(ConSanMoiFenceRecord);
-  const uint16_t address_vgpr = address_plan.result_address_vgpr;
+  const uint64_t record_base =
+      base + fence_records_offset +
+      (arch == ROCJITSU_CODE_ARCH_CDNA4
+           ? 0u
+           : static_cast<uint64_t>(record_index) * sizeof(ConSanMoiFenceRecord));
   const ConSanMoiFenceEventKind kind = candidate.fence.memory_role == ConSanSyncMemoryRole::Release
                                            ? ConSanMoiFenceEventKind::Release
                                            : ConSanMoiFenceEventKind::Acquire;
-  ConSanMoiRecordEmitter record(words, *options.scratch_vgpr,
-                                static_cast<uint16_t>(*options.scratch_vgpr + 2u), arch);
-  if ((derived_owner_vgpr &&
-       !append_store_u32_vgpr(words, record_base + offsetof(ConSanMoiFenceRecord, owner_id),
-                              *derived_owner_vgpr, *options.scratch_vgpr, arch)) ||
-      !append_atomic_event_index_store(words, base + offsetof(ConSanMoiReportHeader, event_counter),
-                                       record_base + offsetof(ConSanMoiFenceRecord, event_index),
-                                       *options.scratch_vgpr, arch) ||
-      !append_store_u32_literal(words, base + offsetof(ConSanMoiReportHeader, fence_record_count),
-                                record_count, *options.scratch_vgpr, arch) ||
-      !record.materialize_address(record_base) ||
-      (options.moi_dispatch_id_sgpr &&
-       (!record.store_sgpr(offsetof(ConSanMoiFenceRecord, generation),
-                           *options.moi_dispatch_id_sgpr) ||
-        !record.store_sgpr(offsetof(ConSanMoiFenceRecord, generation) + sizeof(uint32_t),
-                           static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u)))) ||
-      !record.store_workgroup(offsetof(ConSanMoiFenceRecord, workgroup_x), workgroup_sources.x) ||
-      !record.store_workgroup(offsetof(ConSanMoiFenceRecord, workgroup_y), workgroup_sources.y) ||
-      !record.store_workgroup(offsetof(ConSanMoiFenceRecord, workgroup_z), workgroup_sources.z) ||
-      (options.moi_owner_vgpr &&
-       !record.store_vgpr(offsetof(ConSanMoiFenceRecord, owner_id), *options.moi_owner_vgpr)) ||
-      (options.moi_persistent_owner_sgpr &&
-       !record.store_sgpr(offsetof(ConSanMoiFenceRecord, owner_id),
-                          *options.moi_persistent_owner_sgpr)) ||
-      (options.moi_epoch_vgpr &&
-       !record.store_vgpr(offsetof(ConSanMoiFenceRecord, epoch), *options.moi_epoch_vgpr)) ||
-      (options.moi_persistent_epoch_sgpr &&
-       !record.store_sgpr(offsetof(ConSanMoiFenceRecord, epoch),
-                          *options.moi_persistent_epoch_sgpr)) ||
-      !record.store_literal(offsetof(ConSanMoiFenceRecord, instruction_offset),
-                            static_cast<uint32_t>(candidate.fence.text_offset)) ||
-      !record.store_literal(offsetof(ConSanMoiFenceRecord, kind), static_cast<uint32_t>(kind)) ||
-      !record.store_literal(offsetof(ConSanMoiFenceRecord, scope), *candidate.fence.raw_scope) ||
-      !record.store_literal(offsetof(ConSanMoiFenceRecord, semantics),
-                            candidate.communication_site.raw_th.value_or(0u)) ||
-      !record.store_vgpr(offsetof(ConSanMoiFenceRecord, communication_token), address_vgpr) ||
-      !record.store_vgpr(offsetof(ConSanMoiFenceRecord, communication_token) + sizeof(uint32_t),
-                         static_cast<uint16_t>(address_vgpr + 1u))) {
-    errors.emplace_back("ConSan MOI fence record patch could not encode record stores");
-    return std::nullopt;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (!options.moi_exec_save_sgpr) {
+      errors.emplace_back("ConSan MOI dynamic fence record requires scalar EXEC state");
+      return std::nullopt;
+    }
+    const uint16_t lane_rank_vgpr = *options.scratch_vgpr;
+    const uint16_t slot_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
+    const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
+    const auto save_active_exec =
+        instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kRdna4ExecLo, arch);
+    const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
+        lane_rank_vgpr, *options.moi_exec_save_sgpr, scalar_positive_inline_u32(0), arch);
+    const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
+        lane_rank_vgpr, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u),
+        vector_source_vgpr(lane_rank_vgpr), arch);
+    const auto first_active_lane = instrumentation::build_v_cmp_eq_u32_vcc(
+        scalar_positive_inline_u32(0), lane_rank_vgpr, arch);
+    const auto narrow_exec =
+        instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+    if (!save_active_exec || !mbcnt_lo || !mbcnt_hi || !first_active_lane || !narrow_exec) {
+      errors.emplace_back("ConSan MOI dynamic fence record could not select a wave publisher");
+      return std::nullopt;
+    }
+    words.push_back(*save_active_exec);
+    words.insert(words.end(), mbcnt_lo->begin(), mbcnt_lo->end());
+    words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
+    words.push_back(*first_active_lane);
+    words.push_back(*narrow_exec);
+    if (!append_atomic_fetch_add_one_u32(words,
+                                         base + offsetof(ConSanMoiReportHeader, fence_record_count),
+                                         slot_vgpr, *options.scratch_vgpr, arch)) {
+      errors.emplace_back("ConSan MOI dynamic fence record could not reserve a wave slot");
+      return std::nullopt;
+    }
+    const auto mov_capacity =
+        instrumentation::build_v_mov_b32_literal(value_vgpr, record_capacity_or_count, arch);
+    const auto slot_in_capacity =
+        instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(value_vgpr), slot_vgpr, arch);
+    if (!mov_capacity || !slot_in_capacity) {
+      errors.emplace_back("ConSan MOI dynamic fence record could not guard capacity");
+      return std::nullopt;
+    }
+    words.insert(words.end(), mov_capacity->begin(), mov_capacity->end());
+    words.push_back(*slot_in_capacity);
+    std::vector<uint32_t> record_words;
+    if (derived_owner_word)
+      record_words.push_back(*derived_owner_word);
+    if ((derived_owner_vgpr &&
+         !append_dynamic_fence_store_u32_vgpr(
+             record_words, record_base + offsetof(ConSanMoiFenceRecord, owner_id),
+             *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+        !append_dynamic_fence_event_index_store(
+            record_words, base + offsetof(ConSanMoiReportHeader, event_counter),
+            record_base + offsetof(ConSanMoiFenceRecord, event_index), slot_vgpr,
+            *options.scratch_vgpr, arch) ||
+        (options.moi_dispatch_id_sgpr &&
+         (!append_dynamic_fence_store_u32_scalar_src(
+              record_words, record_base + offsetof(ConSanMoiFenceRecord, generation),
+              *options.moi_dispatch_id_sgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
+          !append_dynamic_fence_store_u32_scalar_src(
+              record_words,
+              record_base + offsetof(ConSanMoiFenceRecord, generation) + sizeof(uint32_t),
+              static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), slot_vgpr,
+              *options.scratch_vgpr, arch))) ||
+        !append_dynamic_fence_store_workgroup_source(
+            record_words, record_base + offsetof(ConSanMoiFenceRecord, workgroup_x),
+            workgroup_sources.x, slot_vgpr, *options.scratch_vgpr, arch) ||
+        !append_dynamic_fence_store_workgroup_source(
+            record_words, record_base + offsetof(ConSanMoiFenceRecord, workgroup_y),
+            workgroup_sources.y, slot_vgpr, *options.scratch_vgpr, arch) ||
+        !append_dynamic_fence_store_workgroup_source(
+            record_words, record_base + offsetof(ConSanMoiFenceRecord, workgroup_z),
+            workgroup_sources.z, slot_vgpr, *options.scratch_vgpr, arch) ||
+        (options.moi_owner_vgpr &&
+         !append_dynamic_fence_store_u32_vgpr(
+             record_words, record_base + offsetof(ConSanMoiFenceRecord, owner_id),
+             *options.moi_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+        (options.moi_persistent_owner_sgpr &&
+         !append_dynamic_fence_store_u32_scalar_src(
+             record_words, record_base + offsetof(ConSanMoiFenceRecord, owner_id),
+             *options.moi_persistent_owner_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+        (options.moi_epoch_vgpr &&
+         !append_dynamic_fence_store_u32_vgpr(
+             record_words, record_base + offsetof(ConSanMoiFenceRecord, epoch),
+             *options.moi_epoch_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+        (options.moi_persistent_epoch_sgpr &&
+         !append_dynamic_fence_store_u32_scalar_src(
+             record_words, record_base + offsetof(ConSanMoiFenceRecord, epoch),
+             *options.moi_persistent_epoch_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+        !append_dynamic_fence_store_u32_literal(
+            record_words, record_base + offsetof(ConSanMoiFenceRecord, instruction_offset),
+            static_cast<uint32_t>(candidate.fence.text_offset), slot_vgpr, *options.scratch_vgpr,
+            arch) ||
+        !append_dynamic_fence_store_u32_literal(
+            record_words, record_base + offsetof(ConSanMoiFenceRecord, kind),
+            static_cast<uint32_t>(kind), slot_vgpr, *options.scratch_vgpr, arch) ||
+        !append_dynamic_fence_store_u32_literal(
+            record_words, record_base + offsetof(ConSanMoiFenceRecord, scope),
+            *candidate.fence.raw_scope, slot_vgpr, *options.scratch_vgpr, arch) ||
+        !append_dynamic_fence_store_u32_literal(
+            record_words, record_base + offsetof(ConSanMoiFenceRecord, semantics),
+            candidate.communication_site.raw_th.value_or(0u), slot_vgpr, *options.scratch_vgpr,
+            arch) ||
+        !append_dynamic_fence_store_u32_vgpr(
+            record_words, record_base + offsetof(ConSanMoiFenceRecord, communication_token),
+            recorded_address_vgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
+        !append_dynamic_fence_store_u32_vgpr(
+            record_words,
+            record_base + offsetof(ConSanMoiFenceRecord, communication_token) + sizeof(uint32_t),
+            static_cast<uint16_t>(recorded_address_vgpr + 1u), slot_vgpr, *options.scratch_vgpr,
+            arch)) {
+      errors.emplace_back("ConSan MOI dynamic fence record could not encode record stores");
+      return std::nullopt;
+    }
+    const auto wait_store = instrumentation::build_s_wait_flat_store0(arch);
+    const auto restore_exec =
+        instrumentation::build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
+    if (!wait_store || !restore_exec ||
+        record_words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max()))
+      return std::nullopt;
+    record_words.push_back(*wait_store);
+    const auto skip_record =
+        instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(record_words.size()), arch);
+    if (!skip_record)
+      return std::nullopt;
+    words.push_back(*skip_record);
+    words.insert(words.end(), record_words.begin(), record_words.end());
+    words.push_back(*restore_exec);
+  } else {
+    ConSanMoiRecordEmitter record(words, *options.scratch_vgpr,
+                                  static_cast<uint16_t>(*options.scratch_vgpr + 2u), arch);
+    if ((derived_owner_vgpr &&
+         !append_store_u32_vgpr(words, record_base + offsetof(ConSanMoiFenceRecord, owner_id),
+                                *derived_owner_vgpr, *options.scratch_vgpr, arch)) ||
+        !append_atomic_event_index_store(words,
+                                         base + offsetof(ConSanMoiReportHeader, event_counter),
+                                         record_base + offsetof(ConSanMoiFenceRecord, event_index),
+                                         *options.scratch_vgpr, arch) ||
+        !append_store_u32_literal(words, base + offsetof(ConSanMoiReportHeader, fence_record_count),
+                                  record_capacity_or_count, *options.scratch_vgpr, arch) ||
+        !record.materialize_address(record_base) ||
+        (options.moi_dispatch_id_sgpr &&
+         (!record.store_sgpr(offsetof(ConSanMoiFenceRecord, generation),
+                             *options.moi_dispatch_id_sgpr) ||
+          !record.store_sgpr(offsetof(ConSanMoiFenceRecord, generation) + sizeof(uint32_t),
+                             static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u)))) ||
+        !record.store_workgroup(offsetof(ConSanMoiFenceRecord, workgroup_x), workgroup_sources.x) ||
+        !record.store_workgroup(offsetof(ConSanMoiFenceRecord, workgroup_y), workgroup_sources.y) ||
+        !record.store_workgroup(offsetof(ConSanMoiFenceRecord, workgroup_z), workgroup_sources.z) ||
+        (options.moi_owner_vgpr &&
+         !record.store_vgpr(offsetof(ConSanMoiFenceRecord, owner_id), *options.moi_owner_vgpr)) ||
+        (options.moi_persistent_owner_sgpr &&
+         !record.store_sgpr(offsetof(ConSanMoiFenceRecord, owner_id),
+                            *options.moi_persistent_owner_sgpr)) ||
+        (options.moi_epoch_vgpr &&
+         !record.store_vgpr(offsetof(ConSanMoiFenceRecord, epoch), *options.moi_epoch_vgpr)) ||
+        (options.moi_persistent_epoch_sgpr &&
+         !record.store_sgpr(offsetof(ConSanMoiFenceRecord, epoch),
+                            *options.moi_persistent_epoch_sgpr)) ||
+        !record.store_literal(offsetof(ConSanMoiFenceRecord, instruction_offset),
+                              static_cast<uint32_t>(candidate.fence.text_offset)) ||
+        !record.store_literal(offsetof(ConSanMoiFenceRecord, kind), static_cast<uint32_t>(kind)) ||
+        !record.store_literal(offsetof(ConSanMoiFenceRecord, scope), *candidate.fence.raw_scope) ||
+        !record.store_literal(offsetof(ConSanMoiFenceRecord, semantics),
+                              candidate.communication_site.raw_th.value_or(0u)) ||
+        !record.store_vgpr(offsetof(ConSanMoiFenceRecord, communication_token), address_vgpr) ||
+        !record.store_vgpr(offsetof(ConSanMoiFenceRecord, communication_token) + sizeof(uint32_t),
+                           static_cast<uint16_t>(address_vgpr + 1u))) {
+      errors.emplace_back("ConSan MOI fence record patch could not encode record stores");
+      return std::nullopt;
+    }
   }
   if (!append_restore_moi_special_state(words, options, arch)) {
     errors.emplace_back("ConSan MOI fence record patch could not restore VCC/SCC");
