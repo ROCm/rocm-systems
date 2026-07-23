@@ -1494,6 +1494,16 @@ void hip_capture_init() {
 }
 
 void hip_capture_shutdown() {
+  // Remove the process-wide crash handler first. It was installed via
+  // amd::Os::installExceptionHandlers() at capture init and is otherwise never
+  // torn down, so it stays live through runtime/driver shutdown. On Windows the
+  // handler is a first-priority vectored exception handler that runs on every
+  // SEH exception in the process; leaving it installed lets it fire on the
+  // teardown thread (where the runtime/PAL backend can raise/handle exceptions
+  // during its own shutdown) and re-enter the finalize path after the writer is
+  // being closed. Uninstalling here, before flush/close, closes that window.
+  amd::Os::uninstallExceptionHandlers();
+
   hip_capture_uninstall();
   hrr_cap::writer::flush(hip_capture_output_dir());
   hrr_cap::writer::close();
