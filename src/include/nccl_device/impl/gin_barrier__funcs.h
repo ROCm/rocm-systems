@@ -95,13 +95,13 @@ NCCL_DEVICE_INLINE ncclResult_t ncclGinBarrierSession_internal<Coop>::syncIntern
       this->net.flush(this->coop, order);
     }
   };
-
-  // Signal `peer` on `net` and wait for `peer`'s reciprocal signal on the calling rank's
-  // matching slot. Returns ncclTimeout (timeout path only) if the wait exceeds budget.
-  auto signalAndWait = [&](ncclGin& net, int peer) -> ncclResult_t {
+  auto signalPeer = [&](ncclGin& net, int peer) {
     net.signal(this->team, peer, ncclGin_SignalInc{this->signal + this->team.rank}, ncclCoopThread(), ncclGin_None(),
                nccl::utility::releaseOrderOf(ord) != cuda::memory_order_relaxed ? cuda::thread_scope_thread :
                                                                                   cuda::thread_scope_system);
+  };
+
+  auto waitForPeer = [&](ncclGin& net, int peer) -> ncclResult_t {
     uint32_t* shadowPtr = (uint32_t*)net.getSignalShadowPtr(this->signal + peer);
     int waitVal = ++*shadowPtr;
     if NCCL_IF_CONSTEXPR (EnableTimeout) {
@@ -144,14 +144,29 @@ NCCL_DEVICE_INLINE ncclResult_t ncclGinBarrierSession_internal<Coop>::syncIntern
       int peer = 1 + this->team.rank + peerStep;
       if (this->team.nRanks <= peer) peer -= this->team.nRanks;
       ncclGin scratch(this->net.comm, ctx, this->net.resourceSharingMode);
-      if ((ret = signalAndWait(scratch, peer)) != ncclSuccess) goto exit;
+      signalPeer(scratch, peer);
+    }
+    NVCC_PRAGMA_UNROLL_DISABLED
+    for (int i = this->coop.thread_rank(); i < total; i += this->coop.size()) {
+      int ctx = i / nPeerSigs;
+      int peerStep = i - ctx * nPeerSigs;
+      int peer = 1 + this->team.rank + peerStep;
+      if (this->team.nRanks <= peer) peer -= this->team.nRanks;
+      ncclGin scratch(this->net.comm, ctx, this->net.resourceSharingMode);
+      if ((ret = waitForPeer(scratch, peer)) != ncclSuccess) goto exit;
     }
   } else {
     NVCC_PRAGMA_UNROLL_DISABLED
     for (int i = this->coop.thread_rank(); i < nPeerSigs; i += this->coop.size()) {
       int peer = 1 + this->team.rank + i;
       if (this->team.nRanks <= peer) peer -= this->team.nRanks;
-      if ((ret = signalAndWait(this->net, peer)) != ncclSuccess) goto exit;
+      signalPeer(this->net, peer);
+    }
+    NVCC_PRAGMA_UNROLL_DISABLED
+    for (int i = this->coop.thread_rank(); i < nPeerSigs; i += this->coop.size()) {
+      int peer = 1 + this->team.rank + i;
+      if (this->team.nRanks <= peer) peer -= this->team.nRanks;
+      if ((ret = waitForPeer(this->net, peer)) != ncclSuccess) goto exit;
     }
   }
 
