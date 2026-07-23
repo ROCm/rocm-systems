@@ -335,7 +335,7 @@ __FP6_HOST_DEVICE_STATIC__ __half_raw __hip_cvt_fp6_to_halfraw(
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
   __amd_fp16x16_storage_t out{};
   __amd_fp6x16_storage_t in{};
-  in[0] = (uint32_t)x;
+  in[0] = (__hip_uint32_t)x;
   if (fp6_interpretation_t == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scale_pk16_f16_fp6))
       out = __builtin_amdgcn_cvt_scale_pk16_f16_fp6(in, 0x7F7Fu /* scale e8m0 = 1.0 */, 0);
@@ -545,7 +545,7 @@ struct __hip_fp6_e2m3 {
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
     __amd_bf16x16_storage_t out{};
-    in[0] = (uint32_t)__x;
+    in[0] = (__hip_uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scale_pk16_bf16_fp6))
       out = __builtin_amdgcn_cvt_scale_pk16_bf16_fp6(in, 0x7F7Fu /* scale e8m0 = 1.0 */, 0);
     u.bf16 = out[0];
@@ -566,7 +566,7 @@ struct __hip_fp6_e2m3 {
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
     __amd_floatx16_storage_t out{};
-    in[0] = (uint32_t)__x;
+    in[0] = (__hip_uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scale_pk16_f32_fp6))
       out = __builtin_amdgcn_cvt_scale_pk16_f32_fp6(in, 0x7F7Fu /* scale e8m0 = 1.0 */, 0);
     auto ret = out[0];
@@ -630,7 +630,7 @@ struct __hip_fp6_e3m2 {
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
     __amd_bf16x16_storage_t out{};
-    in[0] = (uint32_t)__x;
+    in[0] = (__hip_uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scale_pk16_bf16_bf6))
       out = __builtin_amdgcn_cvt_scale_pk16_bf16_bf6(in, 0x7F7Fu /* scale e8m0 = 1.0 */, 0);
     u.bf16 = out[0];
@@ -651,7 +651,7 @@ struct __hip_fp6_e3m2 {
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
     __amd_floatx16_storage_t out{};
-    in[0] = (uint32_t)__x;
+    in[0] = (__hip_uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scale_pk16_f32_bf6))
       out = __builtin_amdgcn_cvt_scale_pk16_f32_bf6(in, 0x7F7Fu /* scale e8m0 = 1.0 */, 0);
     auto ret = out[0];
