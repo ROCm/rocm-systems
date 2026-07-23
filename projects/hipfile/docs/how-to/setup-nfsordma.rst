@@ -6,10 +6,10 @@
 Setting up an NFSoRDMA share for use with hipFile
 ***************************************************
 
-The following prerequisites are required to use an RDMA-capable NFS server over InfiniBand or RoCE with hipFile:
+The following prerequisites are required to use an RDMA-capable NFS server over RDMA or RoCE with hipFile:
 
 * ``amdgpu-dkms`` version 31.40 or later.
-* An InfiniBand or RoCE fabric connecting the NFS server and client.
+* An RDMA or RoCE fabric connecting the NFS server and client.
 * ``nfs-kernel-server`` installed on the server, with the ``svcrdma`` kernel
   module available.
 - ``nfs-common`` installed on the client, with the ``xprtrdma`` kernel module
@@ -18,13 +18,13 @@ The following prerequisites are required to use an RDMA-capable NFS server over 
 Configure the NFS server
 ==========================
 
-Configure a static IP address on the InfiniBand or RoCE interface. 
+Configure a static IP address on the RDMA or RoCE interface. 
 
 .. note::
 
    The example commands use ``netplan``. Use the appropriate distribution network configuration tools.
 
-Create ``/etc/netplan/config.yaml``, replacing ``<ib_interface>`` and ``<server_ip>/<prefix>`` with values that match the fabric, then run ``netplan apply``:
+Create ``/etc/netplan/config.yaml``, replacing ``<rdma_interface>`` and ``<server_ip>/<prefix>`` with values that match the fabric, then run ``netplan apply``:
 
 .. code-block:: yaml
 
@@ -32,7 +32,7 @@ Create ``/etc/netplan/config.yaml``, replacing ``<ib_interface>`` and ``<server_
      version: 2
      renderer: networkd
      ethernets:
-       <ib_interface>:
+       <rdma_interface>:
          dhcp4: false
          dhcp6: false
          accept-ra: false

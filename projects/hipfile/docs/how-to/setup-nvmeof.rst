@@ -10,9 +10,9 @@ To use hipFile with storage exported over NVMe-oF, first :ref:`set up a local NV
 
 NVMe-oF also requires:
 
-* Network or fabric connectivity over RDMA or TCP.
-* Either the ``nvmet-tcp`` kernel module or the ``nvmet`` and ``nvmet-rdma`` kernel modules loaded on the target.
-- Either the ``nvme-rdma`` kernel module or the ``nvme-tcp`` kernel module loaded on the initiator.
+* Network or fabric connectivity over RDMA. hipFile's optimized I/O requires an RDMA transport.
+* The ``nvmet`` and ``nvmet-rdma`` kernel modules loaded on the target.
+- The ``nvme-rdma`` kernel module loaded on the initiator.
 
 Configure the target 
 =====================

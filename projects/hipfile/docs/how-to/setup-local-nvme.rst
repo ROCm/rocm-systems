@@ -42,6 +42,10 @@ Create a single partition on the drive. For example, to partition the ``/dev/nvm
 
 Format the partition with a file system supported by hipFile:
 
+.. note::
+   The filesystem must sit directly on the drive's partition, as shown. For
+   block layers that break hipFile's direct path, see :doc:`../troubleshooting/limitations`.
+
 .. code:: shell
 
    sudo mkfs.ext4 /dev/nvme1n1p1
