@@ -183,13 +183,15 @@ __device__ __forceinline__ void padded_flat_lds_store(uint32_t value) {
 __global__ __launch_bounds__(128) void padded_cross_wave_flat_lds_store(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  constexpr uint32_t kStoredValue = 0xF1A7005Au;
   asm volatile("" : : "v"(&lds[0]) : "memory");
   // Keep the descriptor full so the regression exercises the spill-backed
   // resource plan instead of relying on target-specific unused high VGPRs.
   asm volatile("v_mov_b32 v255, 0" ::: "v255");
-  padded_flat_lds_store(0xF1A70000u | tid);
+  padded_flat_lds_store(kStoredValue);
+  __syncthreads();
   if (tid == 0)
-    out[0] = 0xF1A70000u;
+    out[0] = lds[0];
 }
 
 void launch_padded_lds_store(uint32_t *d_out, uint32_t racy) {
@@ -238,7 +240,7 @@ TEST(ConSanLdsTest, PaddedCrossWaveFlatLdsStoreCompletes) {
   uint32_t out = 0;
   HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
   free_device_ptr(d_out);
-  EXPECT_EQ(out, 0xF1A70000u);
+  EXPECT_EQ(out, 0xF1A7005Au);
 }
 
 TEST(ConSanLdsTest, PaddedRacyStoreCompletesOrTripsDbiTrap) {

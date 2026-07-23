@@ -207,6 +207,7 @@ function(rj_add_consan_common_sim_cases)
         SHARED_TEST
         ACCESS_KERNEL
         SHARED_KERNEL
+        SHARED_INIT_OWNER_EPOCH
     )
     cmake_parse_arguments(PARSE_ARGV 0 _sim "" "${_one_value_args}" "")
     if(_sim_UNPARSED_ARGUMENTS)
@@ -215,7 +216,20 @@ function(rj_add_consan_common_sim_cases)
             "unknown common ConSan simulator arguments: ${_sim_UNPARSED_ARGUMENTS}"
         )
     endif()
-    foreach(_required IN LISTS _one_value_args)
+    foreach(
+        _required
+        IN
+        ITEMS
+            PREFIX
+            LDS_TARGET
+            MOI_TARGET
+            CONFIG
+            RECORD_TEST
+            SAMPLED_TEST
+            SHARED_TEST
+            ACCESS_KERNEL
+            SHARED_KERNEL
+    )
         if(NOT _sim_${_required})
             message(
                 FATAL_ERROR
@@ -223,6 +237,16 @@ function(rj_add_consan_common_sim_cases)
             )
         endif()
     endforeach()
+    if(
+        NOT DEFINED _sim_SHARED_INIT_OWNER_EPOCH
+        OR NOT "${_sim_SHARED_INIT_OWNER_EPOCH}" MATCHES "^[01]$"
+    )
+        message(
+            FATAL_ERROR
+            "common ConSan simulator cases require "
+            "SHARED_INIT_OWNER_EPOCH to be 0 or 1"
+        )
+    endif()
 
     rj_add_consan_hip_case(
         NAME "${_sim_PREFIX}.SuperColliderClean"
@@ -312,7 +336,7 @@ function(rj_add_consan_common_sim_cases)
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=record-replay"
-            "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=0"
+            "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=${_sim_SHARED_INIT_OWNER_EPOCH}"
             "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
             "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
             "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
@@ -351,6 +375,7 @@ function(rj_add_consan_cdna_sim_cases)
         SHARED_TEST "${RJ_CONSAN_CDNA_MOI_SHARED_HELPER_TEST}"
         ACCESS_KERNEL "moi_cdna_forced_spill_test_kernel_for_instrumentation"
         SHARED_KERNEL "moi_cdna_shared_lds_helper_for_instrumentation"
+        SHARED_INIT_OWNER_EPOCH 1
     )
 
     # CDNA's focused MOI fixture has spill-specific inline, synchronization,
@@ -466,6 +491,7 @@ function(rj_add_consan_gfx1250_sim_cases)
         SHARED_TEST "${RJ_CONSAN_MOI_SHARED_NOINLINE_HELPER_TEST}"
         ACCESS_KERNEL "moi_forced_spill_preserves_live_vgprs_test_kernel_for_instrumentation"
         SHARED_KERNEL "moi_shared_noinline_lds_helper_for_instrumentation"
+        SHARED_INIT_OWNER_EPOCH 0
     )
 
     # gfx1250 uses the general RDNA fixture, whose focused inline,
