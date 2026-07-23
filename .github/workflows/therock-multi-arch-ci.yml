@@ -98,6 +98,10 @@ jobs:
 
       - name: Configure CI
         id: configure
+        env:
+          # TEST OVERRIDE: Force hip as changed project to test filtering
+          # TODO(geomin12): Remove after testing cross-repo artifact reuse
+          TEST_OVERRIDE_CHANGED_PROJECTS: "projects/hip"
         run: |
           python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
             --event-name "${{ github.event_name }}" \
