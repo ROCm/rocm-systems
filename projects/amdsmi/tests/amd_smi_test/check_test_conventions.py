@@ -34,9 +34,7 @@ TEST_SUFFIX = "_test.cc"
 # A GTest suite name is <Component><Type>[<Operation>]:
 #   unit       -> <Component>Unit                        (no operation)
 #   functional -> <Component>Functional{ReadOnly,ReadWrite}
-SUITE_RE = re.compile(
-    r"^(Gpu|Cpu|Nic|Ifoe|System)(Unit|FunctionalReadOnly|FunctionalReadWrite)$"
-)
+SUITE_RE = re.compile(r"^(Gpu|Cpu|Nic|Ifoe|System)(Unit|FunctionalReadOnly|FunctionalReadWrite)$")
 
 # Captures the suite from TEST(Suite, Name) and TEST_F(Suite, Name).
 _TEST_MACRO_RE = re.compile(r"\bTEST(?:_F)?\(\s*([A-Za-z_]\w*)\s*,")
@@ -107,9 +105,7 @@ def _iter_tier_sources() -> Iterator[tuple[str, str | None, Path]]:
             yield tier, component, path
 
 
-def _check_layout_and_naming(
-    tier: str, component: str | None, path: Path
-) -> Iterator[str]:
+def _check_layout_and_naming(tier: str, component: str | None, path: Path) -> Iterator[str]:
     """Placement (component subdir) and file-name (_test.cc) rules."""
     if component is None:
         yield (
@@ -117,10 +113,7 @@ def _check_layout_and_naming(
             f"not directly in {tier}/"
         )
     elif component not in COMPONENTS:
-        yield (
-            f"{_rel(path)}: unknown component '{component}'; "
-            f"expected one of {list(COMPONENTS)}"
-        )
+        yield (f"{_rel(path)}: unknown component '{component}'; expected one of {list(COMPONENTS)}")
     if not path.name.endswith(TEST_SUFFIX):
         yield (
             f"{_rel(path)}: must be named '<feature>_<operation>{TEST_SUFFIX}' "
