@@ -13,9 +13,15 @@
 
 #include "flatbuffers/flexbuffers.h"
 
+#include <array>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
+
+#if defined(__linux__)
+#include <dlfcn.h>
+#endif
 
 namespace rocjitsu {
 namespace {
@@ -31,6 +37,37 @@ std::vector<util::LibraryHandle> &open_handles() {
   return handles;
 }
 
+std::string resolve_plugin_path(const std::string &soname, const std::string &plugin_dir) {
+  if (!plugin_dir.empty())
+    return plugin_dir + "/" + soname;
+
+#if defined(__linux__)
+  Dl_info info{};
+  if (dladdr(reinterpret_cast<const void *>(&resolve_plugin_path), &info) != 0 && info.dli_fname) {
+    std::error_code error;
+    const auto module_dir = std::filesystem::canonical(info.dli_fname, error).parent_path();
+    if (!error) {
+      // Shared-library hosts keep plugins beside librocjitsu. The statically
+      // linked CLI uses <build>/tools/rocjitsu/rocjitsu in a build tree and
+      // <prefix>/bin/rocjitsu when installed, so probe those layouts too.
+      const std::array candidates{
+          module_dir / soname,
+          module_dir / ".." / "lib" / soname,
+          module_dir / ".." / "lib64" / soname,
+          module_dir / ".." / ".." / soname,
+      };
+      for (const auto &candidate : candidates) {
+        if (std::filesystem::is_regular_file(candidate, error) && !error)
+          return candidate.lexically_normal().string();
+        error.clear();
+      }
+    }
+  }
+#endif
+
+  return soname;
+}
+
 bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
               ExecutionPluginGroup &group, const std::string &plugin_dir) {
   if (!is_valid_plugin_name(name)) {
@@ -42,7 +79,7 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
   // `name` is validated above, so it cannot contain a path separator; joining a
   // trusted `plugin_dir` in front of it stays inside that directory.
   std::string soname = "librocjitsu_plugin_" + name + ".so";
-  std::string libpath = plugin_dir.empty() ? soname : plugin_dir + "/" + soname;
+  std::string libpath = resolve_plugin_path(soname, plugin_dir);
   util::LibraryHandle handle = util::open_library(libpath.c_str());
   if (!handle) {
     util::Logger::warn("plugin '", name, "': cannot load ", libpath, ": ",

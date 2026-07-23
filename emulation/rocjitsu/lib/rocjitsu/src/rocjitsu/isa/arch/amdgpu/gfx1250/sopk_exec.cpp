@@ -171,7 +171,7 @@ void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   if (offset + size > 32)
     size = 32 - offset;
   uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
-  uint32_t src = literal_;
+  uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(literal);
   if (!write_hwreg(wf, reg_id, offset, mask, src))
     util::Logger::warn("s_setreg_imm32_b32: unhandled hwreg id=", reg_id);
 }

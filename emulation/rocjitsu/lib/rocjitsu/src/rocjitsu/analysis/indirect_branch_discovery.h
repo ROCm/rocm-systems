@@ -33,6 +33,12 @@ struct IndirectCallFixup {
   uint64_t source_target_offset = 0;         ///< Recovered source branch target offset.
   uint16_t source_call_sreg = 0;             ///< Low SGPR of the recovered PC pair.
   bool source_is_call = false;               ///< Whether the consumer is a call-like swappc.
+  /// @brief True when the recovered fact for this consumer was incomplete: at least
+  /// one predecessor path left the PC pair at an unconstrained value. The concrete
+  /// targets are still valid for relocation and liveness, but the consumer must NOT
+  /// be replaced with a direct transfer window — an unconstrained path would be
+  /// redirected to a concrete target it never dynamically reaches.
+  bool source_incomplete = false;
   uint16_t source_return_sreg = 0;           ///< Low SGPR receiving the return PC for calls.
   uint64_t target_getpc_offset = 0;          ///< Relocated offset of the s_getpc_b64 producer.
   uint64_t target_recovery_begin_offset = 0; ///< Relocated first byte of replaceable builder code.

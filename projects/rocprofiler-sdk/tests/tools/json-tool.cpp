@@ -2781,7 +2781,9 @@ write_perfetto()
     }();
 
     // environment settings
-    auto shmem_size_hint = size_t{64};
+    // 64 KB filled up during HSA API emission under the DISCARD fill policy, silently
+    // dropping rocSHMEM events; 8 MB leaves enough headroom for the full trace.
+    auto shmem_size_hint = size_t{8192};
     auto buffer_size_kb  = size_t{1024000};
 
     auto* buffer_config = cfg.add_buffers();

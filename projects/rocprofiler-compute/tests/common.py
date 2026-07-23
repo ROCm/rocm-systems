@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from threading import Thread
 from unittest.mock import Mock
 
 import pandas as pd
@@ -236,6 +237,64 @@ def get_num_pmc_file(output_dir):
 def strip_ansi(s: str) -> str:
     ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
     return ansi_escape.sub("", s)
+
+
+def _tee(pipe, sink, out) -> None:
+    """Echo each line from pipe to sink while accumulating it in out."""
+    with pipe:
+        for line in pipe:
+            print(line, end="", file=sink, flush=True)
+            out.append(line)
+
+
+def run_subprocess(
+    command, capture_output=False, stream=False
+) -> subprocess.CompletedProcess:
+    """Run command in text mode and return a CompletedProcess.
+
+    capture_output: capture stdout and stderr onto the returned object.
+    stream: echo output line by line as the child produces it (requires
+        capture_output); otherwise captured output is printed once at the end.
+    """
+    if not capture_output:
+        return subprocess.run(command, text=True)
+
+    if not stream:
+        # Capture everything, then echo it in one shot after the child exits.
+        process = subprocess.run(command, text=True, capture_output=True)
+        if process.stdout:
+            print(process.stdout, end="")
+        if process.stderr:
+            print(process.stderr, end="", file=sys.stderr)
+        return process
+
+    # Read each pipe on its own thread; reading serially can deadlock if one
+    # fills its buffer while we block on the other.
+    proc = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    out_buf, err_buf = [], []
+    # Tee to the real fds, not sys.stdout/stderr, which pytest's capsys swaps
+    # for in-memory buffers that never reach the terminal.
+    with os.fdopen(os.dup(1), "w", closefd=True) as real_out, os.fdopen(
+        os.dup(2), "w", closefd=True
+    ) as real_err:
+        readers = [
+            Thread(target=_tee, args=(proc.stdout, real_out, out_buf)),
+            Thread(target=_tee, args=(proc.stderr, real_err, err_buf)),
+        ]
+        for r in readers:
+            r.start()
+        for r in readers:
+            r.join()
+        proc.wait()
+    return subprocess.CompletedProcess(
+        command, proc.returncode, "".join(out_buf), "".join(err_buf)
+    )
 
 
 def patch_console(monkeypatch, module, *names, **overrides):

@@ -576,6 +576,35 @@ Here are the contents of ``rocjpeg_api_trace.csv`` file:
    :widths: 10,10,10,10,10,20,20
    :header-rows: 1
 
+rocSHMEM trace
+++++++++++++++
+
+`rocSHMEM <https://rocm.docs.amd.com/projects/rocshmem/en/latest/>`_ is an intra-kernel networking library that provides GPU-centric networking through an OpenSHMEM-like interface. This option traces the rocSHMEM host-stream API (the ``rocshmem_*_on_stream`` routines that enqueue communication and synchronization operations on a HIP stream).
+
+.. note::
+
+   rocSHMEM tracing requires rocSHMEM to be built with rocprofiler-register support (the ``USE_ROCPROFILER_REGISTER`` build option, enabled by default). See the `rocSHMEM build documentation <https://rocm.docs.amd.com/projects/rocshmem/en/latest/build.html>`_ for details.
+
+.. code-block:: shell
+
+    rocprofv3 --rocshmem-trace -- <application_path>
+
+rocSHMEM is emitted directly only to the JSON and ``rocpd`` (default) output formats. CSV, Perfetto (``.pftrace``), and OTF2 output are produced from the rocpd database via ``rocpd convert``. ``--rocshmem-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
+
+.. code-block:: shell
+
+    rocprofv3 --rocshmem-trace -- <application_path>
+    rocpd convert -i out_results.db --output-format csv
+
+The conversion generates a ``rocshmem_api_trace.csv`` file. Here are its contents:
+
+.. csv-table:: rocSHMEM trace
+   :file: /data/rocshmem_api_trace.csv
+   :widths: 10,10,10,10,10,20,20
+   :header-rows: 1
+
+Perfetto will also show rocSHMEM API arguments. Pointers will not be dereferenced and only the address will be displayed.
+
 OMPT trace
 ++++++++++
 
