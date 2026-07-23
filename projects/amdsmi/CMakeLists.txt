@@ -531,9 +531,25 @@ install(
 )
 
 # RPM package specific variables
+# The Python module installs under an absolute system site-packages path
+# (e.g. /usr/lib64/python3.9/site-packages) that the OS python package already
+# owns. Left alone, CPack's RPM generator declares %dir ownership of that
+# directory and its parents -- co-owning system directories, with the default
+# group-writable (0775) mode. Exclude the sitelib and its ancestors from the
+# auto filelist so the RPM owns only its own <sitelib>/amdsmi subtree, not the
+# shared /usr python directories.
+set(_amdsmi_sitelib_excludes "")
+if(AMDSMI_SYSTEM_PYTHON_SITELIB)
+    set(_amdsmi_walk "${AMDSMI_SYSTEM_PYTHON_SITELIB}")
+    while(_amdsmi_walk AND NOT _amdsmi_walk STREQUAL "/" AND NOT _amdsmi_walk STREQUAL "/usr")
+        list(APPEND _amdsmi_sitelib_excludes "${_amdsmi_walk}")
+        get_filename_component(_amdsmi_walk "${_amdsmi_walk}" DIRECTORY)
+    endwhile()
+endif()
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     "${CPACK_PACKAGING_INSTALL_PREFIX}"
     "${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}"
+    ${_amdsmi_sitelib_excludes}
 )
 #Set rpm distro
 if(CPACK_RPM_PACKAGE_RELEASE)
