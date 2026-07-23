@@ -22,18 +22,13 @@
 
 # The tests package installs only test binaries and python test files. It must
 # not touch the main package's state (ldconfig entry, module bytecode, doc,
-# symlinks). The only thing left behind that dpkg's file tracking cannot remove
+# symlinks). The only thing left behind that RPM's file tracking cannot remove
 # is the __pycache__ generated when the installed python tests run, so clean
-# only that, and only on a full remove -- on upgrade the new tests package's
-# files are already in place.
-case "$1" in
-  ( remove )
-    tests_root="@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@"
-    rm -rf "${tests_root}/tests/python_unittest/__pycache__"
-    rm -rf "${tests_root}/tests/__pycache__"
-    rm -rf "${tests_root}/tools/__pycache__"
-  ;;
-  ( * )
-    exit 0
-  ;;
-esac
+# only that, and only on a full erase ($1=0) -- on upgrade ($1=1) the new
+# tests package's files are already in place.
+if [ "$1" -eq 0 ]; then
+    _tests_root="@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@"
+    rm -rf "${_tests_root}/tests/python_unittest/__pycache__"
+    rm -rf "${_tests_root}/tests/__pycache__"
+    rm -rf "${_tests_root}/tools/__pycache__"
+fi

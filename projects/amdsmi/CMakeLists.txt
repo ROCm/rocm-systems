@@ -672,9 +672,22 @@ endif()
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/post.in" RPM/post @ONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/preun.in" RPM/preun @ONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/postun.in" RPM/postun @ONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/tests-preun.in" RPM/tests-preun @ONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/tests-noop.in" RPM/tests-noop @ONLY)
 set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/post")
 set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/preun")
 set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun")
+# The globals above apply to every component RPM, so the tests package would
+# otherwise inherit the main package's ldconfig registration and cleanup and
+# corrupt the still-installed main package on `remove amd-smi-lib-tests`.
+# Per-component script files override the globals for that component only, so
+# point the tests package at its own tests-only pre-uninstall and no-op the
+# install/uninstall hooks it must not run.
+if(NOT ENABLE_ASAN_PACKAGING)
+    set(CPACK_RPM_TESTS_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/tests-preun")
+    set(CPACK_RPM_TESTS_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/tests-noop")
+    set(CPACK_RPM_TESTS_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/tests-noop")
+endif()
 
 #Set the names now using CPACK utility
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
