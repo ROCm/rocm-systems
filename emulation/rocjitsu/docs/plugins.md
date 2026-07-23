@@ -182,7 +182,9 @@ for all output instead of `fprintf(stderr, ...)` or `std::cerr`:
 ```cpp
 class MyPlugin : public ExecutionPlugin {
 public:
-  MyPlugin() : ExecutionPlugin("myplugin") {}
+  explicit MyPlugin(const char *config_json) : ExecutionPlugin("myplugin") {
+    (void)config_json;
+  }
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override {
     sink().write(std::format("[myplugin] dispatch {}\n", info.dispatch_id));
