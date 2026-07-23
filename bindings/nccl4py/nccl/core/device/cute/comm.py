@@ -14,7 +14,7 @@ from cutlass.cutlass_dsl import dsl_user_op
 
 from ...resources import DevCommResource
 from . import _bindings
-from ._helpers import _alloca_struct
+from ._helpers import _alloca_struct, _to_value
 from ._structs import (
     DevCommValue,
     ncclGin_C,
@@ -170,6 +170,36 @@ class DevComm:
     @property
     def team_rail(self) -> Team:
         return Team(_bindings.nccl_team_rail(self.ptr))
+
+    def team_rank_to_world(self, team: Team, rank: int) -> cutlass.Int32:
+        """Translate ``rank`` within ``team`` to its world rank.
+
+        Args:
+            team: team the rank is expressed in.
+            rank: peer rank within ``team``.
+
+        Returns:
+            Corresponding rank in the world team.
+        """
+        return cutlass.Int32(_bindings.nccl_team_rank_to_world(
+            self.ptr, _to_value(team), cutlass.Int32(rank)))
+
+    def team_rank_to_lsa(self, team: Team, rank: int) -> cutlass.Int32:
+        """Translate ``rank`` within ``team`` to its LSA rank.
+
+        ``rank`` must identify a member of this communicator's local LSA team.
+        NCCL does not validate membership; a rank outside the local LSA
+        produces an out-of-range result.
+
+        Args:
+            team: team the rank is expressed in.
+            rank: peer rank within ``team``.
+
+        Returns:
+            Corresponding rank in the LSA team.
+        """
+        return cutlass.Int32(_bindings.nccl_team_rank_to_lsa(
+            self.ptr, _to_value(team), cutlass.Int32(rank)))
 
     # === Gin factory ===
 

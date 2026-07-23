@@ -105,6 +105,16 @@ def nccl_team_lsa(dev_comm: _LLVMPtrType) -> ncclTeam: ...
 @cute.extern(name="ncclTeamRail", source=_BC)
 def nccl_team_rail(dev_comm: _LLVMPtrType) -> ncclTeam: ...
 
+@cute.extern(name="ncclTeamRankToWorld", source=_BC)
+def nccl_team_rank_to_world(
+    dev_comm: _LLVMPtrType, team: ncclTeam, rank: cutlass.Int32,
+) -> cutlass.Int32: ...
+
+@cute.extern(name="ncclTeamRankToLsa", source=_BC)
+def nccl_team_rank_to_lsa(
+    dev_comm: _LLVMPtrType, team: ncclTeam, rank: cutlass.Int32,
+) -> cutlass.Int32: ...
+
 @cute.extern(name="ncclGetLocalPointer", source=_BC)
 def nccl_get_local_pointer(
     window: _LLVMPtrType, offset: cutlass.Int64,
