@@ -115,6 +115,7 @@ jobs:
             ca-certificates \
             cmake \
             git \
+            libclang-rt-dev \
             libdrm-dev \
             ninja-build \
             clang
