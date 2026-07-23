@@ -142,10 +142,10 @@ reader_t::get_flows_in_window(const std::vector<size_t>&         tracks,
     return m_impl->get_flows_in_window(tracks, window, max_edges);
 }
 
-std::optional<reader_types::event_detail_t>
-reader_t::get_event_detail(const reader_types::event_id_t& id) const
+std::optional<reader_types::event_info_t>
+reader_t::get_event_info(const reader_types::event_id_t& id) const
 {
-    return m_impl->get_event_detail(id);
+    return m_impl->get_event_info(id);
 }
 
 reader_types::call_stack_t

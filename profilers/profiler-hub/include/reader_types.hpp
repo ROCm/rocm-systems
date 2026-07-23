@@ -482,7 +482,7 @@ using arg_data_list_t = std::vector<arg_data_ptr_t>;
 using arg_value_t =
     std::variant<std::monostate, int64_t, uint64_t, double, std::string, std::nullptr_t>;
 
-/// A named, typed detail property in an event_detail_t property bag.
+/// A named, typed detail property in an event_info_t property bag.
 struct arg_t
 {
     std::string key;    ///< Property name (source struct field / argument name).
@@ -730,7 +730,7 @@ struct event_id_access
  * code_object, stream, queue, node/process/thread) appear in `properties` as their
  * integer id, NOT as a resolved sub-struct — consumers do a follow-up lookup by id.
  */
-struct event_detail_t
+struct event_info_t
 {
     event_id_t                    id;        ///< Opaque handle this detail describes.
     std::string                   name;      ///< Type's name field; empty if none.

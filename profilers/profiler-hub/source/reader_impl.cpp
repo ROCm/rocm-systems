@@ -1978,7 +1978,7 @@ reader_t::impl::get_source_context(const reader_types::timeline_event_t& event)
 
 // Opaque-handle overloads. These build a minimal timeline_event_t from the handle's
 // private {row_id, type} and delegate to the timeline_event_t overloads above -- the
-// exact internal bridge the region case of get_event_detail already uses (see the
+// exact internal bridge the region case of get_event_info already uses (see the
 // get_arguments call there). The decode lives entirely inside the reader, so event_id_t
 // opacity (task 028) is preserved: no public type/row_id accessor is added, and the
 // consumer only ever holds the opaque handle. resolve_event_metadata reads only
@@ -3145,14 +3145,14 @@ reader_t::impl::get_memory_alloc_details(const reader_types::event_id_t& id)
 // DESIGN DECISION (gap#4, 2026-07-20): full-replace of the seven typed get_*_details
 // public methods with this one collapsed path (draft §7). The typed methods survive as
 // private impl helpers, reused here to reuse their SQL + FK resolution; only their public
-// surface is gone. Optiq is the sole consumer and migrates to get_event_detail. Revisit
+// surface is gone. Optiq is the sole consumer and migrates to get_event_info. Revisit
 // if a second consumer needs the rich typed structs back on the public API.
-std::optional<reader_types::event_detail_t>
-reader_t::impl::get_event_detail(const reader_types::event_id_t& id)
+std::optional<reader_types::event_info_t>
+reader_t::impl::get_event_info(const reader_types::event_id_t& id)
 {
     using reader_types::event_type_t;
 
-    reader_types::event_detail_t detail;
+    reader_types::event_info_t detail;
     detail.id = id;
 
     // DESIGN DECISION (gap#4, 2026-07-20): property-key naming = the source struct's

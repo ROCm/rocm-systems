@@ -109,7 +109,7 @@ struct reader_t
      *@section Timeline Event Queries (On-Demand, Not Stored)
      * These query the database and return lightweight timeline_event_t for display.
      * The returned vector is owned by the caller; reader does not cache events.
-     * Use get_event_details() to fetch full data for a specific event.
+     * Use get_event_info() to fetch full data for a specific event.
      */
 
     /**
@@ -261,14 +261,14 @@ struct reader_t
      * Dispatches on the handle's internal event type across all six event_type_t cases
      * (region, kernel_dispatch, memory_copy, memory_allocate, sample, pmc_event) and
      * returns a fixed common header (name, category, ts, te) plus a generic `properties`
-     * bag of named, typed values (see event_detail_t / arg_t). Point events (sample,
+     * bag of named, typed values (see event_info_t / arg_t). Point events (sample,
      * pmc_event) carry `te == std::nullopt`. Linked entities are emitted as integer-id
      * properties, not resolved sub-structs. Missing optional fields are omitted.
      *
      * @param id Opaque event handle (from get_interval_track / get_scalar_track / flows).
      * @return Unified detail, or nullopt if the handle names no known event.
      */
-    [[nodiscard]] std::optional<reader_types::event_detail_t> get_event_detail(
+    [[nodiscard]] std::optional<reader_types::event_info_t> get_event_info(
         const reader_types::event_id_t& id) const;
 
     /**
@@ -332,7 +332,7 @@ struct reader_t
      *
      * Opaque-handle overload of get_arguments; see get_call_stack(event_id_t)
      * for the opacity-preserving delegation rationale. Unlike the folded
-     * name/value pairs in event_detail_t::properties, this preserves each
+     * name/value pairs in event_info_t::properties, this preserves each
      * argument's position and type (arg_data_t).
      * @param id Opaque event handle.
      * @return List of argument data (empty if not available).

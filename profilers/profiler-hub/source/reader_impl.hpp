@@ -144,7 +144,7 @@ struct reader_t::impl
 
     // Unified event detail (collapses the typed detail methods above into one flat,
     // typed property bag). The typed methods are retained as private helpers reused here.
-    [[nodiscard]] std::optional<reader_types::event_detail_t> get_event_detail(
+    [[nodiscard]] std::optional<reader_types::event_info_t> get_event_info(
         const reader_types::event_id_t& id);
 
     // Event property queries
