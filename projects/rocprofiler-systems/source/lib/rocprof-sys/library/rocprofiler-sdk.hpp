@@ -6,7 +6,6 @@
 #include "core/control/session.hpp"
 #include "core/timemory.hpp"
 
-#include <memory>
 #include <vector>
 
 namespace rocprofsys
@@ -42,8 +41,8 @@ pause();
 void
 resume();
 
-std::shared_ptr<control::session>
-get_session();
+void
+bind_session(control::session& sess);
 
 void
 reset_sdk_session_guards();
