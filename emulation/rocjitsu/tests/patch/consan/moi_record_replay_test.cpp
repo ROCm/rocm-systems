@@ -3667,24 +3667,30 @@ TEST(ConSanMoi, Gfx1250RejectsConfiguredPersistentStateAtOrdinarySgprLimit) {
 }
 
 TEST(ConSanMoi, SupportedCdnaTargetsHonorConfiguredPersistentStateSgprLimit) {
-  constexpr std::array kTargets = {
-      std::pair{ROCJITSU_CODE_ARCH_CDNA3, std::string_view{"gfx942/cdna3"}},
-      std::pair{ROCJITSU_CODE_ARCH_CDNA4, std::string_view{"gfx950/cdna4"}},
+  struct Target {
+    rj_code_arch_t arch;
+    std::string_view label;
+    std::string_view object_name;
+    decltype(&build_cdna3_ds_store_b32) build_guest;
+    decltype(&make_cdna3_lds_code_object) make_object;
   };
-  for (const auto &[arch, target_name] : kTargets) {
-    SCOPED_TRACE(target_name);
-    const auto guest =
-        arch == ROCJITSU_CODE_ARCH_CDNA3
-            ? build_cdna3_ds_store_b32(/*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, arch)
-            : build_cdna4_ds_store_b32(/*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, arch);
+  constexpr std::array<Target, 2> kTargets = {{
+      {ROCJITSU_CODE_ARCH_CDNA3, "gfx942/cdna3", "cdna3_explicit_state_at_ordinary_limit",
+       &build_cdna3_ds_store_b32, &make_cdna3_lds_code_object},
+      {ROCJITSU_CODE_ARCH_CDNA4, "gfx950/cdna4", "cdna4_explicit_state_at_ordinary_limit",
+       &build_cdna4_ds_store_b32, &make_cdna4_lds_code_object},
+  }};
+  for (const Target &target : kTargets) {
+    SCOPED_TRACE(target.label);
+    const auto guest = target.build_guest(/*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, target.arch);
     ASSERT_TRUE(guest);
-    std::vector<uint32_t> text_words(128u, build_s_nop(0, arch));
+    std::vector<uint32_t> text_words(128u, build_s_nop(0, target.arch));
     std::copy(guest->begin(), guest->end(), text_words.begin());
-    text_words.back() = build_s_endpgm(arch);
+    text_words.back() = build_s_endpgm(target.arch);
     const std::vector<uint8_t> bytes =
-        arch == ROCJITSU_CODE_ARCH_CDNA3
-            ? make_cdna3_lds_code_object(text_words, "cdna3_explicit_state_at_ordinary_limit")
-            : make_cdna4_lds_code_object(text_words, "cdna4_explicit_state_at_ordinary_limit");
+        target.make_object(text_words, target.object_name, /*vgpr_granulated=*/0u,
+                           /*uses_dynamic_stack=*/false, /*workgroup_id_dimension_mask=*/0u,
+                           /*group_segment_fixed_size=*/0u);
 
     const auto patch_with = [&](uint16_t owner) {
       ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
