@@ -65,7 +65,12 @@ std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
 /// compact, monotonic text range; helper/trampoline code can be far away from
 /// the first PC observed for the dispatch.
 struct DisasmCache {
-  void record(uint64_t pc, const Instruction &inst) { record(pc, inst.disassemble()); }
+  void record(uint64_t pc, const Instruction &inst) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (entries_.contains(pc))
+      return;
+    entries_.emplace(pc, inst.disassemble());
+  }
 
   void record(uint64_t pc, std::string disasm) {
     std::lock_guard<std::mutex> lock(mutex_);
