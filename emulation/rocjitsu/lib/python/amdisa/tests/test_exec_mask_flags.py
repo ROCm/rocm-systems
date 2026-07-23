@@ -26,14 +26,22 @@ _CASES = [
     # Scalar EXEC writers: write EXEC, but are not themselves EXEC-masked.
     pytest.param(
         InstructionSemantics(
-            'S_AND_SAVEEXEC_B64', 'scalar_saveexec', operation='and', data_type='b64'
+            'S_AND_SAVEEXEC_B64',
+            'scalar_saveexec',
+            operation='and',
+            data_type='b64',
+            sets_scc='nonzero',
         ),
         {'WRITES_EXEC'},
         id='scalar_saveexec',
     ),
     pytest.param(
         InstructionSemantics(
-            'S_WREXEC_B64', 'scalar_wrexec', operation='and', data_type='b64'
+            'S_ANDN2_WREXEC_B64',
+            'scalar_wrexec',
+            operation='andn2',
+            data_type='b64',
+            sets_scc='nonzero',
         ),
         {'WRITES_EXEC'},
         id='scalar_wrexec',
@@ -103,7 +111,11 @@ class TestExecMaskFlagStmts:
 
     def test_flag_statement_format(self):
         sem = InstructionSemantics(
-            'S_OR_SAVEEXEC_B64', 'scalar_saveexec', operation='or', data_type='b64'
+            'S_OR_SAVEEXEC_B64',
+            'scalar_saveexec',
+            operation='or',
+            data_type='b64',
+            sets_scc='nonzero',
         )
         stmts = _exec_mask_flag_stmts(sem)
         assert stmts

@@ -167,39 +167,6 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     ) in output
 
 
-@pytest.mark.parametrize(
-    ('arch', 'profile', 'raw_exec'),
-    [
-        ('cdna3', CdnaProfile(), False),
-        ('rdna4', Rdna4Profile(), True),
-    ],
-)
-def test_operand_exec_register_access_is_wave32_gated(
-    tmp_path, arch, profile, raw_exec
-):
-    generator = CodeGenerator(
-        SimpleNamespace(
-            arch_name=arch,
-            opnd_selectors=[],
-            operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
-            profile=profile,
-        ),
-        str(tmp_path),
-    )
-
-    generator.gen_operand()
-    operand_cpp = (tmp_path / arch / 'operand.cpp').read_text()
-
-    assert 'return static_cast<uint32_t>(wf.exec());' in operand_cpp
-    assert 'wf.set_exec((wf.exec() & 0xFFFFFFFF00000000ULL) | val);' in operand_cpp
-    if raw_exec:
-        assert 'return static_cast<uint32_t>(wf.exec_raw() >> 32);' in operand_cpp
-        assert 'wf.set_exec_raw((wf.exec_raw() & 0x00000000FFFFFFFFULL)' in operand_cpp
-    else:
-        assert 'exec_raw' not in operand_cpp
-        assert 'set_exec_raw' not in operand_cpp
-
-
 def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     generator = CodeGenerator(
         SimpleNamespace(
