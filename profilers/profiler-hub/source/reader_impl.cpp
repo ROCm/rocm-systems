@@ -31,7 +31,8 @@ namespace
 // Every other track's overlaps are concurrency, not containment (a kernel dispatch
 // overlapping another is not its child; memory copies, streams, PMC/memory-activity
 // samples likewise) -> `lane`, parent always no-parent. Per draft principle #4/#6.
-// Open for Anthony review — see design/draft_api_2026-06-22.md §4-6.
+// Open for Anthony review — see design/draft_api_2026-06-22.md §4-6,
+// design/gap_analysis_current_vs_design_2026-07-23.md.
 reader_types::nesting_model_t
 nesting_for(reader_types::track_type_t t)
 {
@@ -2429,6 +2430,10 @@ reader_t::impl::get_interval_track(size_t                              track_id,
     // regardless of any time-window filter applied afterwards. Cache peak concurrency on
     // the track so height consumers can read it via get_all_tracks() (Optiq
     // level->max_lane migration target).
+    // DESIGN DECISION (deviation, 2026-07-23): computing layout over the FULL track
+    // before any window filter is deliberate — it keeps lanes/levels stable across pans
+    // and zooms. Open for Anthony review — see
+    // design/gap_analysis_current_vs_design_2026-07-23.md §3.1/A.2.
     const auto max_lane = detail::compute_interval_layout(events, nesting_for(qi.type));
     auto       tit      = m_track_info_utility.find(track_id);
     if(tit != m_track_info_utility.end()) tit->second->max_lane = max_lane;
@@ -2811,7 +2816,8 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
             // the parent (src). The clique join constrains both endpoints to the SAME
             // stack_id, so this only fires on a self-parent row and in practice yields to
             // the start-ts fallback (earlier start = src; ties broken by handle order for
-            // determinism). Reversible. Open for Anthony review — design/draft_api §5-6.
+            // determinism). Reversible. Open for Anthony review — design/draft_api §5-6,
+            // design/gap_analysis_current_vs_design_2026-07-23.md.
             reader_types::event_id_t src{};
             reader_types::event_id_t dst{};
             if(r.dest_parent.has_value() && *r.dest_parent == r.stack_id)
@@ -2839,7 +2845,8 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
             // DESIGN DECISION (gap #3, 2026-07-20): flow_id groups a causal chain. All
             // edges of one stack_id clique share flow_id = that stack_id, so a multi-hop
             // lineage is recoverable by grouping on flow_id and sorting by src start.
-            // Reversible. Open for Anthony review — design/draft_api §5-6.
+            // Reversible. Open for Anthony review — design/draft_api §5-6,
+            // design/gap_analysis_current_vs_design_2026-07-23.md.
             flows.push_back(reader_types::flow_t{
                 src, dst, reader_types::detail::flow_id_access::make(r.stack_id), kind });
         }
@@ -2847,7 +2854,8 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
 
     // DESIGN DECISION (gap #3, 2026-07-20): kind is fixed by each set's endpoint-type
     // pairing (order-independent, so orientation never changes it). Reversible mapping.
-    // Open for Anthony review — design/draft_api_2026-06-22.md §5-6.
+    // Open for Anthony review — design/draft_api_2026-06-22.md §5-6,
+    // design/gap_analysis_current_vs_design_2026-07-23.md.
     using et = reader_types::event_type_t;
     using fk = reader_types::flow_kind_t;
     run(m_read_statements->region_to_kernel_dispatch_flows(),
@@ -2909,7 +2917,8 @@ reader_t::impl::get_flows_in_window(const std::vector<size_t>&         tracks,
     // DESIGN DECISION (gap #3 windowed selector, 2026-07-20): signature keeps the
     // reader's raw size_t track-id spelling and the existing time_window_t, NOT the
     // draft's track_id_t struct (unused by this reader). Reversible. Open for Anthony
-    // review — see design/draft_api_2026-06-22.md §6.
+    // review — see design/draft_api_2026-06-22.md §6,
+    // design/gap_analysis_current_vs_design_2026-07-23.md.
     auto edges = get_flows({});
     if(edges.empty()) return edges;
 
@@ -2966,7 +2975,8 @@ reader_t::impl::get_flows_in_window(const std::vector<size_t>&         tracks,
         // edge's full temporal extent [min(src.start,dst.start), max(src.end,dst.end)]
         // (conservative superset of the src.end->dst.start arrow), included iff it
         // intersects the window; empty window = no filter. Reversible. Open for Anthony
-        // review — see design/draft_api_2026-06-22.md §6.
+        // review — see design/draft_api_2026-06-22.md §6,
+        // design/gap_analysis_current_vs_design_2026-07-23.md.
         if(has_window)
         {
             const auto elo = std::min(gs.start, gd.start);
@@ -2977,7 +2987,8 @@ reader_t::impl::get_flows_in_window(const std::vector<size_t>&         tracks,
         // DESIGN DECISION (gap #3 windowed selector, 2026-07-20): an edge is kept iff AT
         // LEAST ONE endpoint sits on a listed track, so a cross-track arrow with one
         // endpoint off-screen still surfaces its visible half; empty tracks = all.
-        // Reversible. Open for Anthony review — see design/draft_api_2026-06-22.md §6.
+        // Reversible. Open for Anthony review — see design/draft_api_2026-06-22.md §6,
+        // design/gap_analysis_current_vs_design_2026-07-23.md.
         if(!track_set.empty())
         {
             bool touches = false;
@@ -3003,7 +3014,8 @@ reader_t::impl::get_flows_in_window(const std::vector<size_t>&         tracks,
     // (stable across pans); max_edges==0 = uncapped. This answers draft §10's open
     // "decimation contract" question (renderer LOD depends on it) with a reversible
     // default — the primary Anthony-review decision. Open for Anthony review — see
-    // design/draft_api_2026-06-22.md §6, §10.
+    // design/draft_api_2026-06-22.md §6, §10,
+    // design/gap_analysis_current_vs_design_2026-07-23.md.
     if(max_edges == 0 || filtered.size() <= max_edges) return filtered;
 
     auto latency = [&](const reader_types::flow_t& e) -> reader_types::timestamp_ns_t {
