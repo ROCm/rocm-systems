@@ -48,12 +48,14 @@ Pre-built configs are in `configs/`:
 }
 ```
 
+The example above is intentionally minimal and single-threaded.
+
 ### Top-level fields
 
 | Field | Type | Description |
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
-| `num_threads` | int | Worker threads for PDES engine |
+| `num_threads` | int | Number of PDES engine partitions/worker threads. |
 | `exec_mode` | string | `"functional"` or `"cycle"` |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
 

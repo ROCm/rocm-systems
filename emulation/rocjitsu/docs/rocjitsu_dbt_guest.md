@@ -1,15 +1,30 @@
 # rocjitsu DBT Guest Mode
 
-A rocjitsu-only path where an unmodified ROCm process can see a
-guest GPU, but translate kernels and execute on a real host GPU.
+A rocjitsu-only path where an unmodified ROCm process can see a guest GPU, but
+translate kernels and execute on either a real or simulated host GPU.
 
 The design has three main components with their own responsibilities:
 
 1. **GuestKfd Interposer**: Shows applications a guest GPU device that looks
    like a real KFD/DRM device.
 2. **HSA Hooks**: Intercepts HSA Runtime calls for the guest GPU and forwards
-   them to the host GPU, translating kernels as needed.
+   them to the selected host backend, translating kernels as needed.
 3. **DBT**: Translates guest GPU kernels to host GPU kernels.
+
+The `dbt_guest.execution_backend` enum selects `hardware` or `simulator`.
+Simulator mode can reference an external host config with `simulator_config`,
+which takes precedence over VM/topology in the enclosing file, or omit that
+field and keep the simulator VM/topology in the same file. The checked-in
+CDNA4-on-CDNA3 config references the golden CDNA3 simulator config; the
+self-contained layout is primarily useful for tests and temporary configs.
+
+The optional `dbt_guest.guest_revision` and `dbt_guest.host_revision` enums carry
+the silicon revision for each translation side. They are needed only for gfx1250,
+whose A0 and B0 steppings share an ELF machine ID and therefore cannot be told
+apart from the code object alone. A same-ISA gfx1250 load (for example a B0 guest
+running on A0 host) is rejected unless both revisions are set, because the
+required A0 workarounds cannot otherwise be selected. For every other target the
+machine ID already identifies the silicon, so these fields stay `unspecified`.
 
 ## High Level Flow
 

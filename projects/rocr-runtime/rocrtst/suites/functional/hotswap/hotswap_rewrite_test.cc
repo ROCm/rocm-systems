@@ -199,6 +199,7 @@ void ResetRuntimeTestEnv() {
   g_fake_hsa_env = FakeHsaEnv{};
   g_fake_env_vars.clear();
   rocr::hotswap::ResetAgentGfxRevisionCache();
+  rocr::hotswap::ClearRetargetCacheForTesting();
   rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(false);
 }
 
@@ -276,7 +277,7 @@ TEST(HotswapRewriteDecision, A0RetargetsWithoutStrictModeRegardlessOfOptions) {
     EXPECT_EQ(decision->target_isa, kGfx1250A0Isa);
     EXPECT_FALSE(decision->request_entry_trampolines);
     EXPECT_FALSE(decision->request_strict_mode);
-    EXPECT_TRUE(decision->rewrite_required);
+    EXPECT_FALSE(decision->rewrite_required);
   }
 }
 
@@ -291,7 +292,7 @@ TEST(HotswapRewriteDecision, StrictModeDisabledDoesNotBlockA0Retarget) {
   EXPECT_EQ(decision->source_isa, kGfx1250B0Isa);
   EXPECT_EQ(decision->target_isa, kGfx1250A0Isa);
   EXPECT_FALSE(decision->request_strict_mode);
-  EXPECT_TRUE(decision->rewrite_required);
+  EXPECT_FALSE(decision->rewrite_required);
 }
 
 TEST(HotswapRewriteDecision, EntryTrampolinesDefaultOffBlocksNonA0Gfx1250) {
@@ -698,7 +699,7 @@ TEST(HotswapRewrite, RuntimeLoadRequiredStrictRewriteFailureReturnsError) {
   rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(false);
 }
 
-TEST(HotswapRewrite, RuntimeLoadRequiredA0RewriteFailureReturnsError) {
+TEST(HotswapRewrite, RuntimeLoadOptionalA0RewriteFailureFallsBackToOriginal) {
   ResetRuntimeTestEnv();
   if (!ComgrHotswapOptionsApiAvailable()) return;
   rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(true);
@@ -709,8 +710,10 @@ TEST(HotswapRewrite, RuntimeLoadRequiredA0RewriteFailureReturnsError) {
       executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
       MakeLoadCallbacks(&load));
 
-  EXPECT_EQ(status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
-  EXPECT_TRUE(load.calls.empty());
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  ASSERT_EQ(load.calls.size(), 1u);
+  EXPECT_EQ(load.calls[0].path, LoadPath::kOriginal);
+  EXPECT_EQ(load.calls[0].code_object, static_cast<const void*>(kGfx1250MinCo));
   EXPECT_EQ(
       rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
 
@@ -739,7 +742,68 @@ TEST(HotswapRewrite, RuntimeLoadOptionalRewrittenLoadFailureFallsBackToOriginal)
       rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
 }
 
-TEST(HotswapRewrite, RuntimeLoadRequiredA0RewrittenLoadFailureReturnsError) {
+TEST(HotswapRewrite, RetargetCacheServesSecondLoadFromCache) {
+  ResetRuntimeTestEnv();
+  if (!ComgrHotswapOptionsApiAvailable()) return;
+  rocr::hotswap::ClearRetargetCacheForTesting();
+  ASSERT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 0u);
+
+  // First load: cache miss, performs the full retarget.
+  {
+    LoadRecorder load;
+    const hsa_executable_t executable = MakeTestExecutable(0x601);
+    const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+        executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
+        MakeLoadCallbacks(&load));
+
+    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+    ASSERT_EQ(load.calls.size(), 1u);
+    EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
+    rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
+  }
+
+  const size_t cache_size_after_first = rocr::hotswap::RetargetCacheSizeForTesting();
+  EXPECT_GT(cache_size_after_first, 0u);
+
+  // Second load of the same code object: should be served from cache.
+  {
+    LoadRecorder load;
+    const hsa_executable_t executable = MakeTestExecutable(0x602);
+    const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+        executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
+        MakeLoadCallbacks(&load));
+
+    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+    ASSERT_EQ(load.calls.size(), 1u);
+    EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
+    EXPECT_GT(load.calls[0].code_object_size, 0u);
+    rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
+  }
+
+  // Cache size should not have grown (hit, not a new entry).
+  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), cache_size_after_first);
+  rocr::hotswap::ClearRetargetCacheForTesting();
+}
+
+TEST(HotswapRewrite, RetargetCacheClearResetsCacheSize) {
+  ResetRuntimeTestEnv();
+  if (!ComgrHotswapOptionsApiAvailable()) return;
+  rocr::hotswap::ClearRetargetCacheForTesting();
+
+  // Populate the cache with one entry.
+  LoadRecorder load;
+  const hsa_executable_t executable = MakeTestExecutable(0x603);
+  rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+      executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
+      MakeLoadCallbacks(&load));
+  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
+
+  EXPECT_GT(rocr::hotswap::RetargetCacheSizeForTesting(), 0u);
+  rocr::hotswap::ClearRetargetCacheForTesting();
+  EXPECT_EQ(rocr::hotswap::RetargetCacheSizeForTesting(), 0u);
+}
+
+TEST(HotswapRewrite, RuntimeLoadOptionalA0RewrittenLoadFailureFallsBackToOriginal) {
   ResetRuntimeTestEnv();
   if (!ComgrHotswapOptionsApiAvailable()) return;
   LoadRecorder load;
@@ -750,9 +814,11 @@ TEST(HotswapRewrite, RuntimeLoadRequiredA0RewrittenLoadFailureReturnsError) {
       executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
       MakeLoadCallbacks(&load));
 
-  EXPECT_EQ(status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
-  ASSERT_EQ(load.calls.size(), 1u);
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  ASSERT_EQ(load.calls.size(), 2u);
   EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
+  EXPECT_EQ(load.calls[1].path, LoadPath::kOriginal);
+  EXPECT_EQ(load.calls[1].code_object, static_cast<const void*>(kGfx1250MinCo));
   EXPECT_EQ(
       rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
 }

@@ -331,7 +331,7 @@ def test_vop3_mad_32_16_uses_true16_sources_for_src0_src1_only():
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
     assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
     assert 'read_vop3_true16_src(src2' not in body
-    assert 'uint32_t s2 = src2.read_lane(wf, lane);' in body
+    assert 'uint32_t s2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);' in body
 
 
 def test_vop3_div_fixup_f16_uses_true16_sources_and_destination():

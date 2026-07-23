@@ -9,7 +9,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/instruction.h"
 #include <cstdint>
 #include <string>
@@ -502,6 +502,8 @@ public:
   bool has_dpp8();
   bool has_dpp16();
   bool hasImpliedLiteral();
+  bool hasImpliedLiteral64();
+  uint32_t impliedLiteralWordCount();
   using OpEncoding = Vop2MachineInst;
   const OpEncoding inst_;
   uint32_t literal_ = 0;

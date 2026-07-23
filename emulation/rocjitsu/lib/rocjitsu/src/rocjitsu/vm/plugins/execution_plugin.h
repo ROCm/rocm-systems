@@ -107,12 +107,11 @@ public:
   /// Called when a VGPR is read during instruction execution.
   /// @param wf Owning wavefront, or nullptr if the register is unallocated.
   /// @param physical_reg Physical register index in the VGPR file.
-  /// @param lane_begin First lane in the read range.
-  /// @param lane_end One past the last lane in the read range.
+  /// @param lane_mask Bit mask of lanes read by the instruction.
   /// @param byte_mask Sub-dword byte mask (kFullByteMask = full dword).
-  virtual void onAmdgpuReadVgprs(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/,
-                                 uint32_t /*lane_begin*/, uint32_t /*lane_end*/,
-                                 uint8_t /*byte_mask*/ = kFullByteMask) {}
+  virtual void onAmdgpuReadVgprLanes(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/,
+                                     uint64_t /*lane_mask*/,
+                                     uint8_t /*byte_mask*/ = kFullByteMask) {}
 
   /// Called when an SGPR is read during instruction execution.
   /// @param wf Owning wavefront, or nullptr if the register is unallocated.

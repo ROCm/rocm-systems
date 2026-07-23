@@ -13,26 +13,27 @@
 #include "nccl.h"
 
 struct ncclGinIbCollComm {
-  void*         ctx;
-  int           rank;
-  int           nranks;
-  int           connectionId;
-  int           nConnections;
-  int           queueDepth;
-  void*         recvComm;
-  void*         sendComm;
-  void**        fullRecvComm;
-  void**        fullSendComm;
-  int           dev;
-  void*         ginCtx;
+  void* ctx;
+  int rank;
+  int nranks;
+  int connectionId;
+  int nConnections;
+  int queueDepth;
+  void* recvComm;
+  void* sendComm;
+  void** fullRecvComm;
+  void** fullSendComm;
+  int dev;
+  void* ginCtx;
   struct {
     struct ibv_context* context;
-    struct ibv_pd *pd;
-  }ib;
-  ncclResult_t (*getProperties)(int dev, void *props);
-  ncclResult_t (*allGather)(struct ncclGinIbCollComm *cComm, void *srcBuf, void *recvBuf, size_t len);
-  ncclResult_t (*allToAll)(struct ncclGinIbCollComm *cComm, void *srcBuf, void *recvBuf, size_t len);
-  ncclResult_t (*getGidIndex)(struct ibv_context *context, uint8_t portNum, struct ibv_port_attr* portAttr, int *gidIndex);
+    struct ibv_pd* pd;
+  } ib;
+  ncclResult_t (*getProperties)(int dev, void* props);
+  ncclResult_t (*allGather)(struct ncclGinIbCollComm* cComm, void* srcBuf, void* recvBuf, size_t len);
+  ncclResult_t (*allToAll)(struct ncclGinIbCollComm* cComm, void* srcBuf, void* recvBuf, size_t len);
+  ncclResult_t (*getGidIndex)(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
+                              int* gidIndex);
 };
 
 #endif

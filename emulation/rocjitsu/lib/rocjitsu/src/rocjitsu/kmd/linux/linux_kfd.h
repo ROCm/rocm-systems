@@ -33,9 +33,10 @@ inline constexpr uint64_t kfd_mmap_gpu_id(uint32_t gpu_id) {
 ///
 /// @details The base Driver interface handles /dev/kfd calls. The Linux shim
 /// also needs sysfs redirection, DRM render-node ownership, and fd tracking.
-/// SimulatedKfd and GuestKfd both implement this surface, but with
-/// different ownership rules: simulation owns all visible GPU discovery, while
-/// GuestKfd owns only the appended guest GPU.
+/// SimulatedKfd and GuestKfd both implement this surface, but with different
+/// ownership rules: simulation owns all visible GPU discovery, while GuestKfd
+/// owns the appended guest and delegates host operations to either hardware or
+/// a SimulatedKfd execution backend.
 class LinuxKfd : public Driver {
 public:
   ~LinuxKfd() override = default;
@@ -107,8 +108,9 @@ public:
 
   /// @brief Return a generated /sys/class/drm root for full DRM redirection.
   ///
-  /// @details GuestKfd returns an empty string because host DRM entries
-  /// must remain real; it redirects only the synthetic guest render node.
+  /// @details Hardware-backed GuestKfd returns an empty string because host DRM
+  /// entries must remain real; simulator-backed GuestKfd delegates this to its
+  /// SimulatedKfd backend.
   [[nodiscard]] virtual std::string drm_path() const = 0;
 
   /// @brief Redirect standard KFD topology and DRM sysfs roots.

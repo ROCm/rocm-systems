@@ -2,14 +2,20 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vbuffer.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/mubuf.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -24,6 +30,7 @@
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <span>
@@ -231,6 +238,15 @@ std::vector<BasicBlock *> block_scope(const std::vector<std::unique_ptr<BasicBlo
   return scope;
 }
 
+/// @brief View the code object's .text bytes for LivenessAnalysisOptions::text.
+/// @details The gfx1250 VGPR_MSB analysis reads S_SETREG_IMM32_B32 literals from
+/// this span (at src_loc()+4), so tests exercising immediate MODE writes must
+/// supply it.
+std::span<const uint8_t> text_span(const CodeObject &co) {
+  const Section *text = co.text_sections().front();
+  return {reinterpret_cast<const uint8_t *>(text->data()), text->size()};
+}
+
 LivenessAnalysis analyze_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   auto scope = block_scope(blocks);
   return LivenessAnalysis(KernelBlockScope(scope));
@@ -273,6 +289,76 @@ TEST(RegisterSetAnalysis, KeepsRegisterClassesSeparate) {
   EXPECT_FALSE(set.contains({RegClass::ACC_VGPR, 4, 1}));
 }
 
+TEST(RegisterSetAnalysis, TracksGfx1250HighBankVectorRegisters) {
+  RegisterSet set;
+  set.expand({RegClass::VGPR, 768, 2});
+
+  EXPECT_TRUE(set.contains({RegClass::VGPR, 768, 2}));
+  EXPECT_EQ(set.size(), 2u);
+
+  set.erase({RegClass::VGPR, 769, 1});
+  EXPECT_TRUE(set.contains({RegClass::VGPR, 768, 1}));
+  EXPECT_FALSE(set.contains({RegClass::VGPR, 769, 1}));
+}
+
+template <typename AtomicInst>
+void expect_gfx1250_buffer_cmpswap_def_use(uint8_t return_control, uint8_t payload_width,
+                                           uint8_t return_width) {
+  gfx1250::VbufferMachineInst raw{};
+  raw.vdata = 4;
+  raw.th = return_control;
+  AtomicInst inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+
+  InstDefUse def_use(inst);
+  EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 4, payload_width}));
+  if (return_width == 0) {
+    EXPECT_EQ(def_use.defs.size(), 0u);
+  } else {
+    EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 4, return_width}));
+    EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 4, payload_width}));
+  }
+}
+
+TEST(GeneratedInstDefUse, Gfx1250BufferCmpswapReturnUsesElementWidth) {
+  constexpr uint8_t kAtomicNoReturn = 0;
+  constexpr uint8_t kAtomicReturn = 1;
+
+  expect_gfx1250_buffer_cmpswap_def_use<gfx1250::BufferAtomicCmpswapB32Vbuffer>(kAtomicReturn, 2,
+                                                                                1);
+  expect_gfx1250_buffer_cmpswap_def_use<gfx1250::BufferAtomicCmpswapB32Vbuffer>(kAtomicNoReturn, 2,
+                                                                                0);
+  expect_gfx1250_buffer_cmpswap_def_use<gfx1250::BufferAtomicCmpswapB64Vbuffer>(kAtomicReturn, 4,
+                                                                                2);
+  expect_gfx1250_buffer_cmpswap_def_use<gfx1250::BufferAtomicCmpswapB64Vbuffer>(kAtomicNoReturn, 4,
+                                                                                0);
+}
+
+TEST(GeneratedInstDefUse, MubufCmpswapReturnUsesElementWidthAndTargetGate) {
+  cdna3::MubufMachineInst cdna_raw{};
+  cdna_raw.vdata = 4;
+  cdna_raw.acc = 1;
+  for (uint8_t sc0 : {uint8_t{0}, uint8_t{1}}) {
+    cdna_raw.sc0 = sc0;
+    cdna3::BufferAtomicCmpswapMubuf inst(reinterpret_cast<const cdna3::MachineInst *>(&cdna_raw));
+    InstDefUse def_use(inst);
+    EXPECT_TRUE(def_use.uses.contains({RegClass::ACC_VGPR, 4, 2}));
+    EXPECT_EQ(def_use.defs.contains({RegClass::ACC_VGPR, 4, 1}), sc0 != 0);
+    EXPECT_FALSE(def_use.defs.contains({RegClass::ACC_VGPR, 4, 2}));
+  }
+
+  rdna3::MubufMachineInst rdna_raw{};
+  rdna_raw.vdata = 8;
+  for (uint8_t glc : {uint8_t{0}, uint8_t{1}}) {
+    rdna_raw.glc = glc;
+    rdna3::BufferAtomicCmpswapB32Mubuf inst(
+        reinterpret_cast<const rdna3::MachineInst *>(&rdna_raw));
+    InstDefUse def_use(inst);
+    EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 8, 2}));
+    EXPECT_EQ(def_use.defs.contains({RegClass::VGPR, 8, 1}), glc != 0);
+    EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 8, 2}));
+  }
+}
+
 TEST(RegisterSetAnalysis, IgnoresSpecialRegisterClasses) {
   RegisterSet set;
   set.expand({RegClass::EXEC, 0, 2});
@@ -299,6 +385,20 @@ TEST(RegisterSetAnalysis, GeneratedCdna4OperandsMapTrackedRegisterRefs) {
   ASSERT_TRUE(acc.to_register_ref().has_value());
   EXPECT_EQ(*acc.to_register_ref(), (RegisterRef{RegClass::ACC_VGPR, 7, 1}));
   EXPECT_FALSE(imm32.to_register_ref().has_value());
+}
+
+TEST(RegisterSetAnalysis, Cdna4WritelaneDestinationIsUseAndDef) {
+  constexpr std::array<uint32_t, 2> kWritelaneV141S4Lane2 = {0xd28a008du, 0x00010404u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+
+  std::unique_ptr<Instruction> inst(decoder->decode(kWritelaneV141S4Lane2.data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_writelane_b32");
+
+  InstDefUse du(*inst);
+  EXPECT_TRUE(du.defs.contains({RegClass::VGPR, 141, 1}));
+  EXPECT_TRUE(du.uses.contains({RegClass::VGPR, 141, 1}));
+  EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 4, 1}));
 }
 
 TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {
@@ -409,6 +509,46 @@ TEST(CfgAnalysis, RecoveredIndirectBranchEdgeStartsAtConsumerBlock) {
   ASSERT_EQ(consumer->successors().size(), 1u);
   EXPECT_EQ(consumer->successors()[0], target);
   EXPECT_FALSE(has_predecessor(*fallthrough, consumer));
+}
+
+TEST(CfgAnalysis, IncompleteFactConsumerIsFlaggedIncomplete) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // Two paths reach one setpc consumer:
+  //   * the builder path materializes a concrete PC in s[8:9]
+  //   * the bypass path does nothing to the pair, so it arrives at its
+  //     unconstrained kernel-entry value
+  // The joined fact is therefore INCOMPLETE with one concrete target. Recovery
+  // still records that target (for relocation/liveness) but must flag it
+  // incomplete, so the translator does not replace the dynamic consumer with a
+  // direct window that would redirect the bypass path.
+  std::vector<uint32_t> words = {
+      pack_sopp(5, 5),                                 // 0x00: cbranch scc0 -> bypass at 0x18.
+      pack_sop1(0x1c, kPcSreg, 0),                     // 0x04: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand), // 0x08: s_add_u32.
+      28,                                              // 0x0c: target delta -> 0x08 + 28 = 0x24.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
+      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> consumer at 0x1c.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4), // 0x18: bypass (leaves pair unconstrained).
+      pack_sop1(0x1d, 0, kPcSreg),              // 0x1c: joined consumer setpc.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4), // 0x20: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x24: builder target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *consumer = block_starting_at(blocks, 28);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  const auto &fixup = consumer->static_indirect_call_fixups()[0];
+  EXPECT_EQ(fixup.source_target_offset, 36u);
+  EXPECT_TRUE(fixup.source_incomplete)
+      << "a consumer joined from an unconstrained path must be flagged incomplete";
 }
 
 TEST(CfgAnalysis, DirectCallEdgeUsesTerminatorOffset) {
@@ -577,6 +717,473 @@ TEST(CfgAnalysis, RecoversSignedDeltaTemplateConsumers) {
   EXPECT_TRUE(has_successor_start(*add_consumer, target->start_offset()));
 }
 
+TEST(CfgAnalysis, KeepsDistinctBuildersReachingSameTarget) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+
+  // Two DIFFERENT getpc builders on two paths both build the SAME target (0x28)
+  // and reach one consumer. They are distinct lattice values (same target offset,
+  // different source_getpc_offset), so the consumer must retain BOTH fixups — the
+  // translator rewrites each builder to its own relocated address. Deduplicating
+  // on {call,target,sreg} alone would drop one, leaving its stale pre-relocation
+  // address.
+  std::vector<uint32_t> words = {
+      pack_sopp(5, 4),                                 // 0x00: cbranch scc0 -> builder B at 0x14.
+      pack_sop1(0x1c, kPcSreg, 0),                     // 0x04: builder A getpc.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand), // 0x08: s_add_u32 s8, s8, lit.
+      0x20u,                                           // 0x0c: delta -> 0x08 + 0x20 = 0x28.
+      build_s_branch(3, ROCJITSU_CODE_ARCH_CDNA4),     // 0x10 -> consumer at 0x20.
+      pack_sop1(0x1c, kPcSreg, 0),                     // 0x14: builder B getpc.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand), // 0x18: s_add_u32 s8, s8, lit.
+      0x10u,                                           // 0x1c: delta -> 0x18 + 0x10 = 0x28.
+      pack_sop1(0x1d, 0, kPcSreg),                     // 0x20: joined consumer setpc.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),        // 0x24: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),        // 0x28: shared target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *consumer = block_starting_at(blocks, 32);
+  ASSERT_NE(consumer, nullptr);
+  const auto &fixups = consumer->static_indirect_call_fixups();
+  // Both builders resolve to target 0x28 but from distinct getpc offsets (0x04,
+  // 0x14); both fixups must survive.
+  ASSERT_EQ(fixups.size(), 2u);
+  for (const auto &fixup : fixups)
+    EXPECT_EQ(fixup.source_target_offset, 40u);
+  std::vector<uint64_t> getpc_offsets{fixups[0].source_getpc_offset, fixups[1].source_getpc_offset};
+  std::ranges::sort(getpc_offsets);
+  EXPECT_EQ(getpc_offsets, (std::vector<uint64_t>{4u, 20u}));
+}
+
+TEST(CfgAnalysis, Gfx1250RecoversSignedDeltaTemplateWithPrefetch) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kTmpSreg = 12;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kInlineInt4 = 132;
+  constexpr uint32_t kSignedDeltaLiteral = 68;
+
+  // gfx1250 sometimes emits a prefetch setup move and s_prefetch_inst_pc_rel
+  // around the low/carry updates. Neither alters the PC pair, so both
+  // signed paths still resolve to the same target at 0x4c.
+  std::vector<uint32_t> words = {
+      gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1,
+                          {.ssrc0 = 0, .sdst = kPcSreg})[0], // 0x00: s_get_pc_i64 s[8:9].
+      gfx1250::build_sop2(gfx1250::kSAddCoI32Sop2,
+                          {.ssrc0 = kLiteralOperand, .ssrc1 = kInlineInt4, .sdst = kTmpSreg})[0],
+      // 0x04: s_add_co_i32.
+      kSignedDeltaLiteral, // 0x08: literal.
+      gfx1250::build_sopc(gfx1250::kSCmpGeI32Sopc,
+                          {.ssrc0 = kTmpSreg, .ssrc1 = kInlineInt0})[0], // 0x0c: s_cmp_ge_i32.
+      gfx1250::build_sopp(gfx1250::kSCbranchScc1Sopp, {.simm16 = 7})[0],
+      // 0x10 -> add half at 0x30.
+      gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
+                          {.ssrc0 = 159, .sdst = 14})[0], // 0x14: s_mov_b32 s14, 31.
+      0xF404A000u,
+      0x1C000000u, // 0x18: s_prefetch_inst_pc_rel.
+      gfx1250::build_sop1(gfx1250::kSAbsI32Sop1,
+                          {.ssrc0 = kTmpSreg, .sdst = kTmpSreg})[0], // 0x20: s_abs_i32.
+      gfx1250::build_sop2(gfx1250::kSSubCoU32Sop2,
+                          {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
+      // 0x24: s_sub_co_u32.
+      gfx1250::build_sop2(gfx1250::kSSubCoCiU32Sop2,
+                          {.ssrc0 = kPcSreg + 1, .ssrc1 = kInlineInt0, .sdst = kPcSreg + 1})[0],
+      // 0x28: s_sub_co_ci_u32.
+      gfx1250::build_sop1(gfx1250::kSSetPcI64Sop1,
+                          {.ssrc0 = kPcSreg, .sdst = 0})[0], // 0x2c: s_set_pc_i64.
+      gfx1250::build_sop2(gfx1250::kSAddCoU32Sop2,
+                          {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
+      // 0x30: s_add_co_u32.
+      gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
+                          {.ssrc0 = 159, .sdst = 14})[0], // 0x34: s_mov_b32 s14, 31.
+      0xF404A000u,
+      0x1C000000u, // 0x38: s_prefetch_inst_pc_rel.
+      gfx1250::build_sop2(gfx1250::kSAddCoCiU32Sop2,
+                          {.ssrc0 = kPcSreg + 1, .ssrc1 = kInlineInt0, .sdst = kPcSreg + 1})[0],
+      // 0x40: s_add_co_ci_u32.
+      gfx1250::build_sop1(gfx1250::kSSetPcI64Sop1,
+                          {.ssrc0 = kPcSreg, .sdst = 0})[0], // 0x44: s_set_pc_i64.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),            // 0x48: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),            // 0x4c: shared target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  auto *sub_consumer = block_starting_at(blocks, 44);
+  auto *add_consumer = block_starting_at(blocks, 68);
+  auto *target = block_starting_at(blocks, 76);
+  ASSERT_NE(sub_consumer, nullptr);
+  ASSERT_NE(add_consumer, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  ASSERT_EQ(sub_consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(sub_consumer->static_indirect_call_fixups()[0].source_target_offset, 76u);
+  EXPECT_TRUE(has_successor_start(*sub_consumer, target->start_offset()));
+
+  ASSERT_EQ(add_consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(add_consumer->static_indirect_call_fixups()[0].source_target_offset, 76u);
+  EXPECT_TRUE(has_successor_start(*add_consumer, target->start_offset()));
+}
+
+TEST(CfgAnalysis, Gfx1250SignedDeltaRejectsMoveClobberingTemporary) {
+  // Same signed-delta template as above, but the "prefetch padding" move on the
+  // subtract half writes the temporary (s12) instead of an unrelated register
+  // (s14). That move changes the value s_abs_i32/s_sub_co_u32 consume, so recovery
+  // must NOT treat it as skippable padding and must NOT prove a static target for
+  // the subtract-half setpc. Regression for the temp-clobber gap: an s_mov whose
+  // destination equals tmp_sreg was previously accepted as padding.
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kTmpSreg = 12;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kInlineInt4 = 132;
+  constexpr uint32_t kSignedDeltaLiteral = 68;
+
+  std::vector<uint32_t> words = {
+      gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1,
+                          {.ssrc0 = 0, .sdst = kPcSreg})[0], // 0x00: s_get_pc_i64 s[8:9].
+      gfx1250::build_sop2(gfx1250::kSAddCoI32Sop2,
+                          {.ssrc0 = kLiteralOperand, .ssrc1 = kInlineInt4, .sdst = kTmpSreg})[0],
+      // 0x04: s_add_co_i32.
+      kSignedDeltaLiteral, // 0x08: literal.
+      gfx1250::build_sopc(gfx1250::kSCmpGeI32Sopc,
+                          {.ssrc0 = kTmpSreg, .ssrc1 = kInlineInt0})[0], // 0x0c: s_cmp_ge_i32.
+      gfx1250::build_sopp(gfx1250::kSCbranchScc1Sopp, {.simm16 = 7})[0],
+      // 0x10 -> add half at 0x30.
+      gfx1250::build_sop1(
+          gfx1250::kSMovB32Sop1,
+          {.ssrc0 = 159, .sdst = kTmpSreg})[0], // 0x14: s_mov_b32 s12, 31 (CLOBBER).
+      0xF404A000u,
+      0x1C000000u, // 0x18: s_prefetch_inst_pc_rel.
+      gfx1250::build_sop1(gfx1250::kSAbsI32Sop1,
+                          {.ssrc0 = kTmpSreg, .sdst = kTmpSreg})[0], // 0x20: s_abs_i32.
+      gfx1250::build_sop2(gfx1250::kSSubCoU32Sop2,
+                          {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
+      // 0x24: s_sub_co_u32.
+      gfx1250::build_sop2(gfx1250::kSSubCoCiU32Sop2,
+                          {.ssrc0 = kPcSreg + 1, .ssrc1 = kInlineInt0, .sdst = kPcSreg + 1})[0],
+      // 0x28: s_sub_co_ci_u32.
+      gfx1250::build_sop1(gfx1250::kSSetPcI64Sop1,
+                          {.ssrc0 = kPcSreg, .sdst = 0})[0], // 0x2c: s_set_pc_i64.
+      gfx1250::build_sop2(gfx1250::kSAddCoU32Sop2,
+                          {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
+      // 0x30: s_add_co_u32.
+      gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
+                          {.ssrc0 = 159, .sdst = 14})[0], // 0x34: s_mov_b32 s14, 31.
+      0xF404A000u,
+      0x1C000000u, // 0x38: s_prefetch_inst_pc_rel.
+      gfx1250::build_sop2(gfx1250::kSAddCoCiU32Sop2,
+                          {.ssrc0 = kPcSreg + 1, .ssrc1 = kInlineInt0, .sdst = kPcSreg + 1})[0],
+      // 0x40: s_add_co_ci_u32.
+      gfx1250::build_sop1(gfx1250::kSSetPcI64Sop1,
+                          {.ssrc0 = kPcSreg, .sdst = 0})[0], // 0x44: s_set_pc_i64.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),            // 0x48: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),            // 0x4c: shared target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  // Clobbering the temporary on the subtract half breaks that half of the paired
+  // signed-delta template. Because the two halves cross-validate to the same static
+  // target, the whole recovery fails closed: NO block proves target 0x4c=76 — versus
+  // two proven halves in Gfx1250RecoversSignedDeltaTemplateWithPrefetch.
+  size_t resolved_to_target = 0;
+  for (const auto &block : blocks) {
+    for (const auto &fixup : block->static_indirect_call_fixups()) {
+      if (fixup.source_target_offset == 76u)
+        ++resolved_to_target;
+    }
+  }
+  EXPECT_EQ(resolved_to_target, 0u);
+}
+
+TEST(CfgAnalysis, Gfx1250RecoversPcStashedInVgprLanes) {
+  // s[0:1] builds target 0x38, is stashed in v44 lanes 0:1, then restored
+  // through v_readlane immediately before swappc. This is the finite static
+  // call idiom emitted in RCCL device functions.
+  std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      52u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(52).
+      0xD761002Cu,
+      0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x18: v_writelane_b32 v44, s1, 1.
+      0xD7600000u,
+      0x0201012Cu, // 0x20: v_readlane_b32 s0, v44, 0.
+      0xD7600001u,
+      0x0201032Cu,                                // 0x28: v_readlane_b32 s1, v44, 1.
+      0xBE9E4900u,                                // 0x30: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x34: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x38: target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  auto *consumer = block_starting_at(blocks, 48);
+  auto *target = block_starting_at(blocks, 56);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(target, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 56u);
+  EXPECT_TRUE(has_successor_start(*consumer, target->start_offset()));
+}
+
+TEST(CfgAnalysis, Gfx1250WideVgprWriteInvalidatesStashedLane) {
+  // Same stash idiom as Gfx1250RecoversPcStashedInVgprLanes, but a width-2
+  // v_mov_b64 writes v[44:45] between the writelanes and the readlanes. That wide
+  // write overwrites the stashed VGPR, so the readlane no longer reconstructs the
+  // original PC and recovery must fail closed. A width-one-only invalidation would
+  // miss the b64 write and falsely recover a target.
+  constexpr auto clobber =
+      gfx1250::build_vop3(gfx1250::kVMovB64Vop3, {.vdst = 44, .src0 = 256 + 46});
+  std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      52u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(52).
+      0xD761002Cu,
+      0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x18: v_writelane_b32 v44, s1, 1.
+      clobber[0],  // 0x20: v_mov_b64 v[44:45], v[46:47] (wide write over v44).
+      clobber[1],
+      0xD7600000u,
+      0x0201012Cu, // 0x28: v_readlane_b32 s0, v44, 0.
+      0xD7600001u,
+      0x0201032Cu,                                // 0x30: v_readlane_b32 s1, v44, 1.
+      0xBE9E4900u,                                // 0x38: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x40: would-be target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  size_t total_fixups = 0;
+  for (const auto &block : blocks)
+    total_fixups += block->static_indirect_call_fixups().size();
+  EXPECT_EQ(total_fixups, 0u);
+}
+
+TEST(CfgAnalysis, Gfx1250DoesNotCarryLaneStashAcrossBlockBoundary) {
+  // Same stash idiom, but an unconditional branch separates the writelane stashes
+  // from the readlane/swappc consumer, so they land in different basic blocks. The
+  // lane-slot recovery is block-local and must NOT carry the stash across the
+  // terminator: a writelane reached on only one path (or jumped over) could
+  // otherwise seed a consumer it never dynamically reaches. Recovery must fail
+  // closed here (no proven single target), even though the same straight-line form
+  // resolves in Gfx1250RecoversPcStashedInVgprLanes.
+  std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      56u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(56) -> 0x04+56 = 0x3c (would-be target).
+      0xD761002Cu,
+      0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x18: v_writelane_b32 v44, s1, 1.
+      gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = 0})[0], // 0x20: s_branch -> 0x24.
+      0xD7600000u,
+      0x0201012Cu, // 0x24: v_readlane_b32 s0, v44, 0.
+      0xD7600001u,
+      0x0201032Cu,                                // 0x2c: v_readlane_b32 s1, v44, 1.
+      0xBE9E4900u,                                // 0x34: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x38: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: would-be target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  size_t total_fixups = 0;
+  for (const auto &block : blocks)
+    total_fixups += block->static_indirect_call_fixups().size();
+  EXPECT_EQ(total_fixups, 0u);
+}
+
+TEST(CfgAnalysis, Gfx1250DoesNotRecoverLaneStashWithDifferingRoleBanks) {
+  // Same straight-line stash idiom as Gfx1250RecoversPcStashedInVgprLanes, but an
+  // s_set_vgpr_msb sets the DST bank to 1 while leaving the SRC0 bank at 0. The
+  // v_writelane writes physical v[44+256] (DST bank 1) while the v_readlane reads
+  // physical v44 (SRC0 bank 0). Because the roles resolve the same low selector to
+  // different physical VGPRs, no value actually flows, and recovery must fail
+  // closed rather than key both by the low selector and falsely reconstruct a PC.
+  //
+  // s_set_vgpr_msb immediate byte is {DST[7:6], SRC2[5:4], SRC1[3:2], SRC0[1:0]};
+  // 0x40 selects DST bank 1, all other roles bank 0.
+  constexpr auto set_dst_bank_one =
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x40});
+  std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      52u,
+      0u,                  // 0x04: s_add_nc_u64 ..., lit64(52).
+      set_dst_bank_one[0], // 0x10: s_set_vgpr_msb (DST bank 1, SRC0 bank 0).
+      0xD761002Cu,
+      0x02010000u, // 0x14: v_writelane_b32 v44, s0, 0 (physical v300 under DST bank 1).
+      0xD761002Cu,
+      0x02010201u, // 0x1c: v_writelane_b32 v44, s1, 1.
+      0xD7600000u,
+      0x0201012Cu, // 0x24: v_readlane_b32 s0, v44, 0 (physical v44 under SRC0 bank 0).
+      0xD7600001u,
+      0x0201032Cu,                                // 0x2c: v_readlane_b32 s1, v44, 1.
+      0xBE9E4900u,                                // 0x34: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x38: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: would-be target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  size_t total_fixups = 0;
+  for (const auto &block : blocks)
+    total_fixups += block->static_indirect_call_fixups().size();
+  EXPECT_EQ(total_fixups, 0u);
+}
+
+TEST(CfgAnalysis, Gfx1250DoesNotInheritBankFromLexicalPredecessor) {
+  // An s_set_vgpr_msb in the entry block establishes a bank, then s_branch jumps to
+  // a stash block that performs the full getpc/writelane/readlane/swappc idiom with
+  // NO local s_set_vgpr_msb. The stash block must NOT inherit the lexically-
+  // preceding block's bank (VGPR-MSB is scanned in source order, not CFG order):
+  // its bank is unknown at the block boundary, so the writelane cannot record a
+  // physical slot and recovery fails closed. Otherwise a false concrete target
+  // could be reconstructed.
+  //
+  // 0x00 s_set_vgpr_msb 0 ; 0x04 s_branch -> 0x0c (skips the 0x08 filler).
+  constexpr auto set_bank_zero = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0});
+  constexpr auto branch_to_stash = gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = 1});
+  std::vector<uint32_t> words = {
+      set_bank_zero[0],                           // 0x00: establish bank 0 (entry block).
+      branch_to_stash[0],                         // 0x04: s_branch -> stash block at 0x0c.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), // 0x08: bypassed filler.
+      0xBE804700u,                                // 0x0c: s_get_pc_i64 s[0:1] (stash block).
+      0xA980FE00u,
+      52u,
+      0u,          // 0x10: s_add_nc_u64 ..., lit64(52).
+      0xD761002Cu, // 0x1c: v_writelane_b32 v44, s0, 0.
+      0x02010000u,
+      0xD761002Cu, // 0x24: v_writelane_b32 v44, s1, 1.
+      0x02010201u,
+      0xD7600000u, // 0x2c: v_readlane_b32 s0, v44, 0.
+      0x0201012Cu,
+      0xD7600001u, // 0x34: v_readlane_b32 s1, v44, 1.
+      0x0201032Cu,
+      0xBE9E4900u,                                // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x40: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x44: would-be target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  size_t total_fixups = 0;
+  for (const auto &block : blocks)
+    total_fixups += block->static_indirect_call_fixups().size();
+  EXPECT_EQ(total_fixups, 0u);
+}
+
+TEST(CfgAnalysis, Gfx1250DoesNotReuseStashFromSkippedFallthroughPredecessor) {
+  // Diamond: a conditional branch jumps DIRECTLY into the readlane/swappc consumer
+  // block, while the lexical fallthrough path holds the WHOLE getpc/writelane stash.
+  //
+  //   A: s_cbranch_scc1 -> C                          (fallthrough to B)
+  //   B: s_set_vgpr_msb 0 ; getpc/add ; v_writelane   (fallthrough to C)
+  //   C: v_readlane s0/s1, v44 ; s_swap_pc_i64        (branch target of A)
+  //
+  // On the A->C edge the entire stash in B never executes, so the value in v44 is
+  // not proven to reach the swappc. C is a branch target — a real block leader — so
+  // recovery must reset at C and fail closed, even though B lexically falls through
+  // into C. The lane scan is linear: B has no terminator before C, so without a
+  // reset at C's leader B's recorded slot leaks into C and falsely recovers a single
+  // target. B re-establishes its VGPR-MSB bank locally (s_set_vgpr_msb 0) so the
+  // writelane actually records a slot — otherwise the post-cbranch bank-unknown state
+  // would mask the stash and the test could not distinguish the two behaviors.
+  //
+  // s_cbranch_scc1 next_pc = 0x04, target C = 0x28: delta 36 bytes = 9 dwords.
+  constexpr auto cbranch_to_consumer =
+      gfx1250::build_sopp(gfx1250::kSCbranchScc1Sopp, {.simm16 = 9});
+  constexpr auto set_bank_zero = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0});
+  std::vector<uint32_t> words = {
+      cbranch_to_consumer[0], // 0x00: s_cbranch_scc1 -> C at 0x28 (block A).
+      set_bank_zero[0],       // 0x04: s_set_vgpr_msb 0 (block B, fallthrough).
+      0xBE804700u,            // 0x08: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      48u,
+      0u,          // 0x0c: s_add_nc_u64 ..., lit64(48) -> target 0x3c.
+      0xD761002Cu, // 0x18: v_writelane_b32 v44, s0, 0.
+      0x02010000u,
+      0xD761002Cu, // 0x20: v_writelane_b32 v44, s1, 1.
+      0x02010201u,
+      0xD7600000u, // 0x28: v_readlane_b32 s0, v44, 0 (block C, branch target).
+      0x0201012Cu,
+      0xD7600001u, // 0x30: v_readlane_b32 s1, v44, 1.
+      0x0201032Cu,
+      0xBE9E4900u,                                // 0x38: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: would-be target / continuation.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  // Assert on the recovery pass output directly, not the post-filtered block
+  // fixups: the reviewer's concern is that the lane-stash SCAN must be block-local.
+  // A downstream incomplete-predecessor filter can also hide the bogus target, so
+  // check discover_indirect_branch_edges() emits NO fixup at all.
+  const auto *sec = co.text_sections().front();
+  const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
+  const size_t inst_data_size = sec->size() / sizeof(uint32_t);
+  std::vector<std::unique_ptr<Instruction>> owned;
+  for (size_t pc = 0, byte_offset = 0; pc < inst_data_size;) {
+    if (inst_data[pc] == 0) { // gfx1250 alignment padding, as in BasicBlock::build.
+      ++pc;
+      byte_offset += sizeof(uint32_t);
+      continue;
+    }
+    std::unique_ptr<Instruction> inst(decoder->decode(&inst_data[pc], byte_offset));
+    ASSERT_NE(inst, nullptr);
+    const uint32_t inst_words = static_cast<uint32_t>(inst->size()) / sizeof(uint32_t);
+    byte_offset += inst->size();
+    pc += inst_words;
+    owned.push_back(std::move(inst));
+  }
+  std::vector<const Instruction *> decoded_insts;
+  decoded_insts.reserve(owned.size());
+  for (const auto &inst : owned)
+    decoded_insts.push_back(inst.get());
+  const auto text =
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(sec->data()), sec->size());
+
+  const auto fixups = discover_indirect_branch_edges(
+      std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size()), text,
+      ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_TRUE(fixups.empty()) << "block-local recovery must not reuse a skipped-path stash";
+}
+
 TEST(CfgAnalysis, ReversePostOrderStraightLine) {
   auto blocks =
       build_test_blocks({TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::UseSgpr4});
@@ -630,6 +1237,354 @@ TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {
   EXPECT_NE(*free_vgpr, 0);
 }
 
+TEST(LivenessAnalysis, Gfx1250VgprMsbResolvesPhysicalRegisterBank) {
+  // src0=2 and dst=2 select physical VGPR bank 2. The VOP1 source encoding
+  // still contains v1, but liveness must identify the architectural register
+  // as v513 rather than aliasing it with low-bank v1.
+  // The upper byte records the previous state for trap recovery and must not
+  // affect the active bank selected by the low byte.
+  constexpr auto set_vgpr_msb = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x5a82});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({set_vgpr_msb[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 2);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}));
+  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250DynamicModeWriteConservativelyUsesEveryBank) {
+  constexpr uint16_t kModeSrc0Hwreg = 1u | (14u << 6) | (1u << 11);
+  constexpr auto setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregB32Sopk, {.simm16 = kModeSrc0Hwreg, .sdst = 0});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({setreg[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), std::nullopt);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src1), 0);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src2), 0);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 0);
+  for (uint16_t bank = 0; bank < 4; ++bank)
+    EXPECT_TRUE(liveness.is_live_before(
+        *instruction, {RegClass::VGPR, static_cast<uint16_t>(1 + bank * 256), 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250FullLiteralModeWriteRecoversKnownBank) {
+  constexpr uint16_t kModeSrc0Hwreg = 1u | (14u << 6) | (1u << 11);
+  constexpr auto dynamic_setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregB32Sopk, {.simm16 = kModeSrc0Hwreg, .sdst = 0});
+  constexpr auto literal_setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kModeSrc0Hwreg});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({dynamic_setreg[0], literal_setreg[0], 2u << 14, move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  std::advance(instruction, 2);
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(instruction.operator*().mnemonic(), "v_mov_b32_e32");
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 2);
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}));
+  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250TruncatedLiteralModeWriteMarksBanksAmbiguous) {
+  // A mode-setting s_setreg_imm32_b32 whose 32-bit literal is not fully present in
+  // the .text image (truncated at the end of the section) cannot have its banks
+  // recovered. The analysis reads the literal from the text at src_loc()+4; when
+  // that word is out of range it must mark the affected banks ambiguous (nullopt)
+  // rather than read past the section. Model the truncation by handing the analysis
+  // a text span that stops just after the setreg encoding word, before its literal.
+  constexpr auto set_bank_two = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 2});
+  constexpr uint16_t kModeAllBanksHwreg = 1u | (12u << 6) | (7u << 11);
+  constexpr auto literal_setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kModeAllBanksHwreg});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  // Full program (so decode sees a valid literal + terminator), but the analysis is
+  // told the text ends right after the setreg encoding word at offset 4 (its
+  // literal at offset 8 is out of range).
+  TestCodeObject co({set_bank_two[0], literal_setreg[0], 0xe4u << 12, move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  // Truncate the text span to 8 bytes: the setreg (at offset 4) has no readable
+  // literal at offset 8.
+  const auto full = text_span(co);
+  options.text = full.subspan(0, 8);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  std::advance(instruction, 2);
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(instruction.operator*().mnemonic(), "v_mov_b32_e32");
+  // Bank 2 was set before the truncated mode write; because the mode write's
+  // literal is unreadable, the Src0 bank must be ambiguous, not the pre-write 2.
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), std::nullopt);
+}
+
+TEST(LivenessAnalysis, Gfx1250PartialLiteralModeWriteUsesUnmaskedVgprFields) {
+  constexpr auto set_bank_one = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 1});
+  constexpr uint16_t kModeSrc0HighBitHwreg = 1u | (15u << 6);
+  constexpr auto literal_setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kModeSrc0HighBitHwreg});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({set_bank_one[0], literal_setreg[0], 3u << 14, move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  std::advance(instruction, 2);
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(instruction.operator*().mnemonic(), "v_mov_b32_e32");
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 3);
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 769, 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250ImmediateModeWriteRecoversBanksOutsideRequestedSlice) {
+  constexpr uint16_t kModeSrc0Hwreg = 1u | (14u << 6) | (1u << 11);
+  constexpr auto dynamic_setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregB32Sopk, {.simm16 = kModeSrc0Hwreg, .sdst = 0});
+  // Request a write to MODE bit zero. The gfx1250 erratum nevertheless updates
+  // all VGPR-MSB fields from literal bits [19:12].
+  constexpr uint16_t kModeBitZeroHwreg = 1u;
+  constexpr auto literal_setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kModeBitZeroHwreg});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({dynamic_setreg[0], literal_setreg[0], 2u << 14, move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  std::advance(instruction, 2);
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 2);
+}
+
+TEST(LivenessAnalysis, Gfx1250LiteralModeWriteTracksEveryRole) {
+  constexpr uint16_t kAllVgprMsbFieldsHwreg = 1u | (12u << 6) | (7u << 11);
+  constexpr auto literal_setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kAllVgprMsbFieldsHwreg});
+  // MODE[19:12] is {src2=3, src1=2, src0=1, dst=0}.
+  constexpr uint32_t kModeFields = 0xe4u << 12;
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({literal_setreg[0], kModeFields, move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 1);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src1), 2);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src2), 3);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 0);
+}
+
+TEST(LivenessAnalysis, Gfx1250ImmediateNonModeWriteDoesNotChangeBanks) {
+  constexpr uint16_t kNonModeHwreg = 2u;
+  constexpr auto literal_setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kNonModeHwreg});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({literal_setreg[0], 0x000ff000u, move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 0);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src1), 0);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src2), 0);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 0);
+}
+
+TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinRequiresPredecessorsToAgree) {
+  constexpr auto branch_to_else = gfx1250::build_sopp(gfx1250::kSCbranchScc0Sopp, {.simm16 = 2});
+  constexpr auto set_bank_two = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x82});
+  constexpr auto branch_to_join = gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = 1});
+  constexpr auto set_bank_zero = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp);
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co(
+      {branch_to_else[0], set_bank_two[0], branch_to_join[0], set_bank_zero[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto scope = block_scope(blocks);
+  BasicBlock *join = block_starting_at(blocks, 16);
+  ASSERT_NE(join, nullptr);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &joined_move = *join->instructions().begin();
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0), std::nullopt);
+  for (uint16_t bank = 0; bank < 4; ++bank)
+    EXPECT_TRUE(liveness.is_live_before(
+        joined_move, {RegClass::VGPR, static_cast<uint16_t>(1 + bank * 256), 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinPreservesAgreeingBank) {
+  constexpr auto branch_to_else = gfx1250::build_sopp(gfx1250::kSCbranchScc0Sopp, {.simm16 = 2});
+  constexpr auto set_bank_two = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 2});
+  constexpr auto branch_to_join = gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = 1});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co(
+      {branch_to_else[0], set_bank_two[0], branch_to_join[0], set_bank_two[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto scope = block_scope(blocks);
+  BasicBlock *join = block_starting_at(blocks, 16);
+  ASSERT_NE(join, nullptr);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &joined_move = *join->instructions().begin();
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0), 2);
+  EXPECT_TRUE(liveness.is_live_before(joined_move, {RegClass::VGPR, 513, 1}));
+  EXPECT_FALSE(liveness.is_live_before(joined_move, {RegClass::VGPR, 1, 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250VgprMsbJoinExcludesUnreachablePredecessor) {
+  // The entry unconditionally branches over an unreachable block that sets bank 0,
+  // landing on a block that sets bank 2 and falls through to the join. Only the
+  // reachable predecessor (bank 2) may contribute to the join; the unreachable
+  // bank-0 block must NOT drag the joined bank to ambiguous (nullopt). This pins
+  // that the fixed point excludes unreachable predecessors rather than meeting
+  // every structural in-edge.
+  //
+  // Layout (each op is one dword):
+  //   0x00 s_branch +1        -> skips the unreachable block, targets 0x08
+  //   0x04 s_set_vgpr_msb 0   (UNREACHABLE: no edge targets it)
+  //   0x08 s_set_vgpr_msb 2   (reachable target; falls through to join)
+  //   0x0c v_mov (join)       reads v1 under the proven bank
+  //   0x10 s_endpgm
+  constexpr auto branch_over = gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = 1});
+  constexpr auto set_bank_zero = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp);
+  constexpr auto set_bank_two = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 2});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({branch_over[0], set_bank_zero[0], set_bank_two[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction *joined_move = nullptr;
+  for (const auto &block : blocks) {
+    for (const Instruction &inst : block->instructions()) {
+      if (inst.mnemonic() == "v_mov_b32_e32")
+        joined_move = &inst;
+    }
+  }
+  ASSERT_NE(joined_move, nullptr);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*joined_move, amdgpu::VgprMsbRole::Src0), 2);
+  EXPECT_TRUE(liveness.is_live_before(*joined_move, {RegClass::VGPR, 513, 1}));
+}
+
 TEST(LivenessAnalysis, FindsDeadSgprAfterLiveSgpr) {
   auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
   LivenessAnalysis liveness = analyze_scope(blocks);
@@ -678,6 +1633,37 @@ TEST(LivenessAnalysis, MinFreeVgprForcesScratchAllocationAboveFloor) {
   EXPECT_EQ(liveness.find_free_sgpr(&use, 0), 0);
   EXPECT_EQ(liveness.find_free_run(&use, 1, 0), 4);
   EXPECT_EQ(liveness.find_free_run(&use, 1, 7), 7);
+}
+
+TEST(LivenessAnalysis, FreeVgprAllocationHonorsDestinationLimit) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  const Instruction &use = *blocks[0]->instructions().begin();
+
+  LivenessAnalysisOptions limited_options;
+  limited_options.min_free_vgpr = 256;
+  LivenessAnalysis limited(KernelBlockScope(scope), limited_options);
+  EXPECT_EQ(limited.find_free_run(&use, 1), std::nullopt);
+
+  LivenessAnalysisOptions gfx1250_options;
+  gfx1250_options.min_free_vgpr = 256;
+  gfx1250_options.max_free_vgpr = 1024;
+  LivenessAnalysis gfx1250(KernelBlockScope(scope), gfx1250_options);
+  EXPECT_EQ(gfx1250.find_free_run(&use, 1), 256);
+}
+
+TEST(LivenessAnalysis, FindFreeRunHonorsBaseAlignment) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.min_free_vgpr = 93;
+
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_EQ(liveness.find_free_run(&use, 4, 0, 2), 94);
+  EXPECT_EQ(liveness.find_free_run(&use, 4, 94, 4), 96);
 }
 
 TEST(LivenessAnalysis, ReadWriteSameRegisterIsLiveBeforeInstruction) {
@@ -848,6 +1834,24 @@ constexpr uint32_t kVop1MovWord0Sdwa = (0x3Fu << 25) | (5u << 17) | (1u << 9) | 
 std::unique_ptr<Instruction> decode_cdna4(const std::array<uint32_t, 2> &words) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   return std::unique_ptr<Instruction>(decoder ? decoder->decode(words.data()) : nullptr);
+}
+
+std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 2> &words) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  return std::unique_ptr<Instruction>(decoder ? decoder->decode(words.data()) : nullptr);
+}
+
+TEST(GeneratedInstDefUse, Gfx1250Vop3CompareDefinesOneSgpr) {
+  // v_cmp_eq_u32_e64 s53, 32, v4. gfx1250 is wave32-only, so the comparison
+  // mask occupies s53 and must not make liveness treat the adjacent s54 as
+  // clobbered.
+  auto inst = decode_gfx1250({0xD44A0035u, 0x020208A0u});
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_cmp_eq_u32");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 53, 1}));
+  EXPECT_FALSE(idu.defs.contains({RegClass::SGPR, 54, 1}));
 }
 
 // DPP word1 fields (CDNA4): vsrc0[7:0], dpp_ctrl[16:8], bound_ctrl[19],

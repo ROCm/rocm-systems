@@ -28,31 +28,32 @@ THE SOFTWARE.
 
 // HIP version info retrieval
 #if ROCM_VERSION >= 50000
-   #define HIP_BUILD_INFO STR(HIP_VERSION_MAJOR) "." STR(HIP_VERSION_MINOR) "." STR(HIP_VERSION_PATCH) "-" HIP_VERSION_GITHASH
+#define HIP_BUILD_INFO \
+  STR(HIP_VERSION_MAJOR) "." STR(HIP_VERSION_MINOR) "." STR(HIP_VERSION_PATCH) "-" HIP_VERSION_GITHASH
 // HIP Githash info not available in older ROCm versions < 5.0
 #elif ROCM_VERSION >= 40000
-   #define HIP_BUILD_INFO STR(HIP_VERSION_MAJOR) "." STR(HIP_VERSION_MINOR) "." STR(HIP_VERSION_PATCH)
+#define HIP_BUILD_INFO STR(HIP_VERSION_MAJOR) "." STR(HIP_VERSION_MINOR) "." STR(HIP_VERSION_PATCH)
 #else
-   #define HIP_BUILD_INFO "Unknown"
+#define HIP_BUILD_INFO "Unknown"
 #endif
 
-// ROCm version info retrieval  
+// ROCm version info retrieval
 #if ROCM_VERSION >= 60000
    // rocm_version.h moved to rocm/include/rocm-core from ROCm 6.0
-   #include <rocm-core/rocm_version.h>
+#include <rocm-core/rocm_version.h>
 #else
-   // rocm-core/rocm_version.h not present in some ROCm versions < 6.0. 
+   // rocm-core/rocm_version.h not present in some ROCm versions < 6.0.
    // So, including it from rocm/include/rocm_version.h
-   #if ROCM_VERSION >= 50000
-      #include <rocm_version.h>
-      //ROCM_BUILD_INFO not defined in ROCm Versions < 5.50
-      #ifndef ROCM_BUILD_INFO
-         #define ROCM_BUILD_INFO STR(ROCM_VERSION_MAJOR) "." STR(ROCM_VERSION_MINOR) "." STR(ROCM_VERSION_PATCH)
-      #endif
-   //ROCm version info not available for ROCm versions < 5.0
-   #else
-      #define ROCM_BUILD_INFO "Unknown"
-   #endif
+#if ROCM_VERSION >= 50000
+#include <rocm_version.h>
+      // ROCM_BUILD_INFO not defined in ROCm Versions < 5.50
+#ifndef ROCM_BUILD_INFO
+#define ROCM_BUILD_INFO STR(ROCM_VERSION_MAJOR) "." STR(ROCM_VERSION_MINOR) "." STR(ROCM_VERSION_PATCH)
+#endif
+   // ROCm version info not available for ROCm versions < 5.0
+#else
+#define ROCM_BUILD_INFO "Unknown"
+#endif
 #endif
 
 // Header-only helpers for runtime version reporting.
@@ -69,8 +70,7 @@ struct VersionInfo {
 
 // Decode hipRuntimeGetVersion(): MAJOR*10000000 + MINOR*100000 + PATCH.
 inline VersionInfo decodeHipVer(int v) {
-  return VersionInfo{true, (unsigned)(v / 10000000),
-                     (unsigned)((v / 100000) % 100), (unsigned)(v % 100000)};
+  return VersionInfo{true, (unsigned)(v / 10000000), (unsigned)((v / 100000) % 100), (unsigned)(v % 100000)};
 }
 
 inline bool sameVer(const VersionInfo& a, const VersionInfo& b) {
@@ -78,19 +78,15 @@ inline bool sameVer(const VersionInfo& a, const VersionInfo& b) {
 }
 
 // Runtime values appended only when valid and different from compile-time.
-inline std::string fmtExtVer(
-    const std::string& hipBase, const VersionInfo& hipRt, const VersionInfo& hipCt,
-    const std::string& rocmBase, const VersionInfo& rocmRt, const VersionInfo& rocmCt) {
+inline std::string fmtExtVer(const std::string& hipBase, const VersionInfo& hipRt, const VersionInfo& hipCt,
+                             const std::string& rocmBase, const VersionInfo& rocmRt, const VersionInfo& rocmCt) {
   // Determine the maximum width of the base strings for alignment.
   const size_t width = hipBase.size() > rocmBase.size() ? hipBase.size() : rocmBase.size();
-  auto line = [width](const std::string& base, const char* label,
-                      const VersionInfo& rt, const VersionInfo& ct) {
-    if (!rt.valid || sameVer(rt, ct))
-      return base;
+  auto line = [width](const std::string& base, const char* label, const VersionInfo& rt, const VersionInfo& ct) {
+    if (!rt.valid || sameVer(rt, ct)) return base;
     return fmt::format("{:<{}} / {} : {}.{}.{}", base, width, label, rt.major, rt.minor, rt.patch);
   };
-  return line(hipBase,  "HIP runtime ", hipRt,  hipCt) + '\n'
-       + line(rocmBase, "ROCm runtime", rocmRt, rocmCt);
+  return line(hipBase, "HIP runtime ", hipRt, hipCt) + '\n' + line(rocmBase, "ROCm runtime", rocmRt, rocmCt);
 }
 
 #endif

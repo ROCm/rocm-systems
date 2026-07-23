@@ -77,6 +77,73 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
   return (wf == 32 || wf == 64) && wf >= Isa::WF_SIZE && wf <= Isa::WF_SIZE_MAX;
 }
 
+/// @brief Return true when @p arch belongs to the CDNA ISA family.
+///
+/// @details Keep architecture-family policy near the ISA trait declarations so
+/// DBT call sites do not grow their own partial CDNA/RDNA switch statements.
+[[nodiscard]] inline constexpr bool arch_is_cdna(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
+
+/// @brief Return true when @p arch belongs to the RDNA ISA family.
+[[nodiscard]] inline constexpr bool arch_is_rdna(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
+/// @brief Maximum SGPR allocation encodable in an AMDHSA descriptor for @p arch.
+///
+/// @details CDNA descriptors account for reserved architectural SGPRs such as
+/// VCC in the encoded wavefront allocation. That descriptor limit is larger
+/// than the ordinary scratch SGPR range exposed through CdnaIsaBase, so DBT
+/// must query the descriptor limit separately from semantic scratch limits.
+/// RDNA and gfx1250 descriptors use the ordinary ISA SGPR maximum. gfx1250 is
+/// kept out of arch_is_rdna() because several of its descriptor and register
+/// allocation rules differ from generic RDNA despite sharing the GFX10+ ABI.
+[[nodiscard]] inline constexpr uint32_t arch_descriptor_sgpr_allocation_limit(rj_code_arch_t arch) {
+  // Architectural descriptor SGPR-allocation ceilings. CDNA descriptors may name
+  // up to 112 SGPRs; RDNA up to 106. These are fixed ISA facts (not the smaller
+  // scratch range in CdnaIsaBase), so they are named here rather than derived.
+  constexpr uint32_t kCdnaDescriptorSgprLimit = 112;
+  constexpr uint32_t kRdnaDescriptorSgprLimit = 106;
+  if (arch_is_cdna(arch))
+    return kCdnaDescriptorSgprLimit;
+  if (arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return kRdnaDescriptorSgprLimit;
+  return 0;
+}
+
+/// @brief Maximum hardware LDS bytes available to one workgroup on @p arch.
+///
+/// @details Zero means the limit is not modeled yet. Callers use that
+/// conservative value to avoid inventing compatibility policy for architectures
+/// whose LDS allocation limit has not been wired into rocjitsu.
+[[nodiscard]] inline constexpr uint32_t arch_lds_bytes(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return 64u * 1024u;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return 160u * 1024u;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return 64u * 1024u;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    // gfx1250 can allocate up to 320 KiB to one workgroup. This is distinct
+    // from the configurable LDS/vector-cache partition sizes reported for a
+    // TCP, which must not be used as the descriptor allocation ceiling.
+    return 320u * 1024u;
+  default:
+    return 0;
+  }
+}
+
 } // namespace rocjitsu
 
 #endif // ROCJITSU_ISA_ISA_TRAITS_H_
