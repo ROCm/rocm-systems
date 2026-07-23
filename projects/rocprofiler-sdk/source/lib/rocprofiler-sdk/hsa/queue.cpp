@@ -508,9 +508,11 @@ WriteInterceptor(const void* packets,
             // make a copy of the tracing data
             _packet_data.tracing_data = tracing_data_v;
 
-            // Kernel-replay localized context control: drop any dispatch-tracing context the tool
-            // disabled for this pass so its timestamp records are skipped. No-op outside a replay
-            // loop (the override is empty). See kernel_replay/local_context.hpp.
+            // Kernel-replay localized context control: when a replay pass has toggled contexts,
+            // drop the disabled ones so their timestamp records are skipped. Gated on a single
+            // thread-local check so normal dispatches pay ~nothing. See
+            // kernel_replay/local_context.hpp.
+            if(kernel_replay::local_context_has_overrides())
             {
                 auto disabled = [](const auto& e) {
                     auto ov = kernel_replay::local_context_override({.handle = e.ctx->context_idx});
