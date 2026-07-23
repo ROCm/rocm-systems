@@ -20,25 +20,17 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-const bool SMovkI32Sopk::execute_registered_ = register_exec_fn<SMovkI32Sopk>();
-
 void SMovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_movk_i32_sopk(*this, wf);
 }
-
-const bool SVersionSopk::execute_registered_ = register_exec_fn<SVersionSopk>();
 
 void SVersionSopk::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_version_sopk(*this, wf);
 }
 
-const bool SCmovkI32Sopk::execute_registered_ = register_exec_fn<SCmovkI32Sopk>();
-
 void SCmovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_cmovk_i32_sopk(*this, wf);
 }
-
-const bool SAddkCoI32Sopk::execute_registered_ = register_exec_fn<SAddkCoI32Sopk>();
 
 void SAddkCoI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   wf.write_scc(::rocjitsu::amdgpu::signed_add_overflows(
@@ -52,13 +44,9 @@ void SAddkCoI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
            static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(simm16) << 16) >> 16))));
 }
 
-const bool SMulkI32Sopk::execute_registered_ = register_exec_fn<SMulkI32Sopk>();
-
 void SMulkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_mulk_i32_sopk(*this, wf);
 }
-
-const bool SGetregB32Sopk::execute_registered_ = register_exec_fn<SGetregB32Sopk>();
 
 void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t hwreg = simm16.encoding_value_;
@@ -70,8 +58,6 @@ void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::RegisterAccess(wf).write_scalar(sdst, reg_val);
 }
 
-const bool SSetregB32Sopk::execute_registered_ = register_exec_fn<SSetregB32Sopk>();
-
 void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t hwreg = simm16.encoding_value_;
   uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(sdst);
@@ -81,8 +67,6 @@ void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
                        " hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));
 }
 
-const bool SSetregImm32B32Sopk::execute_registered_ = register_exec_fn<SSetregImm32B32Sopk>();
-
 void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t hwreg = simm16.encoding_value_;
   uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(literal);
@@ -91,8 +75,6 @@ void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
     util::Logger::warn("s_setreg_imm32_b32: ", amdgpu::hwreg_access_result_name(result),
                        " hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));
 }
-
-const bool SCallI64Sopk::execute_registered_ = register_exec_fn<SCallI64Sopk>();
 
 void SCallI64Sopk::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::RegisterAccess(wf).write_scalar64(sdst, wf.pc + size_);

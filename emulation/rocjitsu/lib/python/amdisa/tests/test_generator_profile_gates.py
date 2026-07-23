@@ -108,7 +108,7 @@ def _generated_method_body(cpp: str, class_name: str, next_class_name: str) -> s
     start = cpp.index(f'void {class_name}::execute_impl')
     end_markers = (
         f'{next_class_name}::{next_class_name}',
-        f'const bool {next_class_name}::execute_registered_',
+        f'void {next_class_name}::execute_impl',
     )
     end = min(
         cpp.index(marker, start) for marker in end_markers if marker in cpp[start:]
@@ -2520,7 +2520,7 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'constexpr uint16_t kVopdFmaF64 = 32;' in exec_cpp
     assert 'constexpr uint16_t kVopdAddF64 = 33;' in exec_cpp
     assert 'bool Vopd::is_float64_op' in cpp
-    assert 'const bool Vopd::execute_registered_' in exec_cpp
+    assert 'execute_registered_' not in exec_cpp
     assert 'constexpr uint16_t kVopdMulF64 = 34;' in exec_cpp
     assert 'constexpr uint16_t kVopdMaxNumF64 = 35;' in exec_cpp
     assert 'constexpr uint16_t kVopdMinNumF64 = 36;' in exec_cpp

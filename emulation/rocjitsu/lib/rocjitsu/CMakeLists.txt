@@ -30,10 +30,10 @@ set_target_properties(
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Fixed-profile shared library for the load-time gfx1250 B0-to-A0
-    # consumer. The frontend supplies a gfx1250-only Decoder::create() and
-    # intentionally uses the model object target rather than the full
-    # simulator aggregate. Keep this Linux-only until equivalent export
-    # control is provided for other shared-library formats.
+    # consumer. Its default registry contains only the gfx1250 model provider,
+    # excluding the full simulator aggregate and execution objects. Keep this
+    # Linux-only until equivalent export control is provided for other
+    # shared-library formats.
     add_library(
         rocjitsu_gfx1250_b0_to_a0
         SHARED
@@ -48,7 +48,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     target_link_libraries(
         rocjitsu_gfx1250_b0_to_a0
-        PRIVATE rocjitsu_dbt_internal rocjitsu_isa_gfx1250_model simdojo_headers
+        PRIVATE
+            rocjitsu_dbt_internal
+            rocjitsu_gfx1250_model_registry
+            simdojo_headers
     )
     rj_configure_target(
         rocjitsu_gfx1250_b0_to_a0
