@@ -473,6 +473,34 @@ if(BUILD_TESTS)
       target_link_libraries(${test_executable} PRIVATE dl rt numa -lrccl -L${CMAKE_BINARY_DIR} -lrocm_smi64 -L${ROCM_PATH}/lib -L${ROCM_PATH}/rocm_smi/lib)
     endif()
 
+    # Link the GIN device backend library and device-link its rdc code (-fgpu-rdc
+    # --hip-link --offload-arch=... -rdynamic) so GIN device tests can run.
+    if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_INSTALL_DIR AND "${test_executable}" STREQUAL "rccl-UnitTestsMPI")
+      set(_ROCSHMEM_OFFLOAD_FLAGS "")
+      foreach(_g IN LISTS GPU_TARGETS)
+        if(_g)
+          list(APPEND _ROCSHMEM_OFFLOAD_FLAGS "--offload-arch=${_g}")
+        endif()
+      endforeach()
+      # Fall back to linking by bare name if the hint lookup misses (avoids injecting <VAR>-NOTFOUND into the link line).
+      find_library(_ROCSHMEM_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      find_library(_ROCSHMEM_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      if(NOT _ROCSHMEM_DRM)
+        set(_ROCSHMEM_DRM drm)
+      endif()
+      if(NOT _ROCSHMEM_DRM_AMDGPU)
+        set(_ROCSHMEM_DRM_AMDGPU drm_amdgpu)
+      endif()
+      # Enable the GIN device backend in the test kernels so ncclGinCall has a
+      # dispatch case for the corresponding runtime GIN type.
+      target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ROCSHMEM_GDA_ENABLE=1)
+      target_compile_options(${test_executable} PRIVATE -fgpu-rdc)
+      target_link_libraries(${test_executable} PRIVATE
+          ${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a
+          ibverbs hsa-runtime64 hsakmt numa ${_ROCSHMEM_DRM} ${_ROCSHMEM_DRM_AMDGPU})
+      target_link_options(${test_executable} PRIVATE -fgpu-rdc --hip-link ${_ROCSHMEM_OFFLOAD_FLAGS} -rdynamic)
+    endif()
+
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
   endforeach()
 
