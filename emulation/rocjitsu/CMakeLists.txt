@@ -180,10 +180,13 @@ if(_rj_sanitizer_count GREATER 0)
             "ThreadSanitizer can not be combined with address or memory sanitizers"
         )
     endif()
-    if(memory IN_LIST _rj_sanitizer_kinds AND _rj_sanitizer_count GREATER 1)
+    if(
+        memory IN_LIST _rj_sanitizer_kinds
+        AND address IN_LIST _rj_sanitizer_kinds
+    )
         message(
             FATAL_ERROR
-            "MemorySanitizer cannot be combined with other sanitizers"
+            "MemorySanitizer cannot be combined with AddressSanitizer"
         )
     endif()
     list(JOIN _rj_sanitizer_kinds "," _rj_sanitizer_arg)

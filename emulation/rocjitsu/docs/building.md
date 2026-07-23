@@ -44,13 +44,17 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_ENABLE_TSAN=1
 # MemorySanitizer
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_ENABLE_MSAN=1
 
+# MemorySanitizer + UndefinedBehaviorSanitizer
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_ENABLE_MSAN=1 -DRJ_ENABLE_UBSAN=1
+
 # UndefinedBehaviorSanitizer
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_ENABLE_UBSAN=1
 ```
 
 `AUTO` uses shared runtimes for ASan, UBSan, and TSan, and the only
 supported static runtime for MSan. `SHARED` rejects MSan explicitly because
-Clang does not provide a shared MSan runtime.
+Clang does not provide a shared MSan runtime. MSan can be combined with UBSan,
+but not with ASan or TSan.
 
 ### Static analysis
 

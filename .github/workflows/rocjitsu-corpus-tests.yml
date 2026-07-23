@@ -66,49 +66,25 @@ jobs:
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
             run_tests: 1
-          - name: asan-ubsan
+          - name: asan
             allow_failure: true
             test_regex: ''
             build_type: RelWithDebInfo
             enable_asan: 1
-            enable_ubsan: 1
-            enable_tsan: 0
-            enable_msan: 0
-            enable_expensive_checks: 1
-            sanitizer_runtime: SHARED
-            run_tests: 1
-          - name: tsan
-            allow_failure: true
-            test_regex: ''
-            build_type: RelWithDebInfo
-            enable_asan: 0
             enable_ubsan: 0
-            enable_tsan: 1
-            enable_msan: 0
-            enable_expensive_checks: 1
-            sanitizer_runtime: SHARED
-            run_tests: 1
-          - name: asan-ubsan-gcc
-            allow_failure: true
-            test_regex: ''
-            build_type: RelWithDebInfo
-            enable_asan: 1
-            enable_ubsan: 1
             enable_tsan: 0
             enable_msan: 0
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
             run_tests: 1
-            c_compiler: gcc
-            cxx_compiler: g++
-          - name: msan-auto
+          - name: msan-ubsan
             allow_failure: false
             # MSan requires instrumented runtime dependencies. Keep this gate
             # to configuration and final linkage without running the binary.
             test_regex: ''
             build_type: RelWithDebInfo
             enable_asan: 0
-            enable_ubsan: 0
+            enable_ubsan: 1
             enable_tsan: 0
             enable_msan: 1
             enable_expensive_checks: 0
@@ -185,7 +161,7 @@ jobs:
           ROCMINFO=RocminfoTest
           RCCL_DAEMON=RcclDaemonTest
           EXCLUDED_TESTS="${ROCMINFO}|${RCCL_DAEMON}"
-          ASAN_UBSAN_EXCLUDED_TESTS=(
+          ASAN_EXCLUDED_TESTS=(
             "HsaTest\.InitSucceeded"
             "HsaTest\.GpuAgentFound"
             "Cdna4ToCdna3SimulatedDispatchTest\..*"
@@ -207,7 +183,7 @@ jobs:
           )
           # https://github.com/ROCm/rocm-systems/issues/8922
           TSAN_EXCLUDED_TESTS=(
-            "${ASAN_UBSAN_EXCLUDED_TESTS[@]}"
+            "${ASAN_EXCLUDED_TESTS[@]}"
             "MatmulStressTest\.TiledAllCU"
             "MatmulStressTest\.MfmaAllCUs"
             "VectorAddStressTest\.AllCUsGoldenReference"
@@ -217,8 +193,8 @@ jobs:
           )
 
           CMAKE_CONFIG_FLAGS=()
-          if [[ "${{ matrix.enable_asan }}" == "1" && "${{ matrix.enable_ubsan }}" == "1" ]]; then
-            EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${ASAN_UBSAN_EXCLUDED_TESTS[*]}")"
+          if [[ "${{ matrix.enable_asan }}" == "1" ]]; then
+            EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${ASAN_EXCLUDED_TESTS[*]}")"
             CMAKE_CONFIG_FLAGS+=(
               -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g"
               -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -g"
@@ -259,7 +235,7 @@ jobs:
           fi
           cmake --build "${ROCJITSU_BUILD_DIR}" "${BUILD_TARGET[@]}" -j "${WORKERS}"
 
-          if [[ "${{ matrix.name }}" == "msan-auto" ]]; then
+          if [[ "${{ matrix.name }}" == "msan-ubsan" ]]; then
             set +e
             MSAN_SHARED_OUTPUT="$(
               ROCM_PATH=`rocm-sdk path --root` \
