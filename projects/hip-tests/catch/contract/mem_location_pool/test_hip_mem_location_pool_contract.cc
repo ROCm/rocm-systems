@@ -50,6 +50,18 @@ HIP_TEST_CASE(Contract_MemLocationPool_HipMemGetMemPool_Default_ReturnsPoolForDe
 #endif  // HT_NVIDIA && CUDA_VERSION < 13000
 }
 
+// @asserts: hipMemGetDefaultMemPool - querying the current device's default memory pool returns a non-null pool when memory pools are supported
+HIP_TEST_CASE(Contract_MemLocationPool_HipMemGetDefaultMemPool_CurrentDevice_ReturnsNonNullPool) {
+  SkipIfMemoryPoolsUnsupported();
+
+  int device = 0;
+  HIP_CHECK(hipGetDevice(&device));
+
+  hipMemPool_t default_pool = nullptr;
+  HIP_CHECK(hipMemGetDefaultMemPool(&default_pool, device));
+  REQUIRE(default_pool != nullptr);
+}
+
 // @asserts: hipMemSetMemPool - a pool set for a location round-trips through a subsequent hipMemGetMemPool query
 HIP_TEST_CASE(Contract_MemLocationPool_HipMemSetMemPool_Default_RoundTripsThroughGetMemPool) {
 #if HT_NVIDIA && defined(CUDA_VERSION) && CUDA_VERSION < 13000

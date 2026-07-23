@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 603 | 603 | 0 |
-| **total** | **603** | **603** | **0** |
+| `contract` | 604 | 604 | 0 |
+| **total** | **604** | **604** | **0** |
 
 ## Tier: `contract`
 
@@ -798,11 +798,12 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_NvidiaPrefetchBatchUnsupported_IsSkipped` | hipMemPrefetchBatchAsync | NVIDIA CUDA versions before 13.0 do not expose the batch prefetch API; the contract is skipped until backend parity exists |
 | `Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_PrefetchBatch_IsAcceptedOrUnsupported` | hipMemPrefetchBatchAsync | prefetching a batch of managed ranges to the current device is accepted or reported unsupported |
 
-### `mem_location_pool` (3 cases)
+### `mem_location_pool` (4 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_MemLocationPool_HipMemGetAccess_Default_ReturnsFlagsForPooledAllocation` | hipMemGetAccess | querying access for a pooled allocation's location returns a defined protection flag |
+| `Contract_MemLocationPool_HipMemGetDefaultMemPool_CurrentDevice_ReturnsNonNullPool` | hipMemGetDefaultMemPool | querying the current device's default memory pool returns a non-null pool when memory pools are supported |
 | `Contract_MemLocationPool_HipMemGetMemPool_Default_ReturnsPoolForDeviceLocation` | hipMemGetMemPool | a location-based pool query returns a non-null pool for a valid device location |
 | `Contract_MemLocationPool_HipMemSetMemPool_Default_RoundTripsThroughGetMemPool` | hipMemSetMemPool | a pool set for a location round-trips through a subsequent hipMemGetMemPool query |
 
