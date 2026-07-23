@@ -2076,57 +2076,64 @@ TEST(DppPermuteTest, Dpp8SelectsWithinGroupsOfEight) {
   EXPECT_EQ(dpp8_src_lane(15, lane_sel), 14u);
 }
 
-TEST(DppPermuteTest, DppRead) {
+TEST(DppPermuteTest, True16SourceByteMaskFollowsOpSel) {
   using namespace amdgpu::dpp;
-  constexpr uint32_t kFetchInactive = 1;
+
+  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0000, /*source_index=*/0),
+            ExecutionPlugin::kLowHalfByteMask);
+  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0001, /*source_index=*/0),
+            ExecutionPlugin::kHighHalfByteMask);
+  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0000, /*source_index=*/1),
+            ExecutionPlugin::kLowHalfByteMask);
+  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0010, /*source_index=*/1),
+            ExecutionPlugin::kHighHalfByteMask);
+}
+
+TEST(DppPermuteTest, AccessPlanTracksSelectedSources) {
+  using namespace amdgpu::dpp;
   constexpr uint64_t kAllLanesActive = ~0ULL;
-  // Set up 64 source values: src[i] = i * 10.
-  uint32_t src[64];
-  for (int i = 0; i < 64; ++i)
-    src[i] = i * 10;
+  const auto plan =
+      make_dpp_access_plan(64, ROW_SHR1, 0xF, 0xF, /*bound_ctrl=*/1, /*fi=*/1, kAllLanesActive);
 
-  // row_shr 1: lane 1 reads from lane 0.
-  uint32_t val = dpp_read(src, 1, 64, 0x111, 0xF, 0xF, 1, kFetchInactive, 999, kAllLanesActive);
-  EXPECT_EQ(val, 0u); // src[0] = 0
+  EXPECT_EQ(plan.source_lane_for_destination[0], DppAccessPlan::kNoSourceLane);
+  EXPECT_EQ(plan.source_lane_for_destination[1], 0);
+  EXPECT_EQ(plan.source_lane_for_destination[5], 4);
+  EXPECT_EQ(plan.source_lane_for_destination[17], 16);
+  EXPECT_TRUE(plan.source_lane_mask & (uint64_t{1} << 0));
+  EXPECT_TRUE(plan.source_lane_mask & (uint64_t{1} << 4));
+  EXPECT_TRUE(plan.source_lane_mask & (uint64_t{1} << 16));
 
-  // Lane 5 reads from lane 4 (src[4] = 40).
-  val = dpp_read(src, 5, 64, 0x111, 0xF, 0xF, 1, kFetchInactive, 999, kAllLanesActive);
-  EXPECT_EQ(val, 40u);
+  const auto row_masked =
+      make_dpp_access_plan(64, ROW_SHR1, 0xE, 0xF, /*bound_ctrl=*/1, /*fi=*/1, kAllLanesActive);
+  EXPECT_EQ(row_masked.source_lane_for_destination[5], DppAccessPlan::kNoSourceLane);
 
-  // Lane 0 goes OOB, bound_ctrl=1 -> returns 0.
-  val = dpp_read(src, 0, 64, 0x111, 0xF, 0xF, 1, kFetchInactive, 999, kAllLanesActive);
-  EXPECT_EQ(val, 0u);
-
-  // Lane 0 goes OOB, bound_ctrl=0 -> returns old_val.
-  val = dpp_read(src, 0, 64, 0x111, 0xF, 0xF, 0, kFetchInactive, 999, kAllLanesActive);
-  EXPECT_EQ(val, 999u);
-
-  // Row mask disables row 0 (bits [3:0], row0 = lanes 0-15).
-  val = dpp_read(src, 5, 64, 0x111, 0xE, 0xF, 1, kFetchInactive, 999, kAllLanesActive);
-  EXPECT_EQ(val, 999u); // row 0 masked -> old_val
-
-  // Bank mask disables bank 1 (lanes 4-7 within each row).
-  val = dpp_read(src, 5, 64, 0x111, 0xF, 0xD, 1, kFetchInactive, 999, kAllLanesActive);
-  EXPECT_EQ(val, 999u); // bank 1 disabled -> old_val
-
-  // Unmasked lane in row 1: lane 17 reads from lane 16.
-  val = dpp_read(src, 17, 64, 0x111, 0xF, 0xF, 1, kFetchInactive, 999, kAllLanesActive);
-  EXPECT_EQ(val, 160u); // src[16] = 160
+  const auto bank_masked =
+      make_dpp_access_plan(64, ROW_SHR1, 0xF, 0xD, /*bound_ctrl=*/1, /*fi=*/1, kAllLanesActive);
+  EXPECT_EQ(bank_masked.source_lane_for_destination[5], DppAccessPlan::kNoSourceLane);
 }
 
 TEST(DppPermuteTest, FetchInactiveControlsInactiveSourceReads) {
   using namespace amdgpu::dpp;
-  constexpr uint32_t kOldVal = 0xDEADBEEFu;
   constexpr uint64_t kLane0Inactive = ~1ULL;
-  uint32_t src[64] = {};
-  src[0] = 0xA5A50000u;
 
-  EXPECT_EQ(dpp_read(src, 1, 64, ROW_SHR1, 0xF, 0xF, 1, 0, kOldVal, kLane0Inactive), 0u);
-  EXPECT_EQ(dpp_read(src, 1, 64, ROW_SHR1, 0xF, 0xF, 1, 1, kOldVal, kLane0Inactive), 0xA5A50000u);
+  const auto dpp_fi0 =
+      make_dpp_access_plan(64, ROW_SHR1, 0xF, 0xF, /*bound_ctrl=*/1, /*fi=*/0, kLane0Inactive);
+  EXPECT_EQ(dpp_fi0.source_lane_for_destination[1], DppAccessPlan::kNoSourceLane);
+  EXPECT_EQ(dpp_fi0.source_lane_mask & 1u, 0u);
+
+  const auto dpp_fi1 =
+      make_dpp_access_plan(64, ROW_SHR1, 0xF, 0xF, /*bound_ctrl=*/1, /*fi=*/1, kLane0Inactive);
+  EXPECT_EQ(dpp_fi1.source_lane_for_destination[1], 0);
+  EXPECT_EQ(dpp_fi1.source_lane_mask & 1u, 1u);
 
   constexpr uint32_t kAllLanesSelectLane0 = 0;
-  EXPECT_EQ(dpp8_read(src, 1, 32, kAllLanesSelectLane0, 0, kLane0Inactive), 0u);
-  EXPECT_EQ(dpp8_read(src, 1, 32, kAllLanesSelectLane0, 1, kLane0Inactive), 0xA5A50000u);
+  const auto dpp8_fi0 = make_dpp8_access_plan(32, kAllLanesSelectLane0, /*fi=*/0, kLane0Inactive);
+  EXPECT_EQ(dpp8_fi0.source_lane_for_destination[1], DppAccessPlan::kNoSourceLane);
+  EXPECT_EQ(dpp8_fi0.source_lane_mask & 1u, 0u);
+
+  const auto dpp8_fi1 = make_dpp8_access_plan(32, kAllLanesSelectLane0, /*fi=*/1, kLane0Inactive);
+  EXPECT_EQ(dpp8_fi1.source_lane_for_destination[1], 0);
+  EXPECT_EQ(dpp8_fi1.source_lane_mask & 1u, 1u);
 
   EXPECT_EQ(src_dpp8_fi(amdgpu::SRC_DPP8_FI_0), 0u);
   EXPECT_EQ(src_dpp8_fi(amdgpu::SRC_DPP8_FI_1), 1u);
@@ -3197,6 +3204,9 @@ TEST(DppPermuteTest, Rdna2VopcDppThrowsUnsupported) {
 // SDWA tests
 // ---------------------------------------------------------------------------
 
+// These helper tests pin byte placement independently of instruction decode.
+// End-to-end callback tests can then distinguish a selector/merge bug here
+// from a generated wrapper passing the wrong read or write mask.
 TEST(SdwaTest, SrcSelect) {
   using namespace amdgpu::sdwa;
   uint32_t val = 0xDEADBEEF;
@@ -3228,6 +3238,31 @@ TEST(SdwaTest, DstMerge) {
   // Full dword: just return result.
   merged = sdwa_dst_merge(0x12345678, 0xAAAAAAAA, DWORD, UNUSED_PAD);
   EXPECT_EQ(merged, 0x12345678u);
+
+  // Sign-extension fills bytes above the selected byte/word and zeroes bytes
+  // below it.
+  merged = sdwa_dst_merge(0x80, 0xAABBCCDD, BYTE_1, UNUSED_SEXT);
+  EXPECT_EQ(merged, 0xFFFF8000u);
+  merged = sdwa_dst_merge(0x7F, 0xAABBCCDD, BYTE_3, UNUSED_SEXT);
+  EXPECT_EQ(merged, 0x7F000000u);
+
+  // Word destinations exercise both preservation and sign-extension.
+  merged = sdwa_dst_merge(0x12345678, 0xAABBCCDD, WORD_0, UNUSED_PRESERVE);
+  EXPECT_EQ(merged, 0xAABB5678u);
+  merged = sdwa_dst_merge(0x00008000, 0xAABBCCDD, WORD_1, UNUSED_SEXT);
+  EXPECT_EQ(merged, 0x80000000u);
+
+  // The source selector and preserve destination mask use the same byte
+  // windows; pad/sext destinations are full-dword writes.
+  EXPECT_EQ(sdwa_src_byte_mask(BYTE_0), 0b0001);
+  EXPECT_EQ(sdwa_src_byte_mask(BYTE_3), 0b1000);
+  EXPECT_EQ(sdwa_src_byte_mask(WORD_0), 0b0011);
+  EXPECT_EQ(sdwa_src_byte_mask(WORD_1), 0b1100);
+  EXPECT_EQ(sdwa_src_byte_mask(DWORD), 0b1111);
+  EXPECT_EQ(sdwa_dst_byte_mask(BYTE_1, UNUSED_PRESERVE), 0b0010);
+  EXPECT_EQ(sdwa_dst_byte_mask(WORD_1, UNUSED_PRESERVE), 0b1100);
+  EXPECT_EQ(sdwa_dst_byte_mask(BYTE_1, UNUSED_PAD), 0b1111);
+  EXPECT_EQ(sdwa_dst_byte_mask(BYTE_1, UNUSED_SEXT), 0b1111);
 }
 
 // ---------------------------------------------------------------------------

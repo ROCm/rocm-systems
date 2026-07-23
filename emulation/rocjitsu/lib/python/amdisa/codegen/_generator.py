@@ -9726,6 +9726,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  void simd_notify_read_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const override;\n'
                 '  void simd_notify_read64_impl(const amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const override;\n'
                 '  void simd_notify_read64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const override;\n'
+                '  void simd_notify_write_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const override;\n'
+                '  void simd_notify_write64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const override;\n'
                 '  /// Same-image dispatch table populated by the execution TU before decode.\n'
                 '  /// This is not a registration ABI between independently loaded DSOs.\n'
                 '  struct ExecutionBackend {\n'
@@ -9749,6 +9751,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '    void (Operand::*simd_notify_read_mut)(amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;\n'
                 '    void (Operand::*simd_notify_read64)(const amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;\n'
                 '    void (Operand::*simd_notify_read64_mut)(amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;\n'
+                '    void (Operand::*simd_notify_write_mut)(amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;\n'
+                '    void (Operand::*simd_notify_write64_mut)(amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;\n'
                 '  };\n'
                 '  const ExecutionBackend *execution_backend_ = nullptr;\n'
                 '  bool simd_capable_exec() const;\n'
@@ -9771,6 +9775,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  void simd_notify_read_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;\n'
                 '  void simd_notify_read64_exec(const amdgpu::Wavefront &, uint64_t, uint8_t) const;\n'
                 '  void simd_notify_read64_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;\n'
+                '  void simd_notify_write_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;\n'
+                '  void simd_notify_write64_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;\n'
             )
 
         class_def = [
@@ -10025,6 +10031,24 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                                  : nullptr)
                         (this->*callback)(wf, lane_mask, byte_mask);
                     }
+
+                    void Operand::simd_notify_write_mut_impl(amdgpu::Wavefront &wf,
+                                                             uint64_t lane_mask,
+                                                             uint8_t byte_mask) const {
+                      if (decltype(ExecutionBackend::simd_notify_write_mut) callback =
+                              execution_backend_ ? execution_backend_->simd_notify_write_mut
+                                                 : nullptr)
+                        (this->*callback)(wf, lane_mask, byte_mask);
+                    }
+
+                    void Operand::simd_notify_write64_mut_impl(amdgpu::Wavefront &wf,
+                                                               uint64_t lane_mask,
+                                                               uint8_t byte_mask) const {
+                      if (decltype(ExecutionBackend::simd_notify_write64_mut) callback =
+                              execution_backend_ ? execution_backend_->simd_notify_write64_mut
+                                                 : nullptr)
+                        (this->*callback)(wf, lane_mask, byte_mask);
+                    }
                     ''')))
 
         packed_16bit_helper = ''
@@ -10040,15 +10064,18 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '                                                           OperandType opr_type, int ev) {\n'
                 '  if (!packed_16bit_source || size_bits != 16)\n'
                 '    return std::nullopt;\n'
-                '  if (opr_type == OperandType::OPR_VGPR) {\n'
-                '    if (ev >= 0 && ev <= 127)\n'
-                '      return Packed16VgprSource{static_cast<uint32_t>(ev), 0};\n'
-                '    if (ev >= 128 && ev <= 255)\n'
-                '      return Packed16VgprSource{static_cast<uint32_t>(ev - 128), 16};\n'
+                '  int selector_base;\n'
+                '  if (opr_type == OperandType::OPR_VGPR)\n'
+                '    selector_base = 0;\n'
+                '  else if (opr_type == OperandType::OPR_SRC)\n'
+                '    selector_base = 256;\n'
+                '  else\n'
                 '    return std::nullopt;\n'
-                '  }\n'
-                '  if (ev >= 384 && ev <= 511)\n'
-                '    return Packed16VgprSource{static_cast<uint32_t>(ev - 384), 16};\n'
+                '  int selector = ev - selector_base;\n'
+                '  if (selector >= 0 && selector <= 127)\n'
+                '    return Packed16VgprSource{static_cast<uint32_t>(selector), 0};\n'
+                '  if (selector >= 128 && selector <= 255)\n'
+                '    return Packed16VgprSource{static_cast<uint32_t>(selector - 128), 16};\n'
                 '  return std::nullopt;\n'
                 '}\n'
                 '\n'
@@ -10874,6 +10901,29 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                   }
                 }
 
+                void Operand::simd_notify_write_mut_exec(amdgpu::Wavefront &wf,
+                                                         uint64_t lane_mask,
+                                                         uint8_t byte_mask) const {
+                  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+                    uint32_t voff =
+                        wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+                    wf.cu().raw_cu().notify_vgpr_write(
+                        &wf, wf.vgpr_alloc().base + voff, lane_mask, byte_mask);
+                  }
+                }
+
+                void Operand::simd_notify_write64_mut_exec(amdgpu::Wavefront &wf,
+                                                           uint64_t lane_mask,
+                                                           uint8_t byte_mask) const {
+                  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+                    uint32_t voff =
+                        wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+                    uint32_t reg = wf.vgpr_alloc().base + voff;
+                    wf.cu().raw_cu().notify_vgpr_write(&wf, reg, lane_mask, byte_mask);
+                    wf.cu().raw_cu().notify_vgpr_write(&wf, reg + 1, lane_mask, byte_mask);
+                  }
+                }
+
                 const void *Operand::full_execution_backend() {
                   static const ExecutionBackend backend{
                       &Operand::simd_capable_exec,
@@ -10896,6 +10946,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                       &Operand::simd_notify_read_mut_exec,
                       &Operand::simd_notify_read64_exec,
                       &Operand::simd_notify_read64_mut_exec,
+                      &Operand::simd_notify_write_mut_exec,
+                      &Operand::simd_notify_write64_mut_exec,
                   };
                   return &backend;
                 }
@@ -10921,7 +10973,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                            backend.simd_notify_read != nullptr &&
                            backend.simd_notify_read_mut != nullptr &&
                            backend.simd_notify_read64 != nullptr &&
-                           backend.simd_notify_read64_mut != nullptr;
+                           backend.simd_notify_read64_mut != nullptr &&
+                           backend.simd_notify_write_mut != nullptr &&
+                           backend.simd_notify_write64_mut != nullptr;
                   };
                   return is_complete(*static_cast<const ExecutionBackend *>(
                       full_execution_backend()));

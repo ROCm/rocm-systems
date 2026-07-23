@@ -3,12 +3,18 @@
 
 /// @file register_access_test.cpp
 /// @brief Tests for the AMDGPU instruction-facing register access facade.
+///
+/// @details These tests enforce the boundary beneath generated instructions:
+/// observed read masks constrain returned data and observed write masks
+/// constrain modified storage. End-to-end decoded instruction callbacks live
+/// in execution_plugin_test.cpp.
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
@@ -25,6 +31,20 @@ namespace {
 
 using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
+
+template <typename T>
+concept ExposesRawComputeUnit = requires(T &value) { value.raw_cu(); };
+
+template <typename T>
+concept ExposesRawVgprData = requires(T &value) { value.raw_vgpr_data(0); };
+
+template <typename T>
+concept ExposesUnobservedVgprWrite = requires(T &value) { value.write_vgpr_storage(0, 0, 0); };
+
+static_assert(!ExposesRawComputeUnit<InstructionComputeUnitView>);
+static_assert(!ExposesRawComputeUnit<Wavefront>);
+static_assert(!ExposesRawVgprData<InstructionComputeUnitView>);
+static_assert(!ExposesUnobservedVgprWrite<InstructionComputeUnitView>);
 
 constexpr uint32_t kSgprsPerWave = 104;
 constexpr uint32_t kVgprsPerWave = 256;
@@ -200,6 +220,26 @@ TEST(RegisterAccessTest, ReadWriteRegionObservesThenAllowsWrites) {
   EXPECT_EQ(region.read_lanes(0)[3], 0x5678u);
 }
 
+TEST(RegisterAccessTest, MaskedLaneWritePreservesBytesWithoutSyntheticRead) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  const uint32_t reg = fx.vgpr_base() + 11;
+  fx.cu->write_vgpr(reg, 3, 0xAABBCCDDu);
+
+  cdna4::Operand destination(32, cdna4::OperandType::OPR_VGPR, 11);
+  RegisterAccess(*fx.wf).write_lane_masked(destination, /*lane=*/3, /*value=*/0x00003300u,
+                                           /*update_byte_mask=*/0b0010,
+                                           /*observed_byte_mask=*/0b0010,
+                                           /*post_transform=*/nullptr);
+
+  EXPECT_TRUE(fx.plugin->reads.empty());
+  ASSERT_EQ(fx.plugin->writes.size(), 1u);
+  EXPECT_EQ(fx.plugin->writes[0].physical_reg, reg);
+  EXPECT_EQ(fx.plugin->writes[0].lane_mask, 1u << 3);
+  EXPECT_EQ(fx.plugin->writes[0].byte_mask, 0b0010);
+  EXPECT_EQ(fx.cu->read_vgpr_storage(reg, 3), 0xAABB33DDu);
+}
+
 TEST(RegisterAccessTest, Scalar64ReadObservesBothRegisters) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);
@@ -279,6 +319,9 @@ TEST(RegisterAccessTest, WriteChunkObservesWriteWindow) {
   EXPECT_EQ(fx.cu->read_vgpr(base + logical_vgpr, 9), 0x13u);
 }
 
+// Packed-half access is a single architectural operation on either bytes 0-1
+// or bytes 2-3. Reading or preserving the other half inside the 32-bit
+// register file must neither expose its value nor create another callback.
 TEST(RegisterAccessTest, Packed16ReadsAndWritesObserveSelectedByteHalves) {
   Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(fx.wf, nullptr);

@@ -1533,38 +1533,6 @@ def test_mnemonic_fallbacks_cover_unmodeled_read_write_outputs():
         )
 
 
-def test_gfx1250_generated_operand_uses_masked_packed_16bit_destination_write(
-    gfx1250_generated_root: Path,
-):
-    operand_cpp = (gfx1250_generated_root / 'operand.cpp').read_text()
-    operand_exec_cpp = (gfx1250_generated_root / 'operand_exec.cpp').read_text()
-    operand_h = (gfx1250_generated_root / 'operand.h').read_text()
-
-    assert 'if (ev >= 0 && ev <= 127)' in operand_cpp
-    assert 'packed_16bit_vgpr_dst(packed_16bit_dst_' in operand_cpp
-    assert 'uint8_t write_byte_mask = packed->shift' in operand_exec_cpp
-    assert 'rocjitsu::ExecutionPlugin::kHighHalfByteMask' in operand_exec_cpp
-    assert 'rocjitsu::ExecutionPlugin::kLowHalfByteMask' in operand_exec_cpp
-    assert 'read_vgpr_storage' not in operand_exec_cpp
-    assert 'uint32_t placed = (val & 0xffffu) << packed->shift;' in operand_exec_cpp
-    assert (
-        'amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, placed, write_byte_mask);'
-        in operand_exec_cpp
-    )
-    assert (
-        'amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + voff, lane, val);'
-        in operand_exec_cpp
-    )
-    assert (
-        'amdgpu::RegisterAccess(wf.cu()).write_vgpr64(idx, lane, val);'
-        in operand_exec_cpp
-    )
-    assert 'amdgpu::apply_gpr_idx(wf, off, false)' in operand_exec_cpp
-    assert 'void Operand::write_lane_chunk' in operand_cpp
-    assert 'void write_lane_chunk(amdgpu::Wavefront &wf' in operand_h
-    assert 'bool packed_16bit_dst = false' in operand_h
-
-
 def test_gfx1250_generated_vop2_uses_packed_16bit_vsrc1(
     gfx1250_generated_root: Path,
 ):
@@ -1622,14 +1590,10 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
 
     mov_b16 = _generated_method_body(vop1_exec, 'VMovB16Vop1', 'VMovB64Vop1')
     assert 'read_lane(src0, lane)' in mov_b16
-    assert 'sdwa::write_lane<false>(' in mov_b16
-    assert '*this, wf, vdst, lane,' in mov_b16
     assert 'wf.vgpr_alloc().base + ((inst_.src0 - 256) & 0x7fu)' not in mov_b16
 
     fmac_f16 = _generated_method_body(vop2_exec, 'VFmacF16Vop2', 'VFmamkF16Vop2')
     assert 'read_lane(vdst, lane)' in fmac_f16
-    assert 'sdwa::write_lane<true>(' in fmac_f16
-    assert '*this, wf, vdst, lane,' in fmac_f16
     assert 'base + (inst_.vdst & 0x7fu), lane)' not in fmac_f16
 
     for name, next_name in (
@@ -1762,24 +1726,18 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' not in unary
     assert 'read_vop3_true16_src' not in unary
     assert 'write_vop3_true16_dst' not in unary
-    assert 'sdwa::write_lane<true>' in unary
-    assert 'inst, wf, inst.vdst, lane,' in unary
 
     binary = _shared_execute_body(execute_shared, 'v_add_f16_vop3', 'v_add_f32_vop2')
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_F16' in binary
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' not in binary
     assert 'read_vop3_true16_src' not in binary
     assert 'write_vop3_true16_dst' not in binary
-    assert 'sdwa::write_lane<true>' in binary
-    assert 'inst, wf, inst.vdst, lane,' in binary
 
     ternary = _shared_execute_body(execute_shared, 'v_fma_f16_vop3', 'v_fma_f32_vop3')
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in ternary
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' not in ternary
     assert 'read_vop3_true16_src' not in ternary
     assert 'write_vop3_true16_dst' not in ternary
-    assert 'sdwa::write_lane<true>' in ternary
-    assert 'inst, wf, inst.vdst, lane,' in ternary
 
     true16_unary = _generated_method_body(
         gfx1250_vop3_alu, 'VCeilF16Vop3', 'VTruncF16Vop3'
@@ -2383,7 +2341,6 @@ def test_generated_rdna4_vop3_cvt_f32_f16_applies_true16_source_modifiers(
     assert 'if (inst_.abs & (1u << 0))' in body
     assert 'src = std::fabs(src);' in body
     assert 'if (inst_.neg & (1u << 0))' in body
-    assert 'amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane,' in body
     assert 'std::bit_cast<uint32_t>(src)' in body
 
 

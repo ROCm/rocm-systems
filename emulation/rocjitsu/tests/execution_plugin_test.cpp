@@ -3,6 +3,11 @@
 
 /// @file execution_plugin_test.cpp
 /// @brief Tests for the ExecutionPlugin infrastructure.
+///
+/// @details Register-observation tests in this file execute decoded/generated
+/// instructions and assert that each callback names exactly the physical
+/// registers, lanes, and bytes that the instruction architecturally accesses.
+/// Machine-level preservation below RegisterAccess must not add callbacks.
 
 #include "aql_queue.h"
 
@@ -10,6 +15,15 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
@@ -634,11 +648,11 @@ struct Wave32PluginFixture {
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   std::shared_ptr<ExecutionPluginGroup> plugin_group;
 
-  Wave32PluginFixture()
+  explicit Wave32PluginFixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_GFX1250)
       : gpu_mem(std::make_unique<amdgpu::GpuMemory>("wave32_plugin_mem")),
         l2(std::make_unique<amdgpu::L2Cache>("wave32_plugin_l2")) {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+    cfg.arch = arch;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 104;
     cfg.vgprs_per_wf = 256;
@@ -730,6 +744,11 @@ TEST(ExecutionPluginTest, ValuSimdWriteObservationUsesActiveExecMask) {
   }
 }
 
+// DPP observation tests exercise the interaction among EXEC, row/bank
+// destination masks, source-lane permutation, BOUND_CTRL, fetch-inactive, and
+// source/destination aliasing. Helper-level permutation coverage lives in
+// shared_infra_test.cpp; these tests prove that decoded instructions carry the
+// resulting source and destination lane sets through to plugin callbacks.
 TEST(ExecutionPluginTest, DppObservationReportsExactSourceAndDestinationLanes) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
@@ -789,6 +808,476 @@ TEST(ExecutionPluginTest, DppObservationReportsExactSourceAndDestinationLanes) {
   }
 }
 
+TEST(ExecutionPluginTest, DppOutOfBoundsObservationHonorsBoundCtrl) {
+  ForceScalarOverride force_simd(false);
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  constexpr uint32_t kSrc = 2;
+  constexpr uint32_t kDst = 5;
+  constexpr uint32_t kOldDst = 0xAABBCCDDu;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto run = [&](bool bound_ctrl) {
+    cu->write_vgpr(vb + kSrc, 0, 0x11223344u);
+    cu->write_vgpr(vb + kDst, 0, kOldDst);
+    uint32_t words[2] = {
+        vop1_encode(/*v_mov_b32 opcode=*/1, kDst, amdgpu::SRC_DPP),
+        vop1_dpp_word(kSrc, amdgpu::dpp::ROW_SHR1, /*row_mask=*/0xF,
+                      /*bank_mask=*/0xF, bound_ctrl),
+    };
+    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    ASSERT_NE(inst, nullptr);
+    plugin->events.clear();
+    cu->execute_instruction(inst.get(), *wf);
+  };
+
+  // Lane 0 has no source for row_shr:1. BOUND_CTRL=0 suppresses the
+  // destination write entirely, so neither a source read nor destination write
+  // is architectural.
+  run(false);
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), kOldDst);
+  EXPECT_TRUE(vgpr_read_events(*plugin).empty());
+  EXPECT_TRUE(vgpr_write_events(*plugin).empty());
+
+  // BOUND_CTRL=1 turns the same missing source into zero. No VGPR source is
+  // read, but the destination lane is now architecturally written.
+  run(true);
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0u);
+  EXPECT_TRUE(vgpr_read_events(*plugin).empty());
+  const auto writes = vgpr_write_events(*plugin);
+  ASSERT_EQ(writes.size(), 1u);
+  EXPECT_EQ(writes[0].physical_reg, vb + kDst);
+  EXPECT_EQ(writes[0].lane_mask, 1u);
+  EXPECT_EQ(writes[0].byte_mask, ExecutionPlugin::kFullByteMask);
+}
+
+TEST(ExecutionPluginTest, DppSourceDestinationAliasStagesBeforeWriting) {
+  ForceScalarOverride force_simd(false);
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0xFu);
+
+  constexpr uint32_t kReg = 5;
+  constexpr std::array<uint32_t, 4> kValues{10u, 20u, 30u, 40u};
+  const uint32_t vb = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < kValues.size(); ++lane)
+    cu->write_vgpr(vb + kReg, lane, kValues[lane]);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  uint32_t words[2] = {
+      vop1_encode(/*v_mov_b32 opcode=*/1, kReg, amdgpu::SRC_DPP),
+      vop1_dpp_word(kReg, /*quad_perm:[1,0,3,2]=*/0xB1, /*row_mask=*/0x1,
+                    /*bank_mask=*/0x1, /*bound_ctrl=*/true),
+  };
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  plugin->events.clear();
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kReg, 0), kValues[1]);
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kReg, 1), kValues[0]);
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kReg, 2), kValues[3]);
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kReg, 3), kValues[2]);
+
+  const auto reads = vgpr_read_events(*plugin);
+  ASSERT_EQ(reads.size(), 1u);
+  EXPECT_EQ(reads[0].physical_reg, vb + kReg);
+  EXPECT_EQ(reads[0].lane_mask, 0xFu);
+  const auto writes = vgpr_write_events(*plugin);
+  ASSERT_EQ(writes.size(), 1u);
+  EXPECT_EQ(writes[0].physical_reg, vb + kReg);
+  EXPECT_EQ(writes[0].lane_mask, 0xFu);
+}
+
+TEST(ExecutionPluginTest, Dpp8FetchInactiveControlsSourceObservation) {
+  ForceScalarOverride force_simd(false);
+  Wave32PluginFixture f;
+  auto *plugin = f.attach_ordering_plugin();
+  auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec(1u << 1);
+
+  constexpr uint32_t kSrc = 2;
+  constexpr uint32_t kDst = 5;
+  constexpr uint32_t kValue = 0x11223344u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint32_t lane_sel = (0u << 0u) | (0u << 3u) | (2u << 6u) | (3u << 9u) | (4u << 12u) |
+                            (5u << 15u) | (6u << 18u) | (7u << 21u);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  auto run = [&](uint32_t src_marker) {
+    f.cu->write_vgpr(vb + kSrc, 0, kValue);
+    f.cu->write_vgpr(vb + kDst, 1, 0xAABBCCDDu);
+    const uint32_t words[2] = {
+        vop1_encode(/*v_mov_b32 opcode=*/1, kDst, src_marker),
+        kSrc | (lane_sel << 8u),
+    };
+    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    ASSERT_NE(inst, nullptr);
+    plugin->events.clear();
+    f.cu->execute_instruction(inst.get(), *wf);
+  };
+
+  run(amdgpu::SRC_DPP8_FI_0);
+  EXPECT_EQ(f.cu->read_vgpr_storage(vb + kDst, 1), 0u);
+  EXPECT_TRUE(vgpr_read_events(*plugin).empty());
+  auto writes = vgpr_write_events(*plugin);
+  ASSERT_EQ(writes.size(), 1u);
+  EXPECT_EQ(writes[0].lane_mask, 1u << 1);
+
+  run(amdgpu::SRC_DPP8_FI_1);
+  EXPECT_EQ(f.cu->read_vgpr_storage(vb + kDst, 1), kValue);
+  const auto reads = vgpr_read_events(*plugin);
+  ASSERT_EQ(reads.size(), 1u);
+  EXPECT_EQ(reads[0].physical_reg, vb + kSrc);
+  EXPECT_EQ(reads[0].lane_mask, 1u);
+  writes = vgpr_write_events(*plugin);
+  ASSERT_EQ(writes.size(), 1u);
+  EXPECT_EQ(writes[0].physical_reg, vb + kDst);
+  EXPECT_EQ(writes[0].lane_mask, 1u << 1);
+}
+
+// gfx1250 sub-dword and split-backend tests. The true16 cases cover both
+// low-to-high and high-to-low half selection while checking that preservation
+// of the other half is invisible to plugins. The 64-bit case separately pins
+// write forwarding for both physical destination dwords.
+TEST(ExecutionPluginTest, True16InstructionsReportSelectedSourceAndDestinationHalves) {
+  Wave32PluginFixture f;
+  auto *plugin = f.attach_ordering_plugin();
+  auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  struct Case {
+    uint32_t word;
+    uint32_t source_value;
+    uint32_t expected_destination;
+    uint8_t source_byte_mask;
+    uint8_t destination_byte_mask;
+  };
+  constexpr std::array cases{
+      Case{0x7F02D300u, 0xAABB00FFu, 0xFF005555u, ExecutionPlugin::kLowHalfByteMask,
+           ExecutionPlugin::kHighHalfByteMask}, // v_not_b16_e32 v1.h, v0.l
+      Case{0x7E02D380u, 0x00FFAABBu, 0xAAAAFF00u, ExecutionPlugin::kHighHalfByteMask,
+           ExecutionPlugin::kLowHalfByteMask}, // v_not_b16_e32 v1.l, v0.h
+  };
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(std::format("instruction word 0x{:08x}", test_case.word));
+    f.cu->write_vgpr(vb + 0, 0, test_case.source_value);
+    f.cu->write_vgpr(vb + 1, 0, 0xAAAA5555u);
+    f.cu->write_vgpr(vb + 129, 0, 0xDEADBEEFu);
+
+    std::unique_ptr<Instruction> inst(decoder->decode(&test_case.word));
+    ASSERT_NE(inst, nullptr);
+    plugin->events.clear();
+    f.cu->execute_instruction(inst.get(), *wf);
+
+    EXPECT_EQ(f.cu->read_vgpr_storage(vb + 1, 0), test_case.expected_destination);
+    EXPECT_EQ(f.cu->read_vgpr_storage(vb + 129, 0), 0xDEADBEEFu);
+
+    const auto reads = vgpr_read_events(*plugin);
+    ASSERT_EQ(reads.size(), 1u);
+    EXPECT_EQ(reads[0].physical_reg, vb + 0);
+    EXPECT_EQ(reads[0].lane_mask, 1u);
+    EXPECT_EQ(reads[0].byte_mask, test_case.source_byte_mask);
+    const auto writes = vgpr_write_events(*plugin);
+    ASSERT_EQ(writes.size(), 1u);
+    EXPECT_EQ(writes[0].physical_reg, vb + 1);
+    EXPECT_EQ(writes[0].lane_mask, 1u);
+    EXPECT_EQ(writes[0].byte_mask, test_case.destination_byte_mask);
+  }
+}
+
+TEST(ExecutionPluginTest, Gfx1250Simd64BitWriteReportsBothDestinationRegisters) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+    return;
+  } else {
+    ForceScalarOverride force_simd(false);
+    Wave32PluginFixture f;
+    auto *plugin = f.attach_ordering_plugin();
+    auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+
+    constexpr uint32_t kSrc = 2;
+    constexpr uint32_t kDst = 5;
+    const uint32_t vb = wf->vgpr_alloc().base;
+    f.cu->write_vgpr(vb + kSrc, 0, 0x11223344u);
+    f.cu->write_vgpr(vb + kSrc + 1, 0, 0x55667788u);
+    f.cu->write_vgpr(vb + kDst, 0, 0xAABBCCDDu);
+    f.cu->write_vgpr(vb + kDst + 1, 0, 0xEEFF0011u);
+
+    const uint32_t word =
+        vop1_encode(/*v_mov_b64 opcode=*/29, kDst, /*generic VGPR source=*/256 + kSrc);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> inst(decoder->decode(&word));
+    ASSERT_NE(inst, nullptr);
+    plugin->events.clear();
+    f.cu->execute_instruction(inst.get(), *wf);
+
+    EXPECT_EQ(f.cu->read_vgpr_storage(vb + kDst, 0), 0x11223344u);
+    EXPECT_EQ(f.cu->read_vgpr_storage(vb + kDst + 1, 0), 0x55667788u);
+    expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {kSrc, kSrc + 1}, 1u);
+    expect_vgpr_read_set(vgpr_write_events(*plugin), vb, {kDst, kDst + 1}, 1u);
+  }
+}
+
+TEST(ExecutionPluginTest, DppTrue16SourceReportsSelectedHalf) {
+  ForceScalarOverride force_scalar(true);
+  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
+  Wave32PluginFixture f;
+  auto *plugin = f.attach_ordering_plugin();
+  auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  constexpr uint32_t kSrc = 0;
+  constexpr uint32_t kDst = 1;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  f.cu->write_vgpr(vb + kSrc, 0, 0xAABB00FFu);
+  f.cu->write_vgpr(vb + kDst, 0, 0xAAAA5555u);
+
+  gfx1250::Vop1VopDpp16MachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc;
+  raw.vdst = kDst;
+  raw.dpp_ctrl = 0xE4; // identity quad permutation
+  raw.fi = 1;
+  raw.bound_ctrl = 1;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+  gfx1250::VNotB16Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+
+  plugin->events.clear();
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(f.cu->read_vgpr_storage(vb + kDst, 0), 0xAAAAFF00u);
+  const auto reads = vgpr_read_events(*plugin);
+  ASSERT_EQ(reads.size(), 1u);
+  EXPECT_EQ(reads[0].physical_reg, vb + kSrc);
+  EXPECT_EQ(reads[0].lane_mask, 1u);
+  EXPECT_EQ(reads[0].byte_mask, ExecutionPlugin::kLowHalfByteMask);
+}
+
+TEST(ExecutionPluginTest, Rdna4DppTrue16SourceReportsOpSelHalf) {
+  ForceScalarOverride force_scalar(true);
+  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA4);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu.get();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x7);
+
+  constexpr uint32_t kSrc0 = 0;
+  constexpr uint32_t kSrc1 = 1;
+  constexpr uint32_t kDst = 2;
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  for (bool source_high : {false, true}) {
+    SCOPED_TRACE(source_high ? "high source half" : "low source half");
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(
+          vb + kSrc0, lane,
+          (static_cast<uint32_t>(util::f32_to_f16(static_cast<float>(lane + 20))) << 16) |
+              util::f32_to_f16(static_cast<float>(lane + 10)));
+      cu->write_vgpr(vb + kSrc1, lane, static_cast<uint32_t>(util::f32_to_f16(0.5f)) << 16);
+      cu->write_vgpr(vb + kDst, lane, (0x7000u + lane) << 16 | (0x4000u + lane));
+    }
+
+    rdna4::Vop3VopDpp16MachineInst raw{};
+    raw.vdst = kDst;
+    raw.opsel = 0xAu | static_cast<uint32_t>(source_high);
+    raw.op = 0x132u;
+    raw.encoding = 0x35u;
+    raw.src0 = amdgpu::SRC_DPP;
+    raw.src1 = 256u + kSrc1;
+    raw.vsrc0 = kSrc0;
+    raw.dpp_ctrl = amdgpu::dpp::ROW_SHR1;
+    raw.fi = 1;
+    raw.bound_ctrl = 0;
+    raw.bank_mask = 0xFu;
+    raw.row_mask = 0x1u;
+
+    rdna4::VAddF16Vop3 inst(reinterpret_cast<const rdna4::MachineInst *>(&raw));
+    plugin->events.clear();
+    inst.execute_impl(*wf);
+
+    const float source_base = source_high ? 20.0f : 10.0f;
+    EXPECT_EQ(cu->read_vgpr(vb + kDst, 1),
+              (static_cast<uint32_t>(util::f32_to_f16(source_base + 0.5f)) << 16) | 0x4001u);
+    EXPECT_EQ(cu->read_vgpr(vb + kDst, 2),
+              (static_cast<uint32_t>(util::f32_to_f16(source_base + 1.5f)) << 16) | 0x4002u);
+
+    std::vector<HookEvent> src0_reads;
+    for (const auto &event : vgpr_read_events(*plugin))
+      if (event.physical_reg == vb + kSrc0)
+        src0_reads.push_back(event);
+    ASSERT_EQ(src0_reads.size(), 1u);
+    EXPECT_EQ(src0_reads[0].lane_mask, 0x3u);
+    EXPECT_EQ(src0_reads[0].byte_mask,
+              source_high ? ExecutionPlugin::kHighHalfByteMask : ExecutionPlugin::kLowHalfByteMask);
+  }
+}
+
+TEST(ExecutionPluginTest, Dpp64BitSourceStagesBothPhysicalDwords) {
+  ForceScalarOverride force_scalar(true);
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  constexpr uint32_t kSrc = 2;
+  constexpr uint32_t kDst = 5;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + kSrc, 1, 0x11223344u);
+  cu->write_vgpr(vb + kSrc + 1, 1, 0x55667788u);
+
+  cdna4::Vop1VopDppMachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc;
+  raw.vdst = kDst;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_SHARE_BASE + 1; // row_newbcast:1
+  raw.bound_ctrl = 1;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+  cdna4::VMovB64Vop1 inst(reinterpret_cast<const cdna4::MachineInst *>(&raw));
+
+  plugin->events.clear();
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0x11223344u);
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst + 1, 0), 0x55667788u);
+  expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {kSrc, kSrc + 1}, 1u << 1);
+}
+
+TEST(ExecutionPluginTest, DppInstructionReuseRestagesOriginalSource) {
+  ForceScalarOverride force_scalar(true);
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  constexpr uint32_t kSrc = 2;
+  constexpr uint32_t kDst = 5;
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  cdna4::Vop1VopDppMachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.vsrc0 = kSrc;
+  raw.vdst = kDst;
+  raw.dpp_ctrl = 0xE4; // identity quad permutation
+  raw.bound_ctrl = 1;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+  cdna4::VMovB32Vop1 inst(reinterpret_cast<const cdna4::MachineInst *>(&raw));
+
+  cu->write_vgpr(vb + kSrc, 0, 0x11111111u);
+  inst.execute_impl(*wf);
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0x11111111u);
+
+  cu->write_vgpr(vb + kSrc, 0, 0x22222222u);
+  inst.execute_impl(*wf);
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0x22222222u);
+}
+
+TEST(ExecutionPluginTest, Sdwa64BitDestinationWritesLegalConversionResult) {
+  ForceScalarOverride force_scalar(true);
+  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna3");
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  constexpr uint32_t kSrc = 2;
+  constexpr uint32_t kDst = 5;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint8_t kFp8Lo = 0x34u;
+  constexpr uint8_t kFp8Hi = 0x12u;
+  cu->write_vgpr(vb + kSrc, 0,
+                 (static_cast<uint32_t>(kFp8Hi) << 24) | (static_cast<uint32_t>(kFp8Lo) << 16) |
+                     0xABCDu);
+
+  cdna3::Vop1VopSdwaMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.vsrc0 = kSrc;
+  raw.vdst = kDst;
+  raw.src0_sel = amdgpu::sdwa::WORD_1;
+  raw.dst_sel = amdgpu::sdwa::DWORD;
+  raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
+  cdna3::VCvtPkF32Fp8Vop1 inst(reinterpret_cast<const cdna3::MachineInst *>(&raw));
+
+  plugin->events.clear();
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0),
+            std::bit_cast<uint32_t>(util::fp8_e4m3_fnuz_to_f32(kFp8Lo)));
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst + 1, 0),
+            std::bit_cast<uint32_t>(util::fp8_e4m3_fnuz_to_f32(kFp8Hi)));
+
+  const auto reads = vgpr_read_events(*plugin);
+  ASSERT_EQ(reads.size(), 1u);
+  EXPECT_EQ(reads[0].physical_reg, vb + kSrc);
+  EXPECT_EQ(reads[0].lane_mask, 1u);
+  EXPECT_EQ(reads[0].byte_mask, ExecutionPlugin::kHighHalfByteMask);
+  expect_vgpr_read_set(vgpr_write_events(*plugin), vb, {kDst, kDst + 1}, 1u);
+}
+
+TEST(ExecutionPluginTest, SdwaInstructionReuseRestagesOriginalSource) {
+  ForceScalarOverride force_scalar(true);
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  constexpr uint32_t kSrc = 2;
+  constexpr uint32_t kDst = 5;
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  cdna4::Vop1VopSdwaMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.vsrc0 = kSrc;
+  raw.vdst = kDst;
+  raw.src0_sel = amdgpu::sdwa::BYTE_1;
+  raw.dst_sel = amdgpu::sdwa::DWORD;
+  raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
+  cdna4::VMovB32Vop1 inst(reinterpret_cast<const cdna4::MachineInst *>(&raw));
+
+  cu->write_vgpr(vb + kSrc, 0, 0x11223344u);
+  inst.execute_impl(*wf);
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0x33u);
+
+  cu->write_vgpr(vb + kSrc, 0, 0xAABBCCDDu);
+  inst.execute_impl(*wf);
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0xCCu);
+}
+
+// SDWA observation tests cover byte, word, and dword source selectors plus
+// preserve, pad, sign-extension, and clamp behavior.
+// Selected source bytes must be the only bytes read. Preserved destination
+// bytes are storage bookkeeping, while pad/sign-extension and clamp can widen
+// the architectural write mask.
 TEST(ExecutionPluginTest, SdwaObservationReportsExactSourceAndDestinationBytes) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
@@ -812,18 +1301,25 @@ TEST(ExecutionPluginTest, SdwaObservationReportsExactSourceAndDestinationBytes) 
       uint32_t dst_sel;
       uint32_t dst_unused;
       uint32_t src0_sel;
+      uint32_t source_value;
       uint32_t expected_active;
       uint8_t architectural_byte_mask;
     };
     constexpr std::array cases{
-        Case{amdgpu::sdwa::BYTE_1, amdgpu::sdwa::UNUSED_PRESERVE, amdgpu::sdwa::BYTE_2, 0xAABB22DDu,
-             0b0010},
-        Case{amdgpu::sdwa::WORD_1, amdgpu::sdwa::UNUSED_PRESERVE, amdgpu::sdwa::DWORD, 0x3344CCDDu,
-             0b1100},
-        Case{amdgpu::sdwa::BYTE_1, amdgpu::sdwa::UNUSED_PAD, amdgpu::sdwa::DWORD, 0x00004400u,
-             ExecutionPlugin::kFullByteMask},
+        Case{amdgpu::sdwa::BYTE_1, amdgpu::sdwa::UNUSED_PRESERVE, amdgpu::sdwa::BYTE_2, kSrcValue,
+             0xAABB22DDu, 0b0010},
+        Case{amdgpu::sdwa::BYTE_3, amdgpu::sdwa::UNUSED_PRESERVE, amdgpu::sdwa::BYTE_3, kSrcValue,
+             0x11BBCCDDu, 0b1000},
+        Case{amdgpu::sdwa::WORD_0, amdgpu::sdwa::UNUSED_PRESERVE, amdgpu::sdwa::DWORD, 0x12345678u,
+             0xAABB5678u, 0b0011},
+        Case{amdgpu::sdwa::WORD_1, amdgpu::sdwa::UNUSED_PRESERVE, amdgpu::sdwa::DWORD, kSrcValue,
+             0x3344CCDDu, 0b1100},
+        Case{amdgpu::sdwa::BYTE_1, amdgpu::sdwa::UNUSED_PAD, amdgpu::sdwa::DWORD, kSrcValue,
+             0x00004400u, ExecutionPlugin::kFullByteMask},
+        Case{amdgpu::sdwa::BYTE_1, amdgpu::sdwa::UNUSED_SEXT, amdgpu::sdwa::BYTE_0, 0x00000080u,
+             0xFFFF8000u, ExecutionPlugin::kFullByteMask},
         Case{amdgpu::sdwa::DWORD, amdgpu::sdwa::UNUSED_PAD, amdgpu::sdwa::DWORD, kSrcValue,
-             ExecutionPlugin::kFullByteMask},
+             kSrcValue, ExecutionPlugin::kFullByteMask},
     };
 
     // Selected sources and destinations carry their precise lane and byte
@@ -833,7 +1329,7 @@ TEST(ExecutionPluginTest, SdwaObservationReportsExactSourceAndDestinationBytes) 
     for (const Case &test_case : cases) {
       SCOPED_TRACE(test_case.dst_sel);
       for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-        cu->write_vgpr(vb + kSrc, lane, kSrcValue);
+        cu->write_vgpr(vb + kSrc, lane, test_case.source_value);
         cu->write_vgpr(vb + kDst, lane, kOldDst);
       }
 
@@ -915,7 +1411,34 @@ TEST(ExecutionPluginTest, SdwaClampIsAppliedInsideArchitecturalDestinationWrite)
   EXPECT_EQ(writes[0].byte_mask, ExecutionPlugin::kFullByteMask);
 }
 
-TEST(ExecutionPluginTest, Sdwa64BitDestinationReportsLowByteAndHighDwordWrites) {
+TEST(ExecutionPluginTest, SdwaClampPreservesLegacyNanBehavior) {
+  ForceScalarOverride force_simd(false);
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  constexpr uint32_t kSrc = 2;
+  constexpr uint32_t kDst = 5;
+  constexpr uint32_t kQuietNan = 0x7FC00000u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + kSrc, 0, kQuietNan);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  uint32_t words[2] = {
+      vop1_encode(/*v_rcp_f32 opcode=*/34, kDst, amdgpu::SRC_SDWA),
+      vop1_sdwa_word(kSrc, amdgpu::sdwa::DWORD, amdgpu::sdwa::UNUSED_PAD, amdgpu::sdwa::DWORD,
+                     /*clamp=*/true),
+  };
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), amdgpu::sdwa::sdwa_clamp_f32(kQuietNan));
+}
+
+TEST(ExecutionPluginTest, SdwaPartialPreserveClampReportsFullDwordWrite) {
   ForceScalarOverride force_simd(false);
   PluginFixture f(/*num_wf_slots=*/1);
   auto *plugin = f.attach_ordering_plugin();
@@ -925,40 +1448,34 @@ TEST(ExecutionPluginTest, Sdwa64BitDestinationReportsLowByteAndHighDwordWrites) 
   wf->set_exec(1);
 
   constexpr uint32_t kSrc = 2;
-  constexpr uint32_t kDst = 6;
+  constexpr uint32_t kDst = 5;
   const uint32_t vb = wf->vgpr_alloc().base;
-  cu->write_vgpr(vb + kSrc, 0, 1u);
-  cu->write_vgpr(vb + kDst, 0, 0xAABBCCDDu);
-  cu->write_vgpr(vb + kDst + 1, 0, 0x11223344u);
+  cu->write_vgpr(vb + kSrc, 0, std::bit_cast<uint32_t>(0.5f));
+  // v_rcp produces 2.0f (0x40000000). BYTE_1 replaces 0xCC with 0x00,
+  // yielding 2.0f before clamp; clamp then changes the complete dword to 1.0f.
+  cu->write_vgpr(vb + kDst, 0, 0x4000CC00u);
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   uint32_t words[2] = {
-      vop1_encode(/*v_cvt_f64_i32 opcode=*/4, kDst, amdgpu::SRC_SDWA),
-      vop1_sdwa_word(kSrc, amdgpu::sdwa::BYTE_1, amdgpu::sdwa::UNUSED_PRESERVE,
-                     amdgpu::sdwa::DWORD),
+      vop1_encode(/*v_rcp_f32 opcode=*/34, kDst, amdgpu::SRC_SDWA),
+      vop1_sdwa_word(kSrc, amdgpu::sdwa::BYTE_1, amdgpu::sdwa::UNUSED_PRESERVE, amdgpu::sdwa::DWORD,
+                     /*clamp=*/true),
   };
   std::unique_ptr<Instruction> inst(decoder->decode(words));
   ASSERT_NE(inst, nullptr);
   plugin->events.clear();
   cu->execute_instruction(inst.get(), *wf);
 
-  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0xAABB00DDu);
-  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst + 1, 0), 0x3FF00000u);
-
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), std::bit_cast<uint32_t>(1.0f));
   const auto reads = vgpr_read_events(*plugin);
   ASSERT_EQ(reads.size(), 1u);
   EXPECT_EQ(reads[0].physical_reg, vb + kSrc);
-  EXPECT_EQ(reads[0].lane_mask, 1u);
   EXPECT_EQ(reads[0].byte_mask, ExecutionPlugin::kFullByteMask);
-
   const auto writes = vgpr_write_events(*plugin);
-  ASSERT_EQ(writes.size(), 2u);
+  ASSERT_EQ(writes.size(), 1u);
   EXPECT_EQ(writes[0].physical_reg, vb + kDst);
   EXPECT_EQ(writes[0].lane_mask, 1u);
-  EXPECT_EQ(writes[0].byte_mask, 0b0010);
-  EXPECT_EQ(writes[1].physical_reg, vb + kDst + 1);
-  EXPECT_EQ(writes[1].lane_mask, 1u);
-  EXPECT_EQ(writes[1].byte_mask, ExecutionPlugin::kFullByteMask);
+  EXPECT_EQ(writes[0].byte_mask, ExecutionPlugin::kFullByteMask);
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite) {
