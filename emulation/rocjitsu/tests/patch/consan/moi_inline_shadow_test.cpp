@@ -802,6 +802,102 @@ TEST(ConSanMoi, Rdna4InlineShadowUsesGenerationTaggedWorkgroupLocalLdsMirror) {
             0);
 }
 
+TEST(ConSanMoi, Rdna4AtomicTrackingUsesInitializedWorkgroupLocalLdsMirror) {
+  const auto release = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto acquire = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/4, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/true, /*scope=*/2,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(release && acquire);
+  const std::array<uint32_t, 15> text_words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32
+      0xEE0B0000u,   0x00000000u,
+      0x00000000u, // global_wb
+      (*release)[0], (*release)[1], (*release)[2], (*acquire)[0],
+      (*acquire)[1], (*acquire)[2], 0xEE0AC000u,   0x00000000u,
+      0x00000000u, // global_inv
+      0xBFB00000u, // s_endpgm
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "atomic_workgroup_shadow",
+                                 kRdna4Wave64AllVgprsGranulated, false, false, 0, 4352u);
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_inline_workgroup_shadow = true;
+  options.moi_track_atomics = true;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 16;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+  });
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_NE(prologue, result.patches.end());
+  EXPECT_EQ(access->workgroup_shadow_base, 4352u);
+  EXPECT_EQ(access->workgroup_shadow_size, 8704u);
+  EXPECT_EQ(access->required_group_segment_size, 13056u);
+  EXPECT_FALSE(access->workgroup_shadow_lazy_initialization);
+  EXPECT_FALSE(access->workgroup_shadow_compact);
+  EXPECT_FALSE(prologue->workgroup_shadow_lazy_initialization);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const auto *text = patched.text_sections().front();
+  std::vector<uint32_t> prologue_words(prologue->trampoline_size / sizeof(uint32_t));
+  std::memcpy(prologue_words.data(), text->data() + prologue->trampoline_offset,
+              prologue->trampoline_size);
+  EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(),
+                       *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_RDNA4)),
+            1);
+  EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(),
+                       *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_RDNA4)),
+            1);
+}
+
+TEST(ConSanMoi, Rdna4BarrierTrackingUsesInitializedWorkgroupLocalLdsMirror) {
+  const auto signal = build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto wait = build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(signal && wait);
+  const std::array<uint32_t, 5> text_words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32
+      *signal,     *wait,
+      0xBFB00000u, // s_endpgm
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "barrier_workgroup_shadow",
+                                 kRdna4Wave64AllVgprsGranulated, false, false, 0, 4352u);
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_inline_workgroup_shadow = true;
+  options.moi_track_barriers = true;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 16;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+  });
+  ASSERT_NE(access, result.patches.end());
+  EXPECT_EQ(access->workgroup_shadow_base, 4352u);
+  EXPECT_EQ(access->workgroup_shadow_size, 8704u);
+  EXPECT_EQ(access->required_group_segment_size, 13056u);
+  EXPECT_FALSE(access->workgroup_shadow_lazy_initialization);
+  EXPECT_FALSE(access->workgroup_shadow_compact);
+}
+
 TEST(ConSanMoi, InlineShadowFallsBackToExternalMirrorWhenLocalMirrorDoesNotFit) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,

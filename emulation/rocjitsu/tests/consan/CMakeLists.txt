@@ -232,7 +232,7 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_gfx950_forced_spill_test_kernel_for_instrumentation"
-                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -250,7 +250,7 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_gfx950_forced_spill_test_kernel_for_instrumentation"
-                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -270,7 +270,7 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_gfx950_forced_spill_test_kernel_for_instrumentation"
-                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -288,7 +288,7 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_gfx950_shared_lds_helper_for_instrumentation"
-                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -306,7 +306,7 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_gfx950_barrier_forced_spill_kernel_for_instrumentation"
-                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -324,7 +324,7 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_gfx950_atomic_forced_spill_kernel_for_instrumentation"
-                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -344,7 +344,7 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_gfx950_dynamic_stack_inline_spill_kernel_for_instrumentation"
-                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -528,7 +528,7 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_full_vgpr_file_test_kernel_for_instrumentation"
-                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
@@ -547,7 +547,7 @@ function(rj_add_consan_hip_tests)
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_shared_noinline_lds_helper_for_instrumentation"
-                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
@@ -568,7 +568,7 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_shared_noinline_lds_helper_for_instrumentation"
-                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
@@ -590,7 +590,7 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_shared_noinline_atomic_add_for_instrumentation"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
-                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
@@ -639,7 +639,7 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MODE=record-replay"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_static_private_stack_test_kernel_for_instrumentation"
-                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )

@@ -106,8 +106,13 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     // even an eager entry-prologue clear can leave reused LDS looking like a
     // coherent prior access in large multi-entry modules. Qualify every local
     // cell with the current workgroup key instead, as the gfx1250 large-mirror
-    // path already does. This also removes the clear and its entry barrier.
-    if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+    // path already does. Synchronization tracking still uses persistent
+    // workgroup identity outside the local shadow, so keep its local shadow
+    // eagerly initialized until those identities can be represented
+    // independently. Otherwise a clean barrier or atomic handoff can compare
+    // owners from incompatible generations and report a false conflict.
+    if (arch == ROCJITSU_CODE_ARCH_RDNA4 && !options.moi_track_barriers &&
+        !options.moi_track_atomics) {
       layout = plan_consan_moi_generation_tagged_workgroup_shadow(
           descriptor.group_segment_fixed_size, max_workgroup_lds_bytes);
     }
