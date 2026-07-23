@@ -33,6 +33,19 @@ NCCL_PARAM(EnableVersionCheck, "ENABLE_VERSION_CHECK", 1);
 NCCL_PARAM(ElasticBufferRegister, "ELASTIC_BUFFER_REGISTER", 1);
 NCCL_PARAM(SymReuseSysmemHandles, "SYM_REUSE_SYSMEM_HANDLES", 0);
 
+// Elastic buffers back a symmetric window with CPU memory. Upstream uses the
+// host-NUMA VMM location type, but HIP/CLR has no host-NUMA member and rejects
+// it; RCCL allocates host segments as CU_MEM_LOCATION_TYPE_HOST on AMD (see
+// alloc.h). Treat both as a CPU-backed (sysmem) segment so the elastic-buffer
+// consumer paths recognize AMD host segments.
+static inline bool ncclSymIsHostSegment(CUmemLocationType type) {
+  if (type == CU_MEM_LOCATION_TYPE_HOST_NUMA) return true;
+#if defined(__HIP_PLATFORM_AMD__) && ROCM_VERSION >= 71200
+  if (type == CU_MEM_LOCATION_TYPE_HOST) return true;
+#endif
+  return false;
+}
+
 extern struct ncclDevCommCompat ncclDevCommCompat_v22902, ncclDevCommCompat_v22907, ncclDevCommCompat_v23000;
 
 // The order of entries in the array shouldn't matter (with the exception of the terminating nullptr)
@@ -68,7 +81,7 @@ struct ncclDevrMemory {
   int winFlags;
   // Per-rank info derived from this rank's own allocation
   int numSegments;         // number of physical segments backing this rank's buffer
-  bool hasSysmemSegment;   // true if any segment is CPU-backed (HOST_NUMA memory type)
+  bool hasSysmemSegment;   // true if any segment is CPU-backed (HOST_NUMA, or HOST on AMD)
   size_t* segmentSizes;    // size of each segment, length numSegments
   // Communicator-wide aggregates over all nRanks, populated via bootstrapAllGather
   int maxGlobalNumSegments;    // max(numSegments) across all communicator ranks
@@ -395,7 +408,7 @@ static ncclResult_t symMemoryImportAndMapSegmentsForRank(struct ncclComm* comm, 
   for (int segment = 0; segment < numSegments; segment++) {
     symLsaMessage* msg = messages + r * maxSegments + segment;
     bool reuseLocal =
-      (r == devr->lsaSelf) || (ncclParamSymReuseSysmemHandles() && msg->type == CU_MEM_LOCATION_TYPE_HOST_NUMA);
+      (r == devr->lsaSelf) || (ncclParamSymReuseSysmemHandles() && ncclSymIsHostSegment(msg->type));
     CUmemGenericAllocationHandle handle = reuseLocal ? memHandles[segment] : (CUmemGenericAllocationHandle)0ULL;
     NCCLCHECKGOTO(symMemoryImportAndMapSegmentHandle(comm, r, reinterpret_cast<CUdeviceptr>(addr), msg, handle,
                                                      reuseLocal),
@@ -672,7 +685,7 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     size_t offset = 0;
     for (int segment = 0; segment < mem->numSegments; segment++) {
       CUmemLocationType locType = segmentTypes[segment];
-      int ptrType = (locType == CU_MEM_LOCATION_TYPE_HOST_NUMA) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;
+      int ptrType = ncclSymIsHostSegment(locType) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;
       NCCLCHECKGOTO(ncclGinRegister(comm, (char*)mem->primaryAddr + offset, mem->segmentSizes[segment],
                                     mem->ginSegmentInfos[segment].ginHostWins, mem->ginSegmentInfos[segment].ginDevWins,
                                     mem->winFlags, mem->maxGlobalNumSegments > 1, ptrType),
@@ -1379,9 +1392,9 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
                 ret, fail_locReg);
     CUmemAllocationProp prop;
     CUCHECKGOTO(cuMemGetAllocationPropertiesFromHandle(&prop, memHandles[segment]), ret, fail_locReg);
-    if (prop.location.type != CU_MEM_LOCATION_TYPE_HOST_NUMA && prop.location.type != CU_MEM_LOCATION_TYPE_DEVICE) {
+    if (!ncclSymIsHostSegment(prop.location.type) && prop.location.type != CU_MEM_LOCATION_TYPE_DEVICE) {
       WARN("Segment %d has unsupported location type %d. Symmetric memory currently only supports "
-           "CU_MEM_LOCATION_TYPE_HOST_NUMA and CU_MEM_LOCATION_TYPE_DEVICE.",
+           "host (CU_MEM_LOCATION_TYPE_HOST_NUMA, or CU_MEM_LOCATION_TYPE_HOST on AMD) and CU_MEM_LOCATION_TYPE_DEVICE.",
            segment, (int)prop.location.type);
       ret = ncclInvalidArgument;
       goto fail_locReg;
