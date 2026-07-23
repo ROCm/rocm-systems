@@ -20,7 +20,7 @@ pytestmark = [
     pytest.mark.rocprofiler_sdk_min_version("1.3.4"),
 ]
 
-_ROCSHMEM_DEMO = "rocshmem"
+_ROCSHMEM_DEMO = "rocshmem-test"
 
 EXPECTED_OPERATIONS = [
     "barrier_all_on_stream",
