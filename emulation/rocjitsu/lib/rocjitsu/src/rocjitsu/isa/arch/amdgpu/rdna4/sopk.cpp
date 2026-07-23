@@ -50,12 +50,15 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
     : Sopk("s_cmovk_i32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmovkI32Sopk>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
-  num_src_ = 2;
+  src_operands_[2] = &scc;
+  num_src_ = 3;
   num_dst_ = 1;
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= PREDICATED_DEF;
 }
 
@@ -67,12 +70,15 @@ SAddkCoI32Sopk::SAddkCoI32Sopk(const MachineInst *inst)
     : Sopk("s_addk_co_i32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SAddkCoI32Sopk>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
+  dst_operands_[1] = &scc;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 void SAddkCoI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -187,10 +193,14 @@ void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
 SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
     : Sopk("s_setreg_imm32_b32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SSetregImm32B32Sopk>()),
-      simm16(16, OperandType::OPR_HWREG, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_HWREG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm32(32, OperandType::OPR_SIMM32, 0) {
   dst_operands_[0] = &simm16;
-  num_src_ = 0;
+  src_operands_[0] = &simm32;
+  num_src_ = 1;
   num_dst_ = 1;
+  simm32 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(literal_));
+  simm32.apply_fieldless_caps(true, false, false);
 }
 
 void SSetregImm32B32Sopk::implicit_uses(RegisterSet &uses) const {
@@ -207,7 +217,7 @@ void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   if (offset + size > 32)
     size = 32 - offset;
   uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
-  uint32_t src = literal_;
+  uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(simm32);
   switch (reg_id) {
   case 1: {
     uint32_t s = wf.status_raw();
@@ -224,11 +234,16 @@ void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
 SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
     : Sopk("s_call_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SCallB64Sopk>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      pc(64, OperandType::OPR_PC, 0), pc_in(64, OperandType::OPR_PC, 0) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 1;
+  dst_operands_[1] = &pc;
+  src_operands_[1] = &pc_in;
+  num_src_ = 2;
+  num_dst_ = 2;
+  pc.apply_fieldless_caps(false, false, false);
+  pc_in.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_CALL;
 }
 

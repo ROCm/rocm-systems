@@ -119,11 +119,8 @@ class LoweringContext:
     vcc_read: str | None = None
     vcc_dst: str | None = None
     true16_dst_select: str | None = None
-    true16_src_select: str | None = None
     true16_src_selects: dict[int, str] = field(default_factory=dict)
     true16_vop3_opsel: str | None = None
-    true16_dst_reg: str | None = None
-    true16_src_raw: str | None = None
     fp8_byte_select: str | None = None
     fp8_decode_e5m3_select: str | None = None
     arch_name: str = ''
@@ -266,14 +263,7 @@ def _vcc_init_expr(ctx: LoweringContext) -> str:
 
 
 def _write_vcc_mask_to_explicit_dst(dst: str) -> str:
-    # Keep this wave32/wave64 mask-width rule in sync with simd_glue.h and
-    # vector_cmp.py.
-    return (
-        f'if (wf.wf_size() <= 32)\n'
-        f'    amdgpu::RegisterAccess(wf).write_scalar({dst}, static_cast<uint32_t>(vcc));\n'
-        f'  else\n'
-        f'    amdgpu::RegisterAccess(wf).write_scalar64({dst}, vcc);'
-    )
+    return f'amdgpu::write_wave_mask_scalar({dst}, wf, vcc);'
 
 
 def _vcc_write_stmt(ctx: LoweringContext) -> str:
@@ -888,11 +878,6 @@ def _lower_instoperand_read(node: SemaNode, ctx: LoweringContext) -> str:
             and ctx.true16_dst_select is not None
             and ((node.ty and node.ty.size == 16) or binding.bit_width == 16)
         ):
-            if ctx.true16_dst_reg is not None:
-                value = (
-                    'amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + '
-                    f'({ctx.true16_dst_reg}), lane)'
-                )
             return f'(({ctx.true16_dst_select}) != 0 ? ({value} >> 16) : {value})'
         if tag != 'D' and idx in ctx.true16_src_selects:
             if ctx.true16_vop3_opsel is not None:
@@ -1034,25 +1019,8 @@ def _lower_dst_write(
             (lhs_ty and lhs_ty.size == 16) or binding.bit_width == 16
         ):
             selected_rhs = rhs
-            if ctx.true16_src_raw is not None or ctx.true16_src_select is not None:
-                true16_rhs = ctx.true16_src_raw or raw_rhs
-                if (
-                    ctx.true16_src_raw is None
-                    and rhs_node.kind == SemaNodeKind.CAST
-                    and rhs_node.children
-                    and rhs_node.cast_target
-                    and rhs_node.cast_target.size == 16
-                ):
-                    true16_rhs = _lower_expr(rhs_node.children[0], ctx)
-                selected_rhs = true16_rhs
-                if ctx.true16_src_select is not None:
-                    selected_rhs = f'(({ctx.true16_src_select}) != 0 ? ({true16_rhs} >> 16) : {true16_rhs})'
             ind = _indent(ctx)
-            if ctx.true16_dst_reg is not None:
-                dst_ref = f'wf.vgpr_alloc().base + ({ctx.true16_dst_reg})'
-                read_dst = f'amdgpu::RegisterAccess(wf.cu()).read_vgpr({dst_ref}, lane)'
-                write_dst = f'amdgpu::RegisterAccess(wf.cu()).write_vgpr({dst_ref}, lane, merged);'
-            elif ctx.true16_vop3_opsel is not None or ctx.true16_dst_select in {
+            if ctx.true16_vop3_opsel is not None or ctx.true16_dst_select in {
                 'inst_.opsel & 0x8u',
                 'amdgpu::vop3_opsel(inst_) & 0x8u',
             }:
@@ -1064,11 +1032,8 @@ def _lower_dst_write(
                     f'{name}, wf, lane, {opsel_expr}, src_half, true);',
                     f'{ind}}}',
                 ]
-            else:
-                read_dst = f'amdgpu::RegisterAccess(wf).read_lane({name}, lane)'
-                write_dst = (
-                    f'amdgpu::RegisterAccess(wf).write_lane({name}, lane, merged);'
-                )
+            read_dst = f'amdgpu::RegisterAccess(wf).read_lane({name}, lane)'
+            write_dst = f'amdgpu::RegisterAccess(wf).write_lane({name}, lane, merged);'
             return [
                 f'{ind}{{',
                 f'{ind}  uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>({selected_rhs}));',

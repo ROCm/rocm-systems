@@ -7,19 +7,30 @@ rj_add_object_library(rocjitsu_code
     executable.cpp
     file_io.cpp
     kernel_symbol.cpp
+    relocation_function_table.cpp
     rj_code.cpp
     dbt/binary_translator.cpp
+    dbt/legalization/gfx1250_b0_to_a0.cpp
     dbt/rj_code_translate.cpp
     dbt/hazard_tracker.cpp
     dbt/kernel_descriptor_translator.cpp
     dbt/lane_permutation.cpp
+    dbt/lds_virtualization.cpp
+    dbt/semantic/cdna4_to_cdna3_virtual_lds.cpp
+    dbt/semantic/cdna3_lds.cpp
+    dbt/semantic/cdna3_scratch.cpp
     dbt/semantic/cdna4_to_cdna3.cpp
     dbt/semantic/cdna4_to_rdna_common.cpp
     dbt/semantic/cdna4_to_rdna3.cpp
     dbt/semantic/cdna4_to_rdna4.cpp
+    dbt/semantic/gfx1250_b0_to_a0.cpp
     dbt/semantic_translator.cpp
+    dbt/semantic_scratch.cpp
+    dbt/virtual_lds.cpp
+    patch/sidecar_metadata.cpp
     dbt/waitcnt_translator.cpp
     patch/code_object_patcher.cpp
+    patch/kernarg_extension.cpp
     patch/kernel_text_layout.cpp
     patch/instruction_builder.cpp
     patch/instrumentor.cpp

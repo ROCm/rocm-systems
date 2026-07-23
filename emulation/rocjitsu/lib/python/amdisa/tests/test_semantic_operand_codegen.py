@@ -16,6 +16,17 @@ def test_legacy_buffer_vaddr_width_follows_address_mode():
     )
 
 
+def test_gfx12_flat_vaddr_width_follows_saddr_mode():
+    for enc_name in ('ENC_VFLAT', 'ENC_VGLOBAL'):
+        assert CodeGenerator._vflat_vaddr_operand_size_expr(enc_name, 'vaddr') == (
+            'vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst))'
+        )
+
+    assert CodeGenerator._vflat_vaddr_operand_size_expr('ENC_VSCRATCH', 'vaddr') is None
+    assert CodeGenerator._vflat_vaddr_operand_size_expr('ENC_VFLAT', 'vdst') is None
+    assert 'inst->saddr == OPR_SREG_NULL' in CodeGenerator._emit_vflat_helpers()
+
+
 def test_buffer_vaddr_helper_maps_address_modes_to_zero_one_or_two_vgprs():
     helper = CodeGenerator._emit_buffer_vaddr_helpers(
         'buffer_vaddr_bits', 'BufferMachineInst', templated=True

@@ -2099,6 +2099,7 @@ class _VectorDot2cBf16(_ScalarDeriver):
 
 for _dot_cls in (
     'dot2_f32_f16',
+    'dot2_f32_bf16',
     'dot2_i32_i16',
     'dot2_u32_u16',
     'dot4_i32_i8',

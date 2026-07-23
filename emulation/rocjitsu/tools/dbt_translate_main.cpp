@@ -23,6 +23,9 @@ using namespace rocjitsu::tools;
 namespace {
 
 constexpr int kUsageError = 1;
+// Matches the translation-failure exit code used by translate_code_object so a
+// non-dispatchable (skipped-kernel) artifact reports the same class of failure.
+constexpr int kTranslationError = 3;
 constexpr int kOutputError = 4;
 
 enum class OutputMode {
@@ -40,13 +43,17 @@ struct TargetInfo {
 
 // \NPI new GPU: add a {"gfxNNNN", ARCH, EF_MACH, TARGET} row here
 // (and bump the  std::array size) so the DBT tool can translate to/from it.
-constexpr std::array<TargetInfo, 4> kTargetInfos = {{
+constexpr std::array<TargetInfo, 5> kTargetInfos = {{
     {"gfx942", ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX942, ROCJITSU_CODE_TARGET_GFX942},
     {"gfx950", ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950, ROCJITSU_CODE_TARGET_GFX950},
     {"gfx1200", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1200,
      ROCJITSU_CODE_TARGET_GFX1200},
     {"gfx1201", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201,
      ROCJITSU_CODE_TARGET_GFX1201},
+    // gfx1250 A0 and B0 share the same ELF machine and structural ISA. Separate
+    // revision options select the translation direction.
+    {"gfx1250", ROCJITSU_CODE_ARCH_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+     ROCJITSU_CODE_TARGET_GFX1250},
 }};
 
 struct CliOptions {
@@ -59,6 +66,8 @@ struct CliOptions {
   bool saw_input = false;
   bool saw_input_target = false;
   bool saw_output_target = false;
+  bool saw_input_revision = false;
+  bool saw_output_revision = false;
 };
 
 void print_supported_targets(std::ostream &os) {
@@ -76,12 +85,16 @@ void print_help() {
       << "Options:\n"
       << "  --input-target TARGET           Input LLVM machine, e.g. gfx950\n"
       << "  --output-target TARGET          Output LLVM machine, e.g. gfx1200\n"
+      << "  --input-revision REVISION       Input revision: a0 or b0 (gfx1250 only)\n"
+      << "  --output-revision REVISION      Output revision: a0 or b0 (gfx1250 only)\n"
       << "  --code-object-index N           Code-object index for executable input (default: 0)\n"
       << "  --output-mode MODE              disasm, code-object, or diff (default: disasm)\n"
       << "  --debug-conservative-liveness N Only allocate free VGPR scratch at or above N\n"
       << "  --debug-continue-after-failure Continue collecting diagnostics after failures\n"
+      << "  --skip-failed-kernels          Preserve failed kernels and continue other kernels\n"
       << "  --list-code-objects             List extractable code objects and exit\n"
       << "  --help                          Show this help\n\n"
+      << "Note: gfx1250 b0-to-a0 applies the errata policy; equal revisions are identity.\n\n"
       << "Supported target names: ";
   print_supported_targets(std::cout);
   std::cout << ".\n";
@@ -115,6 +128,26 @@ void print_help() {
   if (value == "diff")
     return OutputMode::Diff;
   return std::nullopt;
+}
+
+[[nodiscard]] std::optional<ProcessorRevision> parse_revision(std::string_view value) {
+  if (value == "a0")
+    return ProcessorRevision::Gfx1250A0;
+  if (value == "b0")
+    return ProcessorRevision::Gfx1250B0;
+  return std::nullopt;
+}
+
+[[nodiscard]] std::string_view revision_name(ProcessorRevision revision) {
+  switch (revision) {
+  case ProcessorRevision::Gfx1250A0:
+    return "a0";
+  case ProcessorRevision::Gfx1250B0:
+    return "b0";
+  case ProcessorRevision::Unspecified:
+    return "unspecified";
+  }
+  return "unspecified";
 }
 
 [[nodiscard]] bool require_value(int argc, char **argv, int &index, std::string_view flag,
@@ -156,6 +189,10 @@ void print_help() {
       options.translate.debug_continue_after_failure = true;
       continue;
     }
+    if (arg == "--skip-failed-kernels") {
+      options.translate.skip_failed_kernels = true;
+      continue;
+    }
 
     if (arg == "--input-target") {
       if (!require_value(argc, argv, i, arg, value))
@@ -181,6 +218,26 @@ void print_help() {
       options.translate.target_mach = target->mach;
       options.output_target_name = std::string(target->name);
       options.saw_output_target = true;
+    } else if (arg == "--input-revision") {
+      if (!require_value(argc, argv, i, arg, value))
+        return false;
+      const auto revision = parse_revision(value);
+      if (!revision) {
+        std::cerr << "invalid input revision: " << value << " (expected a0 or b0)\n";
+        return false;
+      }
+      options.translate.input_revision = *revision;
+      options.saw_input_revision = true;
+    } else if (arg == "--output-revision") {
+      if (!require_value(argc, argv, i, arg, value))
+        return false;
+      const auto revision = parse_revision(value);
+      if (!revision) {
+        std::cerr << "invalid output revision: " << value << " (expected a0 or b0)\n";
+        return false;
+      }
+      options.translate.output_revision = *revision;
+      options.saw_output_revision = true;
     } else if (arg == "--code-object-index") {
       if (!require_value(argc, argv, i, arg, value))
         return false;
@@ -271,6 +328,8 @@ struct ReportTotals {
     return "expand-failed";
   case DiagnosticKind::ResourceLimit:
     return "resource-limit";
+  case DiagnosticKind::KernelSkipped:
+    return "kernel-skipped";
   }
   return "unknown";
 }
@@ -441,7 +500,11 @@ void print_text_report(std::ostream &os, const CliOptions &options,
   os << "rj_dbt_translate: " << (result.ok() ? "ok" : "failed") << "\n";
   os << "input: " << options.translate.input_path << "\n";
   os << "input_target: " << options.input_target_name << "\n";
+  if (options.saw_input_revision)
+    os << "input_revision: " << revision_name(output.input_revision) << "\n";
   os << "output_target: " << options.output_target_name << "\n";
+  if (options.saw_output_revision)
+    os << "output_revision: " << revision_name(output.output_revision) << "\n";
   os << "output_elf_bytes: " << output.elf_bytes.size() << "\n";
 
   print_code_object_report(os, "source", output.source_report);
@@ -512,6 +575,30 @@ int main(int argc, char **argv) {
     return kUsageError;
   }
 
+  if (options.translate.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.saw_input_revision) {
+    std::cerr << "--input-revision is required when --input-target is gfx1250\n";
+    return kUsageError;
+  }
+  if (options.translate.guest_arch != ROCJITSU_CODE_ARCH_GFX1250 && options.saw_input_revision) {
+    std::cerr << "--input-revision is only valid when --input-target is gfx1250\n";
+    return kUsageError;
+  }
+  if (options.translate.host_arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.saw_output_revision) {
+    std::cerr << "--output-revision is required when --output-target is gfx1250\n";
+    return kUsageError;
+  }
+  if (options.translate.host_arch != ROCJITSU_CODE_ARCH_GFX1250 && options.saw_output_revision) {
+    std::cerr << "--output-revision is only valid when --output-target is gfx1250\n";
+    return kUsageError;
+  }
+  if (options.translate.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      options.translate.host_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      options.translate.input_revision == ProcessorRevision::Gfx1250A0 &&
+      options.translate.output_revision == ProcessorRevision::Gfx1250B0) {
+    std::cerr << "gfx1250 A0-to-B0 translation is not supported\n";
+    return kUsageError;
+  }
+
   options.translate.collect_diagnostics = options.output_mode == OutputMode::Diff;
   options.translate.disassembly = options.output_mode == OutputMode::Disasm
                                       ? DisassemblyMode::Translated
@@ -529,6 +616,17 @@ int main(int argc, char **argv) {
     for (const auto &error : result.errors)
       std::cerr << "error: " << error.message << "\n";
     return result.errors.front().exit_code;
+  }
+
+  // A skipped kernel is a warning, so result.ok() stays true, but its s_endpgm
+  // stub completes normally without producing the kernel's outputs and would
+  // silently produce wrong results if dispatched. Refuse to emit an executable
+  // code object in that case (the HSA hook rejects the same load). Diff/Disasm
+  // are diagnostic-only inspection modes and remain available.
+  if (options.output_mode == OutputMode::CodeObject && !result.value.dispatchable()) {
+    std::cerr << "error: translation skipped one or more kernels; the code object is not "
+                 "dispatchable and will not be written\n";
+    return kTranslationError;
   }
 
   if (options.output_mode != OutputMode::Diff && !emit_output(options, result.value)) {

@@ -21,6 +21,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+  Operand vcc;
 };
 
 class VAddF32Vop2 : public Vop2 {
@@ -237,6 +238,7 @@ public:
   VAddCoU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -246,6 +248,7 @@ public:
   VSubCoU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -255,6 +258,7 @@ public:
   VSubrevCoU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -264,8 +268,10 @@ public:
   VAddcCoU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand vcc_in;
 };
 
 class VSubbCoU32Vop2 : public Vop2 {
@@ -273,8 +279,10 @@ public:
   VSubbCoU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand vcc_in;
 };
 
 class VSubbrevCoU32Vop2 : public Vop2 {
@@ -282,8 +290,10 @@ public:
   VSubbrevCoU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand vcc_in;
 };
 
 class VAddF16Vop2 : public Vop2 {

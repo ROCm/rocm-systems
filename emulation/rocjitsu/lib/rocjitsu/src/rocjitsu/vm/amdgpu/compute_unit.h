@@ -56,8 +56,10 @@ class CommandProcessor;
 /// back to this CU and its slot index (wf_id).
 ///
 /// dispatch_wf() finds the first idle slot, allocates registers, and
-/// activates it. retire_halted_wfs() frees register allocations and calls
-/// clear() so the slot can be reused.
+/// activates it. When a wavefront reaches s_endpgm it halts: free_wavefront_resources()
+/// frees its register allocations and resets the slot for reuse, mirroring how real
+/// hardware reclaims a wave's resources at termination (there is no separate lazy
+/// retirement pass).
 ///
 /// Each step() call picks the next active wavefront (round-robin) and executes
 /// one instruction using the ISA-specific decoder.
@@ -99,22 +101,33 @@ public:
   /// and initializes the slot's dynamic state (wg_id, pc, allocations).
   /// @param wg_id Workgroup ID for this wavefront.
   /// @param pc Kernel entry point (byte address).
-  /// @param sgprs Number of scalar registers to allocate.
-  /// @param vgprs Number of vector registers to allocate.
+  /// @param num_sgprs Number of scalar registers to allocate.
+  /// @param num_vgprs Number of vector registers to allocate.
   /// @returns Pointer to the activated wavefront, or nullptr if no free slot
   ///          or insufficient register space.
-  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sgprs, uint32_t vgprs);
+  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, uint32_t num_vgprs);
 
-  /// @brief Execute one instruction on the next active wavefront.
-  /// @retval true An instruction was executed.
-  /// @retval false No active wavefronts remain.
+  /// @brief Advance every RUNNING wavefront by one instruction, then report
+  /// residency.
+  /// @details Issues one instruction to each wavefront currently in the RUNNING
+  /// state (waves stalled on WAITCNT/BARRIER, or halted, issue nothing this tick).
+  /// @retval true At least one wavefront is still resident (active), regardless of
+  ///         whether any instruction issued this call — so a fully WAITCNT/BARRIER-
+  ///         stalled CU still returns true.
+  /// @retval false No wavefronts remain resident (the CU is idle).
   bool step() override;
 
-  /// @brief Clear all halted wavefront slots and free their register allocations.
-  void retire_halted_wfs();
+  /// @brief Free a halted wavefront's register allocations and reset its slot.
+  /// @details Called from Wavefront::halt() at s_endpgm so a terminated wave
+  /// releases its SGPR/VGPR blocks immediately, exactly as hardware reclaims
+  /// resources at wave termination. LDS is per-workgroup and reclaimed separately
+  /// via maybe_reset_lds_alloc() once the whole workgroup completes.
+  void free_wavefront_resources(Wavefront &wf);
 
-  /// @brief Like retire_halted_wfs but without resetting the LDS allocator.
-  void retire_halted_wfs_no_lds_reset();
+  /// @brief Reset the per-WG LDS bump allocator once the CU has fully drained.
+  /// @details No-op while any wavefront is resident or a cluster pin is held (peer
+  /// cluster workgroups may still multicast into LDS after the source wave halts).
+  void maybe_reset_lds_alloc();
 
   /// @brief Check whether this CU can accept an entire workgroup.
   ///
@@ -127,7 +140,7 @@ public:
   bool can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes = 0) const;
 
   /// @brief Execute up to kFunctionalQuantum instructions, then yield.
-  virtual bool advance() = 0;
+  virtual bool execute_quantum() = 0;
 
   /// @brief End the current functional-mode quantum after this instruction.
   ///
@@ -135,16 +148,14 @@ public:
   /// components can publish the state on which the wavefront is polling.
   void request_functional_yield() { functional_yield_requested_ = true; }
 
-  /// @brief Signal that work has been dispatched; begin processing.
-  ///
-  /// @details Schedules an engine event that calls advance() repeatedly
-  /// until all wavefronts are exhausted. Called by the command processor
-  /// after dispatch_wf().
-  virtual void activate() = 0;
+  /// @brief Schedule the tick event if the CU is not already executing.
+  /// Called from dispatch_wf() and the cpl_ port handler.
+  virtual void schedule_work() = 0;
 
   /// @brief Check whether this CU has no active wavefronts.
   /// @retval true No wavefronts are actively executing.
   /// @retval false At least one wavefront is active.
+  /// @warning NOT thread-safe (see has_active_wfs()): engine-thread only.
   virtual bool is_idle() const { return !has_active_wfs(); }
 
   /// @brief Register a callback invoked when this CU becomes idle.
@@ -176,7 +187,7 @@ public:
 
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
-  /// Initializes the refcount so retire_halted_wfs() can detect WG completion.
+  /// Initializes the refcount so release_wf() can detect WG completion.
   void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count) {
     active_wgs_[wg_key(dispatch_id, wg_id)] = wf_count;
   }
@@ -186,6 +197,14 @@ public:
   /// and the CP is notified via notify_wg_complete.
   void release_wf(uint32_t dispatch_id, uint32_t wg_id);
 
+  /// @brief Roll back a committed-but-never-run workgroup on a dispatch error.
+  /// @details Used to unwind an already-committed cluster peer when a later peer in
+  /// the same clustered dispatch fails. Frees the WG's resident waves and drops its
+  /// refcount WITHOUT firing the completion hook or CP notify (the WG never executed),
+  /// then reclaims LDS if the CU is now idle and unpinned. The caller is responsible
+  /// for unpinning any CP-side cluster LDS pin.
+  void abort_workgroup(uint32_t dispatch_id, uint32_t wg_id);
+
   /// @brief Set the execution plugin group (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
@@ -194,8 +213,10 @@ public:
   /// @brief Return the execution plugin group.
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
 
-  /// @brief Return the number of dispatched (active or halted) wavefront slots.
-  /// @returns Count of non-idle wavefront slots.
+  /// @brief Return the number of resident (not-yet-halted) wavefront slots.
+  /// @details A wave frees its resources and its slot at s_endpgm, so halted
+  /// waves are not counted. Equivalent to the number of active wavefronts.
+  /// @returns Count of resident wavefront slots.
   size_t num_wfs() const;
 
   /// @brief Return the total number of wavefront slots.
@@ -347,6 +368,9 @@ public:
   /// @brief Check whether any wavefront slot is actively executing.
   /// @retval true At least one wavefront is not halted.
   /// @retval false All wavefronts are halted.
+  /// @warning NOT thread-safe: reads the non-atomic per-wave state_. Safe only on the
+  ///   shared partition engine thread (CP and its CUs share one partition, asserted in
+  ///   CommandProcessor::startup()); callers on any other thread would race a halt().
   bool has_active_wfs() const {
     for (const auto &w : wfs_)
       if (!w->is_halted())
@@ -502,13 +526,6 @@ public:
   /// @param wf The wavefront executing the instruction.
   virtual void execute_instruction(Instruction *inst, Wavefront &wf) = 0;
 
-  /// @brief Reset all wavefront slots to halted state.
-  ///
-  /// Frees all register allocations and resets every slot.  Used by the
-  /// instruction execution test harness between instructions.
-  /// @warning NOT thread-safe.  Must not be called while step() is running.
-  void reset_all_wf();
-
 protected:
   ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
                   uint32_t wf_size);
@@ -600,6 +617,9 @@ inline uint32_t InstructionComputeUnitView::wf_size() const { return raw_cu().wf
 inline uint32_t InstructionComputeUnitView::sgprs_per_wf() const {
   return raw_cu().config().sgprs_per_wf;
 }
+inline uint32_t InstructionComputeUnitView::vgpr_allocation_block_size() const {
+  return raw_cu().vgpr_allocation_block_size();
+}
 inline std::string InstructionComputeUnitView::full_path() const { return raw_cu().full_path(); }
 inline simdojo::ComponentID InstructionComputeUnitView::id() const { return raw_cu().id(); }
 inline simdojo::SimulationEngine *InstructionComputeUnitView::engine() const {
@@ -619,7 +639,7 @@ inline void InstructionComputeUnitView::write_sgpr(uint32_t reg_idx, uint32_t va
 ///
 /// @details Adds event-driven activation on top of ComputeUnitCore.
 ///
-/// In FUNCTIONAL mode, advance() executes up to kFunctionalQuantum
+/// In FUNCTIONAL mode, execute_quantum() runs up to kFunctionalQuantum
 /// instructions, then yields to the simulation event loop. This
 /// interleaving ensures forward progress when wavefronts on different
 /// CUs synchronize via global memory (e.g., spin-locks, semaphores).
@@ -630,11 +650,13 @@ public:
   using ComputeUnitCore::ComputeUnitCore;
 
   /// @brief Execute work up to the quantum limit, then yield.
-  bool advance() override {
+  bool execute_quantum() override {
     if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
       // A request left by direct step() execution must not shorten this quantum.
       functional_yield_requested_ = false;
+      last_quantum_executed_ = 0;
       for (uint32_t i = 0; i < kFunctionalQuantum && step(); ++i) {
+        ++last_quantum_executed_;
         if (std::exchange(functional_yield_requested_, false))
           break;
       }
@@ -643,23 +665,50 @@ public:
     }
     if (is_idle()) {
       notify_idle();
-      return !is_idle();
+      if (is_idle()) {
+        executing_ = false;
+        return false;
+      }
     }
     return true;
   }
 
-  /// @brief Schedule CU execution via the event loop.
-  void activate() override {
+  void schedule_work() override {
+    // Never wake an idle CU. The CP nudges the CU through the cp->cu.cpl port,
+    // gated on has_active_wfs() when sent, but that port carries link latency, so a
+    // nudge can arrive a tick after the last wavefront has halted and freed itself.
+    // Waking the CU then would run an empty tick with no wave to issue — pure waste.
+    // Work is scheduled only when there is work to do.
+    //
+    // ENGINE-THREAD ONLY: executing_ and tick_event_ are touched without
+    // synchronization, and schedule_event() pushes to the partition's event queue
+    // non-thread-safely. All callers (dispatch_wf(), the cpl_ port handler, and the
+    // CP on the same partition) run on this CU's owning partition engine thread. A
+    // cross-partition schedule_work() would be an executing_ data race plus an
+    // unsynchronized event-queue push.
+    if (executing_ || !this->engine() || !this->has_active_wfs())
+      return;
+    executing_ = true;
     auto now = this->engine()->context(this->partition_id()).current_tick();
-    this->schedule_event(&work_event_, now + 1);
+    this->schedule_event(&tick_event_, now + 1);
   }
 
 private:
-  simdojo::Event work_event_{this, simdojo::EventType::TIMER_CALLBACK,
-                             [this](simdojo::Tick now, simdojo::Message *) {
-                               if (advance())
-                                 this->schedule_event(&work_event_, now + 1);
-                             }};
+  // Reschedule by the number of quantum loop iterations taken, not a fixed
+  // kFunctionalQuantum: a wavefront that requests a yield after k<kFunctionalQuantum
+  // iterations (e.g. s_sleep, vendor-dep retry) resumes at now+k so a peer
+  // component's published state is observed promptly rather than leaping a full
+  // quantum ahead. Note this counts loop iterations, not instructions issued —
+  // step() advances even when every wave is WAITCNT/BARRIER-stalled — so a fully
+  // stalled CU still advances by the full quantum. max(1,...) keeps the event
+  // strictly in the future so re-entries never collapse onto one tick.
+  simdojo::Event tick_event_{
+      this, simdojo::EventType::TIMER_CALLBACK, [this](simdojo::Tick now, simdojo::Message *) {
+        if (execute_quantum())
+          this->schedule_event(&tick_event_, now + std::max<uint64_t>(1, last_quantum_executed_));
+      }};
+  uint64_t last_quantum_executed_ = 0;
+  bool executing_ = false;
 };
 
 /// @brief ISA-parameterized compute unit owning the typed VGPR register file.
@@ -753,7 +802,10 @@ protected:
   /// @brief Execute one instruction on the given wavefront.
   ///
   /// @brief Execute one instruction on the given wavefront via direct dispatch.
-  void execute_instruction(Instruction *inst, Wavefront &wf) override { inst->execute(*inst, &wf); }
+  void execute_instruction(Instruction *inst, Wavefront &wf) override {
+    assert(inst->execute && "instruction execution backend is not linked");
+    inst->execute(*inst, &wf);
+  }
 
 private:
   simdojo::RegisterFile<Vgpr> vgpr_file_{"vgpr"};

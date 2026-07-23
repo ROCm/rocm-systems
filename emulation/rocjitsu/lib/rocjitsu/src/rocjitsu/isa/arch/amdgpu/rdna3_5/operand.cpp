@@ -47,9 +47,9 @@ std::optional<Packed16VgprSource> packed_16bit_vgpr_source(bool packed_16bit_sou
   return std::nullopt;
 }
 
-std::optional<Packed16VgprSource> packed_16bit_vgpr_dst(int size_bits, OperandType opr_type,
-                                                        int ev) {
-  if (size_bits != 16 || opr_type != OperandType::OPR_VGPR)
+std::optional<Packed16VgprSource> packed_16bit_vgpr_dst(bool packed_16bit_dst, int size_bits,
+                                                        OperandType opr_type, int ev) {
+  if (!packed_16bit_dst || size_bits != 16 || opr_type != OperandType::OPR_VGPR)
     return std::nullopt;
   if (ev >= 0 && ev <= 127)
     return Packed16VgprSource{static_cast<uint32_t>(ev), 0};
@@ -59,15 +59,17 @@ std::optional<Packed16VgprSource> packed_16bit_vgpr_dst(int size_bits, OperandTy
 }
 } // namespace
 
-Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source)
+Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source,
+                 bool packed_16bit_dst)
     : AmdgpuIsaOperand<Isa>(size_bits, opr_type, encoding_value),
-      packed_16bit_source_(packed_16bit_source) {
+      packed_16bit_source_(packed_16bit_source), packed_16bit_dst_(packed_16bit_dst) {
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
 
 Operand::Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,
-                 bool packed_16bit_source)
-    : Operand(size_bits, opr_type, static_cast<int>(encoding_value), packed_16bit_source) {}
+                 bool packed_16bit_source, bool packed_16bit_dst)
+    : Operand(size_bits, opr_type, static_cast<int>(encoding_value), packed_16bit_source,
+              packed_16bit_dst) {}
 
 Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
                  uint16_t literal16_display_value, bool has_literal16_display)
@@ -97,7 +99,8 @@ std::string Operand::name() const {
   if (auto packed =
           packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
     return std::format("v{}.{}", packed->reg, packed->shift ? "h" : "l");
-  if (auto packed = packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_))
+  if (auto packed =
+          packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))
     return std::format("v{}.{}", packed->reg, packed->shift ? "h" : "l");
   switch (opr_type_) {
   case OperandType::OPR_ATTR: {
@@ -567,12 +570,23 @@ std::string Operand::name() const {
 std::optional<RegisterRef> Operand::to_register_ref() const {
   if (size_bits_ == 0)
     return std::nullopt;
+  // A fieldless operand (no MR ISA encoding field: a hardwired
+  // register/side effect like VCC/EXEC/SCC, or the fieldless image
+  // address) never denotes a def-use-tracked register: its
+  // encoding value is a fixed placeholder, not a decoded index, so
+  // mapping it to a RegisterRef would fabricate a spurious def/use.
+  // Making this explicit keeps every fieldless operand inert by
+  // design (not by per-type coincidence) if it is placed in the
+  // operand arrays.
+  if (fieldless_)
+    return std::nullopt;
   // Liveness tracks operands as contiguous 32-bit register lanes.
   const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);
   if (auto packed =
           packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
     return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(packed->reg), reg_width};
-  if (auto packed = packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_))
+  if (auto packed =
+          packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))
     return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(packed->reg), reg_width};
   switch (opr_type_) {
   case OperandType::OPR_ATTR: {
@@ -999,7 +1013,7 @@ bool Operand::simd_capable() const {
     return delegate()->simd_capable();
   if (packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
     return false;
-  if (packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_))
+  if (packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))
     return false;
   return AmdgpuIsaOperand<Isa>::simd_capable();
 }
@@ -1025,7 +1039,7 @@ void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32
     amdgpu::RegisterAccess(wf).write_chunk(*delegate(), lane_base, count, vals, mask);
     return;
   }
-  if (packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_)) {
+  if (packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
     for (uint32_t i = 0; i < count; ++i)
       if (mask & (1ULL << i))
         write_lane(wf, lane_base + i, vals[i]);
@@ -1038,6 +1052,12 @@ void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32
 uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
   if (delegate())
     return amdgpu::RegisterAccess(wf).read_scalar(*delegate());
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!reads_value())
+    return 0u;
   if (has_literal64_)
     return static_cast<uint32_t>(literal64_value_);
   if (is_immediate_type(opr_type_))
@@ -1048,6 +1068,12 @@ uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
 uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
   if (delegate())
     return amdgpu::RegisterAccess(wf).read_lane(*delegate(), lane);
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!reads_value())
+    return 0u;
   int ev = encoding_value_;
   if (auto packed = packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, ev)) {
     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
@@ -1067,11 +1093,24 @@ uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
 }
 
 void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!is_writable())
+    return;
   resolve_dst_write(wf, encoding_value_, val);
 }
 
 void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {
-  if (auto packed = packed_16bit_vgpr_dst(size_bits_, opr_type_, encoding_value_)) {
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!is_writable())
+    return;
+  if (auto packed =
+          packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, true) : off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
@@ -1092,6 +1131,12 @@ void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) con
 uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {
   if (delegate())
     return amdgpu::RegisterAccess(wf).read_lane64(*delegate(), lane);
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!reads_value())
+    return 0;
   int ev = encoding_value_;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
@@ -1106,6 +1151,12 @@ uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const 
 }
 
 void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!is_writable())
+    return;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, encoding_value_)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
@@ -1116,6 +1167,12 @@ void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) c
 }
 
 uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!reads_value())
+    return 0;
   if (has_literal64_)
     return literal64_value_;
   if (is_immediate_type(opr_type_))
@@ -1124,6 +1181,12 @@ uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
 }
 
 void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!is_writable())
+    return;
   resolve_dst_write64(wf, encoding_value_, val);
 }
 

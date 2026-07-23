@@ -181,14 +181,70 @@ else
   USE_SLR=0
 fi
 
-# Detect wavefront size based on GPU architecture
-# gfx1100 and gfx1201 have wavefront size 32, most others have 64
+# Detect wavefront size and grid-sync residency limits based on GPU architecture.
+# gfx1100/gfx1201/gfx1250 have wavefront size 32, most others have 64.
+# GRID_SYNC_MAX_THREADS applies only to functional tests whose kernels use the
+# software grid_barrier occupancy guard. A value of 0 disables driver-side adjustment. 
+# It can be overridden with ROCSHMEM_TEST_GRID_SYNC_MAX_THREADS.
 WAVE_SIZE=64
+GPU_ARCH=""
+GRID_SYNC_MAX_THREADS=0
 if command -v rocminfo >/dev/null 2>&1; then
-  if rocminfo | grep -qE "Name:.*(gfx1100|gfx1201|gfx1250)"; then
+  GPU_ARCH=$(rocminfo 2>/dev/null | grep -m1 -Eo "gfx[0-9a-z]+" || true)
+  if [[ "$GPU_ARCH" =~ ^(gfx1100|gfx1201|gfx1250)$ ]]; then
     WAVE_SIZE=32
   fi
+  if [[ "$GPU_ARCH" =~ ^(gfx1100|gfx1201)$ ]]; then
+    GRID_SYNC_MAX_THREADS=$((32 * 1024))
+  fi
 fi
+GRID_SYNC_MAX_THREADS=${ROCSHMEM_TEST_GRID_SYNC_MAX_THREADS:-$GRID_SYNC_MAX_THREADS}
+
+IsGridBarrierOccupancyLimitedTest() {
+  case "$1" in
+    get|getnbi|put|putnbi|p|g|\
+    defaultctxget|defaultctxgetnbi|defaultctxput|defaultctxputnbi|defaultctxp|defaultctxg|\
+    teamctxget|teamctxgetnbi|teamctxput|teamctxputnbi|\
+    waveget|wavegetnbi|waveput|waveputnbi|\
+    wgget|wggetnbi|wgput|wgputnbi|\
+    flood_add|flood_fadd|flood_waitadd)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+AdjustGridBarrierProblemSize() {
+  local test_name=$1
+  local num_wg=$2
+  local num_threads=$3
+
+  if (( GRID_SYNC_MAX_THREADS <= 0 )); then
+    echo "$num_wg"
+    return
+  fi
+
+  if ! IsGridBarrierOccupancyLimitedTest "$test_name"; then
+    echo "$num_wg"
+    return
+  fi
+
+  local requested_threads=$((num_wg * num_threads))
+  if (( requested_threads <= GRID_SYNC_MAX_THREADS )); then
+    echo "$num_wg"
+    return
+  fi
+
+  local adjusted_wg=$((GRID_SYNC_MAX_THREADS / num_threads))
+  if (( adjusted_wg < 1 )); then
+    adjusted_wg=1
+  fi
+
+  echo "Adjust: $test_name workgroups $num_wg -> $adjusted_wg for ${GPU_ARCH:-unknown GPU} grid_barrier residency limit (${GRID_SYNC_MAX_THREADS} threads, -z $num_threads)" >&2
+  echo "$adjusted_wg"
+}
 
 # Router function - dispatches to appropriate implementation
 ExecTest() {
@@ -232,6 +288,8 @@ ExecTest_SLR() {
     DRIVER_RETURN_STATUS=1
     return
   fi
+
+  NUM_WG=$(AdjustGridBarrierProblemSize "$TEST_NAME" "$NUM_WG" "$NUM_THREADS")
 
   if [[ "" == "$ROCSHMEM_MAX_NUM_CONTEXTS" ]]
   then
@@ -362,6 +420,8 @@ ExecTest_MPI() {
     DRIVER_RETURN_STATUS=1
     return
   fi
+
+  NUM_WG=$(AdjustGridBarrierProblemSize "$TEST_NAME" "$NUM_WG" "$NUM_THREADS")
 
   if [[ "" == "$ROCSHMEM_MAX_NUM_CONTEXTS" ]]
   then

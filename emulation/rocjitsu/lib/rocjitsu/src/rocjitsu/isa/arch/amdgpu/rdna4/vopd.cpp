@@ -251,8 +251,10 @@ Vopd::Vopd(const MachineInst *inst)
   dsty_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   srcx0_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   srcy0_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  srcx1_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  srcy1_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  srcx1_.set_vgpr_msb_role(opx_ == kVopdFmamkF32 ? amdgpu::VgprMsbRole::Src2
+                                                 : amdgpu::VgprMsbRole::Src1);
+  srcy1_.set_vgpr_msb_role(opy_ == kVopdFmamkF32 ? amdgpu::VgprMsbRole::Src2
+                                                 : amdgpu::VgprMsbRole::Src1);
   srcx2_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   srcy2_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 

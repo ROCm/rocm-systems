@@ -1,45 +1,7 @@
-name: rocprofiler-systems Ubuntu 24.04 Sanitizers (GCC)
-run-name: ubuntu-noble-sanitizers
+name: rocprofiler-systems CI / Sanitizers
 
 on:
-  push:
-    branches:
-      - develop
-    paths:
-      - ".github/workflows/rocprofiler-systems-ubuntu-noble-sanitizers.yml"
-      - "projects/rocprofiler-systems/**"
-      - "!**/*.md"
-      - "!**/*.rtf"
-      - "!**/*.rst"
-      - "!**/.markdownlint-ci2.yaml"
-      - "!**/.readthedocs.yaml"
-      - "!**/.spellcheck.local.yaml"
-      - "!**/.wordlist.txt"
-      - "!projects/rocprofiler-systems/docs/**"
-      - "!projects/rocprofiler-systems/source/docs/**"
-      - "!projects/rocprofiler-systems/source/python/gui/**"
-      - "!projects/rocprofiler-systems/docker/**"
-      - "!projects/rocprofiler-systems/CMakePresets.json"
-  pull_request:
-    paths:
-      - ".github/workflows/rocprofiler-systems-ubuntu-noble-sanitizers.yml"
-      - "projects/rocprofiler-systems/**"
-      - "!**/*.md"
-      - "!**/*.rtf"
-      - "!**/*.rst"
-      - "!**/.markdownlint-ci2.yaml"
-      - "!**/.readthedocs.yaml"
-      - "!**/.spellcheck.local.yaml"
-      - "!**/.wordlist.txt"
-      - "!projects/rocprofiler-systems/docs/**"
-      - "!projects/rocprofiler-systems/source/docs/**"
-      - "!projects/rocprofiler-systems/source/python/gui/**"
-      - "!projects/rocprofiler-systems/docker/**"
-      - "!projects/rocprofiler-systems/CMakePresets.json"
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
 
 env:
   ROCPROFSYS_CI: ON
@@ -48,6 +10,7 @@ env:
 
 jobs:
   ubuntu-noble-sanitizers:
+    name: Sanitizer / ${{ matrix.sanitizer-type }}
     runs-on: ubuntu-latest
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-24.04
@@ -174,8 +137,8 @@ jobs:
           fi
           echo "TEST_REGEX=${TEST_REGEX}" >> $GITHUB_ENV
 
-      - name: Configure, Build and Test
-        timeout-minutes: 300
+      - name: Generate CI scripts
+        timeout-minutes: 5
         shell: bash
         working-directory: projects/rocprofiler-systems/
         env:
@@ -183,19 +146,17 @@ jobs:
           CMAKE_C_COMPILER_LAUNCHER: ccache
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: |
-          git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory ${PWD}
-          echo "CMake version: $(cmake --version | head -n 1)"
-          echo "Compiler version: $(${{ matrix.compiler }} --version | head -n 1)"
-          echo "Build type: RelWithDebInfo"
+          echo "CMake: $(cmake --version | head -n 1)"
+          echo "Compiler: $(${{ matrix.compiler }} --version | head -n 1)"
           echo "Sanitizer type: ${{ matrix.sanitizer-type }}"
           echo "Sanitizer CMake flags: ${SANITIZER_CMAKE_FLAGS}"
-          TAG="-${{ matrix.sanitizer-type }}-sanitizer"
-          python3 ./scripts/run-ci.py -B build \
-            --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}${TAG} \
+          python3 ./scripts/run-ci.py --stage generate \
+            --name "${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer" \
             --build-jobs $(nproc) \
-            --repeat-until-pass 1 \
             --site GitHub \
+            -B build \
             -- \
             -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g') \
             -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
@@ -219,10 +180,56 @@ jobs:
             -DROCPROFSYS_BUILD_LIBIBERTY=OFF \
             -DROCPROFSYS_MAX_THREADS=64 \
             -DROCPROFSYS_DISABLE_EXAMPLES="transpose;parallel-overhead;user-api;openmp;mpi;python;lulesh;rccl;causal;videodecode;jpegdecode;roctx;thread-limit;transferBench;hpc;shmem;scratch-memory;sdma_test" \
-            -DROCPROFSYS_BUILD_NUMBER=1 \
+            -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -- \
             -R "${TEST_REGEX}"
+
+      - name: Configure
+        timeout-minutes: 15
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        env:
+          GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          python3 ./scripts/run-ci.py --stage configure \
+            --name "${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer" \
+            -B build
+
+      - name: Build
+        timeout-minutes: 120
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          python3 ./scripts/run-ci.py --stage build \
+            --name "${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer" \
+            -B build
+
+      - name: CDash link
+        if: always()
+        shell: bash
+        run: |
+          NAME="${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer"
+          NAME=$(echo "${NAME}" | sed 's/\(.*\)-\([0-9]*\)\/merge/PR_\2_\1/')
+          URL="https://my.cdash.org/index.php?project=rocprofiler-systems&filtercount=1&showfilters=1&field1=buildname&compare1=65&value1=${NAME}"
+          printf '### CDash Results\n[View build on CDash](%s)\n' "${URL}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "::notice title=CDash Results::${URL}"
+
+      - name: Test
+        timeout-minutes: 180
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          python3 ./scripts/run-ci.py --stage test \
+            --name "${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer" \
+            --repeat-until-pass 1 \
+            --repeat-after-timeout 1 \
+            -B build
 
       - name: ccache stats
         if: always()
@@ -283,6 +290,29 @@ jobs:
           else
             echo "✓ No buffered storage files found in /tmp"
           fi
+
+      - name: Upload JUnit test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-sanitizer-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}
+          path: projects/rocprofiler-systems/build/test-results.xml
+          if-no-files-found: ignore
+
+      - name: Write sanitizer summary status
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p sanitizer-summary
+          printf '{"sanitizer":"%s","status":"%s"}\n' '${{ matrix.sanitizer-type }}' '${{ job.status }}' > sanitizer-summary/${{ matrix.sanitizer-type }}.json
+
+      - name: Upload sanitizer summary status
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sanitizer-summary-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}
+          path: sanitizer-summary/${{ matrix.sanitizer-type }}.json
+          if-no-files-found: error
 
       - name: Test Clean Up
         timeout-minutes: 10

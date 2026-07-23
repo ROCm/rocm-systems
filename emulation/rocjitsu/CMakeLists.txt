@@ -270,6 +270,7 @@ target_link_libraries(
         rocjitsu_analysis
         rocjitsu_code
         rocjitsu_isa
+        rocjitsu_isa_registry
         rocjitsu_isa_cdna1
         rocjitsu_isa_cdna2
         rocjitsu_isa_cdna3
@@ -348,6 +349,10 @@ install(
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    install(
+        TARGETS rocjitsu_gfx1250_b0_to_a0
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
     install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 

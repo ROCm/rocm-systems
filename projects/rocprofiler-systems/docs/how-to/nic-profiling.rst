@@ -172,11 +172,37 @@ On a host system that has AI network interface cards, ROCm Systems Profiler can 
 
 AI NIC support in ROCm Systems Profiler
 ---------------------------------------
-AI NIC interfaces support the Remote Direct Memory Access (RDMA) standard. RDMA enables one computer to access another computer’s memory directly, without operating-system involvement. This capability provides high-throughput, low‑latency data transfer, which is needed for large-scale clusters and high-performance networking. You can measure AI NIC network performance by using ``amd-smi``. By default, AI NIC support is enabled in ROCm Systems Profiler. However, you can disable it by setting:
+AI NIC interfaces support the Remote Direct Memory Access (RDMA) standard. RDMA
+enables one computer to access another computer’s memory directly, without
+operating-system involvement. This capability provides high-throughput, low‑latency
+data transfer, which is needed for large-scale clusters and high-performance
+networking. You can measure AI NIC network performance by using ``amd-smi``.
+By default, AI NIC support is enabled in ROCm Systems Profiler. However, you
+can disable it by setting:
 
 .. code-block:: shell
 
    -D ROCPROFSYS_USE_AINIC=OFF
+
+Verifying AI NIC compile-time support
+---------------------------------------
+
+AI NIC metric collection requires ``ROCPROFSYS_BUILD_AINIC=ON`` at build time.
+This flag is set automatically when the AMD SMI library version is 26.3 or
+later and ``ROCPROFSYS_USE_AINIC=ON`` (the default).
+
+The AI NIC settings (such as ``ROCPROFSYS_USE_AINIC``) are only available when
+the ROCm Systems Profiler is compiled with ``ROCPROFSYS_BUILD_AINIC=ON``. Their
+presence in the output of ``rocprof-sys-avail --settings`` is therefore a direct
+indicator of whether AI NIC support was compiled in. This check requires no AI NIC
+hardware.
+
+.. code-block:: shell
+
+   rocprof-sys-avail --settings | grep ROCPROFSYS_USE_AINIC
+
+If ``ROCPROFSYS_USE_AINIC`` is listed, AI NIC support is compiled in. If the
+command produces no output, the binaries were built without AI NIC support.
 
 List available AI NICs
 ------------------------
@@ -222,8 +248,9 @@ the AI NIC.
 Sampling the AI NICs
 -----------------------
 
-After the AI NIC support is enabled, specify the names of the AI NICs for which you want
-to track the values. For example, if the host has an AI NIC named ``enp229s0`` there are multiple options to track its performance:
+After the AI NIC support is enabled, specify the names of the AI NICs for which
+you want to track the values. For example, if the host has an AI NIC named ``enp229s0``
+there are multiple options to track its performance:
 
 * **Option 1:** Set ``ROCPROFSYS_SAMPLING_AINICS`` in the configuration file.
 

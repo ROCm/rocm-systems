@@ -121,6 +121,12 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   if (!d.is_load)
     return MemoryAccessCompletion::Complete;
 
+  // D16 memory completion merges a loaded half into the destination dword. The
+  // preserved half is storage state, not an instruction-visible source operand.
+  auto read_dst_lane_storage_for_d16_merge = [&](uint32_t reg, uint32_t lane) {
+    return reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(reg))[lane];
+  };
+
   // Buffer load with LDS bit: scatter loaded data into LDS instead of VGPRs.
   // Each lane writes num_elems * elem_size bytes to LDS at lds_base + lane_offset.
   if (d.lds_dst)
@@ -156,7 +162,7 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       for (uint32_t i = 0; i < vgpr_count; ++i) {
         uint32_t val = 0;
         if (!cu.sram_ecc() && d.elem_size <= 2 && (d.d16_hi || d.d16_lo)) {
-          const uint32_t old = cu.read_vgpr(d.dst_reg_base + i, lane);
+          const uint32_t old = read_dst_lane_storage_for_d16_merge(d.dst_reg_base + i, lane);
           val = d.d16_hi ? (old & 0x0000FFFFu) : (old & 0xFFFF0000u);
         }
         cu.write_vgpr(d.dst_reg_base + i, lane, val);
@@ -185,7 +191,7 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
           else
             val = val & 0xFFFF;
         } else {
-          uint32_t old = cu.read_vgpr(d.dst_reg_base + i, lane);
+          uint32_t old = read_dst_lane_storage_for_d16_merge(d.dst_reg_base + i, lane);
           if (d.d16_hi)
             val = (old & 0xFFFF) | (val << 16);
           else

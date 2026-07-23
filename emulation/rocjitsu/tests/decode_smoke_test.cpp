@@ -24,6 +24,7 @@
 
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/vopd.h"
@@ -34,6 +35,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/except.h"
 
@@ -131,6 +133,155 @@ INSTANTIATE_TEST_SUITE_P(
       return name;
     });
 
+TEST(FieldlessOperandDecodeTest, SaveexecExposesInertExecAndSccOperands) {
+  const uint32_t words[] = {
+      0xBE802000u, // s_and_saveexec_b64 s[0:1], s[0:1]
+      0x00000000u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_and_saveexec_b64");
+  ASSERT_EQ(inst->num_dst_operands(), 3);
+  ASSERT_EQ(inst->num_src_operands(), 2);
+
+  const Operand *sdst = inst->dst_operand(0);
+  ASSERT_NE(sdst, nullptr);
+  EXPECT_FALSE(sdst->is_fieldless());
+  EXPECT_TRUE(sdst->to_register_ref().has_value());
+
+  auto expect_inert_fieldless_operand = [](const Operand *op, int size_bits, int encoding_value) {
+    ASSERT_NE(op, nullptr);
+    EXPECT_TRUE(op->is_fieldless());
+    EXPECT_EQ(op->size_bits(), size_bits);
+    EXPECT_EQ(op->encoding_value(), encoding_value);
+    EXPECT_FALSE(op->to_register_ref().has_value());
+    // Inertness must span the register/SIMD classification surface too, not
+    // just def-use (to_register_ref): a fieldless operand must not inherit
+    // VGPR/SIMD behavior from its operand type by accident. The capability
+    // flags applied at construction (apply_fieldless_caps) drive this.
+    EXPECT_FALSE(op->is_vgpr());
+    EXPECT_FALSE(op->simd_capable());
+    EXPECT_FALSE(op->reads_value());
+    EXPECT_FALSE(op->is_writable());
+  };
+
+  expect_inert_fieldless_operand(inst->dst_operand(1), 64, 126); // EXEC write.
+  expect_inert_fieldless_operand(inst->dst_operand(2), 1, 253);  // SCC write.
+  expect_inert_fieldless_operand(inst->src_operand(1), 64, 126); // EXEC read.
+
+  EXPECT_EQ(inst->disassemble(), "s_and_saveexec_b64 s[0:1], s[0:1]");
+}
+
+// A fieldless operand must not retain register/SIMD behavior from its operand
+// type by accident. Placeholder/metadata operands (the image `vaddr`, generated
+// as OPR_VGPR with canonical value 0) must be inert across every register/SIMD
+// API -- is_vgpr()/simd_capable()/to_register_ref(), the read/write accessors,
+// and the SIMD chunk paths -- while value-bearing fieldless operands stay live.
+TEST(FieldlessOperandDecodeTest, PlaceholderVaddrInertButSimm32StaysValueBearing) {
+  // Control: a real (field-bearing) VGPR classifies and reads as a register,
+  // and is a normal readable/writable operand.
+  rdna4::Operand v0(128, rdna4::OperandType::OPR_VGPR, 0);
+  EXPECT_TRUE(v0.is_vgpr());
+  EXPECT_TRUE(v0.simd_capable());
+  EXPECT_TRUE(v0.to_register_ref().has_value());
+  EXPECT_TRUE(v0.reads_value());
+  EXPECT_TRUE(v0.is_writable());
+
+  // Placeholder: the fieldless image address must be inert everywhere -- it is
+  // not a decoded v0, and gfx12 NSA addressing a single Operand can't express.
+  // The inert capability triple is what the generator emits for it.
+  rdna4::Operand vaddr(128, rdna4::OperandType::OPR_VGPR, 0);
+  vaddr.apply_fieldless_caps(/*reads_value=*/false, /*writable=*/false, /*is_vgpr=*/false);
+  EXPECT_TRUE(vaddr.is_fieldless());
+  EXPECT_FALSE(vaddr.is_vgpr());
+  EXPECT_FALSE(vaddr.simd_capable());
+  EXPECT_FALSE(vaddr.to_register_ref().has_value());
+  EXPECT_FALSE(vaddr.reads_value());
+  EXPECT_FALSE(vaddr.is_writable());
+
+  // Value-bearing literal: a fieldless inline literal is suppressed from
+  // disasm/def-use (to_register_ref) and is not a write target, but it still
+  // carries a value, so it stays readable and SIMD-capable (immediate
+  // broadcast). Note, this is what keeps FMA-K / S_SETREG_IMM32_B32 literals
+  // live.
+  rdna4::Operand simm(32, rdna4::OperandType::OPR_SIMM32, 0x1234);
+  simm.apply_fieldless_caps(/*reads_value=*/true, /*writable=*/false, /*is_vgpr=*/false);
+  EXPECT_TRUE(simm.is_fieldless());
+  EXPECT_FALSE(simm.is_vgpr());
+  EXPECT_TRUE(simm.simd_capable());
+  EXPECT_FALSE(simm.to_register_ref().has_value());
+  EXPECT_TRUE(simm.reads_value());
+  EXPECT_FALSE(simm.is_writable());
+
+  // The same inertness must hold across the read/write and SIMD chunk paths:
+  // a fieldless placeholder must not read or clobber a real register, while a
+  // value-bearing fieldless literal must still read its value.
+  amdgpu::GpuMemory gpu_mem("fieldless_io_mem");
+  amdgpu::L2Cache l2("fieldless_io_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("fieldless_io", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0xFFFFFFFFULL);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t kSeed = 0xC0FFEE00u;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    cu->write_vgpr(vb + 0, lane, kSeed);
+
+  // Fieldless placeholder at encoding 0 (would resolve to v0 if not inert).
+  rdna4::Operand vaddr32(32, rdna4::OperandType::OPR_VGPR, 0);
+  vaddr32.apply_fieldless_caps(/*reads_value=*/false, /*writable=*/false, /*is_vgpr=*/false);
+
+  // Value access now goes through the observed RegisterAccess facade (#8417);
+  // the operand's own read/write hooks are private backend API.
+  // Guarded reads return 0 (read_chunk fills 0, not a broadcast).
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_scalar(vaddr32), 0u);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(vaddr32, 0), 0u);
+  std::array<uint32_t, 4> chunk{0x11u, 0x22u, 0x33u, 0x44u};
+  amdgpu::RegisterAccess(*wf).read_chunk(vaddr32, 0, static_cast<uint32_t>(chunk.size()),
+                                         chunk.data());
+  for (uint32_t v : chunk)
+    EXPECT_EQ(v, 0u);
+
+  // Writes / chunk-writes leave the seeded register untouched.
+  amdgpu::RegisterAccess(*wf).write_scalar(vaddr32, 0xBADBAD00u);
+  amdgpu::RegisterAccess(*wf).write_lane(vaddr32, 0, 0xBADBAD01u);
+  const std::array<uint32_t, 4> wvals{1u, 2u, 3u, 4u};
+  amdgpu::RegisterAccess(*wf).write_chunk(vaddr32, 0, static_cast<uint32_t>(wvals.size()),
+                                          wvals.data(), 0xFull);
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    EXPECT_EQ(cu->read_vgpr(vb + 0, lane), kSeed) << "lane " << lane;
+
+  // Control: an identical but field-bearing v0 DOES write, proving the guard
+  // (not the fixture) is what makes the placeholder inert.
+  rdna4::Operand real_v0(32, rdna4::OperandType::OPR_VGPR, 0);
+  amdgpu::RegisterAccess(*wf).write_lane(real_v0, 0, 0x1234u);
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x1234u);
+
+  // Value-bearing fieldless literal still reads its carried value.
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_scalar(simm), 0x1234u);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(simm, 0), 0x1234u);
+  // ...and its SIMD chunk path broadcasts the literal to every lane (the mirror
+  // of the placeholder's zero-fill check above): a value-bearing fieldless
+  // operand must stay live across the chunk path, not just read_scalar.
+  std::array<uint32_t, 4> simm_chunk{0u, 0u, 0u, 0u};
+  amdgpu::RegisterAccess(*wf).read_chunk(simm, 0, static_cast<uint32_t>(simm_chunk.size()),
+                                         simm_chunk.data());
+  for (uint32_t v : simm_chunk)
+    EXPECT_EQ(v, 0x1234u);
+}
+
 TEST(Rdna4WaitcntDecodeSmokeTest, FormatsCompatWaitcntWithGfx11Layout) {
   constexpr uint32_t s_waitcnt_vmcnt1 = make_sopp(/*op=*/9, /*simm16=*/1u << 10);
 
@@ -213,6 +364,42 @@ TEST(Rdna3Vop3LiteralDecodeTest, TrigPreopF64ClassifiesMixedWidthLiteralsPerOper
   EXPECT_EQ(src1->size_bits(), 32);
   EXPECT_FALSE(src1->literal64_value().has_value());
   EXPECT_EQ(static_cast<uint32_t>(src1->encoding_value()), literal);
+}
+
+TEST(Rdna3DecodeTest, GlobalFlatAllOnesSaddrIsNull) {
+  rdna3::FlatMachineInst encoding{};
+  // Flat's primary decode ID includes three lower opcode/padding bits;
+  // the machine encoding field holds the upper six bits.
+  encoding.encoding = rdna3::encoding::kFlat >> 3;
+  encoding.op = rdna3::kFlatLoadB64Flat;
+  encoding.seg = 2;
+  encoding.addr = 1;
+  encoding.saddr = 0x7F;
+  encoding.vdst = 2;
+  const auto words = std::bit_cast<std::array<uint32_t, 2>>(encoding);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "global_load_b64");
+  // vaddr + the fieldless OPR_GPUMEM memory operand (saddr is null, so it
+  // is not added); gpumem is counted but currently carries no register.
+  EXPECT_EQ(inst->num_src_operands(), 2);
+  {
+    int fieldless_srcs = 0;
+    for (int i = 0; i < inst->num_src_operands(); ++i)
+      if (inst->src_operand(i)->is_fieldless()) {
+        ++fieldless_srcs;
+        EXPECT_FALSE(inst->src_operand(i)->to_register_ref());
+      }
+    EXPECT_EQ(fieldless_srcs, 1);
+  }
+
+  InstDefUse def_use(*inst);
+  EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 1, 2}));
+  EXPECT_FALSE(def_use.uses.contains({RegClass::SGPR, 0x7F, 1}));
+  EXPECT_FALSE(def_use.uses.contains({RegClass::SGPR, 0x7F, 2}));
 }
 
 struct VopdDecodeCase {
@@ -708,7 +895,7 @@ void expect_sleep_yields_before_quantum_expires(rj_code_arch_t arch, uint32_t sl
   auto *wf = cu->dispatch_wf(0, kCodeAddress, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
 
-  EXPECT_TRUE(cu->advance());
+  EXPECT_TRUE(cu->execute_quantum());
   EXPECT_EQ(wf->pc, kCodeAddress + sizeof(uint32_t));
 }
 
@@ -892,6 +1079,259 @@ TEST(Cdna2DecodeTest, MemoryAccBitSelectsAccumulatorDestination) {
     EXPECT_EQ(*accvgpr_dst, (RegisterRef{RegClass::ACC_VGPR, 5, tc.width}))
         << accvgpr_inst->disassemble();
   }
+}
+
+TEST(Gfx1250DecodeTest, FmamkF64ConsumesThreeDwords) {
+  const uint32_t words[] = {
+      0x46040504u, // v_fmamk_f64 v[2:3], v[4:5], 0xc1f0000000000000, v[2:3]
+      0x00000000u,
+      0xC1F00000u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_fmamk_f64_e32");
+  EXPECT_EQ(inst->size(), sizeof(words));
+
+  const std::string disasm = inst->disassemble();
+  EXPECT_NE(disasm.find("0xc1f0000000000000"), std::string::npos) << disasm;
+}
+
+TEST(Gfx1250DecodeTest, FmaakF64ConsumesThreeDwords) {
+  const uint32_t words[] = {
+      0x48040504u, // v_fmaak_f64 v[2:3], v[4:5], v[2:3], 0xc1f0000000000000
+      0x00000000u,
+      0xC1F00000u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_fmaak_f64_e32");
+  EXPECT_EQ(inst->size(), sizeof(words));
+  EXPECT_EQ(inst->disassemble(), "v_fmaak_f64_e32 v[2:3], v[4:5], v[2:3], 0xc1f0000000000000");
+}
+
+TEST(Gfx1250DecodeTest, Vop3True16DestinationUsesFullEightBitVgprIndex) {
+  const uint32_t words[] = {
+      0xD7620086u,
+      0x02030CFFu,
+      0x000000FFu,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_and_b16");
+  EXPECT_EQ(inst->size(), sizeof(words));
+  EXPECT_EQ(inst->disassemble(), "v_and_b16 v134, 0xff, v134");
+}
+
+TEST(Gfx1250DecodeTest, FlatVaddrWidthFollowsSaddrMode) {
+  // LLVM disassembles these words as flat_load_b64 v[2:3], v1, s[6:7].
+  const uint32_t saddr_words[] = {
+      0xEC054006u,
+      0x00000002u,
+      0x00000001u,
+  };
+  // The same instruction with SADDR disabled uses a 64-bit vector address.
+  const uint32_t vector_only_words[] = {
+      0xEC05407Cu,
+      0x00000002u,
+      0x00000001u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  std::unique_ptr<Instruction> saddr_inst(decoder->decode(saddr_words));
+  ASSERT_NE(saddr_inst, nullptr);
+  EXPECT_EQ(saddr_inst->mnemonic(), "flat_load_b64");
+  EXPECT_EQ(saddr_inst->disassemble(), "flat_load_b64 v[2:3], v1, s[6:7]");
+  // vaddr + saddr + fieldless OPR_GPUMEM memory operand (counted but currently
+  // to_register_ref() == nullopt).
+  EXPECT_EQ(saddr_inst->num_src_operands(), 3);
+  {
+    int fieldless_srcs = 0;
+    for (int i = 0; i < saddr_inst->num_src_operands(); ++i)
+      if (saddr_inst->src_operand(i)->is_fieldless()) {
+        ++fieldless_srcs;
+        EXPECT_FALSE(saddr_inst->src_operand(i)->to_register_ref());
+      }
+    EXPECT_EQ(fieldless_srcs, 1);
+  }
+  InstDefUse saddr_def_use(*saddr_inst);
+  EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::VGPR, 1, 1}));
+  EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 1, 2}));
+  EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::SGPR, 6, 2}));
+
+  std::unique_ptr<Instruction> vector_only_inst(decoder->decode(vector_only_words));
+  ASSERT_NE(vector_only_inst, nullptr);
+  EXPECT_EQ(vector_only_inst->mnemonic(), "flat_load_b64");
+  EXPECT_EQ(vector_only_inst->num_src_operands(), 2); // vaddr + gpumem
+  InstDefUse vector_only_def_use(*vector_only_inst);
+  EXPECT_TRUE(vector_only_def_use.uses.contains({RegClass::VGPR, 1, 2}));
+  EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 1}));
+  EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 2}));
+}
+
+TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
+  // LLVM disassembles these words as global_load_b64 v[2:3], v10, s[6:7].
+  const uint32_t saddr_words[] = {
+      0xEE054006u,
+      0x00000002u,
+      0x0000000Au,
+  };
+  // The same instruction with SADDR disabled uses a 64-bit vector address.
+  const uint32_t vector_only_words[] = {
+      0xEE05407Cu,
+      0x00000002u,
+      0x0000000Au,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  std::unique_ptr<Instruction> saddr_inst(decoder->decode(saddr_words));
+  ASSERT_NE(saddr_inst, nullptr);
+  EXPECT_EQ(saddr_inst->mnemonic(), "global_load_b64");
+  EXPECT_EQ(saddr_inst->disassemble(), "global_load_b64 v[2:3], v10, s[6:7]");
+  // vaddr + saddr + fieldless OPR_GPUMEM memory operand (counted but currently
+  // to_register_ref() == nullopt).
+  EXPECT_EQ(saddr_inst->num_src_operands(), 3);
+  {
+    int fieldless_srcs = 0;
+    for (int i = 0; i < saddr_inst->num_src_operands(); ++i)
+      if (saddr_inst->src_operand(i)->is_fieldless()) {
+        ++fieldless_srcs;
+        EXPECT_FALSE(saddr_inst->src_operand(i)->to_register_ref());
+      }
+    EXPECT_EQ(fieldless_srcs, 1);
+  }
+  InstDefUse saddr_def_use(*saddr_inst);
+  EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::VGPR, 10, 1}));
+  EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 10, 2}));
+  EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::SGPR, 6, 2}));
+
+  std::unique_ptr<Instruction> vector_only_inst(decoder->decode(vector_only_words));
+  ASSERT_NE(vector_only_inst, nullptr);
+  EXPECT_EQ(vector_only_inst->mnemonic(), "global_load_b64");
+  EXPECT_EQ(vector_only_inst->num_src_operands(), 2); // vaddr + gpumem
+  InstDefUse vector_only_def_use(*vector_only_inst);
+  EXPECT_TRUE(vector_only_def_use.uses.contains({RegClass::VGPR, 10, 2}));
+  EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 1}));
+  EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 2}));
+}
+
+TEST(Gfx1250DecodeTest, GlobalStoreUsesScalarOffsetVaddrWidth) {
+  // LLVM disassembles these words as global_store_b64 v10, v[2:3], s[6:7].
+  const uint32_t words[] = {
+      0xEE06C006u,
+      0x01000000u,
+      0x0000000Au,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "global_store_b64");
+  EXPECT_EQ(inst->disassemble(), "global_store_b64 v10, v[2:3], s[6:7]");
+  InstDefUse def_use(*inst);
+  EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 10, 1}));
+  EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, 10, 2}));
+}
+
+TEST(Gfx1250DecodeTest, Vop3CompareWritesSingleScalarMaskRegister) {
+  const uint32_t words[] = {
+      0xD44C0002u, // v_cmp_gt_u32 s2, s5, v12
+      0x02021805u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_cmp_gt_u32");
+  EXPECT_EQ(inst->size(), sizeof(words));
+
+  const std::string disasm = inst->disassemble();
+  EXPECT_NE(disasm.find("s2"), std::string::npos) << disasm;
+  EXPECT_EQ(disasm.find("s[2:3]"), std::string::npos) << disasm;
+
+  InstDefUse def_use(*inst);
+  EXPECT_TRUE(def_use.defs.contains({RegClass::SGPR, 2, 1}));
+  EXPECT_FALSE(def_use.defs.contains({RegClass::SGPR, 3, 1}));
+}
+
+TEST(Cdna4DecodeTest, MfmaF8f6f4DecodesStandaloneVop3pSuffix) {
+  const uint32_t words[] = {
+      0xD3AD0024u,
+      0x0492F572u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
+  EXPECT_EQ(inst->size(), sizeof(words));
+
+  InstDefUse def_use(*inst);
+  EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 36, 4}));
+}
+
+TEST(Cdna4DecodeTest, MfmaF8f6f4SourceWidthsFollowFormatSelectors) {
+  struct FormatCase {
+    uint32_t format;
+    uint8_t register_count;
+  };
+  constexpr std::array cases = {
+      FormatCase{0, 8}, // FP8
+      FormatCase{2, 6}, // FP6
+      FormatCase{4, 4}, // FP4
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  for (const auto &[format, register_count] : cases) {
+    const uint32_t words[] = {
+        0xD3AD0024u | (format << 8),
+        0x00024100u | (format << 29),
+    };
+    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
+
+    InstDefUse def_use(*inst);
+    EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 0, register_count}));
+    EXPECT_FALSE(
+        def_use.uses.contains({RegClass::VGPR, 0, static_cast<uint8_t>(register_count + 1)}));
+    EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 32, register_count}));
+    EXPECT_FALSE(
+        def_use.uses.contains({RegClass::VGPR, 32, static_cast<uint8_t>(register_count + 1)}));
+  }
+}
+
+TEST(Cdna4DecodeTest, MfmaScaleF8f6f4ConsumesVop3px2Prefix) {
+  const uint32_t words[] = {
+      0xD3AC0000u,
+      0x00000000u,
+      0xD3AD0000u,
+      0x04020100u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
+  EXPECT_EQ(inst->size(), sizeof(words));
 }
 
 } // namespace

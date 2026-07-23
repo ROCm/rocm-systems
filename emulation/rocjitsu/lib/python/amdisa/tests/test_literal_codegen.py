@@ -5,9 +5,17 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from amdisa.codegen._generator import CodeGenerator
+from amdisa.codegen.execute.simd_codegen import (
+    SIMD_VOP2_TERNARY,
+    simd_ternary_literal_operand_name,
+)
+from amdisa.cross_isa import SharedInstInfo, SharedInstructionPlan
 from amdisa.gpuisa import InstEncoding, Instruction, Operand
-from amdisa.isa_profile import Rdna4Profile
+from amdisa.isa_profile import Gfx1250Profile, Rdna4Profile
+from amdisa.parser import Parser, _uniquify_fieldless_names
 from amdisa.semantics import InstructionSemantics
 
 
@@ -48,6 +56,7 @@ def _operand(
     is_output: bool = False,
     order: int = 0,
     data_format_name: str = '',
+    fieldless: bool = False,
 ) -> Operand:
     return Operand(
         name,
@@ -59,6 +68,7 @@ def _operand(
         is_binary_ucode_required=False,
         order=order,
         data_format_name=data_format_name,
+        fieldless=fieldless,
     )
 
 
@@ -76,6 +86,47 @@ def test_implied_literal_uses_parent_encoding_literal_struct():
     )
 
     assert info == ('Sop2InstLiteralMachineInst', ('ssrc0', 'ssrc1'))
+
+
+def test_implied_literal64_uses_its_three_dword_machine_inst():
+    inst = Instruction(
+        'V_FMAMK_F64',
+        'VOP2_INST_LITERAL64',
+        opcode=35,
+        operands=[],
+        is_implied_literal_enc=True,
+    )
+
+    info = CodeGenerator._literal_encoding_info(
+        _enc('ENC_VOP2'), _enc('VOP2_INST_LITERAL64'), inst
+    )
+
+    assert info == ('Vop2InstLiteral64MachineInst', ('src0',))
+
+
+def test_implied_literal_extension_preserves_literal64_width():
+    parent = _enc('ENC_VOP2')
+    literal64 = _enc('VOP2_INST_LITERAL64')
+    literal64.bit_cnt = 96
+
+    words = Parser.implied_literal_extension_words(literal64, parent)
+    parent.implied_literal_ops['35'] = words
+
+    assert words == 2
+    assert parent.has_implied_literal_ops
+    assert parent.has_variable_implied_literal_size
+
+
+def test_implied_literal_extension_keeps_literal32_as_one_word():
+    parent = _enc('ENC_VOP2')
+    literal32 = _enc('VOP2_INST_LITERAL')
+    literal32.bit_cnt = 64
+
+    words = Parser.implied_literal_extension_words(literal32, parent)
+    parent.implied_literal_ops['44'] = words
+
+    assert words == 1
+    assert not parent.has_variable_implied_literal_size
 
 
 def test_literal_fixups_require_generated_machine_inst_struct():
@@ -212,6 +263,18 @@ def test_simm16_literal_operand_uses_low_half_of_extension_word():
     ) == stmt
 
 
+def test_simm64_literal_operand_reads_both_unaligned_extension_words():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _literal_operand(64, 'OPR_SIMM64'), 'Vop2InstLiteral64MachineInst'
+    )
+
+    assert (
+        'literal = Operand(64, OperandType::OPR_SIMM64, '
+        '(static_cast<uint64_t>(reinterpret_cast<const uint32_t *>(inst)[2]) << 32) | '
+        'reinterpret_cast<const uint32_t *>(inst)[1], true);'
+    ) == stmt
+
+
 def test_declared_16bit_simm32_literal_uses_low_half_of_extension_word():
     stmt = CodeGenerator._literal_operand_fixup_stmt(
         _literal_operand(16, 'OPR_SIMM32'), 'Vop2InstLiteralMachineInst'
@@ -265,6 +328,16 @@ def test_dynamic_true16_display_uses_each_sources_opsel_bit():
     assert '((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u' in stmt
 
 
+def test_fieldless_sopk_simm32_can_be_initialized_from_literal_member():
+    op = _operand('simm32', 'OPR_SIMM32', order=1, fieldless=True)
+
+    stmt = CodeGenerator._literal_operand_from_expr_stmt(op, 'literal_')
+
+    assert (
+        'simm32 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(literal_));'
+    ) == stmt
+
+
 def test_existing_literal_operand_does_not_need_simm32_fallback_member():
     inst = Instruction(
         'V_FMAAK_F32',
@@ -277,35 +350,18 @@ def test_existing_literal_operand_does_not_need_simm32_fallback_member():
     assert CodeGenerator._has_inline_literal_operand(inst)
 
 
-def test_scalar_literal_fma_synthesizes_third_source_operand():
-    inst = Instruction(
-        'S_FMAAK_F32',
-        'SOP2_INST_LITERAL',
-        opcode=69,
-        operands=[],
-        is_implied_literal_enc=True,
-    )
-
-    fixed = CodeGenerator._with_scalar_literal_fma_operand(inst)
-
-    assert fixed is not inst
-    assert fixed.operands[-1].name == 'src2'
-    assert fixed.operands[-1].operand_type == 'OPR_SIMM32'
-    assert fixed.operands[-1].is_input
-
-
-def test_scalar_fmamk_semantic_sources_use_synthesized_literal_as_multiplier():
+def test_scalar_fmamk_semantic_sources_use_fieldless_simm32_as_multiplier():
     operands = [
         _operand('sdst', 'OPR_SDST', is_input=False, is_output=True, order=0),
         _operand('ssrc0', 'OPR_SSRC', order=1),
         _operand('ssrc1', 'OPR_SSRC', order=2),
-        _operand('src2', 'OPR_SIMM32', order=3),
+        _operand('simm32', 'OPR_SIMM32', order=3, fieldless=True),
     ]
     inst = Instruction('S_FMAMK_F32', 'ENC_SOP2', opcode=70, operands=operands)
 
     ordered = CodeGenerator._semantic_source_operands(inst, operands[1:])
 
-    assert [op.name for op in ordered] == ['ssrc0', 'src2', 'ssrc1']
+    assert [op.name for op in ordered] == ['ssrc0', 'simm32', 'ssrc1']
 
 
 def test_scalar_fmamk_semantic_sources_keep_explicit_literal_as_multiplier():
@@ -334,7 +390,7 @@ def test_scalar_fmamk_generated_execute_uses_literal_multiplier():
         _operand('sdst', 'OPR_SDST', is_input=False, is_output=True, order=0),
         _operand('ssrc0', 'OPR_SSRC', order=1),
         _operand('ssrc1', 'OPR_SSRC', order=2),
-        _operand('src2', 'OPR_SIMM32', order=3),
+        _operand('simm32', 'OPR_SIMM32', order=3, fieldless=True),
     ]
     inst = Instruction('S_FMAMK_F32', 'ENC_SOP2', opcode=70, operands=operands)
     sem = InstructionSemantics(
@@ -348,11 +404,61 @@ def test_scalar_fmamk_generated_execute_uses_literal_multiplier():
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
 
     assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))' in body
-    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(src2))' in body
+    assert (
+        'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(simm32))' in body
+    )
     assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))' in body
-    assert body.index('amdgpu::RegisterAccess(wf).read_scalar(src2)') < body.index(
+    assert body.index('amdgpu::RegisterAccess(wf).read_scalar(simm32)') < body.index(
         'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)'
     )
+
+
+def test_vector_fmaak_execute_uses_fieldless_simm32_operand():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        profile=Rdna4Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    operands = [
+        _operand('vdst', 'OPR_VGPR', is_input=False, is_output=True, order=0),
+        _operand('src0', 'OPR_SRC', order=1),
+        _operand('vsrc1', 'OPR_VGPR', order=2),
+        _operand('simm32', 'OPR_SIMM32', order=3, fieldless=True),
+    ]
+    inst = Instruction('V_FMAAK_F32', 'ENC_VOP2', opcode=70, operands=operands)
+    sem = InstructionSemantics(
+        'V_FMAAK_F32',
+        'vector_fmaak',
+        data_type='f32',
+    )
+
+    body = codegen._gen_execute_body(inst, sem, 'ENC_VOP2')
+
+    assert 'std::bit_cast<float>(simm32.encoding_value_)' in body
+    assert 'simm32_' not in body
+
+
+def test_scalar_setreg_imm_execute_reads_fieldless_simm32_source():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        profile=Rdna4Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    operands = [
+        _operand('simm16', 'OPR_HWREG', is_input=False, is_output=False, order=0),
+        _operand('simm32', 'OPR_SIMM32', order=1, fieldless=True),
+    ]
+    inst = Instruction('S_SETREG_IMM32_B32', 'ENC_SOPK', opcode=20, operands=operands)
+    sem = InstructionSemantics('S_SETREG_IMM32_B32', 'scalar_setreg_imm')
+
+    body = codegen._gen_execute_body(inst, sem, 'ENC_SOPK')
+
+    assert 'uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(simm32);' in body
+    assert 'uint32_t src = literal_;' not in body
 
 
 def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
@@ -393,6 +499,121 @@ def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
     assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)' not in body
 
 
-def test_literal_fma_mnemonics_are_not_shared_across_isa_layouts():
-    assert 's_fmaak_f32' in CodeGenerator._NON_SHAREABLE_MNEMONICS
-    assert 's_fmamk_f32' in CodeGenerator._NON_SHAREABLE_MNEMONICS
+def test_literal_fma_can_share_with_matching_operand_layouts_only():
+    plan = SharedInstructionPlan()
+    plan.family_shared['rdna'] = {}
+    plan.family_shared['rdna'][('s_fmaak_f32', 'ENC_SOP2')] = SharedInstInfo(
+        mnemonic='s_fmaak_f32',
+        encoding_name='ENC_SOP2',
+        field_layout=(),
+        semantic_class='scalar_binop',
+        operation='fma',
+        data_type='f32',
+        isa_names=['rdna3_5', 'rdna4'],
+    )
+
+    rdna_codegen = object.__new__(CodeGenerator)
+    rdna_codegen.isa_spec = SimpleNamespace(arch_name='rdna4', profile=Rdna4Profile())
+    rdna_codegen.shared_plan = plan
+    rdna_codegen.config = SimpleNamespace(unshared_execute_keys=frozenset())
+
+    gfx_codegen = object.__new__(CodeGenerator)
+    gfx_codegen.isa_spec = SimpleNamespace(
+        arch_name='gfx1250', profile=Gfx1250Profile()
+    )
+    gfx_codegen.shared_plan = plan
+    gfx_codegen.config = SimpleNamespace(unshared_execute_keys=frozenset())
+
+    assert rdna_codegen._can_share_execute('s_fmaak_f32', enc_name='ENC_SOP2')
+    assert not gfx_codegen._can_share_execute('s_fmaak_f32', enc_name='ENC_SOP2')
+    # Only ENC_SOP2 is shared, so querying ENC_SOP1 must NOT match
+    assert not rdna_codegen._can_share_execute('s_fmaak_f32', enc_name='ENC_SOP1')
+
+
+# ---------------------------------------------------------------------------
+# The shared SIMD ternary table hard-codes the inline-literal operand name
+# (`inst.simm32.encoding_value_`). simd_ternary_literal_operand_name() exposes
+# that assumption so the generator can assert it per ISA reaching the shared
+# path (see the tripwire in _generator.py). These pin the helper's contract.
+# ---------------------------------------------------------------------------
+def test_simd_ternary_literal_operand_name_for_inline_literal_forms():
+    # Every inline-literal FMA entry reads its literal from `simm32`.
+    assert simd_ternary_literal_operand_name('v_fmaak_f32_vop2') == 'simm32'
+    assert simd_ternary_literal_operand_name('v_fmamk_f32_vop2') == 'simm32'
+    assert simd_ternary_literal_operand_name('v_fmaak_f16_vop2') == 'simm32'
+
+
+def test_simd_ternary_literal_operand_name_none_for_accumulate_and_unknown():
+    # Dst-accumulate forms carry no inline literal (k == "0u").
+    assert simd_ternary_literal_operand_name('v_fmac_f32_vop2') is None
+    assert simd_ternary_literal_operand_name('v_mac_f32_vop2') is None
+    # Non-ternary / unknown templates return None.
+    assert simd_ternary_literal_operand_name('v_add_f32_vop2') is None
+    assert simd_ternary_literal_operand_name('not_a_template') is None
+
+
+def test_simd_ternary_literal_name_covers_every_inline_literal_entry():
+    # Any inline-literal entry (k_expr other than "0u") must resolve to a real
+    # operand name, so the generator tripwire fires for all of them, not a
+    # hand-picked subset. Guards against a new entry using an unparseable k_expr.
+    for template_name, (_cpp_t, k_expr, _op) in SIMD_VOP2_TERNARY.items():
+        resolved = simd_ternary_literal_operand_name(template_name)
+        if k_expr == '0u':
+            assert resolved is None, template_name
+        else:
+            assert resolved == 'simm32', (template_name, k_expr, resolved)
+
+
+# ---------------------------------------------------------------------------
+# The inline-literal VOP2 FMA execute bodies (vector_fmamk / vector_fmaak) read
+# K from the literal source operand. If that operand is missing, codegen raises
+# rather than emit an out-of-range src_ops[] index. These classes are not in
+# _SEMA_CLASSES and not in the DISPATCH registry, so _gen_execute_body falls
+# through to the legacy branch where the len(src_ops) < 3 guard lives.
+# ---------------------------------------------------------------------------
+def _fma_codegen() -> CodeGenerator:
+    cg = object.__new__(CodeGenerator)
+    cg.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        profile=Rdna4Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    return cg
+
+
+def _fma_inst(*, with_simm32: bool) -> Instruction:
+    ops = [
+        Operand('vdst', 32, 'OPR_VGPR', False, True, False, False, 1),
+        Operand('src0', 32, 'OPR_SRC', True, False, False, False, 2),
+    ]
+    if with_simm32:
+        ops.append(
+            Operand(
+                'simm32', 32, 'OPR_SIMM32', True, False, False, False, 3, fieldless=True
+            )
+        )
+    ops.append(Operand('vsrc1', 32, 'OPR_VGPR', True, False, False, False, 4))
+    _uniquify_fieldless_names(ops)
+    return Instruction('V_FMAMK_F32', 'ENC_VOP2', 0, ops)
+
+
+@pytest.mark.parametrize('cls', ['vector_fmamk', 'vector_fmaak'])
+def test_inline_literal_fma_raises_without_literal_source(cls):
+    # Only two field-bearing sources (src0, vsrc1) -> src_ops has length 2, so
+    # the K operand is missing and codegen must refuse rather than index
+    # src_ops[2] / src_ops[1] out of / into the wrong slot.
+    cg = _fma_codegen()
+    sem = InstructionSemantics('V_FMAMK_F32', cls, data_type='f32')
+    with pytest.raises(ValueError, match='expected fieldless simm32 operand'):
+        cg._gen_execute_body(_fma_inst(with_simm32=False), sem, 'ENC_VOP2')
+
+
+def test_inline_literal_fma_emits_body_with_literal_source():
+    # With the fieldless simm32 present (src_ops length 3), the guard passes and
+    # the body reads K from the literal operand -- proving the raise above is
+    # meaningful, not vacuous.
+    cg = _fma_codegen()
+    sem = InstructionSemantics('V_FMAMK_F32', 'vector_fmamk', data_type='f32')
+    body = cg._gen_execute_body(_fma_inst(with_simm32=True), sem, 'ENC_VOP2')
+    assert 'simm32.encoding_value_' in body

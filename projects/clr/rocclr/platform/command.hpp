@@ -375,7 +375,9 @@ class Command : public Event {
   }
   bool getPktCapturingState() const { return packetCapturing_; }
 
-  //! Sets AQL capture state, aql packet to capture and where to copy kernArgs
+  //! Sets AQL capture state, aql packet to capture and where to copy kernArgs.
+  //! |metadataPacket|, when non-null, also enables capturing the metadata-prefetch
+  //! packet that parallels each captured AQL packet.
   void setPktCapturingState(bool state, std::vector<uint8_t*>* packet,
                             amd::GraphKernelArgManager* graphKernArgMgr,
                             const std::string** capturedKernelName,
@@ -1673,32 +1675,15 @@ class Marker : public Command {
 
 class AccumulateCommand : public Command {
  private:
-  //! Kernel names and timestamps list for activity profiling
-  std::vector<const std::string*> kernelNames_;
-  const std::vector<const std::string*>* kernelNamesRef_ = nullptr;
-  //! Optional owner of the borrowed kernel-name strings (e.g. the GraphExec
-  //! whose nodes own them). Retained while this command lives so the strings
-  //! outlive ReportActivity(), which runs at the end of setStatus(CL_COMPLETE)
-  //! -- after OnLaunchComplete() may have dropped the launch's reference. This
-  //! ties the strings' lifetime to the consumer (this command) rather than to
-  //! the graph launch, with no string copies. Set via the constructor.
-  ReferenceCountedObject* kernelNamesOwner_ = nullptr;
-
- public:
-  //! Sentinel queue index meaning "unknown; fall back to the command's queue".
-  static constexpr uint32_t kInvalidQueueIndex = 0xFFFFFFFFu;
-
-  //! One kernel dispatch's GPU timing plus the queue (vGPU index) it ran on.
-  //! Graphs span multiple streams under one command, so the queue is tracked
-  //! per timestamp rather than taken from the command's queue.
-  struct KernelTimestamp {
-    uint64_t start;
-    uint64_t end;
-    uint32_t queue_index;
-  };
-
- private:
-  std::vector<KernelTimestamp> tsList_;
+  //! Stable kernel name pointers — one entry per kernel dispatch slot (base and
+  //! ext variants). Resolved from KernelMap at dispatch time; point into Kernel
+  //! objects that live for the device lifetime. Non-dispatch slots (barriers,
+  //! SDMA) are skipped so kernelNames_ and timestamps_ are always parallel.
+  //! "<unknown>" is used when the kernel_object is not found in KernelMap.
+  std::vector<const char*> kernelNames_;
+  //! GPU timestamps — one entry per kernel dispatch slot, parallel to
+  //! kernelNames_, populated at signal completion time.
+  std::vector<std::pair<uint64_t, uint64_t>> timestamps_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
   //! When false, the destructor does not destroy hw_events_ (an external owner,
@@ -1706,21 +1691,9 @@ class AccumulateCommand : public Command {
   bool owns_hw_events_ = true;
 
  public:
-  //! Create a new accumulate command. kernelNamesOwner, when given, is the
-  //! object that owns the borrowed kernel-name strings (e.g. the GraphExec);
-  //! it is retained for the command's whole lifetime and released in the
-  //! destructor, so the borrowed strings stay valid through ReportActivity()
-  //! even after OnLaunchComplete() drops the launch's reference -- with no
-  //! string copies.
   AccumulateCommand(HostQueue& queue, const EventWaitList& eventWaitList = nullWaitList,
-                    const Event* waitingEvent = nullptr,
-                    ReferenceCountedObject* kernelNamesOwner = nullptr)
-      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent),
-        kernelNamesOwner_(kernelNamesOwner) {
-    if (kernelNamesOwner_ != nullptr) {
-      kernelNamesOwner_->retain();
-    }
-  }
+                    const Event* waitingEvent = nullptr)
+      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent) {}
 
   //! Destructor - release all retained HW events
   virtual ~AccumulateCommand();
@@ -1748,35 +1721,20 @@ class AccumulateCommand : public Command {
   //! them across launches instead.
   void setOwnsHwEvents(bool owns) { owns_hw_events_ = owns; }
 
-  //! Add kernel name to the list if available
-  void addKernelName(const std::string* kernelName) { kernelNames_.push_back(kernelName); }
+  //! Record a stable kernel name pointer for one kernel dispatch slot.
+  //! Must not be nullptr — use "<unknown>" when the name cannot be resolved.
+  void addKernelName(const char* name) { kernelNames_.push_back(name); }
 
-  //! Add multiple kernel names in bulk
-  void addKernelNames(const std::vector<const std::string*>& kernelNames) {
-    kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
+  //! Add GPU timestamps for one dispatch slot (called at signal completion).
+  void addTimestamps(uint64_t startTs, uint64_t endTs) {
+    timestamps_.push_back({startTs, endTs});
   }
 
-  //! Set kernel names by reference (cheap; borrows the caller's vector and
-  //! strings). Safe only while that storage outlives this command. Used on the
-  //! hot path when no profiler is active, where the names are never read.
-  void setKernelNamesRef(const std::vector<const std::string*>* kernelNames) {
-    kernelNamesRef_ = kernelNames;
-  }
+  //! Return kernel name pointers (one per dispatch slot)
+  const std::vector<const char*>& getKernelNames() const { return kernelNames_; }
 
-  //! Add kernel timestamp to the list if available. queue_index is the vGPU
-  //! index of the stream the kernel ran on (kInvalidQueueIndex when unknown).
-  void addTimestamps(uint64_t startTs, uint64_t endTs,
-                     uint32_t queue_index = kInvalidQueueIndex) {
-    tsList_.push_back(KernelTimestamp{startTs, endTs, queue_index});
-  }
-
-  //! Return the kernel names (pointers to stable strings, no copies)
-  const std::vector<const std::string*>& getKernelNames() const {
-    return kernelNamesRef_ != nullptr ? *kernelNamesRef_ : kernelNames_;
-  }
-
-  //! Return the kernel timestamps
-  const std::vector<KernelTimestamp>& getTimestamps() const { return tsList_; }
+  //! Return GPU timestamps (one per dispatch slot, populated at signal completion)
+  const std::vector<std::pair<uint64_t, uint64_t>>& getTimestamps() const { return timestamps_; }
 
   //! The command implementation
   virtual void submit(device::VirtualDevice& device) { device.submitAccumulate(*this); }

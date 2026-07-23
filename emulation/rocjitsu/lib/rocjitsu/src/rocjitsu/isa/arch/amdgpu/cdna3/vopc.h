@@ -18,6 +18,7 @@ class VCmpClassF32Vopc : public Vopc {
 public:
   VCmpClassF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -26,14 +27,17 @@ class VCmpxClassF32Vopc : public Vopc {
 public:
   VCmpxClassF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpClassF64Vopc : public Vopc {
 public:
   VCmpClassF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -42,14 +46,17 @@ class VCmpxClassF64Vopc : public Vopc {
 public:
   VCmpxClassF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpClassF16Vopc : public Vopc {
 public:
   VCmpClassF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -58,14 +65,17 @@ class VCmpxClassF16Vopc : public Vopc {
 public:
   VCmpxClassF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpFF16Vopc : public Vopc {
 public:
   VCmpFF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -74,6 +84,7 @@ class VCmpLtF16Vopc : public Vopc {
 public:
   VCmpLtF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -82,6 +93,7 @@ class VCmpEqF16Vopc : public Vopc {
 public:
   VCmpEqF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -90,6 +102,7 @@ class VCmpLeF16Vopc : public Vopc {
 public:
   VCmpLeF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -98,6 +111,7 @@ class VCmpGtF16Vopc : public Vopc {
 public:
   VCmpGtF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -106,6 +120,7 @@ class VCmpLgF16Vopc : public Vopc {
 public:
   VCmpLgF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -114,6 +129,7 @@ class VCmpGeF16Vopc : public Vopc {
 public:
   VCmpGeF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -122,6 +138,7 @@ class VCmpOF16Vopc : public Vopc {
 public:
   VCmpOF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -130,6 +147,7 @@ class VCmpUF16Vopc : public Vopc {
 public:
   VCmpUF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -138,6 +156,7 @@ class VCmpNgeF16Vopc : public Vopc {
 public:
   VCmpNgeF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -146,6 +165,7 @@ class VCmpNlgF16Vopc : public Vopc {
 public:
   VCmpNlgF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -154,6 +174,7 @@ class VCmpNgtF16Vopc : public Vopc {
 public:
   VCmpNgtF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -162,6 +183,7 @@ class VCmpNleF16Vopc : public Vopc {
 public:
   VCmpNleF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -170,6 +192,7 @@ class VCmpNeqF16Vopc : public Vopc {
 public:
   VCmpNeqF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -178,6 +201,7 @@ class VCmpNltF16Vopc : public Vopc {
 public:
   VCmpNltF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -186,6 +210,7 @@ class VCmpTruF16Vopc : public Vopc {
 public:
   VCmpTruF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -194,134 +219,167 @@ class VCmpxFF16Vopc : public Vopc {
 public:
   VCmpxFF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtF16Vopc : public Vopc {
 public:
   VCmpxLtF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqF16Vopc : public Vopc {
 public:
   VCmpxEqF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeF16Vopc : public Vopc {
 public:
   VCmpxLeF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtF16Vopc : public Vopc {
 public:
   VCmpxGtF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLgF16Vopc : public Vopc {
 public:
   VCmpxLgF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeF16Vopc : public Vopc {
 public:
   VCmpxGeF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxOF16Vopc : public Vopc {
 public:
   VCmpxOF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxUF16Vopc : public Vopc {
 public:
   VCmpxUF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgeF16Vopc : public Vopc {
 public:
   VCmpxNgeF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNlgF16Vopc : public Vopc {
 public:
   VCmpxNlgF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgtF16Vopc : public Vopc {
 public:
   VCmpxNgtF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNleF16Vopc : public Vopc {
 public:
   VCmpxNleF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeqF16Vopc : public Vopc {
 public:
   VCmpxNeqF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNltF16Vopc : public Vopc {
 public:
   VCmpxNltF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxTruF16Vopc : public Vopc {
 public:
   VCmpxTruF16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpFF32Vopc : public Vopc {
 public:
   VCmpFF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -330,6 +388,7 @@ class VCmpLtF32Vopc : public Vopc {
 public:
   VCmpLtF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -338,6 +397,7 @@ class VCmpEqF32Vopc : public Vopc {
 public:
   VCmpEqF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -346,6 +406,7 @@ class VCmpLeF32Vopc : public Vopc {
 public:
   VCmpLeF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -354,6 +415,7 @@ class VCmpGtF32Vopc : public Vopc {
 public:
   VCmpGtF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -362,6 +424,7 @@ class VCmpLgF32Vopc : public Vopc {
 public:
   VCmpLgF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -370,6 +433,7 @@ class VCmpGeF32Vopc : public Vopc {
 public:
   VCmpGeF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -378,6 +442,7 @@ class VCmpOF32Vopc : public Vopc {
 public:
   VCmpOF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -386,6 +451,7 @@ class VCmpUF32Vopc : public Vopc {
 public:
   VCmpUF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -394,6 +460,7 @@ class VCmpNgeF32Vopc : public Vopc {
 public:
   VCmpNgeF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -402,6 +469,7 @@ class VCmpNlgF32Vopc : public Vopc {
 public:
   VCmpNlgF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -410,6 +478,7 @@ class VCmpNgtF32Vopc : public Vopc {
 public:
   VCmpNgtF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -418,6 +487,7 @@ class VCmpNleF32Vopc : public Vopc {
 public:
   VCmpNleF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -426,6 +496,7 @@ class VCmpNeqF32Vopc : public Vopc {
 public:
   VCmpNeqF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -434,6 +505,7 @@ class VCmpNltF32Vopc : public Vopc {
 public:
   VCmpNltF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -442,6 +514,7 @@ class VCmpTruF32Vopc : public Vopc {
 public:
   VCmpTruF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -450,134 +523,167 @@ class VCmpxFF32Vopc : public Vopc {
 public:
   VCmpxFF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtF32Vopc : public Vopc {
 public:
   VCmpxLtF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqF32Vopc : public Vopc {
 public:
   VCmpxEqF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeF32Vopc : public Vopc {
 public:
   VCmpxLeF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtF32Vopc : public Vopc {
 public:
   VCmpxGtF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLgF32Vopc : public Vopc {
 public:
   VCmpxLgF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeF32Vopc : public Vopc {
 public:
   VCmpxGeF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxOF32Vopc : public Vopc {
 public:
   VCmpxOF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxUF32Vopc : public Vopc {
 public:
   VCmpxUF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgeF32Vopc : public Vopc {
 public:
   VCmpxNgeF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNlgF32Vopc : public Vopc {
 public:
   VCmpxNlgF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgtF32Vopc : public Vopc {
 public:
   VCmpxNgtF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNleF32Vopc : public Vopc {
 public:
   VCmpxNleF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeqF32Vopc : public Vopc {
 public:
   VCmpxNeqF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNltF32Vopc : public Vopc {
 public:
   VCmpxNltF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxTruF32Vopc : public Vopc {
 public:
   VCmpxTruF32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpFF64Vopc : public Vopc {
 public:
   VCmpFF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -586,6 +692,7 @@ class VCmpLtF64Vopc : public Vopc {
 public:
   VCmpLtF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -594,6 +701,7 @@ class VCmpEqF64Vopc : public Vopc {
 public:
   VCmpEqF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -602,6 +710,7 @@ class VCmpLeF64Vopc : public Vopc {
 public:
   VCmpLeF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -610,6 +719,7 @@ class VCmpGtF64Vopc : public Vopc {
 public:
   VCmpGtF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -618,6 +728,7 @@ class VCmpLgF64Vopc : public Vopc {
 public:
   VCmpLgF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -626,6 +737,7 @@ class VCmpGeF64Vopc : public Vopc {
 public:
   VCmpGeF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -634,6 +746,7 @@ class VCmpOF64Vopc : public Vopc {
 public:
   VCmpOF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -642,6 +755,7 @@ class VCmpUF64Vopc : public Vopc {
 public:
   VCmpUF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -650,6 +764,7 @@ class VCmpNgeF64Vopc : public Vopc {
 public:
   VCmpNgeF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -658,6 +773,7 @@ class VCmpNlgF64Vopc : public Vopc {
 public:
   VCmpNlgF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -666,6 +782,7 @@ class VCmpNgtF64Vopc : public Vopc {
 public:
   VCmpNgtF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -674,6 +791,7 @@ class VCmpNleF64Vopc : public Vopc {
 public:
   VCmpNleF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -682,6 +800,7 @@ class VCmpNeqF64Vopc : public Vopc {
 public:
   VCmpNeqF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -690,6 +809,7 @@ class VCmpNltF64Vopc : public Vopc {
 public:
   VCmpNltF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -698,6 +818,7 @@ class VCmpTruF64Vopc : public Vopc {
 public:
   VCmpTruF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -706,134 +827,167 @@ class VCmpxFF64Vopc : public Vopc {
 public:
   VCmpxFF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtF64Vopc : public Vopc {
 public:
   VCmpxLtF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqF64Vopc : public Vopc {
 public:
   VCmpxEqF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeF64Vopc : public Vopc {
 public:
   VCmpxLeF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtF64Vopc : public Vopc {
 public:
   VCmpxGtF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLgF64Vopc : public Vopc {
 public:
   VCmpxLgF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeF64Vopc : public Vopc {
 public:
   VCmpxGeF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxOF64Vopc : public Vopc {
 public:
   VCmpxOF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxUF64Vopc : public Vopc {
 public:
   VCmpxUF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgeF64Vopc : public Vopc {
 public:
   VCmpxNgeF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNlgF64Vopc : public Vopc {
 public:
   VCmpxNlgF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgtF64Vopc : public Vopc {
 public:
   VCmpxNgtF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNleF64Vopc : public Vopc {
 public:
   VCmpxNleF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeqF64Vopc : public Vopc {
 public:
   VCmpxNeqF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNltF64Vopc : public Vopc {
 public:
   VCmpxNltF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxTruF64Vopc : public Vopc {
 public:
   VCmpxTruF64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpFI16Vopc : public Vopc {
 public:
   VCmpFI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -842,6 +996,7 @@ class VCmpLtI16Vopc : public Vopc {
 public:
   VCmpLtI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -850,6 +1005,7 @@ class VCmpEqI16Vopc : public Vopc {
 public:
   VCmpEqI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -858,6 +1014,7 @@ class VCmpLeI16Vopc : public Vopc {
 public:
   VCmpLeI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -866,6 +1023,7 @@ class VCmpGtI16Vopc : public Vopc {
 public:
   VCmpGtI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -874,6 +1032,7 @@ class VCmpNeI16Vopc : public Vopc {
 public:
   VCmpNeI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -882,6 +1041,7 @@ class VCmpGeI16Vopc : public Vopc {
 public:
   VCmpGeI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -890,6 +1050,7 @@ class VCmpTI16Vopc : public Vopc {
 public:
   VCmpTI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -898,6 +1059,7 @@ class VCmpFU16Vopc : public Vopc {
 public:
   VCmpFU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -906,6 +1068,7 @@ class VCmpLtU16Vopc : public Vopc {
 public:
   VCmpLtU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -914,6 +1077,7 @@ class VCmpEqU16Vopc : public Vopc {
 public:
   VCmpEqU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -922,6 +1086,7 @@ class VCmpLeU16Vopc : public Vopc {
 public:
   VCmpLeU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -930,6 +1095,7 @@ class VCmpGtU16Vopc : public Vopc {
 public:
   VCmpGtU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -938,6 +1104,7 @@ class VCmpNeU16Vopc : public Vopc {
 public:
   VCmpNeU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -946,6 +1113,7 @@ class VCmpGeU16Vopc : public Vopc {
 public:
   VCmpGeU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -954,6 +1122,7 @@ class VCmpTU16Vopc : public Vopc {
 public:
   VCmpTU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -962,134 +1131,167 @@ class VCmpxFI16Vopc : public Vopc {
 public:
   VCmpxFI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtI16Vopc : public Vopc {
 public:
   VCmpxLtI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqI16Vopc : public Vopc {
 public:
   VCmpxEqI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeI16Vopc : public Vopc {
 public:
   VCmpxLeI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtI16Vopc : public Vopc {
 public:
   VCmpxGtI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeI16Vopc : public Vopc {
 public:
   VCmpxNeI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeI16Vopc : public Vopc {
 public:
   VCmpxGeI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxTI16Vopc : public Vopc {
 public:
   VCmpxTI16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxFU16Vopc : public Vopc {
 public:
   VCmpxFU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtU16Vopc : public Vopc {
 public:
   VCmpxLtU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqU16Vopc : public Vopc {
 public:
   VCmpxEqU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeU16Vopc : public Vopc {
 public:
   VCmpxLeU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtU16Vopc : public Vopc {
 public:
   VCmpxGtU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeU16Vopc : public Vopc {
 public:
   VCmpxNeU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeU16Vopc : public Vopc {
 public:
   VCmpxGeU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxTU16Vopc : public Vopc {
 public:
   VCmpxTU16Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpFI32Vopc : public Vopc {
 public:
   VCmpFI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1098,6 +1300,7 @@ class VCmpLtI32Vopc : public Vopc {
 public:
   VCmpLtI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1106,6 +1309,7 @@ class VCmpEqI32Vopc : public Vopc {
 public:
   VCmpEqI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1114,6 +1318,7 @@ class VCmpLeI32Vopc : public Vopc {
 public:
   VCmpLeI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1122,6 +1327,7 @@ class VCmpGtI32Vopc : public Vopc {
 public:
   VCmpGtI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1130,6 +1336,7 @@ class VCmpNeI32Vopc : public Vopc {
 public:
   VCmpNeI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1138,6 +1345,7 @@ class VCmpGeI32Vopc : public Vopc {
 public:
   VCmpGeI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1146,6 +1354,7 @@ class VCmpTI32Vopc : public Vopc {
 public:
   VCmpTI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1154,6 +1363,7 @@ class VCmpFU32Vopc : public Vopc {
 public:
   VCmpFU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1162,6 +1372,7 @@ class VCmpLtU32Vopc : public Vopc {
 public:
   VCmpLtU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1170,6 +1381,7 @@ class VCmpEqU32Vopc : public Vopc {
 public:
   VCmpEqU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1178,6 +1390,7 @@ class VCmpLeU32Vopc : public Vopc {
 public:
   VCmpLeU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1186,6 +1399,7 @@ class VCmpGtU32Vopc : public Vopc {
 public:
   VCmpGtU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1194,6 +1408,7 @@ class VCmpNeU32Vopc : public Vopc {
 public:
   VCmpNeU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1202,6 +1417,7 @@ class VCmpGeU32Vopc : public Vopc {
 public:
   VCmpGeU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1210,6 +1426,7 @@ class VCmpTU32Vopc : public Vopc {
 public:
   VCmpTU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1218,134 +1435,167 @@ class VCmpxFI32Vopc : public Vopc {
 public:
   VCmpxFI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtI32Vopc : public Vopc {
 public:
   VCmpxLtI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqI32Vopc : public Vopc {
 public:
   VCmpxEqI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeI32Vopc : public Vopc {
 public:
   VCmpxLeI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtI32Vopc : public Vopc {
 public:
   VCmpxGtI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeI32Vopc : public Vopc {
 public:
   VCmpxNeI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeI32Vopc : public Vopc {
 public:
   VCmpxGeI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxTI32Vopc : public Vopc {
 public:
   VCmpxTI32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxFU32Vopc : public Vopc {
 public:
   VCmpxFU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtU32Vopc : public Vopc {
 public:
   VCmpxLtU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqU32Vopc : public Vopc {
 public:
   VCmpxEqU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeU32Vopc : public Vopc {
 public:
   VCmpxLeU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtU32Vopc : public Vopc {
 public:
   VCmpxGtU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeU32Vopc : public Vopc {
 public:
   VCmpxNeU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeU32Vopc : public Vopc {
 public:
   VCmpxGeU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxTU32Vopc : public Vopc {
 public:
   VCmpxTU32Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpFI64Vopc : public Vopc {
 public:
   VCmpFI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1354,6 +1604,7 @@ class VCmpLtI64Vopc : public Vopc {
 public:
   VCmpLtI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1362,6 +1613,7 @@ class VCmpEqI64Vopc : public Vopc {
 public:
   VCmpEqI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1370,6 +1622,7 @@ class VCmpLeI64Vopc : public Vopc {
 public:
   VCmpLeI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1378,6 +1631,7 @@ class VCmpGtI64Vopc : public Vopc {
 public:
   VCmpGtI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1386,6 +1640,7 @@ class VCmpNeI64Vopc : public Vopc {
 public:
   VCmpNeI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1394,6 +1649,7 @@ class VCmpGeI64Vopc : public Vopc {
 public:
   VCmpGeI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1402,6 +1658,7 @@ class VCmpTI64Vopc : public Vopc {
 public:
   VCmpTI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1410,6 +1667,7 @@ class VCmpFU64Vopc : public Vopc {
 public:
   VCmpFU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1418,6 +1676,7 @@ class VCmpLtU64Vopc : public Vopc {
 public:
   VCmpLtU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1426,6 +1685,7 @@ class VCmpEqU64Vopc : public Vopc {
 public:
   VCmpEqU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1434,6 +1694,7 @@ class VCmpLeU64Vopc : public Vopc {
 public:
   VCmpLeU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1442,6 +1703,7 @@ class VCmpGtU64Vopc : public Vopc {
 public:
   VCmpGtU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1450,6 +1712,7 @@ class VCmpNeU64Vopc : public Vopc {
 public:
   VCmpNeU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1458,6 +1721,7 @@ class VCmpGeU64Vopc : public Vopc {
 public:
   VCmpGeU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1466,6 +1730,7 @@ class VCmpTU64Vopc : public Vopc {
 public:
   VCmpTU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
 };
@@ -1474,128 +1739,160 @@ class VCmpxFI64Vopc : public Vopc {
 public:
   VCmpxFI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtI64Vopc : public Vopc {
 public:
   VCmpxLtI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqI64Vopc : public Vopc {
 public:
   VCmpxEqI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeI64Vopc : public Vopc {
 public:
   VCmpxLeI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtI64Vopc : public Vopc {
 public:
   VCmpxGtI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeI64Vopc : public Vopc {
 public:
   VCmpxNeI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeI64Vopc : public Vopc {
 public:
   VCmpxGeI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxTI64Vopc : public Vopc {
 public:
   VCmpxTI64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxFU64Vopc : public Vopc {
 public:
   VCmpxFU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtU64Vopc : public Vopc {
 public:
   VCmpxLtU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqU64Vopc : public Vopc {
 public:
   VCmpxEqU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeU64Vopc : public Vopc {
 public:
   VCmpxLeU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtU64Vopc : public Vopc {
 public:
   VCmpxGtU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeU64Vopc : public Vopc {
 public:
   VCmpxNeU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeU64Vopc : public Vopc {
 public:
   VCmpxGeU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 class VCmpxTU64Vopc : public Vopc {
 public:
   VCmpxTU64Vopc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand sdst_exec;
 };
 
 } // namespace cdna3

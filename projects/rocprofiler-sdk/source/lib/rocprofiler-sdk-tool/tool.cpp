@@ -83,7 +83,7 @@
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <time.h>
@@ -136,6 +136,10 @@ namespace
 {
 // Thread for safe cleanup output generation
 auto output_generation_thread = common::Synchronized<std::optional<std::thread>>{};
+
+// Tracks whether tool_detach produced output for the current attach session.
+// Set true by tool_detach, reset false by tool_attach (new session), read by tool_fini.
+std::atomic<bool> detach_output_generated = false;
 
 using sigaction_t      = struct sigaction;
 using signal_func_t    = sighandler_t (*)(int signum, sighandler_t handler);
@@ -214,10 +218,11 @@ struct buffer_ids
     rocprofiler_buffer_id_t pc_sampling_stochastic  = {};
     rocprofiler_buffer_id_t ompt_trace              = {};
     rocprofiler_buffer_id_t hip_graph_trace         = {};
+    rocprofiler_buffer_id_t rocshmem_api_trace      = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 15>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 16>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -231,7 +236,8 @@ struct buffer_ids
                                                        rocjpeg_api_trace,
                                                        pc_sampling_stochastic,
                                                        ompt_trace,
-                                                       hip_graph_trace};
+                                                       hip_graph_trace,
+                                                       rocshmem_api_trace};
     }
     auto pc_sampling_buffers_as_array() const
     {
@@ -1388,6 +1394,13 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
 
                 tool::write_ring_buffer(*record, domain_type::HIP_GRAPH);
             }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t*>(
+                    header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::ROCSHMEM);
+            }
             else
             {
                 ROCP_CI_LOG(WARNING) << fmt::format(
@@ -2494,6 +2507,11 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
             uint64_t                  context_ids_length,
             void* /*tool_data*/)
 {
+    // Reset the detach output flag for this new session. If the process exits during this
+    // attach (without a corresponding tool_detach), tool_fini will see false and generate
+    // output for whatever was captured. tool_detach sets it true when it produces output.
+    detach_output_generated = false;
+
     // reset any existing output thread from prior tool usage
     // Only log if previous attachment used async mode (where background thread may still be
     // running)
@@ -2761,6 +2779,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                       buffer_service_config{tool::get_config().rocjpeg_api_trace,
                                             ROCPROFILER_BUFFER_TRACING_ROCJPEG_API,
                                             get_buffers().rocjpeg_api_trace},
+                      buffer_service_config{tool::get_config().rocshmem_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT,
+                                            get_buffers().rocshmem_api_trace},
                       // Enable only the ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED operation
                       // for KFD QUEUE events; all other QUEUE related events are published as range
                       // records
@@ -2883,6 +2904,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                               dummy_callback_tracing_callback},
                       callback_service_config{tool::get_config().ompt_trace,
                                               ROCPROFILER_CALLBACK_TRACING_OMPT,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().rocshmem_api_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,
                                               dummy_callback_tracing_callback}})
     {
         if(itr.option)
@@ -3425,7 +3449,8 @@ void
 generate_output(tool::buffered_output<Tp, DomainT>& output_v,
                 output_data&                        output_data_v,
                 domain_stats_vec_t&                 contributions_v,
-                cleanup_vec_t&                      cleanups_v)
+                cleanup_vec_t&                      cleanups_v,
+                bool                                skip_output)
 {
     cleanups_v.emplace_back([&output_v](cleanup_mode _mode) {
         switch(_mode)
@@ -3463,11 +3488,16 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
     output_data_v.num_output += 1;
     output_data_v.num_bytes += _num_bytes;
 
-    // OMPT is rocpd-only: direct CSV/stats (and JSON/Perfetto/OTF2) emission is not
-    // produced for OMPT. OMPT records are written to rocpd and exported to other
-    // formats via `rocpd convert`. The record count above is still tallied so that
-    // rocpd output is produced even when OMPT is the only active trace domain.
-    if constexpr(DomainT != domain_type::OMPT)
+    // After an attach/detach cycle, stop here — bytes are tallied above so the outer
+    // function can warn if data was left unflushed, but nothing is written.
+    if(skip_output) return;
+
+    // OMPT and rocSHMEM do not produce direct CSV/stats output. OMPT is rocpd-only (not
+    // emitted to JSON either), while rocSHMEM is emitted directly only to JSON and rocpd;
+    // both rely on `rocpd convert` for CSV/Perfetto/OTF2. The record count above is still
+    // tallied so that rocpd/JSON output is produced even when one of these is the only
+    // active trace domain.
+    if constexpr(DomainT != domain_type::OMPT && DomainT != domain_type::ROCSHMEM)
     {
         if(tool::get_config().stats || tool::get_config().summary_output)
         {
@@ -3489,7 +3519,7 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
 }
 
 void
-generate_output(cleanup_mode _cleanup_mode)
+generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
 {
     auto _output_gen_timer = common::simple_timer{"[rocprofv3] output generation"};
 
@@ -3526,7 +3556,8 @@ generate_output(cleanup_mode _cleanup_mode)
         tool::pc_sampling_host_trap_buffered_output_t{tool::get_config().pc_sampling_host_trap};
     auto rocdecode_output =
         tool::rocdecode_buffered_output_t{tool::get_config().rocdecode_api_trace};
-    auto rocjpeg_output = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
+    auto rocjpeg_output  = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
+    auto rocshmem_output = tool::rocshmem_buffered_output_t{tool::get_config().rocshmem_api_trace};
     auto pc_sampling_stochastic_output =
         tool::pc_sampling_stochastic_buffered_output_t{tool::get_config().pc_sampling_stochastic};
 
@@ -3546,40 +3577,60 @@ generate_output(cleanup_mode _cleanup_mode)
         cleanups.clear();
     };
 
-    // generate the configuration output regardless of whether there is any data
-    if(tool::get_config().output_config_file)
+    // Generate the configuration output regardless of whether there is any data
+    // Skip config file output after an attach/detach cycle — detach already wrote it.
+    if(tool::get_config().output_config_file && !skip_output)
     {
         generate_config_output(tool::get_config(), *tool_metadata);
     }
 
     auto _dtor = common::scope_destructor{run_cleanup};
 
-    generate_output(kernel_dispatch_output, outdata, contributions, cleanups);
-    generate_output(hsa_output, outdata, contributions, cleanups);
-    generate_output(hip_output, outdata, contributions, cleanups);
-    generate_output(memory_copy_output, outdata, contributions, cleanups);
-    generate_output(memory_allocation_output, outdata, contributions, cleanups);
-    generate_output(kfd_output, outdata, contributions, cleanups);
-    generate_output(marker_output, outdata, contributions, cleanups);
-    generate_output(rccl_output, outdata, contributions, cleanups);
-    generate_output(ompt_output, outdata, contributions, cleanups);
-    generate_output(counters_output, outdata, contributions, cleanups);
-    generate_output(scratch_memory_output, outdata, contributions, cleanups);
-    generate_output(rocdecode_output, outdata, contributions, cleanups);
-    generate_output(pc_sampling_host_trap_output, outdata, contributions, cleanups);
-    generate_output(rocjpeg_output, outdata, contributions, cleanups);
-    generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups);
-    generate_output(spm_counters_output, outdata, contributions, cleanups);
-    generate_output(hip_graph_output, outdata, contributions, cleanups);
+    generate_output(kernel_dispatch_output, outdata, contributions, cleanups, skip_output);
+    generate_output(hsa_output, outdata, contributions, cleanups, skip_output);
+    generate_output(hip_output, outdata, contributions, cleanups, skip_output);
+    generate_output(memory_copy_output, outdata, contributions, cleanups, skip_output);
+    generate_output(memory_allocation_output, outdata, contributions, cleanups, skip_output);
+    generate_output(kfd_output, outdata, contributions, cleanups, skip_output);
+    generate_output(marker_output, outdata, contributions, cleanups, skip_output);
+    generate_output(rccl_output, outdata, contributions, cleanups, skip_output);
+    generate_output(ompt_output, outdata, contributions, cleanups, skip_output);
+    generate_output(counters_output, outdata, contributions, cleanups, skip_output);
+    generate_output(scratch_memory_output, outdata, contributions, cleanups, skip_output);
+    generate_output(rocdecode_output, outdata, contributions, cleanups, skip_output);
+    generate_output(pc_sampling_host_trap_output, outdata, contributions, cleanups, skip_output);
+    generate_output(rocjpeg_output, outdata, contributions, cleanups, skip_output);
+    generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups, skip_output);
+    generate_output(spm_counters_output, outdata, contributions, cleanups, skip_output);
+    generate_output(hip_graph_output, outdata, contributions, cleanups, skip_output);
+    generate_output(rocshmem_output, outdata, contributions, cleanups, skip_output);
 
-    if(tool::get_config().advanced_thread_trace && !tool_metadata->att_filenames.empty())
+    if(!skip_output && tool::get_config().advanced_thread_trace &&
+       !tool_metadata->att_filenames.empty())
     {
         outdata.num_output += 1;
+        cleanups.emplace_back([](cleanup_mode /*_mode*/) { tool_metadata->att_filenames.clear(); });
     }
 
     ROCP_INFO << fmt::format("Number of services generating output: {} ({} kB)",
                              outdata.num_output,
                              (outdata.num_bytes / 1024));
+
+    // After an attach/detach cycle, all output was already produced by tool_detach. The
+    // per-type calls above tallied any bytes still buffered (data that did not flush before
+    // detach). Warn if any such data exists, then return — _dtor runs all cleanups/destroys.
+    if(skip_output)
+    {
+        if(outdata.num_bytes > 0 || outdata.num_output > 0)
+            ROCP_WARNING << fmt::format(
+                "[rocprofv3] Skipping output generation after attach/detach: {} bytes from {} "
+                "sources "
+                "remain unflushed. This indicates one or more tracers did not "
+                "fully stop after detach; that data is dropped.",
+                outdata.num_bytes,
+                outdata.num_output);
+        return;
+    }
 
     if(tool::get_config().csv_output && outdata.num_output > 0 &&
        outdata.num_bytes >= tool::get_config().minimum_output_bytes)
@@ -3619,7 +3670,8 @@ generate_output(cleanup_mode _cleanup_mode)
                          pc_sampling_host_trap_output.get_generator(),
                          pc_sampling_stochastic_output.get_generator(),
                          spm_counters_output.get_generator(),
-                         hip_graph_output.get_generator());
+                         hip_graph_output.get_generator(),
+                         rocshmem_output.get_generator());
         json_ar.finish_process();
 
         tool::close_json(json_ar);
@@ -3663,7 +3715,8 @@ generate_output(cleanup_mode _cleanup_mode)
                           counters_output.get_generator(),
                           spm_counters_output.get_generator(),
                           ompt_output.get_generator(),
-                          hip_graph_output.get_generator());
+                          hip_graph_output.get_generator(),
+                          rocshmem_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&
@@ -3679,6 +3732,7 @@ generate_output(cleanup_mode _cleanup_mode)
         auto memory_allocation_elem_data = memory_allocation_output.load_all();
         auto rocdecode_elem_data         = rocdecode_output.load_all();
         auto rocjpeg_elem_data           = rocjpeg_output.load_all();
+
         tool::write_otf2(tool::get_config(),
                          *tool_metadata,
                          getpid(),
@@ -3741,6 +3795,8 @@ generate_output(cleanup_mode _cleanup_mode)
 void
 tool_detach(void* /*tool_data*/)
 {
+    detach_output_generated = true;
+
     auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
 
     // Flush all buffers, stop context to ensure in-flight GPU operations complete,
@@ -3813,7 +3869,11 @@ tool_fini(void* /*tool_data*/)
     if(tool_metadata->process_end_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
-    generate_output(cleanup_mode::destroy);
+    // If tool_detach ran before us (sync or async — the thread join above ensures it finished),
+    // skip output generation here to avoid overwriting files the detach phase already wrote.
+    const bool skip_output = detach_output_generated;
+
+    generate_output(cleanup_mode::destroy, skip_output);
 
     if(destructors)
     {
@@ -4241,6 +4301,7 @@ rocprofiler_configure(uint32_t                 version,
     if(tool::get_config().marker_api_trace) libs |= ROCPROFILER_MARKER_CORE_TABLE;
     if(tool::get_config().rocdecode_api_trace) libs |= ROCPROFILER_ROCDECODE_TABLE;
     if(tool::get_config().rocjpeg_api_trace) libs |= ROCPROFILER_ROCJPEG_TABLE;
+    if(tool::get_config().rocshmem_api_trace) libs |= ROCPROFILER_ROCSHMEM_TABLE;
 
     ROCPROFILER_CALL(
         rocprofiler_at_intercept_table_registration(api_timestamps_callback, libs, nullptr),
