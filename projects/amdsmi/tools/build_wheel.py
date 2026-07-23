@@ -15,8 +15,9 @@ Pipeline
     1. (optional) Register the project as a git safe.directory
     2. cmake configure  (-DBUILD_PYTHON_WHEEL=ON)
     3. make -j$(nproc)
-    4. pip wheel --no-deps --no-build-isolation  (per interpreter)
-    5. auditwheel repair  (optional, for manylinux tags)
+    4. pip wheel --no-deps --no-build-isolation  (once; the wheel is py3-none)
+    5. build-smoke the package with the oldest/newest interpreters
+    6. auditwheel repair  (optional, for manylinux tags)
 
 Requirements
 ------------
@@ -49,9 +50,11 @@ import argparse
 import glob
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -264,35 +267,71 @@ def cmake_and_build(project_dir, build_dir, cmake_python, args, extra_env):
     run(["make", "-j" + str(os.cpu_count() or 4)], cwd=str(build_dir), env=extra_env or None)
 
 
-def build_wheels(pkg_dir, raw_wheels_dir, interpreters):
-    """Run ``pip wheel`` for each interpreter into *raw_wheels_dir*."""
-    log.info("Building wheels for %d interpreter(s) ...", len(interpreters))
+def select_interpreters(candidates):
+    """Split *candidates* into the one build interpreter and the smoke set.
+
+    The wheel bundles a prebuilt .so and loads it via ctypes, so it is
+    py3-none (identical for every CPython). Building it once is enough; the
+    remaining oldest/newest interpreters only build-smoke the package to catch
+    setuptools compatibility breakage across the supported range.
+    """
+    if not candidates:
+        return None, []
+
+    def _key(path):
+        m = re.search(r"cp3(\d+)", path)
+        return int(m.group(1)) if m else -1
+
+    ordered = sorted(candidates, key=_key)
+    build_py = next((p for p in ordered if "cp310" in p), ordered[0])
+    smoke = []
+    for p in (ordered[0], ordered[-1]):
+        if p != build_py and p not in smoke:
+            smoke.append(p)
+    return build_py, smoke
+
+
+def build_wheel(pkg_dir, raw_wheels_dir, py):
+    """Run ``pip wheel`` once into *raw_wheels_dir* with interpreter *py*."""
+    log.info("--- Building wheel with %s ---", py)
+    best_effort_pip_upgrade(py, ["pip", "setuptools", "wheel"])
+
+    for pattern in ("*.whl", "*.egg-info", "build", "dist"):
+        for path in pkg_dir.glob(pattern):
+            shutil.rmtree(path) if path.is_dir() else path.unlink()
+
+    run(
+        [
+            py,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-deps",
+            "--no-build-isolation",
+            "-w",
+            str(raw_wheels_dir),
+            ".",
+        ],
+        cwd=str(pkg_dir),
+    )
+
+
+def build_smoke(pkg_dir, interpreters):
+    """Build (and discard) the package with each interpreter as a compat check."""
     for py in interpreters:
         if not os.path.isfile(py) or not os.access(py, os.X_OK):
-            log.warning("Skipping missing/non-executable interpreter: %s", py)
+            log.warning("Skipping missing/non-executable smoke interpreter: %s", py)
             continue
-
-        log.info("--- Building wheel with %s ---", py)
+        log.info("--- Build-smoke with %s ---", py)
         best_effort_pip_upgrade(py, ["pip", "setuptools", "wheel"])
-
-        for pattern in ("*.whl", "*.egg-info", "build", "dist"):
-            for path in pkg_dir.glob(pattern):
-                shutil.rmtree(path) if path.is_dir() else path.unlink()
-
-        run(
-            [
-                py,
-                "-m",
-                "pip",
-                "wheel",
-                "--no-deps",
-                "--no-build-isolation",
-                "-w",
-                str(raw_wheels_dir),
-                ".",
-            ],
-            cwd=str(pkg_dir),
-        )
+        with tempfile.TemporaryDirectory() as tmp:
+            for pattern in ("*.egg-info", "build", "dist"):
+                for path in pkg_dir.glob(pattern):
+                    shutil.rmtree(path) if path.is_dir() else path.unlink()
+            run(
+                [py, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation", "-w", tmp, "."],
+                cwd=str(pkg_dir),
+            )
 
 
 def repair_or_copy(raw_wheels, output_dir, cmake_python, repair):
@@ -310,7 +349,6 @@ def repair_or_copy(raw_wheels, output_dir, cmake_python, repair):
         ).returncode
         == 0
     )
-
     if not auditwheel_ok:
         log.warning("auditwheel not available; copying raw wheels.")
         for whl in raw_wheels:
@@ -430,7 +468,8 @@ def main():
     interpreters = collect_interpreters(args.python_bins)
     if not interpreters:
         abort("No Python interpreters found.  Pass --python-bins explicitly.")
-    cmake_python = interpreters[0]
+    build_py, smoke_pys = select_interpreters(interpreters)
+    cmake_python = build_py
 
     log.info("OS variant    : %s", args.os_variant or "(unspecified)")
     log.info("Project dir   : %s", project_dir)
@@ -438,7 +477,8 @@ def main():
     log.info("Raw wheels    : %s", raw_wheels_dir)
     log.info("Output dir    : %s", output_dir)
     log.info("Python (cmake): %s", cmake_python)
-    log.info("Python targets: %s", ", ".join(interpreters))
+    log.info("Publish wheel : %s", build_py)
+    log.info("Build-smoke   : %s", ", ".join(smoke_pys) or "(none)")
 
     # esmi_ib_library_temp is generated by a stale build; remove it before
     # reconfiguring so cmake won't pick it up.
@@ -470,7 +510,8 @@ def main():
         cmake_python, ["pip", "setuptools", "wheel"] + (["auditwheel"] if args.repair else [])
     )
 
-    build_wheels(pkg_dir, raw_wheels_dir, interpreters)
+    build_wheel(pkg_dir, raw_wheels_dir, build_py)
+    build_smoke(pkg_dir, smoke_pys)
 
     raw_wheels = sorted(raw_wheels_dir.glob("*.whl"))
     if not raw_wheels:
