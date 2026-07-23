@@ -1288,7 +1288,7 @@ __BF16_HOST_DEVICE_STATIC__ bool __hgeu(const __hip_bfloat16 a, const __hip_bflo
  * \brief Compare two bfloat162 values - not equal
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hne(const __hip_bfloat16 a, const __hip_bfloat16 b) {
-  return (__bf16)a != (__bf16)b;
+  return ((__bf16)a < (__bf16)b) || ((__bf16)a > (__bf16)b);
 }
 
 /**
