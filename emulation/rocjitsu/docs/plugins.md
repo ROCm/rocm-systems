@@ -132,7 +132,9 @@ When `file` is in `types`, each plugin writes to
 
 Set the top-level `"profiled": true` key to wrap the plugins in a
 profiled execution group, which emits per-hook timing data
-(`HOOK_PROFILE` lines) to stderr.
+(`HOOK_PROFILE` lines) to the configured sinks. With the default sink, timing
+data goes to stderr; stdout sends it to stdout, and file sinks write it to
+`<dir>/profile.log`.
 
 ### Examples
 
