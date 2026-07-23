@@ -610,8 +610,26 @@ def pytest_collection_modifyitems(config, items) -> None:
                 )
 
 
+# Modules that fail to collect (import errors, parametrize-time crashes, ...)
+# are recorded here so CTest generate mode can fail the build loudly instead of
+# silently omitting their tests from the generated suite.
+_collection_errors: list = []
+
+
+def pytest_collectreport(report) -> None:
+    """Record collection failures for CTest generate mode's abort check."""
+    if report.failed:
+        _collection_errors.append(report)
+
+
 def pytest_collection_finish(session):
     if session.config.getoption("--ctest-mode", default="off") == "generate":
+        if _collection_errors:
+            failures = "\n".join(f"  - {r.nodeid}" for r in _collection_errors)
+            pytest.exit(
+                f"CTestTestfile.cmake generation failed due to:\n{failures}",
+                returncode=1,
+            )
         raw_path = session.config.getoption("--ctest-output-path", default=None)
         output_path = Path(raw_path) if raw_path else None
         _ctest_generate_tests(session.items, output_path)

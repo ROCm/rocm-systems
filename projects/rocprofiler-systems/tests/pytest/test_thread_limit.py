@@ -83,22 +83,20 @@ def get_thread_limit_warning_regex(thread_limit: int) -> str:
 @pytest.mark.parametrize(
     "mode", ["sampling", "binary_rewrite", "runtime_instrument", "sys_run"]
 )
-@pytest.mark.parametrize(
-    "thread_count",
-    [
-        get_thread_limit() // 2,
-        get_thread_limit(),
-        get_thread_limit() * 2,
-    ],
-    ids=["half", "at", "double"],
-)
-@pytest.mark.timeout(480)
+@pytest.mark.parametrize("thread_ratio", ["half", "at", "double"])
 @pytest.mark.class_name("thread-limit")
 class TestThreadLimit(RocprofsysTest):
     BINARY_REWRITE_ARGS = ["-e", "-v", "2", "-i", "1024", "--label", "return", "args"]
     RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "1", "-i", "1024", "--label", "return", "args"]
 
-    def test(self, mode, thread_count, thread_limit_env):
+    def test(self, mode, thread_ratio, thread_limit_env):
+        thread_limit = get_thread_limit()
+        if thread_ratio == "half":
+            thread_count = thread_limit // 2
+        elif thread_ratio == "at":
+            thread_count = thread_limit
+        else:  # "double"
+            thread_count = thread_limit * 2
         result = self.run_test(
             mode,
             "thread-limit",
@@ -107,7 +105,6 @@ class TestThreadLimit(RocprofsysTest):
             binary_rewrite_args=self.BINARY_REWRITE_ARGS,
             runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
         )
-        thread_limit = get_thread_limit()
         pass_value = get_expected_pass_value(thread_count, thread_limit)
         fail_value = get_expected_fail_value(thread_count, thread_limit)
 
