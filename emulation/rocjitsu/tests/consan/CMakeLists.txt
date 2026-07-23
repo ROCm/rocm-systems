@@ -206,6 +206,8 @@ function(rj_add_consan_hip_tests)
         # Keep cross-compiled gfx950 fixtures available on other hosts,
         # but only register native HIP execution when gfx950 is present.
         if(HAS_GFX950_GPU)
+            # Per-site resource plans are debug diagnostics. Cases whose pass
+            # regex matches site/source/owner details must request log level 3.
             rj_add_consan_hip_case(
                 NAME "ConSanSpillHipTest.Gfx950VgprScratchRoundTrip"
                 TARGET hip_consan_spill_gfx950_test
@@ -517,6 +519,8 @@ function(rj_add_consan_hip_tests)
                 FILTER "${RJ_CONSAN_MOI_FULL_VGPR_FILE_TEST}"
                 TIMEOUT 30
         )
+        # Resource-plan cases that match debug-only site/source or
+        # owner/private-size diagnostics require log level 3.
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.DbiFullVgprFileForcedSpillPreservesOutput"
                 TARGET hip_consan_moi_test

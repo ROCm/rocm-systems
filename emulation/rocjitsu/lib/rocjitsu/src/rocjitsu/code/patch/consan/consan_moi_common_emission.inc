@@ -111,6 +111,10 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     // eagerly initialized until those identities can be represented
     // independently. Otherwise a clean barrier or atomic handoff can compare
     // owners from incompatible generations and report a false conflict.
+    // This is RDNA4-specific: gfx1250 and CDNA4 preserve their persistent
+    // workgroup key through generation-tagged access/token validation. The
+    // mismatch appeared when every RDNA4 local mirror switched representation.
+    // bd-hei.2.1 tracks unifying these identities without restoring that race.
     if (arch == ROCJITSU_CODE_ARCH_RDNA4 && !options.moi_track_barriers &&
         !options.moi_track_atomics) {
       layout = plan_consan_moi_generation_tagged_workgroup_shadow(

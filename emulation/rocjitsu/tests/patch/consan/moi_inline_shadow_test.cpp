@@ -648,7 +648,7 @@ TEST(ConSanMoi, CompactWorkgroupShadowUsesOneWordPerGuestCell) {
   EXPECT_TRUE(layout->compact);
 }
 
-TEST(ConSanMoi, Rdna4InlineShadowUsesGenerationTaggedWorkgroupLocalLdsMirror) {
+TEST(ConSanMoi, Rdna4AccessOnlyInlineShadowUsesGenerationTaggedWorkgroupLocalLdsMirror) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,
       0x00000000u, // ds_store_b32
@@ -662,6 +662,8 @@ TEST(ConSanMoi, Rdna4InlineShadowUsesGenerationTaggedWorkgroupLocalLdsMirror) {
   });
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_inline_workgroup_shadow = true;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = true;
   options.moi_init_owner_epoch = true;
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 24;
@@ -896,6 +898,24 @@ TEST(ConSanMoi, Rdna4BarrierTrackingUsesInitializedWorkgroupLocalLdsMirror) {
   EXPECT_EQ(access->required_group_segment_size, 13056u);
   EXPECT_FALSE(access->workgroup_shadow_lazy_initialization);
   EXPECT_FALSE(access->workgroup_shadow_compact);
+
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  EXPECT_FALSE(prologue->workgroup_shadow_lazy_initialization);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const auto *text = patched.text_sections().front();
+  std::vector<uint32_t> prologue_words(prologue->trampoline_size / sizeof(uint32_t));
+  std::memcpy(prologue_words.data(), text->data() + prologue->trampoline_offset,
+              prologue->trampoline_size);
+  EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(),
+                       *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_RDNA4)),
+            1);
+  EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(),
+                       *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_RDNA4)),
+            1);
 }
 
 TEST(ConSanMoi, InlineShadowFallsBackToExternalMirrorWhenLocalMirrorDoesNotFit) {

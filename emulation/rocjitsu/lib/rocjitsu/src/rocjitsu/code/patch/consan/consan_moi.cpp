@@ -149,6 +149,16 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         return site.disposition == ConSanSiteDisposition::Supported &&
                site.site_kind == ConSanResourceSiteKind::Barrier;
       });
+  if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow &&
+      effective_options.moi_track_barriers && !has_supported_barrier) {
+    // The standard profile requests barrier tracking, but an access-only
+    // object has no synchronization probe that can consume it. Keep the
+    // effective option aligned with admitted instrumentation so downstream
+    // layout selection can retain generation-qualified local LDS.
+    effective_options.moi_track_barriers = false;
+    result.warnings.emplace_back(
+        "ConSan MOI skipped barrier tracking for a code object with no admitted barrier sites");
+  }
   const size_t supported_barrier_members = std::ranges::count_if(
       sync_admission.site_dispositions, [](const ConSanSiteDispositionRecord &site) {
         return site.disposition == ConSanSiteDisposition::Supported &&
