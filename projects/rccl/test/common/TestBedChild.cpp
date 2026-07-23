@@ -232,153 +232,6 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
-  // ErrCode TestBedChild::InitCommsOld()
-  // {
-  //   if (this->verbose) TEST_INFO("Child %d begins InitComms()", this->childId);
-
-  //   // Read values sent by parent [see TestBed::InitComms()]
-  //   ncclUniqueId id;
-  //   PIPE_READ(id);
-  //   PIPE_READ(this->totalRanks);
-  //   PIPE_READ(this->rankOffset);
-  //   PIPE_READ(this->numGroupCalls);
-  //   PIPE_READ(this->numCollectivesInGroup);
-  //   PIPE_READ(this->useBlocking);
-  //   bool useMultiRankPerGpu;
-  //   PIPE_READ(useMultiRankPerGpu);
-  //   PIPE_READ(this->numStreamsPerGroup);
-
-  //   // Read the GPUs this child uses and prepare storage for collective args / datasets
-  //   int numGpus;
-  //   PIPE_READ(numGpus);
-
-  //   // FIX #1: Destroy existing HIP streams before clearing vector to prevent hardware queue leak!
-  //   for (auto& groupStreams : this->streams) {
-  //     for (auto& rankStreams : groupStreams) {
-  //       for (hipStream_t& stream : rankStreams) {
-  //         if (stream != nullptr) {
-  //           hipStreamDestroy(stream);
-  //           stream = nullptr;
-  //         }
-  //       }
-  //     }
-  //   }
-
-  //   this->deviceIds.resize(numGpus);
-  //   this->streams.clear();
-  //   this->streams.resize(this->numGroupCalls);
-  //   this->collArgs.resize(this->numGroupCalls);
-  //   for (int i = 0; i < this->numGroupCalls; i++)
-  //   {
-  //     this->collArgs[i].resize(numGpus);
-  //     this->streams[i].resize(numGpus);
-  //     for (int j = 0; j < numGpus; j++)
-  //     {
-  //       //PIPE_READ(this->deviceIds[j]);
-  //       this->collArgs[i][j].clear();
-  //       this->collArgs[i][j].resize(numCollectivesInGroup[i]);
-  //       this->streams[i][j].resize(numStreamsPerGroup[i]);
-  //     }
-  //   }
-
-  //   for (int i = 0; i < numGpus; i++)
-  //     PIPE_READ(this->deviceIds[i]);
-
-  //   // Initialize graphs
-  //   this->graphs.resize(this->numGroupCalls);
-  //   this->graphExecs.resize(this->numGroupCalls);
-  //   this->graphEnabled.resize(this->numGroupCalls);
-
-  //   // Initialize communicators
-  //   comms.clear();
-  //   comms.resize(numGpus);
-
-  //   // Initialize within a group call to avoid deadlock when using multiple ranks per child
-  //   ErrCode status = TEST_SUCCESS;
-  //   CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart");
-  //   for (int groupCallIdx = 0; groupCallIdx < this->numGroupCalls; ++groupCallIdx)
-  //   {
-  //     for (int localRank = 0; localRank < numGpus; ++localRank)
-  //     {
-  //       int const globalRank = this->rankOffset + localRank;
-  //       int const currGpu = this->deviceIds[localRank];
-
-  //       if (hipSetDevice(currGpu) != hipSuccess)
-  //       {
-  //         TEST_ERROR("Rank %d on child %d unable to switch to GPU %d", globalRank, this->childId, currGpu);
-  //         status = TEST_FAIL;
-  //         break;
-  //       }
-
-  //       for (int i = 0; i < this->numStreamsPerGroup[groupCallIdx]; i++)
-  //       {
-  //         hipError_t err = hipStreamCreate(&(this->streams[groupCallIdx][localRank][i]));
-  //         if (err != hipSuccess)
-  //         {
-  //           TEST_ERROR("Rank %d on child %d unable to create stream %d for GPU %d in group %d HIP Error: %s (%d)", globalRank, this->childId, i, currGpu, groupCallIdx,hipGetErrorString(err), err);
-  //           status = TEST_FAIL;
-  //           break;
-  //         }
-  //       }
-
-  //       if (groupCallIdx == 0) {
-  //         if (useMultiRankPerGpu)
-  //         {
-  //           //if (ncclCommInitRankMulti(&this->comms[localRank], this->totalRanks, id, globalRank, globalRank) != ncclSuccess)
-  //           {
-  //             TEST_ERROR("Rank %d on child %d unable to call ncclCommInitRankMulti", globalRank, this->childId);
-  //             status = TEST_FAIL;
-  //             break;
-  //           }
-  //         }
-  //         else if (this->useBlocking == false)
-  //         {
-  //           // When non-blocking communicator is desired call ncclCommInitRankConfig with appropriate flag
-  //           ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-  //           config.blocking = 0;
-  //           ncclCommInitRankConfig(&this->comms[localRank], this->totalRanks, id, globalRank, &config);
-  //           CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorInitRankConfig", localRank);
-  //         }
-  //         else
-  //         {
-  //           if (ncclCommInitRank(&this->comms[localRank], this->totalRanks, id, globalRank) != ncclSuccess)
-  //           {
-  //             TEST_ERROR("Rank %d on child %d unable to call ncclCommInitRank", globalRank, this->childId);
-  //             status = TEST_FAIL;
-  //             break;
-  //           }
-  //         }
-  //       }
-  //     }
-  //   }
-
-  //   if (status == TEST_SUCCESS)
-  //   {
-  //     // Check if the communicator is non-blocking
-  //     if (this->useBlocking == false)
-  //     {
-  //       // handle the ncclGroupEnd in case of non-blocking communication
-  //       ncclResult_t Group_End_state = ncclGroupEnd();
-  //       if (Group_End_state != ncclSuccess)
-  //       {
-  //         for (int localRank = 0; localRank < numGpus; ++localRank)
-  //         {
-  //           CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorGroupEnd", localRank);
-  //         }
-  //       }
-  //     }
-  //     else
-  //     {
-  //       // In case of blocking communication just call ncclGroupEnd
-  //       CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd");
-  //     }
-  //   }
-
-  //   if (this->verbose) TEST_INFO("Child %d finishes InitComms() [%s]",
-  //                           this->childId, status == TEST_SUCCESS ? "SUCCESS" : "FAIL");
-  //   return status;
-  // }
-
   ErrCode TestBedChild::InitComms()
   {
     if (this->verbose) TEST_INFO("Child %d begins InitComms()", this->childId);
@@ -419,7 +272,7 @@ namespace RcclUnitTesting
   int numGpus;
   PIPE_READ(numGpus);
 
-  // FIX #1: Destroy existing HIP streams before clearing vector to prevent hardware queue leak!
+  // Destroy existing HIP streams before clearing vector to prevent hardware queue leak!
   for (auto& groupStreams : this->streams) {
     for (auto& rankStreams : groupStreams) {
       for (hipStream_t& stream : rankStreams) {
@@ -462,7 +315,7 @@ namespace RcclUnitTesting
 
   ErrCode status = TEST_SUCCESS;
 
-  // FIX #2: Create HIP streams OUTSIDE of ncclGroupStart()
+  // Create HIP streams OUTSIDE of ncclGroupStart()
   for (int groupCallIdx = 0; groupCallIdx < this->numGroupCalls; ++groupCallIdx)
   {
     for (int localRank = 0; localRank < numGpus; ++localRank)
@@ -490,7 +343,7 @@ namespace RcclUnitTesting
       }
       if (status == TEST_FAIL) break;
     }
-    // FIX #3: Properly break outer loop on error
+    // Properly break outer loop on error
     if (status == TEST_FAIL) break;
   }
 
@@ -535,7 +388,7 @@ namespace RcclUnitTesting
     }
   }
 
-  // FIX #4: ALWAYS call ncclGroupEnd() once ncclGroupStart() has been executed!
+  // ALWAYS call ncclGroupEnd() once ncclGroupStart() has been executed!
   ncclResult_t groupEndErr = ncclGroupEnd();
   if (groupEndErr != ncclSuccess)
   {
