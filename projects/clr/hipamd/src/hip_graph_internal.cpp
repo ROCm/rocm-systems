@@ -2814,21 +2814,19 @@ bool Graph::RunOneNode(Node node) {
   if (node->GetType() == hipGraphNodeTypeGraph) {
     // Process child graph separately, since there is no connection
     auto child = reinterpret_cast<hip::ChildGraphNode*>(node)->GetChildGraph();
-    if (!reinterpret_cast<hip::ChildGraphNode*>(node)->GetGraphCaptureStatus()) {
-      child->RunNodes(node->stream_id_, &streams_, &waitList);
-      // Store the child graph's completion command so that downstream
-      // dependency handling can use node->GetCommands() directly,
-      // instead of querying getLastQueuedCommand at dependency time
-      // (which could return unrelated later work on the same stream).
-      auto completion = streams_[node->stream_id_]->getLastQueuedCommand(true);
-      if (completion != nullptr) {
-        // Release any previously stored completion command (from prior launches)
-        for (auto cmd : node->GetCommands()) {
-          cmd->release();
-        }
-        node->GetCommands().clear();
-        node->GetCommands().push_back(completion);
+    child->RunNodes(node->stream_id_, &streams_, &waitList);
+    // Store the child graph's completion command so that downstream
+    // dependency handling can use node->GetCommands() directly,
+    // instead of querying getLastQueuedCommand at dependency time
+    // (which could return unrelated later work on the same stream).
+    auto completion = streams_[node->stream_id_]->getLastQueuedCommand(true);
+    if (completion != nullptr) {
+      // Release any previously stored completion command (from prior launches)
+      for (auto cmd : node->GetCommands()) {
+        cmd->release();
       }
+      node->GetCommands().clear();
+      node->GetCommands().push_back(completion);
     }
   } else {
     // Assign a stream to the current node
