@@ -12,7 +12,7 @@ PERMANENT_BLACKLIST_ALL_ASICS=
 
 # This is the temporary blacklist for all ASICs. This is to be used when a test
 # is failing consistently
-TEMPORARY_BLACKLIST_ALL_ASICS="CperEntriesTest.*"
+TEMPORARY_BLACKLIST_ALL_ASICS=
 
 
 if [ -z "$PERMANENT_BLACKLIST_ALL_ASICS" -a -z "$TEMPORARY_BLACKLIST_ALL_ASICS" ]; then
@@ -25,20 +25,17 @@ fi
 
 # Device specific blacklists
 FILTER[vega10]=\
-$BLACKLIST_ALL_ASICS\
-"CperEntriesTest.*"
+$BLACKLIST_ALL_ASICS
 
 # SWDEV-207510
 FILTER[vega20]=\
 $BLACKLIST_ALL_ASICS\
-"CperEntriesTest.*:"\
 "GpuFunctionalReadOnly.TestFrequenciesRead:"\
 "GpuFunctionalReadOnly.TestProcInfoRead"
 
 # SWDEV-207510
 FILTER[arcturus]=\
 $BLACKLIST_ALL_ASICS\
-"CperEntriesTest.*:"\
 "GpuFunctionalReadOnly.TestFrequenciesRead:"\
 "GpuFunctionalReadWrite.TestFrequenciesReadWrite:"\
 "GpuFunctionalReadOnly.TestProcInfoRead"
@@ -46,7 +43,6 @@ $BLACKLIST_ALL_ASICS\
 # SWDEV-306889
 FILTER[aldebaran]=\
 $BLACKLIST_ALL_ASICS\
-"CperEntriesTest.*:"\
 "GpuFunctionalReadOnly.FanRead:"\
 "GpuFunctionalReadOnly.TestVoltCurvRead:"\
 "GpuFunctionalReadOnly.TestFrequenciesRead:"\
@@ -58,7 +54,6 @@ $BLACKLIST_ALL_ASICS\
 # SWDEV-319795
 FILTER[sienna_cichlid]=\
 $BLACKLIST_ALL_ASICS\
-"CperEntriesTest.*:"\
 "GpuFunctionalReadWrite.TestPerfLevelReadWrite"
 
 # SWDEV-321166
