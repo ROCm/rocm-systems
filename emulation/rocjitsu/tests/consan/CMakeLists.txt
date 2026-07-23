@@ -149,6 +149,180 @@ function(rj_add_consan_hip_case)
     endif()
 endfunction()
 
+set(RJ_CONSAN_LDS_CLEAN_TEST "ConSanLdsTest.PaddedCleanStoreCompletes")
+set(RJ_CONSAN_LDS_FLAT_RACY_TEST
+    "ConSanLdsTest.PaddedCrossWaveFlatLdsStoreCompletes"
+)
+set(RJ_CONSAN_CDNA_MOI_FORCED_SPILL_RECORD_TEST
+    "ConSanMoiCdnaTest.ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord"
+)
+set(RJ_CONSAN_CDNA_MOI_FORCED_SPILL_SAMPLED_TEST
+    "ConSanMoiCdnaTest.ForcedSpillSampledPreservesLiveVgprsAndWritesEntry"
+)
+set(RJ_CONSAN_CDNA_MOI_FORCED_SPILL_INLINE_TEST
+    "ConSanMoiCdnaTest.ForcedSpillInlineShadowPreservesLiveVgprs"
+)
+set(RJ_CONSAN_CDNA_MOI_SHARED_HELPER_TEST
+    "ConSanMoiCdnaTest.SharedHelperForcedSpillPreservesBothCallers"
+)
+set(RJ_CONSAN_CDNA_MOI_BARRIER_TEST
+    "ConSanMoiCdnaTest.BarrierForcedSpillPreservesLiveVgprsAndWritesRecords"
+)
+set(RJ_CONSAN_CDNA_MOI_ATOMIC_TEST
+    "ConSanMoiCdnaTest.AtomicForcedSpillPreservesLiveVgprsAndWritesRecord"
+)
+set(RJ_CONSAN_CDNA_MOI_DYNAMIC_STACK_TEST
+    "ConSanMoiCdnaTest.DynamicStackInlineSpillPreservesPrivateValues"
+)
+set(RJ_CONSAN_LDS_MOI_BARRIER_RECORD_TEST
+    "ConSanMoiHipTest.BarrierRecordOrdersTwoWaveAccesses"
+)
+set(RJ_CONSAN_LDS_MOI_ATOMIC_RECORD_TEST
+    "ConSanMoiHipTest.FlatAtomicWritesDynamicRecord"
+)
+set(RJ_CONSAN_MOI_FORCED_SPILL_RECORD_TEST
+    "ConSanMoiHipTest.ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord"
+)
+set(RJ_CONSAN_MOI_FORCED_SPILL_SAMPLED_TEST
+    "ConSanMoiHipTest.ForcedSpillSampledPreservesLiveVgprsAndWritesEntry"
+)
+set(RJ_CONSAN_MOI_SHARED_NOINLINE_HELPER_TEST
+    "ConSanMoiHipTest.SharedNoinlineHelperPreservesBothCallers"
+)
+set(RJ_CONSAN_MOI_SHARED_ATOMIC_HELPER_TEST
+    "ConSanMoiHipTest.SharedAtomicNoinlineHelperPreservesBothCallers"
+)
+set(RJ_CONSAN_MOI_DYNAMIC_PRIVATE_STACK_TEST
+    "ConSanMoiHipTest.DynamicPrivateStackTypedFallbackPreservesOutput"
+)
+
+function(rj_add_consan_common_sim_cases)
+    set(_one_value_args
+        PREFIX
+        LDS_TARGET
+        MOI_TARGET
+        CONFIG
+        RECORD_TEST
+        SAMPLED_TEST
+        SHARED_TEST
+        ACCESS_KERNEL
+        SHARED_KERNEL
+    )
+    cmake_parse_arguments(PARSE_ARGV 0 _sim "" "${_one_value_args}" "")
+    if(_sim_UNPARSED_ARGUMENTS)
+        message(
+            FATAL_ERROR
+            "unknown common ConSan simulator arguments: ${_sim_UNPARSED_ARGUMENTS}"
+        )
+    endif()
+    foreach(_required IN LISTS _one_value_args)
+        if(NOT _sim_${_required})
+            message(
+                FATAL_ERROR
+                "common ConSan simulator cases require ${_required}"
+            )
+        endif()
+    endforeach()
+
+    rj_add_consan_hip_case(
+        NAME "${_sim_PREFIX}.SuperColliderClean"
+        TARGET ${_sim_LDS_TARGET}
+        FILTER "${RJ_CONSAN_LDS_CLEAN_TEST}"
+        CONFIG "${_sim_CONFIG}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX "\\[  PASSED  \\] 1 test"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=supercollider"
+            "RJ_CONSAN_LOG=1"
+            "RJ_CONSAN_DELAY=2"
+            "RJ_CONSAN_TMP_VGPR=3"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "${_sim_PREFIX}.FlatLdsRecordReplayForcedSpill"
+        TARGET ${_sim_LDS_TARGET}
+        FILTER "${RJ_CONSAN_LDS_FLAT_RACY_TEST}"
+        CONFIG "${_sim_CONFIG}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX "site=access.*source=spill reason=none"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=record-replay"
+            "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=1048576"
+            "RJ_CONSAN_FLAT_PROVENANCE=strict"
+            "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+            "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+            "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=padded_cross_wave_flat_lds_store"
+            "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_MAX_PATCHES=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "${_sim_PREFIX}.MoiRecordReplayForcedSpill"
+        TARGET ${_sim_MOI_TARGET}
+        FILTER "${_sim_RECORD_TEST}"
+        CONFIG "${_sim_CONFIG}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX "site=access.*source=spill reason=none"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=record-replay"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+            "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=${_sim_ACCESS_KERNEL}"
+            "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_MAX_PATCHES=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "${_sim_PREFIX}.MoiSampledForcedSpill"
+        TARGET ${_sim_MOI_TARGET}
+        FILTER "${_sim_SAMPLED_TEST}"
+        CONFIG "${_sim_CONFIG}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX "site=access.*source=spill reason=none"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=sampled"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+            "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=${_sim_ACCESS_KERNEL}"
+            "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_MAX_PATCHES=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "${_sim_PREFIX}.MoiSharedHelperForcedSpill"
+        TARGET ${_sim_MOI_TARGET}
+        FILTER "${_sim_SHARED_TEST}"
+        CONFIG "${_sim_CONFIG}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX "site=access.*source=spill reason=none owners=2"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=record-replay"
+            "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=0"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+            "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=${_sim_SHARED_KERNEL}"
+            "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_MAX_PATCHES=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+endfunction()
+
 function(rj_add_consan_cdna_sim_cases)
     set(_one_value_args PREFIX LDS_TARGET MOI_TARGET CONFIG)
     cmake_parse_arguments(PARSE_ARGV 0 _sim "" "${_one_value_args}" "")
@@ -167,59 +341,24 @@ function(rj_add_consan_cdna_sim_cases)
         endif()
     endforeach()
 
-    rj_add_consan_hip_case(
-        NAME "${_sim_PREFIX}.SuperColliderClean"
-        TARGET ${_sim_LDS_TARGET}
-        FILTER "ConSanLdsTest.PaddedCleanStoreCompletes"
+    rj_add_consan_common_sim_cases(
+        PREFIX "${_sim_PREFIX}"
+        LDS_TARGET ${_sim_LDS_TARGET}
+        MOI_TARGET ${_sim_MOI_TARGET}
         CONFIG "${_sim_CONFIG}"
-        TIMEOUT 60
-        RUN_SERIAL
-        ENVIRONMENT
-            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-            "RJ_CONSAN_MODE=supercollider"
-            "RJ_CONSAN_LOG=1"
-            "RJ_CONSAN_DELAY=2"
-            "RJ_CONSAN_TMP_VGPR=3"
-            "RJ_CONSAN_REQUIRE_PATCH=1"
+        RECORD_TEST "${RJ_CONSAN_CDNA_MOI_FORCED_SPILL_RECORD_TEST}"
+        SAMPLED_TEST "${RJ_CONSAN_CDNA_MOI_FORCED_SPILL_SAMPLED_TEST}"
+        SHARED_TEST "${RJ_CONSAN_CDNA_MOI_SHARED_HELPER_TEST}"
+        ACCESS_KERNEL "moi_cdna_forced_spill_test_kernel_for_instrumentation"
+        SHARED_KERNEL "moi_cdna_shared_lds_helper_for_instrumentation"
     )
-    rj_add_consan_hip_case(
-        NAME "${_sim_PREFIX}.MoiRecordReplayForcedSpill"
-        TARGET ${_sim_MOI_TARGET}
-        FILTER "ConSanMoiCdnaTest.ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord"
-        CONFIG "${_sim_CONFIG}"
-        TIMEOUT 60
-        RUN_SERIAL
-        PASS_REGEX "site=access.*source=spill reason=none"
-        ENVIRONMENT
-            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-            "RJ_CONSAN_MODE=record-replay"
-            "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
-            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_forced_spill_test_kernel_for_instrumentation"
-            "RJ_CONSAN_LOG=3"
-            "RJ_CONSAN_MAX_PATCHES=1"
-            "RJ_CONSAN_REQUIRE_PATCH=1"
-    )
-    rj_add_consan_hip_case(
-        NAME "${_sim_PREFIX}.MoiSampledForcedSpill"
-        TARGET ${_sim_MOI_TARGET}
-        FILTER "ConSanMoiCdnaTest.ForcedSpillSampledPreservesLiveVgprsAndWritesEntry"
-        CONFIG "${_sim_CONFIG}"
-        TIMEOUT 60
-        RUN_SERIAL
-        PASS_REGEX "site=access.*source=spill reason=none"
-        ENVIRONMENT
-            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-            "RJ_CONSAN_MODE=sampled"
-            "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
-            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_forced_spill_test_kernel_for_instrumentation"
-            "RJ_CONSAN_LOG=3"
-            "RJ_CONSAN_MAX_PATCHES=1"
-            "RJ_CONSAN_REQUIRE_PATCH=1"
-    )
+
+    # CDNA's focused MOI fixture has spill-specific inline, synchronization,
+    # atomic, and dynamic-stack cases; keep those family-specific below.
     rj_add_consan_hip_case(
         NAME "${_sim_PREFIX}.MoiInlineShadowForcedSpill"
         TARGET ${_sim_MOI_TARGET}
-        FILTER "ConSanMoiCdnaTest.ForcedSpillInlineShadowPreservesLiveVgprs"
+        FILTER "${RJ_CONSAN_CDNA_MOI_FORCED_SPILL_INLINE_TEST}"
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
@@ -229,6 +368,8 @@ function(rj_add_consan_cdna_sim_cases)
             "RJ_CONSAN_MODE=inline-shadow"
             "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
             "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
             "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
             "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_forced_spill_test_kernel_for_instrumentation"
             "RJ_CONSAN_LOG=3"
@@ -236,26 +377,9 @@ function(rj_add_consan_cdna_sim_cases)
             "RJ_CONSAN_REQUIRE_PATCH=1"
     )
     rj_add_consan_hip_case(
-        NAME "${_sim_PREFIX}.MoiSharedHelperForcedSpill"
-        TARGET ${_sim_MOI_TARGET}
-        FILTER "ConSanMoiCdnaTest.SharedHelperForcedSpillPreservesBothCallers"
-        CONFIG "${_sim_CONFIG}"
-        TIMEOUT 60
-        RUN_SERIAL
-        PASS_REGEX "site=access.*source=spill reason=none owners=2"
-        ENVIRONMENT
-            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-            "RJ_CONSAN_MODE=record-replay"
-            "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
-            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_shared_lds_helper_for_instrumentation"
-            "RJ_CONSAN_LOG=3"
-            "RJ_CONSAN_MAX_PATCHES=1"
-            "RJ_CONSAN_REQUIRE_PATCH=1"
-    )
-    rj_add_consan_hip_case(
         NAME "${_sim_PREFIX}.MoiBarrierForcedSpill"
         TARGET ${_sim_MOI_TARGET}
-        FILTER "ConSanMoiCdnaTest.BarrierForcedSpillPreservesLiveVgprsAndWritesRecords"
+        FILTER "${RJ_CONSAN_CDNA_MOI_BARRIER_TEST}"
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
@@ -265,6 +389,7 @@ function(rj_add_consan_cdna_sim_cases)
             "RJ_CONSAN_MODE=record-replay"
             "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=0"
             "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
             "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
             "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_barrier_forced_spill_kernel_for_instrumentation"
             "RJ_CONSAN_LOG=3"
@@ -274,7 +399,7 @@ function(rj_add_consan_cdna_sim_cases)
     rj_add_consan_hip_case(
         NAME "${_sim_PREFIX}.MoiAtomicForcedSpill"
         TARGET ${_sim_MOI_TARGET}
-        FILTER "ConSanMoiCdnaTest.AtomicForcedSpillPreservesLiveVgprsAndWritesRecord"
+        FILTER "${RJ_CONSAN_CDNA_MOI_ATOMIC_TEST}"
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
@@ -282,6 +407,7 @@ function(rj_add_consan_cdna_sim_cases)
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=record-replay"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
             "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
             "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
             "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_atomic_forced_spill_kernel_for_instrumentation"
@@ -292,7 +418,7 @@ function(rj_add_consan_cdna_sim_cases)
     rj_add_consan_hip_case(
         NAME "${_sim_PREFIX}.MoiDynamicStackInlineForcedSpill"
         TARGET ${_sim_MOI_TARGET}
-        FILTER "ConSanMoiCdnaTest.DynamicStackInlineSpillPreservesPrivateValues"
+        FILTER "${RJ_CONSAN_CDNA_MOI_DYNAMIC_STACK_TEST}"
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
@@ -302,6 +428,8 @@ function(rj_add_consan_cdna_sim_cases)
             "RJ_CONSAN_MODE=inline-shadow"
             "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
             "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
             "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
             "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_dynamic_stack_inline_spill_kernel_for_instrumentation"
             "RJ_CONSAN_LOG=3"
@@ -328,59 +456,24 @@ function(rj_add_consan_gfx1250_sim_cases)
         endif()
     endforeach()
 
-    rj_add_consan_hip_case(
-        NAME "${_sim_PREFIX}.SuperColliderClean"
-        TARGET ${_sim_LDS_TARGET}
-        FILTER "ConSanLdsTest.PaddedCleanStoreCompletes"
+    rj_add_consan_common_sim_cases(
+        PREFIX "${_sim_PREFIX}"
+        LDS_TARGET ${_sim_LDS_TARGET}
+        MOI_TARGET ${_sim_MOI_TARGET}
         CONFIG "${_sim_CONFIG}"
-        TIMEOUT 60
-        RUN_SERIAL
-        ENVIRONMENT
-            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-            "RJ_CONSAN_MODE=supercollider"
-            "RJ_CONSAN_LOG=1"
-            "RJ_CONSAN_DELAY=2"
-            "RJ_CONSAN_TMP_VGPR=3"
-            "RJ_CONSAN_REQUIRE_PATCH=1"
+        RECORD_TEST "${RJ_CONSAN_MOI_FORCED_SPILL_RECORD_TEST}"
+        SAMPLED_TEST "${RJ_CONSAN_MOI_FORCED_SPILL_SAMPLED_TEST}"
+        SHARED_TEST "${RJ_CONSAN_MOI_SHARED_NOINLINE_HELPER_TEST}"
+        ACCESS_KERNEL "moi_forced_spill_preserves_live_vgprs_test_kernel_for_instrumentation"
+        SHARED_KERNEL "moi_shared_noinline_lds_helper_for_instrumentation"
     )
-    rj_add_consan_hip_case(
-        NAME "${_sim_PREFIX}.MoiRecordReplayForcedSpill"
-        TARGET ${_sim_MOI_TARGET}
-        FILTER "ConSanMoiHipTest.ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord"
-        CONFIG "${_sim_CONFIG}"
-        TIMEOUT 60
-        RUN_SERIAL
-        PASS_REGEX "site=access.*source=spill reason=none"
-        ENVIRONMENT
-            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-            "RJ_CONSAN_MODE=record-replay"
-            "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
-            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_forced_spill_preserves_live_vgprs_test_kernel_for_instrumentation"
-            "RJ_CONSAN_LOG=3"
-            "RJ_CONSAN_MAX_PATCHES=1"
-            "RJ_CONSAN_REQUIRE_PATCH=1"
-    )
-    rj_add_consan_hip_case(
-        NAME "${_sim_PREFIX}.MoiSampledForcedSpill"
-        TARGET ${_sim_MOI_TARGET}
-        FILTER "ConSanMoiHipTest.ForcedSpillSampledPreservesLiveVgprsAndWritesEntry"
-        CONFIG "${_sim_CONFIG}"
-        TIMEOUT 60
-        RUN_SERIAL
-        PASS_REGEX "site=access.*source=spill reason=none"
-        ENVIRONMENT
-            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-            "RJ_CONSAN_MODE=sampled"
-            "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
-            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_forced_spill_preserves_live_vgprs_test_kernel_for_instrumentation"
-            "RJ_CONSAN_LOG=3"
-            "RJ_CONSAN_MAX_PATCHES=1"
-            "RJ_CONSAN_REQUIRE_PATCH=1"
-    )
+
+    # gfx1250 uses the general RDNA fixture, whose focused inline,
+    # synchronization, atomic, and dynamic-stack cases differ from CDNA.
     rj_add_consan_hip_case(
         NAME "${_sim_PREFIX}.MoiInlineShadowAtomic"
         TARGET ${_sim_MOI_TARGET}
-        FILTER "ConSanMoiHipTest.SharedAtomicNoinlineHelperPreservesBothCallers"
+        FILTER "${RJ_CONSAN_MOI_SHARED_ATOMIC_HELPER_TEST}"
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
@@ -399,27 +492,9 @@ function(rj_add_consan_gfx1250_sim_cases)
             "RJ_CONSAN_REQUIRE_PATCH=1"
     )
     rj_add_consan_hip_case(
-        NAME "${_sim_PREFIX}.MoiSharedHelperForcedSpill"
-        TARGET ${_sim_MOI_TARGET}
-        FILTER "ConSanMoiHipTest.SharedNoinlineHelperPreservesBothCallers"
-        CONFIG "${_sim_CONFIG}"
-        TIMEOUT 60
-        RUN_SERIAL
-        PASS_REGEX "site=access.*source=spill reason=none owners=2"
-        ENVIRONMENT
-            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-            "RJ_CONSAN_MODE=record-replay"
-            "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=0"
-            "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
-            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_shared_noinline_lds_helper_for_instrumentation"
-            "RJ_CONSAN_LOG=3"
-            "RJ_CONSAN_MAX_PATCHES=1"
-            "RJ_CONSAN_REQUIRE_PATCH=1"
-    )
-    rj_add_consan_hip_case(
         NAME "${_sim_PREFIX}.MoiBarrierRecordReplay"
         TARGET ${_sim_MOI_TARGET}
-        FILTER "ConSanMoiHipTest.BarrierRecordOrdersTwoWaveAccesses"
+        FILTER "${RJ_CONSAN_LDS_MOI_BARRIER_RECORD_TEST}"
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
@@ -429,6 +504,7 @@ function(rj_add_consan_gfx1250_sim_cases)
             "RJ_CONSAN_MODE=record-replay"
             "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=0"
             "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
             "RJ_CONSAN_TEST_KERNEL_FILTER=moi_two_wave_lds_accesses_with_barrier"
             "RJ_CONSAN_LOG=3"
             "RJ_CONSAN_MAX_PATCHES=8"
@@ -437,7 +513,7 @@ function(rj_add_consan_gfx1250_sim_cases)
     rj_add_consan_hip_case(
         NAME "${_sim_PREFIX}.MoiAtomicRecordReplay"
         TARGET ${_sim_MOI_TARGET}
-        FILTER "ConSanMoiHipTest.FlatAtomicWritesDynamicRecord"
+        FILTER "${RJ_CONSAN_LDS_MOI_ATOMIC_RECORD_TEST}"
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
@@ -445,6 +521,7 @@ function(rj_add_consan_gfx1250_sim_cases)
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=record-replay"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
             "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
             "RJ_CONSAN_TEST_KERNEL_FILTER=moi_flat_atomic_add_record"
             "RJ_CONSAN_LOG=3"
@@ -454,7 +531,7 @@ function(rj_add_consan_gfx1250_sim_cases)
     rj_add_consan_hip_case(
         NAME "${_sim_PREFIX}.MoiDynamicStackTypedFallback"
         TARGET ${_sim_MOI_TARGET}
-        FILTER "ConSanMoiHipTest.DynamicPrivateStackTypedFallbackPreservesOutput"
+        FILTER "${RJ_CONSAN_MOI_DYNAMIC_PRIVATE_STACK_TEST}"
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
@@ -462,6 +539,8 @@ function(rj_add_consan_gfx1250_sim_cases)
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=record-replay"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
             "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
             "RJ_CONSAN_TEST_KERNEL_FILTER=moi_dynamic_private_stack_test_kernel_for_instrumentation"
             "RJ_CONSAN_LOG=1"
@@ -596,7 +675,7 @@ function(rj_add_consan_hip_tests)
             rj_add_consan_hip_case(
                 NAME "ConSanMoiCdnaTest.DbiForcedSpillRecordReplay"
                 TARGET hip_consan_moi_gfx950_test
-                FILTER "ConSanMoiCdnaTest.ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord"
+                FILTER "${RJ_CONSAN_CDNA_MOI_FORCED_SPILL_RECORD_TEST}"
                 TIMEOUT 30
                 RUN_SERIAL
                 PASS_REGEX "site=access.*source=spill reason=none"
@@ -614,7 +693,7 @@ function(rj_add_consan_hip_tests)
             rj_add_consan_hip_case(
                 NAME "ConSanMoiCdnaTest.DbiForcedSpillSampled"
                 TARGET hip_consan_moi_gfx950_test
-                FILTER "ConSanMoiCdnaTest.ForcedSpillSampledPreservesLiveVgprsAndWritesEntry"
+                FILTER "${RJ_CONSAN_CDNA_MOI_FORCED_SPILL_SAMPLED_TEST}"
                 TIMEOUT 30
                 RUN_SERIAL
                 PASS_REGEX "site=access.*source=spill reason=none"
@@ -632,7 +711,7 @@ function(rj_add_consan_hip_tests)
             rj_add_consan_hip_case(
                 NAME "ConSanMoiCdnaTest.DbiForcedSpillInlineShadow"
                 TARGET hip_consan_moi_gfx950_test
-                FILTER "ConSanMoiCdnaTest.ForcedSpillInlineShadowPreservesLiveVgprs"
+                FILTER "${RJ_CONSAN_CDNA_MOI_FORCED_SPILL_INLINE_TEST}"
                 TIMEOUT 30
                 RUN_SERIAL
                 PASS_REGEX "site=access.*source=spill reason=none"
@@ -652,7 +731,7 @@ function(rj_add_consan_hip_tests)
             rj_add_consan_hip_case(
                 NAME "ConSanMoiCdnaTest.DbiSharedHelperForcedSpill"
                 TARGET hip_consan_moi_gfx950_test
-                FILTER "ConSanMoiCdnaTest.SharedHelperForcedSpillPreservesBothCallers"
+                FILTER "${RJ_CONSAN_CDNA_MOI_SHARED_HELPER_TEST}"
                 TIMEOUT 30
                 RUN_SERIAL
                 PASS_REGEX "site=access.*source=spill reason=none owners=2"
@@ -670,7 +749,7 @@ function(rj_add_consan_hip_tests)
             rj_add_consan_hip_case(
                 NAME "ConSanMoiCdnaTest.DbiBarrierForcedSpill"
                 TARGET hip_consan_moi_gfx950_test
-                FILTER "ConSanMoiCdnaTest.BarrierForcedSpillPreservesLiveVgprsAndWritesRecords"
+                FILTER "${RJ_CONSAN_CDNA_MOI_BARRIER_TEST}"
                 TIMEOUT 30
                 RUN_SERIAL
                 PASS_REGEX "site=barrier.*source=spill reason=none"
@@ -689,7 +768,7 @@ function(rj_add_consan_hip_tests)
             rj_add_consan_hip_case(
                 NAME "ConSanMoiCdnaTest.DbiAtomicForcedSpill"
                 TARGET hip_consan_moi_gfx950_test
-                FILTER "ConSanMoiCdnaTest.AtomicForcedSpillPreservesLiveVgprsAndWritesRecord"
+                FILTER "${RJ_CONSAN_CDNA_MOI_ATOMIC_TEST}"
                 TIMEOUT 30
                 RUN_SERIAL
                 PASS_REGEX "site=atomic.*source=spill reason=none"
@@ -707,7 +786,7 @@ function(rj_add_consan_hip_tests)
             rj_add_consan_hip_case(
                 NAME "ConSanMoiCdnaTest.DbiDynamicStackInlineForcedSpill"
                 TARGET hip_consan_moi_gfx950_test
-                FILTER "ConSanMoiCdnaTest.DynamicStackInlineSpillPreservesPrivateValues"
+                FILTER "${RJ_CONSAN_CDNA_MOI_DYNAMIC_STACK_TEST}"
                 TIMEOUT 30
                 RUN_SERIAL
                 PASS_REGEX "site=access.*source=spill reason=none"
@@ -779,7 +858,6 @@ function(rj_add_consan_hip_tests)
             SOURCE dbi/consan/hip_consan_malformed_sync_test.hip
     )
     if(HAS_GFX1201_GPU)
-        set(RJ_CONSAN_LDS_CLEAN_TEST "ConSanLdsTest.PaddedCleanStoreCompletes")
         set(RJ_CONSAN_LDS_RACY_TEST
             "ConSanLdsTest.PaddedRacyStoreCompletesOrTripsDbiTrap"
         )
@@ -840,38 +918,17 @@ function(rj_add_consan_hip_tests)
         set(RJ_CONSAN_LDS_MOI_LIMITED_RECORD_TEST
             "ConSanMoiHipTest.OneRecordCapacityLimitsAccessPatches"
         )
-        set(RJ_CONSAN_LDS_MOI_BARRIER_RECORD_TEST
-            "ConSanMoiHipTest.BarrierRecordOrdersTwoWaveAccesses"
-        )
-        set(RJ_CONSAN_LDS_MOI_ATOMIC_RECORD_TEST
-            "ConSanMoiHipTest.FlatAtomicWritesDynamicRecord"
-        )
         set(RJ_CONSAN_LDS_MOI_ATOMIC_HANDOFF_TEST
             "ConSanMoiHipTest.AtomicHandoffOrdersTwoWaveAccesses"
         )
         set(RJ_CONSAN_GFX1201_VGPR_SPILL_TEST
             "ConSanSpillHipTest.Gfx1201VgprScratchRoundTrip"
         )
-        set(RJ_CONSAN_MOI_FORCED_SPILL_RECORD_TEST
-            "ConSanMoiHipTest.ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord"
-        )
-        set(RJ_CONSAN_MOI_FORCED_SPILL_SAMPLED_TEST
-            "ConSanMoiHipTest.ForcedSpillSampledPreservesLiveVgprsAndWritesEntry"
-        )
         set(RJ_CONSAN_MOI_FULL_VGPR_FILE_TEST
             "ConSanMoiHipTest.FullVgprFileForcedSpillPreservesOutput"
         )
-        set(RJ_CONSAN_MOI_SHARED_NOINLINE_HELPER_TEST
-            "ConSanMoiHipTest.SharedNoinlineHelperPreservesBothCallers"
-        )
-        set(RJ_CONSAN_MOI_SHARED_ATOMIC_HELPER_TEST
-            "ConSanMoiHipTest.SharedAtomicNoinlineHelperPreservesBothCallers"
-        )
         set(RJ_CONSAN_MOI_STATIC_PRIVATE_STACK_TEST
             "ConSanMoiHipTest.StaticPrivateStackForcedSpillPreservesOutput"
-        )
-        set(RJ_CONSAN_MOI_DYNAMIC_PRIVATE_STACK_TEST
-            "ConSanMoiHipTest.DynamicPrivateStackTypedFallbackPreservesOutput"
         )
         rj_add_consan_hip_case(
                 NAME "ConSanSpillHipTest.Gfx1201VgprScratchRoundTrip"

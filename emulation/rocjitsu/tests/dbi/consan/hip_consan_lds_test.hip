@@ -32,12 +32,48 @@ int main(int argc, char **argv) {
 #if defined(__gfx942__) || defined(__gfx950__)
 #define RJ_CONSAN_TEST_WORKGROUP_BARRIER "s_barrier\n\t"
 #define RJ_CONSAN_TEST_DS_STORE_B32 "ds_write_b32 %0, %1\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_B32 "flat_store_dword v[0:1], %0\n\t"
 #else
 #define RJ_CONSAN_TEST_WORKGROUP_BARRIER                                                           \
   "s_barrier_signal -1\n\t"                                                                        \
   "s_barrier_wait -1\n\t"
 #define RJ_CONSAN_TEST_DS_STORE_B32 "ds_store_b32 %0, %1\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_B32 "flat_store_b32 v[0:1], %0\n\t"
 #endif
+
+#define RJ_CONSAN_TEST_NOP_CAVE                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"                                                                                    \
+  "s_nop 0\n\t"
 
 namespace {
 
@@ -121,38 +157,7 @@ __global__ __launch_bounds__(64) void padded_lds_store(uint32_t *out, uint32_t r
   const uint32_t lds_addr = racy != 0 ? racy_addr : clean_addr;
   const uint32_t value = 0xC0FFEE00u | tid;
   // Keep enough slack for the larger marker-buffer mismatch action.
-  asm volatile(RJ_CONSAN_TEST_DS_STORE_B32 "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
-                                           "s_nop 0\n\t"
+  asm volatile(RJ_CONSAN_TEST_DS_STORE_B32 RJ_CONSAN_TEST_NOP_CAVE
                :
                : "v"(lds_addr), "v"(value)
                : "memory");
@@ -164,6 +169,27 @@ __global__ __launch_bounds__(64) void padded_lds_store(uint32_t *out, uint32_t r
   } else {
     out[tid] = lds[tid];
   }
+}
+
+__device__ __forceinline__ void padded_flat_lds_store(uint32_t value) {
+  asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
+               "v_mov_b32 v0, s14\n\t"
+               "v_mov_b32 v1, s15\n\t" RJ_CONSAN_TEST_FLAT_STORE_B32 RJ_CONSAN_TEST_NOP_CAVE
+               :
+               : "v"(value)
+               : "s14", "s15", "v0", "v1", "memory");
+}
+
+__global__ __launch_bounds__(128) void padded_cross_wave_flat_lds_store(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  asm volatile("" : : "v"(&lds[0]) : "memory");
+  // Keep the descriptor full so the regression exercises the spill-backed
+  // resource plan instead of relying on target-specific unused high VGPRs.
+  asm volatile("v_mov_b32 v255, 0" ::: "v255");
+  padded_flat_lds_store(0xF1A70000u | tid);
+  if (tid == 0)
+    out[0] = 0xF1A70000u;
 }
 
 void launch_padded_lds_store(uint32_t *d_out, uint32_t racy) {
@@ -198,6 +224,21 @@ TEST(ConSanLdsTest, PaddedCleanStoreCompletes) {
 
   for (uint32_t i = 0; i < kValues; ++i)
     EXPECT_EQ(out[i], 0xC0FFEE00u | i);
+}
+
+TEST(ConSanLdsTest, PaddedCrossWaveFlatLdsStoreCompletes) {
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, sizeof(*d_out)));
+  HIP_ASSERT(hipMemset(d_out, 0, sizeof(*d_out)));
+
+  padded_cross_wave_flat_lds_store<<<1, 128>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  uint32_t out = 0;
+  HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  EXPECT_EQ(out, 0xF1A70000u);
 }
 
 TEST(ConSanLdsTest, PaddedRacyStoreCompletesOrTripsDbiTrap) {
