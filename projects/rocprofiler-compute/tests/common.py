@@ -30,7 +30,7 @@ SUPPORTED_ARCHS = {
     "gfx1150": {"rdna35_point_1": ["RDNA35_POINT_1"]},
     "gfx1151": {"rdna35_halo": ["RDNA35_HALO"]},
     "gfx1152": {"rdna35_point_2": ["RDNA35_POINT_2"]},
-    "gfx1153": {"rdna35_krackan2": ["RDNA35_KRACKAN2"]},
+    "gfx1153": {"rdna35_krackan2e": ["RDNA35_KRACKAN2E"]},
 }
 
 
@@ -344,7 +344,7 @@ def skip_unsupported_pc_sampling_soc(is_stochastic=False):
         "RDNA35_POINT_1",
         "RDNA35_HALO",
         "RDNA35_POINT_2",
-        "RDNA35_KRACKAN2",
+        "RDNA35_KRACKAN2E",
     }
     if is_stochastic:
         unsupported_socs.add("MI200")

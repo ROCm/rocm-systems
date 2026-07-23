@@ -503,7 +503,7 @@ mi_gpu_spec:
           GL2A: 4
           GL2C: 4
         models:
-          - gpu_model: rdna35_krackan2
+          - gpu_model: rdna35_krackan2e
             design:
               memory_levels: ["LDS", "L0", "L1", "L2"]
             chip_ids:
