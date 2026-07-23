@@ -126,7 +126,8 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
     const ConSanOptions &options, const VgprSpillSequence *spill, rj_code_arch_t arch,
     const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
     uint64_t return_text_offset, std::optional<uint32_t> private_epoch_offset,
-    std::optional<uint16_t> gfx1250_vgpr_msb_mode, std::vector<std::string> &errors) {
+    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> gfx1250_vgpr_msb_mode,
+    std::vector<std::string> &errors) {
   if (!options.scratch_vgpr || !options.moi_report_buffer_address || !options.moi_epoch_vgpr ||
       !options.moi_exec_save_sgpr || !options.moi_owner_vgpr ||
       options.moi_owner_source != ConSanMoiOwnerSource::WorkitemId ||
@@ -210,27 +211,31 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   // workgroup which touched a selected address, leaving its recorded accesses
   // in one epoch with no synchronization metadata.
   if (private_epoch_offset) {
-    if (!options.automatic_moi_private_epoch) {
-      errors.emplace_back("ConSan MOI sampled barrier has an invalid private epoch plan");
+    if (!options.automatic_moi_private_epoch || !private_owner_offset) {
+      errors.emplace_back("ConSan MOI sampled barrier has an invalid private owner/epoch plan");
       return std::nullopt;
     }
     const auto owner_shift =
         moi_descriptor_owner_shift(bytes, *candidate.barrier.kernel_descriptor_file_offset, errors);
-    const auto load = instrumentation::build_private_load_b32(*options.moi_epoch_vgpr,
-                                                              *private_epoch_offset, arch);
-    const auto wait = instrumentation::build_s_wait_private_load0(arch);
-    if (!owner_shift || !load || !wait) {
+    const auto load_epoch = instrumentation::build_private_load_b32(*options.moi_epoch_vgpr,
+                                                                    *private_epoch_offset, arch);
+    const auto load_owner = instrumentation::build_private_load_b32(*options.moi_owner_vgpr,
+                                                                    *private_owner_offset, arch);
+    const auto wait_epoch = instrumentation::build_s_wait_private_load0(arch);
+    const auto wait_owner = instrumentation::build_s_wait_private_load0(arch);
+    const auto owner =
+        owner_shift ? instrumentation::build_v_lshrrev_b32(*options.moi_owner_vgpr,
+                                                           scalar_positive_inline_u32(*owner_shift),
+                                                           *options.moi_owner_vgpr, arch)
+                    : std::nullopt;
+    if (!owner_shift || !load_epoch || !load_owner || !wait_epoch || !wait_owner || !owner) {
       errors.emplace_back("ConSan MOI sampled barrier could not load private owner/epoch state");
       return std::nullopt;
     }
-    words.insert(words.end(), load->begin(), load->end());
-    words.push_back(*wait);
-    const auto owner = instrumentation::build_v_lshrrev_b32(
-        *options.moi_owner_vgpr, scalar_positive_inline_u32(*owner_shift), kRdna4WorkitemIdX, arch);
-    if (!owner) {
-      errors.emplace_back("ConSan MOI sampled barrier failed at private owner derivation");
-      return std::nullopt;
-    }
+    words.insert(words.end(), load_epoch->begin(), load_epoch->end());
+    words.push_back(*wait_epoch);
+    words.insert(words.end(), load_owner->begin(), load_owner->end());
+    words.push_back(*wait_owner);
     words.push_back(*owner);
   }
   if (!append_save_moi_special_state(words, options, arch)) {
@@ -888,6 +893,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     ResolvedMoiScratchPlan resources;
     std::optional<VgprSpillSequence> spill;
     std::optional<uint32_t> private_epoch_offset;
+    std::optional<uint32_t> private_owner_offset;
+    std::optional<uint32_t> private_sample_sequence_offset;
+    uint32_t persistent_private_state_end = 0;
     uint32_t required_private_bytes = 0;
   };
   std::vector<Planned> selected;
@@ -950,7 +958,10 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       continue;
     std::optional<MoiPrivateEpochLayout> private_layout;
     if (options.automatic_moi_private_epoch) {
-      private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings);
+      private_layout = build_moi_private_epoch_layout(
+          result, *resources, arch, result.warnings,
+          /*include_sample_sequence=*/options.automatic_moi_private_sample_sequence,
+          /*include_owner=*/options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId);
       if (!private_layout)
         continue;
     }
@@ -977,7 +988,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     selected.push_back(
         {std::move(candidate), *resources, std::move(spill),
          private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
-         required_private_bytes});
+         private_layout ? private_layout->owner_offset : std::nullopt,
+         private_layout ? private_layout->sample_sequence_offset : std::nullopt,
+         private_layout ? private_layout->ephemeral_base : 0u, required_private_bytes});
   }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan MOI sampled barrier sync found no patchable sequence");
@@ -1225,7 +1238,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         auto body_words = build_sampled_barrier_sync_cave_words(
             bytes, planned.candidate, candidate_options, planned.spill ? &*planned.spill : nullptr,
             arch, layout, body_offset, site.text_offset + site.size, planned.private_epoch_offset,
-            vgpr_msb_mode, result.errors);
+            planned.private_owner_offset, vgpr_msb_mode, result.errors);
         if (!body_words)
           return;
         append_words_bytes(new_text, *body_words);
@@ -1348,6 +1361,10 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
             static_cast<uint32_t>(planned.candidate.sequence->member_event_identities.size());
         info.scratch_vgpr = planned.resources.base;
         info.persistent_epoch_private_offset = planned.private_epoch_offset;
+        info.persistent_owner_private_offset = planned.private_owner_offset;
+        info.persistent_sample_sequence_private_offset = planned.private_sample_sequence_offset;
+        if (planned.private_epoch_offset)
+          info.persistent_private_state_end = planned.persistent_private_state_end;
         info.required_private_segment_size = planned.required_private_bytes;
         info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
         if (planned.spill)
@@ -1381,7 +1398,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     auto cave_words = build_sampled_barrier_sync_cave_words(
         bytes, planned.candidate, candidate_options, planned.spill ? &*planned.spill : nullptr,
         arch, layout, cave_offset, site.text_offset + site.size, planned.private_epoch_offset,
-        std::nullopt, result.errors);
+        planned.private_owner_offset, std::nullopt, result.errors);
     if (!cave_words) {
       result.errors.emplace_back(
           "ConSan MOI sampled barrier sync could not encode its probe with scratch v" +
@@ -1451,6 +1468,10 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         static_cast<uint32_t>(planned.candidate.sequence->member_event_identities.size());
     info.scratch_vgpr = planned.resources.base;
     info.persistent_epoch_private_offset = planned.private_epoch_offset;
+    info.persistent_owner_private_offset = planned.private_owner_offset;
+    info.persistent_sample_sequence_private_offset = planned.private_sample_sequence_offset;
+    if (planned.private_epoch_offset)
+      info.persistent_private_state_end = planned.persistent_private_state_end;
     info.required_private_segment_size = planned.required_private_bytes;
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
     if (planned.spill) {

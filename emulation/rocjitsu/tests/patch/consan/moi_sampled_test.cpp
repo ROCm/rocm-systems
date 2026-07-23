@@ -1238,6 +1238,74 @@ TEST(ConSanMoi, Cdna4Wave64AccvgprBoundarySampledUsesPrivatePersistentState) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, CdnaSampledBarrierUsesPrivatePersistentStateAtAccvgprBoundary) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    const auto guest =
+        arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? build_cdna3_ds_store_b32(/*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, arch)
+            : build_cdna4_ds_store_b32(/*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, arch);
+    const auto barrier = arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_s_barrier(arch)
+                                                          : build_cdna4_s_barrier(arch);
+    ASSERT_TRUE(guest && barrier);
+    std::vector<uint32_t> text_words(540u, build_s_nop(0, arch));
+    std::copy(guest->begin(), guest->end(), text_words.begin());
+    text_words[400] = *barrier;
+    text_words.back() = build_s_endpgm(arch);
+    std::vector<uint8_t> bytes =
+        arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? make_cdna3_lds_code_object(text_words, "sampled_barrier_accvgpr_boundary",
+                                         /*vgpr_granulated=*/3u)
+            : make_cdna4_lds_code_object(text_words, "sampled_barrier_accvgpr_boundary",
+                                         /*vgpr_granulated=*/3u);
+    mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+      // v12 is the first accumulator while ordinary guest code reaches v11.
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 2u);
+    });
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    options.moi_runtime_sample_stride = 2u;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+    options.moi_track_barriers = true;
+    options.moi_track_atomics = false;
+    options.max_patches = 3u;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    EXPECT_TRUE(result.moi_private_epoch_automatic);
+    EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
+    const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+      return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+             patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+    });
+    const auto barrier_patch = std::ranges::find(
+        result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
+    const auto prologue =
+        std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
+                          &ConSanPatchInfo::kind);
+    ASSERT_NE(access, result.patches.end());
+    ASSERT_NE(barrier_patch, result.patches.end());
+    ASSERT_NE(prologue, result.patches.end());
+    EXPECT_TRUE(access->persistent_epoch_private_offset);
+    EXPECT_TRUE(access->persistent_owner_private_offset);
+    EXPECT_TRUE(access->persistent_sample_sequence_private_offset);
+    EXPECT_EQ(barrier_patch->persistent_epoch_private_offset,
+              access->persistent_epoch_private_offset);
+    EXPECT_EQ(barrier_patch->persistent_owner_private_offset,
+              access->persistent_owner_private_offset);
+    EXPECT_EQ(barrier_patch->persistent_sample_sequence_private_offset,
+              access->persistent_sample_sequence_private_offset);
+    EXPECT_EQ(prologue->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
+    EXPECT_EQ(prologue->persistent_owner_private_offset, access->persistent_owner_private_offset);
+    EXPECT_EQ(prologue->persistent_sample_sequence_private_offset,
+              access->persistent_sample_sequence_private_offset);
+    EXPECT_TRUE(result.final_validation_passed);
+  }
+}
+
 TEST(ConSanMoi, DirectSampledProbeSpillsFiveVgprsInAppendedCave) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,

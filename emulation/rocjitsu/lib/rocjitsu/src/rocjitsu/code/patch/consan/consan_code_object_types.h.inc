@@ -469,6 +469,9 @@ struct ConSanPatchInfo {
   /// Entry-captured exact workgroup identity for kernels whose ordinary VGPR
   /// bank has no lifetime-safe persistent slot below ACCUM_OFFSET.
   std::optional<uint32_t> persistent_workgroup_key_private_offset;
+  /// Per-workitem Sampled selection sequence when persistent VGPR state cannot
+  /// remain below the compiler-defined AccVGPR boundary.
+  std::optional<uint32_t> persistent_sample_sequence_private_offset;
   /// First private byte available after all persistent MOI state.
   std::optional<uint32_t> persistent_private_state_end;
   /// Persistent instrumentation-owned SGPR pair receiving the full hardware

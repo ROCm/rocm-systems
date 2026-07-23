@@ -480,14 +480,14 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         if (inserted) {
           cached->second = build_moi_private_epoch_layout(
               result, *resources, arch, result.warnings,
-              /*include_sample_sequence=*/false,
+              /*include_sample_sequence=*/options.automatic_moi_private_sample_sequence,
               /*include_owner=*/options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId);
         }
         private_layout = cached->second;
       } else {
         private_layout = build_moi_private_epoch_layout(
             result, *resources, arch, result.warnings,
-            /*include_sample_sequence=*/false,
+            /*include_sample_sequence=*/options.automatic_moi_private_sample_sequence,
             /*include_owner=*/options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId);
       }
       if (private_layout && private_layout->owner_offset)
@@ -1136,6 +1136,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       info.scratch_vgpr = planned_patch.resources.base;
       info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
       info.persistent_owner_private_offset = planned_patch.private_owner_offset;
+      info.persistent_sample_sequence_private_offset = planned_patch.private_sample_sequence_offset;
       if (planned_patch.private_epoch_offset)
         info.persistent_private_state_end = planned_patch.persistent_private_state_end;
       info.required_private_segment_size = planned_patch.required_private_bytes;
@@ -1401,6 +1402,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             info.scratch_vgpr = planned_patch.resources.base;
             info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
             info.persistent_owner_private_offset = planned_patch.private_owner_offset;
+            info.persistent_sample_sequence_private_offset =
+                planned_patch.private_sample_sequence_offset;
             if (planned_patch.private_epoch_offset)
               info.persistent_private_state_end = planned_patch.persistent_private_state_end;
             info.required_private_segment_size = planned_patch.required_private_bytes;

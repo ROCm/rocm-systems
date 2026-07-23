@@ -3075,14 +3075,15 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
                      });
         });
     if (options.moi_engine == ConSanMoiEngine::Sampled &&
-        options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId &&
-        !has_supported_sampled_sync && !has_dynamic_stack_owner) {
+        options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId && !has_dynamic_stack_owner) {
       options.moi_init_owner_epoch = true;
       options.automatic_moi_private_epoch = true;
+      options.automatic_moi_private_sample_sequence = needs_sample_sequence;
       result.moi_private_epoch_automatic = true;
       result.warnings.emplace_back(
-          "ConSan MOI selected entry-snapshotted private owner/epoch state below a CDNA "
-          "ordinary VGPR boundary for access-only Sampled instrumentation");
+          "ConSan MOI selected entry-snapshotted private owner/epoch" +
+          std::string(needs_sample_sequence ? "/sample-sequence" : "") +
+          " state below a CDNA ordinary VGPR boundary for Sampled instrumentation");
       return true;
     }
     if (options.moi_engine == ConSanMoiEngine::RecordReplay && !options.force_private_epoch) {
@@ -3680,6 +3681,7 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
   if (options.force_private_epoch || persistent_end > kMaxVgprs || prefer_private_epoch) {
     options.moi_init_owner_epoch = true;
     options.automatic_moi_private_epoch = true;
+    options.automatic_moi_private_sample_sequence = needs_sample_sequence;
     result.moi_private_epoch_automatic = true;
     result.warnings.emplace_back(
         std::string("ConSan MOI automatically selected derived-owner/private-"

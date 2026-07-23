@@ -1214,7 +1214,6 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
         return;
       }
     }
-    const bool has_sample_sequence = options.moi_sample_sequence_vgpr.has_value();
     const bool has_private_owner = access_patch->persistent_owner_private_offset.has_value();
     const bool has_private_workgroup_key =
         access_patch->persistent_workgroup_key_private_offset.has_value();
@@ -1228,9 +1227,9 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
           std::max(persistent_end, *access_patch->persistent_workgroup_key_private_offset +
                                        SpillManager::kSlotBytes);
     const std::optional<uint32_t> sample_sequence_offset =
-        has_sample_sequence ? std::optional<uint32_t>(persistent_end) : std::nullopt;
+        access_patch->persistent_sample_sequence_private_offset;
     if (sample_sequence_offset)
-      persistent_end += SpillManager::kSlotBytes;
+      persistent_end = std::max(persistent_end, *sample_sequence_offset + SpillManager::kSlotBytes);
     MoiPrivateEpochLayout layout{
         .epoch_offset = *access_patch->persistent_epoch_private_offset,
         .owner_offset = access_patch->persistent_owner_private_offset,
@@ -1425,6 +1424,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     info.persistent_epoch_private_offset = item.layout.epoch_offset;
     info.persistent_owner_private_offset = item.layout.owner_offset;
     info.persistent_workgroup_key_private_offset = item.layout.workgroup_key_offset;
+    info.persistent_sample_sequence_private_offset = item.layout.sample_sequence_offset;
     info.persistent_private_state_end = item.layout.ephemeral_base;
     info.spilled_vgpr_count = item.spill.vgpr_count;
     info.required_private_segment_size = item.required_private_bytes;

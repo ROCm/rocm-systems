@@ -323,6 +323,9 @@ struct ConSanOptions {
   /// Internal marker set when inline shadow derives owner at each probe and
   /// keeps epoch in per-lane private memory.
   bool automatic_moi_private_epoch = false;
+  /// Internal marker set when synchronization-aware Sampled mode also keeps
+  /// its per-workitem selection sequence in private persistent state.
+  bool automatic_moi_private_sample_sequence = false;
   /// Internal marker set after ConSan assigns the scalar EXEC-save window.
   bool automatic_moi_exec_save_sgprs = false;
   /// Per-owner overrides used when an automatic code-object-wide transient
