@@ -349,6 +349,10 @@ install(
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    install(
+        TARGETS rocjitsu_gfx1250_b0_to_a0
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
     install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
