@@ -137,7 +137,7 @@ run_replay_preflight() {
   fi
   [[ "${HRR_STRICT_VERSION:-}" == "1" ]] && compat_args+=(--strict-version)
   [[ "${HRR_STRICT_ARCH:-}" == "1" ]] && compat_args+=(--strict-arch)
-  echo "[triage] replay preflight (manifest metadata from #8680)" >&2
+  echo "[triage] replay preflight (manifest metadata)" >&2
   set +e
   "${compat_args[@]}"
   local rc=$?

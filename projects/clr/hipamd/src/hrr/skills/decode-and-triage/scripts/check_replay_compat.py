@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Preflight replay compatibility using HRR manifest metadata (PR #8680)."""
+"""Preflight replay compatibility using HRR manifest metadata."""
 
 from __future__ import annotations
 
