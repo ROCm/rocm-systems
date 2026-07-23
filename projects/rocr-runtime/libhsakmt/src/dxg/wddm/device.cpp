@@ -204,8 +204,36 @@ hsa_status_t WDDMDevice::QuerySegmentBytesResident(
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t WDDMDevice::QuerySegmentGroupUsage(
+    uint32_t segment_group, uint64_t* bytes_allocated) const {
+  *bytes_allocated = 0;
+
+  if (dxg_runtime->wddm_version < KMT_DRIVERVERSION_WDDM_3_1)
+    return HSA_STATUS_ERROR;
+
+  D3DKMT_QUERYSTATISTICS stats = {};
+  stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT_GROUP_USAGE;
+  stats.AdapterLuid = adapter_luid_;
+  stats.QuerySegmentGroupUsage.PhysicalAdapterIndex = 0;
+  stats.QuerySegmentGroupUsage.SegmentGroup =
+      static_cast<UINT16>(segment_group);
+
+  NTSTATUS ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
+  if (ret != STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  *bytes_allocated =
+      stats.QueryResult.SegmentGroupUsageInformation.AllocatedBytes;
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t WDDMDevice::QueryLocalVramUsage(uint64_t* usage_bytes) {
   *usage_bytes = 0;
+
+  if (dxg_runtime->wddm_version >= KMT_DRIVERVERSION_WDDM_3_1 &&
+      QuerySegmentGroupUsage(D3DKMT_MEMORY_SEGMENT_GROUP_LOCAL,
+                             usage_bytes) == HSA_STATUS_SUCCESS)
+    return HSA_STATUS_SUCCESS;
 
   uint32_t visible_segment_id = 0;
   if (!FindSegmentId(SegmentKind::kLocalMemory, &visible_segment_id))
@@ -245,6 +273,11 @@ hsa_status_t WDDMDevice::QueryLocalVramUsage(uint64_t* usage_bytes) {
 hsa_status_t WDDMDevice::QueryNonLocalVramUsage(
     uint64_t* usage_bytes) const {
   *usage_bytes = 0;
+
+  if (dxg_runtime->wddm_version >= KMT_DRIVERVERSION_WDDM_3_1 &&
+      QuerySegmentGroupUsage(D3DKMT_MEMORY_SEGMENT_GROUP_NON_LOCAL,
+                             usage_bytes) == HSA_STATUS_SUCCESS)
+    return HSA_STATUS_SUCCESS;
 
   bool found_segment = false;
   for (const auto& seg_info : segment_infos_) {

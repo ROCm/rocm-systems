@@ -268,6 +268,8 @@ private:
   bool FindSegmentId(SegmentKind segment_kind, uint32_t *segment_id);
   hsa_status_t QuerySegmentBytesResident(uint32_t segment_id,
                                          uint64_t *bytes_resident) const;
+  hsa_status_t QuerySegmentGroupUsage(uint32_t segment_group,
+                                      uint64_t *bytes_allocated) const;
   hsa_status_t QueryLocalVramUsage(uint64_t *usage_bytes);
   hsa_status_t QueryNonLocalVramUsage(uint64_t *usage_bytes) const;
 
