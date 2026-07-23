@@ -2219,8 +2219,7 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
   const uint32_t flat_no_saddr = cdna_flat_encoding ? 0u : flat_no_saddr_encoding(arch);
   constexpr int32_t kSigned24Min = -(1 << 23);
   constexpr int32_t kSigned24Max = (1 << 23) - 1;
-  const bool is_compare_exchange = site.mnemonic.find("cmpswap") != std::string::npos ||
-                                   site.mnemonic.find("cmpxchg") != std::string::npos;
+  const bool is_compare_exchange = consan_atomic_is_compare_exchange(site);
   const uint16_t value_word_count = static_cast<uint16_t>(site.width_bits / 32u);
   const uint16_t data_count =
       static_cast<uint16_t>(value_word_count * (is_compare_exchange ? 2u : 1u));

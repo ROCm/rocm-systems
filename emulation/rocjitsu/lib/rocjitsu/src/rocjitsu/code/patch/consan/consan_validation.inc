@@ -3073,8 +3073,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     valid &= wait_store_count >= 2u;
 
     const ConSanAtomicSite *site = atomic_site_for(patch.anchor_offset);
-    const bool compare_exchange = site && (site->mnemonic.find("cmpswap") != std::string::npos ||
-                                           site->mnemonic.find("cmpxchg") != std::string::npos);
+    const bool compare_exchange = site && consan_atomic_is_compare_exchange(*site);
     if (compare_exchange) {
       if (!site->data_vgpr || !site->dst_vgpr) {
         valid = false;

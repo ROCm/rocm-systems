@@ -423,8 +423,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     }
     words.insert(words.end(), address_words->begin(), address_words->end());
   }
-  const bool is_compare_exchange = candidate.site.mnemonic.find("cmpswap") != std::string::npos ||
-                                   candidate.site.mnemonic.find("cmpxchg") != std::string::npos;
+  const bool is_compare_exchange = consan_atomic_is_compare_exchange(candidate.site);
   std::vector<uint32_t> guest_atomic_words;
   guest_atomic_words.reserve(candidate.site.size / sizeof(uint32_t));
   for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
@@ -738,8 +737,7 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
   const auto overlaps = [&](std::optional<uint16_t> base, uint16_t count) {
     return base && range_overlaps(spill.vgpr_base, spill.vgpr_count, *base, count);
   };
-  const bool is_cas = site.mnemonic.find("cmpswap") != std::string::npos ||
-                      site.mnemonic.find("cmpxchg") != std::string::npos;
+  const bool is_cas = consan_atomic_is_compare_exchange(site);
   const uint16_t value_count = static_cast<uint16_t>(std::max<uint32_t>(site.width_bits / 32u, 1u));
   const uint16_t address_count =
       site.mnemonic.starts_with("buffer_") || site.mnemonic.starts_with("ds_") ? 1u : 2u;
@@ -768,6 +766,48 @@ struct SampledAtomicPreludeState {
   std::optional<uint16_t> cas_result_vgpr;
 };
 
+[[nodiscard]] bool append_sampled_atomic_cas_snapshot(std::vector<uint32_t> &words,
+                                                      const VgprSpillSequence &spill,
+                                                      uint16_t compare_vgpr, uint16_t result_vgpr,
+                                                      uint16_t saved_compare, uint16_t saved_result,
+                                                      rj_code_arch_t arch,
+                                                      std::vector<std::string> &errors) {
+  if (spill.slot_offsets.size() != spill.vgpr_count) {
+    errors.emplace_back("ConSan MOI sampled atomic spill has incomplete slot metadata");
+    return false;
+  }
+  bool loaded_private_state = false;
+  const auto append_snapshot = [&](uint16_t destination, uint16_t source) {
+    const uint32_t spill_end = static_cast<uint32_t>(spill.vgpr_base) + spill.vgpr_count;
+    if (source >= spill.vgpr_base && source < spill_end) {
+      const uint16_t slot = static_cast<uint16_t>(source - spill.vgpr_base);
+      const auto load =
+          instrumentation::build_private_load_b32(destination, spill.slot_offsets[slot], arch);
+      if (!load)
+        return false;
+      words.insert(words.end(), load->begin(), load->end());
+      loaded_private_state = true;
+      return true;
+    }
+    words.push_back(build_v_mov_b32_e32(destination, vector_source_vgpr(source), arch));
+    return true;
+  };
+  if (!append_snapshot(saved_compare, compare_vgpr) ||
+      !append_snapshot(saved_result, result_vgpr)) {
+    errors.emplace_back("ConSan MOI sampled atomic could not preserve CAS outcome evidence");
+    return false;
+  }
+  if (loaded_private_state) {
+    const auto wait = instrumentation::build_s_wait_private_load0(arch);
+    if (!wait) {
+      errors.emplace_back("ConSan MOI sampled atomic could not wait for CAS outcome evidence");
+      return false;
+    }
+    words.push_back(*wait);
+  }
+  return true;
+}
+
 [[nodiscard]] bool append_sampled_atomic_prelude(
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes,
     const AtomicRecordCandidate &candidate, const ConSanMoiAtomicAddressPlan &address_plan,
@@ -775,8 +815,7 @@ struct SampledAtomicPreludeState {
     const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch, uint16_t saved_address,
     SampledAtomicPreludeState &state, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset) {
-  const bool is_cas = candidate.site.mnemonic.find("cmpswap") != std::string::npos ||
-                      candidate.site.mnemonic.find("cmpxchg") != std::string::npos;
+  const bool is_cas = consan_atomic_is_compare_exchange(candidate.site);
   if (is_cas) {
     assert(candidate.site.data_vgpr && candidate.site.dst_vgpr);
     state.cas_compare_vgpr = static_cast<uint16_t>(*candidate.site.data_vgpr + 1u);
@@ -784,19 +823,26 @@ struct SampledAtomicPreludeState {
   }
   const bool guest_first =
       spill && sampled_atomic_spill_overlaps_guest_operands(*spill, candidate.site);
-  assert(!guest_first || sampled_atomic_guest_preserves_address(candidate.site));
+  const bool guest_preserves_address = sampled_atomic_guest_preserves_address(candidate.site);
+  assert(!guest_first || guest_preserves_address);
+  if (guest_first && !guest_preserves_address) {
+    errors.emplace_back("ConSan MOI sampled atomic overlap spill cannot preserve guest address");
+    return false;
+  }
   if (guest_first &&
       !append_sampled_atomic_guest(words, bytes, candidate, arch, guest_instruction_offset))
     return false;
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
   if (guest_first && is_cas) {
-    const uint16_t saved_compare = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
-    const uint16_t saved_result = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
-    words.push_back(
-        build_v_mov_b32_e32(saved_compare, vector_source_vgpr(*state.cas_compare_vgpr), arch));
-    words.push_back(
-        build_v_mov_b32_e32(saved_result, vector_source_vgpr(*state.cas_result_vgpr), arch));
+    const uint16_t saved_compare =
+        static_cast<uint16_t>(*options.scratch_vgpr + SampledAtomicScratchLayout::cas_compare);
+    const uint16_t saved_result =
+        static_cast<uint16_t>(*options.scratch_vgpr + SampledAtomicScratchLayout::cas_result);
+    if (!append_sampled_atomic_cas_snapshot(words, *spill, *state.cas_compare_vgpr,
+                                            *state.cas_result_vgpr, saved_compare, saved_result,
+                                            arch, errors))
+      return false;
     state.cas_compare_vgpr = saved_compare;
     state.cas_result_vgpr = saved_result;
   }
@@ -842,7 +888,7 @@ struct SampledAtomicPreludeState {
     uint32_t *guest_instruction_offset = nullptr) {
   if (!options.scratch_vgpr || !options.moi_report_buffer_address || !options.moi_owner_vgpr ||
       !options.moi_epoch_vgpr || !options.moi_exec_save_sgpr ||
-      static_cast<uint32_t>(*options.scratch_vgpr) + 10u > kMaxVgprs ||
+      static_cast<uint32_t>(*options.scratch_vgpr) + sampled_atomic_scratch_count() > kMaxVgprs ||
       selected_slot >= layout.sampled_pending_acquire_capacity || !address_plan.supported() ||
       !candidate.site.raw_scope || candidate.site.width_bits != 32u ||
       !candidate.kernel_descriptor_file_offset)
@@ -860,8 +906,7 @@ struct SampledAtomicPreludeState {
       candidate.site.size > bytes.size() - candidate.site.file_offset)
     return std::nullopt;
 
-  const bool is_cas = candidate.site.mnemonic.find("cmpswap") != std::string::npos ||
-                      candidate.site.mnemonic.find("cmpxchg") != std::string::npos;
+  const bool is_cas = consan_atomic_is_compare_exchange(candidate.site);
   if (is_cas && (!candidate.site.data_vgpr || !candidate.site.dst_vgpr ||
                  !candidate.site.returns_old_value.value_or(false)))
     return std::nullopt;
@@ -888,9 +933,10 @@ struct SampledAtomicPreludeState {
     return std::nullopt;
 
   const uint16_t base = *options.scratch_vgpr;
-  const uint16_t value = static_cast<uint16_t>(base + 2u);
-  const uint16_t expected = static_cast<uint16_t>(base + 3u);
-  const uint16_t saved_address = static_cast<uint16_t>(base + 8u);
+  const uint16_t value = static_cast<uint16_t>(base + SampledAtomicScratchLayout::value);
+  const uint16_t expected = static_cast<uint16_t>(base + SampledAtomicScratchLayout::expected);
+  const uint16_t saved_address =
+      static_cast<uint16_t>(base + SampledAtomicScratchLayout::saved_address);
   const uint16_t original_exec = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
   const uint16_t temporary_exec = *options.moi_exec_save_sgpr;
   const uint64_t report_base = *options.moi_report_buffer_address;
@@ -1086,7 +1132,7 @@ struct SampledAtomicPreludeState {
     uint32_t *guest_instruction_offset = nullptr) {
   if (!options.scratch_vgpr || !options.moi_report_buffer_address || !options.moi_owner_vgpr ||
       !options.moi_epoch_vgpr || !options.moi_exec_save_sgpr ||
-      static_cast<uint32_t>(*options.scratch_vgpr) + 10u > 256u ||
+      static_cast<uint32_t>(*options.scratch_vgpr) + sampled_atomic_scratch_count() > 256u ||
       selected_slot >= layout.sampled_sync_metadata_capacity)
     return std::nullopt;
   if (!address_plan.supported() || !candidate.site.raw_scope || candidate.site.width_bits != 32u)
@@ -1110,8 +1156,7 @@ struct SampledAtomicPreludeState {
     return std::nullopt;
   }
 
-  const bool is_cas = candidate.site.mnemonic.find("cmpswap") != std::string::npos ||
-                      candidate.site.mnemonic.find("cmpxchg") != std::string::npos;
+  const bool is_cas = consan_atomic_is_compare_exchange(candidate.site);
   if (is_cas && (!candidate.site.data_vgpr || !candidate.site.dst_vgpr ||
                  !candidate.site.returns_old_value.value_or(false))) {
     errors.emplace_back("ConSan MOI sampled atomic metadata requires an exact CAS outcome");
@@ -1143,9 +1188,10 @@ struct SampledAtomicPreludeState {
     return std::nullopt;
 
   const uint16_t base = *options.scratch_vgpr;
-  const uint16_t value = static_cast<uint16_t>(base + 2u);
-  const uint16_t expected = static_cast<uint16_t>(base + 3u);
-  const uint16_t saved_address = static_cast<uint16_t>(base + 8u);
+  const uint16_t value = static_cast<uint16_t>(base + SampledAtomicScratchLayout::value);
+  const uint16_t expected = static_cast<uint16_t>(base + SampledAtomicScratchLayout::expected);
+  const uint16_t saved_address =
+      static_cast<uint16_t>(base + SampledAtomicScratchLayout::saved_address);
   const uint16_t original_exec = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
   const uint16_t temporary_exec = *options.moi_exec_save_sgpr;
   const uint64_t report_base = *options.moi_report_buffer_address;

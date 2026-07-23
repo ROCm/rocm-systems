@@ -360,9 +360,10 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
   }
 
   if (resources.owner_descriptor_file_offsets.size() > 1) {
-    // Shared text needs one immediate layout. Starting above the maximum
-    // original private size makes the same save/fill sequence legal for every
-    // owner; site-local spill frames may safely reuse these offsets.
+    // Shared text needs one immediate layout. Start above the caller's
+    // persistent-state boundary when supplied, otherwise above the maximum
+    // original private size. That keeps one save/fill sequence legal for
+    // every owner without overlapping epoch, owner, or sequence state.
     SpillManager shared_manager(
         private_layout_base.value_or(resources.original_private_segment_size), *private_limit);
     auto spill = build_vgpr_spill_sequence(shared_manager, resources.base, resources.count, arch);

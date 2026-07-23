@@ -794,7 +794,27 @@ candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
            : 0u));
 }
 
-[[nodiscard]] constexpr uint16_t sampled_atomic_scratch_count() { return 10u; }
+struct SampledAtomicScratchLayout {
+  static constexpr uint16_t value = 2u;
+  static constexpr uint16_t expected = 3u;
+  // Sampled atomic lowering currently admits only 32-bit CAS, so each
+  // outcome-evidence field occupies one VGPR.
+  static constexpr uint16_t cas_compare = 4u;
+  static constexpr uint16_t cas_result = 5u;
+  static constexpr uint16_t owner = 6u;
+  static constexpr uint16_t epoch = 7u;
+  static constexpr uint16_t saved_address = 8u;
+  static constexpr uint16_t saved_address_count = 2u;
+  static constexpr uint16_t count = 10u;
+};
+
+static_assert(SampledAtomicScratchLayout::saved_address +
+                  SampledAtomicScratchLayout::saved_address_count <=
+              SampledAtomicScratchLayout::count);
+
+[[nodiscard]] constexpr uint16_t sampled_atomic_scratch_count() {
+  return SampledAtomicScratchLayout::count;
+}
 
 [[nodiscard]] bool reject_candidate_scratch_range_overlap(const ConSanMoiCandidate &candidate,
                                                           uint16_t scratch_vgpr,

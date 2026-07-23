@@ -708,8 +708,7 @@ first_light_atomic_disposition_reason(const ConSanAtomicSite &site, bool allow_g
     return ConSanSiteDispositionReason::MissingOrderingMetadata;
   if (*site.raw_scope < 1u || *site.raw_scope > 3u)
     return ConSanSiteDispositionReason::UnsupportedScope;
-  const bool compare_exchange = site.mnemonic.find("cmpswap") != std::string::npos ||
-                                site.mnemonic.find("cmpxchg") != std::string::npos;
+  const bool compare_exchange = consan_atomic_is_compare_exchange(site);
   if (compare_exchange && !site.returns_old_value.value_or(false))
     return ConSanSiteDispositionReason::CompareExchangeOutcomeUnavailable;
   return ConSanSiteDispositionReason::None;

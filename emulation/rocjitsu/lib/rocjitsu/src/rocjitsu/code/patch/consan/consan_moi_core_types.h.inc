@@ -276,8 +276,7 @@ classify_consan_moi_inline_atomic_support(const ConSanAtomicSite &site,
   const bool is_vglobal = site.mnemonic.starts_with("global_atomic");
   if (!is_flat && !is_vglobal)
     return ConSanMoiInlineAtomicSupport::NonFlatAddress;
-  const bool is_compare_exchange = site.mnemonic.find("cmpswap") != std::string::npos ||
-                                   site.mnemonic.find("cmpxchg") != std::string::npos;
+  const bool is_compare_exchange = consan_atomic_is_compare_exchange(site);
   (void)event_kind;
   if (site.width_bits != 32)
     return ConSanMoiInlineAtomicSupport::UnsupportedWidth;

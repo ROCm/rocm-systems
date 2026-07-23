@@ -301,6 +301,11 @@ struct ConSanAtomicSite {
   std::string mnemonic;
 };
 
+[[nodiscard]] constexpr bool consan_atomic_is_compare_exchange(const ConSanAtomicSite &site) {
+  return site.mnemonic.find("cmpswap") != std::string::npos ||
+         site.mnemonic.find("cmpxchg") != std::string::npos;
+}
+
 enum class ConSanMoiCandidateSource : uint8_t {
   NativeLds,
   FlatGroup,

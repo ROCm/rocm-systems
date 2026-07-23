@@ -347,8 +347,7 @@ void append_sync_events_for_container(std::string_view fingerprint, const Contai
   for (const ConSanAtomicSite &site : container.atomic_sites) {
     ConSanSyncEvent event;
     event.kind = ConSanSyncEventKind::Atomic;
-    const bool is_compare_exchange = site.mnemonic.find("cmpswap") != std::string::npos ||
-                                     site.mnemonic.find("cmpxchg") != std::string::npos;
+    const bool is_compare_exchange = consan_atomic_is_compare_exchange(site);
     event.operation = is_compare_exchange ? ConSanSyncOperation::AtomicCompareExchange
                                           : ConSanSyncOperation::AtomicRmw;
     event.address_source = sync_address_source(site.address_space_hint);

@@ -1493,8 +1493,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   const auto append = [&](std::string_view name, bool in_kernel, std::optional<uint64_t> descriptor,
                           const std::vector<ConSanAtomicSite> &sites) {
     for (const ConSanAtomicSite &site : sites) {
-      const bool cas = site.mnemonic.find("cmpswap") != std::string::npos ||
-                       site.mnemonic.find("cmpxchg") != std::string::npos;
+      const bool cas = consan_atomic_is_compare_exchange(site);
       if (cas && !site.returns_old_value.value_or(false)) {
         result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped " + std::string(name) +
                                      ": compare-exchange-dynamic-outcome-unavailable");
@@ -1929,8 +1928,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
     if (planned.private_layout) {
-      candidate_options.moi_owner_vgpr = static_cast<uint16_t>(planned.resources.base + 6u);
-      candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(planned.resources.base + 7u);
+      candidate_options.moi_owner_vgpr =
+          static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::owner);
+      candidate_options.moi_epoch_vgpr =
+          static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::epoch);
     }
     uint32_t guest_instruction_offset = 0;
     auto cave_words =

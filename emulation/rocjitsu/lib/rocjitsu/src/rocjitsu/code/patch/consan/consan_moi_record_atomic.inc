@@ -30,8 +30,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
   auto retain_unavailable_cas = [&](std::string_view container_name, bool in_kernel,
                                     const std::vector<ConSanAtomicSite> &sites) {
     for (const ConSanAtomicSite &site : sites) {
-      const bool cas = site.mnemonic.find("cmpswap") != std::string::npos ||
-                       site.mnemonic.find("cmpxchg") != std::string::npos;
+      const bool cas = consan_atomic_is_compare_exchange(site);
       if (!cas || site.returns_old_value.value_or(false) ||
           !atomic_event_kind_for_site(result, container_name, in_kernel, site))
         continue;

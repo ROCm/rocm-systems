@@ -284,8 +284,7 @@ void append_fence_record_candidates(const ConSanResult &result,
   // not count them as supported lowering candidates.
   if (!site.raw_scope || *site.raw_scope < 1u || *site.raw_scope > 3u)
     return false;
-  const bool cas = site.mnemonic.find("cmpswap") != std::string::npos ||
-                   site.mnemonic.find("cmpxchg") != std::string::npos;
+  const bool cas = consan_atomic_is_compare_exchange(site);
   if (cas && !site.returns_old_value.value_or(false))
     return false;
   return true;
@@ -2403,8 +2402,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   const uint16_t token_value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
   const uint16_t temporary_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 6u);
   const uint16_t address_vgpr = address_plan.result_address_vgpr;
-  const bool is_compare_exchange = candidate.site.mnemonic.find("cmpswap") != std::string::npos ||
-                                   candidate.site.mnemonic.find("cmpxchg") != std::string::npos;
+  const bool is_compare_exchange = consan_atomic_is_compare_exchange(candidate.site);
 
   std::vector<uint32_t> words;
   words.reserve(candidate.site.size / sizeof(uint32_t) + 96u +
