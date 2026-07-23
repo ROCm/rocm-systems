@@ -80,8 +80,6 @@ jobs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
       skip_tests: ${{ steps.configure.outputs.skip_tests }}
-      reusable_stages: ${{ steps.configure.outputs.reusable_stages }}
-      rebuild_stages: ${{ steps.configure.outputs.rebuild_stages }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -95,10 +93,8 @@ jobs:
           repository: ROCm/TheRock
           ref: users/geomin12/superrepo-multi-arch
           path: _therock
-          sparse-checkout: |
-            build_tools
-            BUILD_TOPOLOGY.toml
-          sparse-checkout-cone-mode: false
+          sparse-checkout: build_tools/github_actions
+          sparse-checkout-cone-mode: true
 
       - name: Configure CI
         id: configure
@@ -106,15 +102,13 @@ jobs:
           # TEST OVERRIDE: Force hip as changed project to test filtering
           # TODO(geomin12): Remove after testing cross-repo artifact reuse
           TEST_OVERRIDE_CHANGED_PROJECTS: "projects/hip"
-        working-directory: _therock
         run: |
-          python3 build_tools/github_actions/configure_external_repo_ci.py \
+          python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
             --event-name "${{ github.event_name }}" \
             --github-repo "${{ github.repository }}" \
             --base-sha "${{ github.event.pull_request.base.sha }}" \
             --head-sha "${{ github.event.pull_request.head.sha }}" \
-            --config-path "../.github/repos-config.json" \
-            --enable-stage-reuse
+            --config-path ".github/repos-config.json"
 
   setup:
     needs: configure
