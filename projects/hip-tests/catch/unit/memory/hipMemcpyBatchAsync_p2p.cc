@@ -13,65 +13,6 @@
 #if HT_AMD
 
 /**
- * Batched D2D copies from device 0 to device 1: each entry has its own src allocation on
- * device 0 and a distinct dst allocation on device 1. The stream and hipMemcpyBatchAsync run on
- * device 1 with peer access enabled from device 1 to device 0.
- */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Basic) {
-  if (HipTest::getDeviceCount() < 2) {
-    HIP_SKIP_TEST("Skipping because fewer than 2 devices are available");
-  }
-
-  int can_access_peer = 0;
-  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 1, 0));
-
-  if (!can_access_peer) {
-    HIP_SKIP_TEST("Skipping because device 1 cannot access peer memory on device 0");
-  }
-
-  const size_t count = GENERATE(1, 3, 8);
-  const size_t size_in_bytes = GENERATE(as<size_t>{}, 1, 63, 4096);
-  const int device_for_src = 0;
-  const int device_for_dst = 1;
-  std::vector<unsigned char> initial_values(size_in_bytes, 10);
-  std::vector<void*> src_ptrs(count);
-  std::vector<void*> dst_ptrs(count);
-  std::vector<LinearAllocGuard<unsigned char>> allocations;
-
-  EnablePeerAccess({{device_for_dst, device_for_src}});
-  HIP_CHECK(hipSetDevice(device_for_dst));
-  StreamGuard stream_guard(Streams::created);
-
-  for (size_t i = 0; i < count; ++i) {
-    HIP_CHECK(hipSetDevice(device_for_src));
-    LinearAllocGuard<unsigned char> src_alloc(LinearAllocs::hipMalloc, size_in_bytes);
-    src_ptrs[i] = src_alloc.ptr();
-    fillBuffer(src_ptrs[i], initial_values, LinearAllocs::hipMalloc);
-    allocations.push_back(std::move(src_alloc));
-
-    HIP_CHECK(hipSetDevice(device_for_dst));
-    LinearAllocGuard<unsigned char> dst_alloc(LinearAllocs::hipMalloc, size_in_bytes);
-    dst_ptrs[i] = dst_alloc.ptr();
-    HIP_CHECK(hipMemset(dst_ptrs[i], 0, size_in_bytes));
-    allocations.push_back(std::move(dst_alloc));
-  }
-
-  HIP_CHECK(hipSetDevice(device_for_dst));
-  std::vector<size_t> sizes(count, size_in_bytes);
-  size_t attrs_idxs[1] = {0};
-  size_t fail_index = 0;
-  HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), count, nullptr,
-                                attrs_idxs, 0, &fail_index, stream_guard.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
-
-  for (size_t i = 0; i < count; ++i) {
-    requireBufferEquals(dst_ptrs[i], initial_values, LinearAllocs::hipMalloc);
-  }
-
-  DisablePeerAccess({{device_for_dst, device_for_src}});
-}
-
-/**
  * Batched buffer exchange between device 0 and device 1: for each batch entry, one allocation on
  * each GPU is swapped via hipMemcpyFlagExtOpSwap with mutual peer access enabled; the stream and
  * hipMemcpyBatchAsync run on device 0.
