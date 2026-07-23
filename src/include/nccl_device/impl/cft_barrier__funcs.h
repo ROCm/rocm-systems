@@ -67,7 +67,7 @@ NCCL_DEVICE_INLINE void ncclCftBarrierSession<Coop>::arrive(Coop, cuda::memory_o
     size_t leOffset;
     if (this->useMultimem()) {
       this->mcInbox(&leId, &leOffset);
-      cft.redMultimem(coop, leId, leOffset, ncclCftOpAdd<uint32_t>{}, payload, ncclCftOpByteGran);
+      cft.redMultimem(coop, leId, leOffset, ncclCftOpSum<uint32_t>{}, payload, ncclCftOpByteGran);
       cft.submit(coop);
       cft.flush(coop);
     } else {

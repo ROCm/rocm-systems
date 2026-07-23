@@ -25,7 +25,7 @@ struct ncclCft_internal {
 };
 
 template <typename T>
-struct ncclCftOpAdd {};
+struct ncclCftOpSum {};
 template <typename T>
 struct ncclCftOpAnd {};
 template <typename T>

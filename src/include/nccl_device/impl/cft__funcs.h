@@ -255,12 +255,12 @@ NCCL_CFT_LOGICAL_TRAITS(ncclCftOpOr, or)
 NCCL_CFT_MINMAX_TRAITS(ncclCftOpMin, min)
 NCCL_CFT_MINMAX_TRAITS(ncclCftOpMax, max)
 
-NCCL_CFT_RED_TRAIT(ncclCftOpAdd, uint32_t, add_u32)
-NCCL_CFT_RED_TRAIT(ncclCftOpAdd, uint64_t, add_u64)
-NCCL_CFT_RED_TRAIT(ncclCftOpAdd, __nv_bfloat16, add_bf16)
-NCCL_CFT_RED_TRAIT(ncclCftOpAdd, half, add_f16)
-NCCL_CFT_RED_TRAIT(ncclCftOpAdd, float, add_f32)
-NCCL_CFT_RED_TRAIT_NO_PULL(ncclCftOpAdd, double, add_f64)
+NCCL_CFT_RED_TRAIT(ncclCftOpSum, uint32_t, add_u32)
+NCCL_CFT_RED_TRAIT(ncclCftOpSum, uint64_t, add_u64)
+NCCL_CFT_RED_TRAIT(ncclCftOpSum, __nv_bfloat16, add_bf16)
+NCCL_CFT_RED_TRAIT(ncclCftOpSum, half, add_f16)
+NCCL_CFT_RED_TRAIT(ncclCftOpSum, float, add_f32)
+NCCL_CFT_RED_TRAIT_NO_PULL(ncclCftOpSum, double, add_f64)
 
 #undef NCCL_CFT_MINMAX_TRAITS
 #undef NCCL_CFT_LOGICAL_TRAITS
