@@ -35,6 +35,14 @@
 #include "platform/interop_d3d11.hpp"
 #endif
 
+// Compatibility shim: HSA_STATUS_ERROR_RESOURCE_NOT_READY (value 50) is a newer
+// AMD HSA extension status. When building against an older installed ROCr that
+// predates it, provide the value so the defensive fabric-export check compiles.
+// The older runtime never returns this status, so the guarded branch is inert.
+#ifndef HSA_STATUS_ERROR_RESOURCE_NOT_READY
+#define HSA_STATUS_ERROR_RESOURCE_NOT_READY 50
+#endif
+
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
 #include "device/rocm/rocurilocator.hpp"

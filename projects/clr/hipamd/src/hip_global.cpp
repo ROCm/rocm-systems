@@ -206,6 +206,18 @@ static hipError_t createVarMem(amd::Memory** mem_out, const std::string& name,
   void* device_ptr = nullptr;
   size_t size = 0;
   if (!dev_program->createGlobalVarObj(&mem, &device_ptr, &size, name.c_str())) {
+    // Source-based code-coverage instrumentation on HIP translation units emits
+    // per-TU descriptor globals (e.g. __llvm_profile_sections_<hash>) on the host
+    // side. When the device code is not instrumented these descriptors have no
+    // device-side counterpart, yet the host profile runtime still probes them via
+    // hipGetSymbolAddress at process exit (__llvm_profile_hip_collect_device_data).
+    // Treat an absent profile descriptor as a non-fatal lookup miss (mirroring
+    // ihipCreateGlobalVarObj) instead of aborting global/module registration.
+    if (name.rfind("__llvm_profile", 0) == 0) {
+      LogPrintfError("Skipping absent device coverage symbol: %s", name.c_str());
+      *mem_out = nullptr;
+      return hipErrorInvalidSymbol;
+    }
     guarantee(false, "Cannot create GlobalVar Obj for symbol: %s", name.c_str());
   }
   // Handle size 0 symbols
