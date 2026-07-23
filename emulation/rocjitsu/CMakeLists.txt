@@ -341,8 +341,12 @@ set(FLATBUFFERS_BUILD_FLATLIB ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(googletest flatbuffers)
 
-# flatc executes during the build and uses uninstrumented host libraries. Keep
-# that host tool runnable while the rocjitsu targets remain MSan-instrumented.
+# flatc is a build-time host tool that is executed to generate schema headers.
+# It uses uninstrumented host libraries, so instrumenting flatc itself would make
+# the generator unreliable under MSan. Deliberately exempt only this target from
+# MSan compile and link instrumentation; RJ_ENABLE_MSAN remains enabled for the
+# rocjitsu targets. This is not a fallback for incompatible sanitizer options:
+# those combinations are rejected with FATAL_ERROR above.
 if(RJ_ENABLE_MSAN)
     target_compile_options(flatc PRIVATE -fno-sanitize=memory)
     target_link_options(flatc PRIVATE -fno-sanitize=memory)
