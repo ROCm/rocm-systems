@@ -4143,12 +4143,6 @@ try:
 except AttributeError:
     pass
 try:
-    amdsmi_gpu_driver_reload = _libraries['libamd_smi.so'].amdsmi_gpu_driver_reload
-    amdsmi_gpu_driver_reload.restype = amdsmi_status_t
-    amdsmi_gpu_driver_reload.argtypes = []
-except AttributeError:
-    pass
-try:
     amdsmi_get_gpu_ptl_state = _libraries['libamd_smi.so'].amdsmi_get_gpu_ptl_state
     amdsmi_get_gpu_ptl_state.restype = amdsmi_status_t
     amdsmi_get_gpu_ptl_state.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_bool)]
@@ -5196,15 +5190,14 @@ __all__ = \
     'amdsmi_gpu_block_t', 'amdsmi_gpu_cache_info_t',
     'amdsmi_gpu_control_counter',
     'amdsmi_gpu_counter_group_supported', 'amdsmi_gpu_create_counter',
-    'amdsmi_gpu_destroy_counter', 'amdsmi_gpu_driver_reload',
-    'amdsmi_gpu_metrics_t', 'amdsmi_gpu_ras_policy_info_t',
-    'amdsmi_gpu_ras_policy_v4_0_t', 'amdsmi_gpu_read_counter',
-    'amdsmi_gpu_validate_ras_eeprom', 'amdsmi_gpu_xcp_metrics_t',
-    'amdsmi_gpu_xgmi_error_status', 'amdsmi_hsmp_driver_version_t',
-    'amdsmi_hsmp_freqlimit_src_names', 'amdsmi_hsmp_metrics_table_t',
-    'amdsmi_init', 'amdsmi_init_flags_t',
-    'amdsmi_init_gpu_event_notification', 'amdsmi_io_bw_encoding_t',
-    'amdsmi_is_P2P_accessible',
+    'amdsmi_gpu_destroy_counter', 'amdsmi_gpu_metrics_t',
+    'amdsmi_gpu_ras_policy_info_t', 'amdsmi_gpu_ras_policy_v4_0_t',
+    'amdsmi_gpu_read_counter', 'amdsmi_gpu_validate_ras_eeprom',
+    'amdsmi_gpu_xcp_metrics_t', 'amdsmi_gpu_xgmi_error_status',
+    'amdsmi_hsmp_driver_version_t', 'amdsmi_hsmp_freqlimit_src_names',
+    'amdsmi_hsmp_metrics_table_t', 'amdsmi_init',
+    'amdsmi_init_flags_t', 'amdsmi_init_gpu_event_notification',
+    'amdsmi_io_bw_encoding_t', 'amdsmi_is_P2P_accessible',
     'amdsmi_is_gpu_power_management_enabled', 'amdsmi_kfd_info_t',
     'amdsmi_link_id_bw_type_t', 'amdsmi_link_metrics_t',
     'amdsmi_link_status_t', 'amdsmi_link_type_t',
