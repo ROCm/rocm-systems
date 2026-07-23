@@ -23,6 +23,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/iod.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
@@ -44,6 +45,7 @@ RJ_DIAGNOSTIC_POP
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <barrier>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -54,6 +56,7 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -5117,6 +5120,36 @@ TEST(Gfx1250SimulationTest, BufferStoreUsesM0Soffset) {
     EXPECT_EQ(sim.memory->read32(output_addr + lane * 32), 0u) << "lane " << lane;
     EXPECT_EQ(sim.memory->read32(output_addr + 16 + lane * 32), 7u) << "lane " << lane;
   }
+}
+
+TEST(Gfx1250SimulationTest, MemorySideCacheFlushSerializesConcurrentAccess) {
+  constexpr uint64_t output_addr = 0x2000;
+  constexpr uint32_t iterations = 32;
+
+  Gfx1250Sim sim;
+  auto *msc = sim.soc->iod(0)->msc();
+  std::barrier start(2);
+
+  std::thread writer([&] {
+    start.arrive_and_wait();
+    for (uint32_t value = 1; value <= iterations; ++value) {
+      msc->write(output_addr, reinterpret_cast<const uint8_t *>(&value), sizeof(value));
+      std::this_thread::yield();
+    }
+  });
+  std::thread flusher([&] {
+    start.arrive_and_wait();
+    for (uint32_t i = 0; i < iterations; ++i) {
+      msc->flush_all();
+      std::this_thread::yield();
+    }
+  });
+
+  writer.join();
+  flusher.join();
+  msc->flush_all();
+
+  EXPECT_EQ(sim.memory->read32(output_addr), iterations);
 }
 
 } // namespace

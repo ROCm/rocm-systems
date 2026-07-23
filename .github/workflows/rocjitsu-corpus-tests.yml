@@ -186,8 +186,6 @@ jobs:
             "MatmulStressTest\.TiledAllCU"
             "MatmulStressTest\.MfmaAllCUs"
             "VectorAddStressTest\.AllCUsGoldenReference"
-            "Gfx1250SimulationTest\.GlobalStoreWritesVisibleMemory"
-            "Gfx1250SimulationTest\.BufferStoreUsesM0Soffset"
           )
           TSAN_INCLUDED_TESTS=(
             "SparseMemory(Threading)?Test\..*"

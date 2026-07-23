@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <utility>
 
@@ -109,7 +110,7 @@ private:
   }
 
   mutable std::array<std::mutex, STRIPE_COUNT> stripes_;
-  mutable std::mutex flush_mutex_; ///< Exclusive lock for flush_all (must not race with stripes).
+  mutable std::shared_mutex access_mutex_;
   CacheStore cache_;
   simdojo::Port *req_ = nullptr;
   std::vector<simdojo::Port *> cpl_ports_;

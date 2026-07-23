@@ -55,6 +55,7 @@ void MemorySideCache::ensure_line(uint64_t addr, uint32_t vmid) {
 }
 
 void MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t vmid) {
+  std::shared_lock access_lock(access_mutex_);
   uint32_t copied = 0;
   while (copied < size) {
     const uint64_t ea = addr + copied;
@@ -69,6 +70,7 @@ void MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t 
 }
 
 void MemorySideCache::write(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid) {
+  std::shared_lock access_lock(access_mutex_);
   uint32_t copied = 0;
   while (copied < size) {
     const uint64_t ea = addr + copied;
@@ -90,18 +92,14 @@ void MemorySideCache::write(uint64_t addr, const uint8_t *src, uint32_t size, ui
 }
 
 void MemorySideCache::flush_all() {
-  // flush_all iterates all sets, so acquire all stripes to prevent concurrent access.
-  // This is only called after engine->run() completes (single-threaded), so no contention.
-  std::lock_guard<std::mutex> flush_lock(flush_mutex_);
-  for (auto &s : stripes_)
-    s.lock();
+  // Exclude reads and writes while iterating every set. Ordinary accesses hold
+  // this gate in shared mode and retain their per-stripe concurrency.
+  std::unique_lock access_lock(access_mutex_);
   cache_.for_each_dirty([this](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
     send_backing(line_addr, data, LINE_SIZE, simdojo::MessageOp::WRITE, tag.vmid);
     tag.dirty = false;
   });
   cache_.invalidate_all();
-  for (auto &s : stripes_)
-    s.unlock();
 }
 
 } // namespace amdgpu
