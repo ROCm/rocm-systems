@@ -2,6 +2,20 @@
 
 [work board](https://github.com/orgs/ROCm/projects/164)
 
+## Contributing and agent workflows
+
+Shared code-review, Linux kernel-parity, and partial-merge rebase workflows are
+available as portable [Agent Skills](.agents/skills/README.md). Coding agents
+should also follow [AGENTS.md](AGENTS.md); the rocjitsu
+[style guide](rocjitsu/docs/style.md) is authoritative for rocjitsu changes.
+
+Linux development systems may provide a public kernel source checkout at
+`~/linux` and confidential reference PDFs at `~/referance` (intentional
+spelling). Confidential material must stay local and must not be quoted, named,
+linked, committed, summarized, or exposed through internal terminology. Review
+conclusions must be supportable from repository code, public sources, or
+reproducible tests.
+
 ## Components
 
 - [Rocjitsu](emulation/rocjitsu/) — JIT-based AMD GPU emulator. The core engine that interprets/translates AMDGPU ISA and models GPU blocks so unmodified ROCm apps can run without a physical GPU.
