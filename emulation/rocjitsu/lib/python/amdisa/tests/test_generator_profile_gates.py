@@ -2687,7 +2687,10 @@ def test_generated_atomic_def_use_follows_return_control(
     cdna4_flat = (amdgpu_generated_root / 'cdna4' / 'flat.cpp').read_text()
     cdna4_add = cdna4_flat.split('FlatAtomicAddX2Flat::FlatAtomicAddX2Flat')[1]
     cdna4_add = cdna4_add.split('void FlatAtomicAddX2Flat::execute_impl')[0]
-    assert 'num_dst_ = 0;' in cdna4_add
+    # The atomic writes memory with OPR_GPUMEM operand as the baseline
+    # destination (num_dst_ = 1)
+    assert 'dst_operands_[0] = &gpumem;' in cdna4_add
+    assert 'num_dst_ = 1;' in cdna4_add
     assert 'if ((inst_.sc0 != 0))' in cdna4_add
     assert 'dst_operands_[num_dst_++] = &vdst;' in cdna4_add
 
@@ -2697,7 +2700,9 @@ def test_generated_atomic_def_use_follows_return_control(
     )[1]
     gfx1250_add = gfx1250_add.split('void BufferAtomicAddU32Vbuffer::execute_impl')[0]
     assert 'src_operands_[0] = &vdata;' in gfx1250_add
-    assert 'num_dst_ = 0;' in gfx1250_add
+    # The atomic writes memory with OPR_GPUMEM operand as the destination
+    assert 'dst_operands_[0] = &gpumem;' in gfx1250_add
+    assert 'num_dst_ = 1;' in gfx1250_add
     assert 'if (amdgpu::gfx12_atomic_returns(inst_.th))' in gfx1250_add
     assert 'dst_operands_[num_dst_++] = &vdata;' in gfx1250_add
 

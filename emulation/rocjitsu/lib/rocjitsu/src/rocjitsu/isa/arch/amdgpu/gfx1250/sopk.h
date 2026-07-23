@@ -37,6 +37,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -46,6 +47,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -94,6 +96,8 @@ public:
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand sdst;
   Operand simm16;
+  Operand pc;
+  Operand pc_in;
   static const bool execute_registered_;
 };
 

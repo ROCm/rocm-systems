@@ -532,6 +532,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -541,6 +542,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -550,6 +552,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -559,6 +562,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -1936,6 +1940,7 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+  Operand vcc;
   static const bool execute_registered_;
 };
 
@@ -1947,6 +1952,7 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+  Operand vcc;
   static const bool execute_registered_;
 };
 
@@ -4630,6 +4636,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4640,6 +4647,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4650,6 +4658,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4660,6 +4669,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4670,6 +4680,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4680,6 +4691,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4690,6 +4702,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4700,6 +4713,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4710,6 +4724,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4720,6 +4735,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4730,6 +4746,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4740,6 +4757,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4750,6 +4768,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4760,6 +4779,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4770,6 +4790,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4780,6 +4801,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4790,6 +4812,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4800,6 +4823,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4810,6 +4834,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4820,6 +4845,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4830,6 +4856,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4840,6 +4867,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4850,6 +4878,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4860,6 +4889,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4870,6 +4900,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4880,6 +4911,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4890,6 +4922,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4900,6 +4933,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4910,6 +4944,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4920,6 +4955,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4930,6 +4966,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4940,6 +4977,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4950,6 +4988,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4960,6 +4999,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4970,6 +5010,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4980,6 +5021,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -4990,6 +5032,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5000,6 +5043,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5010,6 +5054,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5020,6 +5065,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5030,6 +5076,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5040,6 +5087,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5050,6 +5098,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5060,6 +5109,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5070,6 +5120,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5080,6 +5131,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5090,6 +5142,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5100,6 +5153,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5110,6 +5164,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5120,6 +5175,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5130,6 +5186,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5140,6 +5197,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5150,6 +5208,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5160,6 +5219,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5170,6 +5230,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5180,6 +5241,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5190,6 +5252,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5200,6 +5263,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5210,6 +5274,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5220,6 +5285,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5230,6 +5296,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5240,6 +5307,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5250,6 +5318,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5260,6 +5329,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5270,6 +5340,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5280,6 +5351,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5290,6 +5362,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5300,6 +5373,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5310,6 +5384,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5320,6 +5395,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5330,6 +5406,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5340,6 +5417,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5350,6 +5428,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5360,6 +5439,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5370,6 +5450,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5380,6 +5461,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5390,6 +5472,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5400,6 +5483,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5410,6 +5494,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5420,6 +5505,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -5430,6 +5516,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
