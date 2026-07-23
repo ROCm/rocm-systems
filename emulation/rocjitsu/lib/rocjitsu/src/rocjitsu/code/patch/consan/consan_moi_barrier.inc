@@ -1038,7 +1038,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
              (candidate_options.moi_engine == ConSanMoiEngine::InlineShadow ||
               candidate_options.moi_engine == ConSanMoiEngine::RecordReplay)) ||
-            (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+            ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
              candidate_options.moi_engine == ConSanMoiEngine::RecordReplay &&
              candidate_options.moi_record_replay_dense_barrier_router);
         if (has_dense_router &&
@@ -1271,7 +1271,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         if (arch == ROCJITSU_CODE_ARCH_GFX1250)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
-        if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+        if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+            arch == ROCJITSU_CODE_ARCH_CDNA4)
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };
@@ -1620,7 +1621,7 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
     return;
   }
   if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250 &&
-      arch != ROCJITSU_CODE_ARCH_CDNA4) {
+      arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) {
     result.warnings.emplace_back(
         "ConSan MOI barrier record patch does not support this architecture");
     return;

@@ -806,6 +806,53 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
             cave_words.end());
 }
 
+TEST(ConSanMoi, Cdna3RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
+  const auto guest = build_cdna3_ds_store_b32(/*vaddr=*/0, /*vdata=*/0, /*byte_offset=*/0, kArch);
+  ASSERT_TRUE(guest);
+  std::vector<uint32_t> text_words(guest->begin(), guest->end());
+  text_words.push_back(build_s_endpgm(kArch));
+  constexpr uint32_t kCdna3Wave64AllVgprsGranulated = 31u;
+  const std::vector<uint8_t> bytes =
+      make_cdna3_lds_code_object(text_words, "dynamic_spill", kCdna3Wave64AllVgprsGranulated,
+                                 /*uses_dynamic_stack=*/true);
+  ConSanOptions options = moi_options();
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
+                               << " errors=" << testing::PrintToString(result.errors);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_TRUE(result.final_validation_passed);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::None);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
+    return item.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  EXPECT_EQ(patch->spilled_vgpr_count, 3u);
+  EXPECT_EQ(patch->required_private_segment_size, 16u);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave_words =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const uint16_t saved_scc_sgpr = static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 4u);
+  const uint16_t saved_frame_sgpr = static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 5u);
+  EXPECT_NE(std::find(cave_words.begin(), cave_words.end(),
+                      build_s_mov_b32(saved_frame_sgpr, /*frame base=*/33, kArch)),
+            cave_words.end());
+  EXPECT_NE(std::find(cave_words.begin(), cave_words.end(),
+                      *build_cdna3_s_cselect_b32(saved_scc_sgpr, scalar_positive_inline_u32(1),
+                                                 scalar_positive_inline_u32(0), kArch)),
+            cave_words.end());
+}
+
 TEST(ConSanMoi, FirstLightProbeWritesOneNativeLdsAccessRecord) {
   std::array<uint32_t, 170> text_words{};
   text_words[0] = 0xD8340000u;
@@ -1239,6 +1286,61 @@ TEST(ConSanMoi, Cdna4FirstLightTransientSgprsAvoidOldAndGrownPhysicalVcc) {
   text_words[2] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/33u, ROCJITSU_CODE_ARCH_CDNA4);
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words, "physical_vcc_growth");
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    // Five allocation granules give 40 SGPRs and place VCC at s34:s35.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 4u);
+  });
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  const uint16_t dispatch_id = *result.resolved_moi_dispatch_id_sgpr;
+  const uint16_t exec_save = *result.resolved_moi_exec_save_sgpr;
+  const auto overlaps = [](uint16_t lhs_base, uint16_t lhs_width, uint16_t rhs_base,
+                           uint16_t rhs_width) {
+    return lhs_base < static_cast<uint32_t>(rhs_base) + rhs_width &&
+           rhs_base < static_cast<uint32_t>(lhs_base) + lhs_width;
+  };
+  constexpr uint16_t kOriginalVcc = 34u;
+  EXPECT_FALSE(overlaps(dispatch_id, 2u, kOriginalVcc, 2u));
+  EXPECT_FALSE(overlaps(exec_save, 5u, kOriginalVcc, 2u));
+  EXPECT_FALSE(overlaps(dispatch_id, 2u, exec_save, 5u));
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  const uint16_t allocated_sgprs = static_cast<uint16_t>(
+      (AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
+                       kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT) +
+       1u) *
+      8u);
+  ASSERT_GE(allocated_sgprs, 6u);
+  const uint16_t grown_vcc = static_cast<uint16_t>(allocated_sgprs - 6u);
+  EXPECT_GE(allocated_sgprs, static_cast<uint16_t>(dispatch_id + 2u));
+  EXPECT_GE(allocated_sgprs, static_cast<uint16_t>(exec_save + 5u));
+  EXPECT_FALSE(overlaps(dispatch_id, 2u, grown_vcc, 2u));
+  EXPECT_FALSE(overlaps(exec_save, 5u, grown_vcc, 2u));
+}
+
+TEST(ConSanMoi, Cdna3TransientSgprsAvoidOldAndGrownPhysicalVcc) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
+  const auto guest = build_cdna3_ds_store_b32(/*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/4, kArch);
+  ASSERT_TRUE(guest);
+  std::vector<uint32_t> text_words(300, build_s_nop(0, kArch));
+  std::ranges::copy(*guest, text_words.begin());
+  text_words[2] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/33u, kArch);
+  text_words.back() = build_s_endpgm(kArch);
+  std::vector<uint8_t> bytes = make_cdna3_lds_code_object(text_words, "physical_vcc_growth");
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
     // Five allocation granules give 40 SGPRs and place VCC at s34:s35.
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
@@ -5025,6 +5127,45 @@ TEST(ConSanMoi, AtomicRecordSpillsSpecialStateOnRdna4) {
     return patch.kind != ConSanPatchKind::TrampolineMoiFenceRecord ||
            patch.required_private_segment_size > 0u;
   }));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Cdna3RecordReplayAtomicEmitsValidatedNativeTransaction) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
+  const auto release = cdna3::build_mubuf(cdna3::kBufferWbl2Mubuf, {.sc1 = 1});
+  const auto acquire = build_cdna3_buffer_inv_sc1(kArch);
+  const auto atomic = build_cdna3_flat_atomic_add_u32(
+      /*vaddr=*/2, /*vsrc=*/4, /*vdst=*/5, /*return_old_value=*/true,
+      /*scope=*/2, kArch);
+  const auto wait = build_cdna3_s_wait_vmcnt_lgkmcnt0(kArch);
+  ASSERT_TRUE(acquire && atomic && wait);
+  std::vector<uint32_t> text_words;
+  text_words.insert(text_words.end(), release.begin(), release.end());
+  text_words.push_back(*wait);
+  text_words.insert(text_words.end(), atomic->begin(), atomic->end());
+  text_words.push_back(*wait);
+  text_words.insert(text_words.end(), acquire->begin(), acquire->end());
+  text_words.resize(800, build_s_nop(0, kArch));
+  text_words.push_back(build_s_endpgm(kArch));
+  const std::vector<uint8_t> bytes = make_cdna3_lds_code_object(text_words, "atomic_record_native");
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 16u;
+  options.moi_owner_vgpr = 30u;
+  options.moi_epoch_vgpr = 31u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(result.target_name, "gfx942");
+  EXPECT_EQ(result.arch_name, "cdna3");
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
+                               &ConSanPatchInfo::kind),
+            1u);
   EXPECT_TRUE(result.final_validation_passed);
 }
 

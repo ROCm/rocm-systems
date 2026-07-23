@@ -1,8 +1,12 @@
 # ConSan usage
 
 ConSan instruments final AMD GPU code objects through the rocJITsu HSA-tools
-hook. It has native support for `gfx950`, `gfx1201`, and `gfx1250` and does not
-translate code objects between GPU architectures.
+hook. It has native support for `gfx942`, `gfx950`, `gfx1201`, and `gfx1250`
+and does not translate code objects between GPU architectures.
+
+ConSan reads the active workgroup-LDS capacity from the runtime agent. It does
+not hard-code a gfx942 LDS size; simulator and offline tests use the selected
+RocJITsu JSON configuration as their source of truth.
 
 Use [TUTORIAL.md](TUTORIAL.md) for a short walkthrough,
 [FLAVORS.md](FLAVORS.md) for a conceptual device/deferred/host comparison,
@@ -326,7 +330,7 @@ Interpret outcomes independently:
 ## Current boundaries
 
 - Native instrumentation is architecture-specific; the code object must target
-  a supported GPU (`gfx950`, `gfx1201`, or `gfx1250`).
+  a supported GPU (`gfx942`, `gfx950`, `gfx1201`, or `gfx1250`).
 - ConSan is LDS/shared-memory focused. Selected atomics/fences provide ordering
   evidence; they are not general global-memory race instrumentation.
 - Flat/generic LDS classification is conservative. `MaybeGroup` is heuristic;

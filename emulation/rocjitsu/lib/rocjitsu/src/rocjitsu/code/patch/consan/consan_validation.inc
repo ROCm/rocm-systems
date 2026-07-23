@@ -2573,7 +2573,7 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
     }
     if (patch.dispatch_id_kernarg_reload_count != 0) {
       for (uint16_t i = 0; i < patch.dispatch_id_kernarg_reload_count; ++i) {
-        const auto load = build_cdna4_s_load_dword(
+        const auto load = instrumentation::build_s_load_dword(
             static_cast<uint16_t>(patch.dispatch_id_kernarg_reload_sgpr + i),
             patch.dispatch_id_kernarg_reload_base_sgpr,
             static_cast<uint32_t>(patch.dispatch_id_kernarg_reload_offset_dwords + i) *
@@ -2585,7 +2585,7 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
                               std::string(kernel_name) + "'");
         }
       }
-      const auto wait = build_cdna4_s_wait_scalar_load0(arch);
+      const auto wait = instrumentation::build_s_wait_scalar_load0(arch);
       if (!wait || read_word(cursor++) != *wait) {
         errors.emplace_back("ConSan final validation found an invalid dispatch-ID kernarg wait "
                             "in kernel '" +
@@ -2747,7 +2747,8 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
               ? decoded_local_exchange_b32_count + 2u * decoded_local_exchange_b64_count
               : decoded_local_exchange_b64_count;
       const bool needs_compact_loop = minimum_cell_count > decoded_local_exchange_cell_count;
-      const uint16_t old_value_offset = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 6u : 5u;
+      const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+      const uint16_t old_value_offset = cdna ? 6u : 5u;
       const auto expected_local_exchange_b32 = instrumentation::build_ds_storexchg_rtn_b32(
           static_cast<uint16_t>(scratch + old_value_offset), scratch,
           static_cast<uint16_t>(scratch + 2u), 0u, arch);
@@ -2757,7 +2758,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       const std::array<uint32_t, 1> duplicate_compact_metadata = {
           build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 3u),
                               vector_source_vgpr(static_cast<uint16_t>(scratch + 2u)), arch)};
-      const uint16_t diagnostic_claim_offset = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 8u : 3u;
+      const uint16_t diagnostic_claim_offset = cdna ? 8u : 3u;
       const auto expected_first_diagnostic_claim = instrumentation::build_flat_atomic_cmpswap_b32(
           scratch, static_cast<uint16_t>(scratch + diagnostic_claim_offset),
           static_cast<uint16_t>(scratch + diagnostic_claim_offset),
@@ -2971,10 +2972,10 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       return result_positions;
     };
     const uint16_t scratch = *patch.scratch_vgpr;
-    const bool cdna4 = arch == ROCJITSU_CODE_ARCH_CDNA4;
-    const uint16_t snapshot_address = static_cast<uint16_t>(scratch + (cdna4 ? 6u : 5u));
+    const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+    const uint16_t snapshot_address = static_cast<uint16_t>(scratch + (cdna ? 6u : 5u));
     const uint16_t temporary = static_cast<uint16_t>(scratch + 20u);
-    const uint16_t version_cas_value = static_cast<uint16_t>(scratch + (cdna4 ? 4u : 5u));
+    const uint16_t version_cas_value = static_cast<uint16_t>(scratch + (cdna ? 4u : 5u));
     const auto version_cas = instrumentation::build_flat_atomic_cmpswap_b32(
         scratch, version_cas_value, version_cas_value, /*return_old_value=*/true, /*scope=*/2,
         arch);
@@ -3004,8 +3005,9 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     // the successor release owner. All six stores intentionally use scratch+0
     // and ABI offset 4, so their encodings are identical; release-only
     // transactions retain the single-store shape.
-    const bool claimed_acquire_release_arch =
-        arch == ROCJITSU_CODE_ARCH_CDNA4 || is_rdna4_family_arch(arch);
+    const bool claimed_acquire_release_arch = arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+                                              arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+                                              is_rdna4_family_arch(arch);
     bool valid = cas_positions.size() == 2u &&
                  (owner_between == 1u || (claimed_acquire_release_arch && owner_between == 6u));
 
@@ -3055,7 +3057,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     };
     bool snapshot_stores_valid =
         require_snapshot_store(offsetof(ConSanMoiInlineCausalSnapshot, entry_count),
-                               static_cast<uint16_t>(scratch + (cdna4 ? 5u : 7u)));
+                               static_cast<uint16_t>(scratch + (cdna ? 5u : 7u)));
     snapshot_stores_valid &= require_snapshot_store(offsetof(ConSanMoiInlineCausalSnapshot, flags),
                                                     static_cast<uint16_t>(scratch + 8u));
     for (uint16_t i = 0; i < 4u; ++i) {

@@ -42,6 +42,7 @@ function(rj_add_consan_hip_case)
         NAME
         TARGET
         FILTER
+        CONFIG
         TIMEOUT
         PASS_REGEX
     )
@@ -99,12 +100,28 @@ function(rj_add_consan_hip_case)
         endif()
     endif()
 
+    if(_case_CONFIG)
+        set(_case_command
+            $<TARGET_FILE:rocjitsu_bin>
+            --config
+            "${_case_CONFIG}"
+            --
+            ${CMAKE_CURRENT_BINARY_DIR}/${_case_TARGET}
+            "--gtest_filter=${_case_FILTER}"
+        )
+        add_dependencies(${_case_TARGET}_target rocjitsu_bin)
+    else()
+        set(_case_command
+            ${CMAKE_CURRENT_BINARY_DIR}/${_case_TARGET}
+            "--gtest_filter=${_case_FILTER}"
+        )
+    endif()
+
     set(_test_args
         NAME
         "${_case_NAME}"
         COMMAND
-        ${CMAKE_CURRENT_BINARY_DIR}/${_case_TARGET}
-        "--gtest_filter=${_case_FILTER}"
+        ${_case_command}
         WORKING_DIRECTORY
         ${CMAKE_CURRENT_BINARY_DIR}
         TIMEOUT
@@ -189,6 +206,58 @@ function(rj_add_consan_hip_tests)
     set(_rj_consan_moi_abi_header
         "${_rj_consan_include_dir}/rocjitsu/code/patch/consan/consan_moi_abi.h"
     )
+    if(RJ_HIP_RUNTIME_SUPPORTS_GFX942)
+        # Keep a native gfx942 code object available on every host so CDNA3
+        # ConSan can be exercised through the RocJITsu simulator.
+        rj_add_hip_test(
+                hip_consan_lds_gfx942_test
+                ARCH gfx942
+                SOURCE dbi/consan/hip_consan_lds_test.hip
+        )
+        rj_add_hip_test(
+                hip_consan_moi_gfx942_test
+                ARCH gfx942
+                SOURCE dbi/consan/hip_consan_moi_cdna_test.hip
+                INCLUDE_DIRS "${_rj_consan_include_dir}"
+                EXTRA_DEPENDS "${_rj_consan_moi_abi_header}"
+        )
+        add_dependencies(hip_consan_lds_gfx942_test_target rocjitsu_dbi_hooks)
+        add_dependencies(hip_consan_moi_gfx942_test_target rocjitsu_dbi_hooks)
+        rj_add_consan_hip_case(
+                NAME "ConSanGfx942Sim.SuperColliderClean"
+                TARGET hip_consan_lds_gfx942_test
+                FILTER "ConSanLdsTest.PaddedCleanStoreCompletes"
+                CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json"
+                TIMEOUT 60
+                RUN_SERIAL
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=supercollider"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_DELAY=2"
+                    "RJ_CONSAN_TMP_VGPR=3"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        rj_add_consan_hip_case(
+                NAME "ConSanGfx942Sim.MoiRecordReplayForcedSpill"
+                TARGET hip_consan_moi_gfx942_test
+                FILTER "ConSanMoiCdnaTest.ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord"
+                CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json"
+                TIMEOUT 60
+                RUN_SERIAL
+                PASS_REGEX "site=access.*source=spill reason=none"
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=record-replay"
+                    "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+                    "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+                    "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_forced_spill_test_kernel_for_instrumentation"
+                    "RJ_CONSAN_LOG=3"
+                    "RJ_CONSAN_MAX_PATCHES=1"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+    endif()
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
         rj_add_hip_test(
                 hip_consan_spill_gfx950_test
@@ -198,7 +267,7 @@ function(rj_add_consan_hip_tests)
         rj_add_hip_test(
                 hip_consan_moi_gfx950_test
                 ARCH gfx950
-                SOURCE dbi/consan/hip_consan_moi_gfx950_test.hip
+                SOURCE dbi/consan/hip_consan_moi_cdna_test.hip
                 INCLUDE_DIRS "${_rj_consan_include_dir}"
                 EXTRA_DEPENDS "${_rj_consan_moi_abi_header}"
         )
@@ -221,9 +290,9 @@ function(rj_add_consan_hip_tests)
                 RUN_SERIAL
             )
             rj_add_consan_hip_case(
-                NAME "ConSanMoiGfx950Test.DbiForcedSpillRecordReplay"
+                NAME "ConSanMoiCdnaTest.DbiForcedSpillRecordReplay"
                 TARGET hip_consan_moi_gfx950_test
-                FILTER "ConSanMoiGfx950Test.ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord"
+                FILTER "ConSanMoiCdnaTest.ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord"
                 TIMEOUT 30
                 RUN_SERIAL
                 PASS_REGEX "site=access.*source=spill reason=none"
@@ -233,15 +302,15 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
-                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_gfx950_forced_spill_test_kernel_for_instrumentation"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_forced_spill_test_kernel_for_instrumentation"
                     "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
             rj_add_consan_hip_case(
-                NAME "ConSanMoiGfx950Test.DbiForcedSpillSampled"
+                NAME "ConSanMoiCdnaTest.DbiForcedSpillSampled"
                 TARGET hip_consan_moi_gfx950_test
-                FILTER "ConSanMoiGfx950Test.ForcedSpillSampledPreservesLiveVgprsAndWritesEntry"
+                FILTER "ConSanMoiCdnaTest.ForcedSpillSampledPreservesLiveVgprsAndWritesEntry"
                 TIMEOUT 30
                 RUN_SERIAL
                 PASS_REGEX "site=access.*source=spill reason=none"
@@ -251,15 +320,15 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
-                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_gfx950_forced_spill_test_kernel_for_instrumentation"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_forced_spill_test_kernel_for_instrumentation"
                     "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
             rj_add_consan_hip_case(
-                NAME "ConSanMoiGfx950Test.DbiForcedSpillInlineShadow"
+                NAME "ConSanMoiCdnaTest.DbiForcedSpillInlineShadow"
                 TARGET hip_consan_moi_gfx950_test
-                FILTER "ConSanMoiGfx950Test.ForcedSpillInlineShadowPreservesLiveVgprs"
+                FILTER "ConSanMoiCdnaTest.ForcedSpillInlineShadowPreservesLiveVgprs"
                 TIMEOUT 30
                 RUN_SERIAL
                 PASS_REGEX "site=access.*source=spill reason=none"
@@ -271,15 +340,15 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
-                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_gfx950_forced_spill_test_kernel_for_instrumentation"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_forced_spill_test_kernel_for_instrumentation"
                     "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
             rj_add_consan_hip_case(
-                NAME "ConSanMoiGfx950Test.DbiSharedHelperForcedSpill"
+                NAME "ConSanMoiCdnaTest.DbiSharedHelperForcedSpill"
                 TARGET hip_consan_moi_gfx950_test
-                FILTER "ConSanMoiGfx950Test.SharedHelperForcedSpillPreservesBothCallers"
+                FILTER "ConSanMoiCdnaTest.SharedHelperForcedSpillPreservesBothCallers"
                 TIMEOUT 30
                 RUN_SERIAL
                 PASS_REGEX "site=access.*source=spill reason=none owners=2"
@@ -289,33 +358,34 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
-                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_gfx950_shared_lds_helper_for_instrumentation"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_shared_lds_helper_for_instrumentation"
                     "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
             rj_add_consan_hip_case(
-                NAME "ConSanMoiGfx950Test.DbiBarrierForcedSpill"
+                NAME "ConSanMoiCdnaTest.DbiBarrierForcedSpill"
                 TARGET hip_consan_moi_gfx950_test
-                FILTER "ConSanMoiGfx950Test.BarrierForcedSpillPreservesLiveVgprsAndWritesRecords"
+                FILTER "ConSanMoiCdnaTest.BarrierForcedSpillPreservesLiveVgprsAndWritesRecords"
                 TIMEOUT 30
                 RUN_SERIAL
                 PASS_REGEX "site=barrier.*source=spill reason=none"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
+                    "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=0"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
-                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_gfx950_barrier_forced_spill_kernel_for_instrumentation"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_barrier_forced_spill_kernel_for_instrumentation"
                     "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
             rj_add_consan_hip_case(
-                NAME "ConSanMoiGfx950Test.DbiAtomicForcedSpill"
+                NAME "ConSanMoiCdnaTest.DbiAtomicForcedSpill"
                 TARGET hip_consan_moi_gfx950_test
-                FILTER "ConSanMoiGfx950Test.AtomicForcedSpillPreservesLiveVgprsAndWritesRecord"
+                FILTER "ConSanMoiCdnaTest.AtomicForcedSpillPreservesLiveVgprsAndWritesRecord"
                 TIMEOUT 30
                 RUN_SERIAL
                 PASS_REGEX "site=atomic.*source=spill reason=none"
@@ -325,15 +395,15 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
-                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_gfx950_atomic_forced_spill_kernel_for_instrumentation"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_atomic_forced_spill_kernel_for_instrumentation"
                     "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
             rj_add_consan_hip_case(
-                NAME "ConSanMoiGfx950Test.DbiDynamicStackInlineForcedSpill"
+                NAME "ConSanMoiCdnaTest.DbiDynamicStackInlineForcedSpill"
                 TARGET hip_consan_moi_gfx950_test
-                FILTER "ConSanMoiGfx950Test.DynamicStackInlineSpillPreservesPrivateValues"
+                FILTER "ConSanMoiCdnaTest.DynamicStackInlineSpillPreservesPrivateValues"
                 TIMEOUT 30
                 RUN_SERIAL
                 PASS_REGEX "site=access.*source=spill reason=none"
@@ -345,12 +415,24 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
-                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_gfx950_dynamic_stack_inline_spill_kernel_for_instrumentation"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_dynamic_stack_inline_spill_kernel_for_instrumentation"
                     "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
         endif()
+    endif()
+    if(RJ_HIP_RUNTIME_SUPPORTS_GFX1250)
+        # Keep a native gfx1250 code object available on every host so the
+        # existing RDNA4 ConSan path can be regression-tested in simulation.
+        rj_add_hip_test(
+                hip_consan_moi_gfx1250_test
+                ARCH gfx1250
+                SOURCE dbi/consan/hip_consan_moi_test.hip
+                INCLUDE_DIRS "${_rj_consan_include_dir}"
+                EXTRA_DEPENDS "${_rj_consan_moi_abi_header}"
+        )
+        add_dependencies(hip_consan_moi_gfx1250_test_target rocjitsu_dbi_hooks)
     endif()
     rj_add_hip_test(
             hip_consan_lds_test

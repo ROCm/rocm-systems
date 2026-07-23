@@ -71,6 +71,8 @@ TEST(Cdna4InstrumentationBuilder, ScalarControlMatchesLlvmAndDecoder) {
 TEST(Cdna4InstrumentationBuilder, ScalarControlRejectsWrongArchAndInvalidOperands) {
   EXPECT_FALSE(build_cdna4_s_mov_b64(20, 22, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(build_cdna4_s_mov_b64(127, 22, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_cdna4_s_mov_b64(20, kVopLiteralSource, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_cdna4_s_and_saveexec_b64(20, kVopLiteralSource, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(build_cdna4_s_andn2_b64(20, 255, 24, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(build_cdna4_s_and_b64(20, 255, 24, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(build_cdna4_s_bcnt1_i32_b64(128, 22, ROCJITSU_CODE_ARCH_CDNA4));
@@ -278,13 +280,13 @@ TEST(Cdna4InstrumentationBuilder, BuildAddressFreeScratchB32) {
 }
 
 TEST(Cdna4InstrumentationBuilder, AddressFreeScratchOffsetBoundary) {
-  EXPECT_TRUE(build_cdna4_address_free_scratch_store_b32(
-      255, kMaxCdna4AddressFreeScratchDwordOffset, ROCJITSU_CODE_ARCH_CDNA4));
-  EXPECT_TRUE(build_cdna4_address_free_scratch_load_b32(255, kMaxCdna4AddressFreeScratchDwordOffset,
+  EXPECT_TRUE(build_cdna4_address_free_scratch_store_b32(255, kMaxCdnaAddressFreeScratchDwordOffset,
+                                                         ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_TRUE(build_cdna4_address_free_scratch_load_b32(255, kMaxCdnaAddressFreeScratchDwordOffset,
                                                         ROCJITSU_CODE_ARCH_CDNA4));
-  EXPECT_FALSE(build_cdna4_address_free_scratch_store_b32(
-      0, kMaxCdna4AddressFreeScratchPrivateBytes, ROCJITSU_CODE_ARCH_CDNA4));
-  EXPECT_FALSE(build_cdna4_address_free_scratch_load_b32(0, kMaxCdna4AddressFreeScratchPrivateBytes,
+  EXPECT_FALSE(build_cdna4_address_free_scratch_store_b32(0, kMaxCdnaAddressFreeScratchPrivateBytes,
+                                                          ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_cdna4_address_free_scratch_load_b32(0, kMaxCdnaAddressFreeScratchPrivateBytes,
                                                          ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(build_cdna4_address_free_scratch_store_b32(0, 2, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(build_cdna4_address_free_scratch_load_b32(0, 0, ROCJITSU_CODE_ARCH_RDNA4));

@@ -13,7 +13,8 @@ namespace rocjitsu {
 /// @brief Encode CDNA4 `s_mov_b64 s[sdst:sdst+1], s[ssrc0:ssrc0+1]`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_cdna4_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_CDNA4 || sdst > 126 || ssrc0 > 255)
+  // 255 is the literal marker; this one-word helper cannot append its payload.
+  if (arch != ROCJITSU_CODE_ARCH_CDNA4 || sdst > 126 || ssrc0 > 254)
     return std::nullopt;
   return build_sop1_encoding(arch, cdna4::kSMovB64Sop1, sdst, ssrc0);
 }
@@ -21,7 +22,8 @@ build_cdna4_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
 /// @brief Encode CDNA4 `s_and_saveexec_b64`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_cdna4_s_and_saveexec_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_CDNA4 || sdst > 126 || ssrc0 > 255)
+  // 255 is the literal marker; this one-word helper cannot append its payload.
+  if (arch != ROCJITSU_CODE_ARCH_CDNA4 || sdst > 126 || ssrc0 > 254)
     return std::nullopt;
   return build_sop1_encoding(arch, cdna4::kSAndSaveExecB64Sop1, sdst, ssrc0);
 }
@@ -571,7 +573,7 @@ build_cdna4_s_dcache_wb_vol(rj_code_arch_t arch) {
 build_cdna4_address_free_scratch_store_b32(uint16_t vsrc, uint32_t byte_offset,
                                            rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA4 || vsrc > 255 ||
-      byte_offset > kMaxCdna4AddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
+      byte_offset > kMaxCdnaAddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
     return std::nullopt;
   }
   return std::array<uint32_t, 2>{0xdc704000u | byte_offset,
@@ -583,7 +585,7 @@ build_cdna4_address_free_scratch_store_b32(uint16_t vsrc, uint32_t byte_offset,
 build_cdna4_address_free_scratch_load_b32(uint16_t vdst, uint32_t byte_offset,
                                           rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA4 || vdst > 255 ||
-      byte_offset > kMaxCdna4AddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
+      byte_offset > kMaxCdnaAddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
     return std::nullopt;
   }
   return std::array<uint32_t, 2>{0xdc504000u | byte_offset,
@@ -595,7 +597,7 @@ build_cdna4_address_free_scratch_load_b32(uint16_t vdst, uint32_t byte_offset,
 build_cdna4_scratch_store_b32_saddr(uint16_t vsrc, uint16_t saddr, uint32_t byte_offset,
                                     rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA4 || vsrc > 255 || saddr > 127 ||
-      byte_offset > kMaxCdna4AddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
+      byte_offset > kMaxCdnaAddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
     return std::nullopt;
   }
   return std::array<uint32_t, 2>{0xdc704000u | byte_offset,
@@ -608,7 +610,7 @@ build_cdna4_scratch_store_b32_saddr(uint16_t vsrc, uint16_t saddr, uint32_t byte
 build_cdna4_scratch_load_b32_saddr(uint16_t vdst, uint16_t saddr, uint32_t byte_offset,
                                    rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA4 || vdst > 255 || saddr > 127 ||
-      byte_offset > kMaxCdna4AddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
+      byte_offset > kMaxCdnaAddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
     return std::nullopt;
   }
   return std::array<uint32_t, 2>{0xdc504000u | byte_offset,

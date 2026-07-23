@@ -703,7 +703,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
         consan_sync_confidence_meets(sequence->memory_role_confidence,
                                      ConSanSemanticConfidence::Conservative)) {
       if (options.fault_atomic_order_edge != ConSanAtomicOrderEdge::Acquire &&
-          encoding != AtomicFaultEncoding::Cdna4Flat)
+          encoding != AtomicFaultEncoding::CdnaFlat)
         release_wait_text_offset = sequence->release_wait_text_offset;
       for (const std::string &identity : sequence->member_event_identities) {
         const auto event = std::ranges::find_if(result.sync_events, [&](const auto &candidate) {
@@ -1681,7 +1681,7 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
     // independently sufficient release proof once the cache operation is
     // removed. Discover it directly so the staged reinventory observes the
     // complete weakened boundary rather than re-admitting the same atomic.
-    if (encoding != AtomicFaultEncoding::Cdna4Flat && !release_wait_text_offset &&
+    if (encoding != AtomicFaultEncoding::CdnaFlat && !release_wait_text_offset &&
         options.fault_atomic_order_edge != ConSanAtomicOrderEdge::Acquire &&
         selected->text_offset >= sizeof(uint32_t) && selected->file_offset >= sizeof(uint32_t)) {
       const auto expected_combined = build_s_wait_storecnt_dscnt0(arch);
@@ -2023,7 +2023,7 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
         site.mnemonic != "ds_read2_b64" && site.mnemonic != "ds_read2st64_b64")
       return false;
     if (site.dst_accvgpr) {
-      return arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+      return (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
              static_cast<uint32_t>(*site.dst_accvgpr) + *dword_count <= 256u;
     }
     const uint32_t register_limit = arch == ROCJITSU_CODE_ARCH_GFX1250 ? 1024u : 256u;
@@ -2177,7 +2177,7 @@ choose_flat_scratch_vgpr(const ConSanFlatSite &site, const ConSanOptions &option
 
 [[nodiscard]] std::optional<std::array<uint32_t, 3>>
 retarget_flat_load_vdst(std::array<uint32_t, 3> words, uint16_t vdst, rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
     words[1] = (words[1] & 0x00FFFFFFu) | (static_cast<uint32_t>(vdst) << 24u);
     return words;
   }
@@ -2252,7 +2252,7 @@ build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bi
     words[1] = (words[1] & ~0xffu & ~kGfx1250FlatVsrcMask) | vdst;
     return words;
   }
-  if (arch != ROCJITSU_CODE_ARCH_CDNA4)
+  if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
     return std::nullopt;
   uint32_t load_op = 0;
   switch (width_bits) {
@@ -2271,10 +2271,10 @@ build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bi
   default:
     return std::nullopt;
   }
-  constexpr uint32_t kCdna4FlatOpMask = 0x7fu << 18u;
-  words[0] = (words[0] & ~kCdna4FlatOpMask) | (load_op << 18u);
-  constexpr uint32_t kCdna4FlatDataMask = 0xffu << 8u;
-  words[1] = (words[1] & ~kCdna4FlatDataMask & 0x00FFFFFFu) | (static_cast<uint32_t>(vdst) << 24u);
+  constexpr uint32_t kCdnaFlatOpMask = 0x7fu << 18u;
+  words[0] = (words[0] & ~kCdnaFlatOpMask) | (load_op << 18u);
+  constexpr uint32_t kCdnaFlatDataMask = 0xffu << 8u;
+  words[1] = (words[1] & ~kCdnaFlatDataMask & 0x00FFFFFFu) | (static_cast<uint32_t>(vdst) << 24u);
   return words;
 }
 

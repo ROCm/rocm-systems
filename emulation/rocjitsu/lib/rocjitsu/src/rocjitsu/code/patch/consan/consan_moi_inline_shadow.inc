@@ -16,8 +16,7 @@ build_inline_sgpr_spill_sequence(const ResolvedMoiScratchPlan &resources,
        !options.automatic_moi_record_replay_sgpr_spill) ||
       !options.moi_exec_save_sgpr)
     return std::nullopt;
-  if ((!is_rdna4_family_arch(arch) && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
-      resources.owner_descriptor_file_offsets.empty()) {
+  if (!instrumentation::is_admitted_arch(arch) || resources.owner_descriptor_file_offsets.empty()) {
     warnings.emplace_back(
         "ConSan MOI spill-backed scalar state requires at least one supported kernel owner");
     return std::nullopt;
@@ -547,14 +546,16 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           cached->second = build_moi_private_epoch_layout(
               result, *resources, arch, result.warnings,
               /*include_sample_sequence=*/false, persist_workitem_owner,
-              /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA4);
+              /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+                  arch == ROCJITSU_CODE_ARCH_CDNA4);
         }
         private_layout = cached->second;
       } else {
         private_layout = build_moi_private_epoch_layout(
             result, *resources, arch, result.warnings,
             /*include_sample_sequence=*/false, persist_workitem_owner,
-            /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA4);
+            /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+                arch == ROCJITSU_CODE_ARCH_CDNA4);
       }
       if (!private_layout)
         continue;

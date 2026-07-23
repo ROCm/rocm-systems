@@ -2110,7 +2110,7 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
            source == ConSanRegisterAllocationSource::DescriptorGrowth ||
            source == ConSanRegisterAllocationSource::SpillRequired;
   };
-  if (!is_rdna4_family_arch(arch) && arch != ROCJITSU_CODE_ARCH_CDNA4)
+  if (!instrumentation::is_admitted_arch(arch))
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedArchitecture);
   if (!usable_resource_source(resource_source))
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedResourcePlan);
@@ -2199,8 +2199,9 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
   // guest VGPRs. Other widths still need an explicit operand-layout proof.
   if (site.width_bits != 32u && site.width_bits != 64u)
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedWidth);
-  const uint32_t expected_size =
-      arch == ROCJITSU_CODE_ARCH_CDNA4 ? 2u * sizeof(uint32_t) : 3u * sizeof(uint32_t);
+  const bool cdna_flat_encoding =
+      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+  const uint32_t expected_size = cdna_flat_encoding ? 2u * sizeof(uint32_t) : 3u * sizeof(uint32_t);
   if (site.size != expected_size || !site.raw_saddr || !site.raw_vaddr || !site.raw_ioffset)
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
   // Scope does not affect effective-address reconstruction. Wave scope is not
@@ -2211,8 +2212,7 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
   if (!site.addr_vgpr || !site.data_vgpr || *site.raw_vaddr != *site.addr_vgpr)
     return reject(ConSanMoiAtomicAddressSupport::MissingAddressOperands);
 
-  const uint32_t flat_no_saddr =
-      arch == ROCJITSU_CODE_ARCH_CDNA4 ? 0u : flat_no_saddr_encoding(arch);
+  const uint32_t flat_no_saddr = cdna_flat_encoding ? 0u : flat_no_saddr_encoding(arch);
   constexpr int32_t kSigned24Min = -(1 << 23);
   constexpr int32_t kSigned24Max = (1 << 23) - 1;
   const bool is_compare_exchange = site.mnemonic.find("cmpswap") != std::string::npos ||

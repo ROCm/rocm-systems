@@ -116,9 +116,17 @@ reserved_ranges_for_existing_patches(const AmdGpuCodeObject &code_object,
 }
 
 [[nodiscard]] std::optional<std::array<uint32_t, 2>>
-build_cdna4_accvgpr_read_b32(uint16_t dst_vgpr, uint16_t src_accvgpr) {
-  if (dst_vgpr > 255u || src_accvgpr > 255u)
+build_cdna_accvgpr_read_b32(uint16_t dst_vgpr, uint16_t src_accvgpr, rj_code_arch_t arch) {
+  if ((arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) || dst_vgpr > 255u ||
+      src_accvgpr > 255u)
     return std::nullopt;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+    return cdna3::build_vop3p(cdna3::kVAccvgprReadVop3p,
+                              {.vdst = static_cast<uint8_t>(dst_vgpr),
+                               .op_sel_hi_2 = 1u,
+                               .src0 = static_cast<uint16_t>(256u + src_accvgpr),
+                               .op_sel_hi = 3u});
+  }
   return cdna4::build_vop3p(cdna4::kVAccvgprReadVop3p,
                             {.vdst = static_cast<uint8_t>(dst_vgpr),
                              .op_sel_hi_2 = 1u,
@@ -327,11 +335,11 @@ build_v_mov_b32_e32_vgpr_word(uint16_t vdst, uint16_t src_vgpr, rj_code_arch_t a
                                                                  std::string_view context) {
   if (!options.report_buffer_address)
     return 1u;
-  if (!is_rdna4_family_arch(arch) && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+  if (!instrumentation::is_admitted_arch(arch)) {
     errors.emplace_back(std::string(context) + " report-buffer action has unsupported target");
     return std::nullopt;
   }
-  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? 8u : 12u;
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 8u : 12u;
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>>
@@ -402,13 +410,14 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
       static_cast<uint16_t>(scratch_vgpr + static_cast<uint16_t>(*required_vgprs));
   uint16_t report_scratch_vgpr =
       static_cast<uint16_t>(compare_scratch_vgpr + lds_check_trap_extra_scratch_vgprs(site));
-  if (options.report_buffer_address && arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+  if (options.report_buffer_address &&
+      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       report_scratch_vgpr % 2u != 0)
     ++report_scratch_vgpr;
   const uint16_t saved_address_vgpr = static_cast<uint16_t>(
       report_scratch_vgpr + static_cast<uint16_t>(report_action_scratch_vgprs(options)));
   if (site.kind == ConSanLdsAccessKind::Read) {
-    if (site.dst_accvgpr && arch == ROCJITSU_CODE_ARCH_CDNA4)
+    if (site.dst_accvgpr && (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4))
       duplicate_load[0] &= ~(uint32_t{1} << 25u);
     duplicate_load[1] =
         (duplicate_load[1] & 0x00FFFFFFu) | (static_cast<uint32_t>(scratch_vgpr) << 24u);
@@ -432,9 +441,10 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
   }
 
   auto wait_dscnt = build_s_wait_dscnt_word(0, arch);
-  auto first_compare_vgpr = site.dst_accvgpr && arch == ROCJITSU_CODE_ARCH_CDNA4
-                                ? std::optional<uint16_t>(compare_scratch_vgpr)
-                                : check_trap_compare_vgpr(site, 0u, arch, gfx1250_vgpr_msb_mode);
+  auto first_compare_vgpr =
+      site.dst_accvgpr && (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+          ? std::optional<uint16_t>(compare_scratch_vgpr)
+          : check_trap_compare_vgpr(site, 0u, arch, gfx1250_vgpr_msb_mode);
   if (!first_compare_vgpr) {
     errors.emplace_back("ConSan LDS check/trap proof selected site without compare VGPR");
     return std::nullopt;
@@ -450,11 +460,11 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
   auto skip_action = build_s_cbranch_vccz_word(static_cast<int16_t>(mismatch_action->size()), arch);
   constexpr uint16_t kRdna4VccLo = 106;
   const std::optional<uint32_t> save_vcc =
-      arch == ROCJITSU_CODE_ARCH_CDNA4
+      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
           ? instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo, arch)
           : std::optional<uint32_t>(build_s_mov_b32(vcc_save_sgpr, kRdna4VccLo, arch));
   const std::optional<uint32_t> restore_vcc =
-      arch == ROCJITSU_CODE_ARCH_CDNA4
+      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
           ? instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr, arch)
           : std::optional<uint32_t>(build_s_mov_b32(kRdna4VccLo, vcc_save_sgpr, arch));
   if (!wait_dscnt || !skip_action || !save_vcc || !restore_vcc) {
@@ -535,9 +545,10 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
   words.push_back(*save_vcc);
   for (uint16_t i = 0; i < *required_vgprs; ++i) {
     auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, gfx1250_vgpr_msb_mode);
-    if (site.dst_accvgpr && arch == ROCJITSU_CODE_ARCH_CDNA4) {
-      const auto acc_read = build_cdna4_accvgpr_read_b32(
-          compare_scratch_vgpr, static_cast<uint16_t>(*site.dst_accvgpr + i));
+    if (site.dst_accvgpr &&
+        (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)) {
+      const auto acc_read = build_cdna_accvgpr_read_b32(
+          compare_scratch_vgpr, static_cast<uint16_t>(*site.dst_accvgpr + i), arch);
       if (!acc_read) {
         errors.emplace_back("ConSan LDS check/trap proof could not encode accumulator read");
         return std::nullopt;

@@ -38,6 +38,12 @@ int main(int argc, char **argv) {
   "s_nop 0\n\t"                                                                                    \
   ".endr\n\t"
 
+#if defined(__gfx1250__)
+#define RJ_CONSAN_MOI_WAIT_ATOMIC_STORE "s_wait_storecnt 0\n\t"
+#else
+#define RJ_CONSAN_MOI_WAIT_ATOMIC_STORE "s_waitcnt vmcnt(0)\n\t"
+#endif
+
 namespace {
 
 using MoiAccessRecord = rocjitsu::ConSanMoiAccessRecord;
@@ -606,15 +612,14 @@ __device__ __noinline__ void moi_shared_noinline_atomic_add_for_instrumentation(
   asm volatile("s_wait_storecnt 0\n\t"
                "global_wb scope:SCOPE_DEV\n\t"
                "s_wait_storecnt 0\n\t"
-               "flat_atomic_add_u32 %0, %1 scope:SCOPE_DEV\n\t"
-               "s_waitcnt vmcnt(0)\n\t"
+               "flat_atomic_add_u32 %0, %1 scope:SCOPE_DEV\n\t" RJ_CONSAN_MOI_WAIT_ATOMIC_STORE
                :
                : "v"(counter), "v"(one)
                : "memory");
 }
 
 __global__ __launch_bounds__(64) void moi_shared_atomic_helper_caller_a(uint32_t *counter,
-                                                                       uint32_t *out) {
+                                                                        uint32_t *out) {
   // Force a real 32-VGPR descriptor allocation. The amdgpu_num_vgpr attribute
   // is only an upper bound and does not create a spillable architectural
   // window for this otherwise tiny caller.
@@ -626,7 +631,7 @@ __global__ __launch_bounds__(64) void moi_shared_atomic_helper_caller_a(uint32_t
 }
 
 __global__ __launch_bounds__(64) void moi_shared_atomic_helper_caller_b(uint32_t *counter,
-                                                                       uint32_t *out) {
+                                                                        uint32_t *out) {
   asm volatile("v_mov_b32 v31, 0" ::: "v31");
   if (threadIdx.x == 0) {
     moi_shared_noinline_atomic_add_for_instrumentation(counter);
@@ -811,8 +816,7 @@ __global__ __launch_bounds__(64) void moi_flat_atomic_add_record(uint32_t *out) 
     asm volatile("s_wait_storecnt 0\n\t"
                  "global_wb scope:SCOPE_DEV\n\t"
                  "s_wait_storecnt 0\n\t"
-                 "flat_atomic_add_u32 %0, %1 scope:SCOPE_DEV\n\t"
-                 "s_waitcnt vmcnt(0)\n\t"
+                 "flat_atomic_add_u32 %0, %1 scope:SCOPE_DEV\n\t" RJ_CONSAN_MOI_WAIT_ATOMIC_STORE
                  :
                  : "v"(out), "v"(one)
                  : "memory");
@@ -837,8 +841,7 @@ __global__ __launch_bounds__(64) void moi_atomic_handoff_lds_accesses(uint32_t *
     asm volatile("s_wait_storecnt 0\n\t"
                  "global_wb scope:SCOPE_DEV\n\t"
                  "s_wait_storecnt 0\n\t"
-                 "flat_atomic_add_u32 %0, %1 scope:SCOPE_DEV\n\t"
-                 "s_waitcnt vmcnt(0)\n\t"
+                 "flat_atomic_add_u32 %0, %1 scope:SCOPE_DEV\n\t" RJ_CONSAN_MOI_WAIT_ATOMIC_STORE
                  :
                  : "v"(release_counter), "v"(one)
                  : "memory");

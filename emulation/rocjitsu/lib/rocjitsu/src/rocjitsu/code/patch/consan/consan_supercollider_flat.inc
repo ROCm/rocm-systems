@@ -1,7 +1,7 @@
 void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                      const ConSanOptions &options, ConSanResult &result,
                                      std::span<const ByteRange> initial_reserved_ranges = {}) {
-  if (!is_rdna4_family_arch(arch) && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+  if (!instrumentation::is_admitted_arch(arch)) {
     result.warnings.emplace_back("ConSan flat check/trap proof has unsupported architecture");
     return;
   }
@@ -136,7 +136,10 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     if (!action_words)
       return;
     const uint32_t report_alignment_padding =
-        options.report_buffer_address && arch == ROCJITSU_CODE_ARCH_CDNA4 ? 1u : 0u;
+        options.report_buffer_address &&
+                (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+            ? 1u
+            : 0u;
     const uint32_t scratch_vgprs =
         *required_vgprs + report_alignment_padding + report_action_scratch_vgprs(options);
     const uint64_t mismatch_words = *required_vgprs > 1u ? 2u * *required_vgprs + 1u + *action_words
@@ -557,7 +560,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     std::vector<uint32_t> displaced_tail_words;
   };
 
-  const auto wait_flat = arch == ROCJITSU_CODE_ARCH_CDNA4
+  const auto wait_flat = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
                              ? instrumentation::build_s_wait_flat_load_lds0(arch)
                              : build_s_wait_dscnt_word(0, arch);
   if (!wait_flat) {
@@ -657,7 +660,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     }
     uint16_t report_scratch_vgpr =
         static_cast<uint16_t>(candidate.scratch_vgpr + static_cast<uint16_t>(*required_vgprs));
-    if (options.report_buffer_address && arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+    if (options.report_buffer_address &&
+        (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
         report_scratch_vgpr % 2u != 0)
       ++report_scratch_vgpr;
     auto mismatch_action = build_mismatch_action_words(

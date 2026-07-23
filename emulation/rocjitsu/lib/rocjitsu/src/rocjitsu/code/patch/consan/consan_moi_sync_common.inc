@@ -265,10 +265,10 @@ void append_fence_record_candidates(const ConSanResult &result,
   // Acquire import now retains the release version across the guest, captures
   // its causal snapshot, and transactionally publishes up to five full ABI-v6
   // tokens. Release-capable events use the same window for frontier capture.
-  // CDNA4 additionally retains token-transaction producer state and scalar
+  // CDNA3/4 additionally retain token-transaction producer state and scalar
   // persistent owner/epoch materialization ahead of the final aligned address
   // pair. RDNA4 keeps its established 24-register transaction layout.
-  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? 28u : 24u;
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 28u : 24u;
 }
 
 [[nodiscard]] bool is_first_light_atomic_record_candidate(const ConSanAtomicSite &site,
@@ -704,15 +704,15 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     uint16_t snapshot_epochs_vgpr, uint64_t token_table_base, uint32_t token_table_capacity,
     bool release_sequence, rj_code_arch_t arch) {
   const uint16_t base = *options.scratch_vgpr;
-  // CDNA4 FLAT compare-swap encodes the new/expected operands as an aligned
+  // CDNA3/4 FLAT compare-swap encodes the new/expected operands as an aligned
   // VGPR pair. Preserve the RDNA4 allocation, whose three-dword encoding does
-  // not have that constraint, and move the CDNA4 pair down by one register.
-  const bool cdna4 = arch == ROCJITSU_CODE_ARCH_CDNA4;
-  const uint16_t value = static_cast<uint16_t>(base + (cdna4 ? 18u : 19u));
-  const uint16_t expected = static_cast<uint16_t>(base + (cdna4 ? 19u : 20u));
+  // not have that constraint, and move the CDNA pair down by one register.
+  const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+  const uint16_t value = static_cast<uint16_t>(base + (cdna ? 18u : 19u));
+  const uint16_t expected = static_cast<uint16_t>(base + (cdna ? 19u : 20u));
   const uint16_t hash = static_cast<uint16_t>(base + 21u);
-  const uint16_t saved_direct_owner = static_cast<uint16_t>(base + (cdna4 ? 22u : 17u));
-  const uint16_t saved_direct_epoch = static_cast<uint16_t>(base + (cdna4 ? 23u : 18u));
+  const uint16_t saved_direct_owner = static_cast<uint16_t>(base + (cdna ? 22u : 17u));
+  const uint16_t saved_direct_epoch = static_cast<uint16_t>(base + (cdna ? 23u : 18u));
   const uint16_t saved_source_version = static_cast<uint16_t>(base + 8u);
   const uint16_t exec_base = *options.moi_exec_save_sgpr;
   const uint16_t winners = static_cast<uint16_t>(exec_base + 16u);
@@ -1066,7 +1066,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   if (!append_atomic_fetch_add_one_u32(words,
                                        *options.moi_report_buffer_address +
                                            offsetof(ConSanMoiReportHeader, inline_overflow_count),
-                                       value, cdna4 ? base : hash, arch))
+                                       value, cdna ? base : hash, arch))
     return false;
 
   // Roll back every journaled reservation for failed lanes. A CAS whose slot
@@ -1368,13 +1368,13 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     return false;
   words.push_back(*dispatch_high_matches);
   words.push_back(*narrow_if_valid);
-  // CDNA4 FLAT memory instructions require an even-aligned address pair.
+  // CDNA3/4 FLAT memory instructions require an even-aligned address pair.
   // Swap the address and temporary lifetimes within the existing register
   // window; the token transaction reuses this space only after the snapshot
   // loads have completed.
-  const bool cdna4 = arch == ROCJITSU_CODE_ARCH_CDNA4;
-  const uint16_t snapshot_address = static_cast<uint16_t>(scratch_vgpr + (cdna4 ? 18u : 17u));
-  const uint16_t snapshot_temporary = static_cast<uint16_t>(scratch_vgpr + (cdna4 ? 17u : 19u));
+  const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+  const uint16_t snapshot_address = static_cast<uint16_t>(scratch_vgpr + (cdna ? 18u : 17u));
+  const uint16_t snapshot_temporary = static_cast<uint16_t>(scratch_vgpr + (cdna ? 17u : 19u));
   const uint16_t snapshot_hash = static_cast<uint16_t>(scratch_vgpr + 21u);
   const uint16_t snapshot_count = static_cast<uint16_t>(scratch_vgpr + 7u);
   const uint16_t snapshot_flags = static_cast<uint16_t>(scratch_vgpr + 8u);
@@ -1454,9 +1454,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       snapshot_table_capacity != token_table_capacity)
     return false;
   const uint16_t base = *options.scratch_vgpr;
-  const bool cdna4 = arch == ROCJITSU_CODE_ARCH_CDNA4;
-  const uint16_t snapshot_address = static_cast<uint16_t>(base + (cdna4 ? 6u : 5u));
-  const uint16_t count = static_cast<uint16_t>(base + (cdna4 ? 5u : 7u));
+  const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+  const uint16_t snapshot_address = static_cast<uint16_t>(base + (cdna ? 6u : 5u));
+  const uint16_t count = static_cast<uint16_t>(base + (cdna ? 5u : 7u));
   const uint16_t flags = static_cast<uint16_t>(base + 8u);
   const uint16_t owners = static_cast<uint16_t>(base + 9u);
   const uint16_t epochs = static_cast<uint16_t>(base + 13u);
@@ -1914,13 +1914,13 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   const uint16_t slot_address = base;
   const uint16_t prior_version = static_cast<uint16_t>(base + 2u);
   const uint16_t workgroup_key = static_cast<uint16_t>(base + 3u);
-  // CDNA4 FLAT compare-swap requires an even-aligned new/expected pair.
+  // CDNA3/4 FLAT compare-swap requires an even-aligned new/expected pair.
   // These three registers are all recomputed after causal-snapshot capture,
   // so rotating their allocation does not extend any live range.
-  const bool cdna4 = arch == ROCJITSU_CODE_ARCH_CDNA4;
-  const uint16_t temporary = static_cast<uint16_t>(base + (cdna4 ? 6u : 4u));
-  const uint16_t cas_new = static_cast<uint16_t>(base + (cdna4 ? 4u : 5u));
-  const uint16_t cas_expected = static_cast<uint16_t>(base + (cdna4 ? 5u : 6u));
+  const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+  const uint16_t temporary = static_cast<uint16_t>(base + (cdna ? 6u : 4u));
+  const uint16_t cas_new = static_cast<uint16_t>(base + (cdna ? 4u : 5u));
+  const uint16_t cas_expected = static_cast<uint16_t>(base + (cdna ? 5u : 6u));
   const uint16_t exec_base = *options.moi_exec_save_sgpr;
   const uint16_t narrow_save = exec_base;
   const uint16_t empty_exec = static_cast<uint16_t>(exec_base + 2u);
@@ -2480,7 +2480,8 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   // slot retains the predecessor payload across the guest, acquire import,
   // causal snapshot, and successor commit.
   const bool claimed_acquire_release =
-      (arch == ROCJITSU_CODE_ARCH_CDNA4 || is_rdna4_family_arch(arch)) &&
+      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+       is_rdna4_family_arch(arch)) &&
       candidate.event_kind == ConSanMoiAtomicEventKind::AcquireRelease && !is_compare_exchange;
   if (claimed_acquire_release) {
     if (!append_inline_versioned_release_transaction(

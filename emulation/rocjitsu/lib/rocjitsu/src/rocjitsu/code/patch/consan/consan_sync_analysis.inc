@@ -1,6 +1,6 @@
 enum class AtomicFaultEncoding : uint8_t {
   Unsupported,
-  Cdna4Flat,
+  CdnaFlat,
   FlatLike,
   Buffer,
   Ds,
@@ -8,9 +8,9 @@ enum class AtomicFaultEncoding : uint8_t {
 
 [[nodiscard]] AtomicFaultEncoding atomic_fault_encoding(std::string_view mnemonic, uint32_t size,
                                                         rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && mnemonic.starts_with("flat_atomic") &&
-      size == sizeof(cdna4::FlatMachineInst))
-    return AtomicFaultEncoding::Cdna4Flat;
+  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      mnemonic.starts_with("flat_atomic") && size == sizeof(cdna4::FlatMachineInst))
+    return AtomicFaultEncoding::CdnaFlat;
   if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) &&
       (mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic")) &&
       size == sizeof(rdna4::VflatMachineInst))
@@ -30,8 +30,8 @@ enum class AtomicFaultEncoding : uint8_t {
 }
 
 [[nodiscard]] bool atomic_fault_supports_order(AtomicFaultEncoding encoding) {
-  return encoding == AtomicFaultEncoding::Cdna4Flat ||
-         encoding == AtomicFaultEncoding::FlatLike || encoding == AtomicFaultEncoding::Buffer;
+  return encoding == AtomicFaultEncoding::CdnaFlat || encoding == AtomicFaultEncoding::FlatLike ||
+         encoding == AtomicFaultEncoding::Buffer;
 }
 
 [[nodiscard]] bool atomic_fault_supports_address(AtomicFaultEncoding encoding) {
@@ -42,8 +42,7 @@ enum class AtomicFaultEncoding : uint8_t {
 template <typename Container>
 void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::string_view fingerprint,
                                       const Container &container, bool in_kernel,
-                                      rj_code_arch_t arch,
-                                      std::vector<ConSanFaultSite> &sites) {
+                                      rj_code_arch_t arch, std::vector<ConSanFaultSite> &sites) {
   const std::string container_kind = in_kernel ? "kernel" : "function";
   uint32_t barrier_occurrence = 0;
   for (const ConSanBarrierSite &barrier : container.barrier_sites) {
@@ -1856,8 +1855,7 @@ ordinary_release_wait_boundary(const ConSanSyncSequence &store,
   return std::nullopt;
 }
 
-[[nodiscard]] std::vector<size_t>
-fence_sequence_indices_by_begin(const ConSanResult &result) {
+[[nodiscard]] std::vector<size_t> fence_sequence_indices_by_begin(const ConSanResult &result) {
   std::vector<size_t> indices;
   indices.reserve(result.sync_sequences.size());
   for (size_t index = 0; index < result.sync_sequences.size(); ++index) {
@@ -1873,8 +1871,8 @@ fence_sequence_indices_by_begin(const ConSanResult &result) {
 }
 
 [[nodiscard]] auto fence_sequence_lower_bound(const ConSanResult &result,
-                                               const std::vector<size_t> &indices,
-                                               uint64_t text_offset) {
+                                              const std::vector<size_t> &indices,
+                                              uint64_t text_offset) {
   return std::lower_bound(indices.begin(), indices.end(), text_offset,
                           [&](size_t index, uint64_t offset) {
                             return result.sync_sequences[index].begin_text_offset < offset;
@@ -2012,12 +2010,10 @@ void associate_ordinary_acquire_sync_sequences(const AmdGpuCodeObject &code_obje
       continue;
     std::vector<size_t> cache_matches;
     std::vector<size_t> bounded_metadata_matches;
-    const uint64_t maximum_cache_offset =
-        load_sequence.end_text_offset > UINT64_MAX - 64u
-            ? UINT64_MAX
-            : load_sequence.end_text_offset + 64u;
-    for (auto it =
-             fence_sequence_lower_bound(result, fence_indices, load_sequence.end_text_offset);
+    const uint64_t maximum_cache_offset = load_sequence.end_text_offset > UINT64_MAX - 64u
+                                              ? UINT64_MAX
+                                              : load_sequence.end_text_offset + 64u;
+    for (auto it = fence_sequence_lower_bound(result, fence_indices, load_sequence.end_text_offset);
          it != fence_indices.end(); ++it) {
       const size_t cache_index = *it;
       const ConSanSyncSequence &cache_sequence = result.sync_sequences[cache_index];

@@ -142,7 +142,6 @@ TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
   const std::array<uint32_t, 1> text_words = {build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
   constexpr std::array unsupported_targets = {
       EF_AMDGPU_MACH_AMDGCN_GFX90A,
-      EF_AMDGPU_MACH_AMDGCN_GFX942,
       EF_AMDGPU_MACH_AMDGCN_GFX1200,
   };
 

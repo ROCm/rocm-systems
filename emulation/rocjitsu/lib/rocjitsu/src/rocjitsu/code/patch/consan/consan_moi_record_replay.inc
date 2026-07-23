@@ -171,8 +171,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   // here (and a third time for component-local scalar assignments) is both
   // redundant and dominant on multi-thousand-kernel generated libraries.
   const auto &dense_host_blocks = resource_state.blocks;
-  if ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA4) && use_indirect_appended &&
-      local_entry_islands) {
+  if ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+       arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      use_indirect_appended && local_entry_islands) {
     const auto merge_ranges = [](std::vector<std::pair<uint64_t, uint64_t>> &ranges) {
       std::ranges::sort(ranges);
       size_t merged_range_count = 0u;
@@ -467,7 +468,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       continue;
     }
     bool spill_overlaps_guest_operands = false;
-    if (spill && arch == ROCJITSU_CODE_ARCH_CDNA4 && !options.moi_dynamic_access_records) {
+    if (spill && (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+        !options.moi_dynamic_access_records) {
       std::vector<std::string> ignored_overlap_errors;
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);

@@ -1,6 +1,6 @@
 void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                          const ConSanOptions &options, ConSanResult &result) {
-  if (!is_rdna4_family_arch(arch) && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+  if (!instrumentation::is_admitted_arch(arch)) {
     result.warnings.emplace_back("ConSan LDS check/trap proof has unsupported architecture");
     return;
   }
@@ -659,7 +659,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       if (!action_words)
         return;
       const uint32_t report_alignment_padding =
-          options.report_buffer_address && arch == ROCJITSU_CODE_ARCH_CDNA4 ? 1u : 0u;
+          options.report_buffer_address &&
+                  (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+              ? 1u
+              : 0u;
       const Instruction *site_inst =
           find_instruction_at_text_offset(kernel_scope, site.text_offset);
       auto vcc_save =
@@ -678,7 +681,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                  static_cast<uint64_t>(*delay_words) + 2u + 1u +
                                  lds_check_trap_precompare_words(site) + 1u +
                                  (2u + *action_words) * *required_vgprs + 1u;
-      if (site.dst_accvgpr && arch == ROCJITSU_CODE_ARCH_CDNA4)
+      if (site.dst_accvgpr &&
+          (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4))
         requested_words += 2u * *required_vgprs;
       if (spill_vcc_save_to_vgpr)
         requested_words += 2u;

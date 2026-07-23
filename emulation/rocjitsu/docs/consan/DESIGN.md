@@ -6,9 +6,12 @@ Instrumentation. ConSan intercepts GPU code-object loads through the HSA tools
 interface, inspects final native machine code, and loads a validated patched
 replacement when the selected flavor and engine can instrument it.
 
-ConSan has target-specific native instrumentation for `gfx950`, `gfx1201`, and
-`gfx1250`. It does not translate kernels between GPU ISAs; it patches the final
-code object for the architecture that will actually run.
+ConSan has target-specific native instrumentation for `gfx942`, `gfx950`,
+`gfx1201`, and `gfx1250`. It does not translate kernels between GPU ISAs; it
+patches the final code object for the architecture that will actually run.
+Workgroup-LDS capacity comes from the runtime agent. The simulator JSON is the
+source of truth for offline execution, so no target-specific LDS size is baked
+into gfx942 probes.
 
 This document describes the current implementation, its invariants, and its
 explicit limitations. [FLAVORS.md](FLAVORS.md) gives a phase-by-phase
@@ -23,7 +26,7 @@ in [AMDGPU register spilling](../spilling.md).
 | Area | Implemented today | Boundary or direction |
 | --- | --- | --- |
 | Interception | HSA-tools hook via `HSA_TOOLS_LIB`. | Keep HSA-tools as the main path. |
-| Architecture | Target-specific native instrumentation for `gfx950`, `gfx1201`, and `gfx1250`. | Keep target capabilities and encoders explicit; do not translate between targets. |
+| Architecture | Target-specific native instrumentation for `gfx942`, `gfx950`, `gfx1201`, and `gfx1250`. | Keep target capabilities and encoders explicit; do not translate between targets. |
 | Public selection | Loading the hook selects MOI Record/Replay. `RJ_CONSAN_MODE` selects alternatives and `RJ_CONSAN_POLICY` selects default or strict completeness checks. | Keep flavor and engine as implementation concepts beneath a small public interface. |
 | SuperCollider | Delayed redundant LDS and admitted group-flat observations with an automatic mismatch marker. | Keep as a complementary perturbation/value-instability flavor. |
 | MOI Record/Replay | Bounded device records plus host replay. This is the recommended starting engine. | Preserve clear reference/debug semantics while making snapshot limits explicit. |
@@ -106,7 +109,7 @@ Primary files:
   - Per-owner register requests, descriptor growth, and spill-plan selection.
 - `lib/rocjitsu/src/rocjitsu/code/patch/instruction_sequence.*`
   - Reusable checked instruction-sequence composition used by probe builders.
-- `lib/rocjitsu/src/rocjitsu/code/patch/{cdna4,gfx1250,rdna4}_instrumentation_builder.h`
+- `lib/rocjitsu/src/rocjitsu/code/patch/{cdna3,cdna4,gfx1250,rdna4}_instrumentation_builder.h`
   - Target-specific instruction encoders used by injected probes, isolated
     from the architecture-generic `instruction_builder.*` surface.
 - `lib/rocjitsu/src/rocjitsu/code/patch/trampoline_builder.*`,
@@ -122,7 +125,7 @@ Test anchors:
 - `tests/consan/CMakeLists.txt`
   - ConSan unit, fuzz, HIP-binary, and live-GPU test registration. The shared
     test manifest only invokes the focused registration helpers.
-- `tests/patch/{cdna4,gfx1250,rdna4}_instrumentation_builder_test.cpp`
+- `tests/patch/{cdna3,cdna4,gfx1250,rdna4}_instrumentation_builder_test.cpp`
   - Exact encoding and rejection coverage for the target-specific builders.
 - `tests/patch/consan/`
   - Shared synthetic ELF fixtures plus feature-centric core, analysis,
@@ -221,7 +224,7 @@ The implementation boundary is:
   patched under ordinary settings, then applies deterministic runtime
   selection before deferred host scanning. An immediate adjacent-range
   in-kernel check remains an expert extension.
-- **Architecture dispatch.** `gfx950`, `gfx1201`, and `gfx1250` use explicit
+- **Architecture dispatch.** `gfx942`, `gfx950`, `gfx1201`, and `gfx1250` use explicit
   ISA-specific capability checks and encoders rather than implicit RDNA4
   assumptions.
 

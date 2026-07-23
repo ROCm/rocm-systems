@@ -632,9 +632,28 @@ TEST(SpillManager, BuildsGfx1250VgprSaveRestoreSequence) {
 }
 
 TEST(SpillManager, BuildsGfx950VgprSaveRestoreSequence) {
-  SpillManager manager(/*original_private_bytes=*/0, kMaxCdna4AddressFreeScratchPrivateBytes);
+  SpillManager manager(/*original_private_bytes=*/0, kMaxCdnaAddressFreeScratchPrivateBytes);
   const auto sequence = build_vgpr_spill_sequence(manager, /*vgpr_base=*/10,
                                                   /*vgpr_count=*/3, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(sequence);
+  EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
+  EXPECT_EQ(sequence->total_private_bytes, 16u);
+  EXPECT_EQ(manager.total_private_bytes(), 12u);
+  ASSERT_EQ(sequence->save_words.size(), 8u);
+  ASSERT_EQ(sequence->restore_words.size(), 7u);
+  EXPECT_EQ(sequence->save_words[0], 0xbf8c0f70u);
+  EXPECT_EQ(sequence->save_words[1], 0xdc704000u);
+  EXPECT_EQ(sequence->save_words[2], 0x007f0a00u);
+  EXPECT_EQ(sequence->save_words[7], 0xbf8c0f70u);
+  EXPECT_EQ(sequence->restore_words[0], 0xdc504000u);
+  EXPECT_EQ(sequence->restore_words[1], 0x0a7f0000u);
+  EXPECT_EQ(sequence->restore_words[6], 0xbf8c0f70u);
+}
+
+TEST(SpillManager, BuildsGfx942VgprSaveRestoreSequence) {
+  SpillManager manager(/*original_private_bytes=*/0, kMaxCdnaAddressFreeScratchPrivateBytes);
+  const auto sequence = build_vgpr_spill_sequence(manager, /*vgpr_base=*/10,
+                                                  /*vgpr_count=*/3, ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_TRUE(sequence);
   EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
   EXPECT_EQ(sequence->total_private_bytes, 16u);
@@ -711,6 +730,29 @@ TEST(SpillManager, BuildsCdna4SccPreservingDynamicStackVgprFrame) {
   EXPECT_EQ(sequence->restore_words[8], 0xbea10050u);
 }
 
+TEST(SpillManager, BuildsCdna3SccPreservingDynamicStackVgprFrame) {
+  const auto sequence = build_dynamic_stack_vgpr_spill_sequence(
+      /*vgpr_base=*/10, /*vgpr_count=*/3, /*stack_top_sgpr=*/32,
+      /*frame_base_sgpr=*/33, /*saved_frame_base_sgpr=*/80, /*saved_scc_sgpr=*/66,
+      ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(sequence);
+  EXPECT_TRUE(sequence->uses_dynamic_stack_frame);
+  EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
+  ASSERT_EQ(sequence->save_words.size(), 14u);
+  ASSERT_EQ(sequence->restore_words.size(), 9u);
+  EXPECT_EQ(sequence->save_words[0], 0xbf8c0f70u);
+  EXPECT_EQ(sequence->save_words[1], 0x85428081u);
+  EXPECT_EQ(sequence->save_words[4], 0xdc704000u);
+  EXPECT_EQ(sequence->save_words[5], 0x00210a00u);
+  EXPECT_EQ(sequence->save_words[10], 0xbf8c0f70u);
+  EXPECT_EQ(sequence->save_words[11], 0x8020ff20u);
+  EXPECT_EQ(sequence->save_words[12], 12u);
+  EXPECT_EQ(sequence->save_words[13], 0xbf078042u);
+  EXPECT_EQ(sequence->restore_words[0], 0xdc504000u);
+  EXPECT_EQ(sequence->restore_words[1], 0x0a210000u);
+  EXPECT_EQ(sequence->restore_words[6], 0xbf8c0f70u);
+}
+
 TEST(SpillManager, VgprSequenceAppendsAfterOriginalPrivateSegment) {
   SpillManager manager(/*original_private_bytes=*/20, kMaxAddressFreeScratchPrivateBytes);
   const auto sequence = build_vgpr_spill_sequence(manager, /*vgpr_base=*/7, /*vgpr_count=*/2,
@@ -738,13 +780,13 @@ TEST(SpillManager, VgprSequenceFailureRollsBack) {
   EXPECT_EQ(unencodable.offset_for(vgpr(10)), std::nullopt);
 
   SpillManager unsupported(/*original_private_bytes=*/0, /*limit=*/16);
-  EXPECT_FALSE(build_vgpr_spill_sequence(unsupported, 10, 1, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_FALSE(build_vgpr_spill_sequence(unsupported, 10, 1, ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(build_vgpr_spill_sequence(unsupported, 255, 2, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_EQ(unsupported.total_private_bytes(), 0u);
 
   SpillManager cdna4_unencodable(
-      /*original_private_bytes=*/kMaxCdna4AddressFreeScratchPrivateBytes,
-      /*limit=*/kMaxCdna4AddressFreeScratchPrivateBytes + 4u);
+      /*original_private_bytes=*/kMaxCdnaAddressFreeScratchPrivateBytes,
+      /*limit=*/kMaxCdnaAddressFreeScratchPrivateBytes + 4u);
   EXPECT_FALSE(build_vgpr_spill_sequence(cdna4_unencodable, 10, 1, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_EQ(cdna4_unencodable.offset_for(vgpr(10)), std::nullopt);
 }

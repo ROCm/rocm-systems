@@ -111,7 +111,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     // eagerly initialized until those identities can be represented
     // independently. Otherwise a clean barrier or atomic handoff can compare
     // owners from incompatible generations and report a false conflict.
-    // This is RDNA4-specific: gfx1250 and CDNA4 preserve their persistent
+    // This is RDNA4-specific: gfx1250 and CDNA3/4 preserve their persistent
     // workgroup key through generation-tagged access/token validation. The
     // mismatch appeared when every RDNA4 local mirror switched representation.
     // bd-hei.2.1 tracks unifying these identities without restoring that race.
@@ -125,14 +125,14 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     // exact local identity and select the representation requested by the
     // object-wide planner.
     constexpr uint32_t kGfx1250PreferredLocalShadowLimit = 48u * 1024u;
-    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
       // LDS is reusable storage whose initial contents are unspecified. Make
-      // CDNA4 validity explicit in each exact cell instead of depending on a
+      // CDNA validity explicit in each exact cell instead of depending on a
       // workgroup-wide eager clear before the instrumented program starts.
       layout = plan_consan_moi_generation_tagged_workgroup_shadow(
           descriptor.group_segment_fixed_size, max_workgroup_lds_bytes);
       if (!layout) {
-        warnings.emplace_back("ConSan MOI CDNA4 generation-tagged workgroup shadow does not fit in "
+        warnings.emplace_back("ConSan MOI CDNA generation-tagged workgroup shadow does not fit in "
                               "architectural LDS");
         return std::nullopt;
       }
@@ -281,7 +281,8 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
     }
     const bool supported_engine =
         options.moi_engine == ConSanMoiEngine::InlineShadow ||
-        (arch == ROCJITSU_CODE_ARCH_CDNA4 && options.moi_engine == ConSanMoiEngine::RecordReplay);
+        ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+         options.moi_engine == ConSanMoiEngine::RecordReplay);
     if (!supported_engine || !options.moi_dynamic_stack_spill || !options.moi_exec_save_sgpr) {
       warnings.emplace_back("ConSan MOI dynamic-stack spill has no supported scalar-state layout");
       return std::nullopt;
@@ -446,12 +447,10 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
   return true;
 }
 
-[[nodiscard]] bool
-apply_lds_descriptor_requirements(CodeObjectPatcher &patcher, const ConSanResult &result,
-                                  const AmdGpuCodeObject &code_object,
-                                  const MoiDescriptorLdsRequirements &requirements,
-                                  const ConSanOptions &options, rj_code_arch_t arch,
-                                  std::vector<std::string> &errors) {
+[[nodiscard]] bool apply_lds_descriptor_requirements(
+    CodeObjectPatcher &patcher, const ConSanResult &result, const AmdGpuCodeObject &code_object,
+    const MoiDescriptorLdsRequirements &requirements, const ConSanOptions &options,
+    rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
     const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
     const auto active_kernel =

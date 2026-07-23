@@ -242,6 +242,8 @@ apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
 
 [[nodiscard]] rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
   switch (target) {
+  case ROCJITSU_CODE_TARGET_GFX942:
+    return ROCJITSU_CODE_ARCH_CDNA3;
   case ROCJITSU_CODE_TARGET_GFX950:
     return ROCJITSU_CODE_ARCH_CDNA4;
   case ROCJITSU_CODE_TARGET_GFX1201:
@@ -1143,14 +1145,14 @@ template <typename Raw> void fill_flat_like_atomic_raw(ConSanAtomicSite &site, c
   site.returns_old_value = amdgpu::gfx12_atomic_returns(static_cast<uint8_t>(raw.th));
 }
 
-void fill_cdna4_flat_atomic_raw(ConSanAtomicSite &site, const cdna4::FlatMachineInst &raw) {
+template <typename Raw> void fill_cdna_flat_atomic_raw(ConSanAtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_saddr = static_cast<uint32_t>(raw.saddr);
   site.raw_vaddr = static_cast<uint32_t>(raw.addr);
   site.raw_vsrc = static_cast<uint32_t>(raw.data);
   site.raw_vdst = static_cast<uint32_t>(raw.vdst);
   site.raw_ioffset = static_cast<int32_t>(raw.offset);
-  // CDNA4 FLAT atomics do not carry gfx12's explicit scope field. ConSan's
+  // CDNA3/4 FLAT atomics do not carry gfx12's explicit scope field. ConSan's
   // admitted forms are device-scoped, matching the builder contract.
   site.raw_scope = 2u;
   site.returns_old_value = raw.sc0 != 0u;
@@ -1431,8 +1433,8 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.size = static_cast<uint32_t>(inst.size());
   site.width_bits = lds_width_bits(mnemonic);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && mnemonic.starts_with("flat_atomic") &&
-      site.width_bits == 0u) {
+  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      mnemonic.starts_with("flat_atomic") && site.width_bits == 0u) {
     site.width_bits = 32u;
   }
   site.address_space_hint = flat_address_space_hint(inst, tracker);
@@ -1446,8 +1448,9 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
     site.addr_vgpr = vgpr_index(inst.src_operand(0));
     site.data_vgpr = vgpr_index(inst.src_operand(1));
   }
-  if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       instruction_bytes.size() >= sizeof(cdna4::FlatMachineInst)) {
+    // CDNA3 and CDNA4 use an identical FLAT bit layout.
     cdna4::FlatMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
     site.raw_op = static_cast<uint32_t>(raw.op);
@@ -1648,8 +1651,8 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.size = static_cast<uint32_t>(inst.size());
   site.width_bits = lds_width_bits(mnemonic);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && mnemonic.starts_with("flat_atomic") &&
-      site.width_bits == 0u) {
+  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      mnemonic.starts_with("flat_atomic") && site.width_bits == 0u) {
     site.width_bits = 32u;
   }
   site.dst_vgpr = vgpr_index(inst.dst_operand(0));
@@ -1663,11 +1666,13 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   }
   site.returns_old_value = atomic_returns_from_mnemonic(mnemonic);
 
-  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && mnemonic.starts_with("flat_atomic") &&
+  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      mnemonic.starts_with("flat_atomic") &&
       instruction_bytes.size() >= sizeof(cdna4::FlatMachineInst)) {
+    // CDNA3 and CDNA4 use an identical FLAT bit layout.
     cdna4::FlatMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-    fill_cdna4_flat_atomic_raw(site, raw);
+    fill_cdna_flat_atomic_raw(site, raw);
   } else if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
     if (mnemonic.starts_with("ds_") && instruction_bytes.size() >= sizeof(rdna4::VdsMachineInst)) {
       rdna4::VdsMachineInst raw{};

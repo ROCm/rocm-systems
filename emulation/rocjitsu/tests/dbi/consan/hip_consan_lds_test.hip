@@ -29,6 +29,16 @@ int main(int argc, char **argv) {
     ASSERT_EQ(err, hipSuccess) << "HIP error: " << hipGetErrorString(err);                         \
   } while (0)
 
+#if defined(__gfx942__)
+#define RJ_CONSAN_TEST_WORKGROUP_BARRIER "s_barrier\n\t"
+#define RJ_CONSAN_TEST_DS_STORE_B32 "ds_write_b32 %0, %1\n\t"
+#else
+#define RJ_CONSAN_TEST_WORKGROUP_BARRIER                                                           \
+  "s_barrier_signal -1\n\t"                                                                        \
+  "s_barrier_wait -1\n\t"
+#define RJ_CONSAN_TEST_DS_STORE_B32 "ds_store_b32 %0, %1\n\t"
+#endif
+
 namespace {
 
 bool bool_env(const char *name) {
@@ -104,55 +114,50 @@ __global__ __launch_bounds__(64) void padded_lds_store(uint32_t *out, uint32_t r
 
   if (tid == 0)
     lds[0] = 0x12345678u;
-  asm volatile("s_barrier_signal -1\n\t"
-               "s_barrier_wait -1\n\t" ::
-                   : "memory");
+  asm volatile(RJ_CONSAN_TEST_WORKGROUP_BARRIER ::: "memory");
 
   const auto clean_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[tid]) & 0xFFFFu);
   const auto racy_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xFFFFu);
   const uint32_t lds_addr = racy != 0 ? racy_addr : clean_addr;
   const uint32_t value = 0xC0FFEE00u | tid;
   // Keep enough slack for the larger marker-buffer mismatch action.
-  asm volatile("ds_store_b32 %0, %1\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
+  asm volatile(RJ_CONSAN_TEST_DS_STORE_B32 "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
+                                           "s_nop 0\n\t"
                :
                : "v"(lds_addr), "v"(value)
                : "memory");
 
-  asm volatile("s_barrier_signal -1\n\t"
-               "s_barrier_wait -1\n\t" ::
-                   : "memory");
+  asm volatile(RJ_CONSAN_TEST_WORKGROUP_BARRIER ::: "memory");
   if (racy != 0) {
     if (tid == 0)
       out[0] = lds[0];

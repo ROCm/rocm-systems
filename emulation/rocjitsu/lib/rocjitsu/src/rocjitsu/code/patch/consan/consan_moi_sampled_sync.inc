@@ -629,8 +629,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
                                           ConSanResult &result) {
   if (!options.moi_track_barriers || options.moi_engine != ConSanMoiEngine::Sampled)
     return;
-  if (!options.moi_report_buffer_address ||
-      (!is_rdna4_family_arch(arch) && arch != ROCJITSU_CODE_ARCH_CDNA4)) {
+  if (!options.moi_report_buffer_address || !instrumentation::is_admitted_arch(arch)) {
     result.warnings.emplace_back(
         "ConSan MOI sampled barrier sync requires a supported report-buffer target");
     return;
@@ -1473,8 +1472,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                                          ConSanResult &result) {
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::Sampled)
     return;
-  if (!options.moi_report_buffer_address ||
-      (!is_rdna4_family_arch(arch) && arch != ROCJITSU_CODE_ARCH_CDNA4)) {
+  if (!options.moi_report_buffer_address || !instrumentation::is_admitted_arch(arch)) {
     result.warnings.emplace_back(
         "ConSan MOI sampled atomic sync requires a supported report-buffer target");
     return;
@@ -2016,7 +2014,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     errors.emplace_back("ConSan MOI fence record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
   }
-  const bool requires_raw_th = arch != ROCJITSU_CODE_ARCH_CDNA4;
+  const bool requires_raw_th = arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4;
   if (!address_plan.supported() || !candidate.fence.raw_scope ||
       (requires_raw_th && !candidate.communication_site.raw_th) ||
       candidate.fence.communication_event_identity.empty()) {
@@ -2049,8 +2047,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
     if (!owner_shift)
       return std::nullopt;
-    const uint16_t value_vgpr =
-        static_cast<uint16_t>(*options.scratch_vgpr + (arch == ROCJITSU_CODE_ARCH_CDNA4 ? 5u : 2u));
+    const uint16_t value_vgpr = static_cast<uint16_t>(
+        *options.scratch_vgpr +
+        (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 5u : 2u));
     const auto owner_init = instrumentation::build_v_lshrrev_b32(
         value_vgpr, scalar_positive_inline_u32(*owner_shift), kRdna4WorkitemIdX, arch);
     if (!owner_init) {
@@ -2106,7 +2105,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     }
     words.insert(words.end(), address_words->begin(), address_words->end());
   }
-  if (derived_owner_word && arch != ROCJITSU_CODE_ARCH_CDNA4)
+  if (derived_owner_word && arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
     words.push_back(*derived_owner_word);
   for (uint64_t offset = 0; offset < candidate.fence.size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
@@ -2115,7 +2114,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   }
   const uint16_t address_vgpr = address_plan.result_address_vgpr;
   const uint16_t recorded_address_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 6u);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
     words.push_back(
         build_v_mov_b32_e32(recorded_address_vgpr, vector_source_vgpr(address_vgpr), arch));
     words.push_back(
@@ -2130,13 +2129,13 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   const uint64_t base = *options.moi_report_buffer_address;
   const uint64_t record_base =
       base + fence_records_offset +
-      (arch == ROCJITSU_CODE_ARCH_CDNA4
+      ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
            ? 0u
            : static_cast<uint64_t>(record_index) * sizeof(ConSanMoiFenceRecord));
   const ConSanMoiFenceEventKind kind = candidate.fence.memory_role == ConSanSyncMemoryRole::Release
                                            ? ConSanMoiFenceEventKind::Release
                                            : ConSanMoiFenceEventKind::Acquire;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
     if (!options.moi_exec_save_sgpr) {
       errors.emplace_back("ConSan MOI dynamic fence record requires scalar EXEC state");
       return std::nullopt;

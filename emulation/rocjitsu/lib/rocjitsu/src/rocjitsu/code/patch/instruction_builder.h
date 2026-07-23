@@ -78,16 +78,16 @@ inline constexpr uint32_t kMaxAddressFreeScratchDwordOffset = 0x7ffffcu;
 /// Largest per-lane private segment whose last dword starts at an encodable
 /// address-free VSCRATCH offset.
 inline constexpr uint32_t kMaxAddressFreeScratchPrivateBytes = 0x800000u;
-/// Largest non-negative, dword-aligned offset in CDNA4 FLAT_SCRATCH's signed
-/// 13-bit byte offset field, and the corresponding per-lane private extent.
-inline constexpr uint32_t kMaxCdna4AddressFreeScratchDwordOffset = 0xffcu;
-inline constexpr uint32_t kMaxCdna4AddressFreeScratchPrivateBytes = 0x1000u;
+/// Largest non-negative, dword-aligned offset in CDNA3/CDNA4 FLAT_SCRATCH's
+/// 12-bit byte offset field, and the corresponding per-lane private extent.
+inline constexpr uint32_t kMaxCdnaAddressFreeScratchDwordOffset = 0xffcu;
+inline constexpr uint32_t kMaxCdnaAddressFreeScratchPrivateBytes = 0x1000u;
 
 /// @brief Return the per-lane private extent addressable by the architecture's
 /// address-free scratch form.
 ///
 /// Keeping this query next to the encoding limits prevents shared DBI policy
-/// from accidentally planning a gfx12-sized layout for CDNA4's narrower
+/// from accidentally planning a gfx12-sized layout for CDNA3/CDNA4's narrower
 /// FLAT_SCRATCH immediate. Architectures without a qualified address-free
 /// spill encoding return std::nullopt.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
@@ -97,7 +97,9 @@ address_free_scratch_private_limit(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_GFX1250:
     return kMaxAddressFreeScratchPrivateBytes;
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return kMaxCdna4AddressFreeScratchPrivateBytes;
+    return kMaxCdnaAddressFreeScratchPrivateBytes;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return kMaxCdnaAddressFreeScratchPrivateBytes;
   default:
     return std::nullopt;
   }
@@ -106,16 +108,16 @@ address_free_scratch_private_limit(rj_code_arch_t arch) {
 /// @brief Normalize a requested private extent to the target's runtime
 /// allocation granularity and reject an unencodable result.
 ///
-/// CDNA4 scratch instructions address dwords, but gfx950 dispatch backing must
-/// be a multiple of 16 bytes. Slot offsets remain unchanged; only the final
-/// descriptor/AQL requirement is rounded.
+/// CDNA3/CDNA4 scratch instructions address dwords, while their dispatch
+/// backing must be a multiple of 16 bytes. Slot offsets remain unchanged;
+/// only the final descriptor/AQL requirement is rounded.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 normalize_address_free_scratch_private_size(rj_code_arch_t arch, uint32_t requested_bytes) {
   const auto limit = address_free_scratch_private_limit(arch);
   if (!limit)
     return std::nullopt;
   const uint64_t normalized =
-      arch == ROCJITSU_CODE_ARCH_CDNA4
+      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
           ? util::align_up(static_cast<uint64_t>(requested_bytes), static_cast<uint64_t>(16u))
           : requested_bytes;
   if (normalized > *limit)

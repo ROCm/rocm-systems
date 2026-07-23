@@ -3,7 +3,13 @@
 ConSan instruments AMD LDS/shared-memory behavior by intercepting HSA
 code-object loads, inspecting final native machine code, and loading a patched
 replacement when instrumentation is possible. ConSan has native support for
-`gfx950`, `gfx1201`, and `gfx1250`; it does not translate between GPU ISAs.
+`gfx942`, `gfx950`, `gfx1201`, and `gfx1250`; it does not translate between GPU
+ISAs.
+
+The runtime agent supplies the active workgroup-LDS capacity, so gfx942 support
+does not assume a fixed architectural size. Simulator and offline validation
+use the selected RocJITsu JSON configuration as the source of truth for that
+capacity.
 
 ConSan exposes the SuperCollider flavor and three MOI engines. MOI stands for
 **Memory-Ordering Instrumentation**.

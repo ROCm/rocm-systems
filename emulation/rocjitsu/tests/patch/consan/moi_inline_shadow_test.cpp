@@ -290,6 +290,65 @@ TEST(ConSanMoi, Cdna4InlineShadowRecoversFullWindowKernargPreloadTail) {
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET), 3u);
 }
 
+TEST(ConSanMoi, Cdna3InlineShadowRecoversFullWindowKernargPreloadTail) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
+  std::vector<uint32_t> text_words(1200, build_s_nop(0, kArch));
+  const auto store = build_cdna3_ds_store_b32(/*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/4, kArch);
+  ASSERT_TRUE(store);
+  std::ranges::copy(*store, text_words.begin());
+  text_words.back() = build_s_endpgm(kArch);
+  std::vector<uint8_t> bytes =
+      make_cdna3_lds_code_object(text_words, "full_window_kernarg_preload");
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 15u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 13u);
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET, 3u);
+  });
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.scratch_vgpr = 8;
+  options.moi_owner_vgpr = 24;
+  options.moi_epoch_vgpr = 25;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  EXPECT_EQ(prologue->dispatch_id_source_sgpr, 2u);
+  EXPECT_EQ(prologue->dispatch_id_original_user_sgpr_count, 15u);
+  EXPECT_EQ(prologue->dispatch_id_expanded_user_sgpr_count, 16u);
+  EXPECT_EQ(prologue->dispatch_id_kernarg_reload_sgpr, 14u);
+  EXPECT_EQ(prologue->dispatch_id_kernarg_reload_base_sgpr, 0u);
+  EXPECT_EQ(prologue->dispatch_id_kernarg_reload_offset_dwords, 15u);
+  EXPECT_EQ(prologue->dispatch_id_kernarg_reload_count, 1u);
+  EXPECT_EQ(prologue->dispatch_id_shifted_system_sgpr_count, 1u);
+  EXPECT_EQ(prologue->dispatch_id_system_sgpr_shift, 1u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT),
+            16u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernel_code_properties,
+                            kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID),
+            1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH), 12u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET), 3u);
+}
+
 TEST(ConSanMoi, Cdna4InlineShadowPreservesDsWorkgroupKeyFromKernelEntry) {
   std::vector<uint32_t> text_words(1200, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
   const auto long_entry = ib::build_v_mov_b32_literal(

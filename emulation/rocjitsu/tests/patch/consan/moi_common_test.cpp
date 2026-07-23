@@ -75,6 +75,21 @@ TEST(ConSanMoi, Gfx1250Wave32DescriptorUsesSixteenVgprGranules) {
   EXPECT_EQ(result.resource_plans.front().current_vgpr_count, 80u);
 }
 
+TEST(ConSanMoi, Cdna3Wave64DescriptorUsesEightVgprGranules) {
+  constexpr auto store = cdna3::build_ds(cdna3::kDsWriteB32Ds, {.addr = 0, .data0 = 1});
+  const std::array<uint32_t, 3> text_words = {store[0], store[1],
+                                              build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3)};
+  const std::vector<uint8_t> bytes =
+      make_cdna3_lds_code_object(text_words, "lds_probe", /*vgpr_granulated=*/3);
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().current_vgpr_count, 32u);
+}
+
 TEST(ConSanMoi, Gfx1250TwoAddressLoadScratchAvoidsCompleteDestinationPair) {
   constexpr auto load =
       gfx1250::build_vds(gfx1250::kDsLoad2addrStride64B32Vds, {.addr = 0, .vdst = 1});

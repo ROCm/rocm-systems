@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file hip_consan_moi_gfx950_test.hip
-/// @brief Native gfx950 smoke tests for hook-driven ConSan MOI instrumentation.
+/// @file hip_consan_moi_cdna_test.hip
+/// @brief CDNA3/CDNA4 smoke tests for hook-driven ConSan MOI instrumentation.
 
 #include <algorithm>
 #include <cstddef>
@@ -109,7 +109,7 @@ bool set_moi_report_buffer_env(void *report, size_t report_bytes) {
 }
 
 __attribute__((amdgpu_num_vgpr(256))) __global__
-__launch_bounds__(64) void moi_gfx950_forced_spill_test_kernel_for_instrumentation(uint32_t *out) {
+__launch_bounds__(64) void moi_cdna_forced_spill_test_kernel_for_instrumentation(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
   const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
@@ -136,7 +136,7 @@ __launch_bounds__(64) void moi_gfx950_forced_spill_test_kernel_for_instrumentati
 }
 
 __attribute__((amdgpu_num_vgpr(256))) __global__ __launch_bounds__(
-    64) void moi_gfx950_barrier_forced_spill_kernel_for_instrumentation(uint32_t *out) {
+    64) void moi_cdna_barrier_forced_spill_kernel_for_instrumentation(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
   const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
@@ -164,8 +164,8 @@ __attribute__((amdgpu_num_vgpr(256))) __global__ __launch_bounds__(
 }
 
 __attribute__((amdgpu_num_vgpr(256))) __global__ __launch_bounds__(
-    64) void moi_gfx950_atomic_forced_spill_kernel_for_instrumentation(uint32_t *atomic_value,
-                                                                       uint32_t *out) {
+    64) void moi_cdna_atomic_forced_spill_kernel_for_instrumentation(uint32_t *atomic_value,
+                                                                      uint32_t *out) {
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
   uint32_t values[8] = {
       0xa1000000u ^ tid, 0xa2000000u ^ tid, 0xa3000000u ^ tid, 0xa4000000u ^ tid,
@@ -198,7 +198,7 @@ __attribute__((amdgpu_num_vgpr(256))) __global__ __launch_bounds__(
 }
 
 __global__ __launch_bounds__(
-    64) void moi_gfx950_dynamic_stack_inline_spill_kernel_for_instrumentation(uint32_t *out) {
+    64) void moi_cdna_dynamic_stack_inline_spill_kernel_for_instrumentation(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
   const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
@@ -219,8 +219,8 @@ __global__ __launch_bounds__(
   out[tid] = private_words[private_index];
 }
 
-__device__ __noinline__ uint32_t moi_gfx950_shared_lds_helper_for_instrumentation(uint32_t lds_addr,
-                                                                                  uint32_t value) {
+__device__ __noinline__ uint32_t moi_cdna_shared_lds_helper_for_instrumentation(uint32_t lds_addr,
+                                                                                 uint32_t value) {
   asm volatile("ds_write_b32 %0, %1\n\t" RJ_CONSAN_MOI_RECORD_NOP_CAVE
                :
                : "v"(lds_addr), "v"(value)
@@ -229,24 +229,24 @@ __device__ __noinline__ uint32_t moi_gfx950_shared_lds_helper_for_instrumentatio
 }
 
 __attribute__((amdgpu_num_vgpr(256))) __global__
-__launch_bounds__(64) void moi_gfx950_shared_helper_caller_a(uint32_t *out) {
+__launch_bounds__(64) void moi_cdna_shared_helper_caller_a(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
   const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
   asm volatile("v_mov_b32 v255, 0" ::: "v255");
-  out[tid] = moi_gfx950_shared_lds_helper_for_instrumentation(lds_addr, 0xa0000000u | tid);
+  out[tid] = moi_cdna_shared_lds_helper_for_instrumentation(lds_addr, 0xa0000000u | tid);
 }
 
 __attribute__((amdgpu_num_vgpr(256))) __global__
-__launch_bounds__(64) void moi_gfx950_shared_helper_caller_b(uint32_t *out) {
+__launch_bounds__(64) void moi_cdna_shared_helper_caller_b(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
   const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
   asm volatile("v_mov_b32 v255, 0" ::: "v255");
-  out[tid] = moi_gfx950_shared_lds_helper_for_instrumentation(lds_addr, 0xb0000000u | tid);
+  out[tid] = moi_cdna_shared_lds_helper_for_instrumentation(lds_addr, 0xb0000000u | tid);
 }
 
-TEST(ConSanMoiGfx950Test, ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord) {
+TEST(ConSanMoiCdnaTest, ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord) {
   constexpr uint32_t kThreads = 64;
   constexpr uint32_t kValuesPerThread = 8;
   constexpr uint32_t kRecordSlots = 1;
@@ -260,7 +260,7 @@ TEST(ConSanMoiGfx950Test, ForcedSpillRecordReplayPreservesLiveVgprsAndWritesReco
 
   ReportEnvGuard report_env;
   ASSERT_TRUE(set_moi_report_buffer_env(report_device, kReportBytes));
-  moi_gfx950_forced_spill_test_kernel_for_instrumentation<<<1, kThreads>>>(out_device);
+  moi_cdna_forced_spill_test_kernel_for_instrumentation<<<1, kThreads>>>(out_device);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
@@ -289,7 +289,7 @@ TEST(ConSanMoiGfx950Test, ForcedSpillRecordReplayPreservesLiveVgprsAndWritesReco
   EXPECT_EQ(record.cell_count, 1u);
 }
 
-TEST(ConSanMoiGfx950Test, BarrierForcedSpillPreservesLiveVgprsAndWritesRecords) {
+TEST(ConSanMoiCdnaTest, BarrierForcedSpillPreservesLiveVgprsAndWritesRecords) {
   constexpr uint32_t kThreads = 64;
   constexpr uint32_t kValuesPerThread = 8;
   constexpr uint32_t kAccessSlots = 1;
@@ -304,7 +304,7 @@ TEST(ConSanMoiGfx950Test, BarrierForcedSpillPreservesLiveVgprsAndWritesRecords) 
 
   ReportEnvGuard report_env;
   ASSERT_TRUE(set_moi_report_buffer_env(report_device, kReportBytes));
-  moi_gfx950_barrier_forced_spill_kernel_for_instrumentation<<<1, kThreads>>>(out_device);
+  moi_cdna_barrier_forced_spill_kernel_for_instrumentation<<<1, kThreads>>>(out_device);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
@@ -342,7 +342,7 @@ TEST(ConSanMoiGfx950Test, BarrierForcedSpillPreservesLiveVgprsAndWritesRecords) 
   }));
 }
 
-TEST(ConSanMoiGfx950Test, AtomicForcedSpillPreservesLiveVgprsAndWritesRecord) {
+TEST(ConSanMoiCdnaTest, AtomicForcedSpillPreservesLiveVgprsAndWritesRecord) {
   constexpr uint32_t kThreads = 64;
   constexpr uint32_t kValuesPerThread = 8;
   constexpr uint32_t kAccessSlots = 1;
@@ -362,8 +362,8 @@ TEST(ConSanMoiGfx950Test, AtomicForcedSpillPreservesLiveVgprsAndWritesRecord) {
 
   ReportEnvGuard report_env;
   ASSERT_TRUE(set_moi_report_buffer_env(report_device, kReportBytes));
-  moi_gfx950_atomic_forced_spill_kernel_for_instrumentation<<<1, kThreads>>>(atomic_device,
-                                                                             out_device);
+  moi_cdna_atomic_forced_spill_kernel_for_instrumentation<<<1, kThreads>>>(atomic_device,
+                                                                            out_device);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
@@ -400,13 +400,13 @@ TEST(ConSanMoiGfx950Test, AtomicForcedSpillPreservesLiveVgprsAndWritesRecord) {
   EXPECT_EQ(record.semantics, 0u);
 }
 
-TEST(ConSanMoiGfx950Test, DynamicStackInlineSpillPreservesPrivateValues) {
+TEST(ConSanMoiCdnaTest, DynamicStackInlineSpillPreservesPrivateValues) {
   constexpr uint32_t kThreads = 64;
   uint32_t *out_device = nullptr;
   HIP_ASSERT(hipMalloc(&out_device, kThreads * sizeof(uint32_t)));
   HIP_ASSERT(hipMemset(out_device, 0, kThreads * sizeof(uint32_t)));
 
-  moi_gfx950_dynamic_stack_inline_spill_kernel_for_instrumentation<<<1, kThreads>>>(out_device);
+  moi_cdna_dynamic_stack_inline_spill_kernel_for_instrumentation<<<1, kThreads>>>(out_device);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
@@ -419,7 +419,7 @@ TEST(ConSanMoiGfx950Test, DynamicStackInlineSpillPreservesPrivateValues) {
     EXPECT_EQ(out[tid], 0xd9500000u ^ tid) << "tid=" << tid;
 }
 
-TEST(ConSanMoiGfx950Test, ForcedSpillSampledPreservesLiveVgprsAndWritesEntry) {
+TEST(ConSanMoiCdnaTest, ForcedSpillSampledPreservesLiveVgprsAndWritesEntry) {
   constexpr uint32_t kThreads = 64;
   constexpr uint32_t kValuesPerThread = 8;
   constexpr uint32_t kSampledSlots = 1;
@@ -433,7 +433,7 @@ TEST(ConSanMoiGfx950Test, ForcedSpillSampledPreservesLiveVgprsAndWritesEntry) {
 
   ReportEnvGuard report_env;
   ASSERT_TRUE(set_moi_report_buffer_env(report_device, kReportBytes));
-  moi_gfx950_forced_spill_test_kernel_for_instrumentation<<<1, kThreads>>>(out_device);
+  moi_cdna_forced_spill_test_kernel_for_instrumentation<<<1, kThreads>>>(out_device);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
@@ -472,14 +472,14 @@ TEST(ConSanMoiGfx950Test, ForcedSpillSampledPreservesLiveVgprsAndWritesEntry) {
   EXPECT_EQ(window.generation & 3u, entry.generation);
 }
 
-TEST(ConSanMoiGfx950Test, ForcedSpillInlineShadowPreservesLiveVgprs) {
+TEST(ConSanMoiCdnaTest, ForcedSpillInlineShadowPreservesLiveVgprs) {
   constexpr uint32_t kThreads = 64;
   constexpr uint32_t kValuesPerThread = 8;
   uint32_t *out_device = nullptr;
   HIP_ASSERT(hipMalloc(&out_device, kThreads * kValuesPerThread * sizeof(uint32_t)));
   HIP_ASSERT(hipMemset(out_device, 0, kThreads * kValuesPerThread * sizeof(uint32_t)));
 
-  moi_gfx950_forced_spill_test_kernel_for_instrumentation<<<1, kThreads>>>(out_device);
+  moi_cdna_forced_spill_test_kernel_for_instrumentation<<<1, kThreads>>>(out_device);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
@@ -499,7 +499,7 @@ TEST(ConSanMoiGfx950Test, ForcedSpillInlineShadowPreservesLiveVgprs) {
   }
 }
 
-TEST(ConSanMoiGfx950Test, SharedHelperForcedSpillPreservesBothCallers) {
+TEST(ConSanMoiCdnaTest, SharedHelperForcedSpillPreservesBothCallers) {
   constexpr uint32_t kThreads = 64;
   constexpr uint32_t kRecordSlots = 2;
   constexpr size_t kReportBytes = moi_report_buffer_bytes(kRecordSlots);
@@ -512,9 +512,9 @@ TEST(ConSanMoiGfx950Test, SharedHelperForcedSpillPreservesBothCallers) {
 
   ReportEnvGuard report_env;
   ASSERT_TRUE(set_moi_report_buffer_env(report_device, kReportBytes));
-  moi_gfx950_shared_helper_caller_a<<<1, kThreads>>>(out_device);
+  moi_cdna_shared_helper_caller_a<<<1, kThreads>>>(out_device);
   HIP_ASSERT(hipGetLastError());
-  moi_gfx950_shared_helper_caller_b<<<1, kThreads>>>(out_device + kThreads);
+  moi_cdna_shared_helper_caller_b<<<1, kThreads>>>(out_device + kThreads);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 

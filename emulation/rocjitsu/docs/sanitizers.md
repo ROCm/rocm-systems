@@ -12,7 +12,7 @@ code object is loaded:
 
 | Target | Waitcheck | ConSan |
 | --- | --- | --- |
-| `gfx942` | Yes | — |
+| `gfx942` | Yes | Yes |
 | `gfx950` | Yes | Partial |
 | `gfx1100` | Yes | — |
 | `gfx1150` | Yes | — |
@@ -26,6 +26,11 @@ On waitcheck-only targets, the combined hook reports wait hazards and leaves
 the original code object uninstrumented. “Partial” means native instrumentation
 exists for only a subset of ConSan forms; “Yes” still denotes supported-form
 coverage, not every ISA memory operation.
+
+ConSan takes the active workgroup-LDS capacity from the runtime agent rather
+than baking a gfx942 size into its instrumentation. Simulator and offline tests
+use the selected RocJITsu JSON configuration, including `lds_size_kb`, as their
+source of truth.
 
 ## Build
 

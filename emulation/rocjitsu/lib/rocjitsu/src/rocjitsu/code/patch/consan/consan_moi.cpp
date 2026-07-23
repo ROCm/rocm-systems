@@ -173,7 +173,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   constexpr size_t kCompactRecordReplayBarrierMemberLimit = 32u;
   effective_options.moi_record_replay_dense_barrier_router =
       effective_options.moi_record_replay_dense_barrier_router ||
-      ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+        arch == ROCJITSU_CODE_ARCH_CDNA4) &&
        effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
        supported_barrier_members > kCompactRecordReplayBarrierMemberLimit);
   const auto has_operational_atomic = [&](const auto &container, bool in_kernel) {
@@ -263,7 +264,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   const bool supports_dynamic_stack_spill =
       effective_options.moi_engine == ConSanMoiEngine::InlineShadow ||
-      (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+      ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
        effective_options.moi_engine == ConSanMoiEngine::RecordReplay);
   effective_options.moi_dynamic_stack_spill =
       supports_dynamic_stack_spill &&
@@ -495,8 +496,9 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
                                  std::span<const uint8_t> code_object_bytes) {
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = options.moi_engine;
-  const rj_code_arch_t arch =
-      result.arch_name == "cdna4" ? ROCJITSU_CODE_ARCH_CDNA4 : ROCJITSU_CODE_ARCH_INVALID;
+  const rj_code_arch_t arch = result.arch_name == "cdna3"   ? ROCJITSU_CODE_ARCH_CDNA3
+                              : result.arch_name == "cdna4" ? ROCJITSU_CODE_ARCH_CDNA4
+                                                            : ROCJITSU_CODE_ARCH_INVALID;
 
   size_t selected_candidate_count = 0;
   bool selected_flat_candidate = false;

@@ -3,7 +3,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                                             ConSanResult &result) {
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::InlineShadow)
     return;
-  if (!is_rdna4_family_arch(arch) && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+  if (!instrumentation::is_admitted_arch(arch)) {
     result.warnings.emplace_back(
         "ConSan MOI inline atomic patch does not support this architecture");
     return;

@@ -306,7 +306,7 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
 }
 
 [[nodiscard]] std::optional<uint32_t> build_s_wait_dscnt_word(uint16_t count, rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
     return count == 0 ? instrumentation::build_s_wait_lds0(arch) : std::nullopt;
   if (!is_rdna4_family_arch(arch))
     return std::nullopt;
@@ -441,7 +441,8 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
     default:
       return std::nullopt;
     }
-  } else if (arch == ROCJITSU_CODE_ARCH_CDNA4 && !two_address) {
+  } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+             !two_address) {
     switch (width_bits) {
     case 8:
       base = 0xD8E80000u;
@@ -458,7 +459,8 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
     default:
       return std::nullopt;
     }
-  } else if (arch == ROCJITSU_CODE_ARCH_CDNA4 && two_address) {
+  } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+             two_address) {
     switch (word0 & 0xFFFF0000u) {
     case 0xD81C0000u:
       base = 0xD86E0000u;
@@ -678,8 +680,9 @@ choose_vcc_save_sgpr(const Instruction *inst, const LivenessAnalysis *liveness,
   if (inst == nullptr || liveness == nullptr)
     return std::nullopt;
   const auto find_free = [&](uint16_t start) {
-    return arch == ROCJITSU_CODE_ARCH_CDNA4 ? liveness->find_free_sgpr_pair(inst, start)
-                                            : liveness->find_free_sgpr(inst, start);
+    return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
+               ? liveness->find_free_sgpr_pair(inst, start)
+               : liveness->find_free_sgpr(inst, start);
   };
   if (min_preferred_sgpr) {
     if (auto high_sgpr = find_free(*min_preferred_sgpr))

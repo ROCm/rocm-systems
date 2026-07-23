@@ -385,10 +385,10 @@
   const bool compact_local_diagnostic =
       options.moi_inline_workgroup_shadow && !options.moi_track_atomics;
   // The first-diagnostic claim uses SLOT as both the returned value and the
-  // low half of the compare-swap data tuple. CDNA4 requires that tuple to
+  // low half of the compare-swap data tuple. CDNA3/4 require that tuple to
   // start at an even VGPR. The +2 temporary is dead after atomic-order
   // filtering as well as in the compact access-only path.
-  const uint16_t slot_vgpr = arch == ROCJITSU_CODE_ARCH_CDNA4
+  const uint16_t slot_vgpr = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
                                  ? static_cast<uint16_t>(old_value_vgpr + 2u)
                                  : current_field_vgpr;
   const auto save_conflict_exec = instrumentation::build_s_mov_b64(
@@ -463,9 +463,10 @@
     words.push_back(*narrow_capacity);
   }
 
-  const uint16_t compact_address_vgpr = arch == ROCJITSU_CODE_ARCH_CDNA4
-                                            ? *options.scratch_vgpr
-                                            : static_cast<uint16_t>(*options.scratch_vgpr + 11u);
+  const uint16_t compact_address_vgpr =
+      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
+          ? *options.scratch_vgpr
+          : static_cast<uint16_t>(*options.scratch_vgpr + 11u);
   if (compact_local_diagnostic &&
       !append_dynamic_diagnostic_record_address(words, diagnostic_base, slot_vgpr,
                                                 compact_address_vgpr, arch)) {
@@ -885,8 +886,9 @@
     // coherent device-scope value directly into the next retry rather than
     // discarding it and beginning with another potentially stale flat load.
     restore_slot_address();
-    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
-      const auto invalidate = build_cdna4_buffer_inv_sc1(arch);
+    if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      const auto invalidate = arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_buffer_inv_sc1(arch)
+                                                               : build_cdna4_buffer_inv_sc1(arch);
       if (!invalidate)
         return false;
       words.insert(words.end(), invalidate->begin(), invalidate->end());
@@ -1785,7 +1787,7 @@
   std::optional<uint16_t> saved_lds_byte_offset_vgpr;
   if (materialize_flat_offset) {
     saved_lds_byte_offset_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + scratch_count - 2u);
-  } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+  } else if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
     const uint16_t first_snapshot =
         static_cast<uint16_t>(*options.scratch_vgpr + scratch_count - 2u);
     saved_lds_byte_offset_vgpr =
@@ -1909,10 +1911,11 @@
     errors.emplace_back("ConSan MOI inline-shadow probe could not derive workgroup identity");
     return std::nullopt;
   }
-  if (generation_tagged_local_shadow && arch == ROCJITSU_CODE_ARCH_CDNA4) {
+  if (generation_tagged_local_shadow &&
+      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)) {
     if (!options.moi_dispatch_id_sgpr) {
       errors.emplace_back(
-          "ConSan MOI CDNA4 generation-tagged local shadow requires dispatch identity");
+          "ConSan MOI CDNA generation-tagged local shadow requires dispatch identity");
       return std::nullopt;
     }
     // Workgroup coordinates alone repeat across dispatches. Fold the native
@@ -1929,7 +1932,7 @@
         workgroup_key_vgpr, scalar_positive_inline_u32(1u), workgroup_key_vgpr, arch);
     if (!mix_dispatch_low || !mix_dispatch_high || !bound_generation || !make_nonzero_generation) {
       errors.emplace_back(
-          "ConSan MOI CDNA4 local shadow could not derive dispatch-qualified generation");
+          "ConSan MOI CDNA local shadow could not derive dispatch-qualified generation");
       return std::nullopt;
     }
     words.push_back(*mix_dispatch_low);
@@ -2021,12 +2024,13 @@
     return std::nullopt;
   }
 
-  // The global versioned transaction keeps old_value at +5 so its CDNA4 CAS
+  // The global versioned transaction keeps old_value at +5 so its CDNA CAS
   // tuples remain even. The workgroup-local B64 DS exchange instead requires
   // an even return tuple, so rotate only that local result to the unused +6
-  // pair on CDNA4.
-  const uint16_t local_old_value_vgpr =
-      static_cast<uint16_t>(old_value_vgpr + (arch == ROCJITSU_CODE_ARCH_CDNA4 ? 1u : 0u));
+  // pair on CDNA3/4.
+  const uint16_t local_old_value_vgpr = static_cast<uint16_t>(
+      old_value_vgpr +
+      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 1u : 0u));
 
   for (const ConSanMoiAccessRange &range : *access_ranges) {
     const ConSanMoiLdsCellRange cell_range =

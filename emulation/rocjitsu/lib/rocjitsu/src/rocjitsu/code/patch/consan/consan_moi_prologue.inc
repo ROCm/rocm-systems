@@ -74,12 +74,13 @@ append_dispatch_id_capture_and_restore(std::vector<uint32_t> &words,
     }
   }
   if (plan.requires_kernarg_reload()) {
-    if (arch != ROCJITSU_CODE_ARCH_CDNA4 || plan.kernarg_reload_count > 2u) {
+    if ((arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+        plan.kernarg_reload_count > 2u) {
       errors.emplace_back("ConSan MOI dispatch-ID prologue has an unsupported kernarg reload");
       return false;
     }
     for (uint16_t i = 0; i < plan.kernarg_reload_count; ++i) {
-      const auto load = build_cdna4_s_load_dword(
+      const auto load = instrumentation::build_s_load_dword(
           static_cast<uint16_t>(plan.kernarg_reload_sgpr + i), plan.kernarg_reload_base_sgpr,
           static_cast<uint32_t>(plan.kernarg_reload_offset_dwords + i) * sizeof(uint32_t), arch);
       if (!load) {
@@ -88,7 +89,7 @@ append_dispatch_id_capture_and_restore(std::vector<uint32_t> &words,
       }
       words.insert(words.end(), load->begin(), load->end());
     }
-    const auto wait = build_cdna4_s_wait_scalar_load0(arch);
+    const auto wait = instrumentation::build_s_wait_scalar_load0(arch);
     if (!wait) {
       errors.emplace_back("ConSan MOI dispatch-ID prologue cannot encode its kernarg wait");
       return false;

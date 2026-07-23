@@ -127,8 +127,9 @@ TEST(InstructionBuilder, AddressFreeScratchPrivateLimitIsArchitectureSpecific) {
   EXPECT_EQ(address_free_scratch_private_limit(ROCJITSU_CODE_ARCH_RDNA4),
             kMaxAddressFreeScratchPrivateBytes);
   EXPECT_EQ(address_free_scratch_private_limit(ROCJITSU_CODE_ARCH_CDNA4),
-            kMaxCdna4AddressFreeScratchPrivateBytes);
-  EXPECT_FALSE(address_free_scratch_private_limit(ROCJITSU_CODE_ARCH_CDNA3));
+            kMaxCdnaAddressFreeScratchPrivateBytes);
+  EXPECT_EQ(address_free_scratch_private_limit(ROCJITSU_CODE_ARCH_CDNA3),
+            kMaxCdnaAddressFreeScratchPrivateBytes);
 }
 
 TEST(InstructionBuilder, AddressFreeScratchPrivateSizeUsesTargetGranularity) {
@@ -136,7 +137,9 @@ TEST(InstructionBuilder, AddressFreeScratchPrivateSizeUsesTargetGranularity) {
   EXPECT_EQ(normalize_address_free_scratch_private_size(ROCJITSU_CODE_ARCH_CDNA4, 20), 32u);
   EXPECT_EQ(normalize_address_free_scratch_private_size(ROCJITSU_CODE_ARCH_CDNA4, 4096), 4096u);
   EXPECT_FALSE(normalize_address_free_scratch_private_size(ROCJITSU_CODE_ARCH_CDNA4, 4097));
-  EXPECT_FALSE(normalize_address_free_scratch_private_size(ROCJITSU_CODE_ARCH_CDNA3, 16));
+  EXPECT_EQ(normalize_address_free_scratch_private_size(ROCJITSU_CODE_ARCH_CDNA3, 20), 32u);
+  EXPECT_EQ(normalize_address_free_scratch_private_size(ROCJITSU_CODE_ARCH_CDNA3, 4096), 4096u);
+  EXPECT_FALSE(normalize_address_free_scratch_private_size(ROCJITSU_CODE_ARCH_CDNA3, 4097));
 }
 
 TEST(InstructionBuilder, BuildSMovB32UsesRdna1AndRdna2Opcodes) {
