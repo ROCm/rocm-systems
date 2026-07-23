@@ -102,6 +102,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Aligned the fabric telemetry and NIC firmware API surface with the unified ABI**.
+  - `amdsmi_fabric_telem_id_to_string()` now returns `amdsmi_status_t` and writes the name through a `const char**` out-parameter, instead of returning a `const char*` directly.
+  - Renamed the `amdsmi_fabric_info_t` member `fabric_info` to `info`.
+  - Renamed `amdsmi_nic_fw_t` to `amdsmi_nic_fw_entry_t`.
+  - Renamed the `amdsmi_fabric_type_t` enumerator `AMDSMI_FABRIC_TYPE_UALLINK` to `AMDSMI_FABRIC_TYPE_UALINK`.
+
 - **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.  
   - The `uclk_aid`, `socclks_mid`, and temperature `xcd` keys are now lowercase (`aid_<N>`, `mid_<N>`, `xcp_<N>`) in JSON and CSV output, matching the existing `xcp_<N>` usage keys; they were previously uppercase (`AID_<N>`, `MID_<N>`, `XCP_<N>`).
   - Human-readable output is unchanged, since it uppercases all keys.
@@ -150,6 +156,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Removed `amdsmi_get_cpusocket_handles()` from the Python interface** (breaking). Use `amdsmi_get_cpu_handles()` instead.
 
 - **Removed the `plpds` key from `amdsmi_get_xgmi_plpd()` Python output** (breaking). Use the `policies` key instead.
+
+- **Removed unused public macros and a duplicate fabric telemetry enumerator to match the unified ABI**.
+  - Dropped the `AMDSMI_MAX_VF_COUNT`, `AMDSMI_MAX_DRIVER_NUM`, `AMDSMI_DFC_FW_NUMBER_OF_ENTRIES`, `AMDSMI_MAX_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_BLACK_LIST_ELEMENTS`, `AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_ERR_RECORDS`, and `AMDSMI_MAX_PROFILE_COUNT` defines, which were unreferenced by any API or struct.
+  - Removed the redundant `AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN` enumerator from `amdsmi_fabric_telemetry_category_t`; `AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID` carries the same `0xFFFFFFFF` value.
 
 - **Removed the non-functional `--decode` flag from `amd-smi ras`**. Out-of-band CPER decoding is available via `amd-smi ras --afid --cper-file <path>` or `--afid --folder <DIR>`.
 
