@@ -82,10 +82,9 @@ if(NOT hipfile_TARGET)
     return()
 endif()
 
-find_package(rocprofiler-register QUIET)
 find_package(Threads REQUIRED)
 
-if(HIP_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
+if(HIP_FOUND AND Threads_FOUND)
     add_executable(hipfile-trace hipfile_trace.cpp)
     target_compile_definitions(hipfile-trace PRIVATE __HIP_PLATFORM_AMD__)
     target_link_libraries(
@@ -94,7 +93,6 @@ if(HIP_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
             hip::host
             ${hipfile_TARGET}
             Threads::Threads
-            rocprofiler-register::rocprofiler-register
     )
     target_compile_options(hipfile-trace PRIVATE ${_FLAGS})
 
@@ -109,10 +107,4 @@ else()
     message(
         "-- ERROR!: ${PROJECT_NAME} excluded! please install all the dependencies and try again!"
     )
-    if(NOT rocprofiler-register_FOUND)
-        message(
-            WARNING
-            "-- ERROR!: rocprofiler-register Not Found! - please install rocprofiler-register!"
-        )
-    endif()
 endif()
