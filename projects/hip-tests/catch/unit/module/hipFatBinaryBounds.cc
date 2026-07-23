@@ -9,7 +9,8 @@
 // parsing when the image comes from a file-backed mapping.
 //
 // Malformed pointer inputs are tail-mapped before a no-access guard page so
-// pre-fix over-reads fault, while fixed code returns hipErrorInvalidImage.
+// over-reads fault instead of silently succeeding, while correct parsing
+// returns hipErrorInvalidImage.
 
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
@@ -30,14 +31,49 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <random>
 #include <string>
 #include <system_error>
 #include <vector>
 
 namespace {
 
-// Magic for ROCm compressed clang offload bundles.
+// Magic strings for ROCm clang offload bundles.
 constexpr char kCompressedBundleMagic[] = "CCOB";
+constexpr char kUncompressedBundleMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
+
+// AMDGPU ELF identity values the runtime checks. Defined locally so this test
+// stays portable (Windows has no <elf.h>) and independent of runtime headers.
+constexpr unsigned char kElfOsabiAmdgpuHsa = 64;  // ELFOSABI_AMDGPU_HSA
+constexpr unsigned char kEmAmdgpuLowByte = 224;   // EM_AMDGPU (0x00E0), low byte
+
+// Builds a `size`-byte compressed offload bundle: the "CCOB" magic with
+// `total_size` written to the totalSize field (offset 8); remaining bytes zero.
+std::vector<unsigned char> MakeCompressedBundle(size_t size, uint32_t total_size) {
+  REQUIRE(size >= 12);  // magic (4) through totalSize (offset 8, 4 bytes)
+  std::vector<unsigned char> image(size, 0);
+  std::memcpy(image.data(), kCompressedBundleMagic, 4);
+  std::memcpy(image.data() + 8, &total_size, sizeof(total_size));
+  return image;
+}
+
+// Builds a `size`-byte little-endian AMDGPU ELFCLASS64 image whose identity
+// fields (EM_AMDGPU + ELFOSABI_AMDGPU_HSA) pass the runtime's ELF check. Only
+// the e_ident bytes and e_machine are set; all other fields are zero.
+std::vector<unsigned char> MakeAmdgpuElf64Image(size_t size) {
+  REQUIRE(size >= 20);  // the last field written, spans offsets 18-19
+  std::vector<unsigned char> image(size, 0);
+  image[0] = 0x7f;
+  image[1] = 'E';
+  image[2] = 'L';
+  image[3] = 'F';
+  image[4] = 2;  // EI_CLASS   = ELFCLASS64
+  image[5] = 1;  // EI_DATA    = ELFDATA2LSB (little-endian)
+  image[6] = 1;  // EI_VERSION = EV_CURRENT
+  image[7] = kElfOsabiAmdgpuHsa;   // EI_OSABI
+  image[18] = kEmAmdgpuLowByte;    // e_machine low byte (little-endian)
+  return image;
+}
 
 // Read-only file mapping used by the valid-image false-positive guard.
 class FileBackedMapping {
@@ -114,38 +150,20 @@ class FileBackedMapping {
 class TempFile {
  public:
   explicit TempFile(const std::vector<unsigned char>& bytes) {
-#if defined(_WIN32)
-    char dir[MAX_PATH] = {0};
-    const DWORD dir_len = GetTempPathA(static_cast<DWORD>(sizeof(dir)), dir);
-    REQUIRE(dir_len > 0);
-    REQUIRE(dir_len < sizeof(dir));
-    char path[MAX_PATH] = {0};
-    REQUIRE(GetTempFileNameA(dir, "hip", 0, path) != 0);
-    path_ = path;
-#else
-    char tmpl[] = "/tmp/hip_fatbin_bounds_XXXXXX";
-    const int fd = mkstemp(tmpl);
-    REQUIRE(fd >= 0);
-    close(fd);
-    path_ = tmpl;
-#endif
-
+    path_ = (fs::temp_directory_path() /
+             ("hip_fatbin_bounds_" + std::to_string(std::random_device{}()) + ".code"))
+                .string();
     std::ofstream file(path_, std::ios::binary | std::ios::trunc);
     REQUIRE(file.is_open());
-    if (!bytes.empty()) {
-      file.write(reinterpret_cast<const char*>(bytes.data()),
-                 static_cast<std::streamsize>(bytes.size()));
-      REQUIRE(file.good());
-    }
+    file.write(reinterpret_cast<const char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
     file.close();
     REQUIRE(file.good());
   }
 
   ~TempFile() {
-    if (!path_.empty()) {
-      std::error_code ec;
-      fs::remove(path_, ec);
-    }
+    std::error_code ec;
+    fs::remove(path_, ec);
   }
 
   TempFile(const TempFile&) = delete;
@@ -194,14 +212,15 @@ class TailMappedImage {
                       nullptr));
     REQUIRE(written == file_bytes.size());
 
-    // Map exactly the one-page file. The view occupies a full allocation-
-    // granularity slot, but only this page is backed; the pages after it stay
-    // unmapped and act as the guard, so any read past the page faults.
+    // Only this one page is backed; the pages after it stay unmapped and act as
+    // the guard, so any read past the page faults.
     mapping_ = CreateFileMappingA(file_, nullptr, PAGE_READONLY, 0, 0, nullptr);
     REQUIRE(mapping_ != nullptr);
     base_ = MapViewOfFile(mapping_, FILE_MAP_READ, 0, 0, 0);
     REQUIRE(base_ != nullptr);
 
+    // Point at the payload's start; image_ + payload.size() lands exactly on the
+    // guard page, so reads past the payload fault.
     image_ = static_cast<unsigned char*>(base_) + (page_size_ - payload.size());
   }
 
@@ -305,15 +324,23 @@ class TailMappedImage {
 
 /**
  * Feeds guard-page-backed malformed images to the pointer load APIs and
- * expects hipErrorInvalidImage instead of an out-of-bounds read. Regression
- * coverage for the clr fat-binary out-of-bounds read security fix.
+ * expects hipErrorInvalidImage instead of an out-of-bounds read.
  */
 HIP_TEST_CASE(Unit_hipModuleLoadData_Negative_TruncatedImages) {
   hipModule_t module = nullptr;
 
+  SECTION("compressed magic shorter than the magic itself") {
+    // Only 3 readable bytes, fewer than the 4-byte compressed magic. Checks that
+    // the magic comparison doesn't read past the image.
+    const std::vector<unsigned char> payload(kCompressedBundleMagic,
+                                             kCompressedBundleMagic + 3);
+    TailMappedImage img(payload);
+    HIP_CHECK_ERROR(hipModuleLoadData(&module, img.image()), hipErrorInvalidImage);
+  }
+
   SECTION("compressed magic with too little readable image") {
-    // Only 4 readable bytes (magic, no header). The fix rejects it; without it
-    // the runtime reads past the image while probing for a header.
+    // Only 4 readable bytes (magic, no header). Checks that probing for a header
+    // doesn't read past the image.
     const std::vector<unsigned char> payload(kCompressedBundleMagic,
                                              kCompressedBundleMagic + 4);
     TailMappedImage img(payload);
@@ -322,52 +349,52 @@ HIP_TEST_CASE(Unit_hipModuleLoadData_Negative_TruncatedImages) {
 
   SECTION("compressed header with out-of-bounds totalSize") {
     // Valid 32-byte header, but its declared totalSize (offset 8) claims a far
-    // larger image than exists. The fix rejects it; without it the runtime
-    // trusts that size and reads past the image.
-    std::vector<unsigned char> payload(32, 0);
-    std::memcpy(payload.data(), kCompressedBundleMagic, 4);
-    const uint32_t total_size = 0xFFFFFFFFu;
-    std::memcpy(payload.data() + 8, &total_size, sizeof(total_size));
+    // larger image than exists. Checks that the runtime doesn't trust that size
+    // and read past the image.
+    const std::vector<unsigned char> payload = MakeCompressedBundle(32, 0xFFFFFFFFu);
     TailMappedImage img(payload);
     HIP_CHECK_ERROR(hipModuleLoadData(&module, img.image()), hipErrorInvalidImage);
   }
 
   SECTION("AMDGPU ELF header smaller than Elf64_Ehdr") {
     // 40-byte AMDGPU ELF header: big enough that the magic checks stay in
-    // bounds, but smaller than a full Elf64_Ehdr (64 bytes). The fix rejects
-    // it; without it the runtime reads ELF header fields past the image.
-    std::vector<unsigned char> payload(40, 0);
-    payload[0] = 0x7f;
-    payload[1] = 'E';
-    payload[2] = 'L';
-    payload[3] = 'F';
-    payload[4] = 2;     // EI_CLASS  = ELFCLASS64
-    payload[5] = 1;     // EI_DATA   = ELFDATA2LSB (little-endian)
-    payload[6] = 1;     // EI_VERSION = EV_CURRENT
-    payload[7] = 64;    // EI_OSABI  = ELFOSABI_AMDGPU_HSA
-    payload[18] = 224;  // e_machine (low byte) = EM_AMDGPU
+    // bounds, but smaller than a full Elf64_Ehdr (64 bytes). Checks that reading
+    // ELF header fields doesn't read past the image.
+    const std::vector<unsigned char> payload = MakeAmdgpuElf64Image(40);
     TailMappedImage img(payload);
     HIP_CHECK_ERROR(hipModuleLoadData(&module, img.image()), hipErrorInvalidImage);
   }
 
   SECTION("uncompressed bundle magic truncated below magic length") {
-    // Only 10 readable bytes of the 24-byte uncompressed magic. The fix rejects
-    // it; without it the runtime compares the full magic and reads past the image.
-    const char* magic = "__CLANG_OFFLOAD_BUNDLE__";
-    const std::vector<unsigned char> payload(magic, magic + 10);
+    // Only 10 readable bytes of the 24-byte uncompressed magic. Checks that
+    // comparing the full magic doesn't read past the image.
+    const std::vector<unsigned char> payload(kUncompressedBundleMagic,
+                                             kUncompressedBundleMagic + 10);
     TailMappedImage img(payload);
     HIP_CHECK_ERROR(hipModuleLoadData(&module, img.image()), hipErrorInvalidImage);
   }
 
-  SECTION("hipModuleLoadFatBinary enforces the totalSize bound") {
-    // Reuses the out-of-bounds totalSize image, but loads it via
-    // hipModuleLoadFatBinary to confirm that API enforces the bound too.
-    std::vector<unsigned char> payload(32, 0);
-    std::memcpy(payload.data(), kCompressedBundleMagic, 4);
-    const uint32_t total_size = 0xFFFFFFFFu;
-    std::memcpy(payload.data() + 8, &total_size, sizeof(total_size));
+  SECTION("AMDGPU ELF whose declared size exceeds the readable image") {
+    // Full 64-byte Elf64_Ehdr so the header checks pass, but e_shoff points a
+    // section table far past the image. e_shnum stays 0 so computing the ELF
+    // size does not itself walk out of bounds; the computed size is what is out
+    // of bounds. Checks that the oversized size isn't used to read past the image
+    // when the code object is handed off for loading.
+    std::vector<unsigned char> payload = MakeAmdgpuElf64Image(64);
+    const uint64_t e_shoff = 0x1000000;                           // section table far past 64 bytes
+    std::memcpy(payload.data() + 40, &e_shoff, sizeof(e_shoff));  // Elf64_Ehdr::e_shoff
     TailMappedImage img(payload);
-    HIP_CHECK_ERROR(hipModuleLoadFatBinary(&module, img.image()), hipErrorInvalidImage);
+    HIP_CHECK_ERROR(hipModuleLoadData(&module, img.image()), hipErrorInvalidImage);
+  }
+
+  SECTION("uncompressed bundle magic with no readable body") {
+    // Exactly the 24-byte magic and nothing else. Checks that reading the bundle
+    // header is clamped to the readable size rather than a fixed 4096-byte slice
+    // that reads past the image.
+    const std::vector<unsigned char> payload(kUncompressedBundleMagic,
+                                             kUncompressedBundleMagic + 24);
+    TailMappedImage img(payload);
+    HIP_CHECK_ERROR(hipModuleLoadData(&module, img.image()), hipErrorInvalidImage);
   }
 }
 
@@ -422,15 +449,11 @@ HIP_TEST_CASE(Unit_hipModuleLoadData_Positive_ValidFileBackedImage) {
 
 /**
  * Loads a file whose compressed header declares a totalSize larger than the
- * file. hipModuleLoad must reject it with hipErrorInvalidImage. Regression
- * coverage for the clr fat-binary out-of-bounds read security fix.
+ * file. hipModuleLoad must reject it with hipErrorInvalidImage.
  */
 HIP_TEST_CASE(Unit_hipModuleLoad_Negative_OutOfBoundsTotalSize) {
   // Full header, but totalSize exceeds the file size.
-  std::vector<unsigned char> payload(32, 0);
-  std::memcpy(payload.data(), kCompressedBundleMagic, 4);
-  const uint32_t total_size = 0xFFFFFFFFu;
-  std::memcpy(payload.data() + 8, &total_size, sizeof(total_size));
+  const std::vector<unsigned char> payload = MakeCompressedBundle(32, 0xFFFFFFFFu);
 
   TempFile image(payload);
   hipModule_t module = nullptr;
