@@ -58,7 +58,8 @@ def update_rpath(search_path: Path, excludes):
                     [
                         "patchelf",
                         "--force-rpath",
-                        "--set-rpath", rpath,
+                        "--set-rpath",
+                        rpath,
                         str(filepath),
                     ]
                 )
@@ -128,7 +129,11 @@ def main():
         help="Folder to search for ELF file. \nPlease note: Any folder with name llvm in that path will be discarded",
     )
     argparser.add_argument(
-        "-h", "--help", action="store_true", dest="help", help="Display this information"
+        "-h",
+        "--help",
+        action="store_true",
+        dest="help",
+        help="Display this information",
     )
 
     args = argparser.parse_args()
