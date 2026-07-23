@@ -141,6 +141,80 @@
         }
       ]
     },
+    "ubr_multisegment_comprehensive": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Generic",
+          "description": "Out-of-place AllReduce on a buffer spanning multiple VMM segments (multi-segment registration branch on Ring AllReduce)",
+          "test_filter": "UBR_MultiSegment.Generic"
+        },
+        {
+          "name": "UBR_MultiSegment_Generic_Reuse",
+          "description": "Register once, AllReduce twice - exercises the multi-segment registration reuse fast path (IPC or NET reuse)",
+          "test_filter": "UBR_MultiSegment.Generic_Reuse"
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_Lsa",
+          "description": "Multi-segment registration on the symmetric-window LSA path (ncclCommWindowRegister, NCCL_WIN_COLL_SYMMETRIC)",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa"
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa",
+          "description": "LSA-only elastic buffer: symmetric window with a host-backed trailing segment (NCCL_ELASTIC_BUFFER_REGISTER=1)",
+          "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Lsa"
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_Elastic_Gating",
+          "description": "Elastic buffer gating: host-backed symmetric window must be rejected when NCCL_ELASTIC_BUFFER_REGISTER=0",
+          "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Gating",
+          "env_variables": {
+            "NCCL_ELASTIC_BUFFER_REGISTER": "0"
+          }
+        }
+      ]
+    },
+    "ubr_multisegment_lsagin_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Symmetric_LsaGin",
+          "description": "Cross-node ReduceScatter over multi-segment symmetric windows exercising both the LSA (intra-node) and GIN (inter-node) legs; requires >=2 nodes and >=2 ranks per node",
+          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin"
+        }
+      ]
+    },
     "net_transport_eth_multinode": {
       "extends": "default",
       "is_gtest": true,
@@ -469,6 +543,11 @@
           "test_filter": "PackRoundtripTest.LoadStorePack_*:PackRoundtripTest.L2_StorePackBoundary:PackRoundtripTest.Store16Load16Global_Direct"
         },
         {
+          "name": "DeviceApi",
+          "description": "Verify RCCL Device API: symmetric window registration and ncclDevCommCreate gating",
+          "test_filter": "DeviceApi.*"
+        },
+        {
           "name": "Fixtures_All",
           "description": "All release fixture tests"
         }
@@ -491,6 +570,11 @@
           "name": "ParamTests",
           "description": "Parameter handling tests",
           "test_filter": "ParamTests.*"
+        },
+        {
+          "name": "ParameterApiTests",
+          "description": "Public ncclParam C API tests",
+          "test_filter": "ParameterApiTests.*"
         },
         {
           "name": "ArgCheck",
@@ -583,6 +667,7 @@
       "tests": [
         {"name": "HostApi_WindowRegisterDeregister", "description": "Host API: window register/deregister", "test_filter": "HostApiTest.WindowRegisterDeregister"},
         {"name": "HostApi_SinglePutRank0ToRank1", "description": "Host API: single put rank0 to rank1", "test_filter": "HostApiTest.SinglePutRank0ToRank1"},
+        {"name": "HostApi_PutSignalEnqueueIsAsync", "description": "Host API: putSignal enqueue is async", "test_filter": "HostApiTest.PutSignalEnqueueIsAsync"},
         {"name": "HostApi_PutWithNonZeroOffset", "description": "Host API: put with non-zero offset", "test_filter": "HostApiTest.PutWithNonZeroOffset"},
         {"name": "HostApi_PutMultipleDataTypes", "description": "Host API: put multiple data types", "test_filter": "HostApiTest.PutMultipleDataTypes"},
         {"name": "HostApi_SignalOnlyNoData", "description": "Host API: signal only, no data", "test_filter": "HostApiTest.SignalOnlyNoData"},
@@ -1219,7 +1304,8 @@
         "RCCL_IB_QP_SCHED_UPDATE_INTERVAL":   "100",
         "RCCL_IB_QP_SCHED_RESET_INTERVAL":    "1000",
         "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN":    "2000",
-        "NCCL_IB_RETURN_ASYNC_EVENTS":         "1"
+        "NCCL_IB_RETURN_ASYNC_EVENTS":         "1",
+        "RCCL_IB_FAULT_INJECTION":             "1"
       },
       "tests": [
         {

@@ -40,6 +40,7 @@
 #include <iterator>
 #include <type_traits>
 #include <limits>
+#include <utility>
 
 namespace Util
 {
@@ -1505,25 +1506,6 @@ constexpr typename std::common_type<T1, T2, typename std::common_type<Ts...>::ty
     return Lcm(Lcm(value1, value2), values...);
 }
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 919
-/// Returns the length of a wchar_t based string.
-///
-/// @returns The length of the given string in wide characters
-inline size_t Wcslen(
-    const wchar_t* pWideStr)
-{
-    return wcslen(pWideStr);
-}
-
-/// Performs a reverse string find of wide character wc.
-///
-/// @returns The matching character at the end of the string or nullptr if not found.
-inline wchar_t* Wcsrchr(wchar_t *pStr, wchar_t wc)
-{
-    return wcsrchr(pStr, wc);
-}
-#endif
-
 /// Compile-time function to report if two values from unrelated strong enums are equivalent.  This is useful for
 /// static asserts ensuring it is safe to cast an enum without a conversion lookup table.
 template <typename T1, typename T2>
@@ -1613,6 +1595,24 @@ inline void* Memcpy(
     return std::memcpy(pDest, source, sizeof(SourceType) * SourceSize);
 }
 
+/// Casts a scoped enum value to it's underlying type.
+/// This is intended to be a shortcut to save from typing the pattern static_cast<underlying_type>.
+/// Will be deprecated by C++23's std::to_underlying
+///
+/// @returns The value of e as it's underlying integer type.
+template<typename E>
+constexpr auto ToUnderlyingType(E e) noexcept
+{
+    if constexpr (std::is_enum_v<E>)
+    {
+        return std::underlying_type_t<E>(e);
+    }
+    else
+    {
+        return e;
+    }
+}
+
 /// This function should be used to convert a larger integer to a smaller integer without generating a "possible loss
 /// of data" warning. The caller must manually specify the LimitT template parameter, which tells this function that
 /// the author of this code has explicitly verified that all possible "src" values fit in a LimitT. The DstT and SrcT
@@ -1626,6 +1626,12 @@ inline void* Memcpy(
 /// TruncateCast is also superior to `dst = static_cast<decltype(dst)>(src)` because the compiler won't warn you if you
 /// decrease the size of DstT without verifying that the new DstT fits all possible "src" values. TruncateCast's LimitT
 /// template parameter forces someone to manually re-certify that all possible "src" values fit inside the new DstT.
+///
+/// TruncateCast also alerts if "src" is outside the representable range of LimitT (i.e. not between
+/// the minimum and maximum values of LimitT), which verifies at runtime that the explicitly certified assumption (all
+/// "src" values fit in a LimitT) actually holds. The lower and upper bounds are checked separately so that a firing
+/// alert clearly indicates which bound was violated. The comparisons use safe-compare helpers and normalize enums to
+/// their underlying integral type so that mixed-signedness and enum "src" values are handled correctly.
 ///
 /// @note Unlike a normal cast, TruncateCast needs to use an output reference instead of simply returning a value.
 ///       It really must work this way because C++ disallows function overloading based on return types.
@@ -1643,7 +1649,110 @@ inline void TruncateCast(
 
     static_assert(sizeof(DstT) >= sizeof(LimitT), "The truncated value cannot fit inside the destination.");
 
+    // Normalize a (possibly enum) src to its underlying integral type so std::cmp_* works correctly.
+    // srcVal's type is deduced via auto from decltype(ToUnderlyingType(src))
+    //   - For enum types it resolves to the enum's underlying integral type.
+    //   - For non-enum (integral) types it resolves to the type itself.
+    const auto srcVal = ToUnderlyingType(src);
+
+    // Lower-bound check: alert if src is below the minimum representable value of LimitT.
+    // std::cmp_less performs a sign-correct comparison, so a negative signed srcVal
+    // correctly fails when LimitT is unsigned (and vice versa) without signed/unsigned warnings.
+    PAL_ALERT_MSG(std::cmp_less(srcVal, std::numeric_limits<LimitT>::min()),
+                  "TruncateCast: src value (0x%llx) is below the minimum value of LimitT (0x%llx); "
+                  "truncation would lose data.",
+                  static_cast<unsigned long long>(srcVal),
+                  static_cast<unsigned long long>(std::numeric_limits<LimitT>::min()));
+
+    // Upper-bound check: alert if src exceeds the maximum representable value of LimitT.
+    // std::cmp_greater likewise compares across differing signedness correctly.
+    PAL_ALERT_MSG(std::cmp_greater(srcVal, std::numeric_limits<LimitT>::max()),
+                  "TruncateCast: src value (0x%llx) exceeds the maximum value of LimitT (0x%llx); "
+                  "truncation would lose data.",
+                  static_cast<unsigned long long>(srcVal),
+                  static_cast<unsigned long long>(std::numeric_limits<LimitT>::max()));
+
     dst = static_cast<DstT>(src);
+}
+
+/// Assigns a range of elements from the fixed-size "src" array to another range in the fixed-size "dst" array.
+///
+/// The arrays may have different lengths. The source range and destination range may have different starting indices.
+/// If either starting index is out of bounds this function does nothing. The "count" argument defines the ends of both
+/// ranges and is implicitly clamped down to prevent out-of-bounds accesses.
+///
+/// @warning The two arrays absolutely must **not** overlap!
+///
+/// @param [in] dst       A reference to the fixed length destination array.
+/// @param [in] src       A reference to the fixed length source array.
+/// @param [in] dstStart  The index of the first element to write in the destination array.
+/// @param [in] srcStart  The index of the first element to read in the source array.
+/// @param [in] count     The number of elements to copy between arrays.
+template<typename T, size_t DstLength, size_t SrcLength>
+void AssignArrayRange(
+    T       (&__restrict dst)[DstLength],
+    const T (&__restrict src)[SrcLength],
+    size_t               dstStart,
+    size_t               srcStart,
+    size_t               count)
+{
+    if ((dstStart >= DstLength) || (srcStart >= SrcLength))
+    {
+        // Stay in bounds! Return immediately to make this call harmless.
+        PAL_ASSERT_ALWAYS();
+        return;
+    }
+
+    T*const       pDstStart = dst + dstStart;
+    const T*const pSrcStart = src + srcStart;
+    const size_t  maxCount  = Min(DstLength - dstStart, SrcLength - srcStart);
+
+    if (count > maxCount)
+    {
+        // No buffer overflows! Clamp the count down to prevent any out of bounds accesses.
+        PAL_ASSERT_ALWAYS();
+        count = maxCount;
+    }
+
+    // This is an optimization for MSVC, which ignores the restrict keywords when it inlines this function, generating
+    // a slower assignment loop which handles overlapping arrays. Note that by C++ spec definition only trivially
+    // copyable types are safe to use with memcpy.
+    if constexpr (std::is_trivially_copyable_v<T>)
+    {
+        // banned_function_exemption: memcpy
+        // This case is exempt from the coding standards memcpy restriction as this function clearly labels the use-case
+        // (copying arrays of fixed, known sizes) and has sufficient bounds checking logic to prevent all possible
+        // out-of-bounds accesses.
+        memcpy(pDstStart, pSrcStart, sizeof(T) * count);
+    }
+    else
+    {
+        for (size_t idx = 0; idx < count; ++idx)
+        {
+            pDstStart[idx] = pSrcStart[idx];
+        }
+    }
+}
+
+/// Assigns the first "count" elements from the fixed-size "src" array to the first "count" elements of the fixed-size
+/// "dst" array. The arrays must have the same length.
+///
+/// The "count" argument defaults to the length of the arrays. This means that `AssignArray(dst, src);` behaves as
+/// `dst = src;` would if C++ supported assignment of fixed-length arrays. Note that "count" is implicitly clamped down
+/// to prevent out-of-bounds accesses.
+///
+/// @warning The two arrays absolutely must **not** overlap!
+///
+/// @param [in] dst    A reference to the fixed length destination array.
+/// @param [in] src    A reference to the fixed length source array.
+/// @param [in] count  The number of elements to copy between arrays; the default value copies the whole source array.
+template<typename T, size_t N>
+void AssignArray(
+    T       (&__restrict dst)[N],
+    const T (&__restrict src)[N],
+    size_t               count = N)
+{
+    AssignArrayRange<T, N, N>(dst, src, 0, 0, count);
 }
 
 } // Util

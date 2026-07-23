@@ -14,6 +14,7 @@
 
 #include "rocjitsu/kmd/linux/events.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "util/unique_handle.h"
 
 #include <atomic>
 #include <cassert>
@@ -25,45 +26,8 @@
 #include <vector>
 
 #include <sys/types.h> // pid_t
-#include <unistd.h>
 
 namespace rocjitsu {
-
-/// @brief Move-only RAII owner of a file descriptor.
-///
-/// @details Closes the descriptor on destruction, reset, or move-assignment.
-/// Used where a KfdProcess must deterministically release a descriptor it owns
-/// — e.g. the daemon-mode debugger notifier the transport dup'd into our fd
-/// table via SCM_RIGHTS. A -1 descriptor owns nothing.
-class UniqueFd {
-public:
-  UniqueFd() = default;
-  explicit UniqueFd(int fd) : fd_(fd) {}
-  UniqueFd(UniqueFd &&other) noexcept : fd_(other.fd_) { other.fd_ = -1; }
-  UniqueFd &operator=(UniqueFd &&other) noexcept {
-    if (this != &other) {
-      reset(other.fd_);
-      other.fd_ = -1;
-    }
-    return *this;
-  }
-  UniqueFd(const UniqueFd &) = delete;
-  UniqueFd &operator=(const UniqueFd &) = delete;
-  ~UniqueFd() { reset(); }
-
-  /// @brief The owned descriptor, or -1 if none.
-  [[nodiscard]] int get() const { return fd_; }
-
-  /// @brief Close the current descriptor and take ownership of @p fd (none by default).
-  void reset(int fd = -1) {
-    if (fd_ >= 0 && fd_ != fd)
-      ::close(fd_);
-    fd_ = fd;
-  }
-
-private:
-  int fd_ = -1;
-};
 
 /// @brief Per-process KFD state.
 ///
@@ -123,6 +87,11 @@ public:
     bool user_va = false;
     bool imported = false;
     int dmabuf_fd = -1;
+    // True when the driver created host_ptr (mmap it itself) and must munmap it
+    // on teardown. False for caller-owned pages (e.g. reused MAP_FIXED pages
+    // from the thunk) that the driver must never unmap, since unmapping them
+    // races with the owning process still accessing the memory.
+    bool host_ptr_owned = false;
   };
 
   /// @brief Memory policy descriptor.
@@ -197,7 +166,7 @@ public:
     /// debug session ends (DISABLE) or the process tears down. Engaged only in
     /// daemon mode; empty in local mode, where @ref dbg_fd is the debugger's own
     /// descriptor and is not owned here. RAII replaces an explicit close.
-    UniqueFd owned_dbg_fd;
+    util::UniqueHandle owned_dbg_fd;
 
     /// @brief Mirrors @c kfd_process::debugger_process (stored as pid instead of pointer).
     /// Linux PID of the attached debugger (ptrace parent). 0 when not attached.

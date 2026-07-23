@@ -21,6 +21,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchLoadI8Vscratch : public Vscratch {
@@ -30,6 +32,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchLoadU16Vscratch : public Vscratch {
@@ -39,6 +43,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchLoadI16Vscratch : public Vscratch {
@@ -48,6 +54,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchLoadB32Vscratch : public Vscratch {
@@ -57,6 +65,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchLoadB64Vscratch : public Vscratch {
@@ -66,6 +76,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchLoadB96Vscratch : public Vscratch {
@@ -75,6 +87,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchLoadB128Vscratch : public Vscratch {
@@ -84,6 +98,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchStoreB8Vscratch : public Vscratch {
@@ -93,6 +109,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchStoreB16Vscratch : public Vscratch {
@@ -102,6 +120,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchStoreB32Vscratch : public Vscratch {
@@ -111,6 +131,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchStoreB64Vscratch : public Vscratch {
@@ -120,6 +142,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchStoreB96Vscratch : public Vscratch {
@@ -129,6 +153,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchStoreB128Vscratch : public Vscratch {
@@ -138,6 +164,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchLoadD16U8Vscratch : public Vscratch {
@@ -147,6 +175,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchLoadD16I8Vscratch : public Vscratch {
@@ -156,6 +186,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchLoadD16B16Vscratch : public Vscratch {
@@ -165,6 +197,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchLoadD16HiU8Vscratch : public Vscratch {
@@ -174,6 +208,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchLoadD16HiI8Vscratch : public Vscratch {
@@ -183,6 +219,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchLoadD16HiB16Vscratch : public Vscratch {
@@ -192,6 +230,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchStoreD16HiB8Vscratch : public Vscratch {
@@ -201,6 +241,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchStoreD16HiB16Vscratch : public Vscratch {
@@ -210,6 +252,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  static const bool execute_registered_;
 };
 
 class ScratchLoadBlockVscratch : public Vscratch {
@@ -219,6 +263,9 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  Operand m0;
+  static const bool execute_registered_;
 };
 
 class ScratchStoreBlockVscratch : public Vscratch {
@@ -228,6 +275,9 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand m0;
+  static const bool execute_registered_;
 };
 
 } // namespace gfx1250

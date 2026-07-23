@@ -26,11 +26,13 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <span>
 #include <vector>
 
 #include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/dbt/processor_revision.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/code/rj_code.h"
 
@@ -57,21 +59,51 @@ struct SemanticReplacement {
 /// binary search.
 class SemanticTranslator {
 public:
-  SemanticTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch);
+  SemanticTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
+                     ProcessorRevision input_revision, ProcessorRevision output_revision);
 
   /// @brief Try to expand/lower an instruction via the expand rules table.
-  /// @param inst      The decoded instruction.
-  /// @param offset    Byte offset of the instruction in .text.
-  /// @param liveness  Kernel-scoped live-before data used for scratch register allocation.
+  /// @param inst        The decoded instruction.
+  /// @param offset      Byte offset of the instruction in .text.
+  /// @param source_text Full source .text bytes for rules that need modifier/literal payloads.
+  /// @param liveness    Kernel-scoped live-before data used for scratch register allocation.
   /// @returns Structured expansion status and replacement words.
   [[nodiscard]] ExpandResult try_lower_expand(const Instruction &inst, uint64_t offset,
+                                              std::span<const uint8_t> source_text,
                                               const LivenessAnalysis &liveness,
                                               TranslationContext &context) const;
+
+  /// @brief Whether @p inst has a registered semantic expansion rule.
+  ///
+  /// @details A true result means the instruction may query instruction-level
+  /// liveness during try_lower_expand(). The rule can still decline expansion
+  /// after inspecting operands or payload bits.
+  [[nodiscard]] bool has_expand_rule(const Instruction &inst) const;
+  [[nodiscard]] bool has_expand_rule(uint16_t encoding_id, uint16_t opcode) const {
+    if (!has_expand_rule_encoding(encoding_id))
+      return false;
+    return std::binary_search(expand_rule_keys_.begin(), expand_rule_keys_.end(),
+                              packed_rule_key(encoding_id, opcode));
+  }
 
   [[nodiscard]] bool has_rules() const { return !expand_rules_.empty(); }
 
 private:
-  std::span<const TranslationRule> expand_rules_; ///< Sorted by (src_encoding_id, src_opcode).
+  [[nodiscard]] static constexpr uint32_t packed_rule_key(uint16_t encoding_id, uint16_t opcode) {
+    return (static_cast<uint32_t>(encoding_id) << 16) | opcode;
+  }
+
+  [[nodiscard]] bool has_expand_rule_encoding(uint16_t encoding_id) const {
+    const size_t word_index = encoding_id / 64;
+    return word_index < expand_rule_encoding_bits_.size() &&
+           (expand_rule_encoding_bits_[word_index] & (uint64_t{1} << (encoding_id % 64))) != 0;
+  }
+
+  [[nodiscard]] const TranslationRule *find_expand_rule(const Instruction &inst) const;
+
+  std::span<const TranslationRule> expand_rules_;   ///< Sorted by (src_encoding_id, src_opcode).
+  std::vector<uint32_t> expand_rule_keys_;          ///< Packed keys parallel to expand_rules_.
+  std::vector<uint64_t> expand_rule_encoding_bits_; ///< Cheap encoding prefilter for hot scans.
   rj_code_arch_t host_arch_;
 };
 

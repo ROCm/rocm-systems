@@ -55,7 +55,7 @@ uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
   engine.topology().set_root(std::move(vm));
   loaded.wire_links(engine.topology());
   soc->wire_backing(engine.topology());
-  engine.build();
+  engine.create();
   engine.register_as_primary();
 
   driver->setup_topology(loaded.device, num_xcds);
@@ -92,7 +92,7 @@ protected:
     engine_->topology().set_root(std::move(vm));
     loaded_.wire_links(engine_->topology());
     soc->wire_backing(engine_->topology());
-    engine_->build();
+    engine_->create();
     engine_->register_as_primary();
 
     driver_->setup_topology(loaded_.device, num_xcds);
@@ -721,6 +721,85 @@ TEST_F(KfdIoctlTest, DbgTrapEnableOversizedRuntimeInfoPreservesTailInDaemonMode)
   rd.close(); // sends RPC_CLOSE so the server loop exits
   server.join();
   EXPECT_EQ(daemon_driver.close(process_id), 0);
+}
+
+// Serializing an ioctl with an embedded input array grows the request vector.
+// Capture the application pointer before that resize: pointers into the vector's
+// copied argument area are invalidated when its storage is reallocated.
+TEST(RemoteDriverEmbeddedArrayTest, MapMemorySerializesDeviceIdsAcrossBufferGrowth) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+
+  constexpr std::array<uint32_t, 2> device_ids{38144, 38145};
+  std::jthread server([server_fd = sv[1], device_ids] {
+    rocjitsu::RpcHeader hdr{};
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &hdr, sizeof(hdr)));
+    ASSERT_EQ(hdr.opcode, rocjitsu::RPC_IOCTL);
+    std::vector<uint8_t> payload(hdr.payload_bytes);
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, payload.data(), payload.size()));
+
+    const auto *request = reinterpret_cast<const rocjitsu::RpcIoctlRequest *>(payload.data());
+    EXPECT_EQ(request->ioctl_cmd, AMDKFD_IOC_MAP_MEMORY_TO_GPU);
+    const auto *args = reinterpret_cast<const kfd_ioctl_map_memory_to_gpu_args *>(payload.data() +
+                                                                                  sizeof(*request));
+    const auto *inline_ids =
+        reinterpret_cast<const uint32_t *>(payload.data() + sizeof(*request) + sizeof(*args));
+    ASSERT_EQ(args->n_devices, device_ids.size());
+    EXPECT_TRUE(std::equal(device_ids.begin(), device_ids.end(), inline_ids));
+
+    rocjitsu::RpcHeader response{};
+    response.opcode = rocjitsu::RPC_IOCTL;
+    response.request_id = hdr.request_id;
+    response.result = -EINVAL;
+    ASSERT_TRUE(rocjitsu::rpc_send_exact(server_fd, &response, sizeof(response)));
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver driver(sv[0]);
+  kfd_ioctl_map_memory_to_gpu_args args{};
+  args.device_ids_array_ptr = reinterpret_cast<uint64_t>(device_ids.data());
+  args.n_devices = device_ids.size();
+  EXPECT_EQ(driver.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &args), -EINVAL);
+}
+
+TEST(RemoteDriverEmbeddedArrayTest, WaitEventsSerializesEventsAcrossBufferGrowth) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+
+  std::array<kfd_event_data, 2> events{};
+  events[0].event_id = 17;
+  events[1].event_id = 29;
+  std::jthread server([server_fd = sv[1]] {
+    rocjitsu::RpcHeader hdr{};
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &hdr, sizeof(hdr)));
+    ASSERT_EQ(hdr.opcode, rocjitsu::RPC_IOCTL);
+    std::vector<uint8_t> payload(hdr.payload_bytes);
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, payload.data(), payload.size()));
+
+    const auto *request = reinterpret_cast<const rocjitsu::RpcIoctlRequest *>(payload.data());
+    EXPECT_EQ(request->ioctl_cmd, AMDKFD_IOC_WAIT_EVENTS);
+    const auto *args =
+        reinterpret_cast<const kfd_ioctl_wait_events_args *>(payload.data() + sizeof(*request));
+    const auto *inline_events =
+        reinterpret_cast<const kfd_event_data *>(payload.data() + sizeof(*request) + sizeof(*args));
+    ASSERT_EQ(args->num_events, 2u);
+    EXPECT_EQ(inline_events[0].event_id, 17u);
+    EXPECT_EQ(inline_events[1].event_id, 29u);
+
+    rocjitsu::RpcHeader response{};
+    response.opcode = rocjitsu::RPC_IOCTL;
+    response.request_id = hdr.request_id;
+    response.result = -EINVAL;
+    ASSERT_TRUE(rocjitsu::rpc_send_exact(server_fd, &response, sizeof(response)));
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver driver(sv[0]);
+  kfd_ioctl_wait_events_args args{};
+  args.events_ptr = reinterpret_cast<uint64_t>(events.data());
+  args.num_events = events.size();
+  args.timeout = 1;
+  EXPECT_EQ(driver.ioctl(AMDKFD_IOC_WAIT_EVENTS, &args), -EINVAL);
 }
 
 // --- Daemon-mode DBG_TRAP notifier-fd transfer via SCM_RIGHTS ---

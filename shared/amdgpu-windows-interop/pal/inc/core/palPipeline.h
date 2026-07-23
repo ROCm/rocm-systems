@@ -58,6 +58,7 @@ namespace Pal
 {
 struct GpuMemSubAllocInfo;
 enum class PrimitiveTopology : uint8;
+class ICodeObject;
 
 /// PAL's public shader-stage enumeration is defined by the Pipeline ABI.
 using ShaderType = Util::Abi::ApiShaderType;
@@ -231,18 +232,28 @@ union PipelineCreateFlags
         uint32 clientInternal        :  1; ///< Internal pipeline not created by the application.
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 971
         uint32 reverseWorkgroupOrder :  1; ///< Indicates that any Dispatch using this pipeline should execute in
-                                           ///  reverse workgroup order. This supersedes the flag on the CommandBuffer
+                                           ///  reverse workgroup order. This superceeds the flag on the CommandBuffer
                                            ///  (dispatchPingPongWalk) - always forcing reverse workgroup order! This
                                            ///  is a best effort as not all implementations or Queues may support this.
 #else
         uint32 reserved971           :  1; ///< Reserved for future use.
 #endif
+#if PAL_BUILD_CODE_OBJECT_INTERFACE
+        uint32 disableCodeObjectReferencing : 1; ///< Indicates that this pipeline will not manage the reference
+                                                 ///  counter for the codeObjects.
+                                                 ///  It's the client's responsibility to ensure the codeObjects stay
+                                                 ///  alive during pipeline creation and execution.
+                                                 ///  This is useful for clients who want to manage the lifetime of the
+                                                 ///  code objects separately from the pipelines.
+        uint32 reserved              : 29; ///< Reserved for future use.
+#else
         uint32 reserved              : 30; ///< Reserved for future use.
+#endif
     };
     uint32 u32All;                         ///< Flags packed as 32-bit uint.
 };
 
-/// Constant defining the max number of view instance count that is supported.
+/// Constant definining the max number of view instance count that is supported.
 constexpr uint32 MaxViewInstanceCount = 6;
 
 /// Specifies graphic pipeline view instancing state.
@@ -345,6 +356,12 @@ struct ComputePipelineCreateInfo
 {
     PipelineCreateFlags  flags;                ///< Flags controlling pipeline creation.
 
+#if PAL_BUILD_CODE_OBJECT_INTERFACE
+    ICodeObject*         pCodeObject;          ///< Pointer to Pipeline ELF binary implementing the Pipeline ABI
+                                               ///  interface, obtained via IDevice::LoadCodeObject().
+                                               ///  The Pipeline ELF contains pre-compiled shaders,
+                                               ///  register values, and additional metadata.
+#endif
     const void*          pPipelineBinary;      ///< Pointer to Pipeline ELF binary implementing the Pipeline ABI
                                                ///  interface. The Pipeline ELF contains pre-compiled shaders,
                                                ///  register values, and additional metadata.
@@ -376,7 +393,7 @@ struct ComputePipelineCreateInfo
     Extent3d threadsPerGroup;
     TriState groupLaunchGuarantee; ///< Force the group launch guarantee mechanism on or off. This feature will throttle
                                    ///  issuing of low priority waves when it detects too many higher priority waves are
-                                   ///  failing to schedule due to resource constraints.
+                                   ///  failing to schedule due to resource contraints.
 
     const char* pKernelName; ///< When create pipeline with hsa ELF binary of multiple kernels, need to set one
                              ///  kernel to create the pipeline. null means only one kernel in ELF binary.
@@ -461,13 +478,19 @@ struct GraphicsPipelineCreateInfo
 {
     PipelineCreateFlags flags;                 ///< Flags controlling pipeline creation.
 
+#if PAL_BUILD_CODE_OBJECT_INTERFACE
+    Util::Span<ICodeObject*> codeObjects;      ///< Pointer(s) to Pipeline ELF binary or binaries implementing the
+                                               ///  Pipeline ABI interface, obtained via IDevice::LoadCodeObject().
+                                               ///  The Pipeline ELF contains pre-compiled shaders,
+                                               ///  register values, and additional metadata.
+#endif
     const void*         pPipelineBinary;       ///< Pointer to Pipeline ELF binary implementing the Pipeline ABI
                                                ///  interface. The Pipeline ELF contains pre-compiled shaders,
                                                ///  register values, and additional metadata.
     size_t              pipelineBinarySize;    ///< Size of Pipeline ELF binary in bytes.
     GetContentsCallback*   pGetContents;       ///< Callback to get ELF contents; can be nullptr if client never
                                                ///  provides an archive with empty members.
-    const IShaderLibrary** ppShaderLibraries;  ///< An array of graphics @ref IShaderLibrary object. pPipelineBinary
+    const IShaderLibrary** ppShaderLibraries;  ///< An array of graphics @ref IShaderLibrary object. codeObjects
                                                ///  and ppShaderLibraries can't be valid at the same time.
                                                ///  If the client does not know whether the pipeline is complete,
                                                ///  it can add the shader library for a "dummy partial pipeline" to
@@ -525,7 +548,7 @@ struct GraphicsPipelineCreateInfo
 
     TriState groupLaunchGuarantee; ///< Force the group launch guarantee mechanism on or off. This feature will throttle
                                    ///  issuing of low priority waves when it detects too many higher priority waves are
-                                   ///  failing to schedule due to resource constraints.
+                                   ///  failing to schedule due to resource contraints.
     bool     noForceReZ;           ///< Disables the ability for PAL to force ReZ modes outside of what was chosen by
                                    ///  the compiler for this pipeline.
 };
@@ -768,12 +791,13 @@ public:
     ///                                 size of the disassembly string in ShaderStats::isaSizeInBytes. Else reports 0.
     /// @returns Success if the stats were successfully obtained for this shader, including the shader disassembly size.
     ///          +ErrorUnavailable if a wrong shader stage for this pipeline was specified, or if some internal error
-    ///                           occurred.
+    ///                           occured.
     virtual Result GetShaderStats(
         ShaderType   shaderType,
         ShaderStats* pShaderStats,
         bool         getDisassemblySize) const = 0;
 
+    /// @deprecated  Please use the equivalent GetShaderCode() provided by the compiler interface instead.
     /// Obtains the compiled shader ISA code for the shader stage specified.
     ///
     /// @param [in]  shaderType The shader stage for which the shader cache entry is requested.

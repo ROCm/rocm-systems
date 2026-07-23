@@ -86,7 +86,7 @@ MPI Profiling Output
 
 When MPI profiling is enabled, ROCm Systems Profiler generates:
 
-* **ROCm Profiling Data (rocpd)**: When ``ROCPROFSYS_USE_ROCPD=ON`` is set, profiling data is output in a SQLite3 database format for advanced analysis. See :ref:`rocprof_sys_rocpd_output` for details on this output format. You can visualize MPI operations in a timeline view showing communication patterns, operation durations, and concurrency using `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
+* **ROCm Profiling Data (rocpd)**: When ``rocpd`` is included in ``--output-format`` (for example, ``--output-format rocpd``), profiling data is output in a SQLite3 database format for advanced analysis. See :ref:`rocprof_sys_rocpd_output` for details on this output format. You can visualize MPI operations in a timeline view showing communication patterns, operation durations, and concurrency using `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
 * **Perfetto traces**: Visualize MPI operations on a timeline, showing communication patterns, operation durations, and concurrency
 * **Timemory profiles**: Statistical summaries of MPI function call counts, total time, and performance metrics
 * **Communication data**: Track message sizes, communication volumes, and data movement patterns for point-to-point and collective operations
@@ -166,7 +166,7 @@ rank values is the user's responsibility.
 ROCm Systems Profiler automatically detects each process's MPI rank by checking these _`rank identification` environment variables:
 
 - ``MPI_RANKID``
-- ``PMI_RANK`` 
+- ``PMI_RANK``
 - ``MV2_COMM_WORLD_RANK``
 - ``OMPI_COMM_WORLD_RANK``
 - ``SLURM_PROCID``
@@ -236,12 +236,12 @@ RCCL Profiling Output
 
 When RCCL profiling is enabled, rocprofiler-systems generates:
 
-* **ROCm Profiling Data (rocpd)**: When ``ROCPROFSYS_USE_ROCPD=ON`` is set, RCCL profiling
-  data is output in a SQLite3 database format with per-GPU device attribution for
-  multi-GPU systems. See :ref:`rocprof_sys_rocpd_output` for details on this output
-  format. You can visualize RCCL operations in a timeline view showing communication
-  patterns, operation durations, and concurrency using `ROCm Optiq
-  <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
+* **ROCm Profiling Data (rocpd)**: When ``rocpd`` is included in ``--output-format``
+  (for example, ``--output-format rocpd``), RCCL profiling data is output in a SQLite3
+  database format with per-GPU device attribution for multi-GPU systems. See
+  :ref:`rocprof_sys_rocpd_output` for details on this output format. You can visualize
+  RCCL operations in a timeline view showing communication patterns, operation durations,
+  and concurrency using `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
 * **Perfetto traces**: Visualize RCCL operations on a timeline, showing communication patterns, operation durations, and concurrency
 * **Communication data**: Track send/receive volumes separately for each GPU in multi-GPU configurations
 
@@ -358,7 +358,12 @@ UCX Profiling Output
 
 When UCX profiling is enabled, rocprofiler-systems generates:
 
-* **ROCm Profiling Data (rocpd)**: When ``ROCPROFSYS_USE_ROCPD=ON`` is set, profiling data is output in a SQLite3 database format for advanced analysis. See :ref:`rocprof_sys_rocpd_output` for details on this output format. You can visualize MPI operations in a timeline view showing communication patterns, operation durations, and concurrency using `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
+* **ROCm Profiling Data (rocpd)**: When ``rocpd`` is included in ``--output-format``
+ (for example, ``--output-format rocpd``), profiling data is output in a SQLite3
+  database format for advanced analysis. See :ref:`rocprof_sys_rocpd_output`
+  for details on this output format. You can visualize MPI operations in a
+  timeline view showing communication patterns, operation durations, and
+  concurrency using `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
 * **Perfetto traces**: Visualize UCX operations on a timeline, showing communication patterns, operation durations, and concurrency
 * **Timemory profiles**: Statistical summaries of UCX function call counts, total time, and performance metrics
 * **Communication data**: Track message sizes, communication volumes, and data movement patterns
@@ -425,7 +430,10 @@ SHMEM profiling output
 
 When SHMEM profiling is enabled, rocprofiler-systems generates:
 
-* **ROCm Profiling Data (rocpd)**: When ``ROCPROFSYS_USE_ROCPD=ON`` is set, SHMEM data is written to the SQLite3 rocpd database. You can visualize SHMEM operations in `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
+* **ROCm Profiling Data (rocpd)**: When ``rocpd`` is included in ``--output-format``
+(for example, ``--output-format rocpd``), SHMEM data is written to the SQLite3
+  rocpd database. You can visualize SHMEM operations in
+  `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
 * **Perfetto traces**: Visualize SHMEM API on a timeline (e.g., ``shmem_putmem``, ``shmem_barrier_all``).
 * **Timemory profiles**: Call counts and timing for traced SHMEM APIs.
 * **Communication data**: Message sizes and PE information for RMA and collective operations.

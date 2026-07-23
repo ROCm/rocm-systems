@@ -17,5 +17,8 @@
     "cts.gfx950.fpsan.fpsan_mfma_gfx950_scaled_test",
     "cts.gfx950.fpsan.fpsan_mfma_gfx950_smfmac_test"
   ],
-  "kernels": []
+  "kernels": [
+    "rocblas_sgemm::large_2048x2048",
+    "rocblas_sgemm::square_64x64"
+  ]
 }
