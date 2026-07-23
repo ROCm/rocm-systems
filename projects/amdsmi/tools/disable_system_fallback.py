@@ -12,12 +12,13 @@ the wheel build flips the flag to ``False`` in its staged copy before
 
 import pathlib
 import sys
+from typing import List
 
 ANCHOR = "_AMDSMI_ALLOW_SYSTEM_FALLBACK = True"
 REPLACEMENT = "_AMDSMI_ALLOW_SYSTEM_FALLBACK = False"
 
 
-def main(argv: list[str]) -> None:
+def main(argv: List[str]) -> None:
     if len(argv) != 2:
         sys.exit(f"usage: {argv[0]} <staged amdsmi_wrapper.py>")
     path = pathlib.Path(argv[1])
