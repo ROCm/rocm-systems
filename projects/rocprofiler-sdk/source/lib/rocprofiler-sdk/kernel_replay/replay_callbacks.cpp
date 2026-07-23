@@ -23,12 +23,14 @@
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
 
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/experimental/kernel_replay.h>
@@ -243,14 +245,27 @@ execute_pass_phase_enter(const replay_plan_t&    plan,
     pass_data.current_pass  = current_pass;
     pass_data.total_passes  = plan.indefinite ? 0 : plan.total_passes;
 
-    tracing::execute_phase_enter_callbacks(out_pass_state.contexts,
-                                           thr_id,
-                                           internal_corr_id,
-                                           out_pass_state.external_correlation_ids,
-                                           ancestor_corr_id,
-                                           ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
-                                           ROCPROFILER_KERNEL_REPLAY_PASS,
-                                           pass_data);
+    // Localized context control: the tool may call these from its PASS PHASE_ENTER callback to
+    // enable/disable a context for the current replay loop (see kernel_replay/local_context.hpp).
+    // They are only legal while armed, so bracket the tool callback with the arm window.
+    pass_data.replay_local_start_context_cb = &replay_local_start_context;
+    pass_data.replay_local_stop_context_cb  = &replay_local_stop_context;
+
+    // Disarm through a scope guard: execute_phase_enter_callbacks can throw (std::out_of_range from
+    // an .at() lookup, or a throwing tool callback), and the armed flag must not leak past this
+    // call.
+    {
+        set_toggles_armed(true);
+        const auto _disarm = common::scope_destructor{[]() { set_toggles_armed(false); }};
+        tracing::execute_phase_enter_callbacks(out_pass_state.contexts,
+                                               thr_id,
+                                               internal_corr_id,
+                                               out_pass_state.external_correlation_ids,
+                                               ancestor_corr_id,
+                                               ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
+                                               ROCPROFILER_KERNEL_REPLAY_PASS,
+                                               pass_data);
+    }
 }
 
 void
