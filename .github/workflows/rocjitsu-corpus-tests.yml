@@ -258,14 +258,11 @@ jobs:
             -DRJ_ENABLE_EXPENSIVE_CHECKS=0 \
             -DRJ_SANITIZER_RUNTIME=STATIC
 
-          WORKERS="$(( ($(nproc) + 1) / 2 ))"
           cmake --build "${STATIC_ASAN_BUILD_DIR}" \
-            --target launch_preload_test \
-            -j "${WORKERS}"
+            --target launch_preload_test
           ctest --test-dir "${STATIC_ASAN_BUILD_DIR}" \
             -R '^LaunchPreloadTest\.' \
-            --output-on-failure \
-            -j "${WORKERS}"
+            --output-on-failure
 
       - name: Install corpus test dependencies
         if: matrix.name == 'release'
