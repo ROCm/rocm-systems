@@ -207,33 +207,24 @@ jobs:
           ./amd_smi_drm_ex > "$RESULTS_DIR/amd_smi_drm_ex.log" 2>&1 || echo 'amd_smi_drm_ex failed'
           ./amd_smi_nodrm_ex > "$RESULTS_DIR/amd_smi_nodrm_ex.log" 2>&1 || echo 'amd_smi_nodrm_ex failed'
 
-      - name: AMDSMI Test Results
+      - name: Test Results
         if: always()
-        run: cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log || echo "No AMDSMI test results"
-
-      - name: Integration Test Results
-        if: always()
-        run: cat /tmp/test-results-${{ matrix.os }}/integration_test_output.txt || echo "No integration test results"
-
-      - name: Unit Test Results
-        if: always()
-        run: cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results"
-
-      - name: Perf Test Results
-        if: always()
-        run: cat /tmp/test-results-${{ matrix.os }}/perf_test_output.txt || echo "No perf test results"
-
-      - name: ABI Compat Test Results
-        if: always()
-        run: cat /tmp/test-results-${{ matrix.os }}/abi_compat_output.txt || echo "No ABI compat results"
-
-      - name: Example DRM Test Results
-        if: always()
-        run: cat /tmp/test-results-${{ matrix.os }}/amd_smi_drm_ex.log || echo "No DRM example results"
-
-      - name: Example NoDRM Test Results
-        if: always()
-        run: cat /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No NoDRM example results"
+        run: |
+          results_dir="/tmp/test-results-${{ matrix.os }}"
+          # label -> log file; printed in one collapsible group each so the
+          # Actions log stays readable instead of seven near-identical steps.
+          print_log() {
+            echo "::group::$1"
+            cat "$results_dir/$2" 2>/dev/null || echo "No $1"
+            echo "::endgroup::"
+          }
+          print_log "AMDSMI test results"      "amdsmi_tests.log"
+          print_log "Integration test results" "integration_test_output.txt"
+          print_log "Unit test results"        "unit_test_output.txt"
+          print_log "Perf test results"        "perf_test_output.txt"
+          print_log "ABI compat results"       "abi_compat_output.txt"
+          print_log "DRM example results"      "amd_smi_drm_ex.log"
+          print_log "NoDRM example results"    "amd_smi_nodrm_ex.log"
 
       - name: AMDSMI CI Summary
         if: always()
