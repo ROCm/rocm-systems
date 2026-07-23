@@ -1003,11 +1003,47 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
   }
 }
 
-TEST(ConSanMoi, CdnaSampledVglobalMaterializesOverlappingSpillAddressInScratchTail) {
-  constexpr std::array<uint32_t, 2> kGlobalAtomic = {
-      0xdf089fecu,
-      0x007f0604u, // global_atomic_add v[4:5], v6, off offset:-20 sc1
+TEST(ConSanMoi, SignExtendsCdnaVglobalOffsetAt13BitBoundaries) {
+  EXPECT_EQ(sign_extend_13_bit_offset(0x0000u), 0);
+  EXPECT_EQ(sign_extend_13_bit_offset(0x0014u), 20);
+  EXPECT_EQ(sign_extend_13_bit_offset(0x0fffu), 4095);
+  EXPECT_EQ(sign_extend_13_bit_offset(0x1000u), -4096);
+  EXPECT_EQ(sign_extend_13_bit_offset(0x1fffu), -1);
+}
+
+TEST(ConSanMoi, CdnaSampledVglobalMaterializesVectorAndScalarAddressesInScratchTail) {
+  struct VglobalCase {
+    std::string_view label;
+    std::array<uint32_t, 2> words;
+    ConSanMoiAtomicAddressKind expected_kind;
+    uint16_t input_vgpr_count;
+    std::optional<uint16_t> scalar_base_sgpr;
+    int32_t signed_byte_offset;
   };
+  constexpr std::array<VglobalCase, 2> kVglobalCases = {{
+      {
+          "vector-only/off",
+          {
+              0xdf089fecu,
+              0x007f0604u, // global_atomic_add v[4:5], v6, off offset:-20 sc1
+          },
+          ConSanMoiAtomicAddressKind::VglobalGuestPairMaterialized,
+          2u,
+          std::nullopt,
+          -20,
+      },
+      {
+          "scalar-base",
+          {
+              0xdf088014u,
+              0x00140604u, // global_atomic_add v4, v6, s[20:21] offset:20 sc1
+          },
+          ConSanMoiAtomicAddressKind::VglobalMaterialized,
+          1u,
+          20u,
+          20,
+      },
+  }};
   for (const SampledCdnaTarget &target : kSampledCdnaTargets) {
     SCOPED_TRACE(target.label);
     const auto access = target.arch == ROCJITSU_CODE_ARCH_CDNA3
@@ -1037,84 +1073,91 @@ TEST(ConSanMoi, CdnaSampledVglobalMaterializesOverlappingSpillAddressInScratchTa
       wait_word = *wait;
     }
 
-    std::vector<uint32_t> text_words;
-    text_words.insert(text_words.end(), access->begin(), access->end());
-    text_words.insert(text_words.end(), release_words.begin(), release_words.end());
-    text_words.push_back(wait_word);
-    text_words.insert(text_words.end(), kGlobalAtomic.begin(), kGlobalAtomic.end());
-    text_words.push_back(wait_word);
-    text_words.insert(text_words.end(), acquire_words.begin(), acquire_words.end());
-    text_words.resize(800u, build_s_nop(0, target.arch));
-    text_words.back() = build_s_endpgm(target.arch);
-    std::vector<uint8_t> bytes =
-        target.arch == ROCJITSU_CODE_ARCH_CDNA3
-            ? make_cdna3_lds_code_object(text_words, "sampled_vglobal_materialized_spill",
-                                         /*vgpr_granulated=*/3u)
-            : make_cdna4_lds_code_object(text_words, "sampled_vglobal_materialized_spill",
-                                         /*vgpr_granulated=*/3u);
-    mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
-      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 2u);
-    });
+    for (const VglobalCase &test_case : kVglobalCases) {
+      SCOPED_TRACE(test_case.label);
+      std::vector<uint32_t> text_words;
+      text_words.insert(text_words.end(), access->begin(), access->end());
+      text_words.insert(text_words.end(), release_words.begin(), release_words.end());
+      text_words.push_back(wait_word);
+      text_words.insert(text_words.end(), test_case.words.begin(), test_case.words.end());
+      text_words.push_back(wait_word);
+      text_words.insert(text_words.end(), acquire_words.begin(), acquire_words.end());
+      text_words.resize(800u, build_s_nop(0, target.arch));
+      text_words.back() = build_s_endpgm(target.arch);
+      std::vector<uint8_t> bytes =
+          target.arch == ROCJITSU_CODE_ARCH_CDNA3
+              ? make_cdna3_lds_code_object(text_words, "sampled_vglobal_materialized_spill",
+                                           /*vgpr_granulated=*/3u)
+              : make_cdna4_lds_code_object(text_words, "sampled_vglobal_materialized_spill",
+                                           /*vgpr_granulated=*/3u);
+      mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+        AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                        2u);
+      });
 
-    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
-    options.moi_runtime_sample_stride = 2u;
-    options.moi_track_barriers = false;
-    options.moi_track_atomics = true;
-    options.moi_exec_save_sgpr = 80u;
-    options.moi_report_buffer_address = 0x123456780000ull;
-    options.moi_report_buffer_size = direct_sampled_report_bytes(2);
-    options.max_patches = 3u;
+      ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+      options.moi_runtime_sample_stride = 2u;
+      options.moi_track_barriers = false;
+      options.moi_track_atomics = true;
+      options.moi_exec_save_sgpr = 80u;
+      options.moi_report_buffer_address = 0x123456780000ull;
+      options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+      options.max_patches = 3u;
 
-    const ConSanResult result = try_patch_consan(bytes, options);
+      const ConSanResult result = try_patch_consan(bytes, options);
 
-    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    ASSERT_EQ(result.kernels.size(), 1u);
-    const auto site =
-        std::ranges::find_if(result.kernels.front().atomic_sites, [](const ConSanAtomicSite &item) {
-          return item.mnemonic.starts_with("global_atomic_");
-        });
-    ASSERT_NE(site, result.kernels.front().atomic_sites.end())
-        << testing::PrintToString(result.kernels.front().atomic_sites);
-    ASSERT_TRUE(site->raw_scope) << testing::PrintToString(*site);
-    EXPECT_EQ(site->width_bits, 32u);
-    const auto patch = std::ranges::find(
-        result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
-    ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
-    ASSERT_TRUE(patch->scratch_vgpr);
-    ASSERT_TRUE(patch->relocated_guest_instruction_offset);
-    EXPECT_EQ(patch->spilled_vgpr_count, 10u);
-    EXPECT_EQ(patch->relocated_guest_instruction_offset, patch->trampoline_offset);
+      ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      ASSERT_EQ(result.kernels.size(), 1u);
+      const auto site = std::ranges::find_if(
+          result.kernels.front().atomic_sites,
+          [](const ConSanAtomicSite &item) { return item.mnemonic.starts_with("global_atomic_"); });
+      ASSERT_NE(site, result.kernels.front().atomic_sites.end())
+          << testing::PrintToString(result.kernels.front().atomic_sites);
+      ASSERT_TRUE(site->raw_scope) << testing::PrintToString(*site);
+      EXPECT_EQ(site->width_bits, 32u);
+      EXPECT_EQ(site->saddr_sgpr, test_case.scalar_base_sgpr);
+      const auto patch =
+          std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                            &ConSanPatchInfo::kind);
+      ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+      ASSERT_TRUE(patch->scratch_vgpr);
+      ASSERT_TRUE(patch->relocated_guest_instruction_offset);
+      EXPECT_EQ(patch->spilled_vgpr_count, 10u);
+      EXPECT_EQ(patch->relocated_guest_instruction_offset, patch->trampoline_offset);
 
-    const ConSanMoiAtomicAddressPlan address_plan =
-        plan_consan_moi_atomic_address(*site, *patch->scratch_vgpr, patch->spilled_vgpr_count,
-                                       ConSanRegisterAllocationSource::SpillRequired, target.arch,
-                                       /*allow_post_guest_spill_operand_overlap=*/true);
-    ASSERT_TRUE(address_plan.supported());
-    EXPECT_EQ(address_plan.kind, ConSanMoiAtomicAddressKind::VglobalGuestPairMaterialized);
-    EXPECT_EQ(address_plan.signed_byte_offset, -20);
-    const uint16_t saved_address = static_cast<uint16_t>(*patch->scratch_vgpr + 8u);
-    EXPECT_EQ(address_plan.result_address_vgpr, saved_address);
+      const ConSanMoiAtomicAddressPlan address_plan =
+          plan_consan_moi_atomic_address(*site, *patch->scratch_vgpr, patch->spilled_vgpr_count,
+                                         ConSanRegisterAllocationSource::SpillRequired, target.arch,
+                                         /*allow_post_guest_spill_operand_overlap=*/true);
+      ASSERT_TRUE(address_plan.supported());
+      EXPECT_EQ(address_plan.kind, test_case.expected_kind);
+      EXPECT_EQ(address_plan.input_address_vgpr_count, test_case.input_vgpr_count);
+      EXPECT_EQ(address_plan.scalar_base_sgpr, test_case.scalar_base_sgpr);
+      EXPECT_EQ(address_plan.signed_byte_offset, test_case.signed_byte_offset);
+      const uint16_t saved_address = static_cast<uint16_t>(*patch->scratch_vgpr + 8u);
+      EXPECT_EQ(address_plan.result_address_vgpr, saved_address);
 
-    const auto materialization = build_consan_moi_atomic_address_materialization(
-        address_plan, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, target.arch);
-    ASSERT_TRUE(materialization);
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
-    ASSERT_TRUE(patched.is_valid());
-    const std::vector<uint32_t> cave =
-        text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
-    EXPECT_TRUE(contains_subsequence(cave, *materialization));
-    EXPECT_EQ(std::ranges::count(cave, build_v_mov_b32_e32(saved_address,
-                                                           vector_source_vgpr(saved_address),
-                                                           target.arch)),
-              0u);
-    EXPECT_EQ(
-        std::ranges::count(
-            cave, build_v_mov_b32_e32(static_cast<uint16_t>(saved_address + 1u),
-                                      vector_source_vgpr(static_cast<uint16_t>(saved_address + 1u)),
-                                      target.arch)),
-        0u);
-    EXPECT_TRUE(result.final_validation_passed);
+      const auto materialization = build_consan_moi_atomic_address_materialization(
+          address_plan, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, target.arch);
+      ASSERT_TRUE(materialization);
+      AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(patched.is_valid());
+      const std::vector<uint32_t> cave =
+          text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+      EXPECT_TRUE(contains_subsequence(cave, *materialization));
+      EXPECT_EQ(std::ranges::count(cave, build_v_mov_b32_e32(saved_address,
+                                                             vector_source_vgpr(saved_address),
+                                                             target.arch)),
+                0u);
+      EXPECT_EQ(std::ranges::count(
+                    cave, build_v_mov_b32_e32(
+                              static_cast<uint16_t>(saved_address + 1u),
+                              vector_source_vgpr(static_cast<uint16_t>(saved_address + 1u)),
+                              target.arch)),
+                0u);
+      EXPECT_TRUE(result.final_validation_passed);
+    }
   }
 }
 

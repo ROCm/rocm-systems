@@ -1133,10 +1133,6 @@ atomic_address_space_hint(const Instruction &inst, const FlatPointerTracker &tra
   return static_cast<int32_t>(value << 8) >> 8;
 }
 
-[[nodiscard]] int32_t sign_extend_13(uint32_t value) {
-  return static_cast<int32_t>(value << 19) >> 19;
-}
-
 template <typename Raw> void fill_flat_like_atomic_raw(ConSanAtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_saddr = static_cast<uint32_t>(raw.saddr);
@@ -1149,17 +1145,27 @@ template <typename Raw> void fill_flat_like_atomic_raw(ConSanAtomicSite &site, c
   site.returns_old_value = amdgpu::gfx12_atomic_returns(static_cast<uint8_t>(raw.th));
 }
 
-template <typename Raw> void fill_cdna_flat_atomic_raw(ConSanAtomicSite &site, const Raw &raw) {
+template <typename Raw> void fill_cdna_flat_like_atomic_raw(ConSanAtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_saddr = static_cast<uint32_t>(raw.saddr);
   site.raw_vaddr = static_cast<uint32_t>(raw.addr);
   site.raw_vsrc = static_cast<uint32_t>(raw.data);
   site.raw_vdst = static_cast<uint32_t>(raw.vdst);
-  site.raw_ioffset = static_cast<int32_t>(raw.offset);
-  // CDNA3/4 FLAT atomics do not carry gfx12's explicit scope field. ConSan's
-  // admitted forms are device-scoped, matching the builder contract.
+  // CDNA3/4 FLAT-like atomics do not carry gfx12's explicit scope field.
+  // ConSan's admitted FLAT and VGLOBAL forms are device-scoped, matching the
+  // builder contract.
   site.raw_scope = 2u;
   site.returns_old_value = raw.sc0 != 0u;
+}
+
+void fill_cdna_flat_atomic_raw(ConSanAtomicSite &site, const cdna4::FlatMachineInst &raw) {
+  fill_cdna_flat_like_atomic_raw(site, raw);
+  site.raw_ioffset = static_cast<int32_t>(raw.offset);
+}
+
+void fill_cdna_global_atomic_raw(ConSanAtomicSite &site, const cdna4::FlatGlblMachineInst &raw) {
+  fill_cdna_flat_like_atomic_raw(site, raw);
+  site.raw_ioffset = sign_extend_13_bit_offset(static_cast<uint32_t>(raw.offset));
 }
 
 template <typename Raw> void fill_buffer_atomic_raw(ConSanAtomicSite &site, const Raw &raw) {
@@ -1684,8 +1690,7 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
     // CDNA3 and CDNA4 also share VGLOBAL's signed 13-bit-offset layout.
     cdna4::FlatGlblMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-    fill_cdna_flat_atomic_raw(site, raw);
-    site.raw_ioffset = sign_extend_13(static_cast<uint32_t>(raw.offset));
+    fill_cdna_global_atomic_raw(site, raw);
   } else if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
     if (mnemonic.starts_with("ds_") && instruction_bytes.size() >= sizeof(rdna4::VdsMachineInst)) {
       rdna4::VdsMachineInst raw{};
@@ -1748,8 +1753,10 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
       (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       mnemonic.starts_with("global_atomic") && site.raw_saddr &&
       *site.raw_saddr == kCdnaGlobalNoSaddrEncoding;
-  if (mnemonic.starts_with("global_atomic") && !site.saddr_sgpr && site.raw_saddr &&
-      !cdna_global_no_saddr && *site.raw_saddr <= std::numeric_limits<uint16_t>::max()) {
+  if (cdna_global_no_saddr) {
+    site.saddr_sgpr.reset();
+  } else if (mnemonic.starts_with("global_atomic") && !site.saddr_sgpr && site.raw_saddr &&
+             *site.raw_saddr <= std::numeric_limits<uint16_t>::max()) {
     site.saddr_sgpr = static_cast<uint16_t>(*site.raw_saddr);
   }
 

@@ -766,6 +766,16 @@ struct SampledAtomicPreludeState {
   std::optional<uint16_t> cas_result_vgpr;
 };
 
+[[nodiscard]] bool
+validate_sampled_atomic_spill_metadata(const VgprSpillSequence &spill,
+                                       std::vector<std::string> &errors) {
+  assert(spill.slot_offsets.size() == spill.vgpr_count);
+  if (spill.slot_offsets.size() == spill.vgpr_count)
+    return true;
+  errors.emplace_back("ConSan MOI sampled atomic spill has incomplete slot metadata");
+  return false;
+}
+
 [[nodiscard]] bool append_sampled_atomic_snapshot_word(std::vector<uint32_t> &words,
                                                        const VgprSpillSequence &spill,
                                                        uint16_t destination, uint16_t source,
@@ -809,6 +819,8 @@ struct SampledAtomicPreludeState {
                                                       uint16_t saved_compare, uint16_t saved_result,
                                                       rj_code_arch_t arch,
                                                       std::vector<std::string> &errors) {
+  if (!validate_sampled_atomic_spill_metadata(spill, errors))
+    return false;
   bool loaded_private_state = false;
   if (!append_sampled_atomic_snapshot_word(words, spill, saved_compare, compare_vgpr, arch,
                                            loaded_private_state) ||
@@ -828,6 +840,8 @@ struct SampledAtomicPreludeState {
 append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprSpillSequence &spill,
                                        uint16_t source_address, uint16_t saved_address,
                                        rj_code_arch_t arch, std::vector<std::string> &errors) {
+  if (!validate_sampled_atomic_spill_metadata(spill, errors))
+    return false;
   bool loaded_private_state = false;
   if (!append_sampled_atomic_snapshot_word(words, spill, saved_address, source_address, arch,
                                            loaded_private_state) ||

@@ -2374,7 +2374,11 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
     words.insert(words.end(), tag->begin(), tag->end());
     return words;
   }
-  if (!is_rdna4_family_arch(arch) && !instrumentation::is_cdna_family_arch(arch))
+  const bool cdna_vglobal_materialization =
+      instrumentation::is_cdna_family_arch(arch) &&
+      (plan.kind == ConSanMoiAtomicAddressKind::VglobalGuestPairMaterialized ||
+       plan.kind == ConSanMoiAtomicAddressKind::VglobalMaterialized);
+  if (!is_rdna4_family_arch(arch) && !cdna_vglobal_materialization)
     return std::nullopt;
   const bool buffer_resource = plan.kind == ConSanMoiAtomicAddressKind::BufferResourceMaterialized;
   const bool scalar_vector =

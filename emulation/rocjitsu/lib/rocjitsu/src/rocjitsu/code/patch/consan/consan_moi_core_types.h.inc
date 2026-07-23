@@ -245,6 +245,10 @@ inline constexpr uint32_t kConSanMoiLdsAddressTokenTag = 0xffffffffu;
 // CDNA VGLOBAL encodes the vector-only `off` address form with SADDR=0x7f.
 inline constexpr uint32_t kCdnaGlobalNoSaddrEncoding = 0x7fu;
 
+[[nodiscard]] constexpr int32_t sign_extend_13_bit_offset(uint32_t value) {
+  return static_cast<int32_t>(value << 19u) >> 19u;
+}
+
 [[nodiscard]] std::string_view
 consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSupport support);
 
