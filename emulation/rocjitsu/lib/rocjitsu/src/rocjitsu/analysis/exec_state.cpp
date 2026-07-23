@@ -56,11 +56,12 @@ enum class ExecWrite : uint8_t {
 ///
 /// @details Semantic EXEC writers (WRITES_EXEC: saveexec/wrexec/v_cmpx) write the
 /// whole mask. A generic write via an EXEC destination operand covers only that
-/// operand's lanes — e.g. `s_mov_b32 exec_lo` writes 32 bits, which is the whole
-/// mask on Wave32 but only half on Wave64.
+/// operand's lanes at the sub-register's position: `exec_lo` (index 0) writes
+/// bits [0,32), `exec_hi` (index 1) bits [32,64). Only an exec_lo-based write can
+/// cover the active mask; an exec_hi write never touches lanes [0,wave_size).
 struct ExecWriteExtent {
   uint64_t mask = 0; ///< Bits written into EXEC.
-  bool full = false; ///< True when those bits cover the entire EXEC register.
+  bool full = false; ///< True when those bits cover the entire active EXEC mask.
 };
 
 [[nodiscard]] ExecWriteExtent exec_write_extent(const Instruction &inst, uint32_t wave_size) {
@@ -73,7 +74,9 @@ struct ExecWriteExtent {
     if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::EXEC) {
       const int w = op->size_bits();
       const uint64_t mask = (w >= 64) ? ~0ULL : ((1ULL << w) - 1ULL);
-      return {mask, w >= static_cast<int>(wave_size)};
+      // Full only when the write starts at exec_lo (index 0) and spans the mask.
+      const bool full = ref->index == 0 && w >= static_cast<int>(wave_size);
+      return {mask, full};
     }
   }
   return {};

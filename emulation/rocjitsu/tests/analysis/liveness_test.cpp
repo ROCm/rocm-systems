@@ -192,7 +192,8 @@ enum class TestOpcode : uint32_t {
   WriteExecOrAllOnes = 20,
   WriteExecAndSaveexec = 21,
   WriteExecLoHalf = 22,
-  PartialDefSgpr4 = 23,
+  WriteExecHiHalf = 23,
+  PartialDefSgpr4 = 24,
 };
 
 class TestDecoder : public Decoder {
@@ -263,6 +264,11 @@ public:
       // s_mov_b32 exec_lo, -1: a 32-bit COPY of all-ones into only the low half
       // of EXEC. Full on Wave32; a partial write on Wave64.
       return new TestInstruction("test_write_exec_lo_half", {{RegClass::EXEC, 0, 1}}, {},
+                                 RESULT_COPY, std::nullopt, {}, std::nullopt, ~0ULL);
+    case TestOpcode::WriteExecHiHalf:
+      // s_mov_b32 exec_hi, -1: a 32-bit COPY of all-ones into only the high half
+      // of EXEC. Never covers the active lanes, so it can never establish Full.
+      return new TestInstruction("test_write_exec_hi_half", {{RegClass::EXEC, 1, 1}}, {},
                                  RESULT_COPY, std::nullopt, {}, std::nullopt, ~0ULL);
     case TestOpcode::PartialDefSgpr4:
       // 16-bit write to s4: defines only part of the lane, so it also reads s4.
@@ -3512,6 +3518,35 @@ TEST(ExecMaskAnalysis, Wave32ExecLoWriteCoversFullMask) {
   auto insts = insts_of(*blocks[0]);
   ASSERT_GE(insts.size(), 2u);
   EXPECT_EQ(exec.before(*insts[1]), ExecState::Full);
+}
+
+TEST(ExecMaskAnalysis, ExecHiWriteNeverEstablishesFull) {
+  // s_mov_b32 exec_hi, -1 writes bits [32,64), which never cover the active
+  // lanes. It must not establish Full from Unknown on either wave size — on
+  // Wave32 the written bits lie entirely outside the mask, on Wave64 they are a
+  // partial upper half.
+  for (uint8_t wave_size : {uint8_t{32}, uint8_t{64}}) {
+    auto blocks =
+        build_test_blocks({TestOpcode::WriteExecHiHalf, TestOpcode::DefVgpr0, TestOpcode::End});
+    auto scope = block_scope(blocks);
+    ExecMaskAnalysis exec{KernelBlockScope(scope), wave_size};
+    auto insts = insts_of(*blocks[0]);
+    ASSERT_GE(insts.size(), 2u);
+    EXPECT_EQ(exec.before(*insts[1]), ExecState::Unknown);
+  }
+}
+
+TEST(ExecMaskAnalysis, ExecHiWritePreservesButDoesNotNarrowFull) {
+  // From an already-Full mask, an all-ones exec_hi write keeps Full (it only
+  // rewrites in-range or upper bits with ones), the same as an exec_lo half.
+  auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::WriteExecHiHalf,
+                                   TestOpcode::DefVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 3u);
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Full); // entering the hi write
+  EXPECT_EQ(exec.before(*insts[2]), ExecState::Full); // hi all-ones preserved Full
 }
 
 TEST(LivenessAnalysis, ExecFullPromotesVgprDefToKill) {

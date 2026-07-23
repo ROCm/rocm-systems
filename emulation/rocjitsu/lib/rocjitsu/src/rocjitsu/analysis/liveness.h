@@ -203,8 +203,7 @@ private:
   void require_available() const;
 
   void analyze(KernelBlockScope blocks, const ExecMaskAnalysis &exec,
-               const LivenessAnalysisOptions &options,
-               std::span<const ScopedCfgEdge> extra_edges);
+               const LivenessAnalysisOptions &options, std::span<const ScopedCfgEdge> extra_edges);
 
   bool available_ = true;
   uint16_t min_free_vgpr_ = 0;
