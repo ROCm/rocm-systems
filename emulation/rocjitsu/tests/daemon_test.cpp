@@ -52,6 +52,7 @@ struct TestPaths {
   std::string daemon_bin = RJ_DAEMON_BIN;
   std::string daemon_config = RJ_DAEMON_CONFIG;
   std::string daemon_config_2gpu = RJ_DAEMON_CONFIG_2GPU;
+  std::string sanitizer_preload = RJ_DAEMON_SANITIZER_PRELOAD;
   std::string preload_lib = RJ_PRELOAD_LIB;
   std::string hip_vector_add_bin = RJ_HIP_VECTOR_ADD_BIN;
   std::string hip_memcpy_bin = RJ_HIP_MEMCPY_BIN;
@@ -97,6 +98,7 @@ TestPaths installed_paths(const std::filesystem::path &exe_dir) {
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_DAEMON_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_DAEMON_CONFIG).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_DAEMON_CONFIG_2GPU).string(),
+      RJ_DAEMON_SANITIZER_PRELOAD,
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_PRELOAD_LIB).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_VECTOR_ADD_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_MEMCPY_BIN).string(),
@@ -124,6 +126,8 @@ const char *daemon_bin() { return test_paths().daemon_bin.c_str(); }
 const char *daemon_config() { return test_paths().daemon_config.c_str(); }
 
 const char *daemon_config_2gpu() { return test_paths().daemon_config_2gpu.c_str(); }
+
+const char *sanitizer_preload() { return test_paths().sanitizer_preload.c_str(); }
 
 const char *preload_lib() { return test_paths().preload_lib.c_str(); }
 
@@ -238,6 +242,7 @@ protected:
     cmd += " XDG_RUNTIME_DIR=";
     cmd += tmp_dir_;
     cmd += " LD_PRELOAD=";
+    cmd += sanitizer_preload();
     cmd += preload_lib();
     cmd += " HSA_ENABLE_SDMA=1 ";
     cmd += binary;
