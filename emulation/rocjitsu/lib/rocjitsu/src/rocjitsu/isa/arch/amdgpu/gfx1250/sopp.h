@@ -121,6 +121,7 @@ class SBarrierLeaveSopp : public Sopp {
 public:
   SBarrierLeaveSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -146,6 +147,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -155,6 +157,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -164,6 +167,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
+  Operand vcc;
   static const bool execute_registered_;
 };
 
@@ -173,6 +177,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
+  Operand vcc;
   static const bool execute_registered_;
 };
 
@@ -182,6 +187,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -191,6 +197,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
+  Operand sdst_exec;
   static const bool execute_registered_;
 };
 
@@ -228,6 +235,7 @@ public:
   SSendmsgSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -236,6 +244,7 @@ public:
   SSendmsghaltSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -259,6 +268,7 @@ class STtracedataSopp : public Sopp {
 public:
   STtracedataSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand m0;
   static const bool execute_registered_;
 };
 

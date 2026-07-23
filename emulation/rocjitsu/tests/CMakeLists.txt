@@ -336,6 +336,7 @@ add_executable(
     rvsim_test.cpp
     amdgpu_vm_test.cpp
     config_test.cpp
+    daemon_api_test.cpp
     matmul_test.cpp
     vector_add_test.cpp
     gfx1250_sim_test.cpp
@@ -360,6 +361,7 @@ add_executable(
     patch/error_report_test.cpp
     code/code_object_target_id_test.cpp
     code/amdgpu_code_object_test.cpp
+    code/relocation_function_table_test.cpp
     dbt/semantic_scratch_test.cpp
     dbt/waitcnt_translator_test.cpp
     dbt/virtual_lds_dispatch_rewrite_test.cpp
@@ -374,6 +376,7 @@ add_executable(
     scalar_scc_test.cpp
     cdna3_predicate_mask_test.cpp
     decode_execute_benchmark.cpp
+    util_unique_handle_test.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
@@ -383,6 +386,7 @@ add_executable(
     simd_correctness/vop2_simd_correctness_test.cpp
     simd_correctness/vop2_carry_simd_correctness_test.cpp
     simd_correctness/vop2_fma_simd_correctness_test.cpp
+    simd_correctness/vop2_fma_f16_rdna_simd_correctness_test.cpp
     simd_correctness/vop2_fma_f64_simd_correctness_test.cpp
     simd_correctness/vop2_cndmask_simd_correctness_test.cpp
     simd_correctness/vop2_minmax_simd_correctness_test.cpp
@@ -435,6 +439,16 @@ if(HAS_DEVICE_KERNELS)
         PRIVATE dbt/multikernel_indirect_branch_test.cpp
     )
 endif()
+if(HAS_GFX1250_DEVICE_KERNELS)
+    target_sources(
+        rocjitsu_tests
+        PRIVATE dbt/relocation_function_table_hip_test.cpp
+    )
+    target_compile_definitions(
+        rocjitsu_tests
+        PRIVATE HAS_GFX1250_DEVICE_KERNELS=1
+    )
+endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)
     target_sources(
         rocjitsu_tests
@@ -483,6 +497,32 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_model_only_test> -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
     )
+
+    add_executable(
+        gfx1250_b0_to_a0_library_test
+        dbt/gfx1250_b0_to_a0_library_test.cpp
+    )
+    target_link_libraries(
+        gfx1250_b0_to_a0_library_test
+        PRIVATE rocjitsu_gfx1250_b0_to_a0 GTest::gtest_main
+    )
+    if(HAS_GFX1250_DBT_FIXTURE)
+        target_compile_definitions(
+            gfx1250_b0_to_a0_library_test
+            PRIVATE
+                GFX1250_B0_TO_A0_FIXTURE="${KERNEL_OUTPUT_DIR}/relocation_function_table_dispatch_gfx1250.hsaco"
+        )
+        add_dependencies(
+            gfx1250_b0_to_a0_library_test
+            probe_relocation_function_table_dispatch_gfx1250
+        )
+    endif()
+    rj_configure_target(
+        gfx1250_b0_to_a0_library_test
+        PRIVATE_INCLUDES
+        WARNINGS
+    )
+    rj_add_gtest_tests(gfx1250_b0_to_a0_library_test)
 endif()
 
 # --- DBI probe fixture test ---
@@ -1938,7 +1978,9 @@ if(RJ_ENABLE_HIP_TESTS)
             rj_install_test_target(daemon_test)
         endif()
         set(RJ_DAEMON_TESTS
+            RocjitsuCliDaemon.LaunchesApplicationAfterDaemonIsReady
             DaemonTest.HipVectorAdd
+            DaemonTest.AttachExecFailurePreservesDaemonSocket
             DaemonTest.HipMemcpyRoundTripFloat
             DaemonTest.HipMemcpyRoundTripInt
             DaemonTest.HipMemcpyDeviceToDevice

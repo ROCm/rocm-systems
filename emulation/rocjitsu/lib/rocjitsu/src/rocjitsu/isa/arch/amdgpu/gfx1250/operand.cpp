@@ -845,6 +845,16 @@ std::string Operand::name() const {
 std::optional<RegisterRef> Operand::to_register_ref() const {
   if (size_bits_ == 0)
     return std::nullopt;
+  // A fieldless operand (no MR ISA encoding field: a hardwired
+  // register/side effect like VCC/EXEC/SCC, or the fieldless image
+  // address) never denotes a def-use-tracked register: its
+  // encoding value is a fixed placeholder, not a decoded index, so
+  // mapping it to a RegisterRef would fabricate a spurious def/use.
+  // Making this explicit keeps every fieldless operand inert by
+  // design (not by per-type coincidence) if it is placed in the
+  // operand arrays.
+  if (fieldless_)
+    return std::nullopt;
   // Liveness tracks operands as contiguous 32-bit register lanes.
   const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);
   if (auto packed =
