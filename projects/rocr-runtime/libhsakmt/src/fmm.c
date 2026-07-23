@@ -3239,6 +3239,16 @@ static void *map_mmio(HsaKFDContext *ctx,
 			pr_err("map_mmio(drm): mmap MMIO_REMAP failed: %s\n", strerror(errno));
 			goto drm_close;
 		}
+
+		/* mmap() holds its own reference to the BO, so the per-file GEM handle
+		 * is no longer needed; close it now rather than holding it for the
+		 * process lifetime (the mapping stays valid). */
+		{
+			struct drm_gem_close gem_close = {0};
+
+			gem_close.handle = gem_op.handle;
+			hsakmt_ioctl(drm_fd, DRM_IOCTL_GEM_CLOSE, &gem_close);
+		}
 		return cpu;
 
 drm_close:
@@ -3301,7 +3311,8 @@ static void release_mmio(HsaKFDContext *ctx)
 			continue;
 		/* DRM mode: the MMIO_REMAP page is a plain mmap of the kernel's global
 		 * BO (opened via GEM_OP_OPEN_GLOBAL, not tracked in an SVM aperture),
-		 * so just unmap it. The GEM handle is released on render-fd close. */
+		 * so just unmap it. The per-file GEM handle was already closed in
+		 * map_mmio once the mapping was established. */
 		if (hsakmt_enable_drm) {
 			munmap(fmm_ctx->gpu_mem[gpu_mem_id].mmio_aperture.base, PAGE_SIZE);
 			continue;

@@ -30,9 +30,8 @@ MMIOHdpFlushTest::~MMIOHdpFlushTest(void) {
 }
 
 void MMIOHdpFlushTest::SetUp(void) {
-  if (!checkPlatformFiltering()) return;
-
-  TestBase::SetUp();  // hsa_init()
+  TestBase::SetUp();  // checkPlatformFiltering() + hsa_init()
+  if (isTestSkipped()) return;
 
   hsa_agent_t gpu_agent = {0};
   hsa_status_t err = hsa_iterate_agents(rocrtst::FindGPUDevice, &gpu_agent);
