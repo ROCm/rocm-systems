@@ -115,16 +115,6 @@ void TestIfoeInfoRead::Run(void) {
     err = amdsmi_get_gpu_board_info(processor_handles_[0], &board_info);
     CHK_ERR_ASRT(err)
 
-    err = amdsmi_get_gpu_vram_vendor(processor_handles_[i], buffer, kBufferLen);
-    if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "\t**Vram Vendor string not supported on this system." << std::endl;
-      err = amdsmi_get_gpu_vram_vendor(processor_handles_[i], nullptr, kBufferLen);
-      ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
-    } else {
-      CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) { std::cout << "\t**Device Vram Vendor name: " << buffer << std::endl; }
-    }
-
     amdsmi_vram_info_t vram_info;
     err = amdsmi_get_gpu_vram_info(processor_handles_[i], &vram_info);
     CHK_ERR_ASRT(err)

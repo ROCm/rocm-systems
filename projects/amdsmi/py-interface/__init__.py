@@ -38,7 +38,6 @@ from .amdsmi_interface import amdsmi_get_npm_info
 # ESMI Dependent Functions
 try:
     from .amdsmi_interface import amdsmi_get_cpu_handles
-    from .amdsmi_interface import amdsmi_get_cpusocket_handles  # Deprecate in 8.0
     from .amdsmi_interface import amdsmi_get_cpucore_handles
     from .amdsmi_interface import amdsmi_get_cpu_hsmp_proto_ver
     from .amdsmi_interface import amdsmi_get_cpu_smu_fw_version
@@ -181,7 +180,6 @@ from .amdsmi_interface import amdsmi_gpu_validate_ras_eeprom
 from .amdsmi_interface import amdsmi_set_gpu_pci_bandwidth
 from .amdsmi_interface import amdsmi_set_power_cap
 from .amdsmi_interface import amdsmi_set_gpu_power_profile
-from .amdsmi_interface import amdsmi_set_gpu_clk_range
 from .amdsmi_interface import amdsmi_set_gpu_clk_limit
 from .amdsmi_interface import amdsmi_set_gpu_od_clk_info
 from .amdsmi_interface import amdsmi_set_gpu_od_volt_info
@@ -232,6 +230,7 @@ from .amdsmi_interface import amdsmi_get_gpu_available_counters
 # # Error Query
 from .amdsmi_interface import amdsmi_get_gpu_ecc_count
 from .amdsmi_interface import amdsmi_get_gpu_ecc_enabled
+from .amdsmi_interface import amdsmi_get_gpu_ecc_supported
 from .amdsmi_interface import amdsmi_get_gpu_ecc_status
 from .amdsmi_interface import amdsmi_status_code_to_string
 
@@ -264,7 +263,6 @@ from .amdsmi_interface import AmdSmiEventReader
 # # Device Identification information
 from .amdsmi_interface import amdsmi_get_gpu_vendor_name
 from .amdsmi_interface import amdsmi_get_gpu_id
-from .amdsmi_interface import amdsmi_get_gpu_vram_vendor
 from .amdsmi_interface import amdsmi_get_gpu_subsystem_id
 from .amdsmi_interface import amdsmi_get_gpu_subsystem_name
 

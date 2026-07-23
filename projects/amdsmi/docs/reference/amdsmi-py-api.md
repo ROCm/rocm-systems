@@ -2317,51 +2317,6 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
-### amdsmi_set_gpu_clk_range
-
-Description: This function sets the clock range information.
-It is not supported on virtual machine guest
-
-Input parameters:
-
-* `processor_handle` handle for the given device
-* `min_clk_value` minimum clock value for desired clock range
-* `max_clk_value` maximum clock value for desired clock range
-* `clk_type` SYS | MEM range type
-
-Output: None
-
-Exceptions that can be thrown by `amdsmi_set_gpu_clk_range` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiParameterException`
-
-#### Possible Library Exceptions
-
-- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
-- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
-- `AMDSMI_STATUS_INVAL` - Invalid parameters
-
-Example:
-
-```python
-import amdsmi
-try:
-    amdsmi.amdsmi_init()
-    devices = amdsmi.amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for device in devices:
-            amdsmi.amdsmi_set_gpu_clk_range(device, 0, 1000, amdsmi.AmdSmiClkType.SYS)
-except amdsmi.AmdSmiException as e:
-    print(e)
-finally:
-    amdsmi.amdsmi_shut_down()
-```
-
 ### amdsmi_get_gpu_bdf_id
 
 Description: Get the unique PCI device identifier associated for a device
@@ -4575,7 +4530,7 @@ Field | Description
 ---|---
 `num_supported` | The number of supported policies
 `current_id` | The current policy index
-`policies` | List of policies. (`plpds` marked for deprecation in next major release)
+`policies` | List of policies.
 
 Exceptions that can be thrown by `amdsmi_get_xgmi_plpd` function:
 
@@ -4708,7 +4663,7 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
-### amdsmi_get_gpu_ecc_enabled
+### amdsmi_get_gpu_ecc_supported
 
 Description: Retrieve the enabled ECC bit-mask. It is not supported on virtual
 machine guest.
@@ -4728,7 +4683,7 @@ Input parameters:
 
 Output: Enabled ECC bit-mask
 
-Exceptions that can be thrown by `amdsmi_get_gpu_ecc_enabled` function:
+Exceptions that can be thrown by `amdsmi_get_gpu_ecc_supported` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
@@ -4752,7 +4707,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            enabled =  amdsmi.amdsmi_get_gpu_ecc_enabled(device)
+            enabled =  amdsmi.amdsmi_get_gpu_ecc_supported(device)
             print(enabled)
 except amdsmi.AmdSmiException as e:
     print(e)
@@ -5145,48 +5100,6 @@ try:
         for device in devices:
             dev_id = amdsmi.amdsmi_get_gpu_id(device)
             print(dev_id)
-except amdsmi.AmdSmiException as e:
-    print(e)
-finally:
-    amdsmi.amdsmi_shut_down()
-```
-
-### amdsmi_get_gpu_vram_vendor
-
-Description: **Deprecated** (slated for removal in a future ROCm release; use `amdsmi_get_gpu_vram_info()` instead). Get the vram vendor string of a gpu device.
-
-Input parameters:
-
-* `processor_handle` device which to query
-
-Output: vram vendor
-
-Exceptions that can be thrown by `amdsmi_get_gpu_vram_vendor` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiParameterException`
-
-#### Possible Library Exceptions
-
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
-- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
-- `AMDSMI_STATUS_INVAL` - Invalid parameters
-- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
-
-Example:
-
-```python
-import amdsmi
-try:
-    amdsmi.amdsmi_init()
-    devices = amdsmi.amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for device in devices:
-            vram_vendor = amdsmi.amdsmi_get_gpu_vram_vendor(device)
-            print(vram_vendor)
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:

@@ -342,7 +342,7 @@ def run_tests():
 
     # Get CPU socket handles (for CPU APIs)
     try:
-        cpu_socket_handles = amdsmi.amdsmi_get_cpusocket_handles()
+        cpu_socket_handles = amdsmi.amdsmi_get_cpu_handles()
     except:
         cpu_socket_handles = []
 
@@ -515,8 +515,6 @@ def run_tests():
     test_api("amdsmi_get_gpu_vendor_name", lambda: amdsmi.amdsmi_get_gpu_vendor_name(gpu_handle))
 
     test_api("amdsmi_get_gpu_id", lambda: amdsmi.amdsmi_get_gpu_id(gpu_handle))
-
-    test_api("amdsmi_get_gpu_vram_vendor", lambda: amdsmi.amdsmi_get_gpu_vram_vendor(gpu_handle))
 
     test_api(
         "amdsmi_get_gpu_drm_render_minor",
@@ -708,12 +706,6 @@ def run_tests():
     test_api(
         "amdsmi_get_gpu_target_frequency_range",
         lambda: amdsmi.amdsmi_get_gpu_target_frequency_range(gpu_handle),
-    )
-
-    test_api(
-        "amdsmi_set_gpu_clk_range",
-        lambda: amdsmi.amdsmi_set_gpu_clk_range(gpu_handle, 500, 2500, need("AmdSmiClkType").GFX),
-        requires_root=True,
     )
 
     # set_gpu_clk_limit takes (handle, clk_type, limit_type, value).
@@ -978,7 +970,9 @@ def run_tests():
         lambda: amdsmi.amdsmi_get_gpu_ecc_count(gpu_handle, need("AmdSmiGpuBlock").UMC),
     )
 
-    test_api("amdsmi_get_gpu_ecc_enabled", lambda: amdsmi.amdsmi_get_gpu_ecc_enabled(gpu_handle))
+    test_api(
+        "amdsmi_get_gpu_ecc_supported", lambda: amdsmi.amdsmi_get_gpu_ecc_supported(gpu_handle)
+    )
 
     test_api(
         "amdsmi_get_gpu_ecc_status",
@@ -1430,7 +1424,7 @@ def run_tests():
     cpu_socket = cpu_socket_handles[0] if cpu_socket_handles else None
     cpu_core = cpu_core_handles[0] if cpu_core_handles else None
 
-    test_api("amdsmi_get_cpusocket_handles", lambda: amdsmi.amdsmi_get_cpusocket_handles())
+    test_api("amdsmi_get_cpu_handles", lambda: amdsmi.amdsmi_get_cpu_handles())
 
     test_api("amdsmi_get_cpucore_handles", lambda: amdsmi.amdsmi_get_cpucore_handles())
 
