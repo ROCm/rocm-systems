@@ -50,6 +50,16 @@ TEST(Fp16OvflMode, F32ToF16ClampsFiniteOverflowOnly) {
   EXPECT_EQ(util::f32_to_f16_mode(std::numeric_limits<float>::infinity(), true), 0x7C00);
 }
 
+TEST(Fp16OvflMode, F32ToF16SrClampsFiniteOverflowOnly) {
+  constexpr uint32_t kOverflowSeed = 0xFFFFFFFFu;
+  EXPECT_EQ(util::f32_to_f16_sr_mode(70000.0f, kOverflowSeed, false), 0x7C00);
+  EXPECT_EQ(util::f32_to_f16_sr_mode(70000.0f, kOverflowSeed, true), 0x7BFF);
+  EXPECT_EQ(util::f32_to_f16_sr_mode(-70000.0f, kOverflowSeed, false), 0xFC00);
+  EXPECT_EQ(util::f32_to_f16_sr_mode(-70000.0f, kOverflowSeed, true), 0xFBFF);
+  EXPECT_EQ(util::f32_to_f16_sr_mode(std::numeric_limits<float>::infinity(), kOverflowSeed, true),
+            0x7C00);
+}
+
 TEST(Fp16OvflMode, F32ToBf16RneAndSrClampRoundedFiniteOverflowOnly) {
   const float max_f32 = std::numeric_limits<float>::max();
   EXPECT_EQ(util::f32_to_bf16_rne_mode(max_f32, false), 0x7F80);

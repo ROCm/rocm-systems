@@ -3687,6 +3687,61 @@ TEST(Gfx1250CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
     wf->halt();
 }
 
+TEST(Gfx1250CvtF16Test, SrPackedF16ConsumesAdvancedSeedAndFp16OvflMode) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_cvt_sr_pk_f16_mem");
+  amdgpu::L2Cache l2("gfx1250_cvt_sr_pk_f16_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  const auto words =
+      encode_vop3(gfx1250::kVCvtSrPkF16F32Vop3, 2, vgpr_src(5), vgpr_src(6), vgpr_src(7));
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_sr_pk_f16_f32");
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t kSeed = 0x40000000u;
+  const float sr_value = std::bit_cast<float>(0x3F801000u);
+  const uint16_t expected_lo = util::f32_to_f16_sr_mode(sr_value, kSeed, false);
+  const uint16_t expected_hi = util::f32_to_f16_sr_mode(sr_value, util::prng_advance(kSeed), false);
+  ASSERT_NE(expected_lo, expected_hi);
+
+  wf->set_mode_raw(0);
+  cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(sr_value));
+  cu->write_vgpr(vb + 6, 0, std::bit_cast<uint32_t>(sr_value));
+  cu->write_vgpr(vb + 7, 0, kSeed);
+  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), pack16(expected_lo, expected_hi));
+
+  cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(70000.0f));
+  cu->write_vgpr(vb + 6, 0, std::bit_cast<uint32_t>(-70000.0f));
+  cu->write_vgpr(vb + 7, 0, 0xFFFFFFFFu);
+  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), pack16(0x7C00u, 0xFC00u));
+
+  wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
+  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), pack16(0x7BFFu, 0xFBFFu));
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
 TEST(Rdna4CvtFp8Test, E4M3OverflowHonorsFp16OvflMode) {
   amdgpu::GpuMemory gpu_mem("rdna4_cvt_fp8_overflow_mem");
   amdgpu::L2Cache l2("rdna4_cvt_fp8_overflow_l2");
@@ -4000,6 +4055,23 @@ TEST(Cdna4CvtSrTest, SingleResultF16Bf16ConsumesSeedAndFp16OvflMode) {
   cu->execute_instruction(f16_hi_inst.get(), *wf);
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), (static_cast<uint32_t>(f16_seed_lo) << 16) | 0xBEEFu);
 
+  constexpr uint32_t kOverflowSeed = 0xFFFFFFFFu;
+  const float f16_overflow = 70000.0f;
+  const uint16_t f16_clear = util::f32_to_f16_sr_mode(f16_overflow, kOverflowSeed, false);
+  const uint16_t f16_set = util::f32_to_f16_sr_mode(f16_overflow, kOverflowSeed, true);
+  ASSERT_NE(f16_clear, f16_set);
+
+  cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(f16_overflow));
+  cu->write_vgpr(vb + 6, 0, kOverflowSeed);
+  wf->set_mode_raw(0);
+  cu->write_vgpr(vb + 2, 0, 0xA5A50000u);
+  cu->execute_instruction(f16_inst.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A50000u | f16_clear);
+  wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
+  cu->write_vgpr(vb + 2, 0, 0x5A5A0000u);
+  cu->execute_instruction(f16_inst.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x5A5A0000u | f16_set);
+
   const float bf16_value = std::bit_cast<float>(0x3F808000u);
   const uint16_t bf16_seed_lo = util::f32_to_bf16_sr_mode(bf16_value, kSeedLo, false);
   const uint16_t bf16_seed_hi = util::f32_to_bf16_sr_mode(bf16_value, kSeedHi, false);
@@ -4020,7 +4092,6 @@ TEST(Cdna4CvtSrTest, SingleResultF16Bf16ConsumesSeedAndFp16OvflMode) {
   cu->execute_instruction(bf16_hi_inst.get(), *wf);
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), (static_cast<uint32_t>(bf16_seed_lo) << 16) | 0xBEEFu);
 
-  constexpr uint32_t kOverflowSeed = 0xFFFFFFFFu;
   const float bf16_overflow = std::numeric_limits<float>::max();
   const uint16_t bf16_clear = util::f32_to_bf16_sr_mode(bf16_overflow, kOverflowSeed, false);
   const uint16_t bf16_set = util::f32_to_bf16_sr_mode(bf16_overflow, kOverflowSeed, true);

@@ -195,9 +195,15 @@ bool compute_pgm_rsrc1_mode_preserves_dx10_ieee(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
     return true;
-  default:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_RV32I:
+  case ROCJITSU_CODE_ARCH_RV64I:
+  case ROCJITSU_CODE_ARCH_NUM_ARCHS:
     return false;
   }
+  // Handle out-of-range values without a default, so -Wswitch catches new architectures.
+  return false;
 }
 
 bool compute_pgm_rsrc1_mode_has_debug_field(rj_code_arch_t arch) {
@@ -211,9 +217,15 @@ bool compute_pgm_rsrc1_mode_has_debug_field(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
     return true;
-  default:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_RV32I:
+  case ROCJITSU_CODE_ARCH_RV64I:
+  case ROCJITSU_CODE_ARCH_NUM_ARCHS:
     return false;
   }
+  // Handle out-of-range values without a default, so -Wswitch catches new architectures.
+  return false;
 }
 
 uint32_t initial_mode_from_compute_pgm_rsrc1(uint32_t rsrc1, rj_code_arch_t arch) {
