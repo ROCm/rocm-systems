@@ -231,7 +231,7 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
   if (hasImpliedLiteral())
     size_ += impliedLiteralWordCount() * sizeof(MachineInst);
-  else if (has_lit64())
+  else if (has_lit64() || hasImpliedLiteral64())
     size_ += 2 * sizeof(MachineInst);
   else if (!default_encoding())
     size_ += sizeof(MachineInst);
