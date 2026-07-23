@@ -766,6 +766,18 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
       NCCLCHECK(result);
     }
     break;
+  case ncclPatternMesh:
+    {
+      // [RCCL] DIRECT_A2A: fan-out send + fan-in recv with every mesh peer
+      struct ncclMesh* mesh = &channel->mesh;
+      for (int i = 0; i < mesh->nPeers; i++) {
+        NCCLCHECK(SaveProxy(comm, channel, proxyRecv, mesh->peers[i], op, op->connIndex, justInquire));
+      }
+      for (int i = 0; i < mesh->nPeers; i++) {
+        NCCLCHECK(SaveProxy(comm, channel, proxySend, mesh->peers[i], op, op->connIndex, justInquire));
+      }
+    }
+    break;
   case ncclPatternSend:
   case ncclPatternRecv:
     {

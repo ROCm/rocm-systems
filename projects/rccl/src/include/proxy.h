@@ -52,6 +52,7 @@ typedef enum : uint8_t {
   ncclPatternNvlsTree,
   ncclPatternPatUp,
   ncclPatternPatDown,
+  ncclPatternMesh,
   ncclPatternSend,
   ncclPatternRecv,
   ncclPatternProfiler,
