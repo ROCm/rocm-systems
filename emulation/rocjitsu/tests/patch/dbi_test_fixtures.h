@@ -1,11 +1,13 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file gfx950_test_fixtures.h
-/// @brief Self-contained, header-only builders for minimal gfx950 (CDNA4) ELFs
-///        used by DBI probe/spill tests: a single-kernel target ELF (with a
-///        discoverable `.kd` descriptor) and a probe ELF exporting one function
-///        symbol, plus small readback helpers.
+/// @file dbi_test_fixtures.h
+/// @brief Self-contained, header-only builders for minimal AMDGPU ELFs used by DBI
+///        probe/spill tests: a single-kernel target ELF (with a discoverable `.kd`
+///        descriptor) and a probe ELF exporting one function symbol, plus small
+///        readback helpers. The generic `make_amdgpu_*` cores take an ELF machine
+///        flag; `make_gfx950_*` (CDNA4) and `make_gfx1200_*` (RDNA4) are thin
+///        wrappers over them.
 ///
 /// These mirror the in-file helpers in tests/patch/instrumentor_test.cpp (which
 /// documents that duplicating self-contained ELF builders across test slices is
@@ -103,15 +105,15 @@ inline uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
 // Target ELF: one kernel with a discoverable `.kd` descriptor
 //==============================================================================
 
-// gfx950 ET_DYN ELF with one kernel: a .kd descriptor (scratch = private_bytes,
-// SGPR granulation big enough for the s[30:31] link pair) plus a .text holding
-// `text_words`, entry at .text offset 0. The `.kd` symbol is a global
-// STT_OBJECT of descriptor size so scan_kernel_descriptors() (and replace_text)
-// can find and keep it coherent. Modeled on the in-file make_gfx950_kernel_elf
-// in instrumentor_test.cpp.
-inline std::vector<uint8_t> make_gfx950_kernel_elf(const std::vector<uint32_t> &text_words,
+// ET_DYN ELF with one kernel: a .kd descriptor (scratch = private_bytes, SGPR
+// granulation big enough for the s[30:31] link pair) plus a .text holding
+// `text_words`, entry at .text offset 0. The `.kd` symbol is a global STT_OBJECT
+// of descriptor size so scan_kernel_descriptors() (and replace_text) can find and
+// keep it coherent. `e_flags` selects the target ISA (e.g. GFX950 / GFX1200).
+inline std::vector<uint8_t> make_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words,
                                                    uint32_t private_bytes,
-                                                   uint32_t granulated_sgpr_count = 3) {
+                                                   uint32_t granulated_sgpr_count,
+                                                   uint32_t e_flags) {
   namespace kd = rocr::llvm::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
@@ -152,7 +154,7 @@ inline std::vector<uint8_t> make_gfx950_kernel_elf(const std::vector<uint32_t> &
   ehdr.e_version = 1;
   ehdr.e_phoff = sizeof(Elf64_Ehdr);
   ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  ehdr.e_flags = e_flags;
   ehdr.e_ehsize = sizeof(Elf64_Ehdr);
   ehdr.e_phentsize = sizeof(Elf64_Phdr);
   ehdr.e_phnum = phdr_count;
@@ -243,6 +245,22 @@ inline std::vector<uint8_t> make_gfx950_kernel_elf(const std::vector<uint32_t> &
 
   std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
   return image;
+}
+
+// CDNA4 (gfx950) single-kernel target ELF.
+inline std::vector<uint8_t> make_gfx950_kernel_elf(const std::vector<uint32_t> &text_words,
+                                                   uint32_t private_bytes,
+                                                   uint32_t granulated_sgpr_count = 3) {
+  return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count,
+                                EF_AMDGPU_MACH_AMDGCN_GFX950);
+}
+
+// RDNA4 (gfx1200) single-kernel target ELF.
+inline std::vector<uint8_t> make_gfx1200_kernel_elf(const std::vector<uint32_t> &text_words,
+                                                    uint32_t private_bytes,
+                                                    uint32_t granulated_sgpr_count = 3) {
+  return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count,
+                                EF_AMDGPU_MACH_AMDGCN_GFX1200);
 }
 
 // Like make_gfx950_kernel_elf but exports *two* `.kd` descriptors (both entering
@@ -398,11 +416,12 @@ inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_
 // Probe ELF: one exported STT_FUNC symbol
 //==============================================================================
 
-// gfx950 ELF exporting one STT_FUNC probe symbol whose body is `body_words`, in
-// an executable .text. Sections: [1]=.text, [2]=.strtab, [3]=.symtab,
-// [4]=.shstrtab. Mirrors make_gfx950_probe_elf in instrumentor_test.cpp.
-inline std::vector<uint8_t> make_gfx950_probe_elf(std::string_view symbol,
-                                                  const std::vector<uint32_t> &body_words) {
+// ELF exporting one STT_FUNC probe symbol whose body is `body_words`, in an
+// executable .text. Sections: [1]=.text, [2]=.strtab, [3]=.symtab, [4]=.shstrtab.
+// `e_flags` selects the target ISA (e.g. GFX950 / GFX1200).
+inline std::vector<uint8_t> make_amdgpu_probe_elf(std::string_view symbol,
+                                                  const std::vector<uint32_t> &body_words,
+                                                  uint32_t e_flags) {
   const uint64_t text_offset = 0x100;
   const uint64_t text_size = body_words.size() * sizeof(uint32_t);
 
@@ -438,7 +457,7 @@ inline std::vector<uint8_t> make_gfx950_probe_elf(std::string_view symbol,
   ehdr.e_machine = EM_AMDGPU;
   ehdr.e_version = 1;
   ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  ehdr.e_flags = e_flags;
   ehdr.e_ehsize = sizeof(Elf64_Ehdr);
   ehdr.e_shentsize = sizeof(Elf64_Shdr);
   ehdr.e_shnum = section_count;
@@ -481,6 +500,18 @@ inline std::vector<uint8_t> make_gfx950_probe_elf(std::string_view symbol,
 
   std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
   return image;
+}
+
+// CDNA4 (gfx950) probe ELF.
+inline std::vector<uint8_t> make_gfx950_probe_elf(std::string_view symbol,
+                                                  const std::vector<uint32_t> &body_words) {
+  return make_amdgpu_probe_elf(symbol, body_words, EF_AMDGPU_MACH_AMDGCN_GFX950);
+}
+
+// RDNA4 (gfx1200) probe ELF.
+inline std::vector<uint8_t> make_gfx1200_probe_elf(std::string_view symbol,
+                                                   const std::vector<uint32_t> &body_words) {
+  return make_amdgpu_probe_elf(symbol, body_words, EF_AMDGPU_MACH_AMDGCN_GFX1200);
 }
 
 //==============================================================================
