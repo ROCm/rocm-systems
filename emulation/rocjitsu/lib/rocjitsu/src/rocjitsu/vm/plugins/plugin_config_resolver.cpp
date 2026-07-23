@@ -110,11 +110,22 @@ bool resolve_config(const std::string &plugin_name, const char *schema_json,
   for (size_t i = 0; i < schema_keys.size(); ++i) {
     std::string arg = schema_keys[i].AsKey();
     auto spec = schema_vals[i];
-    std::string type = spec.IsMap() ? std::string(spec.AsMap()["type"].AsString().c_str()) : "";
+    if (!spec.IsMap()) {
+      util::Logger::warn("plugin '", plugin_name, "': config schema entry '", arg,
+                         "' must be an object");
+      return false;
+    }
+    const auto type_ref = spec.AsMap()["type"];
+    if (!type_ref.IsString()) {
+      util::Logger::warn("plugin '", plugin_name, "': config schema entry '", arg,
+                         "' must have a string 'type'");
+      return false;
+    }
+    std::string type = type_ref.AsString().c_str();
 
     auto provided = user_map[arg.c_str()];
     if (!provided.IsNull()) {
-      if (!type.empty() && !type_matches(type, provided)) {
+      if (!type_matches(type, provided)) {
         util::Logger::warn("plugin '", plugin_name, "': config arg '", arg,
                            "' has wrong type (expected ", type, ")");
         return false;
@@ -123,7 +134,7 @@ bool resolve_config(const std::string &plugin_name, const char *schema_json,
       continue;
     }
 
-    auto def = spec.IsMap() ? spec.AsMap()["default"] : flexbuffers::Reference();
+    auto def = spec.AsMap()["default"];
     if (!def.IsNull()) {
       emit(arg, def);
     } else {

@@ -40,8 +40,8 @@ bool type_matches(const std::string &type, const flexbuffers::Reference &v);
 /// An unparseable or non-object schema is ignored (config passed through).
 ///
 /// @returns false (and reports to the plugin log) only on a hard validation
-///          failure: a provided arg with the wrong type, or a missing required
-///          arg.
+///          failure: a malformed schema entry, a provided arg with the wrong
+///          type, or a missing required arg.
 bool resolve_config(const std::string &plugin_name, const char *schema_json,
                     const flexbuffers::Reference &user_cfg, std::string &out);
 
