@@ -38,6 +38,7 @@
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
@@ -856,6 +857,13 @@ WriteInterceptor(const void* packets,
             // Save this agent's tracked device allocations so every pass runs against identical
             // inputs.
             const auto snapshot = kernel_replay::memory_snapshot::snap(replay_agent);
+
+            // Localized context control for this replay loop. This guard installs the thread-local
+            // routing that connects the tool's PASS toggle callbacks (writers, via
+            // replay_local_start/stop_context) to the services that read it at dispatch (via
+            // kernel_replay::local_context_override). It lives for the whole loop and is torn down
+            // when the guard exits; global context state is never touched.
+            auto local_ctx_tls_guard = kernel_replay::scoped_local_context_control{};
 
             // pass_done is reused across passes: reset to 1 before each submit so the barrier
             // appended in process_packet_batch decrements it to 0 when the pass completes.
