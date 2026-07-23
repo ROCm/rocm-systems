@@ -105,6 +105,9 @@ namespace rocjitsu::amdgpu {
 
 - Always target C++20 and use the STL; prefer modern features such as concepts,
   ranges, and `std::format`.
+- Use `typename` instead of `class` when declaring template type parameters. This
+  makes occurrences of the `class` keyword easier to find when searching the
+  codebase.
 - If you need performance and the STL is a poor fit, build custom data structures
   in `util`.
 - Never use `#define`, C conventions, or macros unless absolutely necessary.
@@ -113,6 +116,9 @@ namespace rocjitsu::amdgpu {
 ```cpp
 #include <cstdint> // not <stdint.h>
 #include <cstdio>  // not <stdio.h>
+
+template <typename ValueType> // not template <class ValueType>
+class Container {};
 ```
 
 - Use `auto` only when the type is obvious from the immediate context (e.g. the
