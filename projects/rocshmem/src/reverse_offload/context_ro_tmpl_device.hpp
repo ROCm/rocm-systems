@@ -360,7 +360,7 @@ template <typename T>
 __device__ int ROContext::broadcast_wave([[maybe_unused]] rocshmem_team_t team,
                                         [[maybe_unused]] T *dest, 
                                         [[maybe_unused]] const T* source, 
-                                        [[maybe_unused]] int nelement, 
+                                        [[maybe_unused]] int nelems,
                                         [[maybe_unused]] int PE_root) {
   LOGD_WARN("Broadcast Wave API not implemented for reverse offload backend");
   return ROCSHMEM_ERROR;
