@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
@@ -12,6 +14,7 @@ import unittest
 from unittest import mock
 
 import consan_validation as validation
+import consan_llama_validation as llama_validation
 from consan_coverage_gate import _COVERAGE_COUNT_FIELDS
 from consan_validation_test_support import temporary_root
 
@@ -83,16 +86,95 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertFalse(summary["accepted"])
         self.assertIn("analysis incomplete", summary["reasons"])
 
+    def test_coverage_summary_preserves_strict_load_rejection(self) -> None:
+        summary = validation._coverage_summary(
+            "[rocjitsu-dbi-hooks] ConSan load rejection reader=73 "
+            "reason=transform-error status=4112 policy=strict action=terminate "
+            "exit_code=92\n"
+        )
+        self.assertFalse(summary["accepted"])
+        self.assertEqual(
+            summary["error"], "ConSan rejected a code object before execution"
+        )
+        self.assertEqual(
+            summary["load_rejection"],
+            {
+                "reader": "73",
+                "reason": "transform-error",
+                "status": "4112",
+                "policy": "strict",
+                "action": "terminate",
+                "exit_code": "92",
+            },
+        )
+
     def test_manifest_is_the_complete_north_star_matrix(self) -> None:
         manifest = validation._manifest("gfx1201")
-        self.assertEqual(len(manifest["workloads"]), 11)
+        self.assertEqual(len(manifest["workloads"]), 19)
         self.assertEqual(
             [profile["id"] for profile in manifest["profiles"]],
             list(validation.PROFILE_IDS),
         )
         self.assertEqual(
-            len({workload["id"] for workload in manifest["workloads"]}), 11
+            len({workload["id"] for workload in manifest["workloads"]}), 19
         )
+        workloads = {workload["id"]: workload for workload in manifest["workloads"]}
+        self.assertEqual(
+            workloads["pytorch-rdna4-compiled-softmax"]["targets"], ("gfx1201",)
+        )
+        self.assertEqual(
+            workloads["pytorch-rdna4-split-softmax"]["targets"], ("gfx1201",)
+        )
+        self.assertEqual(
+            workloads["pytorch-rdna4-llm-topk"]["targets"], ("gfx1201",)
+        )
+        self.assertEqual(
+            workloads["pytorch-rdna4-llm-topk"]["run_timeout_seconds"], 120
+        )
+        self.assertEqual(workloads["pytorch-rdna4-sdpa"]["run_timeout_seconds"], 30)
+        self.assertEqual(
+            workloads["pytorch-rdna4-sdpa"]["targets"], ("gfx1201",)
+        )
+        self.assertEqual(
+            workloads["pytorch-torch-histc"]["targets"],
+            ("gfx950", "gfx1250", "gfx1201"),
+        )
+        self.assertEqual(
+            workloads["llama-rdna4-mul-mat-vec-q"]["targets"], ("gfx1201",)
+        )
+        self.assertEqual(
+            workloads["llama-rdna4-rms-norm"]["targets"], ("gfx1201",)
+        )
+
+    def test_gfx950_manifest_includes_portable_pytorch_workloads(self) -> None:
+        workload_ids = {
+            workload["id"] for workload in validation._manifest("gfx950")["workloads"]
+        }
+        self.assertTrue(
+            {
+                "pytorch-torch-mode",
+                "pytorch-torch-topk",
+                "pytorch-torch-sort",
+                "pytorch-scatter-reduce",
+                "pytorch-torch-histc",
+                "pytorch-norm-softmax",
+            }.issubset(workload_ids)
+        )
+
+    def test_text_manifest_filters_target_specific_workloads(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(validation.main(["--target", "gfx1201", "manifest"]), 0)
+        text = output.getvalue()
+        self.assertIn("pytorch-rdna4-compiled-softmax", text)
+        self.assertIn("pytorch-rdna4-split-softmax", text)
+        self.assertIn("pytorch-rdna4-llm-topk", text)
+        self.assertIn("pytorch-rdna4-sdpa", text)
+        self.assertIn("pytorch-torch-histc", text)
+        self.assertIn("llama-rdna4-mul-mat-vec-q", text)
+        self.assertIn("llama-rdna4-rms-norm", text)
+        self.assertNotIn("pytorch-tdm-descriptor-add", text)
+        self.assertNotIn("tensile-sk-mxf8gemm-explicit", text)
 
     def test_gfx950_manifest_resolves_cdna4_native_workloads(self) -> None:
         manifest = validation._manifest("gfx950")
@@ -181,6 +263,25 @@ class ConSanValidationTest(unittest.TestCase):
             jakub["path"].endswith("hip_moi_reference_gfx1250_jakub_matmul")
         )
 
+    def test_main_doctor_all_uses_target_filtered_workloads(self) -> None:
+        result = {
+            "ok": True,
+            "workspace": "/workspace",
+            "target": "gfx1201",
+            "paths": {},
+            "tools": {},
+        }
+        with (
+            mock.patch.object(
+                validation,
+                "_workspace_from_environment",
+                return_value=Path("/workspace"),
+            ),
+            mock.patch.object(validation, "_doctor", return_value=result) as doctor,
+        ):
+            self.assertEqual(validation.main(["--target", "gfx1201", "doctor"]), 0)
+        doctor.assert_called_once_with(Path("/workspace"), "gfx1201", None)
+
     def test_workload_doctor_requires_only_selected_corpus_and_tools(self) -> None:
         with temporary_root() as workspace:
             with mock.patch.object(validation.shutil, "which", return_value="/tool"):
@@ -211,6 +312,7 @@ class ConSanValidationTest(unittest.TestCase):
                 "RJ_CONSAN_MAX_PATCHES": "1",
                 "RJ_CONSAN_TMP_VGPR": "99",
                 "HSA_TOOLS_LIB": "/stale/hook.so",
+                "HSA_TOOLS_ROCPROFILER_V1_TOOLS": "0",
             },
             clear=False,
         ):
@@ -220,6 +322,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("RJ_CONSAN_MAX_PATCHES", environment)
         self.assertNotIn("RJ_CONSAN_TMP_VGPR", environment)
         self.assertEqual(environment["HSA_TOOLS_LIB"], "/new/hook.so")
+        self.assertNotIn("HSA_TOOLS_ROCPROFILER_V1_TOOLS", environment)
         self.assertEqual(environment["RJ_CONSAN_MODE"], "record-replay")
         self.assertEqual(environment["RJ_CONSAN_POLICY"], "strict")
         self.assertNotIn("RJ_CONSAN_FLAVOR", environment)
@@ -233,6 +336,30 @@ class ConSanValidationTest(unittest.TestCase):
                 "RJ_CONSAN_MOI_TRACK_ATOMICS": "1",
             },
         )
+
+    def test_pytorch_profile_enables_environment_hsa_tool_loading(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-torch-histc"]
+        with mock.patch.dict(
+            os.environ,
+            {"HSA_TOOLS_ROCPROFILER_V1_TOOLS": "0"},
+            clear=False,
+        ):
+            baseline = validation._clean_environment(
+                None, workload, Path("/hook.so")
+            )
+            environment = validation._clean_environment(
+                "record-replay", workload, Path("/hook.so")
+            )
+        self.assertNotIn("HSA_TOOLS_ROCPROFILER_V1_TOOLS", baseline)
+        self.assertEqual(environment["HSA_TOOLS_ROCPROFILER_V1_TOOLS"], "1")
+        setting = validation._audited_settings(environment)
+        v1_tool = next(
+            item
+            for item in setting
+            if item["name"] == "HSA_TOOLS_ROCPROFILER_V1_TOOLS"
+        )
+        self.assertEqual(v1_tool["category"], "runtime-plumbing")
+        self.assertFalse(v1_tool["usability_exception"])
 
     def test_supercollider_does_not_receive_moi_tracking_controls(self) -> None:
         workload = validation.WORKLOAD_BY_ID["streamk-arrival"]
@@ -285,6 +412,83 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
 
+    def test_sharktank_gfx950_uses_configured_python_and_one_repetition(self) -> None:
+        tp1 = validation.WORKLOAD_BY_ID["tp1-prefill"]
+        with mock.patch.dict(
+            os.environ,
+            {validation.SHARKTANK_PYTHON_ENV: "/workspace/venv/bin/python"},
+        ):
+            command = validation._workload_command(
+                Path("/workspace"), "gfx950", tp1, "overhead", Path("/unused")
+            )
+        self.assertEqual(command[0], "/workspace/venv/bin/python")
+        self.assertEqual(command[command.index("--repetitions") + 1], "1")
+
+    def test_active_architectures_use_one_outer_overhead_process(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["d128-pressure"]
+        self.assertEqual(validation._outer_repetitions("gfx950", "overhead", workload), 1)
+        self.assertEqual(validation._outer_repetitions("gfx1250", "overhead", workload), 1)
+        self.assertEqual(
+            validation._outer_repetitions("gfx1201", "overhead", workload),
+            workload.overhead_processes,
+        )
+
+    def test_qwen_gfx950_overhead_uses_one_repetition(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["qwen-prefill"]
+        command = validation._workload_command(
+            Path("/workspace"),
+            "gfx950",
+            workload,
+            "overhead",
+            Path("/artifacts/benchmark.json"),
+        )
+        self.assertIn("--benchmark_repetitions=1", command)
+
+    def test_pytorch_gfx950_overhead_uses_one_repetition(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]
+        command = validation._workload_command(
+            Path("/workspace"),
+            "gfx950",
+            workload,
+            "overhead",
+            Path("/unused"),
+        )
+        self.assertEqual(command[command.index("--repetitions") + 1], "1")
+
+    def test_gfx950_scrubs_software_model_environment_without_changing_gfx1250(
+        self,
+    ) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]
+        model_environment = {
+            name: f"configured-{name}" for name in validation.SOFTWARE_MODEL_ENVIRONMENT
+        }
+        with mock.patch.dict(os.environ, model_environment, clear=False):
+            gfx950 = validation._clean_environment(
+                None, workload, Path("/workspace/hook.so"), "gfx950"
+            )
+            gfx1250 = validation._clean_environment(
+                None, workload, Path("/workspace/hook.so"), "gfx1250"
+            )
+        self.assertTrue(
+            validation.SOFTWARE_MODEL_ENVIRONMENT.isdisjoint(gfx950)
+        )
+        self.assertEqual(
+            {name: gfx1250[name] for name in validation.SOFTWARE_MODEL_ENVIRONMENT},
+            model_environment,
+        )
+
+    def test_gfx950_cdna4_atomics_only_admit_order_faults(self) -> None:
+        for workload_id in ("streamk-arrival", "tree-atomic-or"):
+            workload = validation.WORKLOAD_BY_ID[workload_id]
+            self.assertEqual(
+                validation._fault_families("gfx950", workload),
+                ("atomic-weaken-order",),
+            )
+            self.assertEqual(
+                validation._fault_families("gfx1201", workload),
+                ("atomic-weaken-order", "atomic-weaken-scope"),
+            )
+
     def test_pytorch_gfx1250_runs_both_variants_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-tdm-descriptor-add"]
         with mock.patch.dict(
@@ -302,6 +506,132 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
         self.assertEqual(command[command.index("--workload") + 1], "tdm-descriptor-add")
 
+    def test_pytorch_python_discovers_standard_workspace_environment(self) -> None:
+        with temporary_root() as workspace:
+            python = workspace / "consan-pytorch-venv" / "bin" / "python"
+            python.parent.mkdir(parents=True)
+            python.touch()
+            with mock.patch.dict(
+                os.environ, {validation.PYTORCH_PYTHON_ENV: ""}, clear=False
+            ):
+                self.assertEqual(validation._pytorch_python(workspace), python)
+
+    def test_pytorch_python_explicit_environment_overrides_workspace(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {validation.PYTORCH_PYTHON_ENV: "/custom/venv/bin/python"},
+            clear=False,
+        ):
+            self.assertEqual(
+                validation._pytorch_python(Path("/workspace")),
+                Path("/custom/venv/bin/python"),
+            )
+
+    def test_pytorch_doctor_rejects_interpreter_with_broken_imports(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        with temporary_root() as workspace:
+            python = workspace / "consan-pytorch-venv" / "bin" / "python"
+            python.parent.mkdir(parents=True)
+            python.touch()
+            completed = subprocess.CompletedProcess(
+                [str(python)], 1, stdout="", stderr="No module named torch"
+            )
+            with (
+                mock.patch.object(validation.shutil, "which", return_value="/tool"),
+                mock.patch.object(
+                    validation.subprocess, "run", return_value=completed
+                ) as run,
+            ):
+                doctor = validation._doctor(workspace, "gfx1201", (workload.id,))
+        self.assertFalse(doctor["ok"])
+        self.assertFalse(doctor["runtimes"]["pytorch"]["ok"])
+        self.assertIn("No module named torch", doctor["runtimes"]["pytorch"]["detail"])
+        self.assertEqual(run.call_args.args[0][0], str(python))
+        environment = run.call_args.kwargs["env"]
+        self.assertEqual(environment["HSA_TOOLS_ROCPROFILER_V1_TOOLS"], "1")
+        self.assertEqual(
+            environment["RJ_CONSAN_TEST_KERNEL_FILTER"],
+            "__consan_pytorch_runtime_probe_never_matches__",
+        )
+
+    def test_pytorch_doctor_rejects_runtime_that_skips_consan_hook(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        with temporary_root() as workspace:
+            python = workspace / "consan-pytorch-venv" / "bin" / "python"
+            hook = (
+                workspace
+                / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
+                "librocjitsu_dbi_hooks.so"
+            )
+            python.parent.mkdir(parents=True)
+            hook.parent.mkdir(parents=True)
+            python.touch()
+            hook.touch()
+            completed = subprocess.CompletedProcess(
+                [str(python)],
+                0,
+                stdout=json.dumps(
+                    {
+                        "torch": "test",
+                        "hip": "test",
+                        "triton": "test",
+                        "device": "test GPU",
+                        "arch": "gfx1201",
+                        "numeric_oracle": True,
+                        "hook_loaded": False,
+                    }
+                ),
+                stderr="",
+            )
+            with (
+                mock.patch.object(validation.shutil, "which", return_value="/tool"),
+                mock.patch.object(
+                    validation.subprocess, "run", return_value=completed
+                ),
+            ):
+                doctor = validation._doctor(workspace, "gfx1201", (workload.id,))
+        runtime = doctor["runtimes"]["pytorch"]
+        self.assertFalse(doctor["ok"])
+        self.assertFalse(runtime["ok"])
+        self.assertIn(
+            "PyTorch HSA runtime did not load the ConSan hook", runtime["reasons"]
+        )
+
+    def test_pytorch_only_doctor_uses_runtime_target_probe_without_rocminfo(
+        self,
+    ) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        with temporary_root() as workspace:
+            python = workspace / "consan-pytorch-venv" / "bin" / "python"
+            hook = (
+                workspace
+                / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
+                "librocjitsu_dbi_hooks.so"
+            )
+            python.parent.mkdir(parents=True)
+            hook.parent.mkdir(parents=True)
+            python.touch()
+            hook.touch()
+            runtime = {
+                "ok": True,
+                "python": str(python),
+                "detail": {
+                    "arch": "gfx1201",
+                    "numeric_oracle": True,
+                    "hook_loaded": True,
+                },
+                "reasons": [],
+            }
+            with (
+                mock.patch.object(validation.shutil, "which", return_value=None),
+                mock.patch.object(
+                    validation, "_pytorch_runtime_probe", return_value=runtime
+                ),
+            ):
+                doctor = validation._doctor(workspace, "gfx1201", (workload.id,))
+        self.assertTrue(doctor["ok"])
+        self.assertEqual(doctor["tools"], {})
+
     def test_pytorch_cluster_workload_runs_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-cluster-load-sync"]
         with mock.patch.dict(
@@ -317,6 +647,143 @@ class ConSanValidationTest(unittest.TestCase):
             )
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
         self.assertEqual(command[command.index("--workload") + 1], "cluster-load-sync")
+
+    def test_pytorch_rdna4_softmax_uses_native_compiled_client(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        with mock.patch.dict(
+            os.environ,
+            {validation.PYTORCH_PYTHON_ENV: "/workspace/venv/bin/python"},
+        ):
+            command = validation._workload_command(
+                Path("/workspace"),
+                "gfx1201",
+                workload,
+                "clean",
+                Path("/unused"),
+            )
+        self.assertEqual(command[0], "/workspace/venv/bin/python")
+        self.assertEqual(command[command.index("--repetitions") + 1], "1")
+        self.assertEqual(
+            command[command.index("--workload") + 1], "rdna4-compiled-softmax"
+        )
+
+    def test_pytorch_rdna4_split_softmax_uses_upstream_native_shape(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-split-softmax"]
+        with mock.patch.dict(
+            os.environ,
+            {validation.PYTORCH_PYTHON_ENV: "/workspace/venv/bin/python"},
+        ):
+            command = validation._workload_command(
+                Path("/workspace"),
+                "gfx1201",
+                workload,
+                "clean",
+                Path("/unused"),
+            )
+        self.assertEqual(command[0], "/workspace/venv/bin/python")
+        self.assertEqual(command[command.index("--repetitions") + 1], "1")
+        self.assertEqual(
+            command[command.index("--workload") + 1], "rdna4-split-softmax"
+        )
+
+    def test_pytorch_rdna4_llm_topk_uses_native_client(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"]
+        with mock.patch.dict(
+            os.environ,
+            {validation.PYTORCH_PYTHON_ENV: "/workspace/venv/bin/python"},
+        ):
+            command = validation._workload_command(
+                Path("/workspace"),
+                "gfx1201",
+                workload,
+                "clean",
+                Path("/unused"),
+            )
+        self.assertEqual(command[0], "/workspace/venv/bin/python")
+        self.assertEqual(command[command.index("--repetitions") + 1], "1")
+        self.assertEqual(command[command.index("--workload") + 1], "rdna4-llm-topk")
+
+    def test_pytorch_rdna4_sdpa_uses_native_client(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-sdpa"]
+        with mock.patch.dict(
+            os.environ,
+            {validation.PYTORCH_PYTHON_ENV: "/workspace/venv/bin/python"},
+        ):
+            command = validation._workload_command(
+                Path("/workspace"),
+                "gfx1201",
+                workload,
+                "clean",
+                Path("/unused"),
+            )
+        self.assertEqual(command[0], "/workspace/venv/bin/python")
+        self.assertEqual(command[command.index("--repetitions") + 1], "1")
+        self.assertEqual(command[command.index("--workload") + 1], "rdna4-sdpa")
+
+    def test_llama_rdna4_command_uses_gpu_cpu_oracle_wrapper(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-rms-norm"]
+        command = validation._workload_command(
+            Path("/workspace"),
+            "gfx1201",
+            workload,
+            "clean",
+            Path("/artifacts/benchmark-0.json"),
+        )
+        self.assertTrue(command[1].endswith("consan_llama_validation.py"))
+        self.assertEqual(command[command.index("--workload") + 1], "rms-norm")
+        self.assertEqual(
+            command[command.index("--executable") + 1],
+            (
+                "/workspace/rocjitsu-test-corpus-build/kernels/gfx1201/"
+                "cases/llama.cpp/llama_cpp_rms_norm"
+            ),
+        )
+        self.assertEqual(
+            command[command.index("--output-dir") + 1],
+            "/artifacts/benchmark-0-llama-work",
+        )
+
+    def test_native_matvec_uses_fault_sensitive_realistic_shape(self) -> None:
+        self.assertEqual(llama_validation.WORKLOADS["mul-mat-vec-q"]["n_embd"], 1024)
+        self.assertEqual(llama_validation.WORKLOADS["mul-mat-vec-q"]["n_tokens"], 1)
+        self.assertEqual(llama_validation.WORKLOADS["mul-mat-vec-q"]["tolerance"], 2.0e-2)
+
+    def test_llama_cpu_oracle_environment_scrubs_instrumentation(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "RJ_CONSAN_MODE": "inline-shadow",
+                "HSA_TOOLS_LIB": "/hook.so",
+                "HSA_TOOLS_ROCPROFILER_V1_TOOLS": "1",
+                "HIP_TARGET": "gfx1201",
+                "LD_LIBRARY_PATH": "/runtime",
+            },
+            clear=True,
+        ):
+            environment = llama_validation._cpu_environment()
+        self.assertEqual(environment, {"LD_LIBRARY_PATH": "/runtime"})
+
+    def test_llama_binary_oracle_reads_f32_without_numpy(self) -> None:
+        with temporary_root() as root:
+            path = root / "output.bin"
+            path.write_bytes(b"\x00\x00\x80?\x00\x00\x00@")
+            self.assertEqual(llama_validation._read_f32(path), (1.0, 2.0))
+            path.write_bytes(b"short")
+            with self.assertRaises(ValueError):
+                llama_validation._read_f32(path)
+
+    def test_llama_oracle_writes_fault_runner_result(self) -> None:
+        with temporary_root() as root:
+            path = root / "oracle.json"
+            with mock.patch.dict(
+                os.environ, {"CONSAN_ROW_RESULT_PATH": str(path)}, clear=True
+            ):
+                llama_validation._write_oracle_result(
+                    "pass", {"llama-mul-mat-vec-q": {"oracle_passed": True}}
+                )
+            result = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(result["oracle"], "pass")
+        self.assertEqual(result["source_diagnostics"]["outcome"], "not_applicable")
 
     def test_tensile_gfx1250_uses_numeric_runner_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["tensile-sk-mxf8gemm-explicit"]
@@ -686,6 +1153,8 @@ class ConSanValidationTest(unittest.TestCase):
                 "barrier-drop",
                 "--artifact-root",
                 "/tmp/artifacts",
+                "--health-timeout",
+                "75",
                 "--health-command-json",
                 '["/bin/true"]',
                 "--smoke-command-json",
@@ -694,6 +1163,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(args.health_command_json, ["/bin/true"])
         self.assertEqual(args.smoke_command_json, ["/tmp/smoke", "--short"])
+        self.assertEqual(args.health_timeout, 75.0)
 
     def test_fault_parser_rejects_unpaired_health_command_override(self) -> None:
         with self.assertRaises(SystemExit):
@@ -838,10 +1308,11 @@ class ConSanValidationTest(unittest.TestCase):
             loaded = validation._load_fault(path, "gfx1201", workload, "drop")
         self.assertEqual(loaded["id"], "drop")
 
-    def test_checked_in_gfx1201_fault_reference_covers_the_manifest(self) -> None:
+    def test_checked_in_gfx1201_fault_reference_is_a_valid_manifest_subset(self) -> None:
         path = Path(__file__).with_name(
             "consan_validation_faults_gfx1201_reference.json"
         )
+        document = json.loads(path.read_text(encoding="utf-8"))
         with self.assertRaisesRegex(validation.ValidationError, "reference-only"):
             validation._load_fault(
                 path,
@@ -849,8 +1320,14 @@ class ConSanValidationTest(unittest.TestCase):
                 validation.WORKLOAD_BY_ID["qwen-prefill"],
                 "barrier-drop",
             )
-        for workload in validation._workloads_for_target("gfx1201"):
-            for fault_id in workload.fault_families:
+        manifest_ids = {
+            workload.id for workload in validation._workloads_for_target("gfx1201")
+        }
+        self.assertLessEqual(set(document["workloads"]), manifest_ids)
+        for workload_id, workload_document in document["workloads"].items():
+            workload = validation.WORKLOAD_BY_ID[workload_id]
+            for fault_document in workload_document["faults"]:
+                fault_id = fault_document["id"]
                 fault = validation._load_fault(
                     path,
                     "gfx1201",
@@ -882,6 +1359,71 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(len(trials), 32)
         self.assertEqual(trials[0], {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "0"})
         self.assertEqual(trials[-1], {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "31"})
+
+    def test_checked_in_gfx1201_native_record_replay_fault_is_runnable(self) -> None:
+        path = Path(__file__).with_name(
+            "consan_validation_faults_gfx1201_native_record_replay.json"
+        )
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        fault = validation._load_fault(
+            path, "gfx1201", workload, "barrier-drop"
+        )
+        policy, trials = validation._fault_trials(fault, "record-replay")
+        self.assertEqual(policy["detector"], "detected")
+        self.assertEqual(policy["oracle"], "any")
+        self.assertEqual(trials, [{}])
+        self.assertIn(
+            "pc=0x000000000000b8cc",
+            fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
+        )
+
+    def test_checked_in_gfx1201_native_matvec_miss_is_runnable(self) -> None:
+        path = Path(__file__).with_name(
+            "consan_validation_faults_gfx1201_native_matvec_miss.json"
+        )
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        fault = validation._load_fault(
+            path, "gfx1201", workload, "barrier-drop"
+        )
+        for profile in ("supercollider", "record-replay", "sampled"):
+            policy, trials = validation._fault_trials(fault, profile)
+            self.assertEqual(policy["detector"], "not_detected")
+            self.assertEqual(policy["oracle"], "pass")
+            self.assertEqual(trials, [{}])
+        self.assertIn(
+            "pc=0x000000000000b8cc",
+            fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
+        )
+
+    def test_checked_in_gfx1201_native_matvec_effective_fault_is_runnable(self) -> None:
+        path = Path(__file__).with_name(
+            "consan_validation_faults_gfx1201_native_matvec_rr_effective.json"
+        )
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        fault = validation._load_fault(path, "gfx1201", workload, "barrier-drop")
+        for profile in ("record-replay", "sampled"):
+            policy, trials = validation._fault_trials(fault, profile)
+            self.assertEqual(policy["detector"], "not_detected")
+            self.assertEqual(policy["oracle"], "fail")
+            self.assertEqual(trials, [{}])
+
+    def test_checked_in_gfx1201_native_rms_fault_is_runnable(self) -> None:
+        path = Path(__file__).with_name(
+            "consan_validation_faults_gfx1201_native_rms_norm.json"
+        )
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-rms-norm"]
+        fault = validation._load_fault(
+            path, "gfx1201", workload, "barrier-drop"
+        )
+        for profile in validation.PROFILE_IDS:
+            policy, trials = validation._fault_trials(fault, profile)
+            self.assertEqual(policy["detector"], "detected")
+            self.assertEqual(policy["oracle"], "any")
+            self.assertEqual(trials, [{}])
+        self.assertIn(
+            "pc=0x0000000000001824",
+            fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
+        )
 
 
 if __name__ == "__main__":

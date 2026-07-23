@@ -136,11 +136,11 @@
 
   const auto append_current_workgroup_key = [&](uint16_t destination_vgpr,
                                                 uint16_t temporary_vgpr) {
-    if (workgroup_local_shadow && !generation_tagged_local_shadow) {
-      // An LDS shadow is workgroup-local and therefore omits the generation
-      // field used to disambiguate global shadow cells. Atomic release/token
-      // tables are global, however, so validate them with the persistent
-      // workgroup key for both compact and full-width local shadows.
+    if (workgroup_local_shadow) {
+      // An LDS shadow is workgroup-local. Its optional generation tag guards
+      // reuse of the local cells; it is not the identity used by the global
+      // atomic release/token tables. Validate those tables with the persistent
+      // workgroup key for every local-shadow representation.
       if (options.moi_workgroup_key_vgpr) {
         words.push_back(build_v_mov_b32_e32(
             destination_vgpr, vector_source_vgpr(*options.moi_workgroup_key_vgpr), arch));
@@ -162,7 +162,6 @@
     const uint16_t base = *options.scratch_vgpr;
     const uint16_t exec_base = *options.moi_exec_save_sgpr;
     const uint16_t conflict_exec = static_cast<uint16_t>(exec_base + 2u);
-    const uint16_t ordered_exec = static_cast<uint16_t>(exec_base + 4u);
     const uint16_t predicate_exec = static_cast<uint16_t>(exec_base + 6u);
     const uint16_t token_version = static_cast<uint16_t>(base + 7u);
     const uint16_t token_kind = static_cast<uint16_t>(base + 8u);
@@ -359,335 +358,21 @@
       return false;
     words.push_back(*remove_insufficient);
 
-    // A stable direct token records an acquire that already bracketed its
-    // source release and committed only after the guest RMW. That causal fact
-    // remains valid if a later acquire-release replaces the direct-mapped
-    // source slot. Inherited tokens still revalidate the immutable source
-    // snapshot below.
-    const uint16_t valid_exec = static_cast<uint16_t>(exec_base + 14u);
-    const uint16_t active_exec = static_cast<uint16_t>(exec_base + 16u);
-    const uint16_t inactive_exec = static_cast<uint16_t>(exec_base + 18u);
-    const uint16_t direct_authorized_exec = static_cast<uint16_t>(exec_base + 20u);
-    const uint16_t release_version = static_cast<uint16_t>(base + 16u);
-    // CDNA4 FLAT addresses must start at an even VGPR. Rotate the address pair
-    // and its independent 32-bit hash temporary inside the same +17:+19
-    // reservation; RDNA4 retains its established layout.
-    const uint16_t snapshot_address =
-        static_cast<uint16_t>(base + (arch == ROCJITSU_CODE_ARCH_CDNA4 ? 18u : 17u));
-    const uint16_t snapshot_temporary =
-        static_cast<uint16_t>(base + (arch == ROCJITSU_CODE_ARCH_CDNA4 ? 17u : 19u));
-    const uint16_t release_owner = static_cast<uint16_t>(base + 20u);
-    const uint16_t release_epoch = static_cast<uint16_t>(base + 21u);
-    const uint16_t snapshot_hash = static_cast<uint16_t>(base + 22u);
-    const uint16_t snapshot_count = token_version;
-    const uint16_t snapshot_flags = source_version;
-    const uint16_t previous_owner = token_hash;
-    const uint16_t entry_owner = static_cast<uint16_t>(base + 14u);
-    const uint16_t entry_epoch = static_cast<uint16_t>(base + 15u);
-    const auto save_exec = [&](uint16_t destination) {
-      const auto instruction = instrumentation::build_s_mov_b64(destination, kRdna4ExecLo, arch);
-      if (!instruction)
-        return false;
-      words.push_back(*instruction);
-      return true;
-    };
-    const auto restore_exec = [&](uint16_t source) {
-      const auto instruction = instrumentation::build_s_mov_b64(kRdna4ExecLo, source, arch);
-      if (!instruction)
-        return false;
-      words.push_back(*instruction);
-      return true;
-    };
-    if (!save_exec(valid_exec))
-      return false;
-    const auto direct_token =
-        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), token_kind, arch);
-    if (!direct_token)
-      return false;
-    words.push_back(*direct_token);
-    if (!narrow() || !save_exec(direct_authorized_exec) || !restore_exec(valid_exec))
-      return false;
-    const auto inherited_token =
-        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(1), token_kind, arch);
-    if (!inherited_token)
-      return false;
-    words.push_back(*inherited_token);
-    if (!narrow())
-      return false;
-
-    if (!append_inline_atomic_slot_address(
-            words, *options.moi_report_buffer_address + layout.inline_atomic_release_slots_offset,
-            layout.inline_atomic_release_capacity, source_address, address_lo_vgpr, arch) ||
-        !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                        offsetof(ConSanMoiInlineAtomicReleaseSlot, version),
-                                        release_version, arch))
-      return false;
-    const auto release_version_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
-        scalar_positive_inline_u32(0), release_version, arch);
-    const auto release_version_parity =
-        instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, release_version, arch);
-    const auto release_version_even =
-        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
-    const auto source_is_newer = instrumentation::build_v_cmp_gt_u32_vcc(
-        vector_source_vgpr(source_version), release_version, arch);
-    const auto remove_older_release =
-        instrumentation::build_s_andn2_b64(kRdna4ExecLo, kRdna4ExecLo, kRdna4VccLo, arch);
-    if (!release_version_nonzero || !release_version_parity || !release_version_even ||
-        !source_is_newer || !remove_older_release)
-      return false;
-    words.push_back(*release_version_nonzero);
-    if (!narrow())
-      return false;
-    words.insert(words.end(), release_version_parity->begin(), release_version_parity->end());
-    words.push_back(*release_version_even);
-    if (!narrow())
-      return false;
-    words.push_back(*source_is_newer);
-    words.push_back(*remove_older_release);
-    if (!require_equal(offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address),
-                       source_address) ||
-        !require_equal(offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) +
-                           sizeof(uint32_t),
-                       static_cast<uint16_t>(source_address + 1u)) ||
-        !append_current_workgroup_key(current_field_vgpr, tmp_vgpr) ||
-        !require_equal(offsetof(ConSanMoiInlineAtomicReleaseSlot, workgroup_key),
-                       current_field_vgpr) ||
-        !require_scalar_equal(offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id),
-                              *options.moi_dispatch_id_sgpr) ||
-        !require_scalar_equal(offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id) +
-                                  sizeof(uint32_t),
-                              static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u)) ||
-        !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                        offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id),
-                                        release_owner, arch) ||
-        !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                        offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch_plus_one),
-                                        release_epoch, arch))
-      return false;
-    const auto owner_nonzero =
-        instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), release_owner, arch);
-    const auto epoch_nonzero =
-        instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), release_epoch, arch);
-    const auto epoch_limit = instrumentation::build_v_mov_b32_literal(
-        snapshot_temporary, consan_moi_exact_shadow::max_epoch + 1u, arch);
-    const auto epoch_in_range = instrumentation::build_v_cmp_gt_u32_vcc(
-        vector_source_vgpr(snapshot_temporary), release_epoch, arch);
-    if (!owner_nonzero || !epoch_nonzero || !epoch_limit || !epoch_in_range)
-      return false;
-    words.insert(words.end(), epoch_limit->begin(), epoch_limit->end());
-    for (const auto instruction : {*owner_nonzero, *epoch_nonzero, *epoch_in_range}) {
-      words.push_back(instruction);
-      if (!narrow())
-        return false;
-    }
-
-    if (!append_inline_atomic_snapshot_address(
-            words, *options.moi_report_buffer_address + layout.inline_causal_snapshots_offset,
-            layout.inline_causal_snapshot_capacity, source_address, snapshot_address, snapshot_hash,
-            snapshot_temporary, arch) ||
-        !append_load_u32_vgpr_at_offset(words, snapshot_address,
-                                        offsetof(ConSanMoiInlineCausalSnapshot, entry_count),
-                                        snapshot_count, arch) ||
-        !append_load_u32_vgpr_at_offset(words, snapshot_address,
-                                        offsetof(ConSanMoiInlineCausalSnapshot, flags),
-                                        snapshot_flags, arch))
-      return false;
-    const auto flags_clear = instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
-                                                                     snapshot_flags, arch);
-    const auto count_in_range = instrumentation::build_v_cmp_gt_u32_vcc(
-        scalar_positive_inline_u32(kConSanMoiInlineCausalSnapshotEntryCapacity + 1u),
-        snapshot_count, arch);
-    if (!flags_clear || !count_in_range)
-      return false;
-    words.push_back(*flags_clear);
-    if (!narrow())
-      return false;
-    words.push_back(*count_in_range);
-    if (!narrow() || !save_exec(valid_exec))
-      return false;
-    const auto clear_ordered =
-        instrumentation::build_s_mov_b64(ordered_exec, scalar_positive_inline_u32(0), arch);
-    const auto clear_previous_owner =
-        instrumentation::build_v_mov_b32_literal(previous_owner, 0u, arch);
-    if (!clear_ordered || !clear_previous_owner)
-      return false;
-    words.push_back(*clear_ordered);
-    words.insert(words.end(), clear_previous_owner->begin(), clear_previous_owner->end());
-
-    for (uint16_t i = 0; i < kConSanMoiInlineCausalSnapshotEntryCapacity; ++i) {
-      const size_t entry_offset = offsetof(ConSanMoiInlineCausalSnapshot, entries) +
-                                  i * sizeof(ConSanMoiInlineCausalSnapshotEntry);
-      if (!restore_exec(valid_exec) ||
-          !append_load_u32_vgpr_at_offset(words, snapshot_address, entry_offset, entry_owner,
-                                          arch) ||
-          !append_load_u32_vgpr_at_offset(words, snapshot_address, entry_offset + sizeof(uint32_t),
-                                          entry_epoch, arch))
-        return false;
-
-      const auto threshold = instrumentation::build_v_mov_b32_literal(tmp_vgpr, i, arch);
-      const auto active = instrumentation::build_v_cmp_gt_u32_vcc(
-          vector_source_vgpr(snapshot_count), tmp_vgpr, arch);
-      if (!threshold || !active)
-        return false;
-      words.insert(words.end(), threshold->begin(), threshold->end());
-      words.push_back(*active);
-      if (!narrow())
-        return false;
-      const auto entry_owner_nonzero =
-          instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), entry_owner, arch);
-      const auto entry_not_releaser = instrumentation::build_v_cmp_ne_u32_vcc(
-          vector_source_vgpr(release_owner), entry_owner, arch);
-      const auto entry_not_consumer = instrumentation::build_v_cmp_ne_u32_vcc(
-          vector_source_vgpr(consumer_owner), entry_owner, arch);
-      const auto entry_epoch_nonzero =
-          instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), entry_epoch, arch);
-      const auto entry_epoch_limit = instrumentation::build_v_mov_b32_literal(
-          snapshot_temporary, consan_moi_exact_shadow::max_epoch + 1u, arch);
-      const auto entry_epoch_in_range = instrumentation::build_v_cmp_gt_u32_vcc(
-          vector_source_vgpr(snapshot_temporary), entry_epoch, arch);
-      if (!entry_owner_nonzero || !entry_not_releaser || !entry_not_consumer ||
-          !entry_epoch_nonzero || !entry_epoch_limit || !entry_epoch_in_range)
-        return false;
-      words.insert(words.end(), entry_epoch_limit->begin(), entry_epoch_limit->end());
-      for (const auto instruction : {*entry_owner_nonzero, *entry_not_releaser, *entry_not_consumer,
-                                     *entry_epoch_nonzero, *entry_epoch_in_range}) {
-        words.push_back(instruction);
-        if (!narrow())
-          return false;
-      }
-      if (i != 0u) {
-        const auto canonical = instrumentation::build_v_cmp_gt_u32_vcc(
-            vector_source_vgpr(entry_owner), previous_owner, arch);
-        if (!canonical)
-          return false;
-        words.push_back(*canonical);
-        if (!narrow())
-          return false;
-      }
-      if (!save_exec(active_exec))
-        return false;
-
-      const auto inherited_kind =
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(1), token_kind, arch);
-      const auto ancestor_owner = instrumentation::build_v_cmp_eq_u32_vcc(
-          vector_source_vgpr(prior_owner), entry_owner, arch);
-      if (!inherited_kind || !ancestor_owner)
-        return false;
-      words.push_back(*inherited_kind);
-      if (!narrow())
-        return false;
-      words.push_back(*ancestor_owner);
-      if (!narrow())
-        return false;
-      const auto ancestor_epoch_insufficient = instrumentation::build_v_cmp_gt_u32_vcc(
-          vector_source_vgpr(token_epoch), entry_epoch, arch);
-      if (!ancestor_epoch_insufficient)
-        return false;
-      words.push_back(*ancestor_epoch_insufficient);
-      const auto remove_ancestor_epoch_insufficient =
-          instrumentation::build_s_andn2_b64(kRdna4ExecLo, kRdna4ExecLo, kRdna4VccLo, arch);
-      const auto accumulate_inherited =
-          instrumentation::build_s_xor_b64(ordered_exec, ordered_exec, kRdna4ExecLo, arch);
-      if (!remove_ancestor_epoch_insufficient || !accumulate_inherited)
-        return false;
-      words.push_back(*remove_ancestor_epoch_insufficient);
-      words.push_back(*accumulate_inherited);
-
-      if (!restore_exec(active_exec))
-        return false;
-      words.push_back(build_v_mov_b32_e32(previous_owner, vector_source_vgpr(entry_owner), arch));
-
-      if (!restore_exec(valid_exec))
-        return false;
-      const auto inactive = instrumentation::build_v_cmp_gt_u32_vcc(
-          scalar_positive_inline_u32(i + 1u), snapshot_count, arch);
-      if (!inactive)
-        return false;
-      words.push_back(*inactive);
-      if (!narrow())
-        return false;
-      const auto tail_owner_zero =
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), entry_owner, arch);
-      const auto tail_epoch_zero =
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), entry_epoch, arch);
-      if (!tail_owner_zero || !tail_epoch_zero)
-        return false;
-      words.push_back(*tail_owner_zero);
-      if (!narrow())
-        return false;
-      words.push_back(*tail_epoch_zero);
-      if (!narrow() || !save_exec(inactive_exec))
-        return false;
-      const auto union_valid =
-          instrumentation::build_s_xor_b64(valid_exec, active_exec, inactive_exec, arch);
-      if (!union_valid)
-        return false;
-      words.push_back(*union_valid);
-    }
-
-    if (!restore_exec(valid_exec) ||
-        !append_inline_atomic_slot_address(
-            words, *options.moi_report_buffer_address + layout.inline_atomic_release_slots_offset,
-            layout.inline_atomic_release_capacity, source_address, address_lo_vgpr, arch) ||
-        !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                        offsetof(ConSanMoiInlineAtomicReleaseSlot, version),
-                                        snapshot_temporary, arch))
-      return false;
-    const auto release_unchanged = instrumentation::build_v_cmp_eq_u32_vcc(
-        vector_source_vgpr(release_version), snapshot_temporary, arch);
-    if (!release_unchanged)
-      return false;
-    words.push_back(*release_unchanged);
-    if (!narrow() || !save_exec(valid_exec))
-      return false;
-
-    // An inherited match collected during the scan is authoritative only for
-    // lanes whose complete snapshot and final release version remained valid.
-    const auto inherited_invalid =
-        instrumentation::build_s_andn2_b64(inactive_exec, ordered_exec, valid_exec, arch);
-    const auto retain_valid_inherited =
-        instrumentation::build_s_andn2_b64(ordered_exec, ordered_exec, inactive_exec, arch);
-    if (!inherited_invalid || !retain_valid_inherited)
-      return false;
-    words.push_back(*inherited_invalid);
-    words.push_back(*retain_valid_inherited);
-
-    if (!restore_exec(valid_exec))
-      return false;
-    const auto direct_kind =
-        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), token_kind, arch);
-    const auto direct_owner = instrumentation::build_v_cmp_eq_u32_vcc(
-        vector_source_vgpr(prior_owner), release_owner, arch);
-    if (!direct_kind || !direct_owner)
-      return false;
-    words.push_back(*direct_kind);
-    if (!narrow())
-      return false;
-    words.push_back(*direct_owner);
-    if (!narrow())
-      return false;
-    const auto direct_epoch_insufficient = instrumentation::build_v_cmp_gt_u32_vcc(
-        vector_source_vgpr(token_epoch), release_epoch, arch);
-    if (!direct_epoch_insufficient)
-      return false;
-    words.push_back(*direct_epoch_insufficient);
-    const auto remove_direct_epoch_insufficient =
-        instrumentation::build_s_andn2_b64(kRdna4ExecLo, kRdna4ExecLo, kRdna4VccLo, arch);
-    if (!remove_direct_epoch_insufficient)
-      return false;
-    words.push_back(*remove_direct_epoch_insufficient);
-    if (!save_exec(active_exec))
-      return false;
-    const auto combine_ordered =
-        instrumentation::build_s_xor_b64(ordered_exec, ordered_exec, active_exec, arch);
-    const auto combine_direct =
-        instrumentation::build_s_xor_b64(ordered_exec, ordered_exec, direct_authorized_exec, arch);
+    // Direct and inherited tokens are committed only after a stable source
+    // release has been acquired and the guest RMW has completed. The token is
+    // therefore the durable causal fact. Re-reading the direct-mapped source
+    // slot here would race with later release publication and could transiently
+    // revoke already-established order. Release-sequence tokens carry ancestry
+    // between releases and never authorize an ordinary access directly.
+    const auto access_authorized = instrumentation::build_v_cmp_gt_u32_vcc(
+        scalar_positive_inline_u32(
+            static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence)),
+        token_kind, arch);
     const auto remove_ordered =
-        instrumentation::build_s_andn2_b64(kRdna4ExecLo, conflict_exec, ordered_exec, arch);
-    if (!combine_ordered || !combine_direct || !remove_ordered)
+        instrumentation::build_s_andn2_b64(kRdna4ExecLo, conflict_exec, kRdna4VccLo, arch);
+    if (!access_authorized || !remove_ordered)
       return false;
-    words.push_back(*combine_ordered);
-    words.push_back(*combine_direct);
+    words.push_back(*access_authorized);
     words.push_back(*remove_ordered);
   }
 
@@ -955,8 +640,7 @@
     std::vector<uint32_t> &words, const ConSanOptions &options, rj_code_arch_t arch,
     uint16_t address_lo_vgpr, uint16_t current_low_vgpr, uint16_t old_value_vgpr,
     uint16_t publisher_exec_sgpr, uint16_t committed_exec_sgpr, bool retry_contention) {
-  const bool literal_dispatch_id = arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-                                   !options.moi_track_atomics && !options.moi_dispatch_id_sgpr;
+  const bool literal_dispatch_id = is_rdna4_family_arch(arch) && !options.moi_dispatch_id_sgpr;
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr ||
       (!options.moi_dispatch_id_sgpr && !literal_dispatch_id) || !options.moi_report_buffer_address)
     return false;
@@ -965,7 +649,10 @@
   const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(exec_base + 2u);
   const uint16_t empty_exec_sgpr = exec_base;
   const uint16_t ready_exec_sgpr = temporary_exec_sgpr;
-  const uint16_t retry_count_sgpr = static_cast<uint16_t>(exec_base + 8u);
+  // +8:+9 retain the guest VCC across the complete probe. Keep the scalar
+  // retry counter in the diagnostic-temporary region, which is consumed only
+  // after the transaction has finished.
+  const uint16_t retry_count_sgpr = static_cast<uint16_t>(exec_base + 20u);
   const uint16_t low_dispatch_exec_sgpr = static_cast<uint16_t>(exec_base + 18u);
   const uint16_t saved_address_lo_vgpr = static_cast<uint16_t>(old_value_vgpr + 2u);
   const uint16_t saved_address_hi_vgpr = static_cast<uint16_t>(old_value_vgpr + 3u);
@@ -2043,8 +1730,7 @@
     return std::nullopt;
   }
   if (!options.moi_exec_save_sgpr ||
-      (!options.moi_dispatch_id_sgpr &&
-       !(arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.moi_track_atomics))) {
+      (!options.moi_dispatch_id_sgpr && !is_rdna4_family_arch(arch))) {
     errors.emplace_back(
         "ConSan MOI versioned exact-shadow probe requires EXEC-save and dispatch-ID state");
     return std::nullopt;
@@ -2204,7 +1890,7 @@
     }
     words.push_back(*save_original_exec);
   }
-  if (!workgroup_shadow && private_workgroup_key_offset) {
+  if (private_workgroup_key_offset && (!workgroup_shadow || generation_tagged_local_shadow)) {
     const auto load = instrumentation::build_private_load_b32(workgroup_key_vgpr,
                                                               *private_workgroup_key_offset, arch);
     const auto wait = instrumentation::build_s_wait_private_load0(arch);
@@ -2222,6 +1908,34 @@
                                    tmp_vgpr, address_lo_vgpr, original_exec_save_offset, arch)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not derive workgroup identity");
     return std::nullopt;
+  }
+  if (generation_tagged_local_shadow && arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (!options.moi_dispatch_id_sgpr) {
+      errors.emplace_back(
+          "ConSan MOI CDNA4 generation-tagged local shadow requires dispatch identity");
+      return std::nullopt;
+    }
+    // Workgroup coordinates alone repeat across dispatches. Fold the native
+    // dispatch identity into the bounded generation and reserve zero for an
+    // empty/unqualified cell, so LDS reuse cannot manufacture a prior owner.
+    const auto mix_dispatch_low = instrumentation::build_v_xor_b32(
+        workgroup_key_vgpr, *options.moi_dispatch_id_sgpr, workgroup_key_vgpr, arch);
+    const auto mix_dispatch_high = instrumentation::build_v_xor_b32(
+        workgroup_key_vgpr, static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u),
+        workgroup_key_vgpr, arch);
+    const auto bound_generation = instrumentation::build_v_and_b32_literal(
+        workgroup_key_vgpr, consan_moi_exact_shadow::max_generation - 1u, workgroup_key_vgpr, arch);
+    const auto make_nonzero_generation = instrumentation::build_v_add_u32(
+        workgroup_key_vgpr, scalar_positive_inline_u32(1u), workgroup_key_vgpr, arch);
+    if (!mix_dispatch_low || !mix_dispatch_high || !bound_generation || !make_nonzero_generation) {
+      errors.emplace_back(
+          "ConSan MOI CDNA4 local shadow could not derive dispatch-qualified generation");
+      return std::nullopt;
+    }
+    words.push_back(*mix_dispatch_low);
+    words.push_back(*mix_dispatch_high);
+    words.insert(words.end(), bound_generation->begin(), bound_generation->end());
+    words.insert(words.end(), make_nonzero_generation->begin(), make_nonzero_generation->end());
   }
   if ((!workgroup_shadow || generation_tagged_local_shadow) && options.moi_exec_save_sgpr) {
     // The packed key is injective only inside its documented dimensional
@@ -2454,7 +2168,7 @@
       words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
 
       const uint32_t entries_per_dispatch_bank =
-          layout.exact_shadow_entry_capacity / kConSanMoiInlineExactDispatchBankCount;
+          layout.exact_shadow_entry_capacity / layout.inline_exact_dispatch_bank_count;
       const uint32_t dispatch_bank_stride =
           entries_per_dispatch_bank * sizeof(ConSanMoiInlineExactShadowSlot);
       std::vector<uint32_t> copy_dispatch_id;
@@ -2476,12 +2190,15 @@
           vector_source_vgpr(loop_external_cells ? saved_workgroup_key_vgpr : workgroup_key_vgpr),
           tmp_vgpr, arch);
       const auto select_dispatch_bank = instrumentation::build_v_and_b32_literal(
-          tmp_vgpr, kConSanMoiInlineExactDispatchBankCount - 1u, tmp_vgpr, arch);
+          tmp_vgpr, layout.inline_exact_dispatch_bank_count - 1u, tmp_vgpr, arch);
       const auto scale_dispatch_bank = instrumentation::build_v_mul_lo_u32_literal(
           tmp_vgpr, old_value_vgpr, dispatch_bank_stride, tmp_vgpr, arch);
       const auto add_dispatch_bank =
           instrumentation::build_v_add_u64_vgpr_offset(address_lo_vgpr, tmp_vgpr, arch);
-      if (entries_per_dispatch_bank == 0u || dispatch_bank_stride == 0u || !mix_workgroup_key ||
+      if (layout.inline_exact_dispatch_bank_count == 0u ||
+          (layout.inline_exact_dispatch_bank_count &
+           (layout.inline_exact_dispatch_bank_count - 1u)) != 0u ||
+          entries_per_dispatch_bank == 0u || dispatch_bank_stride == 0u || !mix_workgroup_key ||
           !select_dispatch_bank || !scale_dispatch_bank || !add_dispatch_bank) {
         errors.emplace_back("ConSan MOI inline-shadow probe could not encode dispatch bank");
         return std::nullopt;

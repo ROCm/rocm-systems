@@ -85,9 +85,9 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
 
 [[nodiscard]] std::optional<ConSanMoiWorkgroupShadowLayout> common_moi_workgroup_shadow_layout(
     std::span<const uint8_t> image, const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
-    std::vector<std::string> &warnings, bool prefer_compact = false) {
+    const ConSanOptions &options, std::vector<std::string> &warnings, bool prefer_compact = false) {
   std::optional<ConSanMoiWorkgroupShadowLayout> common;
-  const uint32_t max_workgroup_lds_bytes = consan_moi_max_workgroup_lds_bytes(arch);
+  const uint32_t max_workgroup_lds_bytes = consan_moi_max_workgroup_lds_bytes(options, arch);
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
     if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset) {
       warnings.emplace_back("ConSan MOI workgroup shadow descriptor exceeds ELF bytes");
@@ -102,13 +102,33 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
           "ConSan MOI workgroup shadow requires fixed LDS that fits with its exact mirror");
       return std::nullopt;
     }
+    // RDNA4 LDS contents are not guaranteed to begin zeroed. In practice,
+    // even an eager entry-prologue clear can leave reused LDS looking like a
+    // coherent prior access in large multi-entry modules. Qualify every local
+    // cell with the current workgroup key instead, as the gfx1250 large-mirror
+    // path already does. This also removes the clear and its entry barrier.
+    if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+      layout = plan_consan_moi_generation_tagged_workgroup_shadow(
+          descriptor.group_segment_fixed_size, max_workgroup_lds_bytes);
+    }
     // A near-capacity exact mirror is still useful when either its cells are
     // compacted or its eager clear is replaced by a validity bitmap. Preserve
     // exact local identity and select the representation requested by the
     // object-wide planner.
     constexpr uint32_t kGfx1250PreferredLocalShadowLimit = 48u * 1024u;
-    if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-        layout->required_group_segment_size > kGfx1250PreferredLocalShadowLimit) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      // LDS is reusable storage whose initial contents are unspecified. Make
+      // CDNA4 validity explicit in each exact cell instead of depending on a
+      // workgroup-wide eager clear before the instrumented program starts.
+      layout = plan_consan_moi_generation_tagged_workgroup_shadow(
+          descriptor.group_segment_fixed_size, max_workgroup_lds_bytes);
+      if (!layout) {
+        warnings.emplace_back("ConSan MOI CDNA4 generation-tagged workgroup shadow does not fit in "
+                              "architectural LDS");
+        return std::nullopt;
+      }
+    } else if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+               layout->required_group_segment_size > kGfx1250PreferredLocalShadowLimit) {
       layout = consan_moi_prefer_generation_tagged_workgroup_shadow(
                    descriptor.group_segment_fixed_size, prefer_compact)
                    ? plan_consan_moi_generation_tagged_workgroup_shadow(
@@ -250,28 +270,42 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
           "ConSan MOI spill cannot share one frame recipe across dynamic and fixed owners");
       return std::nullopt;
     }
-    if (options.moi_engine != ConSanMoiEngine::InlineShadow || !options.moi_exec_save_sgpr) {
-      warnings.emplace_back(
-          "ConSan MOI dynamic-stack spill currently requires InlineShadow scalar state");
+    const bool supported_engine =
+        options.moi_engine == ConSanMoiEngine::InlineShadow ||
+        (arch == ROCJITSU_CODE_ARCH_CDNA4 && options.moi_engine == ConSanMoiEngine::RecordReplay);
+    if (!supported_engine || !options.moi_dynamic_stack_spill || !options.moi_exec_save_sgpr) {
+      warnings.emplace_back("ConSan MOI dynamic-stack spill has no supported scalar-state layout");
       return std::nullopt;
     }
     constexpr uint16_t kDynamicStackTopSgpr = 32u;
     constexpr uint16_t kDynamicFrameBaseSgpr = 33u;
-    const uint16_t saved_scc_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 10u);
-    const uint16_t saved_frame_base_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 24u);
+    const auto special_state = moi_special_state_sgprs(options);
+    if (!special_state) {
+      warnings.emplace_back("ConSan MOI dynamic-stack spill has no SCC-save register");
+      return std::nullopt;
+    }
+    const uint16_t saved_scc_sgpr = special_state->scc_save_sgpr;
+    const uint16_t saved_frame_base_sgpr =
+        static_cast<uint16_t>(*options.moi_exec_save_sgpr +
+                              (options.moi_engine == ConSanMoiEngine::InlineShadow ? 24u : 5u));
     auto spill = build_dynamic_stack_vgpr_spill_sequence(
         resources.base, resources.count, kDynamicStackTopSgpr, kDynamicFrameBaseSgpr,
         saved_frame_base_sgpr, saved_scc_sgpr, arch);
-    const uint64_t required_private_bytes =
+    const uint64_t requested_private_bytes =
         static_cast<uint64_t>(resources.original_private_segment_size) +
         static_cast<uint64_t>(resources.count) * SpillManager::kSlotBytes;
-    if (!spill || required_private_bytes > *private_limit) {
+    const auto required_private_bytes =
+        requested_private_bytes <= std::numeric_limits<uint32_t>::max()
+            ? normalize_address_free_scratch_private_size(
+                  arch, static_cast<uint32_t>(requested_private_bytes))
+            : std::nullopt;
+    if (!spill || !required_private_bytes) {
       warnings.emplace_back("ConSan MOI could not encode the dynamic-stack VGPR spill frame");
       return std::nullopt;
     }
     // The offsets are frame-relative, but the loader still needs enough
     // backing scratch for the extra maximum stack depth.
-    spill->total_private_bytes = static_cast<uint32_t>(required_private_bytes);
+    spill->total_private_bytes = *required_private_bytes;
     return spill;
   }
 
@@ -403,11 +437,10 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
   return true;
 }
 
-[[nodiscard]] bool
-apply_lds_descriptor_requirements(CodeObjectPatcher &patcher, const ConSanResult &result,
-                                  const AmdGpuCodeObject &code_object,
-                                  const MoiDescriptorLdsRequirements &requirements,
-                                  rj_code_arch_t arch, std::vector<std::string> &errors) {
+[[nodiscard]] bool apply_lds_descriptor_requirements(
+    CodeObjectPatcher &patcher, const ConSanResult &result, const AmdGpuCodeObject &code_object,
+    const MoiDescriptorLdsRequirements &requirements, const ConSanOptions &options,
+    rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
     const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
     const auto active_kernel =
@@ -429,7 +462,7 @@ apply_lds_descriptor_requirements(CodeObjectPatcher &patcher, const ConSanResult
     }
     KD descriptor{};
     std::memcpy(&descriptor, current_image.data() + active_descriptor_offset, sizeof(descriptor));
-    if (required_bytes > consan_moi_max_workgroup_lds_bytes(arch) ||
+    if (required_bytes > consan_moi_max_workgroup_lds_bytes(options, arch) ||
         descriptor.group_segment_fixed_size > required_bytes) {
       errors.emplace_back("ConSan MOI LDS-plan descriptor has an incompatible fixed-LDS size");
       return false;
@@ -498,7 +531,8 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
 [[nodiscard]] bool
 apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResult &result,
                                   const MoiDescriptorLdsRequirements &requirements,
-                                  rj_code_arch_t arch, std::vector<std::string> &errors) {
+                                  const ConSanOptions &options, rj_code_arch_t arch,
+                                  std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
     if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset ||
         kernel_for_descriptor(result, descriptor_offset) == nullptr) {
@@ -507,7 +541,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     }
     KD descriptor{};
     std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
-    if (required_bytes > consan_moi_max_workgroup_lds_bytes(arch) ||
+    if (required_bytes > consan_moi_max_workgroup_lds_bytes(options, arch) ||
         descriptor.group_segment_fixed_size > required_bytes) {
       errors.emplace_back("ConSan MOI LDS-plan descriptor has an incompatible fixed-LDS size");
       return false;
@@ -537,7 +571,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanOptions &options, rj_code_arch_t arch, uint32_t record_index, uint32_t record_count,
     uint32_t access_record_capacity, std::optional<uint32_t> private_epoch_offset,
-    std::vector<std::string> &errors) {
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI first-light probe requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -605,7 +639,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   }
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
-  if (!options.moi_owner_vgpr && candidate.kernel_descriptor_file_offset) {
+  if (!options.moi_owner_vgpr && !options.moi_persistent_owner_sgpr &&
+      candidate.kernel_descriptor_file_offset) {
     const auto owner_shift =
         moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
     if (!owner_shift)
@@ -661,6 +696,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   if (options.moi_dynamic_access_records)
     words.insert(words.end(), derived_owner_words.begin(), derived_owner_words.end());
   const auto append_guest_access = [&] {
+    if (guest_instruction_offset)
+      *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
       uint32_t word = 0;
       std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
@@ -763,6 +800,20 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
            !append_dynamic_access_store_u32_vgpr(
                words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
                *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+          (options.moi_persistent_owner_sgpr &&
+           !append_dynamic_access_store_u32_scalar_src(
+               words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
+               *options.moi_persistent_owner_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+          (options.moi_dispatch_id_sgpr &&
+           (!append_dynamic_access_store_u32_scalar_src(
+                words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation),
+                *options.moi_dispatch_id_sgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
+            !append_dynamic_access_store_u32_scalar_src(
+                words,
+                dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation) +
+                    sizeof(uint32_t),
+                static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), slot_vgpr,
+                *options.scratch_vgpr, arch))) ||
           !append_dynamic_access_event_index_store(
               words, base + offsetof(ConSanMoiReportHeader, event_counter),
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, event_index), slot_vgpr,
@@ -955,6 +1006,11 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
                                          record_value_vgpr, record_address_vgpr, arch) ||
         !record.materialize_address(access_record_base) ||
         !record.store_vgpr(offsetof(ConSanMoiAccessRecord, event_index), record_value_vgpr) ||
+        (options.moi_dispatch_id_sgpr &&
+         (!record.store_sgpr(offsetof(ConSanMoiAccessRecord, generation),
+                             *options.moi_dispatch_id_sgpr) ||
+          !record.store_sgpr(offsetof(ConSanMoiAccessRecord, generation) + sizeof(uint32_t),
+                             static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u)))) ||
         !record.store_workgroup(offsetof(ConSanMoiAccessRecord, workgroup_x),
                                 workgroup_sources.x) ||
         !record.store_workgroup(offsetof(ConSanMoiAccessRecord, workgroup_y),
@@ -967,6 +1023,9 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
                            static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u)) ||
         (options.moi_owner_vgpr &&
          !record.store_vgpr(offsetof(ConSanMoiAccessRecord, wave_id), *options.moi_owner_vgpr)) ||
+        (options.moi_persistent_owner_sgpr &&
+         !record.store_sgpr(offsetof(ConSanMoiAccessRecord, wave_id),
+                            *options.moi_persistent_owner_sgpr)) ||
         (options.moi_epoch_vgpr &&
          !record.store_vgpr(offsetof(ConSanMoiAccessRecord, epoch), *options.moi_epoch_vgpr)) ||
         !record.store_literal(offsetof(ConSanMoiAccessRecord, instruction_offset),

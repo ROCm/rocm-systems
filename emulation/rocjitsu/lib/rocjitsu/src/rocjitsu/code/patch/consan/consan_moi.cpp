@@ -30,6 +30,7 @@ RJ_DIAGNOSTIC_POP
 #include <bit>
 #include <compare>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <exception>
 #include <limits>
@@ -121,6 +122,19 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     append_moi_access_site_dispositions(code_object_bytes, function,
                                         effective_options.flat_provenance_mode, effective_options,
                                         arch, result);
+  if (effective_options.moi_engine == ConSanMoiEngine::Sampled &&
+      effective_options.moi_track_atomics && result.moi_candidates.empty()) {
+    // Sampled atomics publish ordering only into a selected LDS watchpoint's
+    // causal window. In an access-free code object there is no consumer for
+    // that metadata, so treating standalone runtime atomics as required
+    // instrumentation would reject the workload without improving coverage.
+    // Keep them in decoded/fault inventory, but make them operationally not
+    // applicable for this object's sampled report and coverage ledger.
+    effective_options.moi_track_atomics = false;
+    result.warnings.emplace_back(
+        "ConSan MOI sampled engine skipped atomic ordering in a code object with no selected "
+        "LDS access candidates");
+  }
   ConSanResult sync_admission = result;
   append_moi_sync_site_dispositions(effective_options, sync_admission);
   const bool has_supported_atomic_or_fence = std::ranges::any_of(
@@ -135,6 +149,21 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         return site.disposition == ConSanSiteDisposition::Supported &&
                site.site_kind == ConSanResourceSiteKind::Barrier;
       });
+  const size_t supported_barrier_members = std::ranges::count_if(
+      sync_admission.site_dispositions, [](const ConSanSiteDispositionRecord &site) {
+        return site.disposition == ConSanSiteDisposition::Supported &&
+               site.site_kind == ConSanResourceSiteKind::Barrier;
+      });
+  // Record/Replay's compact persistent-epoch operating point handles bounded
+  // barrier inventories without the relocated dense router. Larger RDNA
+  // inventories can strand appended barrier bodies beyond SOPP branch reach,
+  // so reserve the router's key and call-return state up front. Do not impose
+  // that wider liveness window on ordinary kernels: on full-pressure compiler
+  // output, otherwise-unused adjacent SGPRs may still carry entry ABI state.
+  constexpr size_t kCompactRecordReplayBarrierMemberLimit = 32u;
+  effective_options.moi_record_replay_dense_barrier_router =
+      is_rdna4_family_arch(arch) && effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
+      supported_barrier_members > kCompactRecordReplayBarrierMemberLimit;
   const auto has_operational_atomic = [&](const auto &container, bool in_kernel) {
     return std::ranges::any_of(container.atomic_sites, [&](const ConSanAtomicSite &site) {
       return atomic_event_kind_for_site(result, container.name, in_kernel, site).has_value();
@@ -220,8 +249,12 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   MoiResourcePlanningState resource_planning_state(code_object_bytes, arch, effective_options,
                                                    result);
   rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
+  const bool supports_dynamic_stack_spill =
+      effective_options.moi_engine == ConSanMoiEngine::InlineShadow ||
+      (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+       effective_options.moi_engine == ConSanMoiEngine::RecordReplay);
   effective_options.moi_dynamic_stack_spill =
-      effective_options.moi_engine == ConSanMoiEngine::InlineShadow &&
+      supports_dynamic_stack_spill &&
       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
         if (plan.source != ConSanRegisterAllocationSource::SpillRequired)
           return false;
@@ -241,6 +274,10 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (configure_automatic_moi_exec_save_sgprs(effective_options, result, code_object_bytes, arch))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
+  if (configure_gfx1250_record_replay_owner_dispatch_assignments(effective_options, result,
+                                                                 code_object_bytes, arch)) {
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
+  }
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_sgprs(effective_options, result, arch) ||
       !validate_moi_ordinary_scalar_state(effective_options, result, arch)) {
@@ -305,7 +342,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         });
   }
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::Sampled)
-    try_apply_direct_sampled_watchpoint_patch(code_object_bytes, effective_options, arch, result);
+    try_apply_direct_sampled_watchpoint_patch(code_object_bytes, effective_options, arch,
+                                              resource_planning_state, result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::Sampled)
     try_apply_sampled_atomic_sync_patch(code_object_bytes, effective_options, arch, result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::Sampled)
@@ -313,7 +351,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::InlineShadow)
     try_apply_inline_shadow_patch(code_object_bytes, effective_options, arch, result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay)
-    try_apply_first_light_access_record_patch(code_object_bytes, effective_options, arch, result);
+    try_apply_first_light_access_record_patch(code_object_bytes, effective_options, arch,
+                                              resource_planning_state, result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
       !explicit_persistent_state &&
       std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
@@ -333,12 +372,13 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         "ConSan MOI record/replay reverted to probe-local state after all access probes failed "
         "placement");
   }
+  if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay)
+    try_apply_atomic_record_patch(code_object_bytes, effective_options, arch, result);
   if (result.errors.empty())
-    try_apply_barrier_epoch_patch(code_object_bytes, effective_options, arch, result);
+    try_apply_barrier_epoch_patch(code_object_bytes, effective_options, arch,
+                                  resource_planning_state, result);
   if (result.errors.empty())
     try_apply_inline_atomic_ordering_patch(code_object_bytes, effective_options, arch, result);
-  if (result.errors.empty())
-    try_apply_atomic_record_patch(code_object_bytes, effective_options, arch, result);
   if (result.errors.empty())
     try_apply_fence_record_patch(code_object_bytes, effective_options, arch, result);
   // Sampled and inline prologues only initialize state consumed by an emitted
@@ -517,16 +557,6 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
         std::ranges::count_if(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
           return plan.site_kind == ConSanResourceSiteKind::Fence;
         }));
-    const auto add_dynamic_headroom = [](uint64_t count) {
-      if (count >
-          std::numeric_limits<uint64_t>::max() / kConSanMoiRecordReplayDynamicEventHeadroom) {
-        return std::numeric_limits<uint64_t>::max();
-      }
-      return count * kConSanMoiRecordReplayDynamicEventHeadroom;
-    };
-    inventory.barrier_event_count = add_dynamic_headroom(inventory.barrier_event_count);
-    inventory.atomic_event_count = add_dynamic_headroom(inventory.atomic_event_count);
-    inventory.fence_event_count = add_dynamic_headroom(inventory.fence_event_count);
   }
   inventory.diagnostic_count = std::max<uint64_t>(inventory.access_range_count, 1u);
   if (options.moi_engine == ConSanMoiEngine::InlineShadow)
@@ -580,15 +610,14 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     // some dynamic-LDS objects retain a one-byte placeholder even though a
     // decoded access itself spans more bytes. Provision the external
     // full-aperture fallback just as we do for group-FLAT accesses.
-    const bool descriptor_opaque_lds = result.arch_name == "gfx1250" &&
-                                       inventory.access_range_count != 0u &&
+    const bool descriptor_opaque_lds = inventory.access_range_count != 0u &&
                                        inventory.inline_lds_bytes < selected_native_lds_extent;
     if (selected_flat_candidate || selected_dynamic_lds_owner || descriptor_opaque_lds) {
-      const uint64_t external_lds_bytes =
+      const uint64_t external_lds_bytes = options.moi_max_workgroup_lds_bytes.value_or(
           result.arch_name == "gfx1250"
               ? consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250)
-              : static_cast<uint64_t>(kConSanMoiInlineShadowConservativeExactShadowEntries) *
-                    consan_moi_exact_shadow::granule_bytes;
+              : static_cast<uint32_t>(kConSanMoiInlineShadowConservativeExactShadowEntries *
+                                      consan_moi_exact_shadow::granule_bytes));
       inventory.inline_lds_bytes =
           std::max<uint64_t>(inventory.inline_lds_bytes, external_lds_bytes);
     }
@@ -601,6 +630,8 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     inventory.diagnostic_count = std::max<uint64_t>(
         inventory.diagnostic_count, kConSanMoiInlineShadowDefaultDiagnosticCapacity);
   }
+  if (options.moi_engine == ConSanMoiEngine::RecordReplay)
+    return fit_consan_moi_record_replay_auto_report_inventory(inventory);
   return fit_consan_moi_sampled_auto_report_inventory(inventory);
 }
 

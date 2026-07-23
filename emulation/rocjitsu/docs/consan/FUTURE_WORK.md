@@ -1,11 +1,13 @@
 # ConSan future work
 
-[STATUS_RDNA4.md](STATUS_RDNA4.md) records the gfx1201 north-star matrix. The
-2026-07-16 final-tip pass found contrary evidence in five cells; focused
-repairs and one-tip clean, fault, and overhead campaigns resolved them. The
-gfx1201 release certificate is complete. The remaining tracks separately
-improve actual fault-detection strength, adversarial robustness, workload
-breadth, or hardware portability.
+[STATUS_RDNA4.md](STATUS_RDNA4.md) records the gfx1201 north-star matrix.  The
+2026-07-22 Record/Replay audit repaired clean-input regressions exposed after
+the gfx1250-focused work: hardware dispatch identity is now used on RDNA4, and
+RDNA4 relay sizing no longer applies a large-object envelope indiscriminately.
+All 19 clean and paired-overhead rows pass at one source-matched tip.  The same
+audit corrected two overstated fault claims: TP2 detects its exact drop in 3/5
+trials and D128 pressure in 0/5.  Restoring bounded, dispatch-coherent replay
+evidence is the active release-certificate gap.
 
 Prioritize demonstrable end-to-end LLM value over isolated-kernel breadth. Do
 not reopen a completed cell merely to accumulate more worklog. If new evidence
@@ -36,8 +38,8 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  S["RDNA4 clean ledger and Qwen fault<br/>requalified at one tip"]:::done
-  R["R DONE: repair contrary evidence and<br/>issue release certificate"]:::done
+  S["RDNA4 Record/Replay clean, coverage and<br/>overhead requalified at one tip"]:::done
+  R["R ACTIVE: restore dispatch-coherent<br/>Record/Replay fault evidence"]:::active
   D["D: stronger real-world<br/>fault detection"]:::todo
   H["H: adversarial-input and<br/>metadata hardening"]:::todo
   B["B: admit additional<br/>real workloads"]:::todo
@@ -55,46 +57,44 @@ flowchart LR
   classDef deferred fill:#9e7cc1,stroke:#351c75,stroke-width:2px,color:#000;
 ```
 
-The four RDNA4 tracks are technically independent. `R` converted heterogeneous
-retained cell evidence into a single third-party-reproducible release
-certificate. Work on `D`, `H`, or `B` should rerun the highest-value affected
-e2e sentinel immediately.
+The four RDNA4 tracks are technically independent.  `R` is front-loaded
+because new evidence invalidated two Record/Replay greens.  Work on `D`, `H`,
+or `B` should rerun the highest-value affected e2e sentinel immediately.
 
-## R: final-tip release certificate
+## R: restore the Record/Replay release certificate
 
-This completed track compresses the former broad acceptance DAG into evidence
-that can be reproduced by another developer.
+This track preserves the corrected generation semantics shared with gfx1250.
+It must not regain RDNA4 detections by comparing different dispatches, hiding
+an expert knob in ordinary operation, or enabling unbounded dynamic append.
 
 ```mermaid
 flowchart TB
-  R0["R0 DONE: validation runner, audit view,<br/>workspace contract and current cell evidence"]:::done
-  R1["R1 DONE: freeze executable 640e575da2,<br/>rebuilt hook c45aa0fe, device/assets"]:::done
-  R2["R2 DONE: run all 11 north-star clean rows;<br/>55/55 baseline/profile rows pass"]:::done
-  R2A["R2A DONE: fix reserved ISA fields and<br/>clause relocation; TP2 Inline clean"]:::done
-  R2B["R2B DONE: tree Atomic-OR Inline<br/>complete and clean"]:::done
-  R3["R3 DONE: Qwen exact drop accepted:<br/>SC 1/1, Sampled 16/32, Inline 1/1"]:::done
-  R4["R4 DONE: all 14 admitted exact<br/>fault policies pass"]:::done
-  R5["R5 DONE: 66/66 paired no-fault<br/>overhead result rows pass"]:::done
-  R6["R6 DONE: audit hashes, zero omissions,<br/>no-knob commands and generated summaries"]:::done
-  R7["R7 DONE: update STATUS_RDNA4 from<br/>one-tip script outputs"]:::done
-  RG{"DONE: FINAL-TIP gfx1201<br/>RELEASE CERTIFICATE"}:::done
+  R0["R0 DONE: rebuild source-matched hook;<br/>audit all 19 Record/Replay rows"]:::done
+  R1["R1 DONE: fix RDNA4 dispatch-ID state<br/>and selective relay envelopes"]:::done
+  R2["R2 DONE: 19/19 clean and 57/57 paired<br/>overhead rows; repeat TP2 clean 5/5"]:::done
+  R3["R3 DONE: exact faults expose TP2 3/5<br/>and D128 pressure 0/5 detection"]:::done
+  R4["R4 NEXT: design bounded per-dispatch<br/>or multi-generation first-light capture"]:::active
+  R5["R5: implement model, emission and host<br/>tests; preserve gfx1250 sentinels"]:::todo
+  R6["R6: rerun TP2 and pressure clean/fault/<br/>overhead plus Qwen and gfx1250 sentinels"]:::todo
+  R7["R7: publish source-matched evidence and<br/>restore only evidence-backed greens"]:::todo
+  RG{"gfx1201 RECORD/REPLAY<br/>CERTIFICATE RESTORED"}:::target
 
-  R0 --> R1 --> R2
-  R2 --> R2A --> R3
-  R2 --> R2B --> R3
-  R3 --> R4 --> R5 --> R6 --> R7 --> RG
+  R0 --> R1 --> R2 --> R3 --> R4 --> R5 --> R6 --> R7 --> RG
 
   classDef done fill:#70ad47,stroke:#274e13,stroke-width:2px,color:#000;
+  classDef active fill:#ffc000,stroke:#7f6000,stroke-width:3px,color:#000;
+  classDef todo fill:#a5a5a5,stroke:#404040,stroke-width:2px,color:#000;
+  classDef target fill:#ed7d31,stroke:#843c0c,stroke-width:3px,color:#000;
 ```
 
-Acceptance requires a clean committed tree and a hook rebuilt from exactly that
-tree. Run no more than four GPU jobs in parallel; serialize fault rows capable
-of destabilizing the device. Do not use the repository-wide CTest inventory as
-a concurrent GPU certificate: it mixes unrelated fixtures that are not
-mutually isolated. Run the 2,069-test host binary directly, and use this
-validation runner for live workload rows. Every result retains pre/post GPU
-health. Ordinary profiles must have no workload-specific coverage or sampling
-settings.
+The current fixed-slot implementation claims each static site once for the
+lifetime of its loaded code object.  Hardware dispatch IDs correctly prevent
+cross-dispatch replay, but repeated launches can leave different slots owned
+by different generations.  `R4` should retain a bounded useful set from one or
+more dispatches without turning the ordinary engine into an exhaustive trace.
+Acceptance requires a clean committed tree and a hook rebuilt from exactly
+that tree.  Run no more than four GPU jobs in parallel and keep ordinary
+operation free of workload-specific controls.
 
 ## D: stronger fault detection
 

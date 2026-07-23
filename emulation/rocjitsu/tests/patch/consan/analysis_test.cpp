@@ -603,7 +603,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_FALSE(result.warnings.empty());
+  ASSERT_TRUE(result.warnings.empty());
   ASSERT_EQ(result.kernels.size(), 1u);
   EXPECT_EQ(result.target_name, "gfx1201");
   EXPECT_EQ(result.arch_name, "rdna4");
@@ -697,8 +697,10 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_FALSE(atomic.raw_th);
   ASSERT_TRUE(atomic.returns_old_value);
   EXPECT_FALSE(*atomic.returns_old_value);
-  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Skip);
-  ASSERT_GE(kernel.preflight_reasons.size(), 1u);
+  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
+  EXPECT_TRUE(std::ranges::any_of(kernel.preflight_reasons, [](const std::string &reason) {
+    return reason == "atomic LDS accesses excluded: 1";
+  }));
   ASSERT_EQ(result.sync_events.size(), 3u);
   const ConSanSyncEvent &atomic_event = result.sync_events[0];
   EXPECT_EQ(atomic_event.kind, ConSanSyncEventKind::Atomic);
@@ -1815,9 +1817,7 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
   ASSERT_TRUE(atomic);
   EXPECT_EQ(*atomic, (std::array<uint32_t, 3>{0xEC0D407Cu, 0x02180002u, 0x00000002u}));
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0],
-      (*atomic)[1],
-      (*atomic)[2],
+      (*atomic)[0], (*atomic)[1], (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   ConSanOptions options;
@@ -2788,7 +2788,7 @@ TEST(ConSan, MarksSupportedLdsKernelAsPreflightCandidate) {
   EXPECT_TRUE(result.elf_bytes.empty());
 }
 
-TEST(ConSan, FailClosedRejectsUnsupportedLdsKernel) {
+TEST(ConSan, FailClosedAdmitsOrdinaryLdsAlongsideExcludedAtomic) {
   const std::vector<uint8_t> bytes = make_rdna4_unsupported_lds_code_object();
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
@@ -2796,14 +2796,14 @@ TEST(ConSan, FailClosedRejectsUnsupportedLdsKernel) {
 
   const auto result = try_patch_consan(bytes, options);
 
-  ASSERT_FALSE(result.errors.empty());
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_TRUE(result.errors.empty());
+  EXPECT_NE(result.outcome, ConSanTransformOutcome::Unsupported);
   ASSERT_EQ(result.kernels.size(), 1u);
   const ConSanKernelInfo &kernel = result.kernels.front();
-  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Reject);
-  ASSERT_GE(kernel.preflight_reasons.size(), 1u);
-  EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
+  EXPECT_TRUE(std::ranges::any_of(kernel.preflight_reasons, [](const std::string &reason) {
+    return reason == "atomic LDS accesses excluded: 1";
+  }));
 }
 
 } // namespace

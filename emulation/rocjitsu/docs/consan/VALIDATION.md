@@ -20,12 +20,14 @@ not manufacture old colors. The 2026-07-16 campaign demonstrated that rule by
 temporarily demoting five cells when stronger evidence contradicted them, then
 restoring them only after focused fixes and exact-tip reruns.
 
-The completed gfx1201 certificate uses executable commit `640e575da2` and hook
-SHA-256 `c45aa0fece5a9aa7ef8b3ad24bcbb2077e477586df6b4eecf12990f7fafa693d`.
-It accepts all 55 clean baseline/profile rows, all 14 reviewed exact fault
-policies, and all 66 paired-overhead result rows across 11 workloads. The
-unrounded ratios and raw commands remain in the generated artifacts; the
-rounded current-tip values are published in [STATUS_RDNA4.md](STATUS_RDNA4.md).
+The latest gfx1201 Record/Replay audit uses executable commit `5af82ade33` and
+hook SHA-256
+`0edfe1985a2ee4512b65185a6ad625fe1160e0d080be5edd160d2a12b75dd82b`.
+It accepts all 19 clean rows and all 57 baseline-before, Record/Replay, and
+baseline-after overhead rows.  The reviewed-fault campaign accepts 17/19 rows;
+the two corrected fault-sensitivity gaps and repeated-trial evidence are
+published in [STATUS_RDNA4.md](STATUS_RDNA4.md).  Unrounded ratios, raw
+commands, and source/hook provenance remain in the generated artifacts.
 
 ## Workspace contract
 
@@ -43,6 +45,8 @@ iree-test-suites/
 iree-test-suites-build/
 hip-moi/
 hip-moi-build/
+rocjitsu-test-corpus/
+rocjitsu-test-corpus-build/
 rocjitsu-build/
 ```
 
@@ -52,8 +56,64 @@ For compatibility with the original gfx1201 workspace, it also recognizes
 
 `iree-run-module`, `iree-benchmark-module`, and `rocminfo` are resolved from
 `PATH`; IREE is not vendored or found through a machine-specific build path.
-The Python used to launch the runner must be able to import the IREE Python
-bindings needed by the Sharktank tests.
+`rocminfo` is required by mixed and non-PyTorch campaigns.  A PyTorch-only
+doctor or row instead verifies the target through its stronger in-process
+numeric dispatch, device-architecture, and exact-hook mapping probe, so a
+prebuilt-wheel setup does not need a separate `rocminfo` installation.
+When the launcher Python is not the workload environment, select the exact
+interpreters explicitly:
+
+```sh
+export CONSAN_VALIDATION_SHARKTANK_PYTHON=/path/to/iree-venv/bin/python
+export CONSAN_VALIDATION_PYTORCH_PYTHON=/path/to/pytorch-venv/bin/python
+export CONSAN_VALIDATION_TENSILE_PYTHON=/path/to/tensile-venv/bin/python
+```
+
+The Sharktank interpreter must import the IREE Python bindings plus `pytest`,
+`numpy`, and `ml_dtypes`; the other two variables are needed only when those
+workload families are selected.
+
+PyTorch validation deliberately uses a separate, prebuilt-wheel interpreter;
+the workspace `pytorch/` checkout is for workload discovery and source
+provenance, not for building PyTorch.  Point the runner at that interpreter:
+
+```sh
+python3 -m venv "$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-venv"
+"$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-venv/bin/python" -m pip \
+  install 'torch==2.14.0.dev20260720+rocm7.1' 'numpy==2.5.1' \
+  --index-url https://download.pytorch.org/whl/nightly/rocm7.1
+export CONSAN_VALIDATION_PYTORCH_PYTHON="$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-venv/bin/python"
+```
+
+The final export is optional when the environment uses that standard workspace
+path: the runner discovers
+`$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-venv/bin/python`
+automatically.  Set `CONSAN_VALIDATION_PYTORCH_PYTHON` only to select a
+different prebuilt-wheel environment.  The doctor imports both `torch` and
+`triton`, performs a numeric GPU dispatch, checks the reported gfx target, and
+verifies from the process mappings that PyTorch's HSA runtime loaded the exact
+ConSan hook selected from the workspace.  It records the runtime versions and
+device identity.  Thus an existing but unusable environment, a wrong device,
+or a wheel runtime that silently skips `HSA_TOOLS_LIB` fails before a
+validation row is accepted.
+
+Freeze the exact wheel and bundled Triton versions in the campaign artifacts.
+The example index matches the current ROCm 7.1 validation stack; choose an
+official prebuilt wheel compatible with the machine's runtime and target when
+reproducing elsewhere.  The doctor requires this interpreter only when the
+selected target manifest contains a PyTorch workload.
+
+Official PyTorch ROCm wheels and the native llama.cpp clients use a modern HSA
+runtime. After successful rocprofiler registration that runtime does not consult legacy
+`HSA_TOOLS_LIB` tooling unless `HSA_TOOLS_ROCPROFILER_V1_TOOLS=1` is present.
+The runner therefore sets and audits that variable automatically for
+instrumented PyTorch and llama.cpp rows and removes it from baseline rows. It is classified
+as `runtime-plumbing`, never as workload tuning; users should not have to
+discover or manually preserve it.  The doctor tests this behavior with a real
+dispatch.  Its linkage-only canary uses a deliberately nonmatching internal
+kernel filter to avoid instrumenting PyTorch's large bundled kernel object;
+that filter is never inherited by validation rows, whose ordinary environment
+and complete-coverage gates remain unchanged.
 
 Run the preflight before GPU work:
 
@@ -63,7 +123,45 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
 ```
 
 The doctor reports every missing checkout, artifact, workload executable,
-hook, and tool. It performs no GPU dispatch.
+hook, and tool.  When a PyTorch workload is selected, it also performs one
+small numeric GPU dispatch and verifies that the process loaded the exact
+ConSan hook.  Other workload kinds remain filesystem/tooling-only preflight.
+
+### Native llama.cpp corpus clients
+
+The gfx1201 manifest includes `llama-rdna4-mul-mat-vec-q` and
+`llama-rdna4-rms-norm` from `rocjitsu-test-corpus`. Build its kernels project
+out of source at
+`$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-test-corpus-build/kernels/gfx1201`
+with `CMAKE_HIP_ARCHITECTURES=gfx1201`, `KERNEL_CORPUS_ENABLE_ALL=OFF`, and
+`KERNEL_CORPUS_ENABLE_LLAMA_HIP=ON`. The resulting executables are expected at
+`cases/llama.cpp/llama_cpp_mul_mat_vec_q` and
+`cases/llama.cpp/llama_cpp_rms_norm` beneath that directory. The runner also
+recognizes the target's pytest build artifact while migrating an existing
+workspace, but the stable out-of-source path is the reproducible contract.
+
+These clients require HIP, rocBLAS, and hipBLAS. For a source-built TheRock
+workspace, configure TheRock with `THEROCK_ENABLE_BLAS=ON`, build its focused
+`hipBLAS+stage` target, use `TheRock-build/dist/rocm` as `ROCM_PATH`, and add
+the hipBLAS and hipBLAS-common `dist` prefixes to the corpus
+`CMAKE_PREFIX_PATH`. This is build/runtime enablement, not an instrumentation
+knob. The exact local paths and retained gfx1201 setup evidence are recorded in
+[STATUS_RDNA4.md](STATUS_RDNA4.md).
+
+The corpus executable's `--validate` option selects its CPU backend; it does
+not validate a GPU execution. The checked-in
+[`consan_llama_validation.py`](../../tests/dbi/consan/consan_llama_validation.py)
+therefore launches two processes for every repetition: an instrumented GPU
+process without `--validate`, and an uninstrumented CPU process with
+`--validate` after scrubbing all ConSan/HSA-tool settings. Both write binary
+F32 results. RMSNorm uses the corpus's compact 128-element shape and requires
+a maximum absolute error of `1e-5`. Quantized matvec uses a still-compact but
+fault-sensitive 1,024-element embedding: the corpus's 128-element setup smoke
+schedule-masks its synchronization fault. The 1,024-element clean GPU/CPU
+baseline requires a maximum absolute error of `2e-2`; its independently
+reviewed exact barrier deletion exceeds that bound by roughly 40 orders of
+magnitude. The wrapper emits the GPU timing and oracle result as JSON for the
+normal paired-overhead machinery.
 
 ## Inspecting the executable contract
 
@@ -85,7 +183,7 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
 ```
 
 The JSON contains all north-star workloads, four canonical profiles, admitted
-fault families, fixed timeout, forbidden exploratory controls, and the maximum
+fault families, row-declared timeouts, forbidden exploratory controls, and the maximum
 GPU parallelism. Review it before starting a campaign and retain it with the
 results.
 
@@ -157,7 +255,10 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
 `--allow-reference` only permits read-only explanation. The `fault` subcommand
 continues to reject the cumulative reference file.
 
-The current manifest covers Qwen3-0.6B prefill; Sharktank TP1 prefill and
+The current gfx1201 manifest covers Qwen3-0.6B prefill; native
+PyTorch/Inductor compact and split online-softmax clients, collision-heavy
+scatter-reduce, Qwen-vocabulary top-k, causal SDPA, and histogram;
+native llama.cpp quantized matvec and RMSNorm; Sharktank TP1 prefill and
 decode/combined, TP2, and CLIP BF16; and the hip-moi D128, WMMA, Stream-K,
 tree-atomic-OR, and Jakub workloads. The profile IDs are `supercollider`,
 `record-replay`, `sampled`, and `inline-shadow`.
@@ -182,6 +283,11 @@ profile records its explicit `RJ_CONSAN_MODE` and strict completeness policy,
 so provenance does not depend on selection defaults. This
 prevents a coverage-limiting setting, kernel filter, explicit temporary register,
 force-spill control, or stale sampling setting from silently qualifying a cell.
+If a strict transform cannot be installed, the hook emits a typed
+`ConSan load rejection` record and terminates that contained workload process
+with exit code 92. The runner preserves the rejection fields in `result.json`;
+it does not misreport the result as a missing teardown verdict or allow a HIP
+client to launch through a null symbol after ignoring the HSA load error.
 
 An instrumented clean row is accepted only when:
 
@@ -197,6 +303,12 @@ stride 16,384 and offset zero are automatic runtime defaults, not environment
 settings supplied by the validation harness. `explain --json` records those
 values under `implicit_runtime_defaults`, while `workload_specific_tuning`
 remains empty.
+
+The ordinary process deadline is 30 seconds. The Qwen-vocabulary top-k row
+declares 120 seconds because its complete Record/Replay transform patches
+63,474 accesses and 7,100 barriers and takes about 90 seconds on this machine;
+that execution bound does not change instrumentation coverage or semantics.
+An explicit `--timeout` overrides the manifest only for diagnosis.
 
 ## Correct-workload overhead
 
@@ -218,14 +330,13 @@ and the maximum mode ratio used for the support-table cell:
 slowdown = instrumented median / paired baseline median
 ```
 
-Qwen normally uses ten benchmark dispatch repetitions.  The time-constrained
-`gfx1250` software-execution campaign uses one repetition so that each paired
-row remains practical; its result is an order-of-magnitude qualification, not
-a statistically smoothed performance result.  Sharktank performs an untimed
-warmup and retains call samples. CLIP and hip-moi rows use fresh processes as
-declared by the manifest. Raw samples, commands, complete controlled
-environment, hook hash, source revisions, and unrounded ratios remain in the
-artifact tree.
+The active `gfx950` and `gfx1250` campaigns use one benchmark repetition per
+process for Qwen, Sharktank, PyTorch, and Tensile.  These results qualify the
+order of magnitude rather than providing statistically smoothed performance
+numbers.  Sharktank still performs its untimed warmup, while CLIP and hip-moi
+rows use fresh processes as declared by the manifest. Raw samples, commands,
+complete controlled environment, hook hash, source revisions, and unrounded
+ratios remain in the artifact tree.
 
 ## Fault inventory and reviewed specs
 
@@ -320,7 +431,9 @@ creates a process group, holds the global destructive-GPU lock, enforces the
 deadline, captures original/patched code objects, runs a device-discovery
 command plus a target-dispatch smoke before and after, and quarantines the
 artifact root if health fails.  The defaults are `rocminfo` and the portable
-workload smoke.  Environments where either default cannot terminate may pass
+workload smoke, with a 30-second probe deadline.  Slow software devices may
+set a larger retained `--health-timeout`.  Environments where either default
+cannot terminate may pass
 the paired `--health-command-json` and `--smoke-command-json` overrides.  Both
 exact commands are retained in every row manifest and replayed verbatim; the
 smoke must still execute target code and check an independent result.  A

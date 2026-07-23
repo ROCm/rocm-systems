@@ -162,6 +162,7 @@ struct ConSanMoiReportLayoutOverride {
   uint32_t fence_record_capacity = 0;
   uint32_t diagnostic_capacity = 0;
   uint32_t exact_shadow_entry_capacity = 0;
+  uint32_t inline_exact_dispatch_bank_count = 0;
   uint32_t inline_atomic_release_capacity = 0;
   uint32_t inline_acquired_epoch_token_capacity = 0;
   uint32_t inline_causal_snapshot_capacity = 0;
@@ -216,6 +217,9 @@ struct ConSanMoiPrologueScratchVgprAssignment {
 struct ConSanMoiTransientSgprAssignment {
   uint64_t descriptor_file_offset = 0;
   uint16_t exec_save_sgpr = 0;
+  /// A missing owner-local dispatch pair excludes dispatch-qualified probes
+  /// for that owner rather than emitting records with an ambiguous identity.
+  std::optional<uint16_t> dispatch_id_sgpr;
   bool spill_backed = false;
   std::optional<uint16_t> indirect_pc_sgpr;
   std::optional<uint16_t> indirect_scc_sgpr;
@@ -334,6 +338,11 @@ struct ConSanOptions {
   /// Internal Record/Replay fallback: EXEC/VCC destinations are preserved in
   /// private memory while dense routing uses separately proven-dead scalars.
   bool automatic_moi_record_replay_sgpr_spill = false;
+  /// Internal operating-point marker for RDNA-family Record/Replay objects
+  /// whose barrier inventory can require the relocated dense router. Such
+  /// objects reserve a dispatch key and call-return pair in addition to the
+  /// ordinary five-register EXEC/VCC/SCC window.
+  bool moi_record_replay_dense_barrier_router = false;
   /// Internal proof marker set only when the automatic EXEC-save window lies
   /// above every guest-referenced SGPR and can retain cross-site wave state.
   bool moi_exec_save_sgprs_persistent = false;
@@ -350,7 +359,7 @@ struct ConSanOptions {
   /// Internal marker set after ConSan assigns the hw_id owner temporary SGPR.
   bool automatic_moi_owner_sgpr = false;
   /// Internal marker set after ConSan assigns the persistent hardware
-  /// dispatch-ID SGPR pair used by dispatch-qualified Inline metadata.
+  /// dispatch-ID SGPR pair used by dispatch-qualified engine metadata.
   bool automatic_moi_dispatch_id_sgprs = false;
   /// Internal metadata used only by the mutation-then-instrument composition
   /// path. It prevents appended fault code from being attributed to an
@@ -412,6 +421,10 @@ struct ConSanOptions {
   std::optional<uint64_t> report_buffer_address;
   std::optional<uint64_t> moi_report_buffer_address;
   uint64_t moi_report_buffer_size = 0;
+  /// Effective per-workgroup LDS aperture supplied by the execution runtime.
+  /// Offline callers leave this unset and use the architecture's configured
+  /// default (gfx1250.json for gfx1250).
+  std::optional<uint32_t> moi_max_workgroup_lds_bytes;
   std::optional<ConSanMoiReportLayoutOverride> moi_report_layout;
   /// Generation stored in direct sampled entries. Auto report buffers set
   /// this from their versioned header; explicit buffers default to zero.

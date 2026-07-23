@@ -36,11 +36,25 @@ SCHEMA_VERSION = 1
 WORKSPACE_ENV = "CONSAN_VALIDATION_WORKSPACE_DIR"
 TARGET_ENV = "CONSAN_VALIDATION_TARGET"
 PYTORCH_PYTHON_ENV = "CONSAN_VALIDATION_PYTORCH_PYTHON"
+SHARKTANK_PYTHON_ENV = "CONSAN_VALIDATION_SHARKTANK_PYTHON"
 TENSILE_PYTHON_ENV = "CONSAN_VALIDATION_TENSILE_PYTHON"
 TIMEOUT_SECONDS = 30
-QWEN_OVERHEAD_REPETITIONS = {"gfx1250": 1}
+QWEN_OVERHEAD_REPETITIONS = {"gfx950": 1, "gfx1250": 1}
 CONTROLLED_ENV_PREFIX = "RJ_CONSAN_"
 TOOLS = ("iree-run-module", "iree-benchmark-module", "rocminfo")
+HSA_TOOL_ENVIRONMENT = {
+    "HSA_TOOLS_LIB",
+    "HSA_TOOLS_ROCPROFILER_V1_TOOLS",
+}
+SOFTWARE_MODEL_ENVIRONMENT = {
+    "HSA_MODEL_LIB",
+    "HSAKMT_SIM_LIB",
+    "HSA_MODEL_TOPOLOGY",
+    "HSA_MODEL_NUM_THREADS",
+    "HSA_ENABLE_SDMA",
+    "HSA_ENABLE_SCRATCH_ASYNC_RECLAIM",
+    "HSA_ENABLE_INTERRUPT",
+}
 
 
 SETTING_CATEGORIES = {
@@ -135,6 +149,7 @@ class Workload:
     fault_filter: str | None = None
     targets: tuple[str, ...] | None = None
     moi_record_evidence_expected: bool = True
+    run_timeout_seconds: int = TIMEOUT_SECONDS
 
 
 PROFILES = {
@@ -477,7 +492,7 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=1,
         fault_families=("barrier-drop",),
-        targets=("gfx1250",),
+        targets=("gfx950", "gfx1250"),
     ),
     Workload(
         id="pytorch-torch-topk",
@@ -493,7 +508,7 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=1,
         fault_families=("barrier-drop",),
-        targets=("gfx1250",),
+        targets=("gfx950", "gfx1250"),
     ),
     Workload(
         id="pytorch-torch-sort",
@@ -509,7 +524,7 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=1,
         fault_families=("barrier-drop",),
-        targets=("gfx1250",),
+        targets=("gfx950", "gfx1250"),
     ),
     Workload(
         id="pytorch-scatter-reduce",
@@ -525,7 +540,7 @@ WORKLOADS = (
         tracks_atomics=True,
         overhead_processes=1,
         fault_families=("atomic-weaken-order", "atomic-weaken-scope"),
-        targets=("gfx1250",),
+        targets=("gfx950", "gfx1250", "gfx1201"),
         moi_record_evidence_expected=False,
     ),
     Workload(
@@ -542,7 +557,11 @@ WORKLOADS = (
         tracks_atomics=True,
         overhead_processes=1,
         fault_families=("barrier-drop", "atomic-weaken-order", "atomic-weaken-scope"),
-        targets=("gfx1250",),
+        # This ordinary upstream operation is selected independently by each
+        # installed wheel.  The gfx1201 wheel chooses a native histogram
+        # kernel with LDS accesses, split barriers, and LDS atomics; target
+        # evidence and qualification remain separate.
+        targets=("gfx950", "gfx1250", "gfx1201"),
     ),
     Workload(
         id="pytorch-norm-softmax",
@@ -558,7 +577,104 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=1,
         fault_families=("barrier-drop",),
-        targets=("gfx1250",),
+        targets=("gfx950", "gfx1250"),
+    ),
+    Workload(
+        id="pytorch-rdna4-compiled-softmax",
+        priority="P2",
+        corpus="pytorch",
+        kind="pytorch",
+        relative_path="consan_pytorch_validation.py",
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        fault_families=("barrier-drop",),
+        targets=("gfx1201",),
+    ),
+    Workload(
+        id="pytorch-rdna4-split-softmax",
+        priority="P2",
+        corpus="pytorch",
+        kind="pytorch",
+        relative_path="consan_pytorch_validation.py",
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        fault_families=("barrier-drop",),
+        targets=("gfx1201",),
+    ),
+    Workload(
+        id="pytorch-rdna4-llm-topk",
+        priority="P2",
+        corpus="pytorch",
+        kind="pytorch",
+        relative_path="consan_pytorch_validation.py",
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        fault_families=("barrier-drop",),
+        targets=("gfx1201",),
+        run_timeout_seconds=120,
+    ),
+    Workload(
+        id="pytorch-rdna4-sdpa",
+        priority="P2",
+        corpus="pytorch",
+        kind="pytorch",
+        relative_path="consan_pytorch_validation.py",
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        fault_families=("barrier-drop",),
+        targets=("gfx1201",),
+    ),
+    Workload(
+        id="llama-rdna4-mul-mat-vec-q",
+        priority="P2",
+        corpus="rocjitsu-test-corpus",
+        kind="llama",
+        relative_path="llama_cpp_mul_mat_vec_q",
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=True,
+        overhead_processes=5,
+        fault_families=("barrier-drop",),
+        targets=("gfx1201",),
+    ),
+    Workload(
+        id="llama-rdna4-rms-norm",
+        priority="P3",
+        corpus="rocjitsu-test-corpus",
+        kind="llama",
+        relative_path="llama_cpp_rms_norm",
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=5,
+        fault_families=("barrier-drop",),
+        targets=("gfx1201",),
     ),
     Workload(
         id="qwen-prefill",
@@ -714,7 +830,9 @@ WORKLOADS = (
             "hip-moi-build/tests/"
             "hip_moi_instrumented_rdna4_wmma_streamk_tree_atomic_or_test"
         ),
-        clean_filter="HipMoiRdna4WmmaStreamKTreeAtomicOr.*",
+        clean_filter=(
+            "HipMoiRdna4WmmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersWmmaPartials"
+        ),
         overhead_filter=(
             "HipMoiRdna4WmmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersWmmaPartials"
         ),
@@ -760,6 +878,10 @@ def _fault_families(target: str, workload: Workload) -> tuple[str, ...]:
         "tp1-decode-combined",
     ):
         return ("barrier-move",)
+    if target == "gfx950" and workload.id in ("streamk-arrival", "tree-atomic-or"):
+        # CDNA4 compiler atomics encode ordering through surrounding cache and
+        # wait operations, but have no gfx12-style instruction scope field.
+        return ("atomic-weaken-order",)
     return workload.fault_families
 
 
@@ -985,22 +1107,122 @@ def _required_paths(
     if any(workload.corpus == "hip-moi" for workload in workloads):
         paths["hip-moi"] = workspace / "hip-moi"
         paths["hip-moi-build"] = workspace / "hip-moi-build"
+    if any(workload.kind == "llama" for workload in workloads):
+        paths["rocjitsu-test-corpus"] = workspace / "rocjitsu-test-corpus"
     if any(workload.kind == "tensile" for workload in workloads):
         paths["rocjitsu-test-corpus"] = workspace / "rocjitsu-test-corpus"
         paths["tensilelite"] = _tensilelite_root(workspace)
     return paths
 
 
-def _pytorch_python() -> Path:
+def _pytorch_python(workspace: Path | None = None) -> Path:
     # Preserve a virtual environment's interpreter path. Resolving its python
     # symlink would silently bypass that environment and lose torch/triton.
+    configured = os.environ.get(PYTORCH_PYTHON_ENV)
+    if configured:
+        return Path(os.path.abspath(Path(configured).expanduser()))
+    if workspace is not None:
+        workspace_interpreter = workspace / "consan-pytorch-venv" / "bin" / "python"
+        if workspace_interpreter.is_file():
+            return workspace_interpreter
+    return Path(
+        os.path.abspath(Path(sys.executable).expanduser())
+    )
+
+
+def _sharktank_python() -> Path:
     return Path(
         os.path.abspath(
-            Path(os.environ.get(PYTORCH_PYTHON_ENV, sys.executable)).expanduser()
+            Path(os.environ.get(SHARKTANK_PYTHON_ENV, sys.executable)).expanduser()
         )
     )
 
 
+def _pytorch_runtime_probe(
+    python: Path, hook: Path, target: str, workload: Workload
+) -> dict:
+    """Proves that PyTorch can dispatch and that its HSA runtime loads ConSan."""
+    probe_source = """
+import json
+import os
+import pathlib
+import sys
+
+import torch
+import triton
+
+value = torch.ones(1, device="cuda")
+torch.cuda.synchronize()
+properties = torch.cuda.get_device_properties(0)
+maps = pathlib.Path("/proc/self/maps").read_text(encoding="utf-8")
+print(json.dumps({
+    "torch": torch.__version__,
+    "hip": torch.version.hip,
+    "triton": triton.__version__,
+    "device": torch.cuda.get_device_name(0),
+    "arch": getattr(properties, "gcnArchName", None),
+    "numeric_oracle": value.item() == 1.0,
+    "hook_loaded": sys.argv[1] in maps,
+}), flush=True)
+# Large precompiled operator libraries can spend longer tearing down a
+# software target than executing this linkage canary.  The workload clients
+# finalize ConSan explicitly; this doctor probe only needs the flushed result
+# and process mappings, so skip unrelated runtime shutdown.
+os._exit(0)
+"""
+    environment = _clean_environment("supercollider", workload, hook, target)
+    # This is a runtime-linkage canary, not a coverage row.  Avoid spending
+    # preflight time on PyTorch's large bundled kernel object; the real rows
+    # run without this filter and enforce complete coverage independently.
+    environment.update(
+        {
+            "RJ_CONSAN_LOG": "0",
+            "RJ_CONSAN_REQUIRE_PATCH": "0",
+            "RJ_CONSAN_TEST_KERNEL_FILTER": (
+                "__consan_pytorch_runtime_probe_never_matches__"
+            ),
+        }
+    )
+    try:
+        probe = subprocess.run(
+            [str(python), "-c", probe_source, str(hook)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+            env=environment,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return {
+            "ok": False,
+            "python": str(python),
+            "detail": str(error),
+        }
+    try:
+        payload = json.loads(probe.stdout.strip())
+    except json.JSONDecodeError:
+        payload = None
+    reasons = []
+    if probe.returncode != 0:
+        reasons.append(f"probe exited with status {probe.returncode}")
+    if not isinstance(payload, dict):
+        reasons.append("probe did not emit its JSON result")
+    else:
+        arch = payload.get("arch")
+        if not isinstance(arch, str) or not arch.startswith(target):
+            reasons.append(f"device architecture is {arch!r}, expected {target!r}")
+        if not payload.get("numeric_oracle"):
+            reasons.append("GPU numeric oracle failed")
+        if not payload.get("hook_loaded"):
+            reasons.append("PyTorch HSA runtime did not load the ConSan hook")
+    if reasons and probe.stderr.strip():
+        reasons.append(probe.stderr.strip())
+    return {
+        "ok": not reasons,
+        "python": str(python),
+        "detail": payload if payload is not None else probe.stderr.strip(),
+        "reasons": reasons,
+    }
 def _tensile_python() -> Path:
     return Path(
         os.path.abspath(
@@ -1030,11 +1252,35 @@ def _tensile_client(workspace: Path) -> Path:
     )
 
 
+def _llama_executable(workspace: Path, target: str, name: str) -> Path:
+    candidates = (
+        workspace
+        / "rocjitsu-test-corpus-build"
+        / "kernels"
+        / target
+        / "cases"
+        / "llama.cpp"
+        / name,
+        workspace
+        / "rocjitsu-test-corpus"
+        / ".pytest-artifacts-rdna4-llama-baseline"
+        / "_suite_shards"
+        / "kernels_shard_0"
+        / "kernels"
+        / target
+        / "build"
+        / "cases"
+        / "llama.cpp"
+        / name,
+    )
+    return next((candidate for candidate in candidates if candidate.is_file()), candidates[0])
+
+
 def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, Path]:
     workload = _resolved_workload(target, workload)
     if workload.kind == "pytorch":
         return {
-            "python": _pytorch_python(),
+            "python": _pytorch_python(workspace),
             "workload-source": Path(__file__).with_name(workload.relative_path),
         }
     if workload.kind == "tensile":
@@ -1043,6 +1289,27 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
             "workload-source": Path(__file__).with_name("consan_tensile_validation.py"),
             "config": workspace / "rocjitsu-test-corpus" / workload.relative_path,
             "client": _tensile_client(workspace),
+        }
+    if workload.kind == "llama":
+        case = (
+            "mul_mat_vec_q"
+            if workload.id == "llama-rdna4-mul-mat-vec-q"
+            else "rms_norm"
+        )
+        return {
+            "python": Path(os.path.abspath(Path(sys.executable).expanduser())),
+            "workload-source": Path(__file__).with_name("consan_llama_validation.py"),
+            "case": workspace
+            / "rocjitsu-test-corpus"
+            / "corpus"
+            / "kernels"
+            / "cases"
+            / "llama.cpp"
+            / case
+            / "case.json",
+            "executable": _llama_executable(
+                workspace, target, workload.relative_path
+            ),
         }
     if workload.kind == "qwen":
         root = workspace / workload.relative_path
@@ -1096,7 +1363,15 @@ def _doctor(
         }
         for label, path in paths.items()
     }
-    required_tools = ("rocminfo",)
+    # PyTorch's runtime probe performs a numeric dispatch and reports the
+    # device architecture from the same process that loads the ConSan hook.
+    # Requiring a separately installed rocminfo for a PyTorch-only row adds no
+    # target assurance and can reject an otherwise complete wheel-based setup.
+    required_tools = (
+        ("rocminfo",)
+        if any(workload.kind != "pytorch" for workload in workloads)
+        else ()
+    )
     if any(workload.kind == "qwen" for workload in workloads):
         required_tools = TOOLS
     tools = {tool: shutil.which(tool) for tool in required_tools}
@@ -1106,7 +1381,30 @@ def _doctor(
                 "path": str(path),
                 "present": path.is_file(),
             }
-    ok = all(item["present"] for item in path_checks.values()) and all(tools.values())
+    runtimes = {}
+    pytorch_workloads = tuple(
+        workload for workload in workloads if workload.kind == "pytorch"
+    )
+    if pytorch_workloads:
+        python = _pytorch_python(workspace)
+        if python.is_file():
+            runtimes["pytorch"] = _pytorch_runtime_probe(
+                python,
+                _hook_path(workspace),
+                target,
+                pytorch_workloads[0],
+            )
+        else:
+            runtimes["pytorch"] = {
+                "ok": False,
+                "python": str(python),
+                "detail": "interpreter is missing",
+            }
+    ok = (
+        all(item["present"] for item in path_checks.values())
+        and all(tools.values())
+        and all(item["ok"] for item in runtimes.values())
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "ok": ok,
@@ -1114,6 +1412,7 @@ def _doctor(
         "target": target,
         "workloads": list(selected_ids),
         "paths": path_checks,
+        "runtimes": runtimes,
         "tools": tools,
     }
 
@@ -1146,7 +1445,8 @@ def _clean_environment(
         key: value
         for key, value in os.environ.items()
         if not key.startswith(CONTROLLED_ENV_PREFIX)
-        and key not in {"HSA_TOOLS_LIB", "HIP_TARGET"}
+        and key not in HSA_TOOL_ENVIRONMENT | {"HIP_TARGET"}
+        and not (target == "gfx950" and key in SOFTWARE_MODEL_ENVIRONMENT)
     }
     if target is not None:
         environment["HIP_TARGET"] = target
@@ -1160,6 +1460,11 @@ def _clean_environment(
             "RJ_CONSAN_LOG": "1",
         }
     )
+    if workload.kind in {"pytorch", "llama"}:
+        # These clients use a modern HSA runtime which returns after successful
+        # rocprofiler registration unless legacy environment tools are
+        # explicitly requested. ConSan is currently such a tool.
+        environment["HSA_TOOLS_ROCPROFILER_V1_TOOLS"] = "1"
     if not workload.moi_record_evidence_expected:
         environment["RJ_CONSAN_MOI_REQUIRE_RECORDS"] = "0"
     if workload.id == "qwen-prefill" and profile == "sampled":
@@ -1170,6 +1475,7 @@ def _clean_environment(
 def _controlled_environment(environment: dict[str, str]) -> dict[str, str]:
     runtime_names = {
         "HSA_TOOLS_LIB",
+        "HSA_TOOLS_ROCPROFILER_V1_TOOLS",
         "CTEST_PARALLEL_LEVEL",
         "HIP_PATH",
         "HIP_TARGET",
@@ -1187,7 +1493,7 @@ def _controlled_environment(environment: dict[str, str]) -> dict[str, str]:
 
 
 def _setting_metadata(name: str) -> dict:
-    if name in {"HSA_TOOLS_LIB", "HIP_TARGET"}:
+    if name in HSA_TOOL_ENVIRONMENT | {"HIP_TARGET"}:
         category = "runtime-plumbing"
     elif name == "CTEST_PARALLEL_LEVEL":
         category = "fault-containment"
@@ -1236,7 +1542,7 @@ def _audited_settings(environment: dict[str, str]) -> list[dict]:
         name
         for name in environment
         if name.startswith(CONTROLLED_ENV_PREFIX)
-        or name in {"HSA_TOOLS_LIB", "HIP_TARGET", "CTEST_PARALLEL_LEVEL"}
+        or name in HSA_TOOL_ENVIRONMENT | {"HIP_TARGET", "CTEST_PARALLEL_LEVEL"}
     )
     return [
         {"name": name, "value": environment[name], **_setting_metadata(name)}
@@ -1339,16 +1645,15 @@ def _workload_command(
     if workload.kind == "qwen":
         return _qwen_command(workspace, target, overhead, output)
     if workload.kind == "sharktank":
-        # gfx1250 validation runs in a software GPU environment where repeated
-        # end-to-end model execution is too expensive for the iteration loop.
+        # The active architecture campaigns use one end-to-end repetition.
         # Keep both the outer process count and this inner suite count at one.
         repetitions = (
             1
-            if target == "gfx1250" or workload.overhead_processes > 1
+            if target in {"gfx950", "gfx1250"} or workload.overhead_processes > 1
             else (10 if overhead else 1)
         )
         return [
-            sys.executable,
+            str(_sharktank_python()),
             str(Path(__file__).with_name("consan_sharktank_validation.py")),
             "--suite-root",
             str(workspace / "iree-test-suites"),
@@ -1363,12 +1668,16 @@ def _workload_command(
         ]
     if workload.kind == "pytorch":
         return [
-            str(_pytorch_python()),
+            str(_pytorch_python(workspace)),
             str(Path(__file__).with_name(workload.relative_path)),
             "--workload",
             workload.id.removeprefix("pytorch-"),
             "--repetitions",
-            "1" if target == "gfx1250" else ("10" if overhead else "1"),
+            (
+                "1"
+                if target in {"gfx950", "gfx1250"}
+                else ("10" if overhead else "1")
+            ),
             "--label",
             f"{workload.id}-{phase}",
         ]
@@ -1386,6 +1695,22 @@ def _workload_command(
             "1",
             "--label",
             f"{workload.id}-{phase}",
+        ]
+    if workload.kind == "llama":
+        llama_workload = (
+            "mul-mat-vec-q"
+            if workload.id == "llama-rdna4-mul-mat-vec-q"
+            else "rms-norm"
+        )
+        return [
+            sys.executable,
+            str(Path(__file__).with_name("consan_llama_validation.py")),
+            "--executable",
+            str(_llama_executable(workspace, target, workload.relative_path)),
+            "--workload",
+            llama_workload,
+            "--output-dir",
+            str(output.parent / f"{output.stem}-llama-work"),
         ]
     executable = workspace / workload.relative_path
     selected_filter = (
@@ -1440,6 +1765,10 @@ def _source_identities(workspace: Path, workload: Workload) -> list[dict | None]
                 workspace / "TheRock" / "rocm-libraries",
             ]
         )
+    if workload.kind == "llama":
+        roots.append(workspace / "rocjitsu-test-corpus")
+    if workload.kind == "pytorch":
+        roots.append(workspace / "pytorch")
     return [git_identity(root) for root in roots]
 
 
@@ -1447,6 +1776,19 @@ def _coverage_summary(log_text: str) -> dict:
     try:
         evidence = parse_coverage_evidence(log_text)
     except CoverageParseError as error:
+        rejection_prefix = "[rocjitsu-dbi-hooks] ConSan load rejection "
+        rejection_lines = [
+            line[len(rejection_prefix) :]
+            for line in log_text.splitlines()
+            if line.startswith(rejection_prefix)
+        ]
+        if rejection_lines:
+            fields = dict(re.findall(r"([a-z_]+)=([^ ]+)", rejection_lines[-1]))
+            return {
+                "accepted": False,
+                "error": "ConSan rejected a code object before execution",
+                "load_rejection": fields,
+            }
         return {"accepted": False, "error": str(error)}
     verdict = evidence.verdict
     reasons = []
@@ -1594,6 +1936,12 @@ def _launcher_from_json(value: str | None) -> list[str]:
     return launcher
 
 
+def _outer_repetitions(target: str, phase: str, workload: Workload) -> int:
+    if target in {"gfx950", "gfx1250"} or phase != "overhead":
+        return 1
+    return workload.overhead_processes
+
+
 def _run_profile(
     workspace: Path,
     target: str,
@@ -1609,9 +1957,7 @@ def _run_profile(
     row_dir = artifact_root / workload.id / phase / (row_label or profile_id)
     row_dir.mkdir(parents=True, exist_ok=False)
     hook = _hook_path(workspace)
-    repetitions = (
-        1 if target == "gfx1250" or phase != "overhead" else workload.overhead_processes
-    )
+    repetitions = _outer_repetitions(target, phase, workload)
     logs = []
     commands = []
     returncodes = []
@@ -1642,7 +1988,7 @@ def _run_profile(
                     _benchmark_median(path) for path in qwen_json_paths
                 )
             }
-        elif workload.kind in {"sharktank", "pytorch", "tensile"}:
+        elif workload.kind in {"sharktank", "pytorch", "tensile", "llama"}:
             per_run = [_json_medians(log, workload.kind.capitalize()) for log in logs]
             keys = set.intersection(*(set(item) for item in per_run))
             timing = {
@@ -1924,6 +2270,9 @@ def _inventory(args: argparse.Namespace) -> int:
     aggregate_records = {"sites": set(), "sequences": set(), "destinations": set()}
     for family in _fault_families(target, workload):
         environment = _clean_environment("supercollider", workload, hook, target)
+        # Clean qualification uses compact level-1 summaries. Fault inventory
+        # explicitly requests level 2 because it consumes per-site identities.
+        environment["RJ_CONSAN_LOG"] = "2"
         environment["RJ_CONSAN_FAULT_DRY_RUN"] = "1"
         environment.update(_fault_inventory_environment(family))
         log_path = root / f"command-{family}.log"
@@ -2676,6 +3025,8 @@ def _fault(args: argparse.Namespace) -> int:
                 fault["family"],
                 "--timeout",
                 str(args.timeout),
+                "--health-timeout",
+                str(args.health_timeout),
                 "--destructive",
                 "--allow-destructive",
                 "--serialize-gpu",
@@ -2769,6 +3120,7 @@ def _run(args: argparse.Namespace) -> int:
     workspace = _workspace_from_environment()
     target = _target(args)
     workload = WORKLOAD_BY_ID[args.workload]
+    timeout = args.timeout if args.timeout is not None else workload.run_timeout_seconds
     doctor = _doctor(workspace, target, (workload.id,))
     if not doctor["ok"]:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
@@ -2798,7 +3150,7 @@ def _run(args: argparse.Namespace) -> int:
             profile,
             args.phase,
             artifact_root,
-            args.timeout,
+            timeout,
             row_label,
             launcher,
         )
@@ -2865,7 +3217,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     run.add_argument("--profile", choices=(*PROFILE_IDS, "all"), default="all")
     run.add_argument("--phase", choices=("clean", "overhead"), required=True)
     run.add_argument("--artifact-root", type=Path, required=True)
-    run.add_argument("--timeout", type=int, default=TIMEOUT_SECONDS)
+    run.add_argument(
+        "--timeout",
+        type=int,
+        help="override the workload timeout declared by the executable manifest",
+    )
     run.add_argument("--include-baseline", action="store_true")
     run.add_argument(
         "--launcher-json",
@@ -2893,6 +3249,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     fault.add_argument("--fault", required=True, help="fault id in the JSON spec")
     fault.add_argument("--artifact-root", type=Path, required=True)
     fault.add_argument("--timeout", type=int, default=TIMEOUT_SECONDS)
+    fault.add_argument(
+        "--health-timeout",
+        type=float,
+        default=30.0,
+        help="deadline in seconds for each retained discovery and smoke probe",
+    )
     fault.add_argument("--allow-destructive", action="store_true")
     fault.add_argument(
         "--health-command-json",
@@ -2905,8 +3267,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="explicit retained target-dispatch smoke command",
     )
     args = parser.parse_args(argv)
-    if getattr(args, "timeout", 1) <= 0:
+    timeout = getattr(args, "timeout", None)
+    if timeout is not None and timeout <= 0:
         parser.error("--timeout must be positive")
+    if getattr(args, "health_timeout", 1) <= 0:
+        parser.error("--health-timeout must be positive")
     if (getattr(args, "health_command_json", None) is None) != (
         getattr(args, "smoke_command_json", None) is None
     ):
@@ -2925,7 +3290,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.json:
                 print(json.dumps(result, indent=2, sort_keys=True))
             else:
-                for workload in WORKLOADS:
+                for workload in _workloads_for_target(target):
                     faults = ",".join(_fault_families(target, workload))
                     print(f"{workload.priority} {workload.id}: {faults}")
             return 0
@@ -2950,7 +3315,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "doctor":
             workload_ids = (
-                tuple(WORKLOAD_BY_ID) if args.workload == "all" else (args.workload,)
+                None if args.workload == "all" else (args.workload,)
             )
             result = _doctor(workspace, target, workload_ids)
             if args.json:
@@ -2965,6 +3330,14 @@ def main(argv: list[str] | None = None) -> int:
                     print(
                         f"{'ok' if path else 'MISSING':7} PATH tool {tool}: {path or '-'}"
                     )
+                for runtime, item in result.get("runtimes", {}).items():
+                    state = "ok" if item["ok"] else "BROKEN"
+                    print(
+                        f"{state:7} {runtime} runtime {item['python']}: "
+                        f"{json.dumps(item['detail'], sort_keys=True)}"
+                    )
+                    for reason in item.get("reasons", ()):
+                        print(f"        reason: {reason}")
             return 0 if result["ok"] else 1
         if args.command == "inventory":
             return _inventory(args)

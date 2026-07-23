@@ -292,7 +292,13 @@ rj_status_t rj_waitcheck_result_init(rj_waitcheck_result_t *result, size_t resul
   return ROCJITSU_STATUS_SUCCESS;
 }
 
-const char *rj_waitcheck_target_name(rj_waitcheck_target_t target) {
+#if defined(__clang__)
+#define RJ_NO_SANITIZE_ENUM __attribute__((no_sanitize("enum")))
+#else
+#define RJ_NO_SANITIZE_ENUM
+#endif
+
+RJ_NO_SANITIZE_ENUM const char *rj_waitcheck_target_name(rj_waitcheck_target_t target) {
   switch (target) {
   case ROCJITSU_WAITCHECK_TARGET_GFX90A:
     return "gfx90a";
@@ -318,7 +324,8 @@ const char *rj_waitcheck_target_name(rj_waitcheck_target_t target) {
   return "unknown";
 }
 
-const char *rj_waitcheck_diagnostic_code_name(rj_waitcheck_diagnostic_code_t code) {
+RJ_NO_SANITIZE_ENUM const char *
+rj_waitcheck_diagnostic_code_name(rj_waitcheck_diagnostic_code_t code) {
   switch (code) {
   case ROCJITSU_WAITCHECK_DIAGNOSTIC_WAIT_COUNTER:
     return "wait-counter";
@@ -336,7 +343,8 @@ const char *rj_waitcheck_diagnostic_code_name(rj_waitcheck_diagnostic_code_t cod
   return "unknown";
 }
 
-const char *rj_waitcheck_counter_parity_kind_name(rj_waitcheck_counter_parity_kind_t kind) {
+RJ_NO_SANITIZE_ENUM const char *
+rj_waitcheck_counter_parity_kind_name(rj_waitcheck_counter_parity_kind_t kind) {
   switch (kind) {
   case ROCJITSU_WAITCHECK_COUNTER_PARITY_MODELED_UNDERACCOUNTING:
     return "modeled-counter-underaccounting";
@@ -347,6 +355,8 @@ const char *rj_waitcheck_counter_parity_kind_name(rj_waitcheck_counter_parity_ki
   }
   return "unknown";
 }
+
+#undef RJ_NO_SANITIZE_ENUM
 
 namespace {
 

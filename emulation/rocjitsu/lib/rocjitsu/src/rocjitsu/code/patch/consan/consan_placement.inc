@@ -432,6 +432,9 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
     case 64:
       base = 0xD9D80000u;
       break;
+    case 96:
+      base = 0xDBF80000u;
+      break;
     case 128:
       base = 0xDBFC0000u;
       break;
@@ -509,11 +512,11 @@ two_address_lds_element_width_bits(const ConSanLdsSite &site) {
       site.mnemonic == "ds_read2st64_b64";
   const bool is_two_addr_store = is_two_address_lds_store(site);
   if (site.mnemonic == "ds_load_i8" || site.mnemonic == "ds_load_u8" ||
-      site.mnemonic == "ds_load_u16" || site.mnemonic == "ds_load_u16_d16" ||
-      site.mnemonic == "ds_load_u16_d16_hi" || site.mnemonic == "ds_read_i16" ||
-      site.mnemonic == "ds_read_u16" || site.mnemonic == "ds_store_b8" ||
-      site.mnemonic == "ds_store_b8_d16_hi" || site.mnemonic == "ds_store_b16" ||
-      site.mnemonic == "ds_store_b16_d16_hi")
+      site.mnemonic == "ds_load_i16" || site.mnemonic == "ds_load_u16" ||
+      site.mnemonic == "ds_load_u16_d16" || site.mnemonic == "ds_load_u16_d16_hi" ||
+      site.mnemonic == "ds_read_i16" || site.mnemonic == "ds_read_u16" ||
+      site.mnemonic == "ds_store_b8" || site.mnemonic == "ds_store_b8_d16_hi" ||
+      site.mnemonic == "ds_store_b16" || site.mnemonic == "ds_store_b16_d16_hi")
     return 1;
   if (is_two_addr_load || is_two_addr_store) {
     const auto element_width = two_address_lds_element_width_bits(site);
@@ -671,14 +674,18 @@ choose_scratch_vgpr(const ConSanLdsSite &site, const ConSanOptions &options,
 
 [[nodiscard]] std::optional<uint16_t>
 choose_vcc_save_sgpr(const Instruction *inst, const LivenessAnalysis *liveness,
-                     std::optional<uint16_t> min_preferred_sgpr) {
+                     std::optional<uint16_t> min_preferred_sgpr, rj_code_arch_t arch) {
   if (inst == nullptr || liveness == nullptr)
     return std::nullopt;
+  const auto find_free = [&](uint16_t start) {
+    return arch == ROCJITSU_CODE_ARCH_CDNA4 ? liveness->find_free_sgpr_pair(inst, start)
+                                            : liveness->find_free_sgpr(inst, start);
+  };
   if (min_preferred_sgpr) {
-    if (auto high_sgpr = liveness->find_free_sgpr(inst, *min_preferred_sgpr))
+    if (auto high_sgpr = find_free(*min_preferred_sgpr))
       return high_sgpr;
   }
-  return liveness->find_free_sgpr(inst);
+  return find_free(0);
 }
 
 [[nodiscard]] std::vector<uint64_t> kernel_entry_offsets(const ConSanResult &result) {

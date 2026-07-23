@@ -42,9 +42,17 @@ consan_moi_prefer_generation_tagged_workgroup_shadow(uint32_t guest_lds_bytes,
 }
 
 [[nodiscard]] constexpr uint32_t consan_moi_max_workgroup_lds_bytes(rj_code_arch_t arch) {
-  // gfx1250 exposes up to 320 KiB of LDS to one workgroup. Earlier targets in
-  // the supported set retain the 64 KiB limit used by the original planner.
-  return arch == ROCJITSU_CODE_ARCH_GFX1250 ? 320u * 1024u : 64u * 1024u;
+  // gfx1250 follows the simulator configuration rather than duplicating a
+  // provisional architectural limit in ConSan. Earlier targets retain the
+  // 64 KiB limit used by the original planner.
+  return arch == ROCJITSU_CODE_ARCH_GFX1250
+             ? static_cast<uint32_t>(ROCJITSU_GFX1250_LDS_SIZE_KB) * 1024u
+             : 64u * 1024u;
+}
+
+[[nodiscard]] constexpr uint32_t consan_moi_max_workgroup_lds_bytes(const ConSanOptions &options,
+                                                                    rj_code_arch_t arch) {
+  return options.moi_max_workgroup_lds_bytes.value_or(consan_moi_max_workgroup_lds_bytes(arch));
 }
 
 /// One eight-byte shadow slot covers one four-byte guest-LDS granule. Keeping
@@ -271,8 +279,7 @@ classify_consan_moi_inline_atomic_support(const ConSanAtomicSite &site,
   if (site.width_bits != 32)
     return ConSanMoiInlineAtomicSupport::UnsupportedWidth;
   const bool vector_flat_encoding =
-      is_flat && site.size == 3u * sizeof(uint32_t) && site.raw_saddr &&
-      *site.raw_saddr == 0x7cu;
+      is_flat && site.size == 3u * sizeof(uint32_t) && site.raw_saddr && *site.raw_saddr == 0x7cu;
   const bool cdna4_flat_encoding =
       is_flat && site.size == 2u * sizeof(uint32_t) && site.raw_saddr && *site.raw_saddr == 0u;
   const bool vglobal_encoding = is_vglobal && site.size == 3u * sizeof(uint32_t);
@@ -334,10 +341,11 @@ inline constexpr uint64_t kConSanMoiInlineShadowDefaultReportBufferBytes = 512u 
 /// the process ceiling; this pure planner enforces the per-buffer ceiling.
 inline constexpr uint64_t kConSanMoiAutoReportBufferCeilingBytes = 128u * 1024u * 1024u;
 inline constexpr uint64_t kConSanMoiAutoReportProcessCeilingBytes = 256u * 1024u * 1024u;
-// Record/replay synchronization probes can execute many times per static site.
-// Reserve bounded dynamic headroom by default so normal loop trip counts do not
-// immediately turn a complete static transform into report overflow.
-inline constexpr uint64_t kConSanMoiRecordReplayDynamicEventHeadroom = 256u;
+// Record/replay synchronization probes can execute many times per static site,
+// and a code-object-scoped report remains live across repeated dispatches. Keep
+// enough bounded dynamic headroom for ordinary validation and benchmark loops
+// without requiring a report-size tuning knob.
+inline constexpr uint64_t kConSanMoiRecordReplayDynamicEventHeadroom = 1024u;
 
 struct ConSanMoiAutoReportProcessBudget {
   uint64_t current_live_bytes = 0;

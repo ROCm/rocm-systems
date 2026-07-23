@@ -334,6 +334,87 @@ TEST(ConSan, FaultAtomicWeakenOrderSelectsExplicitReleaseAndAcquireEdges) {
   }));
 }
 
+TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerSequence) {
+  const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+  const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});
+  const auto atomic = build_cdna4_flat_atomic_add_u32(
+      /*vaddr=*/2, /*vsrc=*/4, /*vdst=*/5, /*return_old_value=*/true,
+      /*scope=*/2, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto wait = build_cdna4_s_wait_flat0(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(atomic && wait);
+  std::vector<uint32_t> words;
+  words.insert(words.end(), release.begin(), release.end());
+  words.push_back(*wait);
+  words.insert(words.end(), atomic->begin(), atomic->end());
+  words.push_back(*wait);
+  words.insert(words.end(), acquire.begin(), acquire.end());
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(words, "atomic_order_fault");
+
+  ConSanOptions inventory_options;
+  inventory_options.flavor = ConSanFlavor::SuperCollider;
+  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ASSERT_TRUE(consan_patch_succeeded(inventory));
+  ASSERT_EQ(inventory.fault_sites.size(), 1u);
+
+  ConSanOptions order_options = inventory_options;
+  order_options.fault_atomic_weaken_order = true;
+  order_options.fault_atomic_order_edge = ConSanAtomicOrderEdge::Release;
+  order_options.fault_site_identity = inventory.fault_sites.front().identity;
+  order_options.fault_require_exactly_one = true;
+  const ConSanResult order = try_patch_consan(bytes, order_options);
+  ASSERT_TRUE(order.errors.empty()) << testing::PrintToString(order.errors);
+  EXPECT_EQ(order.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(order.applied_fault_mutations, 1u);
+  EXPECT_TRUE(std::ranges::any_of(order.warnings, [](const std::string &warning) {
+    return warning.find("removed associated buffer_wbl2") != std::string::npos;
+  }));
+  ASSERT_FALSE(order.elf_bytes.empty());
+  const uint64_t text_file_offset = inventory.kernels.front().text_file_offset;
+  const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t offset = 0; offset < release.size() * sizeof(uint32_t);
+       offset += sizeof(uint32_t)) {
+    uint32_t staged_word = 0;
+    std::memcpy(&staged_word, order.elf_bytes.data() + text_file_offset + offset,
+                sizeof(staged_word));
+    EXPECT_EQ(staged_word, nop);
+  }
+  const uint64_t preserved_begin = release.size() * sizeof(uint32_t);
+  const uint64_t preserved_size = (words.size() - release.size() - 1u) * sizeof(uint32_t);
+  EXPECT_TRUE(std::equal(bytes.begin() + text_file_offset + preserved_begin,
+                         bytes.begin() + text_file_offset + preserved_begin + preserved_size,
+                         order.elf_bytes.begin() + text_file_offset + preserved_begin));
+
+  ConSanOptions scope_options = inventory_options;
+  scope_options.fault_atomic_weaken_scope = true;
+  scope_options.fault_dry_run = true;
+  scope_options.fault_site_identity = inventory.fault_sites.front().identity;
+  const ConSanResult scope = try_patch_consan(bytes, scope_options);
+  EXPECT_TRUE(scope.fault_plans.empty());
+  EXPECT_TRUE(std::ranges::any_of(scope.warnings, [](const std::string &warning) {
+    return warning.find("cannot weaken scope") != std::string::npos;
+  }));
+
+  scope_options.fault_dry_run = false;
+  const ConSanResult live_scope = try_patch_consan(bytes, scope_options);
+  EXPECT_EQ(live_scope.outcome, ConSanTransformOutcome::Invalid);
+  EXPECT_FALSE(live_scope.modified);
+  EXPECT_TRUE(std::ranges::any_of(live_scope.errors, [](const std::string &error) {
+    return error.find("scope fault is unsupported") != std::string::npos;
+  }));
+
+  ConSanOptions address_options = inventory_options;
+  address_options.fault_atomic_wrong_address = true;
+  address_options.fault_atomic_address_delta = 4;
+  address_options.fault_site_identity = inventory.fault_sites.front().identity;
+  const ConSanResult address = try_patch_consan(bytes, address_options);
+  EXPECT_EQ(address.outcome, ConSanTransformOutcome::Invalid);
+  EXPECT_FALSE(address.modified);
+  EXPECT_TRUE(std::ranges::any_of(address.errors, [](const std::string &error) {
+    return error.find("address fault is unsupported") != std::string::npos;
+  }));
+}
+
 TEST(ConSan, FaultAtomicWeakenOrderExplicitEdgeFailsClosedWhenAbsent) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_flat_atomic_release_acquire_code_object();
   ConSanOptions options;

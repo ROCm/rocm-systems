@@ -6781,4 +6781,32 @@ TEST(WaitcheckTest, Gfx950SharedSwappcReturnsToMatchingContinuation) {
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
+TEST(WaitcheckTest, Gfx950RecursiveHelperUsesFiniteCallContextSummary) {
+  constexpr uint16_t kReturnSreg = 30;
+
+  // The helper recursively calls its own entry before waiting for a VMEM load.
+  // Expanding every finite recursive stack produces exponentially many
+  // analysis nodes even though the helper body and pending-state lattice are
+  // finite. The recursive edge is summarized at its continuation; the outer
+  // call still returns to the exact main-kernel continuation.
+  std::vector<uint32_t> program;
+  program.push_back(build_s_call_b64(kReturnSreg, 2, ROCJITSU_CODE_ARCH_CDNA4));  // 0x00 -> 0x0c.
+  append_gfx950_v_mov_b32_v1_v0(program);                                         // 0x04.
+  program.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));                    // 0x08.
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);                        // 0x0c helper.
+  program.push_back(build_s_call_b64(kReturnSreg, -3, ROCJITSU_CODE_ARCH_CDNA4)); // 0x14 -> 0x0c.
+  append_gfx950_s_waitcnt_vmcnt_0(program);                                       // 0x18.
+  program.push_back(
+      build_sop1_encoding(ROCJITSU_CODE_ARCH_CDNA4, 0x1d, 0, kReturnSreg)); // 0x1c return.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  EXPECT_LT(report.instructions_analyzed, 64u);
+}
+
 } // namespace

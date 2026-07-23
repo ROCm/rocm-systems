@@ -310,6 +310,25 @@ TEST(InstructionBuilder, BuildVCmpNeU32E32Vcc) {
       build_v_cmp_ne_u32_e32_vcc(vector_source_vgpr(1), /*vsrc1=*/2, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
+TEST(InstructionBuilder, BuildVCmpNeU16E32Vcc) {
+  const auto word =
+      build_v_cmp_ne_u16_e32_vcc(vector_source_vgpr(1), /*vsrc1=*/2, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(word);
+  EXPECT_EQ(*word, 0x7C7A0501u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(&*word));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(std::string_view(inst->mnemonic()), "v_cmp_ne_u16_e32");
+
+  EXPECT_FALSE(build_v_cmp_ne_u16_e32_vcc(/*src0=*/512, /*vsrc1=*/2, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(
+      build_v_cmp_ne_u16_e32_vcc(vector_source_vgpr(1), /*vsrc1=*/256, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(
+      build_v_cmp_ne_u16_e32_vcc(vector_source_vgpr(1), /*vsrc1=*/2, ROCJITSU_CODE_ARCH_CDNA4));
+}
+
 TEST(InstructionBuilder, BuildExecNarrowingScalarOps) {
   const auto save_exec =
       build_s_and_saveexec_b64(/*sdst=*/30, /*ssrc0=*/106, ROCJITSU_CODE_ARCH_RDNA4);

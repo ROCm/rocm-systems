@@ -56,11 +56,13 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     ResolvedMoiScratchPlan resources;
     ConSanMoiAtomicAddressPlan address_plan;
     std::optional<VgprSpillSequence> spill;
+    std::optional<InlineSgprSpillSequence> scalar_spill;
   };
   std::vector<PlannedFenceRecord> selected;
   MoiResourcePlanningState resource_state(bytes, arch, options, result);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
+  MoiDescriptorSgprRequirements scalar_requirements;
   MoiDescriptorPrivateRequirements private_requirements;
   for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
     if (selected.size() == max_candidates)
@@ -97,8 +99,18 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       continue;
     }
     ResolvedMoiScratchPlan active_resources = *resources;
+    ConSanOptions candidate_options = options;
+    candidate_options.scratch_vgpr = resources->base;
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             resources->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI fence record patch found no common transient SGPR assignment");
+      continue;
+    }
     std::optional<VgprSpillSequence> spill;
-    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
+    std::optional<InlineSgprSpillSequence> scalar_spill;
+    if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
+        candidate_options.automatic_moi_record_replay_sgpr_spill) {
       uint32_t active_private_size = 0u;
       bool active_descriptor_missing = false;
       for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {
@@ -125,11 +137,26 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       if (active_descriptor_missing)
         continue;
       active_resources.original_private_segment_size = active_private_size;
+    }
+    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
       spill = build_moi_spill_sequence(result, active_resources, options, spill_managers, arch,
                                        result.warnings);
       if (!spill)
         continue;
       note_spill_descriptor_requirements(private_requirements, active_resources, *spill);
+    }
+    if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
+      scalar_spill = build_inline_sgpr_spill_sequence(
+          active_resources, candidate_options, spill_managers, arch, result.warnings,
+          active_resources.original_private_segment_size, /*spill_count=*/4u);
+      if (!scalar_spill)
+        continue;
+      for (uint64_t descriptor_offset : active_resources.owner_descriptor_file_offsets) {
+        auto [it, inserted] =
+            private_requirements.emplace(descriptor_offset, scalar_spill->total_private_bytes);
+        if (!inserted)
+          it->second = std::max(it->second, scalar_spill->total_private_bytes);
+      }
     }
     const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
         candidate.communication_site, resources->base, resources->count, resources->source, arch);
@@ -146,7 +173,9 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
         continue;
     }
     note_descriptor_requirements(descriptor_requirements, active_resources);
-    selected.push_back({std::move(candidate), active_resources, address_plan, std::move(spill)});
+    note_moi_sgpr_requirements(scalar_requirements, active_resources, candidate_options, arch);
+    selected.push_back({std::move(candidate), active_resources, address_plan, std::move(spill),
+                        std::move(scalar_spill)});
   }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan MOI fence record patch found no patchable fences");
@@ -154,6 +183,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
   }
   if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
                                      descriptor_requirements, arch, result.errors) ||
+      !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
+                                          result.errors) ||
       !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
                                            private_requirements, result.errors))
     return;
@@ -178,9 +209,11 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     };
     for (size_t host_index = result.patches.size(); host_index-- > 0u;) {
       const ConSanPatchInfo &host = result.patches[host_index];
+      // A relocatable dense host preserves at least one entry word before the
+      // local indirect island. Compact eight-word islands are not dispatchers.
       if (host.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
-          host.original_size != 8u * sizeof(uint32_t) || !owns_descriptor(host) ||
-          host_index + 1u >= result.patches.size())
+          host.original_size < (kMoiLocalIndirectIslandWords + 1u) * sizeof(uint32_t) ||
+          !owns_descriptor(host) || host_index + 1u >= result.patches.size())
         continue;
       const ConSanPatchInfo &dispatcher = result.patches[host_index + 1u];
       if (dispatcher.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
@@ -204,16 +237,14 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
   for (const PlannedFenceRecord &planned : selected) {
     const ConSanMoiFenceCandidate &fence = planned.candidate.fence;
     const uint64_t cave_text_offset = placement_planner.appended_end();
-    const uint64_t return_text_offset = fence.text_offset + fence.size;
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
-    auto cave_words = build_fence_record_cave_words(
-        active_bytes, planned.candidate, planned.address_plan, candidate_options,
-        planned.spill ? &*planned.spill : nullptr, arch, record_index, record_count,
-        layout.fence_records_offset, cave_text_offset, return_text_offset, std::nullopt,
-        result.errors);
-    if (!cave_words)
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             planned.resources.owner_descriptor_file_offsets)) {
+      result.errors.emplace_back(
+          "ConSan MOI fence record patch lost its transient SGPR assignment");
       return;
+    }
     const bool direct_entry =
         compute_sopp_branch_simm16(fence.text_offset, cave_text_offset).has_value();
     uint64_t indirect_entry_island = 0;
@@ -225,6 +256,74 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
         has_indirect_entry_island = true;
       }
     }
+    std::vector<uint32_t> displaced_tail_words;
+    uint32_t displaced_original_size = fence.size;
+    bool entry_island_at_anchor = false;
+    bool compact_entry_without_scc = false;
+    if (!direct_entry && !has_indirect_entry_island && is_rdna4_family_arch(arch)) {
+      constexpr size_t kCompactEntryIslandWords = 7u;
+      BasicBlock *entry_block = block_for_offset(resource_state.block_index, fence.text_offset);
+      const Instruction *entry_instruction = instruction_at(entry_block, fence.text_offset);
+      bool found_owner_context = false;
+      bool scc_live = false;
+      if (entry_block != nullptr && entry_instruction != nullptr) {
+        for (const MoiKernelResourceContext &context : resource_state.contexts) {
+          if (!context.block_set.contains(entry_block))
+            continue;
+          found_owner_context = true;
+          scc_live |=
+              context.liveness->live_before(*entry_instruction).contains({RegClass::SCC, 0u, 1u});
+        }
+      }
+      compact_entry_without_scc = found_owner_context && !scc_live;
+      const size_t required_island_words =
+          compact_entry_without_scc ? kCompactEntryIslandWords : kMoiLocalIndirectIslandWords;
+      std::vector<uint32_t> displaced_words;
+      std::vector<std::string> decode_errors;
+      while (displaced_words.size() < required_island_words) {
+        auto decoded = decode_relocatable_entry_instruction(
+            old_text, fence.text_offset + displaced_words.size() * sizeof(uint32_t), arch,
+            decode_errors);
+        if (!decoded) {
+          displaced_words.clear();
+          break;
+        }
+        displaced_words.insert(displaced_words.end(), decoded->begin(), decoded->end());
+      }
+      const size_t fence_words = fence.size / sizeof(uint32_t);
+      const uint64_t displaced_end = fence.text_offset + displaced_words.size() * sizeof(uint32_t);
+      const bool overlaps_existing_patch =
+          std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+            const uint64_t patch_end =
+                patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1u);
+            return fence.text_offset < patch_end && patch.anchor_offset < displaced_end;
+          });
+      const bool swallows_another_fence =
+          std::ranges::any_of(candidates, [&](const FenceRecordCandidate &other) {
+            return other.fence.text_offset != fence.text_offset &&
+                   other.fence.text_offset > fence.text_offset &&
+                   other.fence.text_offset < displaced_end;
+          });
+      if (displaced_words.size() >= required_island_words &&
+          fence_words <= displaced_words.size() && !overlaps_existing_patch &&
+          !swallows_another_fence &&
+          displaced_words.size() * sizeof(uint32_t) <= std::numeric_limits<uint32_t>::max()) {
+        displaced_tail_words.assign(displaced_words.begin() + fence_words, displaced_words.end());
+        displaced_original_size = static_cast<uint32_t>(displaced_words.size() * sizeof(uint32_t));
+        indirect_entry_island = fence.text_offset;
+        has_indirect_entry_island = true;
+        entry_island_at_anchor = true;
+      }
+    }
+    const uint64_t return_text_offset = fence.text_offset + displaced_original_size;
+    auto cave_words = build_fence_record_cave_words(
+        active_bytes, planned.candidate, planned.address_plan, candidate_options,
+        planned.spill ? &*planned.spill : nullptr,
+        planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index, record_count,
+        layout.fence_records_offset, cave_text_offset, return_text_offset, std::nullopt,
+        displaced_tail_words, result.errors);
+    if (!cave_words)
+      return;
     std::optional<DenseFenceRelay> dense_relay;
     if (!direct_entry && !has_indirect_entry_island && arch == ROCJITSU_CODE_ARCH_GFX1250 &&
         planned.candidate.kernel_descriptor_file_offset && options.moi_exec_save_sgpr) {
@@ -236,9 +335,11 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       if (dense_relay) {
         cave_words = build_fence_record_cave_words(
             active_bytes, planned.candidate, planned.address_plan, candidate_options,
-            planned.spill ? &*planned.spill : nullptr, arch, record_index, record_count,
-            layout.fence_records_offset, cave_text_offset, return_text_offset,
-            static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u), result.errors);
+            planned.spill ? &*planned.spill : nullptr,
+            planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
+            record_count, layout.fence_records_offset, cave_text_offset, return_text_offset,
+            static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u),
+            /*displaced_tail_words=*/{}, result.errors);
         if (!cave_words)
           return;
       }
@@ -251,7 +352,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     }
     std::string placement_error;
     const auto placement = placement_planner.plan_indirect_appended(
-        fence.text_offset, fence.size, cave_words->size() * sizeof(uint32_t), &placement_error);
+        fence.text_offset, displaced_original_size, cave_words->size() * sizeof(uint32_t),
+        &placement_error);
     if (!placement) {
       result.errors.emplace_back("ConSan MOI fence record placement failed: " + placement_error);
       return;
@@ -260,21 +362,23 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       result.errors.emplace_back("ConSan MOI fence record patch has a stale cave mapping");
       return;
     }
-    const uint64_t entry_target = dense_relay
-                                      ? dense_relay->island_offset
-                                      : (has_indirect_entry_island ? indirect_entry_island
-                                                                   : placement->body_offset);
+    const uint64_t entry_target =
+        dense_relay ? dense_relay->island_offset
+                    : (has_indirect_entry_island ? indirect_entry_island : placement->body_offset);
     const auto fwd = compute_sopp_branch_simm16(placement->anchor_offset, entry_target);
     if (!fwd) {
       result.errors.emplace_back("ConSan MOI fence record forward branch is out of range");
       return;
     }
-    std::vector<uint32_t> anchor_words(fence.size / sizeof(uint32_t), build_s_nop(0, arch));
+    std::vector<uint32_t> anchor_words(placement->original_size / sizeof(uint32_t),
+                                       build_s_nop(0, arch));
     if (anchor_words.empty()) {
       result.errors.emplace_back("ConSan MOI fence record patch empty anchor");
       return;
     }
-    if (dense_relay) {
+    if (entry_island_at_anchor) {
+      // The indirect island written below occupies the relocated prefix.
+    } else if (dense_relay) {
       const auto call = instrumentation::build_s_call_i64(
           static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u), *fwd, arch);
       if (!call) {
@@ -287,12 +391,51 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     }
     std::memcpy(new_text.data() + fence.text_offset, anchor_words.data(),
                 anchor_words.size() * sizeof(uint32_t));
-    if (has_indirect_entry_island &&
-        !emit_moi_local_indirect_entry_island(
-            new_text, indirect_entry_island, placement->body_offset, fence.text_offset, options,
-            planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
-            "ConSan MOI fence record patch")) {
-      return;
+    if (has_indirect_entry_island) {
+      if (compact_entry_without_scc && entry_island_at_anchor) {
+        constexpr size_t kCompactEntryIslandWords = 7u;
+        const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options);
+        std::vector<uint32_t> island_words;
+        bool encoded = false;
+        if (jump_sgprs) {
+          const uint64_t getpc_offset = indirect_entry_island;
+          island_words.push_back(build_s_getpc_b64(jump_sgprs->pc_sgpr, arch));
+          const int64_t delta = static_cast<int64_t>(placement->body_offset) -
+                                static_cast<int64_t>(getpc_offset + sizeof(uint32_t));
+          const bool delta_encoded =
+              append_pc_delta_builder(island_words, arch, jump_sgprs->pc_sgpr, delta);
+          if (const auto delay = instrumentation::build_salu_dependency_delay(arch);
+              delta_encoded && delay) {
+            island_words.push_back(*delay);
+            island_words.push_back(build_s_setpc_b64(jump_sgprs->pc_sgpr, arch));
+            encoded = true;
+          }
+        }
+        if (!encoded || island_words.size() > kCompactEntryIslandWords) {
+          result.errors.emplace_back(
+              "ConSan MOI fence record patch could not encode its SCC-dead compact entry");
+          return;
+        }
+        while (island_words.size() < kCompactEntryIslandWords)
+          island_words.push_back(build_s_nop(0, arch));
+        std::memcpy(new_text.data() + indirect_entry_island, island_words.data(),
+                    island_words.size() * sizeof(uint32_t));
+        ConSanPatchInfo island_info;
+        island_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+        island_info.anchor_offset = fence.text_offset;
+        island_info.trampoline_offset = indirect_entry_island;
+        // The fence patch owns the entire decoded prefix. A multiword final
+        // guest instruction can make that prefix one word larger than the
+        // compact island; its trailing NOP is part of the same exact overlap.
+        island_info.trampoline_size = displaced_original_size;
+        island_info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
+        patches.push_back(std::move(island_info));
+      } else if (!emit_moi_local_indirect_entry_island(
+                     new_text, indirect_entry_island, placement->body_offset, fence.text_offset,
+                     candidate_options, planned.resources.owner_descriptor_file_offsets, arch,
+                     patches, result.errors, "ConSan MOI fence record patch")) {
+        return;
+      }
     }
     append_words_bytes(new_text, *cave_words);
 
@@ -359,13 +502,17 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     info.kind = ConSanPatchKind::TrampolineMoiFenceRecord;
     info.anchor_offset = fence.text_offset;
     info.trampoline_offset = cave_text_offset;
-    info.original_size = fence.size;
+    info.original_size = displaced_original_size;
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.scratch_vgpr = planned.resources.base;
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
     if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;
       info.required_private_segment_size = planned.spill->total_private_bytes;
+    }
+    if (planned.scalar_spill) {
+      info.required_private_segment_size =
+          std::max(info.required_private_segment_size, planned.scalar_spill->total_private_bytes);
     }
     patches.push_back(std::move(info));
     ++record_index;
@@ -691,6 +838,12 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
         result.sync_events, fence.communication_event_identity, &ConSanSyncEvent::identity);
     const bool unowned_communication =
         communication != result.sync_events.end() && communication->execution_owners.empty();
+    const auto fence_event = std::ranges::find(result.sync_events, fence.fence_event_identity,
+                                               &ConSanSyncEvent::identity);
+    const bool unowned_fence =
+        fence_event != result.sync_events.end() && fence_event->execution_owners.empty();
+    const bool unassociated_cache_operation =
+        fence.rejection_reason == "fence-not-associated-with-addressed-communication-sequence";
     if (!fence.eligible) {
       reason = ConSanSiteDispositionReason::IneligibleFence;
     } else if (communication == result.sync_events.end() || unowned_communication) {
@@ -702,9 +855,9 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
     }
     append_moi_site_disposition(ConSanResourceSiteKind::Fence, fence.container_name,
                                 fence.in_kernel, fence.text_offset, "fence", reason, result,
-                                unowned_communication ||
-                                    (result.arch_name == "gfx1250" &&
-                                     reason == ConSanSiteDispositionReason::IneligibleFence));
+                                unowned_communication || unowned_fence ||
+                                    unassociated_cache_operation ||
+                                    reason == ConSanSiteDispositionReason::IneligibleFence);
   }
 }
 
@@ -788,9 +941,9 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
       continue;
     }
 
-    const auto resource_kind = resource_kind_by_offset.find(patch.anchor_offset);
-    if (resource_kind != resource_kind_by_offset.end())
-      patched_sites.insert({resource_kind->second, patch.anchor_offset});
+    const auto patch_kind = moi_instrumentation_patch_site_kind(patch, result);
+    if (patch_kind)
+      patched_sites.insert({*patch_kind, patch.anchor_offset});
     if (patch.covered_sync_event_count == 0)
       continue;
     const auto anchor_event = std::ranges::find_if(result.sync_events, [&](const auto &event) {
@@ -853,15 +1006,27 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
                                 ConSanResult &result) {
   append_moi_resource_plans(state, options, result);
   append_moi_operational_resource_plans(state, options, result);
-  if (state.arch == ROCJITSU_CODE_ARCH_GFX1250 && options.automatic_moi_dispatch_id_sgprs &&
-      options.moi_dispatch_id_sgpr) {
-    const uint16_t dispatch_base = *options.moi_dispatch_id_sgpr;
+  if ((state.arch == ROCJITSU_CODE_ARCH_GFX1250 || state.arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      options.automatic_moi_dispatch_id_sgprs && options.moi_dispatch_id_sgpr) {
     for (ConSanCandidateResourcePlan &plan : result.resource_plans) {
+      ConSanOptions owner_options = options;
+      if (!options.moi_transient_sgpr_assignments.empty() &&
+          !apply_moi_transient_sgpr_assignment(owner_options, plan.owner_descriptor_file_offsets)) {
+        owner_options.moi_dispatch_id_sgpr.reset();
+      }
+      if (plan.owner_descriptor_file_offsets.empty())
+        continue;
+      const bool missing_dispatch = !owner_options.moi_dispatch_id_sgpr;
+      const uint16_t dispatch_base = owner_options.moi_dispatch_id_sgpr.value_or(0u);
+      const bool conflicts_with_cdna4_vcc =
+          !missing_dispatch && state.arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+          cdna4_sgpr_window_conflicts_with_physical_vcc(
+              dispatch_base, moi_dispatch_state_sgpr_count(owner_options), plan.current_sgpr_count);
       // max_referenced_sgpr_count is a count: equality means every guest
       // reference is below dispatch_base, while a greater count reaches or
       // crosses persistent dispatch state and cannot share this global pair.
-      if (!plan.owner_descriptor_file_offsets.empty() &&
-          plan.max_referenced_sgpr_count > dispatch_base) {
+      if (missing_dispatch || plan.max_referenced_sgpr_count > dispatch_base ||
+          conflicts_with_cdna4_vcc) {
         plan.source = ConSanRegisterAllocationSource::Unsupported;
         plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
         plan.scratch_vgpr.reset();
@@ -869,9 +1034,10 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
       }
     }
   }
-  if (state.arch == ROCJITSU_CODE_ARCH_GFX1250 && options.automatic_moi_partial_exec_save_sgprs &&
-      options.moi_exec_save_sgpr) {
+  if ((is_rdna4_family_arch(state.arch) || state.arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      options.automatic_moi_partial_exec_save_sgprs && options.moi_exec_save_sgpr) {
     const uint16_t exec_base = *options.moi_exec_save_sgpr;
+    const uint16_t exec_count = moi_exec_save_sgpr_count(options, state.arch);
     for (ConSanCandidateResourcePlan &plan : result.resource_plans) {
       const bool has_owner_override =
           std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
@@ -882,8 +1048,11 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
         if (apply_moi_transient_sgpr_assignment(owner_options, plan.owner_descriptor_file_offsets))
           continue;
       }
+      const bool conflicts_with_cdna4_vcc = state.arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+                                            cdna4_sgpr_window_conflicts_with_physical_vcc(
+                                                exec_base, exec_count, plan.current_sgpr_count);
       if (!plan.owner_descriptor_file_offsets.empty() &&
-          plan.max_referenced_sgpr_count > exec_base) {
+          (plan.max_referenced_sgpr_count > exec_base || conflicts_with_cdna4_vcc)) {
         plan.source = ConSanRegisterAllocationSource::Unsupported;
         plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
         plan.scratch_vgpr.reset();

@@ -838,6 +838,67 @@ std::vector<uint8_t> make_gfx1250_code_object_with_local_function(
   return image;
 }
 
+std::vector<uint8_t> make_cdna4_code_object_with_local_function(
+    std::span<const uint32_t> kernel_words, std::span<const uint32_t> function_words,
+    std::span<const uint32_t> tail_words = {}, uint32_t vgpr_granulated = 0u,
+    bool function_is_kernel = false) {
+  std::vector<uint8_t> image = make_rdna4_code_object_with_local_function(
+      kernel_words, function_words, tail_words, vgpr_granulated, function_is_kernel,
+      /*wave32=*/false);
+  mutate_elf_header(image,
+                    [](Elf64_Ehdr &header) { header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950; });
+  return image;
+}
+
+std::vector<uint8_t>
+make_cdna4_disconnected_scalar_pressure_code_object(uint16_t live_sgpr_count = 96u) {
+  EXPECT_TRUE(live_sgpr_count == 96u || live_sgpr_count == 98u);
+  const auto guest = build_cdna4_ds_store_b32(
+      /*vaddr=*/0, /*vdata=*/1, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_TRUE(guest);
+  if (!guest)
+    return {};
+
+  std::vector<uint32_t> low_pressure(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  std::copy(guest->begin(), guest->end(), low_pressure.begin());
+  low_pressure.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+  std::vector<uint32_t> high_pressure;
+  high_pressure.insert(high_pressure.end(), guest->begin(), guest->end());
+  // Keep the ordinary scalar prefix live across the access. With 96 live
+  // registers the remaining pair can carry dispatch identity but not the
+  // transient EXEC window; with 98, even dispatch identity must exclude this
+  // disconnected owner.
+  for (uint16_t sgpr = 0u; sgpr < live_sgpr_count; ++sgpr)
+    high_pressure.push_back(build_s_mov_b32(/*sdst=*/0u, sgpr, ROCJITSU_CODE_ARCH_CDNA4));
+  high_pressure.resize(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  high_pressure.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+  std::vector<uint8_t> image = make_cdna4_code_object_with_local_function(
+      low_pressure, high_pressure, {}, /*vgpr_granulated=*/0u, /*function_is_kernel=*/true);
+  AmdGpuCodeObject object(image.data(), image.size());
+  EXPECT_TRUE(object.is_valid());
+  EXPECT_EQ(object.kernels().size(), 2u);
+  if (!object.is_valid() || object.kernels().size() != 2u)
+    return {};
+  KD descriptor{};
+  const uint64_t low_descriptor_offset = object.kernels()[0].descriptor_file_offset;
+  std::memcpy(&descriptor, image.data() + low_descriptor_offset, sizeof(descriptor));
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                  kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 7u);
+  std::memcpy(image.data() + low_descriptor_offset, &descriptor, sizeof(descriptor));
+  const uint64_t high_descriptor_offset = object.kernels()[1].descriptor_file_offset;
+  std::memcpy(&descriptor, image.data() + high_descriptor_offset, sizeof(descriptor));
+  // Thirteen allocation granules give 104 decoded SGPRs and physical VCC at
+  // s98:s99, leaving no legal fresh pair at the top of the ordinary file.
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                  kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12u);
+  std::memcpy(image.data() + high_descriptor_offset, &descriptor, sizeof(descriptor));
+  append_kernel_metadata_note(image, "lds_helper", /*uses_dynamic_stack=*/true,
+                              /*sgpr_count=*/static_cast<uint8_t>(live_sgpr_count));
+  return image;
+}
+
 struct TwoKernelSharedFixtureOptions {
   uint32_t first_vgpr_granulated = kRdna4Wave64AllVgprsGranulated;
   uint32_t second_vgpr_granulated = kRdna4Wave64AllVgprsGranulated;
@@ -898,8 +959,7 @@ make_rdna4_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOpti
     };
   } else if (options.helper_has_ordinary_memory) {
     helper = {
-        0xEE050004u,
-        7u | (2u << 18u) | (1u << 20u),
+        0xEE050004u, 7u | (2u << 18u) | (1u << 20u),
         10u | (0xfffff0u << 8u), // global_load_b32 v7, v10, s[4:5] offset:-16
     };
   } else if (options.helper_has_ordered_atomic) {
@@ -1166,8 +1226,7 @@ std::vector<uint8_t> make_rdna4_flat_memory_code_object() {
 
 std::vector<uint8_t> make_rdna4_global_atomic_code_object() {
   const std::array<uint32_t, 4> text_words = {
-      0xEE158004u,
-      0x00980000u,
+      0xEE158004u, 0x00980000u,
       0x00000002u, // global_atomic_add_f32 v0, v2, v1, s[4:5] th:return scope:device
       0xBFB00000u, // s_endpgm
   };
@@ -1227,9 +1286,7 @@ std::vector<uint8_t> make_rdna4_ordered_global_cas_code_object(bool return_old_v
 std::vector<uint8_t> make_rdna4_buffer_atomic_code_object() {
   // buffer_atomic_add_u32 v1, v2, s[4:7], 0 th:return scope:device
   const std::array<uint32_t, 4> text_words = {
-      0xC40D4000u,
-      1u | (4u << 9u) | (2u << 18u) | (1u << 20u),
-      2u,
+      0xC40D4000u, 1u | (4u << 9u) | (2u << 18u) | (1u << 20u), 2u,
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words, "buffer_atomic_probe");
@@ -1260,9 +1317,7 @@ std::vector<uint8_t> make_rdna4_flat_atomic_code_object() {
   if (!atomic)
     return {};
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0],
-      (*atomic)[1],
-      (*atomic)[2],
+      (*atomic)[0], (*atomic)[1], (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words);
@@ -1652,7 +1707,7 @@ void expect_moi_first_light_width(uint32_t word0, uint32_t word1, uint32_t expec
   EXPECT_EQ(result.moi_candidates.front().width_bits, expected_width_bits);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiAccessRecordStore);
-  EXPECT_EQ(result.patches.front().original_size, 108u * sizeof(uint32_t));
+  EXPECT_EQ(result.patches.front().original_size, 116u * sizeof(uint32_t));
 }
 
 std::vector<uint32_t> make_padded_moi_flat_first_light_function_words() {

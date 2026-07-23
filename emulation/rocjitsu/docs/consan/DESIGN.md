@@ -187,7 +187,7 @@ The implementation boundary is:
 - **Report-buffer capacity.** MOI can use HSA-tool-owned auto report buffers,
   which is the ordinary path for applications. After final-code
   inventory, the hook computes an exact engine-specific layout and allocates
-  the required bytes under a 16 MiB per-buffer and 256 MiB process ceiling.
+  the required bytes under a 128 MiB per-buffer and 256 MiB process ceiling.
   It reports saturation, undercoverage, overflow, and dropped evidence
   separately. Expert cap, caller-buffer, and zero-disable overrides remain.
 - **Versioned ordinary settings.** `record_replay`, `inline_shadow`, and
@@ -662,7 +662,7 @@ from final-code inventory rather than an engine-wide default:
 | Inline Shadow | Header/alignment plus 16 dispatch banks, each with one versioned exact-shadow slot for every four-byte cell in the maximum declared LDS span of the owning kernels, finite diagnostics, and only the release, snapshot, and acquired-token tables required by enabled ordering instrumentation. |
 
 All additions, multiplications, alignments, and conversions are checked. One
-automatic report buffer may require at most **16 MiB**, and the sum of live
+automatic report buffer may require at most **128 MiB**, and the sum of live
 automatic report buffers in a process may be at most **256 MiB**. These are
 hard safety ceilings rather than allocation quanta. The allocator reserves the
 exact planned bytes below them and accounts the reservation against the
@@ -727,7 +727,11 @@ Current implementation:
 
 Important current simplifications:
 
-- Static access-record slots overwrite on repeated execution of the same site.
+- A static access-record slot is claimed once and never rewritten during the
+  lifetime of the loaded code object. Its hardware dispatch ID prevents replay
+  across distinct dispatch generations, so a multi-dispatch workload can
+  retain a bounded mixed-generation snapshot with no comparable pair for a
+  particular fault.
 - Dynamic access append automatically allocates its EXEC/VCC/SCC scalar window;
   `RJ_CONSAN_MOI_EXEC_SAVE_SGPR` is an optional debug override.
 - Dynamic append can consume records quickly because it writes per active lane.
@@ -740,8 +744,9 @@ Design role:
 
 - Provide the clearest inspectable semantics with modest program overhead.
 - Serve as the reference model for Inline Shadow and Sampled behavior.
-- Report bounded-snapshot limits honestly: static slots can overwrite, so a
-  clean replay is not proof of race freedom.
+- Report bounded-snapshot limits honestly: static slots are first-light
+  evidence rather than execution history, so a clean replay is not proof of
+  race freedom.
 - Preserve clarity rather than optimizing away the reference semantics.
 
 ### Inline Shadow engine

@@ -38,6 +38,7 @@ struct ConSanMoiReportBufferLayout {
   uint32_t fence_record_capacity = 0;
   uint32_t diagnostic_capacity = 0;
   uint32_t exact_shadow_entry_capacity = 0;
+  uint32_t inline_exact_dispatch_bank_count = 0;
   uint32_t inline_atomic_release_capacity = 0;
   uint32_t inline_acquired_epoch_token_capacity = 0;
   uint32_t inline_causal_snapshot_capacity = 0;
@@ -201,6 +202,13 @@ consan_moi_auto_report_plan_reason_name(ConSanMoiAutoReportPlanReason reason) {
 /// capacities for telemetry.
 [[nodiscard]] ConSanMoiAutoReportPlan
 plan_consan_moi_auto_report(const ConSanMoiAutoReportInventory &inventory);
+
+/// Expands static Record/Replay synchronization counts by the largest
+/// power-of-two dynamic headroom that fits the ordinary per-buffer ceiling.
+/// Small objects retain the standard headroom; fat objects retain every static
+/// site with a smaller, still fail-closed dynamic capacity.
+[[nodiscard]] ConSanMoiAutoReportInventory
+fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory inventory);
 
 /// Reduces only an explicitly adaptive Sampled inventory by powers of two
 /// until its complete logical-range population fits the report ceiling or one

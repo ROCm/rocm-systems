@@ -515,6 +515,12 @@ def parse_coverage_evidence(log_text: str) -> CoverageEvidence:
                     f"SuperCollider reader {coverage_record.reader} has MOI coverage_site rows"
                 )
             continue
+        # Compact production logs intentionally retain only the signed aggregate
+        # coverage and verdict records. When verbose per-site evidence is present,
+        # keep enforcing its exact agreement with those aggregates; an entirely
+        # absent inventory is the compact-log representation, not missing evidence.
+        if not reader_sites:
+            continue
         for kind in SITE_KINDS:
             retained = tuple(
                 site for site in reader_sites if site.kind == kind

@@ -82,6 +82,42 @@ rocjitsu::ConSanResult run_consan_transform(std::span<const uint8_t> bytes,
   return rocjitsu::try_patch_consan(bytes, options);
 }
 
+struct GroupSegmentRegionSearch {
+  CoreApiTable *core = nullptr;
+  std::optional<uint32_t> size_bytes;
+};
+
+hsa_status_t HSA_API select_group_segment_region(hsa_region_t region, void *data) {
+  auto *search = static_cast<GroupSegmentRegionSearch *>(data);
+  hsa_region_segment_t segment{};
+  hsa_status_t status =
+      search->core->hsa_region_get_info_fn(region, HSA_REGION_INFO_SEGMENT, &segment);
+  if (status != HSA_STATUS_SUCCESS || segment != HSA_REGION_SEGMENT_GROUP)
+    return status;
+  size_t size_bytes = 0;
+  status = search->core->hsa_region_get_info_fn(region, HSA_REGION_INFO_SIZE, &size_bytes);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+  if (size_bytes == 0 || size_bytes > std::numeric_limits<uint32_t>::max())
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  search->size_bytes = static_cast<uint32_t>(size_bytes);
+  return HSA_STATUS_INFO_BREAK;
+}
+
+[[nodiscard]] std::optional<uint32_t> runtime_group_segment_size_bytes(CoreApiTable *core,
+                                                                       hsa_agent_t agent) {
+  if (core == nullptr || core->hsa_agent_iterate_regions_fn == nullptr ||
+      core->hsa_region_get_info_fn == nullptr) {
+    return std::nullopt;
+  }
+  GroupSegmentRegionSearch search{.core = core, .size_bytes = std::nullopt};
+  const hsa_status_t status =
+      core->hsa_agent_iterate_regions_fn(agent, select_group_segment_region, &search);
+  if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+    return std::nullopt;
+  return search.size_bytes;
+}
+
 enum class WaitcheckPreflightOutcome { NotApplicable, Passed, HazardReported, AnalysisFailed };
 
 [[nodiscard]] const char *waitcheck_target_name(rj_code_target_id_t target) {
@@ -1528,9 +1564,8 @@ public:
         moi_report_summary.exact_unusable_snapshot_count() +
         moi_report_summary.release_unusable_snapshot_count() +
         moi_report_summary.token_unusable_snapshot_count() +
-        moi_report_summary.inline_unsupported_workgroup_count +
-        moi_report_summary.inline_overflow_count + moi_report_summary.inline_unsupported_count +
-        moi_report_summary.inline_malformed_count +
+        moi_report_summary.inline_undercoverage_count + moi_report_summary.inline_overflow_count +
+        moi_report_summary.inline_unsupported_count + moi_report_summary.inline_malformed_count +
         moi_report_summary.sampled_unsupported_sync_count +
         moi_report_summary.sampled_malformed_sync_count +
         moi_report_summary.replay_dropped_access_count +
@@ -1652,16 +1687,15 @@ public:
       if (moi_forbid_overflow)
         std::_Exit(90);
     }
-    const uint64_t inline_coverage_loss = moi_report_summary.inline_unsupported_workgroup_count +
-                                          moi_report_summary.inline_overflow_count +
-                                          moi_report_summary.inline_unsupported_count +
-                                          moi_report_summary.inline_malformed_count;
+    const uint64_t inline_coverage_loss =
+        moi_report_summary.inline_undercoverage_count + moi_report_summary.inline_overflow_count +
+        moi_report_summary.inline_unsupported_count + moi_report_summary.inline_malformed_count;
     if (inline_coverage_loss != 0) {
       std::fprintf(
           stderr,
           "[rocjitsu-dbi-hooks] ConSan MOI inline coverage loss: undercoverage=%llu "
           "overflow=%llu unsupported=%llu malformed=%llu across %llu auto report buffer(s)\n",
-          static_cast<unsigned long long>(moi_report_summary.inline_unsupported_workgroup_count),
+          static_cast<unsigned long long>(moi_report_summary.inline_undercoverage_count),
           static_cast<unsigned long long>(moi_report_summary.inline_overflow_count),
           static_cast<unsigned long long>(moi_report_summary.inline_unsupported_count),
           static_cast<unsigned long long>(moi_report_summary.inline_malformed_count),
@@ -1699,12 +1733,11 @@ public:
       std::fflush(stderr);
       std::_Exit(87);
     }
-    if (moi_report_summary.inline_unsupported_workgroup_count != 0) {
-      std::fprintf(
-          stderr,
-          "[rocjitsu-dbi-hooks] ConSan MOI inline undercoverage observed: "
-          "%llu lane-site publication(s) were not represented in exact shadow\n",
-          static_cast<unsigned long long>(moi_report_summary.inline_unsupported_workgroup_count));
+    if (moi_report_summary.inline_undercoverage_count != 0) {
+      std::fprintf(stderr,
+                   "[rocjitsu-dbi-hooks] ConSan MOI inline undercoverage observed: "
+                   "%llu lane-site publication(s) were not represented in exact shadow\n",
+                   static_cast<unsigned long long>(moi_report_summary.inline_undercoverage_count));
       std::fflush(stderr);
     }
     const bool moi_has_diagnostics = moi_report_summary.visible_diagnostic_record_count +
@@ -2273,6 +2306,28 @@ hsa_status_t HSA_API rj_dbi_executable_symbol_get_info(hsa_executable_symbol_t s
   return status;
 }
 
+constexpr int kStrictLoadRejectionExitCode = 92;
+
+[[nodiscard]] hsa_status_t reject_code_object_load(const HookConfig &config, hsa_status_t status,
+                                                   uint64_t reader, std::string_view reason) {
+  const bool terminate = config.policy == HookPolicy::Strict;
+  std::fprintf(stderr,
+               "[rocjitsu-dbi-hooks] ConSan load rejection reader=%llu reason=%.*s "
+               "status=%d policy=%s action=%s exit_code=%s\n",
+               static_cast<unsigned long long>(reader), static_cast<int>(reason.size()),
+               reason.data(), static_cast<int>(status), hook_policy_name(config.policy),
+               terminate ? "terminate" : "return-error", terminate ? "92" : "none");
+  std::fflush(stderr);
+  // A caller that ignores the HSA code-object load error can retain a null
+  // kernel symbol and crash later during launch. HIP does this for some
+  // precompiled PyTorch fat objects. Strict policy promises fail-closed
+  // execution, so stop at the attributable loader failure instead of handing
+  // an unusable executable back to a client that may continue regardless.
+  if (terminate)
+    std::_Exit(kStrictLoadRejectionExitCode);
+  return status;
+}
+
 hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
     const char *options, hsa_loaded_code_object_t *loaded_code_object) {
@@ -2396,6 +2451,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.report_buffer_address = config->report_buffer_address;
     patch_options.moi_report_buffer_address = config->moi_report_buffer_address;
     patch_options.moi_report_buffer_size = config->moi_report_buffer_size;
+    patch_options.moi_max_workgroup_lds_bytes =
+        runtime_group_segment_size_bytes(layer().core_table(), agent);
     patch_options.delay_nops = config->delay_nops;
     patch_options.max_patches = config->max_patches;
     patch_options.max_patches_is_expert_limit = config->max_patches_explicit;
@@ -2426,7 +2483,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                      "[rocjitsu-dbi-hooks] ConSan fault load selection is ambiguous: "
                      "one reader planned %zu mutations\n",
                      probe.planned_fault_mutations);
-        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+        return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
+                                       code_object_reader.handle, "ambiguous-fault-load-selection");
       }
       bool selected = matched;
       if (config->fault_load_occurrence) {
@@ -2444,7 +2502,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                     selected ? "true" : "false",
                     selection && selection->overflow ? "true" : "false");
         if (selection && selection->overflow)
-          return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+          return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                                         code_object_reader.handle,
+                                         "fault-load-selection-overflow");
       }
       if (selected && config->fault_require_exactly_one && !config->fault_dry_run) {
         size_t expected = 0;
@@ -2489,7 +2549,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
               "without instrumentation");
           patch_result_storage = std::move(inventory);
           if (config->fail_closed || config->require_patch)
-            return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+            return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                                           code_object_reader.handle,
+                                           "supercollider-report-allocation");
         } else {
           patch_options.report_buffer_address = auto_report_address;
         }
@@ -2589,7 +2651,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         patch_options.moi_report_generation = auto_report_generation;
         patch_options.moi_report_dispatch_id = code_object_reader.handle;
       } else if (!patch_result_storage && config->fail_closed) {
-        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+        return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                                       code_object_reader.handle, "moi-report-allocation");
       } else if (!patch_result_storage) {
         patch_result_storage = std::move(inventory);
       }
@@ -2620,17 +2683,20 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       for (const std::string &error : patch_result.errors)
         std::fprintf(stderr, "[rocjitsu-dbi-hooks] %s\n", error.c_str());
       if (config->fail_closed)
-        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+        return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
+                                       code_object_reader.handle, "transform-error");
     }
     for (const std::string &warning : patch_result.warnings)
-      log_message(kLogInfo, "%s", warning.c_str());
+      log_message(kLogVerbose, "%s", warning.c_str());
     if (install_action == rocjitsu::ConSanInstallAction::Reject) {
       std::fprintf(stderr,
                    "[rocjitsu-dbi-hooks] ConSan outcome %s is not installable "
                    "(fail_closed=%s)\n",
                    rocjitsu::consan_transform_outcome_name(patch_result.outcome),
                    config->fail_closed ? "true" : "false");
-      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+      return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
+                                     code_object_reader.handle,
+                                     "non-installable-transform-outcome");
     }
 
     log_message(
@@ -2693,7 +2759,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 patch_result.fault_sites.size());
     for (const rocjitsu::ConSanFaultSite &site : patch_result.fault_sites) {
       const OwnerLogFields owners = owner_log_fields(site.execution_owners, patch_result.kernels);
-      log_message(kLogInfo,
+      log_message(kLogVerbose,
                   "ConSan fault site reader=%llu identity=%s kind=%s container=%s "
                   "container_kind=%s occurrence=%u text_offset=0x%llx file_offset=0x%llx "
                   "size=%u width_bits=%u mnemonic=%s role=%s operands=%s sync_event=%s "
@@ -2730,7 +2796,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           destination.structured_source_block_index
               ? std::to_string(*destination.structured_source_block_index)
               : "-";
-      log_message(kLogInfo,
+      log_message(kLogVerbose,
                   "ConSan barrier destination reader=%llu identity=%s container=%s "
                   "container_kind=%s block=%u text_offset=0x%llx file_offset=0x%llx size=%u "
                   "mnemonic=%s memory_operation=%s suitable=%s reason=%s cfg_contract=%s "
@@ -2797,7 +2863,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 patch_result.perturbation_candidates.size());
     for (const rocjitsu::ConSanPerturbationCandidate &candidate :
          patch_result.perturbation_candidates) {
-      log_message(kLogInfo,
+      log_message(kLogVerbose,
                   "ConSan SC perturb candidate reader=%llu identity=%s sequence=%s kind=%s "
                   "edge=%s container=%s container_kind=%s block=%u anchor=%s "
                   "anchor_text_offset=0x%llx anchor_size=%u eligible=%s reason=%s",
@@ -2830,7 +2896,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         patch_result.applied_perturbations, config->sc_perturb_max,
         config->sc_perturb_required_count, config->sc_perturb_sleep);
     for (const rocjitsu::ConSanAccessPlan &plan : patch_result.access_plans) {
-      log_message(kLogInfo,
+      log_message(kLogVerbose,
                   "ConSan access plan reader=%llu dry_run=true identity=%s container=%s "
                   "container_kind=%s kind=%s planned=1 text_offset=0x%llx",
                   static_cast<unsigned long long>(code_object_reader.handle), plan.identity.c_str(),
@@ -2893,7 +2959,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       const std::string barrier_raw_simm16 =
           event.barrier_raw_simm16 ? std::to_string(*event.barrier_raw_simm16) : "-";
       log_message(
-          kLogInfo,
+          kLogVerbose,
           "ConSan sync event reader=%llu identity=%s kind=%s operation=%s "
           "address_source=%s memory_role=%s memory_role_confidence=%s rmw_outcome=%s "
           "confidence=%s reason=%s "
@@ -2962,7 +3028,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       } else {
         release_wait_offset[0] = '-';
       }
-      log_message(kLogInfo,
+      log_message(kLogVerbose,
                   "ConSan sync sequence reader=%llu identity=%s kind=%s operation=%s "
                   "address_source=%s memory_role=%s memory_role_confidence=%s rmw_outcome=%s "
                   "confidence=%s reason=%s "
@@ -3006,7 +3072,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       }
       std::string reason = group.rejection_reason.empty() ? "-" : group.rejection_reason;
       std::ranges::replace(reason, ' ', '-');
-      log_message(kLogInfo,
+      log_message(kLogVerbose,
                   "ConSan barrier lifecycle reader=%llu identity=%s container=%s "
                   "container_kind=%s block=%s begin_text_offset=0x%llx "
                   "end_text_offset=0x%llx barrier_id=%s barrier_scope=%s admissible=%s "
@@ -3092,7 +3158,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         if (owner_names.empty())
           owner_names = "-";
         log_message(
-            kLogInfo,
+            kLogDebug,
             "ConSan MOI resource reader=%llu site=%s candidate=%zu text_offset=0x%llx "
             "source=%s reason=%s owners=%zu owner_names=%s scratch_vgpr=%s scratch_count=%u "
             "current_vgprs=%u max_referenced_vgprs=%u required_vgprs=%u "
@@ -3279,7 +3345,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     for (const rocjitsu::ConSanSiteDispositionRecord &site : patch_result.site_dispositions) {
       if (site.lowering_outcome == rocjitsu::ConSanSiteLoweringOutcome::NotApplicable)
         continue;
-      log_message(kLogInfo,
+      log_message(kLogDebug,
                   "ConSan coverage_site reader=%llu kind=%s disposition=%s reason=%s "
                   "outcome=%s lowering_reason=%s resource_reason=%s "
                   "container=%s scope=%s text=0x%llx mnemonic=%s load=%llu",
@@ -3305,7 +3371,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     for (const rocjitsu::ConSanKernelInfo &kernel : patch_result.kernels) {
       if (kernel.has_text_range) {
         log_message(
-            kLogInfo,
+            kLogDebug,
             "ConSan kernel reader=%llu name=%s kd_file=0x%llx "
             "text_file=0x%llx entry_text=0x%llx code_size=%llu decoded=%s "
             "dynamic_stack=%s "
@@ -3344,7 +3410,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             static_cast<unsigned long long>(kernel.stats.decode_error_count),
             preflight_action_name(kernel.preflight_action));
       } else {
-        log_message(kLogInfo,
+        log_message(kLogDebug,
                     "ConSan kernel reader=%llu name=%s kd_file=0x%llx "
                     "text_range=unavailable decoded=%s dynamic_stack=%s decode_errors=%llu "
                     "preflight=%s",
@@ -3478,7 +3544,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           patch.persistent_epoch_private_offset
               ? std::to_string(*patch.persistent_epoch_private_offset)
               : "-";
-      log_message(kLogInfo,
+      log_message(kLogDebug,
                   "ConSan proof patch reader=%llu kind=%s anchor=0x%llx "
                   "trampoline=0x%llx original_size=%u trampoline_size=%u scratch_vgpr=%s "
                   "private_epoch_offset=%s spilled_vgprs=%u private_bytes=%u "
@@ -3502,7 +3568,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                      "[rocjitsu-dbi-hooks] RJ_CONSAN_REQUIRE_PATCH requested, but no relevant "
                      "access, barrier, atomic, or fence patch was applied to a code object with "
                      "supported ConSan sites\n");
-        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+        return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
+                                       code_object_reader.handle,
+                                       "required-instrumentation-missing");
       }
     }
 
@@ -3528,7 +3596,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       std::fprintf(stderr, "[rocjitsu-dbi-hooks] failed to create replacement patched reader: %d\n",
                    static_cast<int>(reader_status));
       if (config->fail_closed)
-        return reader_status;
+        return reject_code_object_load(*config, reader_status, code_object_reader.handle,
+                                       "replacement-reader-creation");
       log_message(kLogInfo,
                   "ConSan replacement reader creation failed; loading original reader=%llu",
                   static_cast<unsigned long long>(code_object_reader.handle));

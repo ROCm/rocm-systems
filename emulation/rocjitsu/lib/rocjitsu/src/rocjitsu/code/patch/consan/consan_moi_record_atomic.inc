@@ -72,12 +72,14 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     ResolvedMoiScratchPlan resources;
     ConSanMoiAtomicAddressPlan address_plan;
     std::optional<VgprSpillSequence> spill;
+    std::optional<InlineSgprSpillSequence> scalar_spill;
   };
   std::vector<PlannedAtomicRecord> selected_candidates;
   selected_candidates.reserve(max_candidates);
   MoiResourcePlanningState resource_state(bytes, arch, options, result);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
+  MoiDescriptorSgprRequirements scalar_requirements;
   MoiDescriptorPrivateRequirements private_requirements;
   for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
     const AtomicRecordCandidate &candidate = candidates[candidate_index];
@@ -88,8 +90,20 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
       result.errors.emplace_back("ConSan MOI atomic record patch site is outside .text");
       return;
     }
+    const ConSanPatchInfo *composed_access_patch = nullptr;
+    for (const ConSanPatchInfo &patch : result.patches) {
+      const bool access_patch = patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+                                patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+      if (access_patch && patch.anchor_offset == site.text_offset &&
+          patch.relocated_guest_instruction_offset) {
+        composed_access_patch = &patch;
+        break;
+      }
+    }
     const auto overlaps_existing_patch = std::any_of(
         result.patches.begin(), result.patches.end(), [&](const ConSanPatchInfo &patch) {
+          if (&patch == composed_access_patch)
+            return false;
           const uint64_t patch_end =
               patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1);
           return site.text_offset < patch_end && patch.anchor_offset < site.text_offset + site.size;
@@ -142,8 +156,24 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
       if (!spill)
         continue;
     }
-    selected_candidates.push_back(
-        {std::move(planned_candidate), *resources, address_plan, std::move(spill)});
+    ConSanOptions candidate_options = options;
+    candidate_options.scratch_vgpr = resources->base;
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             resources->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI atomic record patch found no common transient SGPR assignment");
+      continue;
+    }
+    std::optional<InlineSgprSpillSequence> scalar_spill;
+    if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
+      scalar_spill = build_inline_sgpr_spill_sequence(
+          *resources, candidate_options, spill_managers, arch, result.warnings,
+          /*private_layout_base=*/std::nullopt, /*spill_count=*/4u);
+      if (!scalar_spill)
+        continue;
+    }
+    selected_candidates.push_back({std::move(planned_candidate), *resources, address_plan,
+                                   std::move(spill), std::move(scalar_spill)});
   }
   // Do not prune a release based on module-local absence of an acquire. Real
   // applications can split producers and consumers across code objects, and
@@ -156,10 +186,25 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     if (planned.spill) {
       note_spill_descriptor_requirements(private_requirements, planned.resources, *planned.spill);
     }
+    if (planned.scalar_spill) {
+      for (uint64_t descriptor_offset : planned.resources.owner_descriptor_file_offsets) {
+        auto [it, inserted] = private_requirements.emplace(
+            descriptor_offset, planned.scalar_spill->total_private_bytes);
+        if (!inserted)
+          it->second = std::max(it->second, planned.scalar_spill->total_private_bytes);
+      }
+    }
     note_descriptor_requirements(descriptor_requirements, planned.resources);
+    ConSanOptions candidate_options = options;
+    if (apply_moi_transient_sgpr_assignment(candidate_options,
+                                            planned.resources.owner_descriptor_file_offsets)) {
+      note_moi_sgpr_requirements(scalar_requirements, planned.resources, candidate_options, arch);
+    }
   }
   if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
                                      descriptor_requirements, arch, result.errors) ||
+      !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
+                                          result.errors) ||
       !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
                                            private_requirements, result.errors)) {
     return;
@@ -174,25 +219,41 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
   for (const PlannedAtomicRecord &planned : selected_candidates) {
     const AtomicRecordCandidate &candidate = planned.candidate;
     const ConSanAtomicSite &site = candidate.site;
+    const auto composed_access_patch = std::ranges::find_if(result.patches, [&](const auto &patch) {
+      return (patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+              patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
+             patch.anchor_offset == site.text_offset && patch.relocated_guest_instruction_offset;
+    });
+    const uint64_t physical_anchor_offset =
+        composed_access_patch == result.patches.end()
+            ? site.text_offset
+            : *composed_access_patch->relocated_guest_instruction_offset;
     const uint64_t cave_text_offset = placement_planner.appended_end();
-    const uint64_t return_text_offset = site.text_offset + site.size;
+    const uint64_t return_text_offset = physical_anchor_offset + site.size;
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             planned.resources.owner_descriptor_file_offsets)) {
+      result.errors.emplace_back(
+          "ConSan MOI atomic record patch lost its transient SGPR assignment");
+      return;
+    }
     uint32_t guest_instruction_offset = 0;
     auto cave_words = build_atomic_record_cave_words(
         active_bytes, candidate, planned.address_plan, candidate_options,
-        planned.spill ? &*planned.spill : nullptr, arch, record_index,
+        planned.spill ? &*planned.spill : nullptr,
+        planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
         layout.atomic_record_capacity, layout.atomic_records_offset, cave_text_offset,
         return_text_offset, guest_instruction_offset, result.errors);
     if (!cave_words)
       return;
 
     const bool direct_entry =
-        compute_sopp_branch_simm16(site.text_offset, cave_text_offset).has_value();
+        compute_sopp_branch_simm16(physical_anchor_offset, cave_text_offset).has_value();
     uint64_t indirect_entry_island = 0;
     bool has_indirect_entry_island = false;
     if (!direct_entry) {
-      const auto claimed_island = indirect_allocator.claim_reachable(site.text_offset);
+      const auto claimed_island = indirect_allocator.claim_reachable(physical_anchor_offset);
       if (!claimed_island) {
         result.warnings.emplace_back(
             "ConSan MOI atomic record patch found no reachable indirect entry island in " +
@@ -204,7 +265,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     }
     std::string placement_error;
     const auto placement = placement_planner.plan_indirect_appended(
-        site.text_offset, site.size, cave_words->size() * sizeof(uint32_t), &placement_error);
+        physical_anchor_offset, site.size, cave_words->size() * sizeof(uint32_t), &placement_error);
     if (!placement) {
       result.errors.emplace_back("ConSan MOI atomic record placement failed: " + placement_error);
       return;
@@ -227,17 +288,17 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
       return;
     }
     anchor_words.front() = build_s_branch(*fwd, arch);
-    if (site.text_offset > new_text.size() ||
-        anchor_words.size() * sizeof(uint32_t) > new_text.size() - site.text_offset) {
+    if (physical_anchor_offset > new_text.size() ||
+        anchor_words.size() * sizeof(uint32_t) > new_text.size() - physical_anchor_offset) {
       result.errors.emplace_back("ConSan MOI atomic record anchor exceeds .text");
       return;
     }
-    std::memcpy(new_text.data() + site.text_offset, anchor_words.data(),
+    std::memcpy(new_text.data() + physical_anchor_offset, anchor_words.data(),
                 anchor_words.size() * sizeof(uint32_t));
     if (has_indirect_entry_island &&
         !emit_moi_local_indirect_entry_island(
-            new_text, indirect_entry_island, placement->body_offset, site.text_offset, options,
-            planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
+            new_text, indirect_entry_island, placement->body_offset, physical_anchor_offset,
+            options, planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
             "ConSan MOI atomic record patch")) {
       return;
     }
@@ -255,6 +316,10 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;
       info.required_private_segment_size = planned.spill->total_private_bytes;
+    }
+    if (planned.scalar_spill) {
+      info.required_private_segment_size =
+          std::max(info.required_private_segment_size, planned.scalar_spill->total_private_bytes);
     }
     patches.push_back(info);
     ++record_index;

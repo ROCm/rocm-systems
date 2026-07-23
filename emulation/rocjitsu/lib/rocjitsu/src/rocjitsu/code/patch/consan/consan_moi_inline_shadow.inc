@@ -16,9 +16,10 @@ build_inline_sgpr_spill_sequence(const ResolvedMoiScratchPlan &resources,
        !options.automatic_moi_record_replay_sgpr_spill) ||
       !options.moi_exec_save_sgpr)
     return std::nullopt;
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || resources.owner_descriptor_file_offsets.empty()) {
+  if ((!is_rdna4_family_arch(arch) && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+      resources.owner_descriptor_file_offsets.empty()) {
     warnings.emplace_back(
-        "ConSan MOI spill-backed scalar state requires at least one gfx1250 kernel owner");
+        "ConSan MOI spill-backed scalar state requires at least one supported kernel owner");
     return std::nullopt;
   }
   const auto private_limit = address_free_scratch_private_limit(arch);
@@ -153,8 +154,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   const uint64_t original_text_size =
       code_object.text_sections().size() == 1 ? code_object.text_sections().front()->size() : 0;
   constexpr uint64_t kIndirectIslandWords = 8u;
-  const uint64_t access_relay_words =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 ? 20u : kIndirectIslandWords;
+  // A dense dispatcher may need one comparison, one conditional branch, and
+  // a long jump per site, plus a fixed relocated-host route. Twenty words per
+  // site safely amortizes that fixed route even for small owner groups.
+  constexpr uint64_t access_relay_words = 20u;
   const bool has_function_candidate = std::ranges::any_of(
       candidates, [](const ConSanMoiCandidate *candidate) { return !candidate->in_kernel; });
   std::unordered_map<uint64_t, size_t> candidate_count_by_descriptor;
@@ -207,7 +210,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   }
   std::optional<MoiLocalNopIslandAllocator> local_entry_islands;
   if (use_indirect_appended && !original_text.empty())
-    local_entry_islands.emplace(original_text, result, arch, kIndirectIslandWords);
+    local_entry_islands.emplace(original_text, result, arch, kIndirectIslandWords,
+                                options.preapplied_reserved_ranges);
 
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_entry_islands;
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_dispatchers;
@@ -222,7 +226,20 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   };
   std::map<uint64_t, DenseEntryHost> dense_entry_hosts;
   std::vector<std::unique_ptr<BasicBlock>> dense_host_blocks;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && use_indirect_appended && !original_text.empty()) {
+  // Dense explicit-key routing is execution-qualified through the 135-site
+  // RDNA4 histogram object. Larger multi-owner compositions retain the
+  // ordinary per-site placement path until their shared relocation layout is
+  // proven compositional; silently emitting the unqualified layout can alter
+  // an otherwise-correct kernel even when every individual owner is sound.
+  constexpr size_t kMaxQualifiedRdna4DenseCandidateCount = 135u;
+  const bool dense_routing_admitted = arch == ROCJITSU_CODE_ARCH_GFX1250 ||
+                                      candidates.size() <= kMaxQualifiedRdna4DenseCandidateCount;
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250 && !dense_routing_admitted)
+    result.warnings.emplace_back(
+        "ConSan MOI inline-shadow retained conservative per-site RDNA4 placement outside the "
+        "qualified dense-routing composition envelope");
+  if (is_rdna4_family_arch(arch) && dense_routing_admitted && use_indirect_appended &&
+      !original_text.empty()) {
     std::unique_ptr<Decoder> decoder = Decoder::create(arch);
     if (decoder) {
       std::vector<uint64_t> leaders;
@@ -244,18 +261,33 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       dense_host_blocks = BasicBlock::build(code_object, *decoder, arch, leaders, code_ranges);
     }
   }
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && use_indirect_appended && local_entry_islands) {
+  if (is_rdna4_family_arch(arch) && dense_routing_admitted && use_indirect_appended &&
+      local_entry_islands) {
     struct DenseGroup {
       std::vector<const ConSanMoiCandidate *> candidates;
       size_t first_candidate_index = 0;
     };
-    std::map<std::pair<bool, std::string>, DenseGroup> groups;
+    std::map<std::pair<bool, std::string>, std::vector<const ConSanMoiCandidate *>> owner_groups;
     for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
       const ConSanMoiCandidate *candidate = candidates[candidate_index];
-      auto [it, inserted] = groups.try_emplace({candidate->in_kernel, candidate->container_name});
-      if (inserted)
-        it->second.first_candidate_index = candidate_index;
-      it->second.candidates.push_back(candidate);
+      owner_groups[{candidate->in_kernel, candidate->container_name}].push_back(candidate);
+    }
+    constexpr uint64_t kMaxCommonRelayAnchorSpan =
+        static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
+                              static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
+        sizeof(uint32_t);
+    std::vector<std::pair<std::pair<bool, std::string>, DenseGroup>> groups;
+    for (const auto &[key, owner_candidates] : owner_groups) {
+      for (const ConSanMoiCandidate *candidate : owner_candidates) {
+        if (groups.empty() || groups.back().first != key ||
+            (arch != ROCJITSU_CODE_ARCH_GFX1250 && groups.back().second.candidates.size() == 64u) ||
+            candidate->text_offset - groups.back().second.candidates.front()->text_offset >
+                kMaxCommonRelayAnchorSpan) {
+          groups.push_back(
+              {key, {.candidates = {}, .first_candidate_index = candidate_indices.at(candidate)}});
+        }
+        groups.back().second.candidates.push_back(candidate);
+      }
     }
     for (const auto &[key, group] : groups) {
       bool has_dense_neighbors = false;
@@ -271,7 +303,20 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                 access_island_begin + candidate_index * access_relay_words * sizeof(uint32_t);
             return !compute_sopp_branch_simm16(candidate->text_offset, default_entry);
           });
-      if (!has_dense_neighbors && !has_stranded_entry)
+      const bool explicit_anchors_fit =
+          arch == ROCJITSU_CODE_ARCH_GFX1250 ||
+          std::ranges::all_of(group.candidates, [](const ConSanMoiCandidate *candidate) {
+            return candidate->size >= 2u * sizeof(uint32_t);
+          });
+      const bool singleton_has_direct_island =
+          group.candidates.size() == 1u &&
+          local_entry_islands->has_reachable(group.candidates.front()->text_offset,
+                                             kIndirectIslandWords);
+      // gfx1250 also uses the shared call relay to compact nearby anchors.
+      // RDNA4 has no scalar call instruction, so use an explicit key plus
+      // branch only when the ordinary per-site relay is stranded.
+      if (!explicit_anchors_fit || singleton_has_direct_island ||
+          (!(arch == ROCJITSU_CODE_ARCH_GFX1250 && has_dense_neighbors) && !has_stranded_entry))
         continue;
       std::vector<uint64_t> anchors;
       anchors.reserve(group.candidates.size());
@@ -288,7 +333,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           const uint64_t kernel_end = kernel->entry_text_offset + kernel->code_size;
           std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
           occupied_ranges.reserve(group.candidates.size() + kernel->barrier_sites.size() +
-                                  kernel->fence_sites.size() + kernel->atomic_sites.size());
+                                  kernel->fence_sites.size() + kernel->atomic_sites.size() +
+                                  options.preapplied_reserved_ranges.size());
           const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
             if (size != 0u)
               occupied_ranges.emplace_back(begin, begin + size);
@@ -301,6 +347,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             append_occupied_range(site.text_offset, site.size);
           for (const ConSanAtomicSite &site : kernel->atomic_sites)
             append_occupied_range(site.text_offset, site.size);
+          for (const ConSanPreappliedReservedRange &reserved : options.preapplied_reserved_ranges)
+            append_occupied_range(reserved.text_offset, reserved.size);
           std::ranges::sort(occupied_ranges);
           size_t merged_range_count = 0u;
           for (const auto &range : occupied_ranges) {
@@ -441,7 +489,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           const auto *assignment = find_moi_transient_sgpr_assignment(options, descriptor_offset);
           return assignment != nullptr && !assignment->spill_backed;
         });
-    if (options.moi_inline_workgroup_shadow && !has_unspilled_component_override) {
+    const bool spill_without_visible_evidence = candidate_options.automatic_moi_inline_sgpr_spill &&
+                                                !candidate_options.moi_inline_visible_evidence_sgpr;
+    if (options.moi_inline_workgroup_shadow && !has_unspilled_component_override &&
+        !spill_without_visible_evidence) {
       uint16_t next_compact_token = 0u;
       if (candidate.in_kernel && candidate.kernel_descriptor_file_offset) {
         uint16_t &next = next_compact_token_by_descriptor[*candidate.kernel_descriptor_file_offset];
@@ -464,12 +515,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
               direct_workgroup_shadow_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
           if (inserted) {
             cached->second = common_moi_workgroup_shadow_layout(
-                bytes, *resources, arch, result.warnings, compact_token_available);
+                bytes, *resources, arch, options, result.warnings, compact_token_available);
           }
           workgroup_shadow = cached->second;
         } else {
           workgroup_shadow = common_moi_workgroup_shadow_layout(
-              bytes, *resources, arch, result.warnings, compact_token_available);
+              bytes, *resources, arch, options, result.warnings, compact_token_available);
         }
       }
       if (has_dynamic_lds_owner && !warned_dynamic_lds_external_shadow) {
@@ -496,14 +547,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           cached->second = build_moi_private_epoch_layout(
               result, *resources, arch, result.warnings,
               /*include_sample_sequence=*/false, persist_workitem_owner,
-              /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA4 && !workgroup_shadow);
+              /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA4);
         }
         private_layout = cached->second;
       } else {
         private_layout = build_moi_private_epoch_layout(
             result, *resources, arch, result.warnings,
             /*include_sample_sequence=*/false, persist_workitem_owner,
-            /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA4 && !workgroup_shadow);
+            /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA4);
       }
       if (!private_layout)
         continue;
@@ -796,8 +847,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     if (!apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
                                             result.errors))
       return;
-    if (!apply_lds_descriptor_requirements(patcher, result, code_object, lds_requirements, arch,
-                                           result.errors))
+    if (!apply_lds_descriptor_requirements(patcher, result, code_object, lds_requirements, options,
+                                           arch, result.errors))
       return;
     const std::span<const uint8_t> old_text = patcher.text_bytes();
     if (old_text.empty()) {
@@ -831,6 +882,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       const uint16_t call_return_sgpr = group_options.automatic_moi_inline_sgpr_spill
                                             ? *group_options.moi_inline_call_return_sgpr
                                             : static_cast<uint16_t>(base + 28u);
+      const bool explicit_dense_key = arch != ROCJITSU_CODE_ARCH_GFX1250;
       const uint64_t island_offset = *group.front()->entry_island_offset;
       const MoiIndirectJumpSgprs jump_sgprs = *moi_indirect_jump_sgprs(group_options);
 
@@ -883,16 +935,18 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       patches.push_back(std::move(island_info));
 
       std::vector<uint32_t> dispatcher_words;
-      const auto subtract_pc =
-          instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_sgprs.pc_sgpr, arch);
-      if (!subtract_pc) {
-        result.errors.emplace_back(
-            "ConSan MOI inline-shadow probe could not encode its dense dispatch key");
-        return;
+      if (!explicit_dense_key) {
+        const auto subtract_pc =
+            instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_sgprs.pc_sgpr, arch);
+        if (!subtract_pc) {
+          result.errors.emplace_back(
+              "ConSan MOI inline-shadow probe could not encode its dense dispatch key");
+          return;
+        }
+        dispatcher_words.push_back(*subtract_pc);
+        dispatcher_words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
+        dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
       }
-      dispatcher_words.push_back(*subtract_pc);
-      dispatcher_words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
-      dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
 
       if (entry_host != dense_entry_hosts.end()) {
         const auto compare_entry =
@@ -906,9 +960,16 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         std::vector<uint32_t> matched_words;
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
-        if (!append_moi_scc_preserving_indirect_jump(
-                matched_words, matched_offset, entry_host->second.body_offset, jump_sgprs.pc_sgpr,
-                jump_sgprs.scc_save_sgpr, /*capture_scc=*/false, arch)) {
+        const auto direct_entry =
+            explicit_dense_key
+                ? compute_sopp_branch_simm16(matched_offset, entry_host->second.body_offset)
+                : std::nullopt;
+        if (direct_entry) {
+          matched_words.push_back(build_s_branch(*direct_entry, arch));
+        } else if (!append_moi_scc_preserving_indirect_jump(
+                       matched_words, matched_offset, entry_host->second.body_offset,
+                       jump_sgprs.pc_sgpr, jump_sgprs.scc_save_sgpr,
+                       /*capture_scc=*/false, arch)) {
           result.errors.emplace_back(
               "ConSan MOI inline-shadow probe could not encode its dense entry-host target");
           return;
@@ -924,20 +985,27 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         dispatcher_words.insert(dispatcher_words.end(), matched_words.begin(), matched_words.end());
       }
 
-      for (const PlannedInlineShadowPatch *planned_patch : group) {
+      for (size_t group_index = 0; group_index < group.size(); ++group_index) {
+        const PlannedInlineShadowPatch *planned_patch = group[group_index];
         const ConSanMoiCandidate &candidate = *planned_patch->candidate;
-        const auto compare = instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
+        const auto compare = instrumentation::build_s_cmp_eq_u32(
+            key_sgpr,
+            explicit_dense_key ? scalar_positive_inline_u32(static_cast<uint16_t>(group_index + 1u))
+                               : 255u,
+            arch);
         if (!compare) {
           result.errors.emplace_back(
               "ConSan MOI inline-shadow probe could not encode its dense dispatch comparison");
           return;
         }
         dispatcher_words.push_back(*compare);
-        dispatcher_words.push_back(
-            static_cast<uint32_t>(candidate.text_offset + sizeof(uint32_t) - island_offset));
+        if (!explicit_dense_key) {
+          dispatcher_words.push_back(
+              static_cast<uint32_t>(candidate.text_offset + sizeof(uint32_t) - island_offset));
+        }
 
         std::vector<uint32_t> matched_words;
-        if (candidate.size > sizeof(uint32_t)) {
+        if (!explicit_dense_key && candidate.size > sizeof(uint32_t)) {
           const uint32_t adjustment = candidate.size - sizeof(uint32_t);
           matched_words.push_back(
               build_s_add_u32(call_return_sgpr, call_return_sgpr, /*literal=*/255u, arch));
@@ -948,9 +1016,16 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         }
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
-        if (!append_moi_scc_preserving_indirect_jump(
-                matched_words, matched_offset, planned_patch->placement.body_offset,
-                jump_sgprs.pc_sgpr, jump_sgprs.scc_save_sgpr, /*capture_scc=*/false, arch)) {
+        const auto direct_body =
+            explicit_dense_key
+                ? compute_sopp_branch_simm16(matched_offset, planned_patch->placement.body_offset)
+                : std::nullopt;
+        if (direct_body) {
+          matched_words.push_back(build_s_branch(*direct_body, arch));
+        } else if (!append_moi_scc_preserving_indirect_jump(
+                       matched_words, matched_offset, planned_patch->placement.body_offset,
+                       jump_sgprs.pc_sgpr, jump_sgprs.scc_save_sgpr,
+                       /*capture_scc=*/false, arch)) {
           result.errors.emplace_back(
               "ConSan MOI inline-shadow probe could not encode a dense dispatch target");
           return;
@@ -991,32 +1066,51 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       patches.push_back(std::move(dispatcher_info));
 
       if (entry_host != dense_entry_hosts.end()) {
-        const auto host_call =
-            instrumentation::build_s_call_i64(call_return_sgpr, /*next instruction=*/0, arch);
-        if (!host_call || entry_host->second.host_offset > new_text.size() ||
+        const std::optional<uint32_t> host_entry =
+            explicit_dense_key
+                ? std::optional<uint32_t>(
+                      build_s_mov_b32(key_sgpr, scalar_positive_inline_u32(0), arch))
+                : instrumentation::build_s_call_i64(call_return_sgpr, /*next instruction=*/0, arch);
+        if (!host_entry || entry_host->second.host_offset > new_text.size() ||
             sizeof(uint32_t) > new_text.size() - entry_host->second.host_offset) {
           result.errors.emplace_back(
               "ConSan MOI inline-shadow probe could not encode its dense entry host");
           return;
         }
-        std::memcpy(new_text.data() + entry_host->second.host_offset, &*host_call,
+        std::memcpy(new_text.data() + entry_host->second.host_offset, &*host_entry,
                     sizeof(uint32_t));
       }
 
-      for (const PlannedInlineShadowPatch *planned_patch : group) {
+      for (size_t group_index = 0; group_index < group.size(); ++group_index) {
+        const PlannedInlineShadowPatch *planned_patch = group[group_index];
         const ConSanMoiCandidate &candidate = *planned_patch->candidate;
-        const auto call_delta = compute_sopp_branch_simm16(candidate.text_offset, island_offset);
-        const auto call =
-            call_delta ? instrumentation::build_s_call_i64(call_return_sgpr, *call_delta, arch)
-                       : std::nullopt;
-        if (!call || candidate.size < sizeof(uint32_t) || candidate.text_offset > new_text.size() ||
+        const uint64_t branch_offset =
+            candidate.text_offset + (explicit_dense_key ? sizeof(uint32_t) : 0u);
+        const auto call_delta = compute_sopp_branch_simm16(branch_offset, island_offset);
+        const std::optional<uint32_t> call =
+            !call_delta ? std::nullopt
+                        : instrumentation::build_s_call_i64(call_return_sgpr, *call_delta, arch);
+        if ((!explicit_dense_key && !call) ||
+            candidate.size < (explicit_dense_key ? 2u : 1u) * sizeof(uint32_t) ||
+            candidate.text_offset > new_text.size() ||
             candidate.size > new_text.size() - candidate.text_offset) {
           result.errors.emplace_back(
               "ConSan MOI inline-shadow probe could not encode a dense call anchor");
           return;
         }
         std::vector<uint32_t> anchor_words(candidate.size / sizeof(uint32_t), build_s_nop(0, arch));
-        anchor_words.front() = *call;
+        if (explicit_dense_key) {
+          if (!call_delta || group_index >= 64u) {
+            result.errors.emplace_back(
+                "ConSan MOI inline-shadow probe could not encode an explicit dense branch key");
+            return;
+          }
+          anchor_words[0] = build_s_mov_b32(
+              key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(group_index + 1u)), arch);
+          anchor_words[1] = build_s_branch(*call_delta, arch);
+        } else {
+          anchor_words.front() = *call;
+        }
         std::memcpy(new_text.data() + candidate.text_offset, anchor_words.data(), candidate.size);
       }
     }
@@ -1363,8 +1457,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             return info;
           },
           [&](std::vector<uint8_t> &image, ConSanResult &current_result) {
-            return apply_lds_descriptor_requirements(image, current_result, lds_requirements, arch,
-                                                     current_result.errors);
+            return apply_lds_descriptor_requirements(image, current_result, lds_requirements,
+                                                     options, arch, current_result.errors);
           },
           result))
     return;
@@ -1624,7 +1718,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     uint32_t window_bank_count, bool relocate_instruction,
     std::optional<uint16_t> preserved_lds_byte_offset_vgpr, size_t sampled_causal_windows_offset,
     size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
-    std::vector<std::string> &errors) {
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI sampled probe requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -1652,8 +1746,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   if (reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
                                              errors))
     return std::nullopt;
-  if (reject_optional_scratch_range_overlap(options.moi_owner_vgpr, *options.scratch_vgpr,
-                                            scratch_count, "MOI owner", errors) ||
+  if ((!options.automatic_moi_private_epoch &&
+       reject_optional_scratch_range_overlap(options.moi_owner_vgpr, *options.scratch_vgpr,
+                                             scratch_count, "MOI owner", errors)) ||
       (!options.automatic_moi_private_epoch &&
        reject_optional_scratch_range_overlap(options.moi_epoch_vgpr, *options.scratch_vgpr,
                                              scratch_count, "MOI epoch", errors)))
@@ -1700,7 +1795,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     errors.emplace_back("ConSan MOI runtime sampled probe could not derive a wave owner");
     return std::nullopt;
   }
-  if (runtime_sampled && !options.moi_dispatch_id_sgpr && arch != ROCJITSU_CODE_ARCH_GFX1250) {
+  if (runtime_sampled && !options.moi_dispatch_id_sgpr && !is_rdna4_family_arch(arch)) {
     errors.emplace_back("ConSan MOI runtime sampled probe requires a hardware dispatch ID");
     return std::nullopt;
   }
@@ -1761,6 +1856,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     if (select_guest_vgpr_bank)
       words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
           0u, static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), arch));
+    if (guest_instruction_offset)
+      *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
       uint32_t word = 0;
       std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
@@ -2238,8 +2335,10 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     std::optional<uint32_t> prior_first_record_index, uint32_t prior_access_range_count,
     uint32_t window_bank_count, size_t sampled_causal_windows_offset,
     size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
-    std::optional<uint32_t> private_epoch_offset,
-    std::optional<uint32_t> private_sample_sequence_offset, std::vector<std::string> &errors) {
+    std::optional<uint32_t> private_epoch_offset, std::optional<uint32_t> private_owner_offset,
+    std::optional<uint16_t> private_owner_shift,
+    std::optional<uint32_t> private_sample_sequence_offset, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset = nullptr) {
   const auto access_ranges = candidate_access_ranges(bytes, candidate);
   if (!access_ranges || access_ranges->empty()) {
     errors.emplace_back("ConSan MOI sampled probe requires at least one LDS access range");
@@ -2266,6 +2365,25 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     }
     words.insert(words.end(), load->begin(), load->end());
     words.push_back(*wait);
+  }
+  if (private_owner_offset) {
+    if (!options.automatic_moi_private_epoch || !options.moi_owner_vgpr || !private_owner_shift) {
+      errors.emplace_back("ConSan MOI sampled probe has an invalid private owner plan");
+      return std::nullopt;
+    }
+    const auto load = instrumentation::build_private_load_b32(*options.moi_owner_vgpr,
+                                                              *private_owner_offset, arch);
+    const auto wait = instrumentation::build_s_wait_private_load0(arch);
+    const auto owner = instrumentation::build_v_lshrrev_b32(
+        *options.moi_owner_vgpr, scalar_positive_inline_u32(*private_owner_shift),
+        *options.moi_owner_vgpr, arch);
+    if (!load || !wait || !owner) {
+      errors.emplace_back("ConSan MOI sampled probe could not load private owner state");
+      return std::nullopt;
+    }
+    words.insert(words.end(), load->begin(), load->end());
+    words.push_back(*wait);
+    words.push_back(*owner);
   }
   if (private_sample_sequence_offset) {
     if (!options.moi_sample_sequence_vgpr) {
@@ -2313,14 +2431,19 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
                                        prior_range_index * window_bank_count);
       }
     }
+    uint32_t range_guest_instruction_offset = 0;
     auto range_words = build_direct_sampled_watchpoint_range_words(
         bytes, candidate, (*access_ranges)[range_index], options, arch,
         first_record_index + range_index * window_bank_count, prior_record_indices,
         window_bank_count, range_index == 0u, preserved_lds_byte_offset_vgpr,
         sampled_causal_windows_offset, sampled_watchpoints_offset, sampled_pending_acquires_offset,
-        errors);
+        errors, range_index == 0u ? &range_guest_instruction_offset : nullptr);
     if (!range_words)
       return std::nullopt;
+    if (range_index == 0u && guest_instruction_offset) {
+      *guest_instruction_offset =
+          static_cast<uint32_t>(words.size() * sizeof(uint32_t)) + range_guest_instruction_offset;
+    }
     words.insert(words.end(), range_words->begin(), range_words->end());
   }
   if (private_sample_sequence_offset) {
@@ -2345,7 +2468,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     uint64_t cave_text_offset, uint64_t return_text_offset, uint64_t island_word_count,
     rj_code_arch_t arch) {
   if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u ||
-      (!options.moi_dispatch_id_sgpr && arch != ROCJITSU_CODE_ARCH_GFX1250))
+      (!options.moi_dispatch_id_sgpr && !is_rdna4_family_arch(arch)))
     return std::nullopt;
   const uint16_t saved_scc = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u);
   const uint16_t quotient = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 5u);
@@ -2459,7 +2582,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     uint64_t gate_text_offset, uint64_t return_text_offset, uint64_t reserved_word_count,
     rj_code_arch_t arch) {
   if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u ||
-      (!options.moi_dispatch_id_sgpr && arch != ROCJITSU_CODE_ARCH_GFX1250))
+      (!options.moi_dispatch_id_sgpr && !is_rdna4_family_arch(arch)))
     return std::nullopt;
   const uint16_t saved_scc = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u);
   const uint16_t quotient = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 5u);

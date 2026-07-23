@@ -657,8 +657,13 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
                 ("malformed", "token_malformed_snapshots"),
             ):
                 inline_token_snapshot_counts[key] += _integer(fields, field)
+            inline_undercoverage_field = (
+                "inline_undercoverage"
+                if "inline_undercoverage" in fields
+                else "inline_unsupported_workgroups"
+            )
             inline_coverage_counts["undercoverage"] += _integer(
-                fields, "inline_unsupported_workgroups"
+                fields, inline_undercoverage_field
             )
             inline_coverage_counts["overflow"] += _integer(fields, "inline_overflow")
             inline_coverage_counts["unsupported"] += _integer(
@@ -738,7 +743,7 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
                         fields, field
                     )
                 for key, field in (
-                    ("undercoverage", "inline_unsupported_workgroups"),
+                    ("undercoverage", inline_undercoverage_field),
                     ("overflow", "inline_overflow"),
                     ("unsupported", "inline_unsupported"),
                     ("malformed", "inline_malformed"),

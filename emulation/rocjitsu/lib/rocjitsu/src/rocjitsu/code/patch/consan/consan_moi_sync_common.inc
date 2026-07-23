@@ -53,11 +53,20 @@ sampled_atomic_semantics_for_site(const ConSanResult &result, std::string_view c
     unsupported_reason = "unsupported-qualified-memory-role";
     return std::nullopt;
   }
-  if (!sequence->raw_scope) {
+  // LDS visibility is inherently workgroup-scoped. gfx1250 DS encodings do
+  // not carry the raw scope field used by FLAT/GLOBAL atomics, so derive that
+  // semantic only after the shared sequence analysis has qualified the DS
+  // instruction as an ordering event.
+  const std::optional<uint32_t> semantic_scope =
+      sequence->raw_scope ? sequence->raw_scope
+                          : (result.arch_name == "gfx1250" && site.mnemonic.starts_with("ds_")
+                                 ? std::optional<uint32_t>(1u)
+                                 : std::nullopt);
+  if (!semantic_scope) {
     unsupported_reason = "missing-qualified-scope";
     return std::nullopt;
   }
-  switch (*sequence->raw_scope) {
+  switch (*semantic_scope) {
   case 0:
     semantics.scope = ConSanMoiSampledSyncScope::Wavefront;
     break;
@@ -164,6 +173,7 @@ normalize_ordinary_fence_communication(const ConSanOrdinaryMemorySite &site) {
   normalized.raw_soffset = site.raw_soffset;
   normalized.raw_offen = site.raw_offen;
   normalized.raw_idxen = site.raw_idxen;
+  normalized.raw_saddr = site.raw_saddr;
   normalized.raw_ioffset = site.raw_ioffset;
   normalized.raw_scope = site.raw_scope;
   normalized.raw_th = site.raw_th;
@@ -203,7 +213,8 @@ void append_fence_record_candidates(const ConSanResult &result,
       if (site == container.ordinary_memory_sites.end() ||
           std::ranges::count(container.ordinary_memory_sites, event->text_offset,
                              &ConSanOrdinaryMemorySite::text_offset) != 1 ||
-          site->support_reason != ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly)
+          (site->support_reason != ConSanOrdinaryMemorySupportReason::Supported &&
+           site->support_reason != ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly))
         return;
       candidates.push_back({fence, normalize_ordinary_fence_communication(*site),
                             descriptor_file_offset, container.entry_text_offset,
@@ -231,7 +242,7 @@ void append_fence_record_candidates(const ConSanResult &result,
       site.returns_old_value.value_or(false) && site.addr_vgpr && site.dst_vgpr &&
       *site.dst_vgpr >= *site.addr_vgpr && *site.dst_vgpr < *site.addr_vgpr + 2u;
   return returned_value_aliases_address ||
-                 (site.mnemonic.starts_with("global_atomic") &&
+                 (site.mnemonic.starts_with("global_") &&
                   (!site.raw_saddr || !is_vector_flat_no_saddr(*site.raw_saddr, arch) ||
                    site.raw_ioffset.value_or(0) != 0))
              ? 5u
@@ -2439,7 +2450,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
             inline_atomic_release_capacity, snapshot_table_base, inline_causal_snapshot_capacity,
             token_table_base, inline_acquired_token_capacity,
             /*emit_guest_instruction=*/true,
-            /*import_claimed_predecessor=*/arch == ROCJITSU_CODE_ARCH_GFX1250,
+            /*import_claimed_predecessor=*/is_rdna4_family_arch(arch),
             /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors)) {
       errors.emplace_back(
           "ConSan MOI inline release could not emit a versioned causal transaction");
@@ -2469,7 +2480,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   // slot retains the predecessor payload across the guest, acquire import,
   // causal snapshot, and successor commit.
   const bool claimed_acquire_release =
-      (arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) &&
+      (arch == ROCJITSU_CODE_ARCH_CDNA4 || is_rdna4_family_arch(arch)) &&
       candidate.event_kind == ConSanMoiAtomicEventKind::AcquireRelease && !is_compare_exchange;
   if (claimed_acquire_release) {
     if (!append_inline_versioned_release_transaction(

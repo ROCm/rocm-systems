@@ -31,6 +31,20 @@ append_dispatch_id_capture_and_restore(std::vector<uint32_t> &words,
           words,
           build_s_mov_b32(static_cast<uint16_t>(*persistent_dispatch_sgpr + 1u),
                           static_cast<uint16_t>(plan.dispatch_id_sgpr + 1u), arch),
+          arch) ||
+      // Hardware dispatch ID zero is valid (and common for the first packet),
+      // while ConSan reserves zero as the empty metadata sentinel. Store the
+      // injective modulo-2^64 successor used by every downstream comparison.
+      !append_moi_entry_salu_write(words,
+                                   build_s_add_u32(*persistent_dispatch_sgpr,
+                                                   *persistent_dispatch_sgpr,
+                                                   scalar_positive_inline_u32(1), arch),
+                                   arch) ||
+      !append_moi_entry_salu_write(
+          words,
+          build_s_addc_u32(static_cast<uint16_t>(*persistent_dispatch_sgpr + 1u),
+                           static_cast<uint16_t>(*persistent_dispatch_sgpr + 1u),
+                           scalar_positive_inline_u32(0), arch),
           arch)) {
     errors.emplace_back("ConSan MOI dispatch-ID prologue cannot encode its SALU dependency delay");
     return false;
@@ -47,6 +61,39 @@ append_dispatch_id_capture_and_restore(std::vector<uint32_t> &words,
           "ConSan MOI dispatch-ID prologue cannot encode a guest-restore dependency delay");
       return false;
     }
+  }
+  for (uint16_t i = 0; i < plan.shifted_system_sgpr_count; ++i) {
+    const uint16_t destination = static_cast<uint16_t>(plan.original_user_sgpr_count + i);
+    if (!append_moi_entry_salu_write(
+            words,
+            build_s_mov_b32(destination,
+                            static_cast<uint16_t>(destination + plan.system_sgpr_shift), arch),
+            arch)) {
+      errors.emplace_back("ConSan MOI dispatch-ID prologue cannot encode a system-SGPR restore");
+      return false;
+    }
+  }
+  if (plan.requires_kernarg_reload()) {
+    if (arch != ROCJITSU_CODE_ARCH_CDNA4 || plan.kernarg_reload_count > 2u) {
+      errors.emplace_back("ConSan MOI dispatch-ID prologue has an unsupported kernarg reload");
+      return false;
+    }
+    for (uint16_t i = 0; i < plan.kernarg_reload_count; ++i) {
+      const auto load = build_cdna4_s_load_dword(
+          static_cast<uint16_t>(plan.kernarg_reload_sgpr + i), plan.kernarg_reload_base_sgpr,
+          static_cast<uint32_t>(plan.kernarg_reload_offset_dwords + i) * sizeof(uint32_t), arch);
+      if (!load) {
+        errors.emplace_back("ConSan MOI dispatch-ID prologue cannot encode a kernarg reload");
+        return false;
+      }
+      words.insert(words.end(), load->begin(), load->end());
+    }
+    const auto wait = build_cdna4_s_wait_scalar_load0(arch);
+    if (!wait) {
+      errors.emplace_back("ConSan MOI dispatch-ID prologue cannot encode its kernarg wait");
+      return false;
+    }
+    words.push_back(*wait);
   }
   return true;
 }
@@ -65,15 +112,19 @@ append_dispatch_id_capture_and_restore(std::vector<uint32_t> &words,
   }
 
   // Large all-site transformations can place the entry prologue beyond a
-  // SOPP branch's signed 16-bit dword range. The descriptor-backed ConSan
-  // scalar state is unobservable by the original kernel at entry, so its first
-  // pair is safe temporary state for an absolute indirect return.
-  if (!pc_sgpr || *pc_sgpr > 126u || *pc_sgpr % 2u != 0u) {
+  // SOPP branch's signed 16-bit dword range. A probe-local EXEC-save window is
+  // dead at the selected probe sites, but that does not make it safe at kernel
+  // entry: it may still hold guest ABI input. RDNA-family VCC and SCC are not
+  // kernel-entry inputs, so use VCC for the absolute return and let the guest
+  // establish both special registers from its normal entry state afterward.
+  const std::optional<uint16_t> long_return_pc_sgpr =
+      is_rdna4_family_arch(arch) ? std::optional<uint16_t>(kRdna4VccLo) : pc_sgpr;
+  if (!long_return_pc_sgpr || *long_return_pc_sgpr > 126u || *long_return_pc_sgpr % 2u != 0u) {
     errors.emplace_back("ConSan MOI " + std::string(prologue_name) +
                         " branch target is out of range and has no valid long-return SGPR pair");
     return false;
   }
-  words.push_back(build_s_getpc_b64(*pc_sgpr, arch));
+  words.push_back(build_s_getpc_b64(*long_return_pc_sgpr, arch));
   const uint64_t pc_after_getpc = branch_pc + sizeof(uint32_t);
   if (original_entry_text_offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
       pc_after_getpc > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
@@ -83,7 +134,7 @@ append_dispatch_id_capture_and_restore(std::vector<uint32_t> &words,
   }
   const int64_t delta =
       static_cast<int64_t>(original_entry_text_offset) - static_cast<int64_t>(pc_after_getpc);
-  if (!append_pc_delta_builder(words, arch, *pc_sgpr, delta)) {
+  if (!append_pc_delta_builder(words, arch, *long_return_pc_sgpr, delta)) {
     errors.emplace_back("ConSan MOI " + std::string(prologue_name) +
                         " could not encode its long return");
     return false;
@@ -95,7 +146,7 @@ append_dispatch_id_capture_and_restore(std::vector<uint32_t> &words,
     return false;
   }
   words.push_back(*wait_pc);
-  words.push_back(build_s_setpc_b64(*pc_sgpr, arch));
+  words.push_back(build_s_setpc_b64(*long_return_pc_sgpr, arch));
   return true;
 }
 
@@ -1015,6 +1066,10 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, std::span<const
                     1u);
     AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
                     plan.expanded_user_sgpr_count);
+    if (plan.requires_kernarg_reload()) {
+      AMDHSA_BITS_SET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH,
+                      plan.replacement_kernarg_preload_length);
+    }
   }
   const uint32_t required_sgpr_count = std::max<uint32_t>(
       plan.required_sgpr_count, static_cast<uint32_t>(persistent_dispatch_sgpr) + 2u);
@@ -1041,6 +1096,17 @@ void rollback_moi_dispatch_id_as_unsupported(ConSanResult &result, std::string r
                                std::move(reason));
 }
 
+[[nodiscard]] std::string
+dispatch_id_preload_rejection_reason(std::string_view kernel_name,
+                                     const ConSanMoiDispatchIdPreloadPlan &plan,
+                                     uint16_t persistent_dispatch_sgpr) {
+  return "kernel '" + std::string(kernel_name) +
+         "' preload plan support=" + std::to_string(static_cast<uint32_t>(plan.support)) +
+         " user_sgprs=" + std::to_string(plan.original_user_sgpr_count) +
+         " required_sgprs=" + std::to_string(plan.required_sgpr_count) +
+         " persistent_sgpr=" + std::to_string(persistent_dispatch_sgpr);
+}
+
 void note_dispatch_id_patch_info(ConSanPatchInfo &info, const ConSanMoiDispatchIdPreloadPlan &plan,
                                  uint16_t persistent_dispatch_sgpr) {
   info.dispatch_id_capture_sgpr = persistent_dispatch_sgpr;
@@ -1048,6 +1114,14 @@ void note_dispatch_id_patch_info(ConSanPatchInfo &info, const ConSanMoiDispatchI
   info.dispatch_id_original_user_sgpr_count = plan.original_user_sgpr_count;
   info.dispatch_id_expanded_user_sgpr_count = plan.expanded_user_sgpr_count;
   info.dispatch_id_system_sgpr_count = plan.system_sgpr_count;
+  info.dispatch_id_kernarg_reload_sgpr = plan.kernarg_reload_sgpr;
+  info.dispatch_id_kernarg_reload_base_sgpr = plan.kernarg_reload_base_sgpr;
+  info.dispatch_id_kernarg_reload_offset_dwords = plan.kernarg_reload_offset_dwords;
+  info.dispatch_id_kernarg_reload_count = plan.kernarg_reload_count;
+  info.dispatch_id_shifted_system_sgpr_count = plan.shifted_system_sgpr_count;
+  info.dispatch_id_system_sgpr_shift = plan.system_sgpr_shift;
+  info.dispatch_id_original_kernarg_preload_length = plan.original_kernarg_preload_length;
+  info.dispatch_id_replacement_kernarg_preload_length = plan.replacement_kernarg_preload_length;
   info.dispatch_id_required_sgpr_count = static_cast<uint16_t>(std::max<uint32_t>(
       plan.required_sgpr_count, static_cast<uint32_t>(persistent_dispatch_sgpr) + 2u));
   info.dispatch_id_preload_inserted = plan.descriptor_change_required();
@@ -1128,7 +1202,8 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       if (!dispatch_plan->supported() ||
           *options.moi_dispatch_id_sgpr < dispatch_plan->required_sgpr_count) {
         rollback_moi_dispatch_id_as_unsupported(
-            result, "private-epoch kernel has an invalid or overlapping preload layout");
+            result, dispatch_id_preload_rejection_reason(kernel.name, *dispatch_plan,
+                                                         *options.moi_dispatch_id_sgpr));
         return;
       }
       has_kernarg_preload = moi_descriptor_has_kernarg_preload(descriptor);
@@ -1497,7 +1572,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     }
     if (active.descriptor_file_offset > active_bytes.size() ||
         sizeof(KD) > active_bytes.size() - active.descriptor_file_offset) {
-      if (options.moi_dispatch_id_sgpr) {
+      if (kernel_options.moi_dispatch_id_sgpr) {
         rollback_moi_dispatch_id_as_unsupported(result, "owner descriptor exceeds ELF bytes");
         return;
       }
@@ -1508,18 +1583,19 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     std::memcpy(&descriptor, active_bytes.data() + active.descriptor_file_offset,
                 sizeof(descriptor));
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
-    if (options.moi_dispatch_id_sgpr) {
+    if (kernel_options.moi_dispatch_id_sgpr) {
       dispatch_plan = moi_descriptor_dispatch_id_preload_plan(descriptor, arch);
       if (!dispatch_plan->supported() ||
-          *options.moi_dispatch_id_sgpr < dispatch_plan->required_sgpr_count) {
+          *kernel_options.moi_dispatch_id_sgpr < dispatch_plan->required_sgpr_count) {
         rollback_moi_dispatch_id_as_unsupported(
-            result, "kernel '" + kernel.name + "' has an invalid or overlapping preload layout");
+            result, dispatch_id_preload_rejection_reason(kernel.name, *dispatch_plan,
+                                                         *kernel_options.moi_dispatch_id_sgpr));
         return;
       }
     }
     const bool has_kernarg_preload = moi_descriptor_has_kernarg_preload(descriptor);
     if (has_kernarg_preload && kernel.code_size <= kAmdhsaKernelEntryAlignment) {
-      if (options.moi_dispatch_id_sgpr) {
+      if (kernel_options.moi_dispatch_id_sgpr) {
         rollback_moi_dispatch_id_as_unsupported(
             result, "kernel '" + kernel.name + "' has no valid secondary hardware entry");
       } else {
@@ -1615,10 +1691,10 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       required_vgpr_count =
           std::max<uint32_t>(required_vgpr_count, *kernel_options.moi_workgroup_key_vgpr + 1u);
     uint32_t required_sgpr_count = owner_required_sgpr_count;
-    if (options.moi_dispatch_id_sgpr) {
+    if (kernel_options.moi_dispatch_id_sgpr) {
       required_sgpr_count = std::max<uint32_t>(
-          required_sgpr_count, static_cast<uint32_t>(*options.moi_dispatch_id_sgpr) +
-                                   moi_dispatch_state_sgpr_count(options));
+          required_sgpr_count, static_cast<uint32_t>(*kernel_options.moi_dispatch_id_sgpr) +
+                                   moi_dispatch_state_sgpr_count(kernel_options));
     }
     if (options.moi_persistent_owner_sgpr)
       required_sgpr_count = std::max<uint32_t>(
@@ -1635,10 +1711,10 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
                                               result.errors)) {
       return;
     }
-    if (item.dispatch_plan && options.moi_dispatch_id_sgpr &&
+    if (item.dispatch_plan && kernel_options.moi_dispatch_id_sgpr &&
         !apply_moi_dispatch_id_descriptor(patcher, item.kernel.descriptor_file_offset,
-                                          *item.dispatch_plan, *options.moi_dispatch_id_sgpr, arch,
-                                          result.errors)) {
+                                          *item.dispatch_plan, *kernel_options.moi_dispatch_id_sgpr,
+                                          arch, result.errors)) {
       return;
     }
   }
@@ -1906,8 +1982,8 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       info.workgroup_shadow_compact = item.workgroup_shadow->compact;
       info.required_group_segment_size = item.workgroup_shadow->required_group_segment_size;
     }
-    if (item.dispatch_plan && options.moi_dispatch_id_sgpr)
-      note_dispatch_id_patch_info(info, *item.dispatch_plan, *options.moi_dispatch_id_sgpr);
+    if (item.dispatch_plan && kernel_options.moi_dispatch_id_sgpr)
+      note_dispatch_id_patch_info(info, *item.dispatch_plan, *kernel_options.moi_dispatch_id_sgpr);
     const auto canonical_kernel =
         std::ranges::find(result.kernels, kernel.name, &ConSanKernelInfo::name);
     if (canonical_kernel == result.kernels.end()) {

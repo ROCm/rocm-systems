@@ -124,7 +124,7 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
     if (kernel.preflight_action != ConSanPreflightAction::Skip)
       return false;
     return !kernel.has_text_range || !kernel.decoded || kernel.stats.decode_error_count != 0 ||
-           kernel.stats.lds_atomic_count != 0 || kernel.stats.ds_other_count != 0;
+           kernel.stats.ds_other_count != 0;
   });
 }
 
@@ -252,7 +252,28 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
             existing->bytes.end - existing->bytes.begin >= 6u * sizeof(uint32_t) &&
             next.bytes.begin == existing->bytes.begin + sizeof(uint32_t) &&
             next.bytes.end == existing->bytes.begin + 4u * sizeof(uint32_t)));
-      if (!exact_alias && !nested_cross_phase && !nested_sc_relay_donor) {
+      const bool nested_composed_access_atomic =
+          existing->phase == ConSanPatchPhase::Instrumentation &&
+          next.phase == ConSanPatchPhase::Instrumentation &&
+          existing->bytes.begin == next.bytes.begin &&
+          (((existing->kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+             existing->kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
+            next.kind == ConSanPatchKind::TrampolineMoiAtomicRecord) ||
+           ((next.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+             next.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
+            existing->kind == ConSanPatchKind::TrampolineMoiAtomicRecord));
+      const bool nested_composed_sampled_access_atomic =
+          existing->phase == ConSanPatchPhase::Instrumentation &&
+          next.phase == ConSanPatchPhase::Instrumentation &&
+          existing->bytes.begin == next.bytes.begin &&
+          (((existing->kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+             existing->kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore) &&
+            next.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata) ||
+           ((next.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+             next.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore) &&
+            existing->kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata));
+      if (!exact_alias && !nested_cross_phase && !nested_sc_relay_donor &&
+          !nested_composed_access_atomic && !nested_composed_sampled_access_atomic) {
         errors.emplace_back(
             "ConSan final validation found partially overlapping patch ranges: existing=" +
             std::to_string(existing->bytes.begin) + "-" + std::to_string(existing->bytes.end) +
@@ -514,6 +535,26 @@ validate_sc_branch_only_continuation_semantics(const AmdGpuCodeObject &replaceme
          patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap) &&
         patch.original_size == 2u * sizeof(uint32_t))
       owned_relay_slots.insert(patch.anchor_offset + sizeof(uint32_t));
+    if (patch.kind == ConSanPatchKind::TrampolineScBranchRelayDonor) {
+      if (patch.original_size == 2u * sizeof(uint32_t))
+        owned_relay_slots.insert(patch.anchor_offset + sizeof(uint32_t));
+      if (patch.original_size >= 6u * sizeof(uint32_t)) {
+        for (uint64_t offset = patch.anchor_offset + 4u * sizeof(uint32_t);
+             offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t))
+          owned_relay_slots.insert(offset);
+      }
+    }
+    if (patch.kind == ConSanPatchKind::TrampolineScRelayReservoir) {
+      if (patch.original_size == 0) {
+        for (uint64_t offset = patch.trampoline_offset;
+             offset < patch.trampoline_offset + patch.trampoline_size; offset += sizeof(uint32_t))
+          owned_relay_slots.insert(offset);
+      } else {
+        const auto slots =
+            sc_relay_reservoir_all_slot_offsets(patch.anchor_offset, patch.original_size);
+        owned_relay_slots.insert(slots.begin(), slots.end());
+      }
+    }
   }
   std::unordered_set<uint64_t> used_relay_slots;
   const auto validate_hop = [&](uint64_t source, uint64_t target) {
@@ -1039,6 +1080,15 @@ validate_sc_relay_reservoir_semantics(const AmdGpuCodeObject &original,
           {.start_offset = function.entry_text_offset, .size = function.code_size});
   }
   auto blocks = BasicBlock::build(original, *decoder, arch, extra_leaders, code_ranges);
+  std::vector<BasicBlock *> blocks_by_offset;
+  blocks_by_offset.reserve(blocks.size());
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    if (!block->instructions().empty())
+      blocks_by_offset.push_back(block.get());
+  }
+  std::ranges::sort(blocks_by_offset, [](BasicBlock *lhs, BasicBlock *rhs) {
+    return (*lhs->instructions().begin()).src_loc() < (*rhs->instructions().begin()).src_loc();
+  });
   const uint32_t nop = build_s_nop(0, arch);
   const uint32_t branch_opcode = build_s_branch(0, arch) & 0xffff0000u;
   const auto read_word = [](std::span<const uint8_t> bytes,
@@ -1052,6 +1102,7 @@ validate_sc_relay_reservoir_semantics(const AmdGpuCodeObject &original,
 
   std::unordered_set<uint64_t> relay_vertices;
   std::unordered_set<uint64_t> island_vertices;
+  std::unordered_map<uint64_t, uint64_t> branch_only_relay_targets;
   for (const ConSanPatchInfo &patch : result.patches) {
     for (uint64_t offset : patch.branch_relay_offsets) {
       if (offset < patch.trampoline_offset ||
@@ -1083,11 +1134,38 @@ validate_sc_relay_reservoir_semantics(const AmdGpuCodeObject &original,
           relay_vertices.insert(offset);
       } else {
         for (uint64_t offset :
-             sc_relay_reservoir_slot_offsets(patch.anchor_offset, patch.original_size))
+             sc_relay_reservoir_all_slot_offsets(patch.anchor_offset, patch.original_size))
           relay_vertices.insert(offset);
       }
     }
+    if (patch.sc_branch_only_continuation) {
+      for (size_t index = 0; index < patch.sc_branch_only_entry_relay_offsets.size(); ++index) {
+        const uint64_t source = patch.sc_branch_only_entry_relay_offsets[index];
+        const uint64_t target = index + 1u < patch.sc_branch_only_entry_relay_offsets.size()
+                                    ? patch.sc_branch_only_entry_relay_offsets[index + 1u]
+                                    : patch.trampoline_offset;
+        branch_only_relay_targets.emplace(source, target);
+      }
+      for (size_t index = 0; index < patch.sc_branch_only_return_relay_offsets.size(); ++index) {
+        const uint64_t source = patch.sc_branch_only_return_relay_offsets[index];
+        const uint64_t target = index + 1u < patch.sc_branch_only_return_relay_offsets.size()
+                                    ? patch.sc_branch_only_return_relay_offsets[index + 1u]
+                                    : patch.anchor_offset + patch.original_size;
+        branch_only_relay_targets.emplace(source, target);
+      }
+    }
   }
+
+  const auto valid_relay_target = [&](uint64_t source, int64_t target) {
+    if (target < 0)
+      return false;
+    if (const auto branch_only = branch_only_relay_targets.find(source);
+        branch_only != branch_only_relay_targets.end())
+      return static_cast<uint64_t>(target) == branch_only->second;
+    return target > static_cast<int64_t>(source) &&
+           (relay_vertices.contains(static_cast<uint64_t>(target)) ||
+            island_vertices.contains(static_cast<uint64_t>(target)));
+  };
 
   for (const ConSanPatchInfo *patch : reservoirs) {
     if (patch->original_size == 0) {
@@ -1115,9 +1193,7 @@ validate_sc_relay_reservoir_semantics(const AmdGpuCodeObject &original,
         const int64_t target =
             static_cast<int64_t>(offset) + sizeof(uint32_t) +
             static_cast<int64_t>(static_cast<int16_t>(*word & 0xffffu)) * sizeof(uint32_t);
-        if (target <= static_cast<int64_t>(offset) || target < 0 ||
-            (!relay_vertices.contains(static_cast<uint64_t>(target)) &&
-             !island_vertices.contains(static_cast<uint64_t>(target)))) {
+        if (!valid_relay_target(offset, target)) {
           errors.emplace_back("ConSan relay reservoir proof found an invalid relay target from " +
                               std::to_string(offset) + " to " + std::to_string(target));
           return errors;
@@ -1156,7 +1232,12 @@ validate_sc_relay_reservoir_semantics(const AmdGpuCodeObject &original,
     }
 
     bool found_pristine_block = false;
-    for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    const auto owning_block =
+        std::ranges::upper_bound(blocks_by_offset, patch->anchor_offset, {}, [](BasicBlock *block) {
+          return (*block->instructions().begin()).src_loc();
+        });
+    if (owning_block != blocks_by_offset.begin()) {
+      BasicBlock *block = *std::prev(owning_block);
       uint64_t cursor = patch->anchor_offset;
       uint32_t clause_remaining = 0;
       bool inside = false;
@@ -1186,7 +1267,6 @@ validate_sc_relay_reservoir_semantics(const AmdGpuCodeObject &original,
       }
       if (inside && valid && cursor == patch->anchor_offset + patch->original_size) {
         found_pristine_block = true;
-        break;
       }
     }
     if (!found_pristine_block) {
@@ -1246,9 +1326,7 @@ validate_sc_relay_reservoir_semantics(const AmdGpuCodeObject &original,
       const int64_t target =
           static_cast<int64_t>(offset) + sizeof(uint32_t) +
           static_cast<int64_t>(static_cast<int16_t>(*word & 0xffffu)) * sizeof(uint32_t);
-      if (target <= static_cast<int64_t>(offset) || target < 0 ||
-          (!relay_vertices.contains(static_cast<uint64_t>(target)) &&
-           !island_vertices.contains(static_cast<uint64_t>(target)))) {
+      if (!valid_relay_target(offset, target)) {
         errors.emplace_back("ConSan relay reservoir proof found an invalid relay target from " +
                             std::to_string(offset) + " to " + std::to_string(target));
         return errors;
@@ -1341,13 +1419,14 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       const bool sc_relocation = candidate.kind == ConSanPatchKind::TrampolineScPerturbation &&
                                  candidate.perturbation_composite_atomic_overlap &&
                                  candidate.perturbation_edge;
-      const bool record_replay_relocation =
-          candidate.kind == ConSanPatchKind::TrampolineMoiAtomicRecord &&
+      const bool moi_atomic_relocation =
+          (candidate.kind == ConSanPatchKind::TrampolineMoiAtomicRecord ||
+           candidate.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata) &&
           candidate.relocated_guest_instruction_offset;
       const bool inline_shadow_relocation =
           candidate.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering &&
           candidate.relocated_guest_instruction_offset;
-      if (!sc_relocation && !record_replay_relocation && !inline_shadow_relocation)
+      if (!sc_relocation && !moi_atomic_relocation && !inline_shadow_relocation)
         continue;
       if (match != nullptr)
         return std::nullopt;
@@ -1357,6 +1436,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       return std::nullopt;
     uint64_t body_offset = 0;
     if (match->kind == ConSanPatchKind::TrampolineMoiAtomicRecord ||
+        match->kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata ||
         match->kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering) {
       body_offset = *match->relocated_guest_instruction_offset;
       if (match->trampoline_offset > replacement_text.size() ||
@@ -1799,9 +1879,24 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       for (size_t i = 1; i < barrier_id_scope_patches.size(); ++i) {
         const ConSanPatchInfo &previous = *barrier_id_scope_patches[i - 1u];
         const ConSanPatchInfo &current = *barrier_id_scope_patches[i];
-        if (previous.anchor_offset + previous.original_size != current.anchor_offset) {
+        const uint64_t gap_begin = previous.anchor_offset + previous.original_size;
+        if (gap_begin > current.anchor_offset) {
           errors.emplace_back(
-              "ConSan mutation proof found an omitted or noncontiguous barrier group member");
+              "ConSan mutation proof found overlapping or out-of-order barrier group members");
+          break;
+        }
+        const uint64_t gap_size = current.anchor_offset - gap_begin;
+        if (lifecycle_shape && gap_size > 0u) {
+          errors.emplace_back(
+              "ConSan mutation proof found an omitted or noncontiguous barrier lifecycle member");
+          break;
+        }
+        if (pair_shape && gap_size > 0u &&
+            !std::equal(original_text.begin() + gap_begin,
+                        original_text.begin() + current.anchor_offset,
+                        replacement_text.begin() + gap_begin)) {
+          errors.emplace_back(
+              "ConSan mutation proof found changed bytes between barrier group members");
           break;
         }
       }
@@ -2383,6 +2478,8 @@ struct DescriptorRequirement {
   bool dispatch_id_preload_inserted = false;
   uint16_t dispatch_id_original_user_sgpr_count = 0;
   uint16_t dispatch_id_expanded_user_sgpr_count = 0;
+  uint16_t dispatch_id_original_kernarg_preload_length = 0;
+  uint16_t dispatch_id_replacement_kernarg_preload_length = 0;
   uint16_t required_vgpr_count = 0;
   uint16_t required_sgpr_count = 0;
   uint32_t required_private_bytes = 0;
@@ -2412,8 +2509,16 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
       return;
     }
     const uint32_t restore_count =
-        patch.dispatch_id_preload_inserted ? guest_input_count - patch.dispatch_id_source_sgpr : 0u;
-    const uint64_t required_words = 4u + 2u * restore_count;
+        patch.dispatch_id_preload_inserted
+            ? (patch.dispatch_id_kernarg_reload_count != 0
+                   ? patch.dispatch_id_kernarg_reload_sgpr - patch.dispatch_id_source_sgpr
+                   : guest_input_count - patch.dispatch_id_source_sgpr)
+            : 0u;
+    const uint64_t reload_words = patch.dispatch_id_kernarg_reload_count != 0
+                                      ? 2u * patch.dispatch_id_kernarg_reload_count + 1u
+                                      : 0u;
+    const uint64_t required_words =
+        4u + 2u * (restore_count + patch.dispatch_id_shifted_system_sgpr_count) + reload_words;
     const uint64_t required_bytes = required_words * sizeof(uint32_t);
     if (entry_offset > replacement_text.size() ||
         required_bytes > replacement_text.size() - entry_offset) {
@@ -2446,10 +2551,46 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
     expect_write(build_s_mov_b32(static_cast<uint16_t>(persistent + 1u),
                                  static_cast<uint16_t>(patch.dispatch_id_source_sgpr + 1u), arch),
                  "high-word capture");
+    expect_write(build_s_add_u32(persistent, persistent, scalar_positive_inline_u32(1), arch),
+                 "low-word sentinel encoding");
+    expect_write(build_s_addc_u32(static_cast<uint16_t>(persistent + 1u),
+                                  static_cast<uint16_t>(persistent + 1u),
+                                  scalar_positive_inline_u32(0), arch),
+                 "high-word sentinel encoding");
     for (uint32_t i = 0; i < restore_count; ++i) {
       const uint16_t destination = static_cast<uint16_t>(patch.dispatch_id_source_sgpr + i);
       expect_write(build_s_mov_b32(destination, static_cast<uint16_t>(destination + 2u), arch),
                    "ascending guest restore");
+    }
+    for (uint16_t i = 0; i < patch.dispatch_id_shifted_system_sgpr_count; ++i) {
+      const uint16_t destination =
+          static_cast<uint16_t>(patch.dispatch_id_original_user_sgpr_count + i);
+      expect_write(
+          build_s_mov_b32(destination,
+                          static_cast<uint16_t>(destination + patch.dispatch_id_system_sgpr_shift),
+                          arch),
+          "system-SGPR restore");
+    }
+    if (patch.dispatch_id_kernarg_reload_count != 0) {
+      for (uint16_t i = 0; i < patch.dispatch_id_kernarg_reload_count; ++i) {
+        const auto load = build_cdna4_s_load_dword(
+            static_cast<uint16_t>(patch.dispatch_id_kernarg_reload_sgpr + i),
+            patch.dispatch_id_kernarg_reload_base_sgpr,
+            static_cast<uint32_t>(patch.dispatch_id_kernarg_reload_offset_dwords + i) *
+                sizeof(uint32_t),
+            arch);
+        if (!load || read_word(cursor++) != (*load)[0] || read_word(cursor++) != (*load)[1]) {
+          errors.emplace_back("ConSan final validation found an invalid dispatch-ID kernarg "
+                              "reload in kernel '" +
+                              std::string(kernel_name) + "'");
+        }
+      }
+      const auto wait = build_cdna4_s_wait_scalar_load0(arch);
+      if (!wait || read_word(cursor++) != *wait) {
+        errors.emplace_back("ConSan final validation found an invalid dispatch-ID kernarg wait "
+                            "in kernel '" +
+                            std::string(kernel_name) + "'");
+      }
     }
   };
 
@@ -2499,7 +2640,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
   const rj_code_arch_t arch = arch_for_target(replacement.target_id());
   if (replacement.text_sections().size() != 1 ||
       (has_global_exact_patch && !result.resolved_moi_dispatch_id_sgpr &&
-       arch != ROCJITSU_CODE_ARCH_GFX1250)) {
+       !is_rdna4_family_arch(arch))) {
     errors.emplace_back(
         "ConSan final validation found exact-shadow publication without dispatch-ID state");
     return errors;
@@ -2864,7 +3005,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     // and ABI offset 4, so their encodings are identical; release-only
     // transactions retain the single-store shape.
     const bool claimed_acquire_release_arch =
-        arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
+        arch == ROCJITSU_CODE_ARCH_CDNA4 || is_rdna4_family_arch(arch);
     bool valid = cas_positions.size() == 2u &&
                  (owner_between == 1u || (claimed_acquire_release_arch && owner_between == 6u));
 
@@ -2905,12 +3046,10 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       const std::vector<size_t> store_positions = positions(*store);
       return store_positions.size() == 1u && !cas_positions.empty() &&
              cas_positions.front() < store_positions.front() &&
-             std::ranges::any_of(
-                 owner_positions,
-                 [&](size_t owner_position) {
-                   return store_positions.front() < owner_position &&
-                          owner_position < cas_positions.back();
-                 });
+             std::ranges::any_of(owner_positions, [&](size_t owner_position) {
+               return store_positions.front() < owner_position &&
+                      owner_position < cas_positions.back();
+             });
     };
     bool snapshot_stores_valid =
         require_snapshot_store(offsetof(ConSanMoiInlineCausalSnapshot, entry_count),
@@ -3124,6 +3263,10 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
               patch.dispatch_id_original_user_sgpr_count;
           requirement.dispatch_id_expanded_user_sgpr_count =
               patch.dispatch_id_expanded_user_sgpr_count;
+          requirement.dispatch_id_original_kernarg_preload_length =
+              patch.dispatch_id_original_kernarg_preload_length;
+          requirement.dispatch_id_replacement_kernarg_preload_length =
+              patch.dispatch_id_replacement_kernarg_preload_length;
           requirement.required_sgpr_count =
               std::max(requirement.required_sgpr_count, patch.dispatch_id_required_sgpr_count);
         }
@@ -3210,6 +3353,18 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
             "kernel '" +
             original_kernel.name + "'");
       }
+      const uint32_t original_preload_length =
+          AMDHSA_BITS_GET(original_descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH);
+      const uint32_t replacement_preload_length =
+          AMDHSA_BITS_GET(replacement_descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH);
+      if (original_preload_length != requirement.dispatch_id_original_kernarg_preload_length ||
+          replacement_preload_length !=
+              requirement.dispatch_id_replacement_kernarg_preload_length) {
+        errors.emplace_back(
+            "ConSan final validation found an invalid dispatch-ID kernarg-preload delta for "
+            "kernel '" +
+            original_kernel.name + "'");
+      }
 
       uint32_t normalized_rsrc2 = replacement_descriptor.compute_pgm_rsrc2;
       AMDHSA_BITS_SET(normalized_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, original_user_count);
@@ -3243,6 +3398,10 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
                       kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID,
                       AMDHSA_BITS_GET(original_descriptor.kernel_code_properties,
                                       kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID));
+      if (requirement.dispatch_id_original_kernarg_preload_length != 0) {
+        AMDHSA_BITS_SET(normalized.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH,
+                        requirement.dispatch_id_original_kernarg_preload_length);
+      }
     }
     if (text_relocated || requirement.allow_entry_delta)
       normalized.kernel_code_entry_byte_offset = original_descriptor.kernel_code_entry_byte_offset;

@@ -955,6 +955,7 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       std::min(header.diagnostic_capacity, span_size_u32(diagnostic_records.size()));
 
   struct ReplayWorkgroupState {
+    uint64_t generation = 0;
     uint32_t workgroup_x = 0;
     uint32_t workgroup_y = 0;
     uint32_t workgroup_z = 0;
@@ -966,15 +967,16 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
   };
   std::vector<ReplayWorkgroupState> workgroups;
   std::optional<size_t> first_workgroup_index;
-  auto find_workgroup_state = [&](uint32_t workgroup_x, uint32_t workgroup_y,
+  auto find_workgroup_state = [&](uint64_t generation, uint32_t workgroup_x, uint32_t workgroup_y,
                                   uint32_t workgroup_z) -> ReplayWorkgroupState & {
     for (ReplayWorkgroupState &state : workgroups) {
-      if (state.workgroup_x == workgroup_x && state.workgroup_y == workgroup_y &&
-          state.workgroup_z == workgroup_z)
+      if (state.generation == generation && state.workgroup_x == workgroup_x &&
+          state.workgroup_y == workgroup_y && state.workgroup_z == workgroup_z)
         return state;
     }
 
     ReplayWorkgroupState state;
+    state.generation = generation;
     state.workgroup_x = workgroup_x;
     state.workgroup_y = workgroup_y;
     state.workgroup_z = workgroup_z;
@@ -1063,8 +1065,9 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
   for (const ReplayEvent &event : events) {
     if (event.kind == ReplayEvent::Kind::Barrier) {
       const ConSanMoiBarrierRecord &record = barrier_records[event.record_index];
-      ReplayWorkgroupState &state =
-          find_workgroup_state(record.workgroup_x, record.workgroup_y, record.workgroup_z);
+      const uint64_t generation = record.generation != 0 ? record.generation : header.generation;
+      ReplayWorkgroupState &state = find_workgroup_state(generation, record.workgroup_x,
+                                                         record.workgroup_y, record.workgroup_z);
       ++replay.processed_barrier_count;
       if (!state.in_barrier_run) {
         for (uint32_t &epoch : state.owner_epochs) {
@@ -1079,8 +1082,9 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     if (event.kind == ReplayEvent::Kind::Fence) {
       const ConSanMoiRecordReplayFenceEvent &record = fence_events[event.record_index];
       ++replay.processed_fence_count;
-      ReplayWorkgroupState &state =
-          find_workgroup_state(record.workgroup_x, record.workgroup_y, record.workgroup_z);
+      const uint64_t generation = record.generation != 0 ? record.generation : header.generation;
+      ReplayWorkgroupState &state = find_workgroup_state(generation, record.workgroup_x,
+                                                         record.workgroup_y, record.workgroup_z);
       state.in_barrier_run = false;
       if (record.owner_id > consan_moi_exact_shadow::max_owner || record.scope == 0 ||
           record.scope > 3 || record.communication_token == 0) {
@@ -1095,7 +1099,6 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
         ++replay.unsupported_fence_count;
         continue;
       }
-      const uint64_t generation = record.generation != 0 ? record.generation : header.generation;
       const uint32_t epoch = record.epoch != 0 ? record.epoch : state.owner_epochs[record.owner_id];
       if (acquire) {
         for (const FenceRelease &prior : fence_releases) {
@@ -1123,8 +1126,9 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     if (event.kind == ReplayEvent::Kind::Atomic) {
       const ConSanMoiRecordReplayAtomicEvent &record = atomic_events[event.record_index];
       ++replay.processed_atomic_count;
-      ReplayWorkgroupState &state =
-          find_workgroup_state(record.workgroup_x, record.workgroup_y, record.workgroup_z);
+      const uint64_t generation = record.generation != 0 ? record.generation : header.generation;
+      ReplayWorkgroupState &state = find_workgroup_state(generation, record.workgroup_x,
+                                                         record.workgroup_y, record.workgroup_z);
       state.in_barrier_run = false;
       if (record.owner_id > consan_moi_exact_shadow::max_owner) {
         ++replay.unsupported_atomic_count;
@@ -1137,7 +1141,6 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
         continue;
       }
 
-      const uint64_t generation = record.generation != 0 ? record.generation : header.generation;
       const uint32_t epoch = record.epoch != 0 ? record.epoch : state.owner_epochs[record.owner_id];
       ConSanMoiAtomicSyncResult atomic_result;
       switch (record.kind) {
@@ -1199,11 +1202,12 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       continue;
     }
 
-    ReplayWorkgroupState &state =
-        find_workgroup_state(record.workgroup_x, record.workgroup_y, record.workgroup_z);
+    const uint64_t generation = record.generation != 0 ? record.generation : header.generation;
+    ReplayWorkgroupState &state = find_workgroup_state(generation, record.workgroup_x,
+                                                       record.workgroup_y, record.workgroup_z);
     state.in_barrier_run = false;
     const ConSanMoiRecordReplayAccess access{
-        record.generation != 0 ? record.generation : header.generation,
+        generation,
         /*owner_id=*/record.wave_id,
         record.epoch != 0 ? record.epoch : state.owner_epochs[record.wave_id],
         *access_kind,
@@ -2188,7 +2192,12 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
     plan.result_address_vgpr_count = 2u;
     return plan;
   }
-  if (site.width_bits != 32u)
+  // Record/Replay only needs the communication operation's effective address
+  // and, for CAS, its dynamic success mask. Global/flat atomics and the
+  // ordinary load/store side of a qualified fence sequence use the same
+  // 64-bit address forms. Wider atomic values merely occupy more consecutive
+  // guest VGPRs. Other widths still need an explicit operand-layout proof.
+  if (site.width_bits != 32u && site.width_bits != 64u)
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedWidth);
   const uint32_t expected_size =
       arch == ROCJITSU_CODE_ARCH_CDNA4 ? 2u * sizeof(uint32_t) : 3u * sizeof(uint32_t);
@@ -2208,12 +2217,15 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
   constexpr int32_t kSigned24Max = (1 << 23) - 1;
   const bool is_compare_exchange = site.mnemonic.find("cmpswap") != std::string::npos ||
                                    site.mnemonic.find("cmpxchg") != std::string::npos;
-  const uint16_t data_count = is_compare_exchange ? 2u : 1u;
-  const bool returned_value_aliases_address = site.returns_old_value.value_or(false) &&
-                                              site.dst_vgpr &&
-                                              overlaps(*site.addr_vgpr, 2u, *site.dst_vgpr, 1u);
+  const uint16_t value_word_count = static_cast<uint16_t>(site.width_bits / 32u);
+  const uint16_t data_count =
+      static_cast<uint16_t>(value_word_count * (is_compare_exchange ? 2u : 1u));
+  const uint16_t destination_count = site.returns_old_value.value_or(false) ? value_word_count : 0u;
+  const bool returned_value_aliases_address =
+      site.returns_old_value.value_or(false) && site.dst_vgpr &&
+      overlaps(*site.addr_vgpr, 2u, *site.dst_vgpr, destination_count);
 
-  if (site.mnemonic.starts_with("flat_atomic")) {
+  if (site.mnemonic.starts_with("flat_")) {
     if (*site.raw_saddr != flat_no_saddr)
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
     if (*site.addr_vgpr >= 255u)
@@ -2226,7 +2238,8 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
     if (overlaps(scratch_vgpr, scratch_vgpr_count, *site.addr_vgpr, 2u) ||
         overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-        (site.dst_vgpr && overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, 1u)))
+        (site.dst_vgpr &&
+         overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count)))
       return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
     plan.kind = returned_value_aliases_address
                     ? ConSanMoiAtomicAddressKind::FlatGuestPairMaterialized
@@ -2242,7 +2255,7 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
     return plan;
   }
 
-  if (!site.mnemonic.starts_with("global_atomic"))
+  if (!site.mnemonic.starts_with("global_"))
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedAddressKind);
   if (*site.raw_saddr == flat_no_saddr) {
     if (*site.addr_vgpr >= 255u)
@@ -2257,7 +2270,8 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
     if (!requires_materialization) {
       if (overlaps(scratch_vgpr, scratch_vgpr_count, *site.addr_vgpr, 2u) ||
           overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-          (site.dst_vgpr && overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, 1u)))
+          (site.dst_vgpr &&
+           overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count)))
         return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
       plan.kind = ConSanMoiAtomicAddressKind::VglobalGuestPair;
       plan.support = ConSanMoiAtomicAddressSupport::Supported;
@@ -2274,7 +2288,8 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
       return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
     if (overlaps(scratch_vgpr, scratch_vgpr_count - 2u, *site.addr_vgpr, 2u) ||
         overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-        (site.dst_vgpr && overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, 1u)))
+        (site.dst_vgpr &&
+         overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count)))
       return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
     plan.kind = ConSanMoiAtomicAddressKind::VglobalGuestPairMaterialized;
     plan.support = ConSanMoiAtomicAddressSupport::Supported;
@@ -2302,7 +2317,8 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
   if (overlaps(result_address_vgpr, 2u, *site.addr_vgpr, 1u))
     return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
   if (overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-      (site.dst_vgpr && overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, 1u)) ||
+      (site.dst_vgpr &&
+       overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count)) ||
       overlaps(scratch_vgpr, scratch_vgpr_count - 2u, *site.addr_vgpr, 1u))
     return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
 

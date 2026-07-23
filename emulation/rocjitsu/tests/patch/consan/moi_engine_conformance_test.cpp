@@ -112,7 +112,7 @@ TEST_P(MoiEngineConformanceTest, RelocatesStraightLinePrefixWhenNoEntryIslandIsR
             0);
 }
 
-TEST_P(MoiEngineConformanceTest, SkipsAdjacentAccessInsideRelocatedEntryPrefix) {
+TEST_P(MoiEngineConformanceTest, HandlesAdjacentAccessInsideRelocationRange) {
   const MoiEngineConformanceCase &test_case = GetParam();
   const std::array<uint32_t, 2> kernel_words = {
       pack_sopk(/*s_call_b64=*/0x14, /*sdst=*/30, /*simm16=*/1),
@@ -138,8 +138,18 @@ TEST_P(MoiEngineConformanceTest, SkipsAdjacentAccessInsideRelocatedEntryPrefix) 
   const auto result = try_patch_consan(bytes, conformance_options(test_case, 2));
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  const size_t expected_access_patches =
+      test_case.engine == ConSanMoiEngine::RecordReplay ? 2u : 1u;
   EXPECT_EQ(std::ranges::count(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind),
-            1);
+            expected_access_patches);
+  if (test_case.engine == ConSanMoiEngine::RecordReplay) {
+    EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+      return patch.kind == test_case.access_patch_kind && patch.anchor_offset == 28u;
+    }));
+    EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+      return patch.kind == test_case.access_patch_kind && patch.anchor_offset == 40u;
+    }));
+  }
 }
 
 TEST_P(MoiEngineConformanceTest, Gfx1250RoutesSparseAccessesWithStrandedAppendedEntries) {

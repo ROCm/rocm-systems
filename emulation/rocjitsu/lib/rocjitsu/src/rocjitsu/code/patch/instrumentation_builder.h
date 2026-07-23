@@ -185,9 +185,7 @@ build_v_cmp_ne_u32_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
 build_v_cmp_ne_u16_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA4)
     return build_cdna4_v_cmp_ne_u16_vcc(src0, vsrc1, arch);
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
-    return build_gfx1250_v_cmp_ne_u16_vcc(src0, vsrc1, arch);
-  return std::nullopt;
+  return rocjitsu::build_v_cmp_ne_u16_e32_vcc(src0, vsrc1, arch);
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>

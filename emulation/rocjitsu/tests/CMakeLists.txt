@@ -2459,6 +2459,7 @@ if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
             -std=c++20 ${RJ_HIP_SANITIZER_FLAGS}
             -I${CMAKE_SOURCE_DIR}/lib/util/include -o ${CVT_NARROW_BIN}
             ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
+            -Wl,-rpath,${ROCM_PATH}/lib
             ${RJ_HIP_SANITIZER_LINK_FLAGS}
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
         COMMENT "Building hip_cvt_narrow_test with amdclang++ -x hip (gfx950)"

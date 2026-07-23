@@ -62,8 +62,11 @@ comparison in [FLAVORS.md](FLAVORS.md).
 saved command self-describing.
 
 Record/Replay's complete static-site instrumentation is not an exhaustive
-dynamic trace: repeated executions of a static site can overwrite earlier
-evidence. A clean replay therefore remains inconclusive.
+dynamic trace. Each static slot retains its first publisher for the lifetime
+of the loaded code object, and replay compares only records from the same
+hardware dispatch generation. Repeated dispatches can therefore leave a
+mixed-generation snapshot without a useful pair. A clean replay remains
+inconclusive.
 
 Ordinary runs do not need a register number, report-buffer size, barrier
 switch, atomic switch, or sampling setting. The hook logs
@@ -122,14 +125,19 @@ export RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1  # predeclared positive MOI control
 ```
 
 Do not enable both diagnostic guards. Strict policy can be too restrictive for
-a broad application that loads helper code objects with no admitted sites.
+a broad application that loads helper code objects with no admitted sites. A
+strict code-object rejection terminates at the loader boundary with the typed
+`ConSan load rejection` diagnostic and exit code 92. This prevents HIP clients
+that ignore an HSA load error from retaining a null kernel symbol and crashing
+later during launch. Explicit `RJ_CONSAN_FAIL_CLOSED=1` under the default policy
+continues to return the HSA error to callers that correctly handle it.
 
 ## Core controls
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `RJ_CONSAN_MODE=record-replay|inline-shadow|sampled|supercollider` | `record-replay` | Select the analysis. Loading the hook activates ConSan. |
-| `RJ_CONSAN_POLICY=default|strict` | `default` | `strict` rejects unsupported or incomplete instrumentation, requires real patches and MOI evidence, and rejects report overflow. It does not make diagnostics fatal. |
+| `RJ_CONSAN_POLICY=default|strict` | `default` | `strict` rejects unsupported or incomplete instrumentation, requires real patches and MOI evidence, and rejects report overflow. A load-time rejection terminates with exit code 92; race diagnostics remain nonfatal. |
 | `RJ_CONSAN_LOG=N` | disabled | Enable compact logs at `1`; larger values add inventory detail. |
 | `RJ_CONSAN_FAIL_CLOSED=0|1` | `0` | Reject unsupported/invalid transformation outcomes instead of loading the original. |
 | `RJ_CONSAN_REQUIRE_PATCH=0|1` | `0` | Reject an applicable code object when no real access/barrier/atomic/fence instrumentation patch is emitted. Prologues and metadata-only changes do not satisfy it. |
@@ -173,13 +181,13 @@ engine:
 
 The automatic allocator requests the exact planned bytes. It never silently
 shrinks site coverage or disables an event kind to fit. The hard ceilings are
-16 MiB per automatic buffer and 256 MiB live automatic-report memory per
+128 MiB per automatic buffer and 256 MiB live automatic-report memory per
 process. Arithmetic overflow, a ceiling violation, or allocation failure is a
 typed incomplete outcome.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=N` | 16 MiB ceiling | Expert cap for HSA-tool-owned allocation; ordinary inventory still requests exact bytes below the cap. `0` disables automatic allocation. Dynamic access append requires an explicit finite cap. |
+| `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=N` | 128 MiB ceiling | Expert cap for HSA-tool-owned allocation; ordinary inventory still requests exact bytes below the cap. `0` disables automatic allocation. Dynamic access append requires an explicit finite cap. |
 | `RJ_CONSAN_MOI_REPORT_BUFFER=0xADDR` | unset | Caller-owned device-visible report buffer. |
 | `RJ_CONSAN_MOI_REPORT_BUFFER_SIZE=N` | `0` | Size of the caller-owned buffer; layout requirements depend on the engine and enabled event families. |
 | `RJ_CONSAN_MOI_REQUIRE_RECORDS=0|1` | `0` | At unload, require some visible auto-buffer access, synchronization, shadow, or sampled evidence. |

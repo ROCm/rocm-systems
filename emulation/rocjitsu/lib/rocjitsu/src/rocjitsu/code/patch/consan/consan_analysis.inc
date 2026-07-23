@@ -341,6 +341,8 @@ apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
     return mnemonic == "ds_store_b16" || mnemonic == "ds_store_b16_d16_hi";
   if (kind == ConSanLdsAccessKind::Read && width_bits == 96)
     return mnemonic == "ds_load_b96";
+  if (kind == ConSanLdsAccessKind::Write && width_bits == 96)
+    return mnemonic == "ds_store_b96";
   return width_bits == 32 || width_bits == 64 || width_bits == 128;
 }
 
@@ -1240,6 +1242,7 @@ void record_lds_site(const Instruction &inst, ConSanKernelInfo &kernel,
   site.supported_mvp = is_supported_mvp_lds_site(site.kind, site.width_bits, mnemonic);
   if (site.kind == ConSanLdsAccessKind::Read) {
     site.dst_vgpr = vgpr_index(inst.dst_operand(0));
+    site.dst_accvgpr = register_index(inst.dst_operand(0), RegClass::ACC_VGPR);
     site.addr_vgpr = vgpr_index(inst.src_operand(0));
   } else if (site.kind == ConSanLdsAccessKind::Write) {
     site.addr_vgpr = vgpr_index(inst.src_operand(0));
@@ -2177,8 +2180,9 @@ void preflight_kernel(ConSanKernelInfo &kernel, const ConSanOptions &options,
     blockers.emplace_back("kernel was not decoded");
   if (kernel.stats.decode_error_count > 0)
     blockers.push_back(count_reason("decode errors", kernel.stats.decode_error_count));
-  if (kernel.stats.lds_atomic_count > 0)
-    blockers.push_back(count_reason("unsupported DS atomics", kernel.stats.lds_atomic_count));
+  // SuperCollider does not reconstruct synchronization and leaves atomics
+  // unchanged. Their presence therefore does not invalidate redundant checks
+  // at independently supported non-atomic LDS sites.
   if (kernel.stats.ds_other_count > 0)
     blockers.push_back(
         count_reason("unsupported or unclassified ds_* instructions", kernel.stats.ds_other_count));
@@ -2200,6 +2204,9 @@ void preflight_kernel(ConSanKernelInfo &kernel, const ConSanOptions &options,
   if (supported_lds_sites == 0) {
     kernel.preflight_action = ConSanPreflightAction::Skip;
     kernel.preflight_reasons.emplace_back("no supported non-atomic LDS reads or writes");
+    if (kernel.stats.lds_atomic_count > 0)
+      kernel.preflight_reasons.push_back(
+          count_reason("non-instrumented DS atomics observed", kernel.stats.lds_atomic_count));
     const uint64_t flat_memory_sites = kernel.stats.flat_read_count +
                                        kernel.stats.flat_write_count +
                                        kernel.stats.flat_atomic_count;
@@ -2222,6 +2229,14 @@ void preflight_kernel(ConSanKernelInfo &kernel, const ConSanOptions &options,
       count_reason("supported LDS reads", kernel.stats.lds_read_count));
   kernel.preflight_reasons.push_back(
       count_reason("supported LDS writes", kernel.stats.lds_write_count));
+  // SuperCollider checks non-atomic LDS accesses for conflicting writes by
+  // duplicating the access.  Replaying an atomic as an ordinary load/store
+  // would change program semantics, but the atomic is itself indivisible and
+  // is not a race candidate.  Keep it as a typed exclusion without rejecting
+  // co-resident ordinary LDS accesses under fail-closed policy.
+  if (kernel.stats.lds_atomic_count > 0)
+    kernel.preflight_reasons.push_back(
+        count_reason("atomic LDS accesses excluded", kernel.stats.lds_atomic_count));
   if (kernel.stats.barrier_count > 0)
     kernel.preflight_reasons.push_back(
         count_reason("barriers observed", kernel.stats.barrier_count));

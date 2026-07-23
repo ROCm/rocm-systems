@@ -1,17 +1,25 @@
 enum class AtomicFaultEncoding : uint8_t {
   Unsupported,
+  Cdna4Flat,
   FlatLike,
   Buffer,
   Ds,
 };
 
-[[nodiscard]] AtomicFaultEncoding atomic_fault_encoding(std::string_view mnemonic, uint32_t size) {
-  if ((mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic")) &&
+[[nodiscard]] AtomicFaultEncoding atomic_fault_encoding(std::string_view mnemonic, uint32_t size,
+                                                        rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && mnemonic.starts_with("flat_atomic") &&
+      size == sizeof(cdna4::FlatMachineInst))
+    return AtomicFaultEncoding::Cdna4Flat;
+  if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) &&
+      (mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic")) &&
       size == sizeof(rdna4::VflatMachineInst))
     return AtomicFaultEncoding::FlatLike;
-  if (mnemonic.starts_with("buffer_atomic") && size == sizeof(rdna4::VbufferMachineInst))
+  if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) &&
+      mnemonic.starts_with("buffer_atomic") && size == sizeof(rdna4::VbufferMachineInst))
     return AtomicFaultEncoding::Buffer;
-  if (mnemonic.starts_with("ds_") && is_ds_atomic(mnemonic) && lds_width_bits(mnemonic) == 32u &&
+  if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) &&
+      mnemonic.starts_with("ds_") && is_ds_atomic(mnemonic) && lds_width_bits(mnemonic) == 32u &&
       size == sizeof(rdna4::VdsMachineInst))
     return AtomicFaultEncoding::Ds;
   return AtomicFaultEncoding::Unsupported;
@@ -22,13 +30,19 @@ enum class AtomicFaultEncoding : uint8_t {
 }
 
 [[nodiscard]] bool atomic_fault_supports_order(AtomicFaultEncoding encoding) {
-  return encoding == AtomicFaultEncoding::FlatLike || encoding == AtomicFaultEncoding::Buffer;
+  return encoding == AtomicFaultEncoding::Cdna4Flat || encoding == AtomicFaultEncoding::FlatLike ||
+         encoding == AtomicFaultEncoding::Buffer;
+}
+
+[[nodiscard]] bool atomic_fault_supports_address(AtomicFaultEncoding encoding) {
+  return encoding == AtomicFaultEncoding::FlatLike || encoding == AtomicFaultEncoding::Buffer ||
+         encoding == AtomicFaultEncoding::Ds;
 }
 
 template <typename Container>
 void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::string_view fingerprint,
                                       const Container &container, bool in_kernel,
-                                      std::vector<ConSanFaultSite> &sites) {
+                                      rj_code_arch_t arch, std::vector<ConSanFaultSite> &sites) {
   const std::string container_kind = in_kernel ? "kernel" : "function";
   uint32_t barrier_occurrence = 0;
   for (const ConSanBarrierSite &barrier : container.barrier_sites) {
@@ -63,7 +77,8 @@ void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::strin
 
   uint32_t atomic_occurrence = 0;
   for (const ConSanAtomicSite &atomic : container.atomic_sites) {
-    if (atomic_fault_encoding(atomic.mnemonic, atomic.size) == AtomicFaultEncoding::Unsupported) {
+    if (atomic_fault_encoding(atomic.mnemonic, atomic.size, arch) ==
+        AtomicFaultEncoding::Unsupported) {
       continue;
     }
     ConSanFaultSite site;
@@ -109,15 +124,16 @@ void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::strin
   }
 }
 
-void build_fault_site_inventory(std::span<const uint8_t> bytes, ConSanResult &result) {
+void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t arch,
+                                ConSanResult &result) {
   const std::string fingerprint = code_object_fingerprint(bytes);
   result.fault_sites.clear();
   for (const ConSanKernelInfo &kernel : result.kernels) {
     if (!is_rocclr_runtime_kernel_name(kernel.name))
-      append_fault_sites_for_container(bytes, fingerprint, kernel, true, result.fault_sites);
+      append_fault_sites_for_container(bytes, fingerprint, kernel, true, arch, result.fault_sites);
   }
   for (const ConSanFunctionInfo &function : result.functions)
-    append_fault_sites_for_container(bytes, fingerprint, function, false, result.fault_sites);
+    append_fault_sites_for_container(bytes, fingerprint, function, false, arch, result.fault_sites);
 }
 
 [[nodiscard]] ConSanSyncAddressSource sync_address_source(ConSanAtomicAddressSpaceHint hint) {
@@ -1839,10 +1855,35 @@ ordinary_release_wait_boundary(const ConSanSyncSequence &store,
   return std::nullopt;
 }
 
+[[nodiscard]] std::vector<size_t> fence_sequence_indices_by_begin(const ConSanResult &result) {
+  std::vector<size_t> indices;
+  indices.reserve(result.sync_sequences.size());
+  for (size_t index = 0; index < result.sync_sequences.size(); ++index) {
+    if (result.sync_sequences[index].kind == ConSanSyncSequenceKind::Fence)
+      indices.push_back(index);
+  }
+  std::ranges::sort(indices, [&](size_t lhs, size_t rhs) {
+    const uint64_t lhs_offset = result.sync_sequences[lhs].begin_text_offset;
+    const uint64_t rhs_offset = result.sync_sequences[rhs].begin_text_offset;
+    return lhs_offset != rhs_offset ? lhs_offset < rhs_offset : lhs < rhs;
+  });
+  return indices;
+}
+
+[[nodiscard]] auto fence_sequence_lower_bound(const ConSanResult &result,
+                                              const std::vector<size_t> &indices,
+                                              uint64_t text_offset) {
+  return std::lower_bound(indices.begin(), indices.end(), text_offset,
+                          [&](size_t index, uint64_t offset) {
+                            return result.sync_sequences[index].begin_text_offset < offset;
+                          });
+}
+
 void associate_ordinary_release_sync_sequences(const AmdGpuCodeObject &code_object,
                                                Decoder &decoder, rj_code_arch_t arch,
                                                ConSanResult &result) {
   const auto blocks = build_sync_basic_blocks(code_object, decoder, arch, result);
+  const std::vector<size_t> fence_indices = fence_sequence_indices_by_begin(result);
   std::unordered_map<size_t, size_t> associations;
   std::unordered_set<size_t> claimed_cache_sequences;
   for (size_t store_index = 0; store_index < result.sync_sequences.size(); ++store_index) {
@@ -1864,12 +1905,12 @@ void associate_ordinary_release_sync_sequences(const AmdGpuCodeObject &code_obje
     if (!cache_offset)
       continue;
     std::vector<size_t> cache_matches;
-    for (size_t cache_index = 0; cache_index < result.sync_sequences.size(); ++cache_index) {
+    for (auto it = fence_sequence_lower_bound(result, fence_indices, *cache_offset);
+         it != fence_indices.end(); ++it) {
+      const size_t cache_index = *it;
       const ConSanSyncSequence &cache_sequence = result.sync_sequences[cache_index];
-      if (cache_sequence.kind != ConSanSyncSequenceKind::Fence ||
-          cache_sequence.begin_text_offset != *cache_offset) {
-        continue;
-      }
+      if (cache_sequence.begin_text_offset != *cache_offset)
+        break;
       const ConSanSyncEvent *cache = first_sequence_event(result, cache_sequence);
       if (cache != nullptr && consan_ordinary_release_metadata_compatible(*cache, cache_sequence,
                                                                           *store, store_sequence)) {
@@ -1955,6 +1996,7 @@ void associate_ordinary_acquire_sync_sequences(const AmdGpuCodeObject &code_obje
                                                Decoder &decoder, rj_code_arch_t arch,
                                                ConSanResult &result) {
   const auto blocks = build_sync_basic_blocks(code_object, decoder, arch, result);
+  const std::vector<size_t> fence_indices = fence_sequence_indices_by_begin(result);
   std::unordered_map<size_t, size_t> associations;
   std::unordered_set<size_t> claimed_cache_sequences;
   for (size_t load_index = 0; load_index < result.sync_sequences.size(); ++load_index) {
@@ -1968,10 +2010,15 @@ void associate_ordinary_acquire_sync_sequences(const AmdGpuCodeObject &code_obje
       continue;
     std::vector<size_t> cache_matches;
     std::vector<size_t> bounded_metadata_matches;
-    for (size_t cache_index = 0; cache_index < result.sync_sequences.size(); ++cache_index) {
+    const uint64_t maximum_cache_offset = load_sequence.end_text_offset > UINT64_MAX - 64u
+                                              ? UINT64_MAX
+                                              : load_sequence.end_text_offset + 64u;
+    for (auto it = fence_sequence_lower_bound(result, fence_indices, load_sequence.end_text_offset);
+         it != fence_indices.end(); ++it) {
+      const size_t cache_index = *it;
       const ConSanSyncSequence &cache_sequence = result.sync_sequences[cache_index];
-      if (cache_sequence.kind != ConSanSyncSequenceKind::Fence)
-        continue;
+      if (cache_sequence.begin_text_offset > maximum_cache_offset)
+        break;
       const ConSanSyncEvent *cache = first_sequence_event(result, cache_sequence);
       if (cache == nullptr ||
           !ordinary_acquire_metadata_compatible_impl(*load, load_sequence, *cache, cache_sequence,
@@ -3120,9 +3167,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   if (!options.fault_site_identity.empty()) {
     const ConSanFaultSite *site =
         find_fault_site_by_identity(result, options.fault_site_identity, kind);
-    const bool patchable = site != nullptr && (kind != ConSanFaultSiteKind::Atomic ||
-                                               atomic_fault_encoding(site->mnemonic, site->size) !=
-                                                   AtomicFaultEncoding::Unsupported);
+    const bool patchable = site != nullptr;
     return patchable && owned_by_requested_kernel(site->execution_owners, result, options)
                ? site
                : nullptr;
@@ -3130,9 +3175,6 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   uint32_t index = 0;
   for (const ConSanFaultSite &site : result.fault_sites) {
     if (site.kind != kind)
-      continue;
-    if (kind == ConSanFaultSiteKind::Atomic &&
-        atomic_fault_encoding(site.mnemonic, site.size) == AtomicFaultEncoding::Unsupported)
       continue;
     if (!owned_by_requested_kernel(site.execution_owners, result, options))
       continue;
