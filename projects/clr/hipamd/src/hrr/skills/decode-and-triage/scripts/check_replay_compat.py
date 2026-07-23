@@ -513,6 +513,41 @@ def resolve_clr_lib_dir(
     return None
 
 
+def _hip_version_from_soname(filename: str) -> str | None:
+    match = re.search(r"libamdhip64\.so\.(\d+\.\d+\.\d+)", filename)
+    if match:
+        return match.group(1)
+    return None
+
+
+def hip_version_from_clr_lib(clr_lib: Path) -> str | None:
+    """Parse HIP runtime version from the mounted libamdhip64 SONAME."""
+    lib_dir = clr_lib.resolve()
+    resolved: list[Path] = []
+    for name in ("libamdhip64.so", "libamdhip64.so.7"):
+        link = lib_dir / name
+        if not link.exists():
+            continue
+        try:
+            target = link.resolve()
+        except OSError:
+            continue
+        if target.is_file():
+            resolved.append(target)
+    if not resolved:
+        versioned = sorted(
+            lib_dir.glob("libamdhip64.so.*.*.*"),
+            key=lambda path: path.name,
+        )
+        if versioned:
+            resolved.append(versioned[-1].resolve())
+    for path in resolved:
+        version = _hip_version_from_soname(path.name)
+        if version:
+            return version
+    return None
+
+
 def build_docker_ld_inside(
     *,
     clr_lib: Path | None,
@@ -587,6 +622,8 @@ def probe_docker_replay_env(
         rocr_lib=rocr_lib,
         extra_ld=extra_ld,
     )
+    if clr_lib is not None:
+        env.source = f"docker:{image}:overlay:{clr_lib}"
 
     probe_shell = (
         f"export LD_LIBRARY_PATH={ld_inside}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}; "
@@ -616,7 +653,10 @@ def probe_docker_replay_env(
         env.gpu_archs = archs
         env.gpu_names = names
 
-    env.hip_runtime_version = _parse_hip_version(out)
+    if clr_lib is not None:
+        env.hip_runtime_version = hip_version_from_clr_lib(clr_lib)
+    if env.hip_runtime_version is None:
+        env.hip_runtime_version = _parse_hip_version(out)
     # comgr inside container
     comgr_args = _docker_cmd("run", "--rm")
     if clr_lib is not None:

@@ -202,7 +202,7 @@ available here.  Choose one of the options below:
        `$env:CLR_BUILD = 'C:\path\to\build-dir'
 
   3. Install the HIP SDK and ensure hrr-playback.exe is under HIP_PATH\bin:
-       `$env:HIP_PATH = 'C:\Program Files\AMD\ROCm\6.4'
+       `$env:HIP_PATH = 'C:\Program Files\AMD\ROCm\6.2'
 
   4. Triage without replay (no binary needed — reads manifest.json only):
        .\triage_archive.ps1 --archive <pid-dir> --no-replay
