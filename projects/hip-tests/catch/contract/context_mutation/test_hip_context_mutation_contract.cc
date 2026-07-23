@@ -55,7 +55,7 @@ class ScopedCurrentContext {
 }  // namespace
 
 // @asserts: hipCtxCreate - creating then destroying a context succeeds and the previously current context is restored afterward
-HIP_TEST_CASE(Contract_ContextMutation_CreateDestroy_Succeeds) {
+HIP_TEST_CASE(Contract_ContextMutation_HipCtxCreate_Destroy_Succeeds) {
   RequireDevice();
 
   const hipDevice_t device = DeviceForOrdinalZero();
@@ -77,7 +77,7 @@ HIP_TEST_CASE(Contract_ContextMutation_CreateDestroy_Succeeds) {
 }
 
 // @asserts: hipCtxSetCurrent - a set context round-trips through hipCtxGetCurrent and its device agrees with the runtime current device
-HIP_TEST_CASE(Contract_ContextMutation_SetCurrent_RoundTripsThroughGetCurrent) {
+HIP_TEST_CASE(Contract_ContextMutation_HipCtxSetCurrent_Default_RoundTripsThroughGetCurrent) {
   RequireDevice();
 
   const hipDevice_t device = DeviceForOrdinalZero();
@@ -108,7 +108,7 @@ HIP_TEST_CASE(Contract_ContextMutation_SetCurrent_RoundTripsThroughGetCurrent) {
 }
 
 // @asserts: hipCtxPushCurrent - pushing a context makes it current and popping it returns that context and restores the previous current context
-HIP_TEST_CASE(Contract_ContextMutation_PushPop_RestoresPreviousCurrent) {
+HIP_TEST_CASE(Contract_ContextMutation_HipCtxPushCurrent_PushPop_RestoresPreviousCurrent) {
   RequireDevice();
 
   const hipDevice_t device = DeviceForOrdinalZero();
@@ -140,7 +140,7 @@ HIP_TEST_CASE(Contract_ContextMutation_PushPop_RestoresPreviousCurrent) {
 }
 
 // @asserts: hipCtxSynchronize - a driver-style context barrier either succeeds or reports accepted-or-unsupported
-HIP_TEST_CASE(Contract_ContextMutation_Synchronize_ReportsSupportedOrNotSupported) {
+HIP_TEST_CASE(Contract_ContextMutation_HipCtxSynchronize_Default_ReportsSupportedOrNotSupported) {
   RequireDevice();
 
   // hipCtxSynchronize is a driver-style barrier over the current context. It
@@ -151,7 +151,7 @@ HIP_TEST_CASE(Contract_ContextMutation_Synchronize_ReportsSupportedOrNotSupporte
 }
 
 // @asserts: hipCtxGetApiVersion - the query either succeeds with a positive version or reports accepted-or-unsupported
-HIP_TEST_CASE(Contract_ContextMutation_GetApiVersion_ReportsVersionOrNotSupported) {
+HIP_TEST_CASE(Contract_ContextMutation_HipCtxGetApiVersion_Default_ReportsVersionOrNotSupported) {
   RequireDevice();
 
   const hipDevice_t device = DeviceForOrdinalZero();

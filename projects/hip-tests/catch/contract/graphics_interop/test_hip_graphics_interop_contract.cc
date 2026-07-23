@@ -41,7 +41,7 @@ void RequireRejected(hipError_t status) {
 }  // namespace
 
 // @asserts: hipGraphicsMapResources - a null resource array or null element with positive count is rejected with a defined error
-HIP_TEST_CASE(Contract_GraphicsInterop_MapResources_NullResources_IsRejected) {
+HIP_TEST_CASE(Contract_GraphicsInterop_HipGraphicsMapResources_NullResources_IsRejected) {
   // A positive count with a null resource array is invalid input and must be
   // rejected. count must be > 0 so the null-array check is actually reached: the
   // runtime rejects count <= 0 first, so a zero count would never exercise the
@@ -54,7 +54,7 @@ HIP_TEST_CASE(Contract_GraphicsInterop_MapResources_NullResources_IsRejected) {
 }
 
 // @asserts: hipGraphicsUnmapResources - a null resource array or null element with positive count is rejected with a defined error
-HIP_TEST_CASE(Contract_GraphicsInterop_UnmapResources_NullResources_IsRejected) {
+HIP_TEST_CASE(Contract_GraphicsInterop_HipGraphicsUnmapResources_NullResources_IsRejected) {
   // A positive count with a null resource array must be rejected (count > 0 so
   // the null-array check is reached rather than short-circuited by count <= 0).
   RequireRejected(hipGraphicsUnmapResources(1, nullptr, nullptr));
@@ -65,14 +65,14 @@ HIP_TEST_CASE(Contract_GraphicsInterop_UnmapResources_NullResources_IsRejected) 
 }
 
 // @asserts: hipGraphicsUnregisterResource - a null resource handle is rejected with a defined error rather than silently succeeding
-HIP_TEST_CASE(Contract_GraphicsInterop_UnregisterResource_NullHandle_IsRejected) {
+HIP_TEST_CASE(Contract_GraphicsInterop_HipGraphicsUnregisterResource_NullHandle_IsRejected) {
   // Unregistering a null resource handle is invalid input and must be rejected
   // rather than silently succeeding.
   RequireRejected(hipGraphicsUnregisterResource(nullptr));
 }
 
 // @asserts: hipGraphicsResourceGetMappedPointer - querying the mapped pointer of a null resource is rejected with a defined error
-HIP_TEST_CASE(Contract_GraphicsInterop_ResourceGetMappedPointer_NullHandle_IsRejected) {
+HIP_TEST_CASE(Contract_GraphicsInterop_HipGraphicsResourceGetMappedPointer_NullHandle_IsRejected) {
   // Querying the mapped device pointer of a null resource is invalid input and
   // must be rejected rather than returning a pointer.
   void* device_ptr = nullptr;
@@ -81,7 +81,7 @@ HIP_TEST_CASE(Contract_GraphicsInterop_ResourceGetMappedPointer_NullHandle_IsRej
 }
 
 // @asserts: hipGraphicsSubResourceGetMappedArray - querying the mapped array of a null resource is rejected with a defined error
-HIP_TEST_CASE(Contract_GraphicsInterop_SubResourceGetMappedArray_NullHandle_IsRejected) {
+HIP_TEST_CASE(Contract_GraphicsInterop_HipGraphicsSubResourceGetMappedArray_NullHandle_IsRejected) {
   // Querying the mapped array of a null resource is invalid input and must be
   // rejected rather than returning an array handle.
   hipArray_t array = nullptr;
@@ -102,7 +102,7 @@ HIP_TEST_CASE(Contract_GraphicsInterop_SubResourceGetMappedArray_NullHandle_IsRe
 // <GL/gl.h> (via <cuda_gl_interop.h>), which a headless CUDA node lacks.
 #if HT_AMD
 // @asserts: hipGLGetDevices - querying HIP devices with no current GL context is rejected with a defined error
-HIP_TEST_CASE(Contract_GraphicsInterop_GLGetDevices_NoGLContext_IsRejected) {
+HIP_TEST_CASE(Contract_GraphicsInterop_HipGLGetDevices_NoGLContext_IsRejected) {
   // Querying the HIP devices for the current GL context with no GL context bound
   // must be rejected. A positive device-count buffer size is passed so the query
   // reaches the no-context check rather than short-circuiting on a zero size.
@@ -114,7 +114,7 @@ HIP_TEST_CASE(Contract_GraphicsInterop_GLGetDevices_NoGLContext_IsRejected) {
 }
 
 // @asserts: hipGraphicsGLRegisterBuffer - registering a GL buffer with no current GL context is rejected with a defined error
-HIP_TEST_CASE(Contract_GraphicsInterop_GLRegisterBuffer_NoGLContext_IsRejected) {
+HIP_TEST_CASE(Contract_GraphicsInterop_HipGraphicsGLRegisterBuffer_NoGLContext_IsRejected) {
   // Registering a GL buffer with no current GL context must be rejected. The
   // buffer name is a bogus non-zero GLuint; the no-context check fires before the
   // name is ever dereferenced against GL, so no real GL object is needed.
@@ -123,7 +123,7 @@ HIP_TEST_CASE(Contract_GraphicsInterop_GLRegisterBuffer_NoGLContext_IsRejected) 
 }
 
 // @asserts: hipGraphicsGLRegisterImage - registering a GL image with no current GL context is rejected with a defined error
-HIP_TEST_CASE(Contract_GraphicsInterop_GLRegisterImage_NoGLContext_IsRejected) {
+HIP_TEST_CASE(Contract_GraphicsInterop_HipGraphicsGLRegisterImage_NoGLContext_IsRejected) {
   // Registering a GL image with no current GL context must be rejected. As above,
   // the image name and target are bogus but never reach GL because the no-context
   // check rejects first. GL_TEXTURE_2D is 0x0DE1.

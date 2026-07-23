@@ -26,7 +26,7 @@ void RequireAllEqual(const std::array<T, N>& values, T expected) {
 }  // namespace
 
 // @asserts: hipMemsetD8Async - fills device memory with the byte pattern, visible on the host after stream sync
-HIP_TEST_CASE(Contract_DriverMemsetAsync_D8_FillsByte_VisibleAfterSync) {
+HIP_TEST_CASE(Contract_DriverMemsetAsync_HipMemsetD8Async_D8FillsByte_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x5a;
   std::array<uint8_t, kByteCount> dst{};
@@ -47,7 +47,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync_D8_FillsByte_VisibleAfterSync) {
 }
 
 // @asserts: hipMemsetD16Async - fills device memory with the 16-bit pattern, visible on the host after stream sync
-HIP_TEST_CASE(Contract_DriverMemsetAsync_D16_FillsWord_VisibleAfterSync) {
+HIP_TEST_CASE(Contract_DriverMemsetAsync_HipMemsetD16Async_D16FillsWord_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint16_t pattern = 0x1357;
   std::array<uint16_t, kWordCount> dst{};
@@ -69,7 +69,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync_D16_FillsWord_VisibleAfterSync) {
 }
 
 // @asserts: hipMemsetD32Async - fills device memory with the 32-bit pattern, visible on the host after stream sync
-HIP_TEST_CASE(Contract_DriverMemsetAsync_D32_FillsDword_VisibleAfterSync) {
+HIP_TEST_CASE(Contract_DriverMemsetAsync_HipMemsetD32Async_D32FillsDword_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   constexpr int pattern = 0x12345678;
   std::array<int, kDwordCount> dst{};
@@ -91,7 +91,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync_D32_FillsDword_VisibleAfterSync) {
 }
 
 // @asserts: hipMemsetD32Async - a null stream argument runs the fill on the default stream
-HIP_TEST_CASE(Contract_DriverMemsetAsync_NullStream_UsesDefaultStream) {
+HIP_TEST_CASE(Contract_DriverMemsetAsync_HipMemsetD32Async_NullStream_UsesDefaultStream) {
   hip::contract::ContractCleanup cleanup;
   constexpr int pattern = 0x76543210;
   std::array<int, kDwordCount> dst{};
@@ -110,7 +110,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync_NullStream_UsesDefaultStream) {
 }
 
 // @asserts: hipMemsetD8Async - a zero-element count succeeds and leaves existing memory unchanged
-HIP_TEST_CASE(Contract_DriverMemsetAsync_ZeroCount_Succeeds) {
+HIP_TEST_CASE(Contract_DriverMemsetAsync_HipMemsetD8Async_ZeroCount_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t original = 0x21;
   constexpr uint8_t replacement = 0x7f;
@@ -132,7 +132,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync_ZeroCount_Succeeds) {
 }
 
 // @asserts: hipMemsetD8Async - the D8/D16/D32 async variants reject a null destination pointer with a non-success error
-HIP_TEST_CASE(Contract_DriverMemsetAsync_NullDestination_IsRejected) {
+HIP_TEST_CASE(Contract_DriverMemsetAsync_HipMemsetD8Async_NullDestination_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));

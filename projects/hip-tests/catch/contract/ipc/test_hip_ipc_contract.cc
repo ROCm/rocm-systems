@@ -92,7 +92,7 @@ void SkipIfIpcMemHandleUnsupported() {
 }  // namespace
 
 // @asserts: hipIpcGetMemHandle - produces an IPC mem handle for a valid device allocation, or reports the capability unsupported
-HIP_TEST_CASE(Contract_Ipc_GetMemHandle_SucceedsForDeviceAllocation) {
+HIP_TEST_CASE(Contract_Ipc_HipIpcGetMemHandle_Default_SucceedsForDeviceAllocation) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
 
@@ -116,7 +116,7 @@ HIP_TEST_CASE(Contract_Ipc_GetMemHandle_SucceedsForDeviceAllocation) {
 }
 
 // @asserts: hipIpcOpenMemHandle - opening a self-produced IPC mem handle either yields a non-null mapping or is skipped as an unsupported same-process operation
-HIP_TEST_CASE(Contract_Ipc_MemHandle_SameProcessRoundTrip) {
+HIP_TEST_CASE(Contract_Ipc_HipIpcOpenMemHandle_Default_SameProcessRoundTrip) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
 
@@ -157,7 +157,7 @@ HIP_TEST_CASE(Contract_Ipc_MemHandle_SameProcessRoundTrip) {
 }
 
 // @asserts: hipIpcGetMemHandle - rejects a null handle-out pointer or null device pointer with a documented invalid-argument error (AMD only)
-HIP_TEST_CASE(Contract_Ipc_GetMemHandle_NullArgs_AreRejected) {
+HIP_TEST_CASE(Contract_Ipc_HipIpcGetMemHandle_NullArgs_AreRejected) {
   RequireDevice();
   SkipIfIpcMemHandleUnsupported();
 
@@ -193,7 +193,7 @@ HIP_TEST_CASE(Contract_Ipc_GetMemHandle_NullArgs_AreRejected) {
 }
 
 // @asserts: hipIpcGetEventHandle - does not succeed for an event created without the hipEventInterprocess flag
-HIP_TEST_CASE(Contract_Ipc_GetEventHandle_RequiresInterprocessFlag) {
+HIP_TEST_CASE(Contract_Ipc_HipIpcGetEventHandle_Default_RequiresInterprocessFlag) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
 
@@ -210,7 +210,7 @@ HIP_TEST_CASE(Contract_Ipc_GetEventHandle_RequiresInterprocessFlag) {
 }
 
 // @asserts: hipIpcOpenEventHandle - opening a self-produced interprocess event handle either yields a non-null event or is skipped as an unsupported same-process operation
-HIP_TEST_CASE(Contract_Ipc_EventHandle_SameProcessRoundTrip) {
+HIP_TEST_CASE(Contract_Ipc_HipIpcOpenEventHandle_Default_SameProcessRoundTrip) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
 

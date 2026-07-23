@@ -13,7 +13,7 @@
 
 #if HT_NVIDIA && defined(CUDA_VERSION) && CUDA_VERSION < 13000
 // @asserts: hipDeviceGetDevResource - CUDA versions before 13.0 do not provide the green-context resource fields required by this contract domain; the contract is skipped until backend parity exists
-HIP_TEST_CASE(Contract_GreenContext_NvidiaCuda12Unsupported_IsSkipped) {
+HIP_TEST_CASE(Contract_GreenContext_HipDeviceGetDevResource_NvidiaCuda12Unsupported_IsSkipped) {
   HIP_SKIP_TEST("Green-context resource fields required by this contract domain are not available before CUDA 13.0.");
 }
 #else
@@ -84,7 +84,7 @@ bool TryCreateGreenContext(hipExecutionCtx_t* ctx) {
 }  // namespace
 
 // @asserts: hipDeviceGetDevResource - device SM resource reports a positive SM count that a fresh stream's resource matches (accepted-or-unsupported)
-HIP_TEST_CASE(Contract_GreenContext_GetDevResource_ReportsSmCount) {
+HIP_TEST_CASE(Contract_GreenContext_HipDeviceGetDevResource_Default_ReportsSmCount) {
   SkipIfDevResourceUnsupported();
   hip::contract::ContractCleanup cleanup;
 
@@ -105,7 +105,7 @@ HIP_TEST_CASE(Contract_GreenContext_GetDevResource_ReportsSmCount) {
 }
 
 // @asserts: hipDevSmResourceSplitByCount - yields at least one group whose SM count is within (0, device SM count] (accepted-or-unsupported)
-HIP_TEST_CASE(Contract_GreenContext_SplitByCount_ProducesBoundedSubset) {
+HIP_TEST_CASE(Contract_GreenContext_HipDevSmResourceSplitByCount_Default_ProducesBoundedSubset) {
   SkipIfDevResourceUnsupported();
 
   hipDevResource device_resource{};
@@ -130,7 +130,7 @@ HIP_TEST_CASE(Contract_GreenContext_SplitByCount_ProducesBoundedSubset) {
 }
 
 // @asserts: hipGreenCtxCreate - a green context binds to its creating device and exposes an SM subset and stable id (accepted-or-unsupported)
-HIP_TEST_CASE(Contract_GreenContext_Create_QueriesDeviceAndResource) {
+HIP_TEST_CASE(Contract_GreenContext_HipGreenCtxCreate_Default_QueriesDeviceAndResource) {
   hipExecutionCtx_t ctx = nullptr;
   if (!TryCreateGreenContext(&ctx)) {
     HIP_SKIP_TEST("Green execution contexts are not supported by this runtime path.");
@@ -161,7 +161,7 @@ HIP_TEST_CASE(Contract_GreenContext_Create_QueriesDeviceAndResource) {
 }
 
 // @asserts: hipExecutionCtxStreamCreate - work on a green-context stream runs and is observable after context sync (accepted-or-unsupported)
-HIP_TEST_CASE(Contract_GreenContext_Stream_LaunchesObservableWork) {
+HIP_TEST_CASE(Contract_GreenContext_HipExecutionCtxStreamCreate_Stream_LaunchesObservableWork) {
   hipExecutionCtx_t ctx = nullptr;
   if (!TryCreateGreenContext(&ctx)) {
     HIP_SKIP_TEST("Green execution contexts are not supported by this runtime path.");
@@ -188,7 +188,7 @@ HIP_TEST_CASE(Contract_GreenContext_Stream_LaunchesObservableWork) {
 }
 
 // @asserts: hipExecutionCtxRecordEvent - recording then waiting on an event on a green context round-trips and syncs cleanly (accepted-or-unsupported)
-HIP_TEST_CASE(Contract_GreenContext_Event_RecordAndWaitRoundTrips) {
+HIP_TEST_CASE(Contract_GreenContext_HipExecutionCtxRecordEvent_Event_RecordAndWaitRoundTrips) {
   hipExecutionCtx_t ctx = nullptr;
   if (!TryCreateGreenContext(&ctx)) {
     HIP_SKIP_TEST("Green execution contexts are not supported by this runtime path.");

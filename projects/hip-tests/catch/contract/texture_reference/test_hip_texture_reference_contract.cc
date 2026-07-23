@@ -35,7 +35,7 @@
 // the texref API removed; matching would mean retargeting onto texture objects.
 #if HT_NVIDIA
 // @asserts: hipTexRefSetAddressMode - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
-HIP_TEST_CASE(Contract_TextureReference_NvidiaUnsupported_IsSkipped) {
+HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetAddressMode_NvidiaUnsupported_IsSkipped) {
   HIP_SKIP_TEST("The deprecated texture-reference API is not exposed by the NVIDIA backend.");
 }
 #endif  // HT_NVIDIA
@@ -55,7 +55,7 @@ bool IsUnsupported(hipError_t status) { return status == hipErrorNotSupported; }
 // ---------------------------------------------------------------------------
 
 // @asserts: hipTexRefSetAddressMode - deprecated texref address mode set then get round-trips per-reference state (or unsupported skip)
-HIP_TEST_CASE(Contract_TextureReference_SetGetAddressMode_RoundTrips) {
+HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetAddressMode_SetGetAddressMode_RoundTrips) {
   CHECK_IMAGE_SUPPORT;
 
   textureReference tex_ref{};
@@ -79,7 +79,7 @@ HIP_TEST_CASE(Contract_TextureReference_SetGetAddressMode_RoundTrips) {
 }
 
 // @asserts: hipTexRefSetFilterMode - deprecated texref filter mode set then get round-trips per-reference state (or unsupported skip)
-HIP_TEST_CASE(Contract_TextureReference_SetGetFilterMode_RoundTrips) {
+HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetFilterMode_SetGetFilterMode_RoundTrips) {
   CHECK_IMAGE_SUPPORT;
 
   textureReference tex_ref{};
@@ -103,7 +103,7 @@ HIP_TEST_CASE(Contract_TextureReference_SetGetFilterMode_RoundTrips) {
 }
 
 // @asserts: hipTexRefSetFlags - deprecated texref flags set then get round-trips per-reference state (or unsupported skip)
-HIP_TEST_CASE(Contract_TextureReference_SetGetFlags_RoundTrips) {
+HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetFlags_SetGetFlags_RoundTrips) {
   CHECK_IMAGE_SUPPORT;
 
   textureReference tex_ref{};
@@ -127,7 +127,7 @@ HIP_TEST_CASE(Contract_TextureReference_SetGetFlags_RoundTrips) {
 }
 
 // @asserts: hipTexRefSetFormat - deprecated texref array format and channel count set then get round-trip (or unsupported skip)
-HIP_TEST_CASE(Contract_TextureReference_SetGetFormat_RoundTrips) {
+HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetFormat_SetGetFormat_RoundTrips) {
   CHECK_IMAGE_SUPPORT;
 
   textureReference tex_ref{};
@@ -155,7 +155,7 @@ HIP_TEST_CASE(Contract_TextureReference_SetGetFormat_RoundTrips) {
 }
 
 // @asserts: hipTexRefSetMaxAnisotropy - deprecated texref max-anisotropy set then get round-trips per-reference state (or unsupported skip)
-HIP_TEST_CASE(Contract_TextureReference_SetGetMaxAnisotropy_RoundTrips) {
+HIP_TEST_CASE(Contract_TextureReference_HipTexRefSetMaxAnisotropy_SetGetMaxAnisotropy_RoundTrips) {
   CHECK_IMAGE_SUPPORT;
 
   textureReference tex_ref{};

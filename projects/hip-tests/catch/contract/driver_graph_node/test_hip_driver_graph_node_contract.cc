@@ -96,7 +96,7 @@ void LaunchGraph(hipGraph_t graph) {
 }  // namespace
 
 // @asserts: hipDrvGraphAddMemcpyNode - a driver 3D memcpy node delivers the full extent to the device when the graph launches
-HIP_TEST_CASE(Contract_DriverGraphNode_AddMemcpyNode_LaunchesCopyThroughGraph) {
+HIP_TEST_CASE(Contract_DriverGraphNode_HipDrvGraphAddMemcpyNode_Default_LaunchesCopyThroughGraph) {
   hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
   if (!TryMalloc3D(&device)) {
@@ -125,7 +125,7 @@ HIP_TEST_CASE(Contract_DriverGraphNode_AddMemcpyNode_LaunchesCopyThroughGraph) {
 }
 
 // @asserts: hipDrvGraphMemcpyNodeGetParams - the getter round-trips the extent and endpoints the memcpy node was created with, and the setter accepts them back
-HIP_TEST_CASE(Contract_DriverGraphNode_MemcpyNodeGetParams_RoundTripsExtent) {
+HIP_TEST_CASE(Contract_DriverGraphNode_HipDrvGraphMemcpyNodeGetParams_Default_RoundTripsExtent) {
   hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
   if (!TryMalloc3D(&device)) {
@@ -158,7 +158,7 @@ HIP_TEST_CASE(Contract_DriverGraphNode_MemcpyNodeGetParams_RoundTripsExtent) {
 }
 
 // @asserts: hipDrvGraphExecMemcpyNodeSetParams - re-pointing an instantiated memcpy node's source is accepted on AMD but rejected with hipErrorInvalidValue on NVIDIA
-HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemcpyNodeSetParams_RetargetsSourceAfterInstantiate) {
+HIP_TEST_CASE(Contract_DriverGraphNode_HipDrvGraphExecMemcpyNodeSetParams_Default_RetargetsSourceAfterInstantiate) {
   hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
   if (!TryMalloc3D(&device)) {
@@ -225,7 +225,7 @@ HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemcpyNodeSetParams_RetargetsSourceAf
 }
 
 // @asserts: hipDrvGraphAddMemsetNode - a driver memset node writes the requested byte value into the target row when the graph launches
-HIP_TEST_CASE(Contract_DriverGraphNode_AddMemsetNode_LaunchesExpectedValue) {
+HIP_TEST_CASE(Contract_DriverGraphNode_HipDrvGraphAddMemsetNode_Default_LaunchesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
   if (!TryMalloc3D(&device)) {
@@ -262,7 +262,7 @@ HIP_TEST_CASE(Contract_DriverGraphNode_AddMemsetNode_LaunchesExpectedValue) {
 }
 
 // @asserts: hipDrvGraphExecMemsetNodeSetParams - updating an instantiated memset node's value makes the next launch write the new byte
-HIP_TEST_CASE(Contract_DriverGraphNode_ExecMemsetNodeSetParams_UpdatesValueAfterInstantiate) {
+HIP_TEST_CASE(Contract_DriverGraphNode_HipDrvGraphExecMemsetNodeSetParams_Default_UpdatesValueAfterInstantiate) {
   hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
   if (!TryMalloc3D(&device)) {

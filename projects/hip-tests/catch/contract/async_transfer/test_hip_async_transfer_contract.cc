@@ -25,7 +25,7 @@ std::array<uint8_t, kElementCount> MakePattern(uint8_t seed) {
 }
 
 // @asserts: hipMemcpyAsync - host->device->host async copies round-trip byte-for-byte once the stream is synchronized
-HIP_TEST_CASE(Contract_AsyncTransfer_HostToDeviceToHost_RoundTripsAfterStreamSynchronize) {
+HIP_TEST_CASE(Contract_AsyncTransfer_HipMemcpyAsync_HostToDeviceToHost_RoundTripsAfterStreamSynchronize) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x21);
   std::array<uint8_t, kElementCount> dst{};
@@ -45,7 +45,7 @@ HIP_TEST_CASE(Contract_AsyncTransfer_HostToDeviceToHost_RoundTripsAfterStreamSyn
 }
 
 // @asserts: hipMemcpyAsync - a device-to-device async copy reproduces the source data once the stream is synchronized
-HIP_TEST_CASE(Contract_AsyncTransfer_DeviceToDevice_CopiesAfterStreamSynchronize) {
+HIP_TEST_CASE(Contract_AsyncTransfer_HipMemcpyAsync_DeviceToDevice_CopiesAfterStreamSynchronize) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x58);
   std::array<uint8_t, kElementCount> dst{};
@@ -70,7 +70,7 @@ HIP_TEST_CASE(Contract_AsyncTransfer_DeviceToDevice_CopiesAfterStreamSynchronize
 }
 
 // @asserts: hipMemcpyAsync - a zero-byte async copy succeeds and leaves the destination unchanged
-HIP_TEST_CASE(Contract_AsyncTransfer_ZeroBytes_Succeeds) {
+HIP_TEST_CASE(Contract_AsyncTransfer_HipMemcpyAsync_ZeroBytes_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   uint8_t src = 0x1;
   uint8_t dst = 0x2;
@@ -85,7 +85,7 @@ HIP_TEST_CASE(Contract_AsyncTransfer_ZeroBytes_Succeeds) {
 }
 
 // @asserts: hipMemcpyAsync - rejects an invalid hipMemcpyKind with a non-success status that matches the recorded last error
-HIP_TEST_CASE(Contract_AsyncTransfer_InvalidDirection_ReturnsConsistentError) {
+HIP_TEST_CASE(Contract_AsyncTransfer_HipMemcpyAsync_InvalidDirection_ReturnsConsistentError) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x83);
   void* device_ptr = nullptr;

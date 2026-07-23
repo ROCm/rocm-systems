@@ -51,7 +51,7 @@ hipPitchedPtr HostPitchedPtr(void* ptr, size_t width, size_t height) {
 }  // namespace
 
 // @asserts: hipMemsetD2D16Async - pitched device rows filled with a 16-bit pattern are visible on host after stream sync
-HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_D2D16Async_FillsWordRows_VisibleAfterSync) {
+HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_HipMemsetD2D16Async_FillsWordRows_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint16_t pattern = 0x1357;
   std::array<uint16_t, kWidth * kHeight> dst{};
@@ -76,7 +76,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_D2D16Async_FillsWordRows_VisibleAft
 }
 
 // @asserts: hipMemsetD2D32Async - pitched device rows filled with a 32-bit pattern are visible on host after stream sync
-HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_D2D32Async_FillsDwordRows_VisibleAfterSync) {
+HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_HipMemsetD2D32Async_FillsDwordRows_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   constexpr int pattern = 0x12345678;
   std::array<int, kWidth * kHeight> dst{};
@@ -101,7 +101,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_D2D32Async_FillsDwordRows_VisibleAf
 }
 
 // @asserts: hipMemset2DAsync - a 2D pitched region filled with a byte pattern is visible on host after stream sync
-HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_Memset2DAsync_FillsRegion_VisibleAfterSync) {
+HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_HipMemset2DAsync_FillsRegion_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x7b;
   std::array<uint8_t, kWidth * kHeight> dst{};
@@ -125,7 +125,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_Memset2DAsync_FillsRegion_VisibleAf
 }
 
 // @asserts: hipMemset3DAsync - a 3D extent filled with a byte pattern is visible on host after stream sync
-HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_Memset3DAsync_FillsExtent_VisibleAfterSync) {
+HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_HipMemset3DAsync_FillsExtent_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x5c;
   std::array<uint8_t, kWidth * kHeight * kDepth> dst{};
@@ -154,7 +154,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_Memset3DAsync_FillsExtent_VisibleAf
 }
 
 // @asserts: hipMemsetD2D16Async - null-destination async 2D/3D memsets all reject with a non-success status
-HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_NullDestination_IsRejected) {
+HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_HipMemsetD2D16Async_NullDestination_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   hipPitchedPtr null_3d{};

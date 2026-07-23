@@ -31,7 +31,7 @@ constexpr char const kKnownSymbol[] = "cuDeviceGetCount";
 }  // namespace
 
 // @asserts: hipGetDriverEntryPoint - resolves a known symbol to a callable pointer whose result matches the direct API
-HIP_TEST_CASE(Contract_DriverEntryPoint_ResolvesKnownSymbol_IsCallable) {
+HIP_TEST_CASE(Contract_DriverEntryPoint_HipGetDriverEntryPoint_ResolvesKnownSymbol_IsCallable) {
   RequireDevice();
 
   void* function_ptr = nullptr;
@@ -54,7 +54,7 @@ HIP_TEST_CASE(Contract_DriverEntryPoint_ResolvesKnownSymbol_IsCallable) {
 }
 
 // @asserts: hipGetDriverEntryPoint - an unknown symbol is reported as not-found rather than resolved to a pointer
-HIP_TEST_CASE(Contract_DriverEntryPoint_UnknownSymbol_ReportsNotFound) {
+HIP_TEST_CASE(Contract_DriverEntryPoint_HipGetDriverEntryPoint_UnknownSymbol_ReportsNotFound) {
   RequireDevice();
 
   void* function_ptr = reinterpret_cast<void*>(0x1);
@@ -74,7 +74,7 @@ HIP_TEST_CASE(Contract_DriverEntryPoint_UnknownSymbol_ReportsNotFound) {
 }
 
 // @asserts: hipGetDriverEntryPoint - an empty symbol name never resolves to a usable non-null entry point
-HIP_TEST_CASE(Contract_DriverEntryPoint_EmptySymbol_IsRejected) {
+HIP_TEST_CASE(Contract_DriverEntryPoint_HipGetDriverEntryPoint_EmptySymbol_IsRejected) {
   RequireDevice();
 
   void* function_ptr = nullptr;
@@ -96,7 +96,7 @@ HIP_TEST_CASE(Contract_DriverEntryPoint_EmptySymbol_IsRejected) {
 }
 
 // @asserts: hipGetDriverEntryPoint - rejects a null output function pointer with hipErrorInvalidValue
-HIP_TEST_CASE(Contract_DriverEntryPoint_NullFuncPtr_IsRejected) {
+HIP_TEST_CASE(Contract_DriverEntryPoint_HipGetDriverEntryPoint_NullFuncPtr_IsRejected) {
   RequireDevice();
 
   // BACKEND-DIFF: A null output pointer is a caller error that must be rejected
@@ -116,7 +116,7 @@ HIP_TEST_CASE(Contract_DriverEntryPoint_NullFuncPtr_IsRejected) {
 }
 
 // @asserts: hipGetDriverEntryPoint - rejects an invalid flags value with a non-success error
-HIP_TEST_CASE(Contract_DriverEntryPoint_InvalidFlag_IsRejected) {
+HIP_TEST_CASE(Contract_DriverEntryPoint_HipGetDriverEntryPoint_InvalidFlag_IsRejected) {
   RequireDevice();
 
   void* function_ptr = nullptr;

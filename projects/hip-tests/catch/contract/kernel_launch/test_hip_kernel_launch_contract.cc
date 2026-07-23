@@ -79,7 +79,7 @@ bool CooperativeLaunchSupported() {
 }  // namespace
 
 // @asserts: hipLaunchCooperativeKernel - a cooperative launch executes and publishes the expected value, or skips if unsupported
-HIP_TEST_CASE(Contract_KernelLaunch_CooperativeKernel_WritesExpectedValue) {
+HIP_TEST_CASE(Contract_KernelLaunch_HipLaunchCooperativeKernel_Default_WritesExpectedValue) {
   if (!CooperativeLaunchSupported()) {
     HIP_SKIP_TEST("This device does not support cooperative kernel launch.");
   }
@@ -102,7 +102,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_CooperativeKernel_WritesExpectedValue) {
 }
 
 // @asserts: hipLaunchCooperativeKernel - a null function pointer is rejected with a non-success status rather than silently succeeding
-HIP_TEST_CASE(Contract_KernelLaunch_CooperativeKernel_NullFunction_IsRejected) {
+HIP_TEST_CASE(Contract_KernelLaunch_HipLaunchCooperativeKernel_NullFunction_IsRejected) {
   if (!CooperativeLaunchSupported()) {
     HIP_SKIP_TEST("This device does not support cooperative kernel launch.");
   }
@@ -123,7 +123,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_CooperativeKernel_NullFunction_IsRejected) {
 }
 
 // @asserts: hipGetSymbolAddress - a device global resolves to a non-null device pointer usable for host-device copies
-HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolAddress_ReturnsUsableDevicePointer) {
+HIP_TEST_CASE(Contract_KernelLaunch_HipGetSymbolAddress_Default_ReturnsUsableDevicePointer) {
   // Launch a kernel that references the device global so the symbol is emitted
   // and resolvable in the device image on every runtime path.
   hipLaunchKernelGGL(TouchSymbolScalarKernel, dim3(1), dim3(1), 0, 0);
@@ -144,7 +144,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolAddress_ReturnsUsableDevicePointer)
 }
 
 // @asserts: hipGetSymbolSize - the reported size of a device global array matches its declared byte size
-HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolSize_MatchesDeclaredSize) {
+HIP_TEST_CASE(Contract_KernelLaunch_HipGetSymbolSize_Default_MatchesDeclaredSize) {
   // Launch a kernel that references the device global array so the symbol is
   // emitted and resolvable in the device image on every runtime path.
   hipLaunchKernelGGL(TouchSymbolArrayKernel, dim3(1), dim3(1), 0, 0);
@@ -158,7 +158,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolSize_MatchesDeclaredSize) {
 }
 
 // @asserts: hipGetSymbolAddress - a null symbol is rejected with a non-success status rather than silently succeeding
-HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolAddress_NullSymbol_IsRejected) {
+HIP_TEST_CASE(Contract_KernelLaunch_HipGetSymbolAddress_NullSymbol_IsRejected) {
   // Resolving a null symbol must not silently succeed. The exact error code is
   // backend-specific, so only a non-success status is required. The null is
   // typed as const void* so the non-template C API overload is selected;
@@ -176,7 +176,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_GetSymbolAddress_NullSymbol_IsRejected) {
 // (absent from amdhip.def.in), so referencing it is an unresolved external at link
 // time on Windows. The contract is exercised only where the symbol is exported
 // (non-Windows). This gate can be removed once the Windows runtime exports it.
-HIP_TEST_CASE(Contract_KernelLaunch_LaunchKernelEx_WritesExpectedValue) {
+HIP_TEST_CASE(Contract_KernelLaunch_HipLaunchKernelEx_Default_WritesExpectedValue) {
 #if defined(_WIN32)
   HIP_SKIP_TEST("hipLaunchKernelEx is not exported from the Windows HIP runtime; the "
                 "extended-launch contract cannot be linked or exercised there.");
@@ -209,7 +209,7 @@ HIP_TEST_CASE(Contract_KernelLaunch_LaunchKernelEx_WritesExpectedValue) {
 // so this contract builds only on AMD (see the gated hip_ext.h include above).
 #if HT_AMD
 // @asserts: hipExtLaunchKernel - the AMD extended launch entry point executes the kernel and publishes the expected value
-HIP_TEST_CASE(Contract_KernelLaunch_ExtLaunchKernel_WritesExpectedValue) {
+HIP_TEST_CASE(Contract_KernelLaunch_HipExtLaunchKernel_Default_WritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
   int value = kExpectedValue;

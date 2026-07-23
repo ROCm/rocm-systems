@@ -25,7 +25,7 @@ std::array<uint8_t, kElementCount> MakePattern(uint8_t seed) {
 }
 
 // @asserts: hipGraphClone - a clone of an empty-node graph instantiates and launches successfully
-HIP_TEST_CASE(Contract_GraphClone_ClonedEmptyGraph_InstantiatesAndLaunches) {
+HIP_TEST_CASE(Contract_GraphClone_HipGraphClone_ClonedEmptyGraph_InstantiatesAndLaunches) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraph_t clone = nullptr;
@@ -47,7 +47,7 @@ HIP_TEST_CASE(Contract_GraphClone_ClonedEmptyGraph_InstantiatesAndLaunches) {
 }
 
 // @asserts: hipGraphClone - a clone preserves the source graph's memcpy nodes so the launched clone round-trips the data
-HIP_TEST_CASE(Contract_GraphClone_ClonedMemcpyGraph_RoundTripsBytes) {
+HIP_TEST_CASE(Contract_GraphClone_HipGraphClone_ClonedMemcpyGraph_RoundTripsBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x45);
   std::array<uint8_t, kElementCount> dst{};
@@ -80,7 +80,7 @@ HIP_TEST_CASE(Contract_GraphClone_ClonedMemcpyGraph_RoundTripsBytes) {
 }
 
 // @asserts: hipGraphClone - the clone is a non-null handle distinct from the original graph handle
-HIP_TEST_CASE(Contract_GraphClone_OriginalAndClone_AreDistinctHandles) {
+HIP_TEST_CASE(Contract_GraphClone_HipGraphClone_OriginalAndClone_AreDistinctHandles) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraph_t clone = nullptr;

@@ -35,7 +35,7 @@ void WriteAndVerifyHostBytes(void* host_ptr, const std::array<uint8_t, kElementC
 }  // namespace
 
 // @asserts: hipHostAlloc - returns a non-null pinned host pointer that is host-readable/writable
-HIP_TEST_CASE(Contract_HostAllocAliases_HostAlloc_ReturnsUsablePinnedPointer) {
+HIP_TEST_CASE(Contract_HostAllocAliases_HipHostAlloc_Default_ReturnsUsablePinnedPointer) {
   hip::contract::ContractCleanup cleanup;
   void* host_ptr = nullptr;
   const auto pattern = MakePattern(0x12);
@@ -48,7 +48,7 @@ HIP_TEST_CASE(Contract_HostAllocAliases_HostAlloc_ReturnsUsablePinnedPointer) {
 }
 
 // @asserts: hipMallocHost - alias returns a non-null host pointer that is host-readable/writable
-HIP_TEST_CASE(Contract_HostAllocAliases_MallocHost_ReturnsUsablePointer) {
+HIP_TEST_CASE(Contract_HostAllocAliases_HipMallocHost_Default_ReturnsUsablePointer) {
   hip::contract::ContractCleanup cleanup;
   void* host_ptr = nullptr;
   const auto pattern = MakePattern(0x34);
@@ -61,7 +61,7 @@ HIP_TEST_CASE(Contract_HostAllocAliases_MallocHost_ReturnsUsablePointer) {
 }
 
 // @asserts: hipMemAllocHost - driver-API alias returns a non-null host pointer that is host-readable/writable
-HIP_TEST_CASE(Contract_HostAllocAliases_MemAllocHost_ReturnsUsablePointer) {
+HIP_TEST_CASE(Contract_HostAllocAliases_HipMemAllocHost_Default_ReturnsUsablePointer) {
   hip::contract::ContractCleanup cleanup;
   void* host_ptr = nullptr;
   const auto pattern = MakePattern(0x56);
@@ -79,7 +79,7 @@ HIP_TEST_CASE(Contract_HostAllocAliases_MemAllocHost_ReturnsUsablePointer) {
 }
 
 // @asserts: hipFreeHost - accepts a null pointer as success but rejects a non-pinned (stack) pointer with non-success
-HIP_TEST_CASE(Contract_HostAllocAliases_FreeHost_NullSucceeds_InvalidPointerRejected) {
+HIP_TEST_CASE(Contract_HostAllocAliases_HipFreeHost_NullSucceeds_InvalidPointerRejected) {
   int stack_value = 0;
 
   HIP_CHECK(hipFreeHost(nullptr));
@@ -87,7 +87,7 @@ HIP_TEST_CASE(Contract_HostAllocAliases_FreeHost_NullSucceeds_InvalidPointerReje
 }
 
 // @asserts: hipHostAlloc - the pinned-host alloc aliases reject a null out-pointer and an invalid flag with non-success
-HIP_TEST_CASE(Contract_HostAllocAliases_InvalidArgs_AreRejected) {
+HIP_TEST_CASE(Contract_HostAllocAliases_HipHostAlloc_InvalidArgs_AreRejected) {
   void* host_ptr = nullptr;
 
   REQUIRE(hipHostAlloc(nullptr, kElementCount, hipHostAllocDefault) != hipSuccess);
@@ -102,7 +102,7 @@ HIP_TEST_CASE(Contract_HostAllocAliases_InvalidArgs_AreRejected) {
 // would require NVIDIA to expose the ext malloc entry point and flag.
 #if HT_AMD
 // @asserts: hipExtMallocWithFlags - default flag allocates a non-null device pointer and a zero-size request yields null (AMD only)
-HIP_TEST_CASE(Contract_HostAllocAliases_ExtMallocWithFlags_DefaultAllocatesAndZeroSizeIsNull) {
+HIP_TEST_CASE(Contract_HostAllocAliases_HipExtMallocWithFlags_Default_DefaultAllocatesAndZeroSizeIsNull) {
   void* device_ptr = nullptr;
 
   HIP_CHECK(hipExtMallocWithFlags(&device_ptr, kElementCount, hipDeviceMallocDefault));
@@ -115,7 +115,7 @@ HIP_TEST_CASE(Contract_HostAllocAliases_ExtMallocWithFlags_DefaultAllocatesAndZe
 }
 
 // @asserts: hipExtMallocWithFlags - rejects a null out-pointer and an invalid flag with non-success (AMD only)
-HIP_TEST_CASE(Contract_HostAllocAliases_ExtMallocWithFlags_InvalidArgs_AreRejected) {
+HIP_TEST_CASE(Contract_HostAllocAliases_HipExtMallocWithFlags_InvalidArgs_AreRejected) {
   void* device_ptr = nullptr;
 
   REQUIRE(hipExtMallocWithFlags(nullptr, kElementCount, hipDeviceMallocDefault) != hipSuccess);

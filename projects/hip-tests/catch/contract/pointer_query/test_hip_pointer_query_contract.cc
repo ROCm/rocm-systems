@@ -35,7 +35,7 @@ bool PointerSetAttributeOrSkip(const void* value, hipPointer_attribute attribute
 }  // namespace
 
 // @asserts: hipDrvPointerGetAttributes - a device allocation reports device memory type and the owning device ordinal
-HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_DeviceAllocation_ReportsTypeAndOrdinal) {
+HIP_TEST_CASE(Contract_PointerQuery_HipDrvPointerGetAttributes_DrvGetAttributesDeviceAllocation_ReportsTypeAndOrdinal) {
   hip::contract::ContractCleanup cleanup;
   int current_device = 0;
   HIP_CHECK(hipGetDevice(&current_device));
@@ -58,7 +58,7 @@ HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_DeviceAllocation_ReportsTyp
 }
 
 // @asserts: hipDrvPointerGetAttributes - batch device-pointer query matches the scalar hipPointerGetAttribute result
-HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_MatchesSingleAttributeQuery) {
+HIP_TEST_CASE(Contract_PointerQuery_HipDrvPointerGetAttributes_DrvGetAttributes_MatchesSingleAttributeQuery) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
@@ -79,7 +79,7 @@ HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_MatchesSingleAttributeQuery
 }
 
 // @asserts: hipDrvPointerGetAttributes - rejects zero count and null attribute/result arrays with a non-success status
-HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_InvalidArgs_AreRejected) {
+HIP_TEST_CASE(Contract_PointerQuery_HipDrvPointerGetAttributes_DrvGetAttributesInvalidArgs_AreRejected) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
@@ -103,7 +103,7 @@ HIP_TEST_CASE(Contract_PointerQuery_DrvGetAttributes_InvalidArgs_AreRejected) {
 // would require NVIDIA to expose these pointer query/set entry points.
 #if HT_AMD
 // @asserts: hipMemPtrGetInfo - reports an allocation size at least as large as the requested allocation
-HIP_TEST_CASE(Contract_PointerQuery_MemPtrGetInfo_ReturnsAllocationSize) {
+HIP_TEST_CASE(Contract_PointerQuery_HipMemPtrGetInfo_Default_ReturnsAllocationSize) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
@@ -118,7 +118,7 @@ HIP_TEST_CASE(Contract_PointerQuery_MemPtrGetInfo_ReturnsAllocationSize) {
 // @asserts: hipPointerSetAttribute - setting SYNC_MEMOPS on a device pointer is accepted-or-unsupported
 // PLATFORM-DIFF: hipPointerSetAttribute is not exported from the Windows HIP
 // runtime, so this case is skipped there (see the helper gate above).
-HIP_TEST_CASE(Contract_PointerQuery_SetAttribute_SyncMemops_SucceedsWhenSupported) {
+HIP_TEST_CASE(Contract_PointerQuery_HipPointerSetAttribute_SyncMemops_SucceedsWhenSupported) {
 #if defined(_WIN32)
   HIP_SKIP_TEST("hipPointerSetAttribute is not exported from the Windows HIP runtime; the "
                 "SYNC_MEMOPS set contract cannot be linked or exercised there.");
@@ -139,7 +139,7 @@ HIP_TEST_CASE(Contract_PointerQuery_SetAttribute_SyncMemops_SucceedsWhenSupporte
 // @asserts: hipPointerSetAttribute - rejects null value, an unknown attribute enum, and a null pointer with a non-success status
 // PLATFORM-DIFF: hipPointerSetAttribute is not exported from the Windows HIP
 // runtime, so this case is skipped there (see the helper gate above).
-HIP_TEST_CASE(Contract_PointerQuery_SetAttribute_InvalidArgs_AreRejected) {
+HIP_TEST_CASE(Contract_PointerQuery_HipPointerSetAttribute_InvalidArgs_AreRejected) {
 #if defined(_WIN32)
   HIP_SKIP_TEST("hipPointerSetAttribute is not exported from the Windows HIP runtime; the "
                 "invalid-argument rejection contract cannot be linked or exercised there.");

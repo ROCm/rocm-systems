@@ -30,7 +30,7 @@ void RequireRejected(hipError_t status) {
 // Windows the POSIX-fd path is not the native external-handle mechanism and the
 // runtime currently reports success for fd=-1, so skip rather than treating the
 // platform mismatch as a portable rejection contract.
-HIP_TEST_CASE(Contract_ExternalResource_ImportMemory_InvalidFd_IsRejected) {
+HIP_TEST_CASE(Contract_ExternalResource_HipImportExternalMemory_ImportMemoryInvalidFd_IsRejected) {
 #if defined(_WIN32)
   HIP_SKIP_TEST("POSIX opaque-fd external-memory imports are not exercised on Windows.");
 #else
@@ -54,7 +54,7 @@ HIP_TEST_CASE(Contract_ExternalResource_ImportMemory_InvalidFd_IsRejected) {
 // Windows the POSIX-fd path is not the native external-handle mechanism and the
 // runtime currently reports success for fd=-1, so skip rather than treating the
 // platform mismatch as a portable rejection contract.
-HIP_TEST_CASE(Contract_ExternalResource_ImportSemaphore_InvalidFd_IsRejected) {
+HIP_TEST_CASE(Contract_ExternalResource_HipImportExternalSemaphore_ImportSemaphoreInvalidFd_IsRejected) {
 #if defined(_WIN32)
   HIP_SKIP_TEST("POSIX opaque-fd external-semaphore imports are not exercised on Windows.");
 #else
@@ -72,7 +72,7 @@ HIP_TEST_CASE(Contract_ExternalResource_ImportSemaphore_InvalidFd_IsRejected) {
 }
 
 // @asserts: hipExternalMemoryGetMappedBuffer - rejects a null external-memory handle with a non-success status
-HIP_TEST_CASE(Contract_ExternalResource_GetMappedBuffer_NullHandle_IsRejected) {
+HIP_TEST_CASE(Contract_ExternalResource_HipExternalMemoryGetMappedBuffer_NullHandle_IsRejected) {
   // Mapping a buffer from a null external-memory handle is invalid input and
   // must be rejected rather than returning a device pointer.
   hipExternalMemoryBufferDesc desc{};
@@ -85,21 +85,21 @@ HIP_TEST_CASE(Contract_ExternalResource_GetMappedBuffer_NullHandle_IsRejected) {
 }
 
 // @asserts: hipDestroyExternalMemory - rejects a null external-memory handle with a non-success status
-HIP_TEST_CASE(Contract_ExternalResource_DestroyMemory_NullHandle_IsRejected) {
+HIP_TEST_CASE(Contract_ExternalResource_HipDestroyExternalMemory_DestroyMemoryNullHandle_IsRejected) {
   // Destroying a null external-memory handle is invalid input and must be
   // rejected rather than silently succeeding.
   RequireRejected(hipDestroyExternalMemory(nullptr));
 }
 
 // @asserts: hipDestroyExternalSemaphore - rejects a null external-semaphore handle with a non-success status
-HIP_TEST_CASE(Contract_ExternalResource_DestroySemaphore_NullHandle_IsRejected) {
+HIP_TEST_CASE(Contract_ExternalResource_HipDestroyExternalSemaphore_DestroySemaphoreNullHandle_IsRejected) {
   // Destroying a null external-semaphore handle is invalid input and must be
   // rejected rather than silently succeeding.
   RequireRejected(hipDestroyExternalSemaphore(nullptr));
 }
 
 // @asserts: hipSignalExternalSemaphoresAsync - rejects a batch containing a null semaphore handle with a non-success status (AMD only)
-HIP_TEST_CASE(Contract_ExternalResource_SignalSemaphore_NullHandle_IsRejected) {
+HIP_TEST_CASE(Contract_ExternalResource_HipSignalExternalSemaphoresAsync_SignalSemaphoreNullHandle_IsRejected) {
   // BACKEND-DIFF: The null-handle rejection contract is only exercised on AMD. On
   // NVIDIA hipSignalExternalSemaphoresAsync maps to
   // cudaSignalExternalSemaphoresAsync, which does not validate the semaphore
@@ -128,7 +128,7 @@ HIP_TEST_CASE(Contract_ExternalResource_SignalSemaphore_NullHandle_IsRejected) {
 }
 
 // @asserts: hipWaitExternalSemaphoresAsync - rejects a batch containing a null semaphore handle with a non-success status
-HIP_TEST_CASE(Contract_ExternalResource_WaitSemaphore_NullHandle_IsRejected) {
+HIP_TEST_CASE(Contract_ExternalResource_HipWaitExternalSemaphoresAsync_WaitSemaphoreNullHandle_IsRejected) {
   // BACKEND-DIFF: On AMD the wait path validates the handle and rejects null. On
   // NVIDIA the behavior is CUDA-version-dependent: CUDA 13.x validates the handle
   // and returns cudaErrorInvalidValue (probe-confirmed on H100/CUDA 13.1), but
@@ -156,7 +156,7 @@ HIP_TEST_CASE(Contract_ExternalResource_WaitSemaphore_NullHandle_IsRejected) {
 }
 
 // @asserts: hipExternalMemoryGetMappedMipmappedArray - rejects a null external-memory handle with a non-success status and no array
-HIP_TEST_CASE(Contract_ExternalResource_GetMappedMipmappedArray_NullHandle_IsRejected) {
+HIP_TEST_CASE(Contract_ExternalResource_HipExternalMemoryGetMappedMipmappedArray_NullHandle_IsRejected) {
   // Mapping a mipmapped array from a null external-memory handle is invalid
   // input and must be rejected rather than returning a mipmapped array.
   hipExternalMemoryMipmappedArrayDesc desc{};

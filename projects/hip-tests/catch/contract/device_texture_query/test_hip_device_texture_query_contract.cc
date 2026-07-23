@@ -22,7 +22,7 @@ bool QueryTextureWidthOrSkip(size_t* max_width, const hipChannelFormatDesc* desc
 }  // namespace
 
 // @asserts: hipDeviceGetTexture1DLinearMaxWidth - a float-channel descriptor yields a positive max 1D linear texture width
-HIP_TEST_CASE(Contract_DeviceTextureQuery_ReturnsPositiveWidth_ForFloatChannel) {
+HIP_TEST_CASE(Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_ReturnsPositiveWidth_ForFloatChannel) {
   CHECK_IMAGE_SUPPORT;
 
   int device = 0;
@@ -38,7 +38,7 @@ HIP_TEST_CASE(Contract_DeviceTextureQuery_ReturnsPositiveWidth_ForFloatChannel) 
 }
 
 // @asserts: hipDeviceGetTexture1DLinearMaxWidth - a byte-channel descriptor yields a positive max 1D linear texture width
-HIP_TEST_CASE(Contract_DeviceTextureQuery_ReturnsPositiveWidth_ForByteChannel) {
+HIP_TEST_CASE(Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_ReturnsPositiveWidth_ForByteChannel) {
   CHECK_IMAGE_SUPPORT;
 
   int device = 0;
@@ -54,7 +54,7 @@ HIP_TEST_CASE(Contract_DeviceTextureQuery_ReturnsPositiveWidth_ForByteChannel) {
 }
 
 // @asserts: hipDeviceGetTexture1DLinearMaxWidth - rejects a null max-width output pointer with a non-success error
-HIP_TEST_CASE(Contract_DeviceTextureQuery_NullMaxWidth_IsRejected) {
+HIP_TEST_CASE(Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_NullMaxWidth_IsRejected) {
   CHECK_IMAGE_SUPPORT;
 
   int device = 0;
@@ -65,7 +65,7 @@ HIP_TEST_CASE(Contract_DeviceTextureQuery_NullMaxWidth_IsRejected) {
 }
 
 // @asserts: hipDeviceGetTexture1DLinearMaxWidth - rejects a null channel-format descriptor with a non-success error
-HIP_TEST_CASE(Contract_DeviceTextureQuery_NullDescriptor_IsRejected) {
+HIP_TEST_CASE(Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_NullDescriptor_IsRejected) {
   CHECK_IMAGE_SUPPORT;
 
   int device = 0;
@@ -76,7 +76,7 @@ HIP_TEST_CASE(Contract_DeviceTextureQuery_NullDescriptor_IsRejected) {
 }
 
 // @asserts: hipDeviceGetTexture1DLinearMaxWidth - rejects an all-zero (no channel bits) descriptor with a non-success error
-HIP_TEST_CASE(Contract_DeviceTextureQuery_ZeroSizedDescriptor_IsRejected) {
+HIP_TEST_CASE(Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_ZeroSizedDescriptor_IsRejected) {
   CHECK_IMAGE_SUPPORT;
 
   int device = 0;
@@ -88,7 +88,7 @@ HIP_TEST_CASE(Contract_DeviceTextureQuery_ZeroSizedDescriptor_IsRejected) {
 }
 
 // @asserts: hipDeviceGetTexture1DLinearMaxWidth - rejects an out-of-range device ordinal with a non-success error
-HIP_TEST_CASE(Contract_DeviceTextureQuery_InvalidDevice_IsRejected) {
+HIP_TEST_CASE(Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_InvalidDevice_IsRejected) {
   CHECK_IMAGE_SUPPORT;
 
   int device_count = 0;

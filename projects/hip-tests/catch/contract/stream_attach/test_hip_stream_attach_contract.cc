@@ -43,7 +43,7 @@ hipDeviceptr_t* AttachPtr(void* p) { return reinterpret_cast<hipDeviceptr_t*>(p)
 }  // namespace
 
 // @asserts: hipStreamAttachMemAsync - attaching managed memory with hipMemAttachSingle to a created stream succeeds
-HIP_TEST_CASE(Contract_StreamAttach_ManagedOnCreatedStream_Succeeds) {
+HIP_TEST_CASE(Contract_StreamAttach_HipStreamAttachMemAsync_ManagedOnCreatedStream_Succeeds) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
 
@@ -60,7 +60,7 @@ HIP_TEST_CASE(Contract_StreamAttach_ManagedOnCreatedStream_Succeeds) {
 }
 
 // @asserts: hipStreamAttachMemAsync - attaching managed memory with hipMemAttachGlobal on the null stream succeeds
-HIP_TEST_CASE(Contract_StreamAttach_NullStream_AttachGlobal_Succeeds) {
+HIP_TEST_CASE(Contract_StreamAttach_HipStreamAttachMemAsync_NullStreamAttachGlobal_Succeeds) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
 
@@ -74,7 +74,7 @@ HIP_TEST_CASE(Contract_StreamAttach_NullStream_AttachGlobal_Succeeds) {
 }
 
 // @asserts: hipStreamAttachMemAsync - a non-zero length with hipMemAttachSingle on a created stream succeeds
-HIP_TEST_CASE(Contract_StreamAttach_NonZeroLengthAttachSingle_Succeeds) {
+HIP_TEST_CASE(Contract_StreamAttach_HipStreamAttachMemAsync_NonZeroLengthAttachSingle_Succeeds) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
 
@@ -91,7 +91,7 @@ HIP_TEST_CASE(Contract_StreamAttach_NonZeroLengthAttachSingle_Succeeds) {
 }
 
 // @asserts: hipStreamAttachMemAsync - rejects a null device pointer with a non-success error
-HIP_TEST_CASE(Contract_StreamAttach_NullDevPtr_IsRejected) {
+HIP_TEST_CASE(Contract_StreamAttach_HipStreamAttachMemAsync_NullDevPtr_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -101,7 +101,7 @@ HIP_TEST_CASE(Contract_StreamAttach_NullDevPtr_IsRejected) {
 }
 
 // @asserts: hipStreamAttachMemAsync - rejects hipMemAttachSingle on the null stream with a non-success error
-HIP_TEST_CASE(Contract_StreamAttach_NullStreamAttachSingle_IsRejected) {
+HIP_TEST_CASE(Contract_StreamAttach_HipStreamAttachMemAsync_NullStreamAttachSingle_IsRejected) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
 

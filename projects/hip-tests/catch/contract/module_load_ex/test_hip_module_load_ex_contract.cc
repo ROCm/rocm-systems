@@ -97,7 +97,7 @@ void LoadContractModuleEx(hipModule_t& module) {
 }  // namespace
 
 // @asserts: hipModuleLoadDataEx - loading a code object with zero options yields a non-null module that unloads cleanly
-HIP_TEST_CASE(Contract_ModuleLoadEx_ZeroOptions_LoadsAndUnloads) {
+HIP_TEST_CASE(Contract_ModuleLoadEx_HipModuleLoadDataEx_ZeroOptions_LoadsAndUnloads) {
   hip::contract::ContractCleanup cleanup;
   std::vector<char> code;
   if (!CompileModuleSource(code)) {
@@ -114,7 +114,7 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_ZeroOptions_LoadsAndUnloads) {
 }
 
 // @asserts: hipModuleLoadDataEx - supplying benign JIT options still loads the module and lets a known symbol resolve, or reports unsupported
-HIP_TEST_CASE(Contract_ModuleLoadEx_WithJitOptions_ResolvesSymbol) {
+HIP_TEST_CASE(Contract_ModuleLoadEx_HipModuleLoadDataEx_WithJitOptions_ResolvesSymbol) {
   hip::contract::ContractCleanup cleanup;
   std::vector<char> code;
   if (!CompileModuleSource(code)) {
@@ -149,7 +149,7 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_WithJitOptions_ResolvesSymbol) {
 }
 
 // @asserts: hipModuleLoadDataEx - rejects a null code-object image with a defined non-success error
-HIP_TEST_CASE(Contract_ModuleLoadEx_NullImage_IsRejected) {
+HIP_TEST_CASE(Contract_ModuleLoadEx_HipModuleLoadDataEx_NullImage_IsRejected) {
   // Loading a module from a null image through the load-with-options entry point
   // must not silently succeed. Backends may report hipErrorInvalidValue or
   // hipErrorInvalidImage; the contract only requires a non-success status so the
@@ -160,7 +160,7 @@ HIP_TEST_CASE(Contract_ModuleLoadEx_NullImage_IsRejected) {
 }
 
 // @asserts: hipModuleLaunchKernel - a function resolved from an Ex-loaded module launches and writes the expected value to device memory
-HIP_TEST_CASE(Contract_ModuleLoadEx_LaunchWritesExpectedValue) {
+HIP_TEST_CASE(Contract_ModuleLoadEx_HipModuleLaunchKernel_Default_LaunchWritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModuleEx(module);

@@ -41,7 +41,7 @@ void RequireStreamWaitValueSupport() {
 }  // namespace
 
 // @asserts: hipStreamWriteValue32 - an enqueued 32-bit write is visible to a later same-stream copy after the stream drains
-HIP_TEST_CASE(Contract_StreamMemoryOps_WriteValue32_BecomesVisibleInStreamOrder) {
+HIP_TEST_CASE(Contract_StreamMemoryOps_HipStreamWriteValue32_Default_BecomesVisibleInStreamOrder) {
   RequireDevice();
   RequireStreamWaitValueSupport();
   hip::contract::ContractCleanup cleanup;
@@ -70,7 +70,7 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WriteValue32_BecomesVisibleInStreamOrder)
 }
 
 // @asserts: hipStreamWriteValue64 - an enqueued 64-bit write is visible to a later same-stream copy after the stream drains
-HIP_TEST_CASE(Contract_StreamMemoryOps_WriteValue64_BecomesVisibleInStreamOrder) {
+HIP_TEST_CASE(Contract_StreamMemoryOps_HipStreamWriteValue64_Default_BecomesVisibleInStreamOrder) {
   RequireDevice();
   RequireStreamWaitValueSupport();
   hip::contract::ContractCleanup cleanup;
@@ -98,7 +98,7 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WriteValue64_BecomesVisibleInStreamOrder)
 }
 
 // @asserts: hipStreamWaitValue32 - a Gte wait gates later same-stream work until the value condition is satisfied
-HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValueGte_GatesLaterStreamWork) {
+HIP_TEST_CASE(Contract_StreamMemoryOps_HipStreamWaitValue32_WaitValueGte_GatesLaterStreamWork) {
   RequireDevice();
   RequireStreamWaitValueSupport();
   hip::contract::ContractCleanup cleanup;
@@ -139,7 +139,7 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValueGte_GatesLaterStreamWork) {
 }
 
 // @asserts: hipStreamWaitValue64 - a 64-bit Gte wait gates later same-stream work until the value condition is satisfied
-HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValue64Gte_GatesLaterStreamWork) {
+HIP_TEST_CASE(Contract_StreamMemoryOps_HipStreamWaitValue64_Gte_GatesLaterStreamWork) {
   RequireDevice();
   RequireStreamWaitValueSupport();
   hip::contract::ContractCleanup cleanup;
@@ -181,7 +181,7 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_WaitValue64Gte_GatesLaterStreamWork) {
 }
 
 // @asserts: hipStreamBatchMemOp - a batch of write ops applies all writes in stream order, or reports unsupported
-HIP_TEST_CASE(Contract_StreamMemoryOps_BatchMemOp_AppliesWritesInStreamOrder) {
+HIP_TEST_CASE(Contract_StreamMemoryOps_HipStreamBatchMemOp_Default_AppliesWritesInStreamOrder) {
 #if defined(_WIN32)
   HIP_SKIP_TEST("hipStreamBatchMemOp reports success but does not apply write operations on this Windows runtime path.");
 #else
@@ -244,7 +244,7 @@ HIP_TEST_CASE(Contract_StreamMemoryOps_BatchMemOp_AppliesWritesInStreamOrder) {
 }
 
 // @asserts: hipStreamWriteValue32 - write and wait reject a null address with hipErrorInvalidValue, or report unsupported
-HIP_TEST_CASE(Contract_StreamMemoryOps_RejectsInvalidInputs) {
+HIP_TEST_CASE(Contract_StreamMemoryOps_HipStreamWriteValue32_Default_RejectsInvalidInputs) {
   RequireDevice();
   RequireStreamWaitValueSupport();
   hip::contract::ContractCleanup cleanup;

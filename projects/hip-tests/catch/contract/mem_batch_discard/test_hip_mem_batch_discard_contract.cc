@@ -109,7 +109,7 @@ void RequireAcceptedOrUnsupported(hipError_t status) {
 
 #if HIP_CONTRACT_HAS_MEM_DISCARD_BATCH
 // @asserts: hipMemDiscardBatchAsync - discarding a batch of managed ranges is accepted (stream drains cleanly) or reported unsupported
-HIP_TEST_CASE(Contract_MemBatchDiscard_DiscardBatch_IsAcceptedOrUnsupported) {
+HIP_TEST_CASE(Contract_MemBatchDiscard_HipMemDiscardBatchAsync_DiscardBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
 
@@ -131,7 +131,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DiscardBatch_IsAcceptedOrUnsupported) {
 }
 
 // @asserts: hipMemDiscardAndPrefetchBatchAsync - combined discard-and-prefetch batch to the current device is accepted or reported unsupported
-HIP_TEST_CASE(Contract_MemBatchDiscard_DiscardAndPrefetchBatch_IsAcceptedOrUnsupported) {
+HIP_TEST_CASE(Contract_MemBatchDiscard_HipMemDiscardAndPrefetchBatchAsync_DiscardAndPrefetchBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
 
@@ -156,7 +156,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DiscardAndPrefetchBatch_IsAcceptedOrUnsup
 }
 
 // @asserts: hipDrvMemDiscardBatchAsync - driver-style discard batch over device pointers is accepted or reported unsupported
-HIP_TEST_CASE(Contract_MemBatchDiscard_DrvDiscardBatch_IsAcceptedOrUnsupported) {
+HIP_TEST_CASE(Contract_MemBatchDiscard_HipDrvMemDiscardBatchAsync_DrvDiscardBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
 
@@ -178,7 +178,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DrvDiscardBatch_IsAcceptedOrUnsupported) 
 }
 
 // @asserts: hipDrvMemDiscardAndPrefetchBatchAsync - driver-style combined discard-and-prefetch batch over device pointers is accepted or reported unsupported
-HIP_TEST_CASE(Contract_MemBatchDiscard_DrvDiscardAndPrefetchBatch_IsAcceptedOrUnsupported) {
+HIP_TEST_CASE(Contract_MemBatchDiscard_HipDrvMemDiscardAndPrefetchBatchAsync_DrvDiscardAndPrefetchBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
 
@@ -203,7 +203,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_DrvDiscardAndPrefetchBatch_IsAcceptedOrUn
 }
 
 // @asserts: hipMemDiscardBatchAsync - a batch with a null range never returns hipSuccess (rejected, or reported unsupported)
-HIP_TEST_CASE(Contract_MemBatchDiscard_NullPointer_IsRejectedOrUnsupported) {
+HIP_TEST_CASE(Contract_MemBatchDiscard_HipMemDiscardBatchAsync_NullPointer_IsRejectedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
 
@@ -227,7 +227,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_NullPointer_IsRejectedOrUnsupported) {
 
 #if HIP_CONTRACT_HAS_MEM_PREFETCH_BATCH
 // @asserts: hipMemPrefetchBatchAsync - prefetching a batch of managed ranges to the current device is accepted or reported unsupported
-HIP_TEST_CASE(Contract_MemBatchDiscard_PrefetchBatch_IsAcceptedOrUnsupported) {
+HIP_TEST_CASE(Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_PrefetchBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
   if (!IsDiscreteDevice()) {
     HIP_SKIP_TEST("Batch prefetch is only exercised on discrete GPUs.");
@@ -256,7 +256,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_PrefetchBatch_IsAcceptedOrUnsupported) {
 #else
 #if HT_NVIDIA
 // @asserts: hipMemPrefetchBatchAsync - NVIDIA CUDA versions before 13.0 do not expose the batch prefetch API; the contract is skipped until backend parity exists
-HIP_TEST_CASE(Contract_MemBatchDiscard_NvidiaPrefetchBatchUnsupported_IsSkipped) {
+HIP_TEST_CASE(Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_NvidiaPrefetchBatchUnsupported_IsSkipped) {
   HIP_SKIP_TEST("hipMemPrefetchBatchAsync is not exposed by this NVIDIA CUDA runtime version.");
 }
 #endif  // HT_NVIDIA

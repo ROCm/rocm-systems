@@ -47,7 +47,7 @@ bool TryMalloc3D(hipPitchedPtr* device_ptr, hipExtent extent) {
 }  // namespace
 
 // @asserts: hipMalloc3D - a 3D allocation returns a non-null pitched pointer whose pitch and xsize/ysize match the extent
-HIP_TEST_CASE(Contract_Copy3D_Malloc3D_ReturnsPitchedPtr) {
+HIP_TEST_CASE(Contract_Copy3D_HipMalloc3D_Default_ReturnsPitchedPtr) {
   hip::contract::ContractCleanup cleanup;
   hipPitchedPtr device{};
   const auto extent = ByteExtent(kWidth, kHeight, kDepth);
@@ -64,7 +64,7 @@ HIP_TEST_CASE(Contract_Copy3D_Malloc3D_ReturnsPitchedPtr) {
 }
 
 // @asserts: hipMemcpy3D - a full-extent H2D then D2H 3D copy round-trips all bytes unchanged
-HIP_TEST_CASE(Contract_Copy3D_Memcpy3D_HostDeviceRoundTripsExtent) {
+HIP_TEST_CASE(Contract_Copy3D_HipMemcpy3D_Default_HostDeviceRoundTripsExtent) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x12);
   std::array<uint8_t, kWidth * kHeight * kDepth> dst{};
@@ -94,7 +94,7 @@ HIP_TEST_CASE(Contract_Copy3D_Memcpy3D_HostDeviceRoundTripsExtent) {
 }
 
 // @asserts: hipMemcpy3D - a single-slice (depth=1) H2D then D2H 3D copy round-trips that slice's bytes
-HIP_TEST_CASE(Contract_Copy3D_Memcpy3D_SingleSliceRoundTripsBytes) {
+HIP_TEST_CASE(Contract_Copy3D_HipMemcpy3D_Default_SingleSliceRoundTripsBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x56);
   std::array<uint8_t, kWidth * kHeight * kDepth> dst{};
@@ -126,7 +126,7 @@ HIP_TEST_CASE(Contract_Copy3D_Memcpy3D_SingleSliceRoundTripsBytes) {
 }
 
 // @asserts: hipFree - freeing the pointer from a hipMalloc3D pitched allocation succeeds
-HIP_TEST_CASE(Contract_Copy3D_Free3DAllocation_Succeeds) {
+HIP_TEST_CASE(Contract_Copy3D_HipFree_3DAllocation_Succeeds) {
   hipPitchedPtr device{};
   const auto extent = ByteExtent(kWidth, kHeight, kDepth);
 

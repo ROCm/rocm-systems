@@ -63,7 +63,7 @@ bool TryMalloc3D(hipPitchedPtr* device_ptr, hipExtent extent) {
 }  // namespace
 
 // @asserts: hipMemcpy3DAsync - a 3D extent round-trips host->device->host intact once the stream is synchronized
-HIP_TEST_CASE(Contract_AsyncCopy3D_Memcpy3DAsync_HostDeviceRoundTripsExtent_VisibleAfterSync) {
+HIP_TEST_CASE(Contract_AsyncCopy3D_HipMemcpy3DAsync_HostDeviceRoundTripsExtent_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   const auto src = Make3DPattern(0x23);
   std::array<uint8_t, kWidth * kHeight * kDepth> dst{};
@@ -97,7 +97,7 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_Memcpy3DAsync_HostDeviceRoundTripsExtent_Visi
 }
 
 // @asserts: hipMemset3D - fills every byte of a 3D extent with the given value, visible after copy-back
-HIP_TEST_CASE(Contract_AsyncCopy3D_Memset3D_FillsExtent_VisibleAfterCopyBack) {
+HIP_TEST_CASE(Contract_AsyncCopy3D_HipMemset3D_FillsExtent_VisibleAfterCopyBack) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x6d;
   std::array<uint8_t, kWidth * kHeight * kDepth> dst{};
@@ -122,7 +122,7 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_Memset3D_FillsExtent_VisibleAfterCopyBack) {
 }
 
 // @asserts: hipMemcpy3DAsync - rejects null copy params and surfaces the failure via hipGetLastError, then clears it
-HIP_TEST_CASE(Contract_AsyncCopy3D_Memcpy3DAsync_NullParams_IsRejected) {
+HIP_TEST_CASE(Contract_AsyncCopy3D_HipMemcpy3DAsync_NullParams_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
 
@@ -138,7 +138,7 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_Memcpy3DAsync_NullParams_IsRejected) {
 }
 
 // @asserts: hipMemcpyWithStream - a linear buffer round-trips host->device->host intact once the stream is synchronized
-HIP_TEST_CASE(Contract_AsyncCopy3D_MemcpyWithStream_RoundTripsBytes_VisibleAfterSync) {
+HIP_TEST_CASE(Contract_AsyncCopy3D_HipMemcpyWithStream_RoundTripsBytes_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakeLinearPattern(0x45);
   std::array<uint8_t, kLinearBytes> dst{};
@@ -158,7 +158,7 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_MemcpyWithStream_RoundTripsBytes_VisibleAfter
 }
 
 // @asserts: hipMemcpyWithStream - rejects an invalid hipMemcpyKind and surfaces the failure via hipGetLastError, then clears it
-HIP_TEST_CASE(Contract_AsyncCopy3D_MemcpyWithStream_InvalidKind_IsRejected) {
+HIP_TEST_CASE(Contract_AsyncCopy3D_HipMemcpyWithStream_InvalidKind_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakeLinearPattern(0x67);
   void* device_ptr = nullptr;
@@ -179,7 +179,7 @@ HIP_TEST_CASE(Contract_AsyncCopy3D_MemcpyWithStream_InvalidKind_IsRejected) {
 }
 
 // @asserts: hipMemset3D - rejects a null (zero-initialized) pitched pointer and surfaces the failure via hipGetLastError
-HIP_TEST_CASE(Contract_AsyncCopy3D_Memset3D_NullPitchedPtr_IsRejected) {
+HIP_TEST_CASE(Contract_AsyncCopy3D_HipMemset3D_NullPitchedPtr_IsRejected) {
   hipPitchedPtr null_ptr{};
   const auto extent = ByteExtent(kWidth, kHeight, kDepth);
 

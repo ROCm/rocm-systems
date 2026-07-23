@@ -34,7 +34,7 @@ bool IsKnownScheduleFlag(unsigned int flags) {
 }  // namespace
 
 // @asserts: hipDeviceReset - reset discards device state and leaves the device usable for fresh allocations
-HIP_TEST_CASE(Contract_DeviceReset_DiscardsStateAndLeavesDeviceUsable) {
+HIP_TEST_CASE(Contract_DeviceReset_HipDeviceReset_Default_DiscardsStateAndLeavesDeviceUsable) {
   RequireDevice();
 
   int device = 0;

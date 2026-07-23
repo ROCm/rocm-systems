@@ -67,7 +67,7 @@ bool QueryRangeAttributeOrSkip(void* data, size_t data_size, hipMemRangeAttribut
 }  // namespace
 
 // @asserts: hipMemAdvise - SetReadMostly is reflected by the ReadMostly range attribute and clears on unset (accepted-or-unsupported)
-HIP_TEST_CASE(Contract_MemAdvise_SetReadMostly_RangeAttributeReflectsAdvice) {
+HIP_TEST_CASE(Contract_MemAdvise_HipMemAdvise_SetReadMostly_RangeAttributeReflectsAdvice) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
   int device = 0;
@@ -106,7 +106,7 @@ HIP_TEST_CASE(Contract_MemAdvise_SetReadMostly_RangeAttributeReflectsAdvice) {
 }
 
 // @asserts: hipMemAdvise - SetPreferredLocation makes the PreferredLocation range attribute report that device (accepted-or-unsupported)
-HIP_TEST_CASE(Contract_MemAdvise_SetPreferredLocation_RangeAttributeReturnsDevice) {
+HIP_TEST_CASE(Contract_MemAdvise_HipMemAdvise_SetPreferredLocation_RangeAttributeReturnsDevice) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
   int device = 0;
@@ -147,7 +147,7 @@ HIP_TEST_CASE(Contract_MemAdvise_SetPreferredLocation_RangeAttributeReturnsDevic
 }
 
 // @asserts: hipMemAdvise - SetAccessedBy makes the AccessedBy range attribute list that device (accepted-or-unsupported)
-HIP_TEST_CASE(Contract_MemAdvise_SetAccessedBy_RangeAttributeReflectsDevice) {
+HIP_TEST_CASE(Contract_MemAdvise_HipMemAdvise_SetAccessedBy_RangeAttributeReflectsDevice) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
   int device = 0;
@@ -177,7 +177,7 @@ HIP_TEST_CASE(Contract_MemAdvise_SetAccessedBy_RangeAttributeReflectsDevice) {
 }
 
 // @asserts: hipMemRangeGetAttributes - batch query of multiple range attributes succeeds and reflects applied advice (accepted-or-unsupported)
-HIP_TEST_CASE(Contract_MemAdvise_RangeGetAttributes_MultipleAttributes_Succeed) {
+HIP_TEST_CASE(Contract_MemAdvise_HipMemRangeGetAttributes_MultipleAttributes_Succeed) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
   int device = 0;
@@ -231,7 +231,7 @@ HIP_TEST_CASE(Contract_MemAdvise_RangeGetAttributes_MultipleAttributes_Succeed) 
 }
 
 // @asserts: hipMemAdvise - rejects a null range pointer with a non-success status
-HIP_TEST_CASE(Contract_MemAdvise_NullPointer_IsRejected) {
+HIP_TEST_CASE(Contract_MemAdvise_HipMemAdvise_NullPointer_IsRejected) {
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
 
@@ -242,7 +242,7 @@ HIP_TEST_CASE(Contract_MemAdvise_NullPointer_IsRejected) {
 }
 
 // @asserts: hipMemRangeGetAttribute - rejects a null data output pointer with a non-success status
-HIP_TEST_CASE(Contract_MemAdvise_RangeGetAttribute_NullData_IsRejected) {
+HIP_TEST_CASE(Contract_MemAdvise_HipMemRangeGetAttribute_NullData_IsRejected) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
 

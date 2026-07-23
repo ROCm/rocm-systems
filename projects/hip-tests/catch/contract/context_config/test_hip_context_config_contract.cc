@@ -70,7 +70,7 @@ class ScopedCurrentContext {
 }  // namespace
 
 // @asserts: hipCtxGetCacheConfig - when supported the queried cache preference is one of the documented hipFuncCache_t enumerators, else accepted-or-unsupported
-HIP_TEST_CASE(Contract_ContextConfig_GetCacheConfig_ReturnsEnumOrNotSupported) {
+HIP_TEST_CASE(Contract_ContextConfig_HipCtxGetCacheConfig_Default_ReturnsEnumOrNotSupported) {
   RequireDevice();
 
   hipFuncCache_t config = hipFuncCachePreferNone;
@@ -88,7 +88,7 @@ HIP_TEST_CASE(Contract_ContextConfig_GetCacheConfig_ReturnsEnumOrNotSupported) {
 }
 
 // @asserts: hipCtxSetCacheConfig - a valid cache preference is accepted-or-unsupported while an out-of-range enumerator is rejected with a non-success status
-HIP_TEST_CASE(Contract_ContextConfig_SetCacheConfig_IsAcceptedOrUnsupported_RejectsInvalid) {
+HIP_TEST_CASE(Contract_ContextConfig_HipCtxSetCacheConfig_IsAcceptedOrUnsupported_RejectsInvalid) {
   RequireDevice();
 
   // Save the current preference so the context configuration is restored even if
@@ -122,7 +122,7 @@ HIP_TEST_CASE(Contract_ContextConfig_SetCacheConfig_IsAcceptedOrUnsupported_Reje
 }
 
 // @asserts: hipCtxGetSharedMemConfig - when supported the reported bank size is one of the documented hipSharedMemConfig enumerators, else accepted-or-unsupported
-HIP_TEST_CASE(Contract_ContextConfig_GetSharedMemConfig_ReturnsEnumOrNotSupported) {
+HIP_TEST_CASE(Contract_ContextConfig_HipCtxGetSharedMemConfig_Default_ReturnsEnumOrNotSupported) {
   RequireDevice();
 
   hipSharedMemConfig config = hipSharedMemBankSizeDefault;
@@ -141,7 +141,7 @@ HIP_TEST_CASE(Contract_ContextConfig_GetSharedMemConfig_ReturnsEnumOrNotSupporte
 }
 
 // @asserts: hipCtxSetSharedMemConfig - setting a valid shared-memory bank size is accepted-or-unsupported and the prior config is restored
-HIP_TEST_CASE(Contract_ContextConfig_SetSharedMemConfig_IsAcceptedOrUnsupported) {
+HIP_TEST_CASE(Contract_ContextConfig_HipCtxSetSharedMemConfig_Default_IsAcceptedOrUnsupported) {
   RequireDevice();
 
   // Save the current bank size so the context configuration is restored even if
@@ -168,7 +168,7 @@ HIP_TEST_CASE(Contract_ContextConfig_SetSharedMemConfig_IsAcceptedOrUnsupported)
 }
 
 // @asserts: hipCtxGetFlags - when supported the schedule subfield of the returned flags is one of the documented scheduling modes, else accepted-or-unsupported
-HIP_TEST_CASE(Contract_ContextConfig_GetFlags_ReturnsScheduleOrNotSupported) {
+HIP_TEST_CASE(Contract_ContextConfig_HipCtxGetFlags_Default_ReturnsScheduleOrNotSupported) {
   RequireDevice();
 
   unsigned int flags = 0;
@@ -189,7 +189,7 @@ HIP_TEST_CASE(Contract_ContextConfig_GetFlags_ReturnsScheduleOrNotSupported) {
 }
 
 // @asserts: hipCtxEnablePeerAccess - enabling peer access from a context to itself lands in a documented portable outcome set (success, already-enabled, unsupported, or invalid)
-HIP_TEST_CASE(Contract_ContextConfig_PeerAccessSelf_IsRejectedOrUnsupportedOrNoOp) {
+HIP_TEST_CASE(Contract_ContextConfig_HipCtxEnablePeerAccess_Self_IsRejectedOrUnsupportedOrNoOp) {
   RequireDevice();
 
   const hipDevice_t device = DeviceForOrdinalZero();

@@ -56,7 +56,7 @@ bool CreateTextureOrSkip(hipTextureObject_t* texture, const HIP_RESOURCE_DESC* r
 }  // namespace
 
 // @asserts: hipTexObjectCreate - creating a texture object over a linear device buffer succeeds or is cleanly unsupported
-HIP_TEST_CASE(Contract_DriverTexture_CreateAndDestroy_LinearResource_Succeeds) {
+HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectCreate_AndDestroyLinearResource_Succeeds) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
 
@@ -77,7 +77,7 @@ HIP_TEST_CASE(Contract_DriverTexture_CreateAndDestroy_LinearResource_Succeeds) {
 }
 
 // @asserts: hipTexObjectGetResourceDesc - the linear resource descriptor read back matches the one used to create the object
-HIP_TEST_CASE(Contract_DriverTexture_GetResourceDesc_RoundTripsLinearResource) {
+HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectGetResourceDesc_Default_RoundTripsLinearResource) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
 
@@ -105,7 +105,7 @@ HIP_TEST_CASE(Contract_DriverTexture_GetResourceDesc_RoundTripsLinearResource) {
 }
 
 // @asserts: hipTexObjectGetTextureDesc - the texture descriptor read back (address/filter mode, flags) matches what was set at create
-HIP_TEST_CASE(Contract_DriverTexture_GetTextureDesc_RoundTripsFlags) {
+HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectGetTextureDesc_Default_RoundTripsFlags) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
 
@@ -134,7 +134,7 @@ HIP_TEST_CASE(Contract_DriverTexture_GetTextureDesc_RoundTripsFlags) {
 }
 
 // @asserts: hipTexObjectGetResourceDesc - an array-backed texture object reports resType ARRAY and the same hipArray handle
-HIP_TEST_CASE(Contract_DriverTexture_CreateAndGetResourceDesc_ArrayResource) {
+HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectGetResourceDesc_CreateAndGetResourceDesc_ArrayResource) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
 
@@ -168,7 +168,7 @@ HIP_TEST_CASE(Contract_DriverTexture_CreateAndGetResourceDesc_ArrayResource) {
 // enumerators.
 #if HT_AMD
 // @asserts: hipTexObjectGetResourceViewDesc - a resource-view descriptor set at create round-trips when the path is supported
-HIP_TEST_CASE(Contract_DriverTexture_GetResourceViewDesc_IsQueryableWhenSupported) {
+HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectGetResourceViewDesc_Default_IsQueryableWhenSupported) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
 
@@ -204,7 +204,7 @@ HIP_TEST_CASE(Contract_DriverTexture_GetResourceViewDesc_IsQueryableWhenSupporte
 #endif  // HT_AMD
 
 // @asserts: hipTexObjectCreate - rejects null out-handle, null resource, or null texture descriptor with a non-success error
-HIP_TEST_CASE(Contract_DriverTexture_Create_InvalidArgs_AreRejected) {
+HIP_TEST_CASE(Contract_DriverTexture_HipTexObjectCreate_InvalidArgs_AreRejected) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
 

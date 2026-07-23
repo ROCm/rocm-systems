@@ -17,7 +17,7 @@ constexpr size_t kByteCount = 64;
 }
 
 // @asserts: hipGraphNodeGetType - an empty node reports node type hipGraphNodeTypeEmpty
-HIP_TEST_CASE(Contract_GraphNodeTypes_GetType_EmptyNodeReportsEmpty) {
+HIP_TEST_CASE(Contract_GraphNodeTypes_HipGraphNodeGetType_Default_EmptyNodeReportsEmpty) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
@@ -32,7 +32,7 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_GetType_EmptyNodeReportsEmpty) {
 }
 
 // @asserts: hipGraphNodeGetType - a memcpy node reports node type hipGraphNodeTypeMemcpy
-HIP_TEST_CASE(Contract_GraphNodeTypes_GetType_MemcpyNodeReportsMemcpy) {
+HIP_TEST_CASE(Contract_GraphNodeTypes_HipGraphNodeGetType_Default_MemcpyNodeReportsMemcpy) {
   hip::contract::ContractCleanup cleanup;
   std::array<uint8_t, kByteCount> host{};
   void* device_ptr = nullptr;
@@ -52,7 +52,7 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_GetType_MemcpyNodeReportsMemcpy) {
 }
 
 // @asserts: hipGraphNodeGetType - a memset node reports node type hipGraphNodeTypeMemset
-HIP_TEST_CASE(Contract_GraphNodeTypes_GetType_MemsetNodeReportsMemset) {
+HIP_TEST_CASE(Contract_GraphNodeTypes_HipGraphNodeGetType_Default_MemsetNodeReportsMemset) {
   hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
   hipMemsetParams params{};
@@ -79,7 +79,7 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_GetType_MemsetNodeReportsMemset) {
 }
 
 // @asserts: hipGraphAddDependencies - adding a dependency creates one edge and one dependency on the target node
-HIP_TEST_CASE(Contract_GraphNodeTypes_AddDependencies_CreatesEdge) {
+HIP_TEST_CASE(Contract_GraphNodeTypes_HipGraphAddDependencies_Default_CreatesEdge) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t from = nullptr;
@@ -105,7 +105,7 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_AddDependencies_CreatesEdge) {
 }
 
 // @asserts: hipGraphRemoveDependencies - removing a previously added dependency clears the edge back to zero
-HIP_TEST_CASE(Contract_GraphNodeTypes_RemoveDependencies_ClearsEdge) {
+HIP_TEST_CASE(Contract_GraphNodeTypes_HipGraphRemoveDependencies_Default_ClearsEdge) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t from = nullptr;

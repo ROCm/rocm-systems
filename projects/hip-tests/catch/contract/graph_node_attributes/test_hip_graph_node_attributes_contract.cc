@@ -33,7 +33,7 @@ hipKernelNodeParams KernelNodeParams(void** args) {
 }  // namespace
 
 // @asserts: hipGraphKernelNodeSetAttribute - the cooperative kernel-node attribute set on a node is observable through a subsequent get
-HIP_TEST_CASE(Contract_GraphNodeAttributes_Cooperative_RoundTrips) {
+HIP_TEST_CASE(Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_Cooperative_RoundTrips) {
   hip::contract::ContractCleanup cleanup;
   int value = kInitialValue;
   int* device_value = nullptr;
@@ -74,7 +74,7 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_Cooperative_RoundTrips) {
 }
 
 // @asserts: hipGraphKernelNodeSetAttribute - an access-policy-window attribute set on a kernel node round-trips through a subsequent get
-HIP_TEST_CASE(Contract_GraphNodeAttributes_AccessPolicyWindow_RoundTrips) {
+HIP_TEST_CASE(Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_AccessPolicyWindow_RoundTrips) {
   int device_ordinal = 0;
   HIP_CHECK(hipGetDevice(&device_ordinal));
 
@@ -141,7 +141,7 @@ HIP_TEST_CASE(Contract_GraphNodeAttributes_AccessPolicyWindow_RoundTrips) {
 }
 
 // @asserts: hipGraphKernelNodeSetAttribute - rejects a null node, a non-kernel node, and an out-of-range attribute id with hipErrorInvalidValue
-HIP_TEST_CASE(Contract_GraphNodeAttributes_SetAttribute_RejectsInvalidInputs) {
+HIP_TEST_CASE(Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_Default_RejectsInvalidInputs) {
   hip::contract::ContractCleanup cleanup;
   int value = kInitialValue;
   int* device_value = nullptr;

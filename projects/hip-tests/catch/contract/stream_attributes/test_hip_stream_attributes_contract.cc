@@ -25,7 +25,7 @@ void RequireDevice() {
 }  // namespace
 
 // @asserts: hipStreamGetAttribute - the priority attribute reads back clamped within the device's reported priority range, or reports unsupported
-HIP_TEST_CASE(Contract_StreamAttributes_Priority_RoundTrips) {
+HIP_TEST_CASE(Contract_StreamAttributes_HipStreamGetAttribute_Priority_RoundTrips) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
 
@@ -60,7 +60,7 @@ HIP_TEST_CASE(Contract_StreamAttributes_Priority_RoundTrips) {
 }
 
 // @asserts: hipStreamSetAttribute - a set synchronization-policy attribute reads back verbatim via hipStreamGetAttribute, or reports unsupported
-HIP_TEST_CASE(Contract_StreamAttributes_SyncPolicy_RoundTrips) {
+HIP_TEST_CASE(Contract_StreamAttributes_HipStreamSetAttribute_SyncPolicy_RoundTrips) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
 
@@ -90,7 +90,7 @@ HIP_TEST_CASE(Contract_StreamAttributes_SyncPolicy_RoundTrips) {
 }
 
 // @asserts: hipStreamSetAttribute - a set access-policy-window attribute reads back field-for-field via hipStreamGetAttribute, or reports unsupported
-HIP_TEST_CASE(Contract_StreamAttributes_AccessPolicyWindow_RoundTrips) {
+HIP_TEST_CASE(Contract_StreamAttributes_HipStreamSetAttribute_AccessPolicyWindow_RoundTrips) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
 
@@ -144,7 +144,7 @@ HIP_TEST_CASE(Contract_StreamAttributes_AccessPolicyWindow_RoundTrips) {
 }
 
 // @asserts: hipStreamCopyAttributes - propagates the source stream's synchronization policy to the destination stream verbatim, or reports unsupported
-HIP_TEST_CASE(Contract_StreamAttributes_CopyAttributes_PropagatesToDestination) {
+HIP_TEST_CASE(Contract_StreamAttributes_HipStreamCopyAttributes_Default_PropagatesToDestination) {
   RequireDevice();
   hip::contract::ContractCleanup cleanup;
 
@@ -185,7 +185,7 @@ HIP_TEST_CASE(Contract_StreamAttributes_CopyAttributes_PropagatesToDestination) 
 }
 
 // @asserts: hipStreamGetAttribute - rejects a null value-out pointer and an unknown attribute id with hipErrorInvalidValue (AMD only)
-HIP_TEST_CASE(Contract_StreamAttributes_GetAttribute_RejectsInvalidInputs) {
+HIP_TEST_CASE(Contract_StreamAttributes_HipStreamGetAttribute_Default_RejectsInvalidInputs) {
   RequireDevice();
 
   // BACKEND-DIFF: The invalid-input rejection contracts for hipStreamGetAttribute

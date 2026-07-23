@@ -26,7 +26,7 @@ void SkipIfP2PAttributeUnsupported(int device) {
 }  // namespace
 
 // @asserts: hipDeviceGetP2PAttribute - rejects a same-device (src==dst) P2P attribute query with a non-success status
-HIP_TEST_CASE(Contract_PeerQuery_GetP2PAttribute_SelfDevice_IsRejected) {
+HIP_TEST_CASE(Contract_PeerQuery_HipDeviceGetP2PAttribute_SelfDevice_IsRejected) {
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
   SkipIfP2PAttributeUnsupported(device);
@@ -36,7 +36,7 @@ HIP_TEST_CASE(Contract_PeerQuery_GetP2PAttribute_SelfDevice_IsRejected) {
 }
 
 // @asserts: hipDeviceGetP2PAttribute - rejects null output, an unknown attribute enum, and out-of-range device ids with a non-success status
-HIP_TEST_CASE(Contract_PeerQuery_GetP2PAttribute_InvalidArgs_AreRejected) {
+HIP_TEST_CASE(Contract_PeerQuery_HipDeviceGetP2PAttribute_InvalidArgs_AreRejected) {
   int device = 0;
   int device_count = 0;
   HIP_CHECK(hipGetDevice(&device));
@@ -58,7 +58,7 @@ HIP_TEST_CASE(Contract_PeerQuery_GetP2PAttribute_InvalidArgs_AreRejected) {
 // AMD. Parity would require a NVIDIA-side link-topology query API.
 #if HT_AMD
 // @asserts: hipExtGetLinkTypeAndHopCount - rejects a same-device (0,0) link-topology query with a non-success status
-HIP_TEST_CASE(Contract_PeerQuery_LinkTypeAndHopCount_SameDevice_IsRejected) {
+HIP_TEST_CASE(Contract_PeerQuery_HipExtGetLinkTypeAndHopCount_SameDevice_IsRejected) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   REQUIRE(device_count > 0);
@@ -70,7 +70,7 @@ HIP_TEST_CASE(Contract_PeerQuery_LinkTypeAndHopCount_SameDevice_IsRejected) {
 }
 
 // @asserts: hipExtGetLinkTypeAndHopCount - rejects out-of-range and negative device ids with a non-success status
-HIP_TEST_CASE(Contract_PeerQuery_LinkTypeAndHopCount_InvalidDevice_IsRejected) {
+HIP_TEST_CASE(Contract_PeerQuery_HipExtGetLinkTypeAndHopCount_InvalidDevice_IsRejected) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
 
@@ -86,7 +86,7 @@ HIP_TEST_CASE(Contract_PeerQuery_LinkTypeAndHopCount_InvalidDevice_IsRejected) {
 }
 
 // @asserts: hipExtGetLinkTypeAndHopCount - rejects null link-type and/or hop-count output pointers with a non-success status
-HIP_TEST_CASE(Contract_PeerQuery_LinkTypeAndHopCount_NullOutputs_AreRejected) {
+HIP_TEST_CASE(Contract_PeerQuery_HipExtGetLinkTypeAndHopCount_NullOutputs_AreRejected) {
   uint32_t link_type = 0;
   uint32_t hop_count = 0;
 

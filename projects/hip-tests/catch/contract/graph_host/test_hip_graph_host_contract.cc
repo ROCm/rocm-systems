@@ -22,7 +22,7 @@ void IncrementCounter(void* userData) {
 }  // namespace
 
 // @asserts: hipGraphAddHostNode - a host node's callback runs exactly once when the instantiated graph is launched
-HIP_TEST_CASE(Contract_GraphHost_AddHostNode_InvokesCallbackOnLaunch) {
+HIP_TEST_CASE(Contract_GraphHost_HipGraphAddHostNode_Default_InvokesCallbackOnLaunch) {
   hip::contract::ContractCleanup cleanup;
   int32_t counter = kInitialValue;
   hipGraph_t graph = nullptr;
@@ -49,7 +49,7 @@ HIP_TEST_CASE(Contract_GraphHost_AddHostNode_InvokesCallbackOnLaunch) {
 }
 
 // @asserts: hipGraphHostNodeGetParams - retrieved host-node params round-trip the callback fn and userData pointers
-HIP_TEST_CASE(Contract_GraphHost_HostNodeGetParams_RoundTripsFnAndUserData) {
+HIP_TEST_CASE(Contract_GraphHost_HipGraphHostNodeGetParams_Default_RoundTripsFnAndUserData) {
   hip::contract::ContractCleanup cleanup;
   int32_t counter = kInitialValue;
   hipGraph_t graph = nullptr;
@@ -71,7 +71,7 @@ HIP_TEST_CASE(Contract_GraphHost_HostNodeGetParams_RoundTripsFnAndUserData) {
 }
 
 // @asserts: hipGraphNodeGetType - a node added via hipGraphAddHostNode reports type hipGraphNodeTypeHost
-HIP_TEST_CASE(Contract_GraphHost_NodeType_ReportsHost) {
+HIP_TEST_CASE(Contract_GraphHost_HipGraphNodeGetType_NodeType_ReportsHost) {
   hip::contract::ContractCleanup cleanup;
   int32_t counter = kInitialValue;
   hipGraph_t graph = nullptr;

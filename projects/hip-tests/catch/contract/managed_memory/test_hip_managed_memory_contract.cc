@@ -43,7 +43,7 @@ void SkipIfManagedMemoryUnsupported() {
 }
 
 // @asserts: hipMallocManaged - allocating a managed range returns a non-null usable pointer
-HIP_TEST_CASE(Contract_ManagedMemory_MallocManaged_ReturnsUsablePointer) {
+HIP_TEST_CASE(Contract_ManagedMemory_HipMallocManaged_Default_ReturnsUsablePointer) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
   int* data = nullptr;
@@ -55,7 +55,7 @@ HIP_TEST_CASE(Contract_ManagedMemory_MallocManaged_ReturnsUsablePointer) {
 }
 
 // @asserts: hipMallocManaged - a host-written value in managed memory is visible to a kernel after device synchronize
-HIP_TEST_CASE(Contract_ManagedMemory_HostWriteDeviceRead_RoundTripsAfterSynchronize) {
+HIP_TEST_CASE(Contract_ManagedMemory_HipMallocManaged_HostWriteDeviceRead_RoundTripsAfterSynchronize) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
   int* data = nullptr;
@@ -79,7 +79,7 @@ HIP_TEST_CASE(Contract_ManagedMemory_HostWriteDeviceRead_RoundTripsAfterSynchron
 }
 
 // @asserts: hipMallocManaged - a kernel-written value in managed memory is visible to the host after device synchronize
-HIP_TEST_CASE(Contract_ManagedMemory_DeviceWriteHostRead_RoundTripsAfterSynchronize) {
+HIP_TEST_CASE(Contract_ManagedMemory_HipMallocManaged_DeviceWriteHostRead_RoundTripsAfterSynchronize) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
   int* data = nullptr;
@@ -101,7 +101,7 @@ HIP_TEST_CASE(Contract_ManagedMemory_DeviceWriteHostRead_RoundTripsAfterSynchron
 }
 
 // @asserts: hipFree - freeing a managed pointer allocated by hipMallocManaged succeeds
-HIP_TEST_CASE(Contract_ManagedMemory_FreeManagedPointer_Succeeds) {
+HIP_TEST_CASE(Contract_ManagedMemory_HipFree_ManagedPointer_Succeeds) {
   SkipIfManagedMemoryUnsupported();
   int* data = nullptr;
 
@@ -110,7 +110,7 @@ HIP_TEST_CASE(Contract_ManagedMemory_FreeManagedPointer_Succeeds) {
 }
 
 // @asserts: hipMemPrefetchAsync - prefetching a managed range to the current device succeeds where concurrent managed access is supported
-HIP_TEST_CASE(Contract_ManagedMemory_PrefetchAsync_SucceedsWhenSupported) {
+HIP_TEST_CASE(Contract_ManagedMemory_HipMemPrefetchAsync_Default_SucceedsWhenSupported) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
   int* data = nullptr;

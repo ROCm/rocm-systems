@@ -51,7 +51,7 @@ bool CreatePool(hipMemPool_t* pool) {
 }
 
 // @asserts: hipMemPoolCreate - creating a pool yields a non-null handle that hipMemPoolDestroy releases, or is unsupported
-HIP_TEST_CASE(Contract_MemoryPoolLifecycle_CreateDestroy_SucceedsWhenSupported) {
+HIP_TEST_CASE(Contract_MemoryPoolLifecycle_HipMemPoolCreate_Destroy_SucceedsWhenSupported) {
   SkipIfMemoryPoolsUnsupported();
   hipMemPool_t pool = nullptr;
 
@@ -65,7 +65,7 @@ HIP_TEST_CASE(Contract_MemoryPoolLifecycle_CreateDestroy_SucceedsWhenSupported) 
 }
 
 // @asserts: hipMemPoolSetAttribute - a release-threshold value set on a pool reads back unchanged via hipMemPoolGetAttribute
-HIP_TEST_CASE(Contract_MemoryPoolLifecycle_GetSetReleaseThreshold_RoundTripsValue) {
+HIP_TEST_CASE(Contract_MemoryPoolLifecycle_HipMemPoolSetAttribute_GetSetReleaseThreshold_RoundTripsValue) {
   SkipIfMemoryPoolsUnsupported();
   hip::contract::ContractCleanup cleanup;
   hipMemPool_t pool = nullptr;
@@ -84,7 +84,7 @@ HIP_TEST_CASE(Contract_MemoryPoolLifecycle_GetSetReleaseThreshold_RoundTripsValu
 }
 
 // @asserts: hipMemPoolTrimTo - trimming an empty pool to zero reserved bytes succeeds
-HIP_TEST_CASE(Contract_MemoryPoolLifecycle_TrimTo_SucceedsOnEmptyPool) {
+HIP_TEST_CASE(Contract_MemoryPoolLifecycle_HipMemPoolTrimTo_Default_SucceedsOnEmptyPool) {
   SkipIfMemoryPoolsUnsupported();
   hip::contract::ContractCleanup cleanup;
   hipMemPool_t pool = nullptr;
@@ -98,7 +98,7 @@ HIP_TEST_CASE(Contract_MemoryPoolLifecycle_TrimTo_SucceedsOnEmptyPool) {
 }
 
 // @asserts: hipMallocFromPoolAsync - an async allocation from a created pool on a stream yields a non-null pointer, or is unsupported
-HIP_TEST_CASE(Contract_MemoryPoolLifecycle_MallocFromCreatedPoolAsync_SucceedsWhenSupported) {
+HIP_TEST_CASE(Contract_MemoryPoolLifecycle_HipMallocFromPoolAsync_MallocFromCreatedPoolAsync_SucceedsWhenSupported) {
   SkipIfMemoryPoolsUnsupported();
   hip::contract::ContractCleanup cleanup;
   hipMemPool_t pool = nullptr;

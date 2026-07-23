@@ -17,7 +17,7 @@
 // only on AMD. Parity is unlikely without a NVIDIA-side CU/SM-mask concept.
 #if HT_NVIDIA
 // @asserts: hipExtStreamCreateWithCUMask - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
-HIP_TEST_CASE(Contract_StreamCuMask_NvidiaUnsupported_IsSkipped) {
+HIP_TEST_CASE(Contract_StreamCuMask_HipExtStreamCreateWithCUMask_NvidiaUnsupported_IsSkipped) {
   HIP_SKIP_TEST("The stream CU-mask extension APIs are not exposed by the NVIDIA backend.");
 }
 #endif  // HT_NVIDIA
@@ -72,7 +72,7 @@ bool CreateStreamWithMaskOrSkip(hipStream_t* stream, const std::vector<uint32_t>
 }  // namespace
 
 // @asserts: hipExtStreamGetCUMask - the CU mask read back from a stream equals the all-CUs mask it was created with
-HIP_TEST_CASE(Contract_StreamCuMask_DefaultMaskRoundTrips_AllCUsActive) {
+HIP_TEST_CASE(Contract_StreamCuMask_HipExtStreamGetCUMask_MaskRoundTrips_AllCUsActive) {
   hip::contract::ContractCleanup cleanup;
   const auto default_mask = DefaultCuMask();
   hipStream_t stream = nullptr;
@@ -87,7 +87,7 @@ HIP_TEST_CASE(Contract_StreamCuMask_DefaultMaskRoundTrips_AllCUsActive) {
 }
 
 // @asserts: hipExtStreamCreateWithCUMask - creating a stream with a valid all-CUs mask yields a non-null stream
-HIP_TEST_CASE(Contract_StreamCuMask_CreateWithDefaultMask_Succeeds) {
+HIP_TEST_CASE(Contract_StreamCuMask_HipExtStreamCreateWithCUMask_CreateWithDefaultMask_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   const auto default_mask = DefaultCuMask();
   hipStream_t stream = nullptr;
@@ -101,7 +101,7 @@ HIP_TEST_CASE(Contract_StreamCuMask_CreateWithDefaultMask_Succeeds) {
 }
 
 // @asserts: hipExtStreamCreateWithCUMask - rejects a null stream out-param, zero mask size, or null mask pointer with a non-success error
-HIP_TEST_CASE(Contract_StreamCuMask_CreateRejectsInvalidArgs) {
+HIP_TEST_CASE(Contract_StreamCuMask_HipExtStreamCreateWithCUMask_Default_CreateRejectsInvalidArgs) {
   const auto default_mask = DefaultCuMask();
   hipStream_t stream = nullptr;
 
@@ -113,7 +113,7 @@ HIP_TEST_CASE(Contract_StreamCuMask_CreateRejectsInvalidArgs) {
 }
 
 // @asserts: hipExtStreamGetCUMask - rejects a null mask pointer or zero mask size with hipErrorInvalidValue
-HIP_TEST_CASE(Contract_StreamCuMask_GetRejectsInvalidArgs) {
+HIP_TEST_CASE(Contract_StreamCuMask_HipExtStreamGetCUMask_Default_GetRejectsInvalidArgs) {
   hip::contract::ContractCleanup cleanup;
   const auto default_mask = DefaultCuMask();
   std::vector<uint32_t> mask(default_mask.size(), 0);

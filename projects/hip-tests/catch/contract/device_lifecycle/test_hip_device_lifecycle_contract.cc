@@ -38,7 +38,7 @@ hipDevice_t DeviceForOrdinalZero() {
 }  // namespace
 
 // @asserts: hipSetDeviceFlags - writing back the currently-active device flags is accepted or reported not-settable
-HIP_TEST_CASE(Contract_DeviceLifecycle_SetDeviceFlags_AcceptsCurrentFlags) {
+HIP_TEST_CASE(Contract_DeviceLifecycle_HipSetDeviceFlags_Default_AcceptsCurrentFlags) {
   // Reading the active device flags and setting the very same value back must be
   // accepted (or reported as not-settable on an already-active process). Writing
   // the current value keeps global device state unchanged for sibling tests.
@@ -49,7 +49,7 @@ HIP_TEST_CASE(Contract_DeviceLifecycle_SetDeviceFlags_AcceptsCurrentFlags) {
 }
 
 // @asserts: hipDeviceSetSharedMemConfig - setting back the currently-reported shared-mem config is accepted or unsupported
-HIP_TEST_CASE(Contract_DeviceLifecycle_SetSharedMemConfig_RoundTripsCurrentConfig) {
+HIP_TEST_CASE(Contract_DeviceLifecycle_HipDeviceSetSharedMemConfig_Default_RoundTripsCurrentConfig) {
   // The shared-memory bank configuration setter (deprecated) must accept the
   // configuration the device currently reports. Setting the current value back
   // leaves the device configuration unchanged.
@@ -64,7 +64,7 @@ HIP_TEST_CASE(Contract_DeviceLifecycle_SetSharedMemConfig_RoundTripsCurrentConfi
 }
 
 // @asserts: hipSetValidDevices - presenting the full set of visible device ordinals is accepted or reported unsupported
-HIP_TEST_CASE(Contract_DeviceLifecycle_SetValidDevices_AcceptsFullDeviceList) {
+HIP_TEST_CASE(Contract_DeviceLifecycle_HipSetValidDevices_Default_AcceptsFullDeviceList) {
   int count = 0;
   HIP_CHECK(hipGetDeviceCount(&count));
   REQUIRE(count > 0);
@@ -81,7 +81,7 @@ HIP_TEST_CASE(Contract_DeviceLifecycle_SetValidDevices_AcceptsFullDeviceList) {
 }
 
 // @asserts: hipDevicePrimaryCtxSetFlags - setting primary-context flags is accepted or reports context-already-in-use
-HIP_TEST_CASE(Contract_DeviceLifecycle_PrimaryCtxSetFlags_IsAcceptedOrInUse) {
+HIP_TEST_CASE(Contract_DeviceLifecycle_HipDevicePrimaryCtxSetFlags_Default_IsAcceptedOrInUse) {
   const hipDevice_t device = DeviceForOrdinalZero();
 
   // Setting primary-context flags (deprecated) is only permitted while the
@@ -92,7 +92,7 @@ HIP_TEST_CASE(Contract_DeviceLifecycle_PrimaryCtxSetFlags_IsAcceptedOrInUse) {
 }
 
 // @asserts: hipDevicePrimaryCtxReset - after resetting the primary context the device still serves fresh allocations
-HIP_TEST_CASE(Contract_DeviceLifecycle_PrimaryCtxReset_LeavesDeviceUsable) {
+HIP_TEST_CASE(Contract_DeviceLifecycle_HipDevicePrimaryCtxReset_Default_LeavesDeviceUsable) {
   const hipDevice_t device = DeviceForOrdinalZero();
 
   // Resetting the primary context (deprecated) destroys allocations on it, but

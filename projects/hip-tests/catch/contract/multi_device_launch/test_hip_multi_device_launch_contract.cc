@@ -23,7 +23,7 @@
 // NVIDIA headers to complete cudaLaunchParams and provide the ext launch entry.
 #if HT_NVIDIA
 // @asserts: hipLaunchCooperativeKernelMultiDevice - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
-HIP_TEST_CASE(Contract_MultiDeviceLaunch_NvidiaUnsupported_IsSkipped) {
+HIP_TEST_CASE(Contract_MultiDeviceLaunch_HipLaunchCooperativeKernelMultiDevice_NvidiaUnsupported_IsSkipped) {
   HIP_SKIP_TEST("The cooperative multi-device launch family is not exposed by the NVIDIA backend.");
 }
 #endif  // HT_NVIDIA
@@ -272,7 +272,7 @@ bool CompileModuleSource(std::vector<char>& code) {
 // through a hipLaunchParams array; each participating device must observe its own
 // written value after synchronization.
 // @asserts: hipLaunchCooperativeKernelMultiDevice - each device runs its per-device kernel and observes its own written value
-HIP_TEST_CASE(Contract_MultiDeviceLaunch_CooperativeKernel_WritesPerDeviceValue) {
+HIP_TEST_CASE(Contract_MultiDeviceLaunch_HipLaunchCooperativeKernelMultiDevice_CooperativeKernel_WritesPerDeviceValue) {
   RequireCooperativeMultiDeviceLaunch();
 
   ScopedDevice restore_device;
@@ -303,7 +303,7 @@ HIP_TEST_CASE(Contract_MultiDeviceLaunch_CooperativeKernel_WritesPerDeviceValue)
 // point over the same hipLaunchParams array; it must produce the same per-device
 // observable writes.
 // @asserts: hipExtLaunchMultiKernelMultiDevice - extended multi-device launch produces the same per-device observable writes
-HIP_TEST_CASE(Contract_MultiDeviceLaunch_ExtMultiKernel_WritesPerDeviceValue) {
+HIP_TEST_CASE(Contract_MultiDeviceLaunch_HipExtLaunchMultiKernelMultiDevice_ExtMultiKernel_WritesPerDeviceValue) {
   RequireCooperativeMultiDeviceLaunch();
 
   ScopedDevice restore_device;
@@ -334,7 +334,7 @@ HIP_TEST_CASE(Contract_MultiDeviceLaunch_ExtMultiKernel_WritesPerDeviceValue) {
 // device through a hipFunctionLaunchParams array. Each device loads its own module
 // instance (module handles are context-bound) and must observe its written value.
 // @asserts: hipModuleLaunchCooperativeKernelMultiDevice - each device runs its module-resolved function and observes its own written value
-HIP_TEST_CASE(Contract_MultiDeviceLaunch_ModuleCooperativeKernel_WritesPerDeviceValue) {
+HIP_TEST_CASE(Contract_MultiDeviceLaunch_HipModuleLaunchCooperativeKernelMultiDevice_ModuleCooperativeKernel_WritesPerDeviceValue) {
   RequireCooperativeMultiDeviceLaunch();
 
   // The single compiled code object is loaded on every participating device, so

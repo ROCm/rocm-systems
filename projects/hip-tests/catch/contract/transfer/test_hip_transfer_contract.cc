@@ -25,7 +25,7 @@ std::array<uint8_t, kElementCount> MakePattern(uint8_t seed) {
 }
 
 // @asserts: hipMemcpy - bytes copied host-to-device then device-to-host round-trip unchanged
-HIP_TEST_CASE(Contract_Transfer_HostToDeviceToHost_RoundTripsBytes) {
+HIP_TEST_CASE(Contract_Transfer_HipMemcpy_HostToDeviceToHost_RoundTripsBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x31);
   std::array<uint8_t, kElementCount> dst{};
@@ -41,7 +41,7 @@ HIP_TEST_CASE(Contract_Transfer_HostToDeviceToHost_RoundTripsBytes) {
 }
 
 // @asserts: hipMemcpy - a device-to-device copy preserves the source bytes at the destination
-HIP_TEST_CASE(Contract_Transfer_DeviceToDevice_CopiesBytes) {
+HIP_TEST_CASE(Contract_Transfer_HipMemcpy_DeviceToDevice_CopiesBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x67);
   std::array<uint8_t, kElementCount> dst{};
@@ -61,7 +61,7 @@ HIP_TEST_CASE(Contract_Transfer_DeviceToDevice_CopiesBytes) {
 }
 
 // @asserts: hipMemcpy - a zero-byte copy succeeds and leaves the destination unmodified
-HIP_TEST_CASE(Contract_Transfer_MemcpyZeroBytes_Succeeds) {
+HIP_TEST_CASE(Contract_Transfer_HipMemcpy_ZeroBytes_Succeeds) {
   uint8_t src = 0x1;
   uint8_t dst = 0x2;
 
@@ -71,7 +71,7 @@ HIP_TEST_CASE(Contract_Transfer_MemcpyZeroBytes_Succeeds) {
 }
 
 // @asserts: hipMemcpy - an invalid memcpy kind is rejected with hipErrorInvalidMemcpyDirection
-HIP_TEST_CASE(Contract_Transfer_InvalidDirection_ReturnsInvalidMemcpyDirection) {
+HIP_TEST_CASE(Contract_Transfer_HipMemcpy_InvalidDirection_ReturnsInvalidMemcpyDirection) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x9a);
   void* device_ptr = nullptr;

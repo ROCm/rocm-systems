@@ -56,7 +56,7 @@ hipBatchMemOpNodeParams MakeNodeParams(hipStreamBatchMemOpParams* op_array, unsi
 }  // namespace
 
 // @asserts: hipGraphAddBatchMemOpNode - launching a graph with a write-value-32 batch-mem-op node writes the value to the target address
-HIP_TEST_CASE(Contract_GraphBatchMemOp_AddNode_LaunchesWriteValue) {
+HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphAddBatchMemOpNode_AddNode_LaunchesWriteValue) {
 #if defined(_WIN32)
   HIP_SKIP_TEST("Batch-mem-op graph nodes report success but do not apply write operations on this Windows runtime path.");
 #else
@@ -101,7 +101,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_AddNode_LaunchesWriteValue) {
 }
 
 // @asserts: hipGraphBatchMemOpNodeGetParams - reports back the operation count the batch-mem-op node was created with
-HIP_TEST_CASE(Contract_GraphBatchMemOp_GetParams_RoundTripsCount) {
+HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphBatchMemOpNodeGetParams_Default_RoundTripsCount) {
   RequireStreamWaitValueSupport();
   hip::contract::ContractCleanup cleanup;
 
@@ -131,7 +131,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_GetParams_RoundTripsCount) {
 }
 
 // @asserts: hipGraphBatchMemOpNodeSetParams - re-parameterizing a node before instantiate makes the launch write the updated value
-HIP_TEST_CASE(Contract_GraphBatchMemOp_SetParams_UpdatesWriteValueBeforeInstantiate) {
+HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphBatchMemOpNodeSetParams_Default_UpdatesWriteValueBeforeInstantiate) {
 #if defined(_WIN32)
   HIP_SKIP_TEST("Batch-mem-op graph node setters report success but do not apply write operations on this Windows runtime path.");
 #else
@@ -184,7 +184,7 @@ HIP_TEST_CASE(Contract_GraphBatchMemOp_SetParams_UpdatesWriteValueBeforeInstanti
 }
 
 // @asserts: hipGraphExecBatchMemOpNodeSetParams - updating an instantiated node's write value takes effect on the next launch without re-instantiation
-HIP_TEST_CASE(Contract_GraphBatchMemOp_ExecSetParams_UpdatesWriteValueAfterInstantiate) {
+HIP_TEST_CASE(Contract_GraphBatchMemOp_HipGraphExecBatchMemOpNodeSetParams_ExecSetParams_UpdatesWriteValueAfterInstantiate) {
 #if defined(_WIN32)
   HIP_SKIP_TEST("Batch-mem-op executable node setters report success but do not apply write operations on this Windows runtime path.");
 #else

@@ -132,7 +132,7 @@ bool CompileModuleSource(std::vector<char>& code) {
 // The launched kernel must publish its argument value, observable after a device
 // synchronize.
 // @asserts: hipLaunchKernelExC - a driver-style config launch runs the kernel and publishes its arg value, or skips if unsupported
-HIP_TEST_CASE(Contract_DriverLaunchEx_LaunchKernelExC_WritesExpectedValue) {
+HIP_TEST_CASE(Contract_DriverLaunchEx_HipLaunchKernelExC_Default_WritesExpectedValue) {
   SkipIfIntegratedDevice();
 
   ScopedDeviceInt device_value(0);
@@ -167,7 +167,7 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_LaunchKernelExC_WritesExpectedValue) {
 // groups. Requesting one group must yield a group whose SM count is within
 // (0, device SM count]; the split cannot invent SMs the device lacks.
 // @asserts: hipDevSmResourceSplit - a group-params SM split yields a group whose SM count is within (0, device SM count], or skips if unsupported
-HIP_TEST_CASE(Contract_DriverLaunchEx_DevSmResourceSplit_ProducesBoundedGroup) {
+HIP_TEST_CASE(Contract_DriverLaunchEx_HipDevSmResourceSplit_Default_ProducesBoundedGroup) {
 #if HT_NVIDIA && defined(CUDA_VERSION) && CUDA_VERSION < 13000
   HIP_SKIP_TEST("SM resource fields required by hipDevSmResourceSplit are not available before CUDA 13.0.");
 #else
@@ -212,7 +212,7 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_DevSmResourceSplit_ProducesBoundedGroup) {
 // HIP_LAUNCH_CONFIG. The launched kernel must publish its argument value,
 // observable after a device synchronize.
 // @asserts: hipDrvLaunchKernelEx - a driver-API extended launch of a module function publishes its arg value, or skips if unsupported
-HIP_TEST_CASE(Contract_DriverLaunchEx_DrvLaunchKernelEx_WritesExpectedValue) {
+HIP_TEST_CASE(Contract_DriverLaunchEx_HipDrvLaunchKernelEx_Default_WritesExpectedValue) {
   SkipIfIntegratedDevice();
   hip::contract::ContractCleanup cleanup;
 

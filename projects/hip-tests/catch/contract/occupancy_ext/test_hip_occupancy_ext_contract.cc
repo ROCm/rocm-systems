@@ -18,7 +18,7 @@ __global__ void OccupancyExtKernel(int* output) {
 }  // namespace
 
 // @asserts: hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags - the default-flags query returns the same block count as the non-flags query
-HIP_TEST_CASE(Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_DefaultMatchesPlain) {
+HIP_TEST_CASE(Contract_OccupancyExt_HipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Default_DefaultMatchesPlain) {
   // The default-flags occupancy query must agree with the non-flags query for
   // the same kernel and block size. The runtime documents that the default
   // occupancy flag is the baseline behavior, so both entry points must be
@@ -41,7 +41,7 @@ HIP_TEST_CASE(Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_De
 
 // @asserts: hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags - the disable-caching-override flag is accepted and yields a non-negative block count
 HIP_TEST_CASE(
-    Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_DisableCachingOverrideSucceeds) {
+    Contract_OccupancyExt_HipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Default_DisableCachingOverrideSucceeds) {
   // The disable-caching-override flag must be accepted by the with-flags query
   // and must return a non-negative occupancy. The value may legitimately differ
   // from the default-flags query, so no equality is asserted.
@@ -57,7 +57,7 @@ HIP_TEST_CASE(
 }
 
 // @asserts: hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags - rejects a null output pointer and an invalid flag value with hipErrorInvalidValue
-HIP_TEST_CASE(Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_RejectsInvalidInputs) {
+HIP_TEST_CASE(Contract_OccupancyExt_HipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Default_RejectsInvalidInputs) {
   // A null output pointer and an invalid flag value must both be rejected with
   // hipErrorInvalidValue.
   constexpr int kBlockSize = 64;
@@ -82,7 +82,7 @@ HIP_TEST_CASE(Contract_OccupancyExt_MaxActiveBlocksPerMultiprocessorWithFlags_Re
 // the cluster-occupancy query wrappers (CUDA has the underlying cluster APIs).
 #if HT_AMD
 // @asserts: hipOccupancyMaxPotentialClusterSize - on cluster-capable devices the cluster-occupancy queries report a usable range (size >= 1, active clusters >= 0)
-HIP_TEST_CASE(Contract_OccupancyExt_ClusterQueries_CapabilityGatedRange) {
+HIP_TEST_CASE(Contract_OccupancyExt_HipOccupancyMaxPotentialClusterSize_ClusterQueries_CapabilityGatedRange) {
   int current_device = 0;
   hipDeviceProp_t props{};
   HIP_CHECK(hipGetDevice(&current_device));

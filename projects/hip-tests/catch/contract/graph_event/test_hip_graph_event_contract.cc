@@ -25,7 +25,7 @@ std::array<uint8_t, kElementCount> MakePattern(uint8_t seed) {
 }
 
 // @asserts: hipGraphAddEventRecordNode - an event-record node in a launched graph leaves the event completed (query succeeds)
-HIP_TEST_CASE(Contract_GraphEvent_AddEventRecordNode_RecordsEvent) {
+HIP_TEST_CASE(Contract_GraphEvent_HipGraphAddEventRecordNode_Default_RecordsEvent) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;
@@ -48,7 +48,7 @@ HIP_TEST_CASE(Contract_GraphEvent_AddEventRecordNode_RecordsEvent) {
 }
 
 // @asserts: hipGraphAddEventWaitNode - a wait node depending on a record node of the same event lets the graph launch and complete
-HIP_TEST_CASE(Contract_GraphEvent_AddEventWaitNode_WaitsForRecordedEvent) {
+HIP_TEST_CASE(Contract_GraphEvent_HipGraphAddEventWaitNode_Default_WaitsForRecordedEvent) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;
@@ -72,7 +72,7 @@ HIP_TEST_CASE(Contract_GraphEvent_AddEventWaitNode_WaitsForRecordedEvent) {
 }
 
 // @asserts: hipGraphAddEventRecordNode - record-then-wait event nodes order H2D before D2H so the copied data round-trips intact
-HIP_TEST_CASE(Contract_GraphEvent_RecordThenWait_OrdersMemcpy) {
+HIP_TEST_CASE(Contract_GraphEvent_HipGraphAddEventRecordNode_RecordThenWait_OrdersMemcpy) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x7b);
   std::array<uint8_t, kElementCount> dst{};

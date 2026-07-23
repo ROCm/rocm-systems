@@ -34,7 +34,7 @@ hipMemLocation CurrentDeviceLocation() {
 }  // namespace
 
 // @asserts: hipMemGetMemPool - a location-based pool query returns a non-null pool for a valid device location
-HIP_TEST_CASE(Contract_MemLocationPool_GetMemPool_ReturnsPoolForDeviceLocation) {
+HIP_TEST_CASE(Contract_MemLocationPool_HipMemGetMemPool_Default_ReturnsPoolForDeviceLocation) {
 #if HT_NVIDIA && defined(CUDA_VERSION) && CUDA_VERSION < 13000
   HIP_SKIP_TEST("Location-based memory-pool queries are not exposed before CUDA 13.0 on the NVIDIA backend.");
 #else
@@ -51,7 +51,7 @@ HIP_TEST_CASE(Contract_MemLocationPool_GetMemPool_ReturnsPoolForDeviceLocation) 
 }
 
 // @asserts: hipMemSetMemPool - a pool set for a location round-trips through a subsequent hipMemGetMemPool query
-HIP_TEST_CASE(Contract_MemLocationPool_SetMemPool_RoundTripsThroughGetMemPool) {
+HIP_TEST_CASE(Contract_MemLocationPool_HipMemSetMemPool_Default_RoundTripsThroughGetMemPool) {
 #if HT_NVIDIA && defined(CUDA_VERSION) && CUDA_VERSION < 13000
   HIP_SKIP_TEST("Location-based memory-pool set/query APIs are not exposed before CUDA 13.0 on the NVIDIA backend.");
 #else
@@ -76,7 +76,7 @@ HIP_TEST_CASE(Contract_MemLocationPool_SetMemPool_RoundTripsThroughGetMemPool) {
 }
 
 // @asserts: hipMemGetAccess - querying access for a pooled allocation's location returns a defined protection flag
-HIP_TEST_CASE(Contract_MemLocationPool_GetAccess_ReturnsFlagsForPooledAllocation) {
+HIP_TEST_CASE(Contract_MemLocationPool_HipMemGetAccess_Default_ReturnsFlagsForPooledAllocation) {
   SkipIfMemoryPoolsUnsupported();
   hip::contract::ContractCleanup cleanup;
 

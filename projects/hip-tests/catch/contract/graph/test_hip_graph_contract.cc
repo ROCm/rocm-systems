@@ -25,7 +25,7 @@ std::array<uint8_t, kElementCount> MakePattern(uint8_t seed) {
 }
 
 // @asserts: hipGraphCreate - creating an empty graph yields a non-null handle that can be destroyed
-HIP_TEST_CASE(Contract_Graph_CreateDestroy_Succeeds) {
+HIP_TEST_CASE(Contract_Graph_HipGraphCreate_Destroy_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
 
@@ -36,7 +36,7 @@ HIP_TEST_CASE(Contract_Graph_CreateDestroy_Succeeds) {
 }
 
 // @asserts: hipGraphAddEmptyNode - adding an empty node to a graph yields a non-null node handle
-HIP_TEST_CASE(Contract_Graph_AddEmptyNode_Succeeds) {
+HIP_TEST_CASE(Contract_Graph_HipGraphAddEmptyNode_Default_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
@@ -49,7 +49,7 @@ HIP_TEST_CASE(Contract_Graph_AddEmptyNode_Succeeds) {
 }
 
 // @asserts: hipGraphAddMemcpyNode1D - dependent H2D then D2H memcpy nodes in a launched graph round-trip bytes
-HIP_TEST_CASE(Contract_Graph_AddMemcpyNode1D_RoundTripsBytes) {
+HIP_TEST_CASE(Contract_Graph_HipGraphAddMemcpyNode1D_Default_RoundTripsBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x51);
   std::array<uint8_t, kElementCount> dst{};
@@ -79,7 +79,7 @@ HIP_TEST_CASE(Contract_Graph_AddMemcpyNode1D_RoundTripsBytes) {
 }
 
 // @asserts: hipGraphAddMemsetNode - a memset node in a launched graph fills the device buffer with the pattern
-HIP_TEST_CASE(Contract_Graph_AddMemsetNode_FillsDeviceBuffer) {
+HIP_TEST_CASE(Contract_Graph_HipGraphAddMemsetNode_Default_FillsDeviceBuffer) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x6d;
   std::array<uint8_t, kElementCount> dst{};
@@ -117,7 +117,7 @@ HIP_TEST_CASE(Contract_Graph_AddMemsetNode_FillsDeviceBuffer) {
 }
 
 // @asserts: hipGraphInstantiate - an instantiated graph launches and synchronizes on a stream without error
-HIP_TEST_CASE(Contract_Graph_InstantiateLaunchSynchronize_Succeeds) {
+HIP_TEST_CASE(Contract_Graph_HipGraphInstantiate_LaunchSynchronize_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;

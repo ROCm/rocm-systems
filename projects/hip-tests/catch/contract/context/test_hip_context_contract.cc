@@ -54,7 +54,7 @@ class ScopedDevice {
 }  // namespace
 
 // @asserts: hipDeviceGet - ordinal zero yields a handle whose hipDeviceGetName is a non-empty NUL-terminated string
-HIP_TEST_CASE(Contract_Context_DeviceGet_ReturnsHandleForOrdinalZero) {
+HIP_TEST_CASE(Contract_Context_HipDeviceGet_Default_ReturnsHandleForOrdinalZero) {
   RequireDeviceCount();
 
   hipDevice_t device = 0;
@@ -71,7 +71,7 @@ HIP_TEST_CASE(Contract_Context_DeviceGet_ReturnsHandleForOrdinalZero) {
 }
 
 // @asserts: hipDeviceComputeCapability - reports non-negative major/minor with a positive major for a usable device
-HIP_TEST_CASE(Contract_Context_DeviceComputeCapability_IsPositive) {
+HIP_TEST_CASE(Contract_Context_HipDeviceComputeCapability_Default_IsPositive) {
   RequireDeviceCount();
 
   const hipDevice_t device = DeviceForOrdinalZero();
@@ -87,7 +87,7 @@ HIP_TEST_CASE(Contract_Context_DeviceComputeCapability_IsPositive) {
 }
 
 // @asserts: hipDeviceTotalMem - reports a positive total that matches hipGetDeviceProperties totalGlobalMem
-HIP_TEST_CASE(Contract_Context_DeviceTotalMem_MatchesProperties) {
+HIP_TEST_CASE(Contract_Context_HipDeviceTotalMem_Default_MatchesProperties) {
   RequireDeviceCount();
 
   const hipDevice_t device = DeviceForOrdinalZero();
@@ -103,7 +103,7 @@ HIP_TEST_CASE(Contract_Context_DeviceTotalMem_MatchesProperties) {
 }
 
 // @asserts: hipDeviceGetUuid - returns a UUID with at least one non-zero byte and hipDeviceGetPCIBusId a non-empty string
-HIP_TEST_CASE(Contract_Context_DeviceGetUuidAndPciBusId_Succeed) {
+HIP_TEST_CASE(Contract_Context_HipDeviceGetUuid_AndPciBusId_Succeed) {
   RequireDeviceCount();
 
   const hipDevice_t device = DeviceForOrdinalZero();
@@ -134,7 +134,7 @@ HIP_TEST_CASE(Contract_Context_DeviceGetUuidAndPciBusId_Succeed) {
 }
 
 // @asserts: hipDevicePrimaryCtxRetain - retain yields a context and making the device current marks the primary context active
-HIP_TEST_CASE(Contract_Context_PrimaryCtxRetainRelease_RoundTrips) {
+HIP_TEST_CASE(Contract_Context_HipDevicePrimaryCtxRetain_Release_RoundTrips) {
   RequireDeviceCount();
 
   const hipDevice_t device = DeviceForOrdinalZero();
@@ -162,7 +162,7 @@ HIP_TEST_CASE(Contract_Context_PrimaryCtxRetainRelease_RoundTrips) {
 }
 
 // @asserts: hipCtxGetCurrent - when a current context exists its hipCtxGetDevice matches the runtime current device
-HIP_TEST_CASE(Contract_Context_CtxGetCurrentAndDevice_AreConsistent) {
+HIP_TEST_CASE(Contract_Context_HipCtxGetCurrent_AndDevice_AreConsistent) {
   RequireDeviceCount();
 
   hipCtx_t current = nullptr;

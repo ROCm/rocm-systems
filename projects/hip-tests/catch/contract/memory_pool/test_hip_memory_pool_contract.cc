@@ -35,7 +35,7 @@ hipMemPool_t CurrentDefaultPool() {
 }
 
 // @asserts: hipDeviceGetDefaultMemPool - returns a non-null default memory pool for the current device, or skips when pools unsupported
-HIP_TEST_CASE(Contract_MemoryPool_DeviceGetDefaultMemPool_ReturnsPool) {
+HIP_TEST_CASE(Contract_MemoryPool_HipDeviceGetDefaultMemPool_Default_ReturnsPool) {
   SkipIfMemoryPoolsUnsupported();
   hipMemPool_t pool = CurrentDefaultPool();
 
@@ -43,7 +43,7 @@ HIP_TEST_CASE(Contract_MemoryPool_DeviceGetDefaultMemPool_ReturnsPool) {
 }
 
 // @asserts: hipDeviceGetMemPool - returns a non-null current memory pool for the device, or skips when pools unsupported
-HIP_TEST_CASE(Contract_MemoryPool_DeviceGetMemPool_ReturnsCurrentPool) {
+HIP_TEST_CASE(Contract_MemoryPool_HipDeviceGetMemPool_Default_ReturnsCurrentPool) {
   SkipIfMemoryPoolsUnsupported();
   int device = 0;
   hipMemPool_t pool = nullptr;
@@ -55,7 +55,7 @@ HIP_TEST_CASE(Contract_MemoryPool_DeviceGetMemPool_ReturnsCurrentPool) {
 }
 
 // @asserts: hipDeviceSetMemPool - a pool set via hipDeviceSetMemPool round-trips back through hipDeviceGetMemPool
-HIP_TEST_CASE(Contract_MemoryPool_SetCurrentMemPool_RoundTripsThroughGetMemPool) {
+HIP_TEST_CASE(Contract_MemoryPool_HipDeviceSetMemPool_SetCurrentMemPool_RoundTripsThroughGetMemPool) {
   SkipIfMemoryPoolsUnsupported();
   int device = 0;
   hipMemPool_t default_pool = nullptr;
@@ -70,7 +70,7 @@ HIP_TEST_CASE(Contract_MemoryPool_SetCurrentMemPool_RoundTripsThroughGetMemPool)
 }
 
 // @asserts: hipMemPoolSetAttribute - a release-threshold value written via SetAttribute reads back unchanged via GetAttribute
-HIP_TEST_CASE(Contract_MemoryPool_GetSetReleaseThreshold_RoundTripsValue) {
+HIP_TEST_CASE(Contract_MemoryPool_HipMemPoolSetAttribute_GetSetReleaseThreshold_RoundTripsValue) {
   SkipIfMemoryPoolsUnsupported();
   hipMemPool_t pool = CurrentDefaultPool();
   uint64_t original_threshold = 0;
@@ -87,7 +87,7 @@ HIP_TEST_CASE(Contract_MemoryPool_GetSetReleaseThreshold_RoundTripsValue) {
 }
 
 // @asserts: hipMallocAsync - stream-ordered allocate then hipFreeAsync succeeds when pools supported, or skips otherwise
-HIP_TEST_CASE(Contract_MemoryPool_MallocAsyncFreeAsync_SucceedsWhenSupported) {
+HIP_TEST_CASE(Contract_MemoryPool_HipMallocAsync_FreeAsync_SucceedsWhenSupported) {
   SkipIfMemoryPoolsUnsupported();
   // ptr and stream are declared BEFORE the cleanup guard so they outlive it: the
   // guard action below deliberately captures ptr by reference to observe it being
@@ -118,7 +118,7 @@ HIP_TEST_CASE(Contract_MemoryPool_MallocAsyncFreeAsync_SucceedsWhenSupported) {
 }
 
 // @asserts: hipMallocAsync - memory from an async allocation is device-usable (memset round-trips) after stream synchronize
-HIP_TEST_CASE(Contract_MemoryPool_MallocAsync_MemoryUsableAfterStreamSynchronize) {
+HIP_TEST_CASE(Contract_MemoryPool_HipMallocAsync_Default_MemoryUsableAfterStreamSynchronize) {
   SkipIfMemoryPoolsUnsupported();
   hip::contract::ContractCleanup cleanup;
   void* ptr = nullptr;

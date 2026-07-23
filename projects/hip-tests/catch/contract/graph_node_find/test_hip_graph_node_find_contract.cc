@@ -17,7 +17,7 @@ constexpr size_t kByteCount = 64;
 }
 
 // @asserts: hipGraphNodeFindInClone - locates the clone's counterpart of an original node as a distinct non-null handle
-HIP_TEST_CASE(Contract_GraphNodeFind_ClonedNode_IsFoundAndDistinct) {
+HIP_TEST_CASE(Contract_GraphNodeFind_HipGraphNodeFindInClone_ClonedNode_IsFoundAndDistinct) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraph_t clone = nullptr;
@@ -37,7 +37,7 @@ HIP_TEST_CASE(Contract_GraphNodeFind_ClonedNode_IsFoundAndDistinct) {
 }
 
 // @asserts: hipGraphNodeFindInClone - the found clone node preserves the original node's type (memcpy)
-HIP_TEST_CASE(Contract_GraphNodeFind_FoundNodeMatchesType) {
+HIP_TEST_CASE(Contract_GraphNodeFind_HipGraphNodeFindInClone_Default_FoundNodeMatchesType) {
   hip::contract::ContractCleanup cleanup;
   std::array<uint8_t, kByteCount> host{};
   void* device_ptr = nullptr;
@@ -64,7 +64,7 @@ HIP_TEST_CASE(Contract_GraphNodeFind_FoundNodeMatchesType) {
 }
 
 // @asserts: hipGraphNodeFindInClone - rejects a node absent from the clone (added post-clone) with hipErrorInvalidValue
-HIP_TEST_CASE(Contract_GraphNodeFind_NodeOnlyInOriginal_ReturnsInvalidValue) {
+HIP_TEST_CASE(Contract_GraphNodeFind_HipGraphNodeFindInClone_NodeOnlyInOriginal_ReturnsInvalidValue) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraph_t clone = nullptr;

@@ -20,17 +20,17 @@ void RequireAcceptedOrUnsupported(hipError_t status) {
 }  // namespace
 
 // @asserts: hipProfilerStart - is either honored (hipSuccess) or reported unavailable (hipErrorNotSupported), no other status
-HIP_TEST_CASE(Contract_Profiler_Start_IsAcceptedOrUnsupported) {
+HIP_TEST_CASE(Contract_Profiler_HipProfilerStart_Start_IsAcceptedOrUnsupported) {
   RequireAcceptedOrUnsupported(hipProfilerStart());
 }
 
 // @asserts: hipProfilerStop - is either honored (hipSuccess) or reported unavailable (hipErrorNotSupported), no other status
-HIP_TEST_CASE(Contract_Profiler_Stop_IsAcceptedOrUnsupported) {
+HIP_TEST_CASE(Contract_Profiler_HipProfilerStop_Stop_IsAcceptedOrUnsupported) {
   RequireAcceptedOrUnsupported(hipProfilerStop());
 }
 
 // @asserts: hipProfilerStart - start/stop report a consistent capability: stop succeeds iff the matching start succeeded
-HIP_TEST_CASE(Contract_Profiler_StartStop_PairIsAcceptedOrUnsupported) {
+HIP_TEST_CASE(Contract_Profiler_HipProfilerStart_StartStop_PairIsAcceptedOrUnsupported) {
   // Starting then stopping profiling must report a consistent capability: if
   // start is honored the matching stop must also be honored, and if start is
   // unsupported stop must likewise be unsupported. A runtime cannot claim to

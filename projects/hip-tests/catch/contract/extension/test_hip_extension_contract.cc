@@ -57,7 +57,7 @@ int RuntimeQueryVersion() {
 }  // namespace
 
 // @asserts: hipGetProcAddress - resolves a known runtime symbol to a non-null, callable pointer with a success status
-HIP_TEST_CASE(Contract_Extension_GetProcAddress_ResolvesKnownSymbol) {
+HIP_TEST_CASE(Contract_Extension_HipGetProcAddress_Default_ResolvesKnownSymbol) {
   RequireDevice();
 
   const int hip_version = RuntimeQueryVersion();
@@ -117,7 +117,7 @@ HIP_TEST_CASE(Contract_Extension_GetProcAddress_ResolvesKnownSymbol) {
 }
 
 // @asserts: hipGetProcAddress - an unknown symbol reports not-found and never yields a success+callable-pointer result
-HIP_TEST_CASE(Contract_Extension_GetProcAddress_UnknownSymbol_ReportsNotFound) {
+HIP_TEST_CASE(Contract_Extension_HipGetProcAddress_UnknownSymbol_ReportsNotFound) {
   RequireDevice();
 
   const int hip_version = RuntimeQueryVersion();
@@ -147,7 +147,7 @@ HIP_TEST_CASE(Contract_Extension_GetProcAddress_UnknownSymbol_ReportsNotFound) {
 }
 
 // @asserts: hipGetProcAddress - rejects a null symbol name or null output pointer with hipErrorInvalidValue (AMD)
-HIP_TEST_CASE(Contract_Extension_GetProcAddress_NullArgs_AreRejected) {
+HIP_TEST_CASE(Contract_Extension_HipGetProcAddress_NullArgs_AreRejected) {
   RequireDevice();
 
   const int hip_version = RuntimeQueryVersion();
@@ -182,7 +182,7 @@ HIP_TEST_CASE(Contract_Extension_GetProcAddress_NullArgs_AreRejected) {
 // above run on both backends. Parity would require NVIDIA-side equivalents.
 #if HT_AMD
 // @asserts: hipApiName - maps API id 0 to a non-null, non-empty NUL-terminated name string
-HIP_TEST_CASE(Contract_Extension_ApiName_ReturnsNonEmptyString) {
+HIP_TEST_CASE(Contract_Extension_HipApiName_Default_ReturnsNonEmptyString) {
   RequireDevice();
 
   // hipApiName maps a callback/activity API id to its name. Id 0 is always a
@@ -194,7 +194,7 @@ HIP_TEST_CASE(Contract_Extension_ApiName_ReturnsNonEmptyString) {
 }
 
 // @asserts: hipGetStreamDeviceId - the null/default stream reports the device id of the current active device
-HIP_TEST_CASE(Contract_Extension_GetStreamDeviceId_MatchesCurrentDevice) {
+HIP_TEST_CASE(Contract_Extension_HipGetStreamDeviceId_Default_MatchesCurrentDevice) {
   RequireDevice();
 
   const ScopedDevice scoped_device(0);
@@ -209,7 +209,7 @@ HIP_TEST_CASE(Contract_Extension_GetStreamDeviceId_MatchesCurrentDevice) {
 }
 
 // @asserts: hipExtGetLastError - reports the stored thread error then resets the thread error state to hipSuccess
-HIP_TEST_CASE(Contract_Extension_ExtGetLastError_TracksErrorState) {
+HIP_TEST_CASE(Contract_Extension_HipExtGetLastError_Default_TracksErrorState) {
   RequireDevice();
 
   // Clear any residual error from prior runtime calls in this thread. This must

@@ -114,7 +114,7 @@ bool CooperativeLaunchSupported() {
 }  // namespace
 
 // @asserts: hipModuleGetFunctionCount - a module defining at least one kernel reports a function count of at least one
-HIP_TEST_CASE(Contract_ModuleExec_GetFunctionCount_ReturnsPositiveCount) {
+HIP_TEST_CASE(Contract_ModuleExec_HipModuleGetFunctionCount_Default_ReturnsPositiveCount) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
@@ -129,7 +129,7 @@ HIP_TEST_CASE(Contract_ModuleExec_GetFunctionCount_ReturnsPositiveCount) {
 }
 
 // @asserts: hipModuleGetFunctionCount - a null count out-pointer is rejected with a non-success status
-HIP_TEST_CASE(Contract_ModuleExec_GetFunctionCount_NullCount_IsRejected) {
+HIP_TEST_CASE(Contract_ModuleExec_HipModuleGetFunctionCount_NullCount_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
@@ -143,7 +143,7 @@ HIP_TEST_CASE(Contract_ModuleExec_GetFunctionCount_NullCount_IsRejected) {
 }
 
 // @asserts: hipModuleOccupancyMaxPotentialBlockSize - returns a positive block size and non-negative minimum grid size for a module function
-HIP_TEST_CASE(Contract_ModuleExec_OccupancyMaxPotentialBlockSize_ReturnsUsableValues) {
+HIP_TEST_CASE(Contract_ModuleExec_HipModuleOccupancyMaxPotentialBlockSize_Default_ReturnsUsableValues) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
@@ -163,7 +163,7 @@ HIP_TEST_CASE(Contract_ModuleExec_OccupancyMaxPotentialBlockSize_ReturnsUsableVa
 }
 
 // @asserts: hipModuleOccupancyMaxActiveBlocksPerMultiprocessor - returns non-negative active-blocks occupancy for a concrete block size
-HIP_TEST_CASE(Contract_ModuleExec_OccupancyMaxActiveBlocks_ReturnsNonNegativeValue) {
+HIP_TEST_CASE(Contract_ModuleExec_HipModuleOccupancyMaxActiveBlocksPerMultiprocessor_OccupancyMaxActiveBlocks_ReturnsNonNegativeValue) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
@@ -181,7 +181,7 @@ HIP_TEST_CASE(Contract_ModuleExec_OccupancyMaxActiveBlocks_ReturnsNonNegativeVal
 }
 
 // @asserts: hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags - default-flags active-blocks query matches the non-flags query
-HIP_TEST_CASE(Contract_ModuleExec_OccupancyWithFlags_MatchesDefault) {
+HIP_TEST_CASE(Contract_ModuleExec_HipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_OccupancyWithFlags_MatchesDefault) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
@@ -207,7 +207,7 @@ HIP_TEST_CASE(Contract_ModuleExec_OccupancyWithFlags_MatchesDefault) {
 }
 
 // @asserts: hipModuleOccupancyMaxPotentialBlockSizeWithFlags - default-flags potential-block-size query matches the non-flags grid/block suggestion
-HIP_TEST_CASE(Contract_ModuleExec_OccupancyPotentialBlockSizeWithFlags_MatchesDefault) {
+HIP_TEST_CASE(Contract_ModuleExec_HipModuleOccupancyMaxPotentialBlockSizeWithFlags_OccupancyPotentialBlockSizeWithFlags_MatchesDefault) {
   hip::contract::ContractCleanup cleanup;
   hipModule_t module = nullptr;
   LoadContractModule(module);
@@ -244,7 +244,7 @@ HIP_TEST_CASE(Contract_ModuleExec_OccupancyPotentialBlockSizeWithFlags_MatchesDe
 }
 
 // @asserts: hipModuleLaunchCooperativeKernel - a cooperative launch of a module function executes and deterministically publishes the expected value
-HIP_TEST_CASE(Contract_ModuleExec_LaunchCooperativeKernel_WritesExpectedValue) {
+HIP_TEST_CASE(Contract_ModuleExec_HipModuleLaunchCooperativeKernel_Default_WritesExpectedValue) {
   if (!CooperativeLaunchSupported()) {
     HIP_SKIP_TEST("This device does not support cooperative kernel launch.");
   }
@@ -275,7 +275,7 @@ HIP_TEST_CASE(Contract_ModuleExec_LaunchCooperativeKernel_WritesExpectedValue) {
 }
 
 // @asserts: hipModuleLaunchCooperativeKernel - a null function handle is rejected with a non-success status
-HIP_TEST_CASE(Contract_ModuleExec_LaunchCooperativeKernel_NullFunction_IsRejected) {
+HIP_TEST_CASE(Contract_ModuleExec_HipModuleLaunchCooperativeKernel_NullFunction_IsRejected) {
   if (!CooperativeLaunchSupported()) {
     HIP_SKIP_TEST("This device does not support cooperative kernel launch.");
   }

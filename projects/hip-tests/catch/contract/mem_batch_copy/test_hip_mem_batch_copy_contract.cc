@@ -38,7 +38,7 @@ hipMemLocation DeviceLocation() {
 }  // namespace
 
 // @asserts: hipMemcpyBatchAsync - a two-op batch delivers each source to its matching destination after synchronize (or reports unsupported)
-HIP_TEST_CASE(Contract_MemBatchCopy_TwoOps_RoundTripBytes) {
+HIP_TEST_CASE(Contract_MemBatchCopy_HipMemcpyBatchAsync_TwoOps_RoundTripBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src_a = MakePattern(0x10);
   const auto src_b = MakePattern(0x90);
@@ -99,7 +99,7 @@ HIP_TEST_CASE(Contract_MemBatchCopy_TwoOps_RoundTripBytes) {
 }
 
 // @asserts: hipMemcpyBatchAsync - a per-copy attribute (access order, location hints) does not change the copied bytes (or reports unsupported)
-HIP_TEST_CASE(Contract_MemBatchCopy_WithAttributes_RoundTripBytes) {
+HIP_TEST_CASE(Contract_MemBatchCopy_HipMemcpyBatchAsync_WithAttributes_RoundTripBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x24);
   std::array<uint8_t, kBytes> out{};
@@ -144,7 +144,7 @@ HIP_TEST_CASE(Contract_MemBatchCopy_WithAttributes_RoundTripBytes) {
 }
 
 // @asserts: hipMemcpyBatchAsync - a batch with a null destination never returns hipSuccess (or reports unsupported)
-HIP_TEST_CASE(Contract_MemBatchCopy_NullDestination_IsRejected) {
+HIP_TEST_CASE(Contract_MemBatchCopy_HipMemcpyBatchAsync_NullDestination_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x33);
   void* dev_src = nullptr;

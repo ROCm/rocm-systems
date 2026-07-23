@@ -78,7 +78,7 @@ void LaunchGraph(hipGraph_t graph) {
 }  // namespace
 
 // @asserts: hipGraphAddMemcpyNode - a 3D memcpy node delivers the full extent to the device buffer when the graph is launched
-HIP_TEST_CASE(Contract_GraphMemcpy3DNode_AddNode_LaunchesCopyThroughGraph) {
+HIP_TEST_CASE(Contract_GraphMemcpy3DNode_HipGraphAddMemcpyNode_AddNode_LaunchesCopyThroughGraph) {
   hipPitchedPtr device{};
   if (!TryMalloc3D(&device)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
@@ -106,7 +106,7 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_AddNode_LaunchesCopyThroughGraph) {
 }
 
 // @asserts: hipGraphMemcpyNodeGetParams - getter reports the copy kind, extent, and endpoints the 3D memcpy node was created with
-HIP_TEST_CASE(Contract_GraphMemcpy3DNode_GetParams_ReflectsAddedNode) {
+HIP_TEST_CASE(Contract_GraphMemcpy3DNode_HipGraphMemcpyNodeGetParams_Default_ReflectsAddedNode) {
   hipPitchedPtr device{};
   if (!TryMalloc3D(&device)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
@@ -136,7 +136,7 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_GetParams_ReflectsAddedNode) {
 }
 
 // @asserts: hipGraphMemcpyNodeSetParams - re-pointing the 3D memcpy node's source before instantiation makes the launched graph copy the new buffer
-HIP_TEST_CASE(Contract_GraphMemcpy3DNode_SetParams_RetargetsSourceBeforeInstantiate) {
+HIP_TEST_CASE(Contract_GraphMemcpy3DNode_HipGraphMemcpyNodeSetParams_Default_RetargetsSourceBeforeInstantiate) {
   hipPitchedPtr device{};
   if (!TryMalloc3D(&device)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
@@ -168,7 +168,7 @@ HIP_TEST_CASE(Contract_GraphMemcpy3DNode_SetParams_RetargetsSourceBeforeInstanti
 }
 
 // @asserts: hipGraphExecMemcpyNodeSetParams - exec-time retarget of a 3D memcpy node to a different allocation is accepted on AMD but rejected with hipErrorInvalidValue on NVIDIA
-HIP_TEST_CASE(Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInstantiate) {
+HIP_TEST_CASE(Contract_GraphMemcpy3DNode_HipGraphExecMemcpyNodeSetParams_ExecSetParams_RetargetsSourceAfterInstantiate) {
   hipPitchedPtr device{};
   if (!TryMalloc3D(&device)) {
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");

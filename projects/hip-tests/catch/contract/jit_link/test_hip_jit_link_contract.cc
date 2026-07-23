@@ -17,7 +17,7 @@
 // surface an equivalent JIT-link API (CUDA's cuLink* family) through HIP.
 #if HT_NVIDIA
 // @asserts: hipLinkCreate - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
-HIP_TEST_CASE(Contract_JitLink_NvidiaUnsupported_IsSkipped) {
+HIP_TEST_CASE(Contract_JitLink_HipLinkCreate_NvidiaUnsupported_IsSkipped) {
   HIP_SKIP_TEST("The HIP JIT-linker lifecycle APIs are not exposed by the NVIDIA backend.");
 }
 #endif  // HT_NVIDIA
@@ -36,24 +36,24 @@ hipLinkState_t CreateLinkState() {
 }  // namespace
 
 // @asserts: hipLinkCreate - rejects a null output state pointer
-HIP_TEST_CASE(Contract_JitLink_Create_NullState_IsRejected) {
+HIP_TEST_CASE(Contract_JitLink_HipLinkCreate_NullState_IsRejected) {
   REQUIRE(hipLinkCreate(0, nullptr, nullptr, nullptr) != hipSuccess);
 }
 
 // @asserts: hipLinkCreate - a created link state round-trips through hipLinkDestroy without error
-HIP_TEST_CASE(Contract_JitLink_CreateDestroy_RoundTrips) {
+HIP_TEST_CASE(Contract_JitLink_HipLinkCreate_Destroy_RoundTrips) {
   hipLinkState_t state = CreateLinkState();
 
   HIP_CHECK(hipLinkDestroy(state));
 }
 
 // @asserts: hipLinkDestroy - rejects a null link state handle
-HIP_TEST_CASE(Contract_JitLink_Destroy_InvalidHandle_IsRejected) {
+HIP_TEST_CASE(Contract_JitLink_HipLinkDestroy_InvalidHandle_IsRejected) {
   REQUIRE(hipLinkDestroy(nullptr) != hipSuccess);
 }
 
 // @asserts: hipLinkComplete - rejects null output image and size pointers
-HIP_TEST_CASE(Contract_JitLink_Complete_NullOutputs_AreRejected) {
+HIP_TEST_CASE(Contract_JitLink_HipLinkComplete_NullOutputs_AreRejected) {
   hipLinkState_t state = CreateLinkState();
 
   REQUIRE(hipLinkComplete(state, nullptr, nullptr) != hipSuccess);
@@ -62,7 +62,7 @@ HIP_TEST_CASE(Contract_JitLink_Complete_NullOutputs_AreRejected) {
 }
 
 // @asserts: hipLinkAddData - rejects a null/invalid image and a malformed input of a valid type
-HIP_TEST_CASE(Contract_JitLink_AddData_InvalidImage_IsRejected) {
+HIP_TEST_CASE(Contract_JitLink_HipLinkAddData_InvalidImage_IsRejected) {
   hipLinkState_t state = CreateLinkState();
 
   REQUIRE(hipLinkAddData(state, hipJitInputSpirv, nullptr, 0, "invalid", 0, nullptr, nullptr) !=
@@ -74,7 +74,7 @@ HIP_TEST_CASE(Contract_JitLink_AddData_InvalidImage_IsRejected) {
 }
 
 // @asserts: hipLinkAddFile - rejects adding a file with an unsupported input type / missing file
-HIP_TEST_CASE(Contract_JitLink_AddFile_InvalidInputType_IsRejected) {
+HIP_TEST_CASE(Contract_JitLink_HipLinkAddFile_InvalidInputType_IsRejected) {
   hipLinkState_t state = CreateLinkState();
 
   REQUIRE(hipLinkAddFile(state, hipJitInputFatBinary, kMissingFile, 0, nullptr, nullptr) !=

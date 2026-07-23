@@ -34,7 +34,7 @@ bool IsKnownSharedMemConfig(hipSharedMemConfig config) {
 }  // namespace
 
 // @asserts: hipDeviceGetCacheConfig - the queried cache preference is one of the documented hipFuncCache_t enumerators
-HIP_TEST_CASE(Contract_DeviceConfig_GetCacheConfig_ReturnsEnumValue) {
+HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceGetCacheConfig_Default_ReturnsEnumValue) {
   RequireDevice();
 
   hipFuncCache_t config = hipFuncCachePreferNone;
@@ -46,7 +46,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_GetCacheConfig_ReturnsEnumValue) {
 }
 
 // @asserts: hipDeviceSetCacheConfig - setting the cache preference either succeeds or reports NotSupported
-HIP_TEST_CASE(Contract_DeviceConfig_SetCacheConfig_IsAcceptedOrUnsupported) {
+HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceSetCacheConfig_Default_IsAcceptedOrUnsupported) {
   RequireDevice();
 
   // Save the current preference so the device configuration is restored even if
@@ -68,7 +68,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_SetCacheConfig_IsAcceptedOrUnsupported) {
 }
 
 // @asserts: hipDeviceGetSharedMemConfig - when supported, reports one of the documented hipSharedMemConfig enumerators
-HIP_TEST_CASE(Contract_DeviceConfig_GetSharedMemConfig_ReturnsEnumValue) {
+HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceGetSharedMemConfig_Default_ReturnsEnumValue) {
   RequireDevice();
 
   hipSharedMemConfig config = hipSharedMemBankSizeDefault;
@@ -85,7 +85,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_GetSharedMemConfig_ReturnsEnumValue) {
 }
 
 // @asserts: hipDeviceGetLimit - stack and heap limits resolve or report unsupported, and an out-of-range limit is not accepted
-HIP_TEST_CASE(Contract_DeviceConfig_GetLimit_ReportsStackAndHeapAndRejectsInvalid) {
+HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceGetLimit_Default_ReportsStackAndHeapAndRejectsInvalid) {
   RequireDevice();
 
   // Stack size and malloc heap size are the two portably queryable limits; each
@@ -119,7 +119,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_GetLimit_ReportsStackAndHeapAndRejectsInvali
 }
 
 // @asserts: hipDeviceSetLimit - setting the heap limit back to its current value succeeds or reports unsupported
-HIP_TEST_CASE(Contract_DeviceConfig_SetLimit_RoundTripsOrIsUnsupported) {
+HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceSetLimit_Default_RoundTripsOrIsUnsupported) {
   RequireDevice();
 
   // Query the current heap-size limit first; if the limit itself is
@@ -141,7 +141,7 @@ HIP_TEST_CASE(Contract_DeviceConfig_SetLimit_RoundTripsOrIsUnsupported) {
 }
 
 // @asserts: hipGetDeviceFlags - the schedule subfield is a documented mode and greatest stream priority <= least
-HIP_TEST_CASE(Contract_DeviceConfig_GetDeviceFlagsAndStreamPriorityRange_AreConsistent) {
+HIP_TEST_CASE(Contract_DeviceConfig_HipGetDeviceFlags_AndStreamPriorityRange_AreConsistent) {
   RequireDevice();
 
   unsigned int flags = 0;

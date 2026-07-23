@@ -35,7 +35,7 @@ void* HtoDSrc(const void* host) { return const_cast<void*>(host); }
 }  // namespace
 
 // @asserts: hipMemcpyDtoA - a device-to-array then array-to-host copy chain round-trips the byte pattern
-HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyDtoAThenAtoH_RoundTripsBytes) {
+HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpyDtoA_ThenAtoH_RoundTripsBytes) {
   CHECK_IMAGE_SUPPORT;
 
   hip::contract::ContractCleanup cleanup;
@@ -59,7 +59,7 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyDtoAThenAtoH_RoundTripsBytes) {
 }
 
 // @asserts: hipMemcpyAtoA - an array-to-array copy preserves the bytes it transfers between two HIP arrays
-HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyAtoA_RoundTripsBytes) {
+HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpyAtoA_Default_RoundTripsBytes) {
   CHECK_IMAGE_SUPPORT;
 
   hip::contract::ContractCleanup cleanup;
@@ -84,7 +84,7 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyAtoA_RoundTripsBytes) {
 }
 
 // @asserts: hipMemcpy2DArrayToArray - a 2D array-to-array copy round-trips a width-by-height byte pattern
-HIP_TEST_CASE(Contract_ArrayCopyExt_Memcpy2DArrayToArray_RoundTripsBytes) {
+HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpy2DArrayToArray_Default_RoundTripsBytes) {
   CHECK_IMAGE_SUPPORT;
 
   hip::contract::ContractCleanup cleanup;
@@ -110,7 +110,7 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_Memcpy2DArrayToArray_RoundTripsBytes) {
 }
 
 // @asserts: hipMemcpyHtoAAsync - rejects a null host source through the returned status
-HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyHtoAAsync_NullSource_IsRejected) {
+HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpyHtoAAsync_NullSource_IsRejected) {
   CHECK_IMAGE_SUPPORT;
 
   hip::contract::ContractCleanup cleanup;
@@ -136,7 +136,7 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyHtoAAsync_NullSource_IsRejected) {
 }
 
 // @asserts: hipMemcpyDtoA - rejects a null destination array through the returned status
-HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyDtoA_NullArray_IsRejected) {
+HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpyDtoA_NullArray_IsRejected) {
   CHECK_IMAGE_SUPPORT;
 
   hip::contract::ContractCleanup cleanup;
@@ -160,7 +160,7 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyDtoA_NullArray_IsRejected) {
 }
 
 // @asserts: hipMemcpyAtoD - rejects a null source array through the returned status
-HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyAtoD_NullArray_IsRejected) {
+HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpyAtoD_NullArray_IsRejected) {
   CHECK_IMAGE_SUPPORT;
 
   hip::contract::ContractCleanup cleanup;
@@ -181,7 +181,7 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyAtoD_NullArray_IsRejected) {
 }
 
 // @asserts: hipMemcpy2DArrayToArray - rejects an invalid hipMemcpyKind and latches it into the last-error
-HIP_TEST_CASE(Contract_ArrayCopyExt_Memcpy2DArrayToArray_InvalidKind_IsRejected) {
+HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpy2DArrayToArray_InvalidKind_IsRejected) {
   CHECK_IMAGE_SUPPORT;
 
   hip::contract::ContractCleanup cleanup;
@@ -210,7 +210,7 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_Memcpy2DArrayToArray_InvalidKind_IsRejected)
 // consistency with the rest of the suite's positive backend gates.
 #if HT_AMD
 // @asserts: hipMemcpyHtoAAsync - an async host-to-array then array-to-host round-trip is visible after stream sync
-HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyHtoAAsyncThenAtoHAsync_VisibleAfterSync) {
+HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpyHtoAAsync_ThenAtoHAsync_VisibleAfterSync) {
   CHECK_IMAGE_SUPPORT;
 
   hip::contract::ContractCleanup cleanup;

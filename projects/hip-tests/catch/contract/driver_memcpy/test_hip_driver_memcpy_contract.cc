@@ -31,7 +31,7 @@ void* HtoDSrc(const void* host) { return const_cast<void*>(host); }
 }  // namespace
 
 // @asserts: hipMemcpyHtoD - a host-to-device then device-to-host copy round-trips the byte pattern
-HIP_TEST_CASE(Contract_DriverMemcpy_HtoDtoH_RoundTripsBytes) {
+HIP_TEST_CASE(Contract_DriverMemcpy_HipMemcpyHtoD_HtoDtoH_RoundTripsBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x11);
   std::array<uint8_t, kElementCount> dst{};
@@ -48,7 +48,7 @@ HIP_TEST_CASE(Contract_DriverMemcpy_HtoDtoH_RoundTripsBytes) {
 }
 
 // @asserts: hipMemcpyDtoD - a device-to-device copy on a single device preserves the bytes transferred
-HIP_TEST_CASE(Contract_DriverMemcpy_DtoD_SingleDevice_CopiesBytes) {
+HIP_TEST_CASE(Contract_DriverMemcpy_HipMemcpyDtoD_DtoDSingleDevice_CopiesBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x29);
   std::array<uint8_t, kElementCount> dst{};
@@ -71,7 +71,7 @@ HIP_TEST_CASE(Contract_DriverMemcpy_DtoD_SingleDevice_CopiesBytes) {
 }
 
 // @asserts: hipMemcpyHtoD - zero-byte HtoD/DtoH/DtoD copies succeed and leave the destination untouched
-HIP_TEST_CASE(Contract_DriverMemcpy_ZeroBytes_Succeeds) {
+HIP_TEST_CASE(Contract_DriverMemcpy_HipMemcpyHtoD_ZeroBytes_Succeeds) {
   hip::contract::ContractCleanup cleanup;
   uint8_t host_src = 0x1;
   uint8_t host_dst = 0x2;
@@ -92,7 +92,7 @@ HIP_TEST_CASE(Contract_DriverMemcpy_ZeroBytes_Succeeds) {
 }
 
 // @asserts: hipMemcpyHtoDAsync - an async HtoD/DtoD/DtoH chain on a stream round-trips bytes after sync
-HIP_TEST_CASE(Contract_DriverMemcpy_Async_OnStream_RoundTripsBytes) {
+HIP_TEST_CASE(Contract_DriverMemcpy_HipMemcpyHtoDAsync_AsyncOnStream_RoundTripsBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x43);
   std::array<uint8_t, kElementCount> dst{};
@@ -119,7 +119,7 @@ HIP_TEST_CASE(Contract_DriverMemcpy_Async_OnStream_RoundTripsBytes) {
 }
 
 // @asserts: hipMemcpyHtoD - null source or destination pointers are rejected across HtoD/DtoH/DtoD
-HIP_TEST_CASE(Contract_DriverMemcpy_NullPointers_AreRejected) {
+HIP_TEST_CASE(Contract_DriverMemcpy_HipMemcpyHtoD_NullPointers_AreRejected) {
   hip::contract::ContractCleanup cleanup;
   uint8_t host[kElementCount]{};
   void* src_device_ptr = nullptr;
@@ -143,7 +143,7 @@ HIP_TEST_CASE(Contract_DriverMemcpy_NullPointers_AreRejected) {
 }
 
 // @asserts: hipMemcpyHtoDAsync - null source or destination pointers are rejected across the async driver copies
-HIP_TEST_CASE(Contract_DriverMemcpy_AsyncNullPointers_AreRejected) {
+HIP_TEST_CASE(Contract_DriverMemcpy_HipMemcpyHtoDAsync_AsyncNullPointers_AreRejected) {
   hip::contract::ContractCleanup cleanup;
   uint8_t host[kElementCount]{};
   void* src_device_ptr = nullptr;

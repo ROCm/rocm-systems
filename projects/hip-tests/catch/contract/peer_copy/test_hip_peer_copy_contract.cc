@@ -52,7 +52,7 @@ bool TryMalloc3D(hipPitchedPtr* device_ptr, hipExtent extent) {
 }  // namespace
 
 // @asserts: hipMemcpyPeer - a same-device (degenerate) 1D peer copy transfers bytes like an ordinary device-to-device copy
-HIP_TEST_CASE(Contract_PeerCopy_SelfDevice1D_CopiesBytes) {
+HIP_TEST_CASE(Contract_PeerCopy_HipMemcpyPeer_SelfDevice1D_CopiesBytes) {
   // A peer copy where the source and destination device are the same device is
   // a valid degenerate case: it must behave like an ordinary device-to-device
   // copy. This keeps the positive contract runnable on a single-GPU host.
@@ -76,7 +76,7 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice1D_CopiesBytes) {
 }
 
 // @asserts: hipMemcpyPeerAsync - a same-device async 1D peer copy is complete and visible after the stream is synchronized
-HIP_TEST_CASE(Contract_PeerCopy_SelfDevice1DAsync_CopiesBytesAfterSync) {
+HIP_TEST_CASE(Contract_PeerCopy_HipMemcpyPeerAsync_SelfDevice1DAsync_CopiesBytesAfterSync) {
   hip::contract::ContractCleanup cleanup;
   const int device = CurrentDevice();
   const auto src = MakePattern(0x22);
@@ -103,7 +103,7 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice1DAsync_CopiesBytesAfterSync) {
 }
 
 // @asserts: hipMemcpy3DPeer - a same-device 3D peer copy round-trips a pitched extent like an ordinary same-device 3D copy
-HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3D_CopiesExtent) {
+HIP_TEST_CASE(Contract_PeerCopy_HipMemcpy3DPeer_SelfDevice3D_CopiesExtent) {
   // The 3D peer copy with matching source and destination device must round-trip
   // a pitched extent like an ordinary same-device 3D copy.
   hip::contract::ContractCleanup cleanup;
@@ -151,7 +151,7 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3D_CopiesExtent) {
 }
 
 // @asserts: hipMemcpy3DPeerAsync - a same-device async 3D peer copy round-trips the extent once the stream is synchronized
-HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3DAsync_CopiesExtentAfterSync) {
+HIP_TEST_CASE(Contract_PeerCopy_HipMemcpy3DPeerAsync_SelfDevice3DAsync_CopiesExtentAfterSync) {
   hip::contract::ContractCleanup cleanup;
   const int device = CurrentDevice();
   const auto src = MakePattern(0x44);
@@ -199,7 +199,7 @@ HIP_TEST_CASE(Contract_PeerCopy_SelfDevice3DAsync_CopiesExtentAfterSync) {
 }
 
 // @asserts: hipMemcpyPeer - rejects an out-of-range device ordinal and leaves a matching sticky last error that clears once consumed
-HIP_TEST_CASE(Contract_PeerCopy_InvalidDevice_IsRejected) {
+HIP_TEST_CASE(Contract_PeerCopy_HipMemcpyPeer_InvalidDevice_IsRejected) {
   // A peer copy naming an out-of-range device ordinal must not silently succeed.
   // The exact error code is backend-specific, so only a non-success status is
   // required. Buffers are valid so the rejection is attributable to the device

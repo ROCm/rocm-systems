@@ -28,7 +28,7 @@ hipChannelFormatDesc ByteChannelDesc() { return hipCreateChannelDesc<uint8_t>();
 }  // namespace
 
 // @asserts: hipMallocArray - allocating a 2D array returns a non-null usable array handle
-HIP_TEST_CASE(Contract_ArrayMemory_MallocArray_ReturnsUsableArray) {
+HIP_TEST_CASE(Contract_ArrayMemory_HipMallocArray_Default_ReturnsUsableArray) {
   CHECK_IMAGE_SUPPORT;
 
   hip::contract::ContractCleanup cleanup;
@@ -42,7 +42,7 @@ HIP_TEST_CASE(Contract_ArrayMemory_MallocArray_ReturnsUsableArray) {
 }
 
 // @asserts: hipMemcpy2DToArray - a 2D copy into an array and back round-trips the byte pattern
-HIP_TEST_CASE(Contract_ArrayMemory_Memcpy2DToArrayAndBack_RoundTripsBytes) {
+HIP_TEST_CASE(Contract_ArrayMemory_HipMemcpy2DToArray_AndBack_RoundTripsBytes) {
   CHECK_IMAGE_SUPPORT;
 
   hip::contract::ContractCleanup cleanup;
@@ -62,7 +62,7 @@ HIP_TEST_CASE(Contract_ArrayMemory_Memcpy2DToArrayAndBack_RoundTripsBytes) {
 }
 
 // @asserts: hipFreeArray - freeing a freshly allocated array succeeds
-HIP_TEST_CASE(Contract_ArrayMemory_FreeArray_Succeeds) {
+HIP_TEST_CASE(Contract_ArrayMemory_HipFreeArray_Default_Succeeds) {
   CHECK_IMAGE_SUPPORT;
 
   hipArray_t array = nullptr;
@@ -73,7 +73,7 @@ HIP_TEST_CASE(Contract_ArrayMemory_FreeArray_Succeeds) {
 }
 
 // @asserts: hipArrayGetInfo - reports the array's channel descriptor, extent, and flags matching allocation
-HIP_TEST_CASE(Contract_ArrayMemory_ArrayGetInfo_ReturnsDescriptorIfAvailable) {
+HIP_TEST_CASE(Contract_ArrayMemory_HipArrayGetInfo_Default_ReturnsDescriptorIfAvailable) {
   CHECK_IMAGE_SUPPORT;
 
   hip::contract::ContractCleanup cleanup;

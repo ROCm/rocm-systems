@@ -138,7 +138,7 @@ bool CreateMappedAllocation(hip::contract::ContractCleanup& cleanup, MappedAlloc
 }  // namespace
 
 // @asserts: hipMemRetainAllocationHandle - retaining the handle for a mapped address yields a usable handle releasable independently of the original
-HIP_TEST_CASE(Contract_VmmHandle_RetainAllocationHandle_ByAddress_Succeeds) {
+HIP_TEST_CASE(Contract_VmmHandle_HipMemRetainAllocationHandle_ByAddress_Succeeds) {
   SkipIfVmmUnsupported();
   // alloc must be declared BEFORE cleanup: the cleanup guard's teardown lambdas
   // capture &alloc and read its fields (handle/address/mapped) as they run. Locals
@@ -159,7 +159,7 @@ HIP_TEST_CASE(Contract_VmmHandle_RetainAllocationHandle_ByAddress_Succeeds) {
 }
 
 // @asserts: hipMemGetAllocationPropertiesFromHandle - properties queried from the handle reflect the pinned type and device location it was created with
-HIP_TEST_CASE(Contract_VmmHandle_GetAllocationProperties_RoundTripsFromHandle) {
+HIP_TEST_CASE(Contract_VmmHandle_HipMemGetAllocationPropertiesFromHandle_GetAllocationProperties_RoundTripsFromHandle) {
   SkipIfVmmUnsupported();
   // alloc must be declared BEFORE cleanup: the cleanup guard's teardown lambdas
   // capture &alloc and read its fields (handle/address/mapped) as they run. Locals
@@ -187,7 +187,7 @@ HIP_TEST_CASE(Contract_VmmHandle_GetAllocationProperties_RoundTripsFromHandle) {
 // external at link time on Windows; the dma-buf fd export it queries is a
 // Linux/driver concept in any case. The contract is exercised only on non-Windows.
 // This gate can be removed once the Windows runtime exports the symbol.
-HIP_TEST_CASE(Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWhenSupported) {
+HIP_TEST_CASE(Contract_VmmHandle_HipMemGetHandleForAddressRange_DmaBufFd_IsQueryableWhenSupported) {
 #if defined(_WIN32)
   HIP_SKIP_TEST("hipMemGetHandleForAddressRange is not exported from the Windows HIP runtime; the "
                 "dma-buf handle-export contract cannot be linked or exercised there.");
@@ -225,7 +225,7 @@ HIP_TEST_CASE(Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWh
 // which is Linux-specific. The Windows runtime rejects the POSIX-fd path with
 // hipErrorInvalidValue, so the contract is skipped there rather than treating the
 // platform mismatch as a runtime failure.
-HIP_TEST_CASE(Contract_VmmHandle_ExportImportShareableHandle_RoundTrips) {
+HIP_TEST_CASE(Contract_VmmHandle_HipMemExportToShareableHandle_ExportImportShareableHandle_RoundTrips) {
 #if defined(_WIN32)
   HIP_SKIP_TEST("POSIX-fd VMM shareable handles are not supported on Windows.");
 #else

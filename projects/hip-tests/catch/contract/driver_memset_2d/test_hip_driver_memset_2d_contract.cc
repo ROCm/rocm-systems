@@ -38,7 +38,7 @@ void SkipPitchedAllocationUnsupported() {
 }  // namespace
 
 // @asserts: hipMemsetD2D8 - fills a pitched 2D region with a byte pattern that is visible after copy-back
-HIP_TEST_CASE(Contract_DriverMemset2D_D2D8_FillsRows_VisibleAfterCopy) {
+HIP_TEST_CASE(Contract_DriverMemset2D_HipMemsetD2D8_D2D8FillsRows_VisibleAfterCopy) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x5a;
   std::array<uint8_t, kWidth * kHeight> dst{};
@@ -59,7 +59,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_D2D8_FillsRows_VisibleAfterCopy) {
 }
 
 // @asserts: hipMemsetD2D16 - fills a pitched 2D region with a 16-bit pattern that is visible after copy-back
-HIP_TEST_CASE(Contract_DriverMemset2D_D2D16_FillsWordRows_VisibleAfterCopy) {
+HIP_TEST_CASE(Contract_DriverMemset2D_HipMemsetD2D16_D2D16FillsWordRows_VisibleAfterCopy) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint16_t pattern = 0x1357;
   std::array<uint16_t, kWidth * kHeight> dst{};
@@ -80,7 +80,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_D2D16_FillsWordRows_VisibleAfterCopy) {
 }
 
 // @asserts: hipMemsetD2D32 - fills a pitched 2D region with a 32-bit pattern that is visible after copy-back
-HIP_TEST_CASE(Contract_DriverMemset2D_D2D32_FillsDwordRows_VisibleAfterCopy) {
+HIP_TEST_CASE(Contract_DriverMemset2D_HipMemsetD2D32_D2D32FillsDwordRows_VisibleAfterCopy) {
   hip::contract::ContractCleanup cleanup;
   constexpr int pattern = 0x12345678;
   std::array<int, kWidth * kHeight> dst{};
@@ -101,7 +101,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_D2D32_FillsDwordRows_VisibleAfterCopy) {
 }
 
 // @asserts: hipMemsetD2D8Async - stream-ordered 2D byte fill is visible after the stream is synchronized
-HIP_TEST_CASE(Contract_DriverMemset2D_AsyncD2D8_VisibleAfterSync) {
+HIP_TEST_CASE(Contract_DriverMemset2D_HipMemsetD2D8Async_AsyncD2D8_VisibleAfterSync) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x3c;
   std::array<uint8_t, kWidth * kHeight> dst{};
@@ -126,7 +126,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_AsyncD2D8_VisibleAfterSync) {
 }
 
 // @asserts: hipMemset2D - runtime 2D memset fills a pitched region with a byte pattern visible after copy-back
-HIP_TEST_CASE(Contract_DriverMemset2D_RuntimeMemset2D_FillsRegion) {
+HIP_TEST_CASE(Contract_DriverMemset2D_HipMemset2D_RuntimeMemset2D_FillsRegion) {
   hip::contract::ContractCleanup cleanup;
   constexpr uint8_t pattern = 0x7b;
   std::array<uint8_t, kWidth * kHeight> dst{};
@@ -146,7 +146,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_RuntimeMemset2D_FillsRegion) {
 }
 
 // @asserts: hipMemsetD2D8 - all D2D8/D2D16/D2D32 and hipMemset2D variants reject a null destination with a non-success status
-HIP_TEST_CASE(Contract_DriverMemset2D_NullDestination_IsRejected) {
+HIP_TEST_CASE(Contract_DriverMemset2D_HipMemsetD2D8_NullDestination_IsRejected) {
   constexpr size_t pitch = kWidth * sizeof(uint32_t);
 
   REQUIRE(hipMemsetD2D8(hipDeviceptr_t(nullptr), pitch, 0x5a, kWidth, kHeight) != hipSuccess);

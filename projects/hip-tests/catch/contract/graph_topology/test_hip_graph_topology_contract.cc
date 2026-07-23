@@ -33,7 +33,7 @@ TwoNodeGraph CreateTwoNodeGraph() {
 }
 
 // @asserts: hipGraphGetNodes - reports the correct node count and returns every node added to the graph
-HIP_TEST_CASE(Contract_GraphTopology_GetNodes_ReturnsAddedNodes) {
+HIP_TEST_CASE(Contract_GraphTopology_HipGraphGetNodes_Default_ReturnsAddedNodes) {
   hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
   cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
@@ -51,7 +51,7 @@ HIP_TEST_CASE(Contract_GraphTopology_GetNodes_ReturnsAddedNodes) {
 }
 
 // @asserts: hipGraphGetRootNodes - returns only the dependency-free node(s) as roots
-HIP_TEST_CASE(Contract_GraphTopology_GetRootNodes_ReturnsDependencyFreeNode) {
+HIP_TEST_CASE(Contract_GraphTopology_HipGraphGetRootNodes_Default_ReturnsDependencyFreeNode) {
   hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
   cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
@@ -68,7 +68,7 @@ HIP_TEST_CASE(Contract_GraphTopology_GetRootNodes_ReturnsDependencyFreeNode) {
 }
 
 // @asserts: hipGraphGetEdges - returns each dependency as a from/to edge pair matching the configured direction
-HIP_TEST_CASE(Contract_GraphTopology_GetEdges_ReturnsDependencyEdge) {
+HIP_TEST_CASE(Contract_GraphTopology_HipGraphGetEdges_Default_ReturnsDependencyEdge) {
   hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
   cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
@@ -87,7 +87,7 @@ HIP_TEST_CASE(Contract_GraphTopology_GetEdges_ReturnsDependencyEdge) {
 }
 
 // @asserts: hipGraphNodeGetDependencies - returns the upstream nodes a given node depends on
-HIP_TEST_CASE(Contract_GraphTopology_NodeDependencies_ReturnsConfiguredDependency) {
+HIP_TEST_CASE(Contract_GraphTopology_HipGraphNodeGetDependencies_NodeDependencies_ReturnsConfiguredDependency) {
   hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
   cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
@@ -104,7 +104,7 @@ HIP_TEST_CASE(Contract_GraphTopology_NodeDependencies_ReturnsConfiguredDependenc
 }
 
 // @asserts: hipGraphNodeGetDependentNodes - returns the downstream nodes that depend on a given node
-HIP_TEST_CASE(Contract_GraphTopology_NodeDependents_ReturnsConfiguredDependent) {
+HIP_TEST_CASE(Contract_GraphTopology_HipGraphNodeGetDependentNodes_NodeDependents_ReturnsConfiguredDependent) {
   hip::contract::ContractCleanup cleanup;
   auto graph = CreateTwoNodeGraph();
   cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });

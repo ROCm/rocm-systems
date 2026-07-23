@@ -29,7 +29,7 @@ hipChannelFormatDesc ByteChannelDesc() { return hipCreateChannelDesc<uint8_t>();
 }  // namespace
 
 // @asserts: hipMemcpyToArray - a to-array then from-array copy pair round-trips the byte pattern
-HIP_TEST_CASE(Contract_ArrayCopy_MemcpyToArrayAndFromArray_RoundTripsBytes) {
+HIP_TEST_CASE(Contract_ArrayCopy_HipMemcpyToArray_AndFromArray_RoundTripsBytes) {
   CHECK_IMAGE_SUPPORT;
 
   hip::contract::ContractCleanup cleanup;
@@ -47,7 +47,7 @@ HIP_TEST_CASE(Contract_ArrayCopy_MemcpyToArrayAndFromArray_RoundTripsBytes) {
 }
 
 // @asserts: hipMemcpyHtoA - a host-to-array then array-to-host copy pair round-trips the byte pattern
-HIP_TEST_CASE(Contract_ArrayCopy_MemcpyHtoAAndAtoH_RoundTripsBytes) {
+HIP_TEST_CASE(Contract_ArrayCopy_HipMemcpyHtoA_AndAtoH_RoundTripsBytes) {
   CHECK_IMAGE_SUPPORT;
 
   hip::contract::ContractCleanup cleanup;
@@ -65,7 +65,7 @@ HIP_TEST_CASE(Contract_ArrayCopy_MemcpyHtoAAndAtoH_RoundTripsBytes) {
 }
 
 // @asserts: hipMemcpy2DToArrayAsync - an async 2D to-array/from-array round-trip is visible after stream sync
-HIP_TEST_CASE(Contract_ArrayCopy_Memcpy2DToFromArrayAsync_VisibleAfterSync) {
+HIP_TEST_CASE(Contract_ArrayCopy_HipMemcpy2DToArrayAsync_Memcpy2DToFromArrayAsync_VisibleAfterSync) {
   CHECK_IMAGE_SUPPORT;
 
   hip::contract::ContractCleanup cleanup;
@@ -90,7 +90,7 @@ HIP_TEST_CASE(Contract_ArrayCopy_Memcpy2DToFromArrayAsync_VisibleAfterSync) {
 }
 
 // @asserts: hipMemcpyToArray - rejects a null destination array and latches it into the last-error
-HIP_TEST_CASE(Contract_ArrayCopy_MemcpyToArray_NullArray_IsRejected) {
+HIP_TEST_CASE(Contract_ArrayCopy_HipMemcpyToArray_NullArray_IsRejected) {
   CHECK_IMAGE_SUPPORT;
 
   const auto src = MakePattern(0x9a);
@@ -105,7 +105,7 @@ HIP_TEST_CASE(Contract_ArrayCopy_MemcpyToArray_NullArray_IsRejected) {
 }
 
 // @asserts: hipMemcpy2DFromArrayAsync - rejects an invalid hipMemcpyKind and latches it into the last-error
-HIP_TEST_CASE(Contract_ArrayCopy_Memcpy2DFromArrayAsync_InvalidKind_IsRejected) {
+HIP_TEST_CASE(Contract_ArrayCopy_HipMemcpy2DFromArrayAsync_InvalidKind_IsRejected) {
   CHECK_IMAGE_SUPPORT;
 
   hip::contract::ContractCleanup cleanup;

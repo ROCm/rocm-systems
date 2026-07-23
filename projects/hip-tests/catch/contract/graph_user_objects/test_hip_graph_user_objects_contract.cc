@@ -35,7 +35,7 @@ bool TryCreateUserObject(hipUserObject_t* object, int* counter) {
 }  // namespace
 
 // @asserts: hipUserObjectRelease - releasing the sole initial reference drops the refcount to zero and runs the destructor once
-HIP_TEST_CASE(Contract_GraphUserObjects_CreateRelease_InvokesDestructorOnce) {
+HIP_TEST_CASE(Contract_GraphUserObjects_HipUserObjectRelease_CreateRelease_InvokesDestructorOnce) {
   int counter = 0;
   hipUserObject_t object = nullptr;
 
@@ -53,7 +53,7 @@ HIP_TEST_CASE(Contract_GraphUserObjects_CreateRelease_InvokesDestructorOnce) {
 }
 
 // @asserts: hipUserObjectRetain - retained references keep the object alive until every reference is released (destructor timing is backend-specific)
-HIP_TEST_CASE(Contract_GraphUserObjects_RetainRelease_BalancesRefcount) {
+HIP_TEST_CASE(Contract_GraphUserObjects_HipUserObjectRetain_Release_BalancesRefcount) {
   int counter = 0;
   hipUserObject_t object = nullptr;
 
@@ -95,7 +95,7 @@ HIP_TEST_CASE(Contract_GraphUserObjects_RetainRelease_BalancesRefcount) {
 }
 
 // @asserts: hipGraphRetainUserObject - a graph's reference on a user object is independent of the standalone reference and does not fire the destructor early
-HIP_TEST_CASE(Contract_GraphUserObjects_GraphRetainRelease_TiedToGraphLifetime) {
+HIP_TEST_CASE(Contract_GraphUserObjects_HipGraphRetainUserObject_GraphRetainRelease_TiedToGraphLifetime) {
   int counter = 0;
   hipUserObject_t object = nullptr;
   hipGraph_t graph = nullptr;
@@ -125,7 +125,7 @@ HIP_TEST_CASE(Contract_GraphUserObjects_GraphRetainRelease_TiedToGraphLifetime) 
 }
 
 // @asserts: hipUserObjectCreate - rejects a null out-object pointer with hipErrorInvalidValue
-HIP_TEST_CASE(Contract_GraphUserObjects_CreateNullObject_ReturnsInvalidValue) {
+HIP_TEST_CASE(Contract_GraphUserObjects_HipUserObjectCreate_NullObject_ReturnsInvalidValue) {
   int counter = 0;
 
   // A null out-object pointer is an invalid argument, so create must report a

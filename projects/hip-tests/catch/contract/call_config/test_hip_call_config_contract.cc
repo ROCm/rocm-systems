@@ -17,7 +17,7 @@
 // the tests to be re-expressed on the portable launch APIs).
 #if HT_NVIDIA
 // @asserts: hipConfigureCall - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
-HIP_TEST_CASE(Contract_CallConfig_NvidiaUnsupported_IsSkipped) {
+HIP_TEST_CASE(Contract_CallConfig_HipConfigureCall_NvidiaUnsupported_IsSkipped) {
   HIP_SKIP_TEST("The legacy call-configuration launch path is not exposed by the NVIDIA backend.");
 }
 #endif  // HT_NVIDIA
@@ -41,7 +41,7 @@ int ReadDeviceInt(int* device_ptr) {
 }  // namespace
 
 // @asserts: hipLaunchByPtr - legacy configure/setup/launch staging path launches a kernel that writes the expected value
-HIP_TEST_CASE(Contract_CallConfig_ConfigureSetupLaunch_WritesExpectedValue) {
+HIP_TEST_CASE(Contract_CallConfig_HipLaunchByPtr_ConfigureSetupLaunch_WritesExpectedValue) {
   hip::contract::ContractCleanup cleanup;
   int* device_value = nullptr;
   HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
@@ -65,7 +65,7 @@ HIP_TEST_CASE(Contract_CallConfig_ConfigureSetupLaunch_WritesExpectedValue) {
 }
 
 // @asserts: hipLaunchByPtr - repeated configure/setup/launch sequences stage independent argument stacks that do not leak between calls
-HIP_TEST_CASE(Contract_CallConfig_ConfigureSetupLaunch_RepeatedStagingIsIndependent) {
+HIP_TEST_CASE(Contract_CallConfig_HipLaunchByPtr_ConfigureSetupLaunch_RepeatedStagingIsIndependent) {
   hip::contract::ContractCleanup cleanup;
   int* first = nullptr;
   int* second = nullptr;

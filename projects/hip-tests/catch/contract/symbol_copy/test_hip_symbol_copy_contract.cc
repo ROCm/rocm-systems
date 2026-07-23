@@ -61,7 +61,7 @@ void TouchAndSyncSymbols() {
 }  // namespace
 
 // @asserts: hipMemcpyToSymbol - a value written to a scalar device global round-trips back through hipMemcpyFromSymbol
-HIP_TEST_CASE(Contract_SymbolCopy_ToSymbol_ThenFromSymbol_RoundTripsScalar) {
+HIP_TEST_CASE(Contract_SymbolCopy_HipMemcpyToSymbol_ThenFromSymbol_RoundTripsScalar) {
   RequireDevice();
   TouchAndSyncSymbols();
 
@@ -79,7 +79,7 @@ HIP_TEST_CASE(Contract_SymbolCopy_ToSymbol_ThenFromSymbol_RoundTripsScalar) {
 }
 
 // @asserts: hipMemcpyToSymbol - a byte-offset write lands at the matching array element and leaves other elements untouched
-HIP_TEST_CASE(Contract_SymbolCopy_ToSymbolWithOffset_WritesAtElementOffset) {
+HIP_TEST_CASE(Contract_SymbolCopy_HipMemcpyToSymbol_WithOffset_WritesAtElementOffset) {
   RequireDevice();
   TouchAndSyncSymbols();
 
@@ -108,7 +108,7 @@ HIP_TEST_CASE(Contract_SymbolCopy_ToSymbolWithOffset_WritesAtElementOffset) {
 }
 
 // @asserts: hipMemcpyFromSymbol - with the default copy direction reads back bytes seeded at the resolved symbol address
-HIP_TEST_CASE(Contract_SymbolCopy_FromSymbol_DefaultDirection_ReadsBytes) {
+HIP_TEST_CASE(Contract_SymbolCopy_HipMemcpyFromSymbol_DefaultDirection_ReadsBytes) {
   RequireDevice();
   TouchAndSyncSymbols();
 
@@ -132,7 +132,7 @@ HIP_TEST_CASE(Contract_SymbolCopy_FromSymbol_DefaultDirection_ReadsBytes) {
 }
 
 // @asserts: hipMemcpyToSymbolAsync - a stream-ordered write then read on the same stream round-trips after synchronize
-HIP_TEST_CASE(Contract_SymbolCopy_ToSymbolAsync_FromSymbolAsync_RoundTripsInStreamOrder) {
+HIP_TEST_CASE(Contract_SymbolCopy_HipMemcpyToSymbolAsync_FromSymbolAsync_RoundTripsInStreamOrder) {
   RequireDevice();
   TouchAndSyncSymbols();
   hip::contract::ContractCleanup cleanup;
@@ -157,7 +157,7 @@ HIP_TEST_CASE(Contract_SymbolCopy_ToSymbolAsync_FromSymbolAsync_RoundTripsInStre
 }
 
 // @asserts: hipMemcpyToSymbol - copying to or from a null symbol is rejected with a non-success status
-HIP_TEST_CASE(Contract_SymbolCopy_NullSymbol_IsRejected) {
+HIP_TEST_CASE(Contract_SymbolCopy_HipMemcpyToSymbol_NullSymbol_IsRejected) {
   RequireDevice();
 
   // Copying to or from a null symbol must not silently succeed. The exact error
@@ -183,7 +183,7 @@ HIP_TEST_CASE(Contract_SymbolCopy_NullSymbol_IsRejected) {
 }
 
 // @asserts: hipMemcpyToSymbol - a copy whose offset plus size exceeds the symbol size is rejected with a non-success status
-HIP_TEST_CASE(Contract_SymbolCopy_OutOfBoundsSizePlusOffset_IsRejected) {
+HIP_TEST_CASE(Contract_SymbolCopy_HipMemcpyToSymbol_OutOfBoundsSizePlusOffset_IsRejected) {
   RequireDevice();
   TouchAndSyncSymbols();
 

@@ -89,7 +89,7 @@ bool ExportToFdOrSkip(hipMemPool_t pool, int* fd) {
 }  // namespace
 
 // @asserts: hipMemPoolExportToShareableHandle - a POSIX-fd pool export yields a valid fd that re-imports into a non-null pool, or skips when unsupported
-HIP_TEST_CASE(Contract_MemPoolShareableHandle_ExportImportHandle_RoundTrips) {
+HIP_TEST_CASE(Contract_MemPoolShareableHandle_HipMemPoolExportToShareableHandle_ExportImportHandle_RoundTrips) {
   hip::contract::ContractCleanup cleanup;
   hipMemPool_t pool = CreatePosixFdPoolOrSkip();
   cleanup.Add([pool] { (void)hipMemPoolDestroy(pool); });
@@ -114,7 +114,7 @@ HIP_TEST_CASE(Contract_MemPoolShareableHandle_ExportImportHandle_RoundTrips) {
 }
 
 // @asserts: hipMemPoolExportPointer - an allocation exported via hipMemPoolExportPointer imports into the peer pool as a non-null pointer, or skips when unsupported
-HIP_TEST_CASE(Contract_MemPoolShareableHandle_ExportImportPointer_RoundTrips) {
+HIP_TEST_CASE(Contract_MemPoolShareableHandle_HipMemPoolExportPointer_ExportImportPointer_RoundTrips) {
   hip::contract::ContractCleanup cleanup;
   hipMemPool_t pool = CreatePosixFdPoolOrSkip();
   cleanup.Add([pool] { (void)hipMemPoolDestroy(pool); });
@@ -161,7 +161,7 @@ HIP_TEST_CASE(Contract_MemPoolShareableHandle_ExportImportPointer_RoundTrips) {
 }
 
 // @asserts: hipMemPoolExportToShareableHandle - rejects a null output-handle pointer with a non-success status instead of crashing or succeeding
-HIP_TEST_CASE(Contract_MemPoolShareableHandle_NullArgs_IsRejected) {
+HIP_TEST_CASE(Contract_MemPoolShareableHandle_HipMemPoolExportToShareableHandle_NullArgs_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipMemPool_t pool = CreatePosixFdPoolOrSkip();
   cleanup.Add([pool] { (void)hipMemPoolDestroy(pool); });

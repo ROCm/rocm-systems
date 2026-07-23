@@ -18,7 +18,7 @@ __global__ void OccupancyKernel(int* output) {
 }
 
 // @asserts: hipOccupancyMaxActiveBlocksPerMultiprocessor - reports a non-negative active-block count for a kernel
-HIP_TEST_CASE(Contract_Occupancy_MaxActiveBlocksPerMultiprocessor_ReturnsNonNegativeValue) {
+HIP_TEST_CASE(Contract_Occupancy_HipOccupancyMaxActiveBlocksPerMultiprocessor_Default_ReturnsNonNegativeValue) {
   int max_active_blocks = -1;
 
   HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&max_active_blocks, OccupancyKernel, 1, 0));
@@ -27,7 +27,7 @@ HIP_TEST_CASE(Contract_Occupancy_MaxActiveBlocksPerMultiprocessor_ReturnsNonNega
 }
 
 // @asserts: hipOccupancyMaxPotentialBlockSize - suggests a non-negative min grid size and a positive block size for a kernel
-HIP_TEST_CASE(Contract_Occupancy_MaxPotentialBlockSize_ReturnsUsableValues) {
+HIP_TEST_CASE(Contract_Occupancy_HipOccupancyMaxPotentialBlockSize_Default_ReturnsUsableValues) {
   int min_grid_size = 0;
   int block_size = 0;
 
@@ -38,7 +38,7 @@ HIP_TEST_CASE(Contract_Occupancy_MaxPotentialBlockSize_ReturnsUsableValues) {
 }
 
 // @asserts: hipOccupancyAvailableDynamicSMemPerBlock - reports available dynamic shared memory not exceeding the device's per-block limit
-HIP_TEST_CASE(Contract_Occupancy_AvailableDynamicSmem_IsWithinDeviceLimit) {
+HIP_TEST_CASE(Contract_Occupancy_HipOccupancyAvailableDynamicSMemPerBlock_AvailableDynamicSmem_IsWithinDeviceLimit) {
   int current_device = 0;
   hipDeviceProp_t properties{};
   HIP_CHECK(hipGetDevice(&current_device));

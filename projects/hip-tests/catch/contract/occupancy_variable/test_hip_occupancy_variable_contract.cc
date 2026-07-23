@@ -27,7 +27,7 @@
 // exports these symbols.
 #if defined(_WIN32)
 // @asserts: hipOccupancyMaxPotentialBlockSizeWithFlags - Windows runtime does not export the symbol and the occupancy_variable contract is skipped until export parity exists
-HIP_TEST_CASE(Contract_OccupancyVariable_WindowsUnsupported_IsSkipped) {
+HIP_TEST_CASE(Contract_OccupancyVariable_HipOccupancyMaxPotentialBlockSizeWithFlags_WindowsUnsupported_IsSkipped) {
   HIP_SKIP_TEST("hipOccupancyMaxPotentialBlockSize* occupancy contracts are not exported from the "
                 "Windows HIP runtime yet; the real cases are skipped here until export parity "
                 "exists.");
@@ -36,7 +36,7 @@ HIP_TEST_CASE(Contract_OccupancyVariable_WindowsUnsupported_IsSkipped) {
 
 #if HT_NVIDIA
 // @asserts: hipOccupancyMaxPotentialBlockSizeWithFlags - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
-HIP_TEST_CASE(Contract_OccupancyVariable_NvidiaUnsupported_IsSkipped) {
+HIP_TEST_CASE(Contract_OccupancyVariable_HipOccupancyMaxPotentialBlockSizeWithFlags_NvidiaUnsupported_IsSkipped) {
   HIP_SKIP_TEST("The occupancy-variable helper family is not exposed by the NVIDIA backend.");
 }
 #endif  // HT_NVIDIA
@@ -59,7 +59,7 @@ struct NoDynamicSmem {
 }  // namespace
 
 // @asserts: hipOccupancyMaxPotentialBlockSizeWithFlags - returns a non-negative min grid size and positive block size; the reserved flag does not change the contract
-HIP_TEST_CASE(Contract_OccupancyVariable_PotentialBlockSizeWithFlags_ReturnsUsableValues) {
+HIP_TEST_CASE(Contract_OccupancyVariable_HipOccupancyMaxPotentialBlockSizeWithFlags_Default_ReturnsUsableValues) {
   // The with-flags potential-block-size helper must return a usable grid/block
   // pair for a launchable kernel: a non-negative minimum grid size and a
   // positive block size. The flag argument is reserved and does not change the
@@ -75,7 +75,7 @@ HIP_TEST_CASE(Contract_OccupancyVariable_PotentialBlockSizeWithFlags_ReturnsUsab
 }
 
 // @asserts: hipOccupancyMaxPotentialBlockSizeWithFlags - under default flags suggests the same block size as the plain hipOccupancyMaxPotentialBlockSize
-HIP_TEST_CASE(Contract_OccupancyVariable_PotentialBlockSizeWithFlags_MatchesPlainVariant) {
+HIP_TEST_CASE(Contract_OccupancyVariable_HipOccupancyMaxPotentialBlockSizeWithFlags_Default_MatchesPlainVariant) {
   // Under default flags the with-flags helper must agree with the plain
   // potential-block-size helper for the same kernel: the reserved flag argument
   // must not change the suggested block size.
@@ -95,7 +95,7 @@ HIP_TEST_CASE(Contract_OccupancyVariable_PotentialBlockSizeWithFlags_MatchesPlai
 }
 
 // @asserts: hipOccupancyMaxPotentialBlockSizeVariableSMem - accepts a block-size-to-dynamic-smem functor and returns a non-negative min grid size and positive block size
-HIP_TEST_CASE(Contract_OccupancyVariable_VariableSMem_ReturnsUsableValues) {
+HIP_TEST_CASE(Contract_OccupancyVariable_HipOccupancyMaxPotentialBlockSizeVariableSMem_Default_ReturnsUsableValues) {
   // The variable-shared-memory helper must accept a block-size-to-dynamic-smem
   // functor and return a usable grid/block pair. A functor that always requests
   // zero dynamic shared memory keeps the query portable across devices.
@@ -109,7 +109,7 @@ HIP_TEST_CASE(Contract_OccupancyVariable_VariableSMem_ReturnsUsableValues) {
 }
 
 // @asserts: hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags - accepts the smem functor and returns a non-negative min grid size and positive block size under the reserved default flag
-HIP_TEST_CASE(Contract_OccupancyVariable_VariableSMemWithFlags_ReturnsUsableValues) {
+HIP_TEST_CASE(Contract_OccupancyVariable_HipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags_Default_ReturnsUsableValues) {
   // The with-flags variable-shared-memory helper must behave like its non-flags
   // sibling for the reserved default flag: it accepts the functor and returns a
   // usable grid/block pair.

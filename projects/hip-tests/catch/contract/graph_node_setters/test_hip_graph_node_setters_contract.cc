@@ -42,7 +42,7 @@ void HostNoop(void* /*user_data*/) {}
 }  // namespace
 
 // @asserts: hipGraphKernelNodeSetParams - mutating a kernel node's params pre-instantiation makes the launched graph write the updated value
-HIP_TEST_CASE(Contract_GraphNodeSetters_KernelNodeSetParams_UpdatesLaunchValue) {
+HIP_TEST_CASE(Contract_GraphNodeSetters_HipGraphKernelNodeSetParams_Default_UpdatesLaunchValue) {
   hip::contract::ContractCleanup cleanup;
   int initial = kInitialValue;
   int updated = kUpdatedValue;
@@ -91,7 +91,7 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_KernelNodeSetParams_UpdatesLaunchValue) 
 }
 
 // @asserts: hipGraphMemcpyNodeSetParams1D - retargeting a memcpy node's source before instantiation makes the launched copy observe the new source
-HIP_TEST_CASE(Contract_GraphNodeSetters_MemcpyNodeSetParams1D_UpdatesCopySource) {
+HIP_TEST_CASE(Contract_GraphNodeSetters_HipGraphMemcpyNodeSetParams1D_Default_UpdatesCopySource) {
   hip::contract::ContractCleanup cleanup;
   constexpr size_t kBytes = sizeof(int);
   int source_a = kInitialValue;
@@ -128,7 +128,7 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_MemcpyNodeSetParams1D_UpdatesCopySource)
 }
 
 // @asserts: hipGraphHostNodeSetParams - swapping a host node's params makes the getter report the new fn and user-data pair
-HIP_TEST_CASE(Contract_GraphNodeSetters_HostNodeSetParams_RoundTripsFnAndUserData) {
+HIP_TEST_CASE(Contract_GraphNodeSetters_HipGraphHostNodeSetParams_Default_RoundTripsFnAndUserData) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t host_node = nullptr;
@@ -157,7 +157,7 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_HostNodeSetParams_RoundTripsFnAndUserDat
 }
 
 // @asserts: hipGraphEventRecordNodeSetEvent - event-record and event-wait nodes accept a swapped event and report it back through their getters
-HIP_TEST_CASE(Contract_GraphNodeSetters_EventNodesSetEvent_RoundTripSwappedEvents) {
+HIP_TEST_CASE(Contract_GraphNodeSetters_HipGraphEventRecordNodeSetEvent_EventNodesSetEvent_RoundTripSwappedEvents) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t record_node = nullptr;
@@ -188,7 +188,7 @@ HIP_TEST_CASE(Contract_GraphNodeSetters_EventNodesSetEvent_RoundTripSwappedEvent
 }
 
 // @asserts: hipGraphKernelNodeCopyAttributes - copies kernel-node attributes to the destination node (AMD carries cooperative; NVIDIA does not)
-HIP_TEST_CASE(Contract_GraphNodeSetters_KernelNodeCopyAttributes_PropagatesToDestination) {
+HIP_TEST_CASE(Contract_GraphNodeSetters_HipGraphKernelNodeCopyAttributes_Default_PropagatesToDestination) {
   hip::contract::ContractCleanup cleanup;
   int value = kInitialValue;
   int* device_value = nullptr;

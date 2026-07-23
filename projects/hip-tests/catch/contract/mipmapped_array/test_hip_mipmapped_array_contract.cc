@@ -41,7 +41,7 @@ bool IsUnsupportedOrNoMemory(hipError_t status) {
 }  // namespace
 
 // @asserts: hipMallocMipmappedArray - a runtime-created mipmapped array yields a non-null level-0 array via hipGetMipmappedArrayLevel
-HIP_TEST_CASE(Contract_MipmappedArray_MallocAndGetLevel_ReturnsLevelArray) {
+HIP_TEST_CASE(Contract_MipmappedArray_HipMallocMipmappedArray_MallocAndGetLevel_ReturnsLevelArray) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
 
@@ -64,7 +64,7 @@ HIP_TEST_CASE(Contract_MipmappedArray_MallocAndGetLevel_ReturnsLevelArray) {
 }
 
 // @asserts: hipMipmappedArrayCreate - driver-API create/get-level/destroy round-trips, yielding a non-null level-0 array
-HIP_TEST_CASE(Contract_MipmappedArray_DriverCreateGetLevelDestroy) {
+HIP_TEST_CASE(Contract_MipmappedArray_HipMipmappedArrayCreate_Default_DriverCreateGetLevelDestroy) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
 
@@ -97,7 +97,7 @@ HIP_TEST_CASE(Contract_MipmappedArray_DriverCreateGetLevelDestroy) {
 }
 
 // @asserts: hipGetMipmappedArrayLevel - requesting a level beyond numLevels is rejected with a non-success status
-HIP_TEST_CASE(Contract_MipmappedArray_GetLevel_OutOfRange_IsRejected) {
+HIP_TEST_CASE(Contract_MipmappedArray_HipGetMipmappedArrayLevel_GetLevelOutOfRange_IsRejected) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
 
@@ -121,7 +121,7 @@ HIP_TEST_CASE(Contract_MipmappedArray_GetLevel_OutOfRange_IsRejected) {
 }
 
 // @asserts: hipMipmappedArrayGetMemoryRequirements - querying memory requirements either succeeds or reports a defined not-queryable status
-HIP_TEST_CASE(Contract_MipmappedArray_GetMemoryRequirements_IsQueryable) {
+HIP_TEST_CASE(Contract_MipmappedArray_HipMipmappedArrayGetMemoryRequirements_Default_IsQueryable) {
   CHECK_IMAGE_SUPPORT;
   hip::contract::ContractCleanup cleanup;
 

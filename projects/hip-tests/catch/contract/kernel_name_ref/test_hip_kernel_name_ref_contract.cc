@@ -16,7 +16,7 @@
 // kernel-name reflection API.
 #if HT_NVIDIA
 // @asserts: hipKernelNameRef - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
-HIP_TEST_CASE(Contract_KernelNameRef_NvidiaUnsupported_IsSkipped) {
+HIP_TEST_CASE(Contract_KernelNameRef_HipKernelNameRef_NvidiaUnsupported_IsSkipped) {
   HIP_SKIP_TEST("The kernel-name reflection APIs are not exposed by the NVIDIA backend.");
 }
 #endif  // HT_NVIDIA
@@ -55,7 +55,7 @@ void RequireNamesKernel(const char* name) {
 // is therefore exercised only where the symbol is exported (non-Windows). The
 // sibling hipKernelNameRef below is exported on Windows and is not gated.
 // @asserts: hipKernelNameRefByPtr - resolves a host kernel function pointer to a non-empty name mentioning the kernel identifier
-HIP_TEST_CASE(Contract_KernelNameRef_ByPtr_NamesHostKernel) {
+HIP_TEST_CASE(Contract_KernelNameRef_HipKernelNameRefByPtr_ByPtr_NamesHostKernel) {
 #if defined(_WIN32)
   HIP_SKIP_TEST("hipKernelNameRefByPtr is not exported from the Windows HIP runtime; the "
                 "name-reflection contract cannot be linked or exercised there.");
@@ -70,7 +70,7 @@ HIP_TEST_CASE(Contract_KernelNameRef_ByPtr_NamesHostKernel) {
 // hipGetFuncBySymbol) to its kernel name; the returned string must name the
 // kernel.
 // @asserts: hipKernelNameRef - resolves a hipFunction_t (from hipGetFuncBySymbol) to a non-empty name mentioning the kernel identifier
-HIP_TEST_CASE(Contract_KernelNameRef_ByFunction_NamesResolvedKernel) {
+HIP_TEST_CASE(Contract_KernelNameRef_HipKernelNameRef_ByFunction_NamesResolvedKernel) {
   hipFunction_t function = nullptr;
   HIP_CHECK(hipGetFuncBySymbol(&function, reinterpret_cast<const void*>(KernelNameRefProbe)));
   REQUIRE(function != nullptr);

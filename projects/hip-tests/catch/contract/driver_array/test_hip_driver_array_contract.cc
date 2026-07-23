@@ -43,7 +43,7 @@ HIP_ARRAY3D_DESCRIPTOR Array3DDesc() {
 }  // namespace
 
 // @asserts: hipArrayCreate - creating a 2D array from a valid descriptor yields a non-null array handle
-HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_2D_ReturnsUsableArray) {
+HIP_TEST_CASE(Contract_DriverArray_HipArrayCreate_2D_ReturnsUsableArray) {
   CHECK_IMAGE_SUPPORT;
   EnsureContext();
 
@@ -58,7 +58,7 @@ HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_2D_ReturnsUsableArray) {
 }
 
 // @asserts: hipArrayGetDescriptor - reads back the width, height, format, and channel count the array was created with
-HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_RoundTripsDimsAndFormat) {
+HIP_TEST_CASE(Contract_DriverArray_HipArrayGetDescriptor_Default_RoundTripsDimsAndFormat) {
   CHECK_IMAGE_SUPPORT;
   EnsureContext();
 
@@ -78,7 +78,7 @@ HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_RoundTripsDimsAndFormat) {
 }
 
 // @asserts: hipArrayCreate - rejects a null array-out pointer or null descriptor with a non-success error
-HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_InvalidArgs_AreRejected) {
+HIP_TEST_CASE(Contract_DriverArray_HipArrayCreate_InvalidArgs_AreRejected) {
   CHECK_IMAGE_SUPPORT;
   EnsureContext();
 
@@ -90,7 +90,7 @@ HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_InvalidArgs_AreRejected) {
 }
 
 // @asserts: hipArrayGetDescriptor - rejects a null descriptor-out pointer or null array handle with a non-success error
-HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_InvalidArgs_AreRejected) {
+HIP_TEST_CASE(Contract_DriverArray_HipArrayGetDescriptor_InvalidArgs_AreRejected) {
   CHECK_IMAGE_SUPPORT;
   EnsureContext();
 
@@ -107,7 +107,7 @@ HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_InvalidArgs_AreRejected) {
 }
 
 // @asserts: hipArray3DCreate - creating a 3D array from a valid descriptor yields a non-null array handle
-HIP_TEST_CASE(Contract_DriverArray_Array3DCreate_ReturnsUsableArray) {
+HIP_TEST_CASE(Contract_DriverArray_HipArray3DCreate_Default_ReturnsUsableArray) {
   CHECK_IMAGE_SUPPORT;
   EnsureContext();
 
@@ -122,7 +122,7 @@ HIP_TEST_CASE(Contract_DriverArray_Array3DCreate_ReturnsUsableArray) {
 }
 
 // @asserts: hipArray3DGetDescriptor - reads back the dims, depth, format, channels, and flags the 3D array was created with
-HIP_TEST_CASE(Contract_DriverArray_Array3DGetDescriptor_RoundTripsDepthAndFlags) {
+HIP_TEST_CASE(Contract_DriverArray_HipArray3DGetDescriptor_Default_RoundTripsDepthAndFlags) {
   CHECK_IMAGE_SUPPORT;
   EnsureContext();
 

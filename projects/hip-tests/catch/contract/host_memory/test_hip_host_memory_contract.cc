@@ -25,7 +25,7 @@ std::array<uint8_t, kElementCount> MakePattern(uint8_t seed) {
 }
 
 // @asserts: hipHostMalloc - returns a non-null host pointer whose bytes are readable and writable by the host
-HIP_TEST_CASE(Contract_HostMemory_HostMalloc_ReturnsUsablePointer) {
+HIP_TEST_CASE(Contract_HostMemory_HipHostMalloc_Default_ReturnsUsablePointer) {
   hip::contract::ContractCleanup cleanup;
   void* host_ptr = nullptr;
 
@@ -45,7 +45,7 @@ HIP_TEST_CASE(Contract_HostMemory_HostMalloc_ReturnsUsablePointer) {
 }
 
 // @asserts: hipHostFree - frees a pointer previously returned by hipHostMalloc successfully
-HIP_TEST_CASE(Contract_HostMemory_HostFree_Succeeds) {
+HIP_TEST_CASE(Contract_HostMemory_HipHostFree_Default_Succeeds) {
   void* host_ptr = nullptr;
 
   HIP_CHECK(hipHostMalloc(&host_ptr, kElementCount, hipHostMallocDefault));
@@ -53,7 +53,7 @@ HIP_TEST_CASE(Contract_HostMemory_HostFree_Succeeds) {
 }
 
 // @asserts: hipHostRegister - registering then unregistering an existing host buffer round-trips successfully
-HIP_TEST_CASE(Contract_HostMemory_HostRegisterUnregister_Succeeds) {
+HIP_TEST_CASE(Contract_HostMemory_HipHostRegister_Unregister_Succeeds) {
   std::array<uint8_t, kElementCount> host_buffer{};
 
   HIP_CHECK(hipHostRegister(host_buffer.data(), host_buffer.size(), hipHostRegisterDefault));
@@ -61,7 +61,7 @@ HIP_TEST_CASE(Contract_HostMemory_HostRegisterUnregister_Succeeds) {
 }
 
 // @asserts: hipHostGetDevicePointer - yields a device-visible pointer for mapped host memory that round-trips bytes via hipMemcpy
-HIP_TEST_CASE(Contract_HostMemory_HostGetDevicePointer_RoundTripsBytes) {
+HIP_TEST_CASE(Contract_HostMemory_HipHostGetDevicePointer_Default_RoundTripsBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x41);
   std::array<uint8_t, kElementCount> dst{};
@@ -81,7 +81,7 @@ HIP_TEST_CASE(Contract_HostMemory_HostGetDevicePointer_RoundTripsBytes) {
 }
 
 // @asserts: hipHostGetFlags - reports back at least the allocation flags requested at hipHostMalloc time
-HIP_TEST_CASE(Contract_HostMemory_HostGetFlags_IncludesRequestedFlags) {
+HIP_TEST_CASE(Contract_HostMemory_HipHostGetFlags_Default_IncludesRequestedFlags) {
   hip::contract::ContractCleanup cleanup;
   void* host_ptr = nullptr;
   unsigned int flags = 0;

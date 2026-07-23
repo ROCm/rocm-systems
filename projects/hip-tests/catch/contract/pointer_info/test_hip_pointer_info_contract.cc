@@ -70,7 +70,7 @@ bool QueryPointerAttributeOrSkip(void* data, hipPointer_attribute attribute, hip
 }  // namespace
 
 // @asserts: hipPointerGetAttributes - a device allocation reports device memory type, its owning device, and matching devicePointer
-HIP_TEST_CASE(Contract_PointerInfo_GetAttributes_DeviceAllocation_ReportsDeviceType) {
+HIP_TEST_CASE(Contract_PointerInfo_HipPointerGetAttributes_DeviceAllocation_ReportsDeviceType) {
   hip::contract::ContractCleanup cleanup;
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
@@ -88,7 +88,7 @@ HIP_TEST_CASE(Contract_PointerInfo_GetAttributes_DeviceAllocation_ReportsDeviceT
 }
 
 // @asserts: hipPointerGetAttributes - a pinned host allocation reports host memory type and a matching hostPointer
-HIP_TEST_CASE(Contract_PointerInfo_GetAttributes_HostAllocation_ReportsHostType) {
+HIP_TEST_CASE(Contract_PointerInfo_HipPointerGetAttributes_HostAllocation_ReportsHostType) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipHostMalloc(&data, kAllocationBytes, hipHostMallocDefault));
@@ -102,7 +102,7 @@ HIP_TEST_CASE(Contract_PointerInfo_GetAttributes_HostAllocation_ReportsHostType)
 }
 
 // @asserts: hipPointerGetAttributes - a managed allocation reports managed/unified memory type and its owning device (or managed memory is skipped)
-HIP_TEST_CASE(Contract_PointerInfo_GetAttributes_ManagedAllocation_ReportsManagedOrUnified) {
+HIP_TEST_CASE(Contract_PointerInfo_HipPointerGetAttributes_ManagedAllocation_ReportsManagedOrUnified) {
   SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
 
@@ -121,7 +121,7 @@ HIP_TEST_CASE(Contract_PointerInfo_GetAttributes_ManagedAllocation_ReportsManage
 }
 
 // @asserts: hipPointerGetAttribute - the single MEMORY_TYPE query agrees with hipPointerGetAttributes for the same device pointer (or is cleanly unsupported)
-HIP_TEST_CASE(Contract_PointerInfo_GetAttribute_MemoryType_MatchesGetAttributes) {
+HIP_TEST_CASE(Contract_PointerInfo_HipPointerGetAttribute_MemoryType_MatchesGetAttributes) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
@@ -141,7 +141,7 @@ HIP_TEST_CASE(Contract_PointerInfo_GetAttribute_MemoryType_MatchesGetAttributes)
 }
 
 // @asserts: hipMemGetAddressRange - an interior device pointer resolves to the allocation base and a size spanning the interior offset
-HIP_TEST_CASE(Contract_PointerInfo_MemGetAddressRange_ReturnsBaseAndSize) {
+HIP_TEST_CASE(Contract_PointerInfo_HipMemGetAddressRange_Default_ReturnsBaseAndSize) {
   hip::contract::ContractCleanup cleanup;
   char* data = nullptr;
   HIP_CHECK(hipMalloc(&data, kAllocationBytes));
@@ -159,7 +159,7 @@ HIP_TEST_CASE(Contract_PointerInfo_MemGetAddressRange_ReturnsBaseAndSize) {
 }
 
 // @asserts: hipMemGetInfo - reports a positive total and free memory never exceeding total
-HIP_TEST_CASE(Contract_PointerInfo_MemGetInfo_FreeNotGreaterThanTotal) {
+HIP_TEST_CASE(Contract_PointerInfo_HipMemGetInfo_Default_FreeNotGreaterThanTotal) {
   size_t free_bytes = 0;
   size_t total_bytes = 0;
 
@@ -170,7 +170,7 @@ HIP_TEST_CASE(Contract_PointerInfo_MemGetInfo_FreeNotGreaterThanTotal) {
 }
 
 // @asserts: hipPointerGetAttributes - a null output attributes pointer is rejected with a defined error (AMD only; skipped on NVIDIA)
-HIP_TEST_CASE(Contract_PointerInfo_GetAttributes_NullOutput_IsRejected) {
+HIP_TEST_CASE(Contract_PointerInfo_HipPointerGetAttributes_NullOutput_IsRejected) {
   // BACKEND-DIFF: The null-output rejection contract is only exercised on AMD. On
   // NVIDIA hipPointerGetAttributes maps to cudaPointerGetAttributes, which does
   // not validate the output-attributes pointer and dereferences it - a null

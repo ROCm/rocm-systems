@@ -13,7 +13,7 @@
 // require a NVIDIA-side logging-control API.
 #if HT_NVIDIA
 // @asserts: hipExtEnableLogging - NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists
-HIP_TEST_CASE(Contract_Logging_NvidiaUnsupported_IsSkipped) {
+HIP_TEST_CASE(Contract_Logging_HipExtEnableLogging_NvidiaUnsupported_IsSkipped) {
   HIP_SKIP_TEST("The HIP extended logging APIs are not exposed by the NVIDIA backend.");
 }
 #endif  // HT_NVIDIA
@@ -32,7 +32,7 @@ void RequireAcceptedOrUnsupported(hipError_t status) {
 }  // namespace
 
 // @asserts: hipExtEnableLogging - enable and disable are each accepted-or-unsupported and report a consistent capability
-HIP_TEST_CASE(Contract_Logging_EnableThenDisable_IsAcceptedOrUnsupported) {
+HIP_TEST_CASE(Contract_Logging_HipExtEnableLogging_EnableThenDisable_IsAcceptedOrUnsupported) {
   // Enabling then disabling logging must report a consistent capability: if
   // enable is honored, the matching disable must also be honored, and if enable
   // is unsupported, disable must likewise be unsupported. A runtime cannot claim
@@ -48,7 +48,7 @@ HIP_TEST_CASE(Contract_Logging_EnableThenDisable_IsAcceptedOrUnsupported) {
 }
 
 // @asserts: hipExtSetLoggingParams - configuring benign logging level/buffer/mask is accepted or reported unsupported
-HIP_TEST_CASE(Contract_Logging_SetLoggingParams_IsAcceptedOrUnsupported) {
+HIP_TEST_CASE(Contract_Logging_HipExtSetLoggingParams_Default_IsAcceptedOrUnsupported) {
   // Configuring the logging level, buffer size, and mask must be accepted or
   // reported unsupported. The parameters chosen are benign (a low level with a
   // small buffer); logging is disabled afterward so no output is emitted for

@@ -19,7 +19,7 @@ void RequireNonEmptyString(const char* value) {
 }  // namespace
 
 // @asserts: hipDrvGetErrorName - returns a non-null, non-empty name string for known error codes
-HIP_TEST_CASE(Contract_DriverError_GetErrorName_KnownCode_ReturnsNonEmptyString) {
+HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorName_KnownCode_ReturnsNonEmptyString) {
   for (hipError_t error : kKnownErrors) {
     const char* name = nullptr;
     HIP_CHECK(hipDrvGetErrorName(error, &name));
@@ -28,7 +28,7 @@ HIP_TEST_CASE(Contract_DriverError_GetErrorName_KnownCode_ReturnsNonEmptyString)
 }
 
 // @asserts: hipDrvGetErrorString - returns a non-null, non-empty message string for known error codes
-HIP_TEST_CASE(Contract_DriverError_GetErrorString_KnownCode_ReturnsNonEmptyString) {
+HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorString_KnownCode_ReturnsNonEmptyString) {
   for (hipError_t error : kKnownErrors) {
     const char* message = nullptr;
     HIP_CHECK(hipDrvGetErrorString(error, &message));
@@ -37,7 +37,7 @@ HIP_TEST_CASE(Contract_DriverError_GetErrorString_KnownCode_ReturnsNonEmptyStrin
 }
 
 // @asserts: hipDrvGetErrorName - repeated queries for the same code yield identical name strings
-HIP_TEST_CASE(Contract_DriverError_GetErrorName_RepeatedQueryIsStable) {
+HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorName_Default_RepeatedQueryIsStable) {
   for (hipError_t error : kKnownErrors) {
     const char* first_name = nullptr;
     const char* second_name = nullptr;
@@ -51,7 +51,7 @@ HIP_TEST_CASE(Contract_DriverError_GetErrorName_RepeatedQueryIsStable) {
 }
 
 // @asserts: hipDrvGetErrorString - repeated queries for the same code yield identical message strings
-HIP_TEST_CASE(Contract_DriverError_GetErrorString_RepeatedQueryIsStable) {
+HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorString_Default_RepeatedQueryIsStable) {
   for (hipError_t error : kKnownErrors) {
     const char* first_message = nullptr;
     const char* second_message = nullptr;
@@ -65,13 +65,13 @@ HIP_TEST_CASE(Contract_DriverError_GetErrorString_RepeatedQueryIsStable) {
 }
 
 // @asserts: hipDrvGetErrorName - rejects an unknown/invalid error code with a non-success status
-HIP_TEST_CASE(Contract_DriverError_GetErrorName_InvalidCode_IsRejected) {
+HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorName_InvalidCode_IsRejected) {
   const char* name = nullptr;
   REQUIRE(hipDrvGetErrorName(static_cast<hipError_t>(-1), &name) != hipSuccess);
 }
 
 // @asserts: hipDrvGetErrorString - rejects an unknown/invalid error code with a non-success status
-HIP_TEST_CASE(Contract_DriverError_GetErrorString_InvalidCode_IsRejected) {
+HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorString_InvalidCode_IsRejected) {
   const char* message = nullptr;
   REQUIRE(hipDrvGetErrorString(static_cast<hipError_t>(-1), &message) != hipSuccess);
 }

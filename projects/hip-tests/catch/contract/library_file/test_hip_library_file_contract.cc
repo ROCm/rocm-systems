@@ -87,7 +87,7 @@ std::string WriteCodeObjectFile(const char* suffix) {
 }  // namespace
 
 // @asserts: hipLibraryLoadFromFile - loading a code object from a file yields a valid library whose known kernel resolves
-HIP_TEST_CASE(Contract_LibraryFile_LoadFromFile_ResolvesKnownKernel) {
+HIP_TEST_CASE(Contract_LibraryFile_HipLibraryLoadFromFile_Default_ResolvesKnownKernel) {
   const std::string path = WriteCodeObjectFile("resolve");
 
   // Loading a HIPRTC-produced code object from a file must yield a non-null
@@ -106,7 +106,7 @@ HIP_TEST_CASE(Contract_LibraryFile_LoadFromFile_ResolvesKnownKernel) {
 }
 
 // @asserts: hipLibraryLoadFromFile - loading from a nonexistent path is rejected with a non-success status
-HIP_TEST_CASE(Contract_LibraryFile_LoadFromFile_MissingFile_IsRejected) {
+HIP_TEST_CASE(Contract_LibraryFile_HipLibraryLoadFromFile_MissingFile_IsRejected) {
   // Loading from a path that does not exist must not silently succeed. The exact
   // error code is backend-specific, so only a non-success status is required.
   hipLibrary_t library = nullptr;
@@ -116,7 +116,7 @@ HIP_TEST_CASE(Contract_LibraryFile_LoadFromFile_MissingFile_IsRejected) {
 }
 
 // @asserts: hipLibraryGetManaged - requesting a managed symbol the library does not define is rejected, not given a bogus pointer
-HIP_TEST_CASE(Contract_LibraryFile_GetManaged_UnknownSymbol_IsRejected) {
+HIP_TEST_CASE(Contract_LibraryFile_HipLibraryGetManaged_UnknownSymbol_IsRejected) {
   const std::string path = WriteCodeObjectFile("managed");
 
   hipLibrary_t library = nullptr;
