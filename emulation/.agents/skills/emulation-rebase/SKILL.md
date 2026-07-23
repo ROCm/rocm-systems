@@ -21,7 +21,12 @@ Mirage behavior afterward.
    history rewrite. Do not stash implicitly.
 3. Create and report a durable local recovery ref for the original tip before
    rebasing. Do not delete it in this workflow.
-4. Do not force-push unless the user explicitly asks. Use
+4. Never push any commit, branch, tag, rebased history, or other content—and
+   never modify a pull request or other GitHub state—without explicit user
+   approval immediately before that specific write. A request to rebase,
+   commit, update a branch, or prepare a pull request is not publication
+   approval. Approval for one write does not authorize another. For an approved
+   rewritten-branch push, use
    `--force-with-lease=<branch>:<expected-remote-oid>`, never plain `--force`.
 5. Never continue a conflicted rebase without inspecting the full file and the
    intent of both sides. Never resolve generated files by choosing one side or
@@ -142,6 +147,8 @@ Report:
 - tests and formatting run, failures, and residual risk;
 - whether the branch was pushed.
 
-If explicitly asked to update the remote, first record the current remote topic
-OID and push with an OID-qualified force-with-lease. Stop if the lease fails;
-fetch and reassess instead of overriding another contributor's work.
+If a remote update is desired, first record the current remote topic OID and
+show the user the local tip, destination, commits/diff to publish, and exact
+push mode. Obtain explicit approval immediately before the push. For rewritten
+history, use an OID-qualified force-with-lease. Stop if the lease fails; fetch
+and reassess instead of overriding another contributor's work.

@@ -39,6 +39,10 @@ the observable contract remains correct and the project layering is preserved.
    uncertain publication status as confidential.
 7. Separate verified mismatch, intentional emulation difference, version skew,
    and unknown. Do not label an uncertainty as a kernel-parity bug.
+8. Never push or otherwise write to GitHub without explicit user approval
+  immediately before that specific write. Analysis, implementation, commit,
+  review, and pull-request preparation requests do not imply publication
+  approval; approval for one write does not authorize another.
 
 ## 1. Pin scope and sources
 

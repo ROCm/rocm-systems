@@ -33,6 +33,16 @@ Use these workflows when the request matches. They are read-only unless the
 user explicitly asks for fixes or history changes. A review never posts to
 GitHub on its own.
 
+## GitHub write approval
+
+Never push commits, branches, tags, rebased history, or other content to
+GitHub—and never create or modify pull requests, issues, comments, reviews,
+labels, releases, or other remote state—without the user's explicit approval
+for that specific write. A request to review, edit, commit, rebase, prepare a
+pull request, or follow a skill is not approval to publish. Prepare and validate
+changes locally, show what would be written, and ask immediately before the
+GitHub write. Approval for one write does not authorize later writes.
+
 ## Local reference material
 
 On Linux development systems, agents may assume these optional sources exist:

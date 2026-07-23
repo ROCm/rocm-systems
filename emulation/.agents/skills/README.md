@@ -33,3 +33,12 @@ material of uncertain publication status as confidential.
 The skills do not require a particular agent runner or model. Clients that do
 not automatically discover nested `.agents/skills` directories can be pointed
 at this directory as a project skill source.
+
+## GitHub write approval
+
+Every skill must obtain explicit user approval immediately before each GitHub
+write, including pushes and creating or changing pull requests, issues,
+comments, reviews, labels, tags, releases, or other remote state. Earlier task
+approval and approval for a different write do not count. Read-only GitHub
+inspection is allowed; publishing is not implicit in review, rebase, commit, or
+pull-request preparation requests.

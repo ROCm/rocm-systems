@@ -13,9 +13,12 @@ the user. This workflow is read-only unless the user separately asks for fixes.
 
 ## Hard rules
 
-1. Never post comments, reviews, replies, labels, or verdicts to GitHub. Do not
-   use a review-submission command. A user may explicitly request that later as
-   a separate action.
+1. Never push commits, branches, tags, or other content to GitHub, and never
+  create or modify comments, reviews, replies, labels, pull requests, or other
+  GitHub state, without explicit user approval immediately before that specific
+  write. Do not use a review-submission command during this workflow. Review,
+  edit, commit, or pull-request preparation requests are not publication
+  approval, and approval for one write does not authorize another.
 2. Treat `emulation/rocjitsu/docs/style.md` as authoritative for rocjitsu. Read
    it during every rocjitsu review; do not rely on remembered summaries.
 3. Read complete changed files plus relevant owners, callers, cleanup paths,
