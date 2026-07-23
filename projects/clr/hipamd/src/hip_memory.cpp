@@ -3103,7 +3103,8 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
   // The ExtOp flags (hipMemcpyFlagExtOpSwap / hipMemcpyFlagExtOpIndirect*) are
   // only honored by the SDMA batch path (BatchCopyMemoryCommand ->
   // DmaBlitManager::hsaCopyBatch), which restricts them to transfers between
-  // device memory and pinned host memory. All other combinations are rejected up front.
+  // device memory and pinned host memory, plus peer device-to-device copies.
+  // All other combinations are rejected up front.
   const unsigned int kExtOpFlagMask =
       hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
   size_t attrIdx = 0;

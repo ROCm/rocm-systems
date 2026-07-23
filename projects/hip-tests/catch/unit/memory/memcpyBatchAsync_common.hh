@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <iterator>
 #include <utility>
 #include <vector>
 
@@ -32,9 +34,10 @@ inline void requireBufferEquals(const void* buffer, const std::vector<unsigned c
   const hipMemcpyKind kind =
       allocType == LinearAllocs::hipMalloc ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
   HIP_CHECK(hipMemcpy(host_out.data(), buffer, expected.size(), kind));
-  for (size_t j = 0; j < expected.size(); ++j) {
-    REQUIRE(host_out[j] == expected[j]);
-  }
+
+  const auto diff = std::mismatch(host_out.begin(), host_out.end(), expected.begin());
+  INFO("First mismatch at byte " << std::distance(host_out.begin(), diff.first));
+  REQUIRE(diff.first == host_out.end());
 }
 
 // Enable peer access from the first device of each pair to the second. Tolerates pairs whose peer
