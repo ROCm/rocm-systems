@@ -28,7 +28,7 @@ class gfx1153_soc(OmniSoC_Base):
                 "GRBM": 2,
             })
 
-        self._mspec.l2_banks = 8
+        self._mspec.l2_banks = 4
         self._mspec.lds_banks_per_cu = 32
         self._mspec.pipes_per_gpu = 2
 
