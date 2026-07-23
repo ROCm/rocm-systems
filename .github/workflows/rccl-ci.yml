@@ -135,10 +135,13 @@ jobs:
       ROCM_RELEASE_CHANNEL: ${{ needs.provision-ruby.outputs.rocm_channel }}
       ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
       RCCL_DEVICE_API_CACHE: /apps/rccl-ci
+      # Per-job checkout dir so parallel jobs don't share a .git.
+      CI_SUBDIR: _ci/cleanup-ruby-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
+          path: ${{ env.CI_SUBDIR }}
           # Sparse-checkout: only the CI helper scripts are needed here.
           sparse-checkout: projects/rccl/tools/ci
 
@@ -147,7 +150,11 @@ jobs:
           ROCM_REF_TOKEN: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          "${{ github.workspace }}/projects/rccl/tools/ci/lib/rocm-ref.sh" release
+          "${GITHUB_WORKSPACE}/${CI_SUBDIR}/projects/rccl/tools/ci/lib/rocm-ref.sh" release
+
+      - name: Clean up per-job workdir
+        if: always()
+        run: rm -rf "${GITHUB_WORKSPACE:?}/${CI_SUBDIR:?}"
 
   cleanup-tw:
     name: Cleanup ROCm (Tensorwave)
@@ -159,10 +166,13 @@ jobs:
       ROCM_RELEASE_CHANNEL: ${{ needs.provision-tw.outputs.rocm_channel }}
       ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
       RCCL_DEVICE_API_CACHE: /it-share/rccl-ci
+      # Per-job checkout dir so parallel jobs don't share a .git.
+      CI_SUBDIR: _ci/cleanup-tw-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
+          path: ${{ env.CI_SUBDIR }}
           sparse-checkout: projects/rccl/tools/ci
 
       - name: Release ROCm reference
@@ -170,4 +180,8 @@ jobs:
           ROCM_REF_TOKEN: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          "${{ github.workspace }}/projects/rccl/tools/ci/lib/rocm-ref.sh" release
+          "${GITHUB_WORKSPACE}/${CI_SUBDIR}/projects/rccl/tools/ci/lib/rocm-ref.sh" release
+
+      - name: Clean up per-job workdir
+        if: always()
+        run: rm -rf "${GITHUB_WORKSPACE:?}/${CI_SUBDIR:?}"

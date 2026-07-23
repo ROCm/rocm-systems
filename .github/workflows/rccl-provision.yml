@@ -66,28 +66,36 @@ jobs:
       RCCL_DEVICE_API_CACHE: ${{ inputs.cache_root }}
       # Stability-first cascade used by fetch-rocm.sh (no token needed).
       RCCL_ROCM_CHANNELS: 'release prerelease nightly'
+      # Per-job checkout dir so parallel jobs don't share a .git.
+      CI_SUBDIR: _ci/provision-rocm-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
+          path: ${{ env.CI_SUBDIR }}
           # Sparse-checkout: only the CI helper scripts are needed here.
           sparse-checkout: projects/rccl/tools/ci
 
       - name: Fetch ROCm
         id: fetch
         env:
-          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}/${{ env.CI_SUBDIR }}
           # Reference the shared build so cleanup only GCs it once the last run is done.
           ROCM_REF_TOKEN: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          "${{ github.workspace }}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
+          workdir="${GITHUB_WORKSPACE}/${CI_SUBDIR}"
+          "${workdir}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
           # shellcheck disable=SC1091
-          source "${{ github.workspace }}/.ci-out/rocm.env"
+          source "${workdir}/.ci-out/rocm.env"
           echo "rocm_release=${ROCM_RELEASE}" >> "$GITHUB_OUTPUT"
           # The resolved channel is recorded in the cache tree's .stamp.
           channel="$(sed -n 's/^channel=//p' "${ROCM_PATH}/.stamp" 2>/dev/null || true)"
           echo "rocm_channel=${channel}" >> "$GITHUB_OUTPUT"
+
+      - name: Clean up per-job workdir
+        if: always()
+        run: rm -rf "${GITHUB_WORKSPACE:?}/${CI_SUBDIR:?}"
 
   # Build OpenMPI once on a compute node (after ROCm), so all suites on this
   # cluster share a warm cache instead of each rebuilding it / racing the install.
@@ -102,28 +110,31 @@ jobs:
       RCCL_SLURM_PARTITION: ${{ inputs.partition }}
       RCCL_SLURM_RESERVATION: ${{ inputs.reservation }}
       RCCL_ROCM_CHANNELS: 'release prerelease nightly'
+      # Per-job checkout dir so parallel jobs don't share a .git.
+      CI_SUBDIR: _ci/provision-ompi-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
+          path: ${{ env.CI_SUBDIR }}
           sparse-checkout: projects/rccl/tools/ci
 
       # fetch-rocm.sh re-resolves the version/family/channel (to locate the cache
       # tree) even on a cache hit; the public CDNs need no token.
       - name: Resolve ROCm from cache
         env:
-          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
-        run: "${{ github.workspace }}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
+          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}/${{ env.CI_SUBDIR }}
+        run: "${{ github.workspace }}/${{ env.CI_SUBDIR }}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
 
       - name: Build OpenMPI on a compute node
         env:
-          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}/${{ env.CI_SUBDIR }}
         run: |
           set -euo pipefail
-          ci_lib="${{ github.workspace }}/projects/rccl/tools/ci/lib"
+          ci_lib="${GITHUB_WORKSPACE}/${CI_SUBDIR}/projects/rccl/tools/ci/lib"
           python3 "${ci_lib}/submit_slurm_job.py" \
             --script "${ci_lib}/build-ompi.sbatch" \
-            --chdir "${{ github.workspace }}/.ci-out/ompi-logs" \
+            --chdir "${GITHUB_WORKSPACE}/${CI_SUBDIR}/.ci-out/ompi-logs" \
             --partition "${RCCL_SLURM_PARTITION}" \
             --reservation "${RCCL_SLURM_RESERVATION}" \
             --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_AMDGPU_FAMILY"
@@ -134,7 +145,7 @@ jobs:
       - name: Dump OpenMPI build logs
         if: always()
         run: |
-          logs_dir="${{ github.workspace }}/.ci-out/ompi-logs"
+          logs_dir="${GITHUB_WORKSPACE}/${CI_SUBDIR}/.ci-out/ompi-logs"
           shopt -s nullglob
           dumped=0
           for f in "${logs_dir}"/rccl-ompi-*.out "${logs_dir}"/rccl-ompi-*.err; do
@@ -147,3 +158,7 @@ jobs:
             echo "No OpenMPI build logs found under ${logs_dir}"
             ls -la "${logs_dir}" 2>/dev/null || echo "(logs dir missing)"
           fi
+
+      - name: Clean up per-job workdir
+        if: always()
+        run: rm -rf "${GITHUB_WORKSPACE:?}/${CI_SUBDIR:?}"
