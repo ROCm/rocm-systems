@@ -73,23 +73,6 @@ std::vector<std::pair<int, int>> GetPeerAccessibleDevicePairs() {
   return peer_pairs;
 }
 
-void EnablePeerAccess(const std::vector<std::pair<int, int>>& peer_pairs) {
-  for (const auto& [src_device, dst_device] : peer_pairs) {
-    HIP_CHECK(hipSetDevice(src_device));
-    hipError_t peer_status = hipDeviceEnablePeerAccess(dst_device, 0);
-    if (peer_status != hipSuccess && peer_status != hipErrorPeerAccessAlreadyEnabled) {
-      HIP_CHECK(peer_status);
-    }
-  }
-}
-
-void DisablePeerAccess(const std::vector<std::pair<int, int>>& peer_pairs) {
-  for (const auto& [src_device, dst_device] : peer_pairs) {
-    HIP_CHECK(hipSetDevice(src_device));
-    HIP_CHECK(hipDeviceDisablePeerAccess(dst_device));
-  }
-}
-
 std::vector<LinearAllocGuard<int>> AllocateBatchBuffers(LinearAllocs allocation_type,
                                                         const BatchConfig& config,
                                                         size_t extra_bytes = 0) {
@@ -855,117 +838,11 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Functional) {
 }
 
 #if HT_AMD
-struct SwapCopyTest {
-  SwapCopyTest(size_t count, size_t size_in_bytes, LinearAllocs allocTypeB, LinearAllocs allocTypeA,
-               hipError_t expectedError)
-      : count{count},
-        size_in_bytes{size_in_bytes},
-        allocTypeB(allocTypeB),
-        allocTypeA(allocTypeA),
-        initialValuesA(count, std::vector<unsigned char>(size_in_bytes, 10)),
-        initialValuesB(count, std::vector<unsigned char>(size_in_bytes, 4)),
-        swapPtrsA(count),
-        swapPtrsB(count),
-        expectedReturnValue(expectedError) {}
-
-  void runTest() {
-    initializeMem();
-    execute();
-    if (expectedReturnValue == hipSuccess) {
-      verifyResults();
-    }
-    freeMem();
-  }
-
- private:
-  void initializeMem() {
-    HIP_CHECK(hipStreamCreate(&stream));
-
-    for (size_t i = 0; i < count; ++i) {
-      LinearAllocGuard<unsigned char> allocB(allocTypeB, size_in_bytes);
-      swapPtrsB[i] = allocB.ptr();
-      allocations.push_back(std::move(allocB));
-      hipMemcpyKind fillKindB =
-          allocTypeB == LinearAllocs::hipMalloc ? hipMemcpyHostToDevice : hipMemcpyHostToHost;
-      HIP_CHECK(hipMemcpy(swapPtrsB[i], initialValuesB[i].data(), size_in_bytes, fillKindB));
-
-      LinearAllocGuard<unsigned char> allocA(allocTypeA, size_in_bytes);
-      swapPtrsA[i] = allocA.ptr();
-      allocations.push_back(std::move(allocA));
-      hipMemcpyKind fillKindA =
-          allocTypeA == LinearAllocs::hipMalloc ? hipMemcpyHostToDevice : hipMemcpyHostToHost;
-      HIP_CHECK(hipMemcpy(swapPtrsA[i], initialValuesA[i].data(), size_in_bytes, fillKindA));
-    }
-  }
-
-  void execute() {
-    std::vector<size_t> sizes(count, size_in_bytes);
-
-    const size_t num_attributes = 1;
-
-    std::vector<hipMemcpyAttributes> attributes(num_attributes);
-    attributes[0].flags = hipMemcpyFlagExtOpSwap;
-    attributes[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
-
-    std::vector<size_t> attributes_indexes(num_attributes);
-    attributes_indexes[0] = 0;
-
-    size_t fail_index;
-
-    HIP_CHECK_ERROR(hipMemcpyBatchAsync(swapPtrsA.data(), swapPtrsB.data(), sizes.data(), count,
-                                        attributes.data(), attributes_indexes.data(),
-                                        num_attributes, &fail_index, stream),
-                    expectedReturnValue);
-    if (expectedReturnValue != hipSuccess) return;
-
-    HIP_CHECK(hipStreamSynchronize(stream));
-  }
-
-  void verifyResults() {
-    std::vector<std::vector<unsigned char>> hostPtrAOut(count,
-                                                        std::vector<unsigned char>(size_in_bytes));
-    std::vector<std::vector<unsigned char>> hostPtrBOut(count,
-                                                        std::vector<unsigned char>(size_in_bytes));
-    for (size_t i = 0; i < count; i++) {
-      hipMemcpyKind readKindA =
-          allocTypeA == LinearAllocs::hipMalloc ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
-      HIP_CHECK(hipMemcpy(hostPtrAOut[i].data(), swapPtrsA[i], size_in_bytes, readKindA));
-
-      hipMemcpyKind readKindB =
-          allocTypeB == LinearAllocs::hipMalloc ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
-      HIP_CHECK(hipMemcpy(hostPtrBOut[i].data(), swapPtrsB[i], size_in_bytes, readKindB));
-      for (size_t j = 0; j < size_in_bytes; j++) {
-        REQUIRE(hostPtrAOut[i][j] == initialValuesB[i][j]);
-        REQUIRE(hostPtrBOut[i][j] == initialValuesA[i][j]);
-      }
-    }
-  }
-
-  void freeMem() { HIP_CHECK(hipStreamDestroy(stream)); }
-
-  const size_t count;
-  const size_t size_in_bytes;
-
-  const LinearAllocs allocTypeB;
-  const LinearAllocs allocTypeA;
-
-  std::vector<std::vector<unsigned char>> initialValuesA;
-  std::vector<std::vector<unsigned char>> initialValuesB;
-
-  std::vector<LinearAllocGuard<unsigned char>> allocations;
-
-  /*Stream where the memcpy will be enqueued to. */
-  hipStream_t stream;
-
-  /* Pointers that will be used as src and dst for the copy. */
-  std::vector<void*> swapPtrsA;
-  std::vector<void*> swapPtrsB;
-
-  hipError_t expectedReturnValue;
-};
-
-
-TEST_CASE("Unit_hipMemcpyBatchAsync_Swap") {
+/**
+ * For each batch entry, the contents of two buffers are exchanged using
+ * hipMemcpyFlagExtOpSwap across generated per-side allocation types, copy counts, and sizes.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap) {
   const size_t count = GENERATE(2, 3, 8);
   const size_t size_in_bytes = GENERATE(as<size_t>{}, 1, 63, 4096);
   const LinearAllocs allocTypeA =
@@ -974,116 +851,89 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_Swap") {
       GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
   CAPTURE(count, size_in_bytes, allocTypeA, allocTypeB);
 
-  hipError_t expectedError = getSwapExpectedReturn(allocTypeA, allocTypeB);
-  SwapCopyTest test(count, size_in_bytes, allocTypeB, allocTypeA, expectedError);
-  test.runTest();
-}
+  const hipError_t expectedError = getSwapExpectedReturn(allocTypeA, allocTypeB);
 
-struct MulticastCopyTest {
-  MulticastCopyTest(size_t count, size_t size_in_bytes, LinearAllocs srcAllocType,
-                    LinearAllocs dstAllocType, hipError_t expectedError)
-      : count{count},
-        size_in_bytes{size_in_bytes},
-        srcAllocType(srcAllocType),
-        dstAllocType(dstAllocType),
-        initialValues(size_in_bytes, 10),
-        srcPtrs(count),
-        dstPtrs(count),
-        expectedReturnValue(expectedError) {}
-
-  void runTest() {
-    initializeMem();
-    execute();
-    if (expectedReturnValue == hipSuccess) {
-      verifyResults();
-    }
-    freeMem();
-  }
-
- private:
-  void initializeMem() {
-    HIP_CHECK(hipStreamCreate(&stream));
-
-    LinearAllocGuard<unsigned char> srcAlloc(srcAllocType, size_in_bytes);
-    srcMem = srcAlloc.ptr();
-    hipMemcpyKind fillKind =
-        srcAllocType == LinearAllocs::hipMalloc ? hipMemcpyHostToDevice : hipMemcpyHostToHost;
-    HIP_CHECK(hipMemcpy(srcMem, initialValues.data(), size_in_bytes, fillKind));
-    allocations.push_back(std::move(srcAlloc));
-
-    for (size_t i = 0; i < count; ++i) {
-      srcPtrs[i] = srcMem;
-
-      LinearAllocGuard<unsigned char> dstAlloc(dstAllocType, size_in_bytes);
-      dstPtrs[i] = dstAlloc.ptr();
-      allocations.push_back(std::move(dstAlloc));
-    }
-  }
-
-  void execute() {
-    std::vector<size_t> sizes(count, size_in_bytes);
-
-    const size_t num_attributes = 1;
-
-    std::vector<hipMemcpyAttributes> attributes(num_attributes);
-    attributes[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
-
-    std::vector<size_t> attributes_indexes(num_attributes);
-    attributes_indexes[0] = 0;
-
-    size_t fail_index;
-    HIP_CHECK_ERROR(
-        hipMemcpyBatchAsync(dstPtrs.data(), srcPtrs.data(), sizes.data(), count, attributes.data(),
-                            attributes_indexes.data(), num_attributes, &fail_index, stream),
-        expectedReturnValue);
-    if (expectedReturnValue != hipSuccess) return;
-
-    HIP_CHECK(hipStreamSynchronize(stream));
-  }
-
-  void verifyResults() {
-    std::vector<std::vector<unsigned char>> hostPtrOut(count,
-                                                       std::vector<unsigned char>(size_in_bytes));
-    for (size_t i = 0; i < count; i++) {
-      hipMemcpyKind readKind =
-          dstAllocType == LinearAllocs::hipMalloc ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
-      HIP_CHECK(hipMemcpy(hostPtrOut[i].data(), dstPtrs[i], size_in_bytes, readKind));
-      for (size_t j = 0; j < size_in_bytes; j++) {
-        REQUIRE(hostPtrOut[i][j] == initialValues[j]);
-      }
-    }
-  }
-
-  void freeMem() { HIP_CHECK(hipStreamDestroy(stream)); }
-
-  const size_t count;
-  const size_t size_in_bytes;
-
-  const LinearAllocs srcAllocType;
-  const LinearAllocs dstAllocType;
-
-  /*Host memory used to assign initial values to device memory. */
-  std::vector<unsigned char> initialValues;
-
+  std::vector<std::vector<unsigned char>> initialValuesA(
+      count, std::vector<unsigned char>(size_in_bytes, 10));
+  std::vector<std::vector<unsigned char>> initialValuesB(
+      count, std::vector<unsigned char>(size_in_bytes, 4));
+  std::vector<void*> swapPtrsA(count);
+  std::vector<void*> swapPtrsB(count);
   std::vector<LinearAllocGuard<unsigned char>> allocations;
 
-  /*Stream where the memcpy will be enqueued to. */
-  hipStream_t stream;
+  StreamGuard stream_guard(Streams::created);
 
-  /* Memory that will be used as src for the copy. Same src will be used for multiple copies*/
-  void* srcMem;
+  for (size_t i = 0; i < count; ++i) {
+    LinearAllocGuard<unsigned char> allocB(allocTypeB, size_in_bytes);
+    swapPtrsB[i] = allocB.ptr();
+    allocations.push_back(std::move(allocB));
+    fillBuffer(swapPtrsB[i], initialValuesB[i], allocTypeB);
 
-  /* Pointers that will be used as src and dst for the copy. */
-  std::vector<void*> srcPtrs;
-  std::vector<void*> dstPtrs;
+    LinearAllocGuard<unsigned char> allocA(allocTypeA, size_in_bytes);
+    swapPtrsA[i] = allocA.ptr();
+    allocations.push_back(std::move(allocA));
+    fillBuffer(swapPtrsA[i], initialValuesA[i], allocTypeA);
+  }
 
-  hipError_t expectedReturnValue;
-};
+  std::vector<size_t> sizes(count, size_in_bytes);
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap};
+  size_t attrs_idxs[1] = {0};
+  size_t fail_index = 0;
+
+  HIP_CHECK_ERROR(hipMemcpyBatchAsync(swapPtrsA.data(), swapPtrsB.data(), sizes.data(), count,
+                                      &attr, attrs_idxs, 1, &fail_index, stream_guard.stream()),
+                  expectedError);
+
+  // Unsupported allocation/device combinations are asserted to fail above; only the supported
+  // combinations reach a real exchange worth verifying.
+  if (expectedError == hipSuccess) {
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+    for (size_t i = 0; i < count; ++i) {
+      requireBufferEquals(swapPtrsA[i], initialValuesB[i], allocTypeA);
+      requireBufferEquals(swapPtrsB[i], initialValuesA[i], allocTypeB);
+    }
+  }
+}
+
+// Batched multicast copy: one shared source, multiple destinations.
+static void RunMulticastCopyTest(size_t count, size_t size_in_bytes, LinearAllocs srcAllocType,
+                                 LinearAllocs dstAllocType) {
+  std::vector<unsigned char> initialValues(size_in_bytes, 10);
+  std::vector<void*> srcPtrs(count);
+  std::vector<void*> dstPtrs(count);
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+
+  StreamGuard stream_guard(Streams::created);
+
+  LinearAllocGuard<unsigned char> srcAlloc(srcAllocType, size_in_bytes);
+  void* srcMem = srcAlloc.ptr();
+  fillBuffer(srcMem, initialValues, srcAllocType);
+  allocations.push_back(std::move(srcAlloc));
+
+  for (size_t i = 0; i < count; ++i) {
+    srcPtrs[i] = srcMem;
+    LinearAllocGuard<unsigned char> dstAlloc(dstAllocType, size_in_bytes);
+    dstPtrs[i] = dstAlloc.ptr();
+    allocations.push_back(std::move(dstAlloc));
+  }
+
+  std::vector<size_t> sizes(count, size_in_bytes);
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault};
+  size_t attrs_idxs[1] = {0};
+  size_t fail_index = 0;
+  HIP_CHECK(hipMemcpyBatchAsync(dstPtrs.data(), srcPtrs.data(), sizes.data(), count, &attr,
+                                attrs_idxs, 1, &fail_index, stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  for (size_t i = 0; i < count; ++i) {
+    requireBufferEquals(dstPtrs[i], initialValues, dstAllocType);
+  }
+}
 
 /**
  * Batched multicast copy: one shared source, multiple destinations.
  */
-TEST_CASE("Unit_hipMemcpyBatchAsync_Multicast") {
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Multicast) {
   const size_t count = GENERATE(2, 3, 8);
   const size_t size_in_bytes = GENERATE(as<size_t>{}, 1, 63, 4096);
   const LinearAllocs allocTypeSrc =
@@ -1092,15 +942,13 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_Multicast") {
       GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
   CAPTURE(count, size_in_bytes, allocTypeSrc, allocTypeDst);
 
-  hipError_t expectedError = hipSuccess;
-  MulticastCopyTest test(count, size_in_bytes, allocTypeSrc, allocTypeDst, expectedError);
-  test.runTest();
+  RunMulticastCopyTest(count, size_in_bytes, allocTypeSrc, allocTypeDst);
 }
 
 /**
  * Batched multicast copy with large per-operation size.
  */
-TEST_CASE("Unit_hipMemcpyBatchAsync_Multicast_Large") {
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Multicast_Large) {
   const size_t count = GENERATE(2, 3, 8);
   const LinearAllocs allocTypeSrc =
       GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
@@ -1109,9 +957,7 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_Multicast_Large") {
   const size_t size_in_bytes = 1024 * 1024;
   CAPTURE(count, size_in_bytes, allocTypeSrc, allocTypeDst);
 
-  hipError_t expectedError = hipSuccess;
-  MulticastCopyTest test(count, size_in_bytes, allocTypeSrc, allocTypeDst, expectedError);
-  test.runTest();
+  RunMulticastCopyTest(count, size_in_bytes, allocTypeSrc, allocTypeDst);
 }
 
 /**
@@ -1119,73 +965,50 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_Multicast_Large") {
  * different source, e.g. srcA, srcA, srcA, srcB, srcA, srcA, srcA. Validates correctness when the
  * batch cannot be lowered to a single multicast operation.
  */
-struct MixedMulticastSourcesBatchTest {
-  void run() {
-    constexpr int k_count = 7;
-    const size_t size_in_bytes = 4096;
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources) {
+  constexpr int k_count = 7;
+  const size_t size_in_bytes = 4096;
 
-    std::vector<unsigned char> pattern_a(size_in_bytes, 10);
-    std::vector<unsigned char> pattern_b(size_in_bytes, 4);
+  std::vector<unsigned char> pattern_a(size_in_bytes, 10);
+  std::vector<unsigned char> pattern_b(size_in_bytes, 4);
 
-    LinearAllocGuard<unsigned char> srcAllocA(LinearAllocs::hipMalloc, size_in_bytes);
-    LinearAllocGuard<unsigned char> srcAllocB(LinearAllocs::hipMalloc, size_in_bytes);
-    void* const srcMemA = srcAllocA.ptr();
-    void* const srcMemB = srcAllocB.ptr();
+  LinearAllocGuard<unsigned char> srcAllocA(LinearAllocs::hipMalloc, size_in_bytes);
+  LinearAllocGuard<unsigned char> srcAllocB(LinearAllocs::hipMalloc, size_in_bytes);
+  void* const srcMemA = srcAllocA.ptr();
+  void* const srcMemB = srcAllocB.ptr();
 
-    std::vector<LinearAllocGuard<unsigned char>> allocations;
-    allocations.push_back(std::move(srcAllocA));
-    allocations.push_back(std::move(srcAllocB));
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  allocations.push_back(std::move(srcAllocA));
+  allocations.push_back(std::move(srcAllocB));
 
-    HIP_CHECK(hipMemcpy(srcMemA, pattern_a.data(), size_in_bytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(srcMemB, pattern_b.data(), size_in_bytes, hipMemcpyHostToDevice));
+  fillBuffer(srcMemA, pattern_a, LinearAllocs::hipMalloc);
+  fillBuffer(srcMemB, pattern_b, LinearAllocs::hipMalloc);
 
-    std::vector<void*> dst_ptrs;
-    for (int i = 0; i < k_count; ++i) {
-      LinearAllocGuard<unsigned char> dstAlloc(LinearAllocs::hipMalloc, size_in_bytes);
-      HIP_CHECK(hipMemset(dstAlloc.ptr(), 0, size_in_bytes));
-      dst_ptrs.push_back(dstAlloc.ptr());
-      allocations.push_back(std::move(dstAlloc));
-    }
-
-    std::vector<void*> src_ptrs = {srcMemA, srcMemA, srcMemA, srcMemB, srcMemA, srcMemA, srcMemA};
-    std::vector<size_t> sizes(k_count, size_in_bytes);
-
-    hipMemcpyAttributes attr{};
-    attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
-    attr.flags = hipMemcpyFlagDefault;
-    std::vector<hipMemcpyAttributes> attrs = {attr};
-    std::vector<size_t> attrs_idxs = {0};
-    constexpr size_t k_num_attrs = 1;
-
-    hipStream_t stream{};
-    HIP_CHECK(hipStreamCreate(&stream));
-
-    size_t fail_index = 0;
-    HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), k_count,
-                                  attrs.data(), attrs_idxs.data(), k_num_attrs, &fail_index,
-                                  stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
-
-    std::vector<unsigned char> host_out(size_in_bytes);
-    for (int i = 0; i < k_count; ++i) {
-      HIP_CHECK(hipMemcpy(host_out.data(), dst_ptrs[i], size_in_bytes, hipMemcpyDeviceToHost));
-      const std::vector<unsigned char>& expected = (i == 3) ? pattern_b : pattern_a;
-      for (size_t j = 0; j < size_in_bytes; ++j) {
-        REQUIRE(host_out[j] == expected[j]);
-      }
-    }
-
-    HIP_CHECK(hipStreamDestroy(stream));
+  std::vector<void*> dst_ptrs;
+  for (int i = 0; i < k_count; ++i) {
+    LinearAllocGuard<unsigned char> dstAlloc(LinearAllocs::hipMalloc, size_in_bytes);
+    HIP_CHECK(hipMemset(dstAlloc.ptr(), 0, size_in_bytes));
+    dst_ptrs.push_back(dstAlloc.ptr());
+    allocations.push_back(std::move(dstAlloc));
   }
-};
 
-/**
- * Batched D2D copy where one entry uses a different device source than the others (multicast
- * grouping interrupted mid-batch).
- */
-TEST_CASE("Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources") {
-  MixedMulticastSourcesBatchTest test;
-  test.run();
+  std::vector<void*> src_ptrs = {srcMemA, srcMemA, srcMemA, srcMemB, srcMemA, srcMemA, srcMemA};
+  std::vector<size_t> sizes(k_count, size_in_bytes);
+
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault};
+  size_t attrs_idxs[1] = {0};
+
+  StreamGuard stream_guard(Streams::created);
+
+  size_t fail_index = 0;
+  HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), k_count, &attr,
+                                attrs_idxs, 1, &fail_index, stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  for (int i = 0; i < k_count; ++i) {
+    const std::vector<unsigned char>& expected = (i == 3) ? pattern_b : pattern_a;
+    requireBufferEquals(dst_ptrs[i], expected, LinearAllocs::hipMalloc);
+  }
 }
 
 /**

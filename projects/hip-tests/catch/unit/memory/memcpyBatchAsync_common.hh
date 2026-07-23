@@ -6,24 +6,53 @@
 
 #pragma once
 
+#include <utility>
+#include <vector>
+
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_process.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
 
-template <typename> struct get_test_values_unsupported_type : std::false_type {};
+// Copy `data` from the host into `buffer`, picking the copy kind from the buffer's allocation type
+// so device and host buffers can be filled through one call.
+inline void fillBuffer(void* buffer, const std::vector<unsigned char>& data,
+                       const LinearAllocs allocType) {
+  const hipMemcpyKind kind =
+      allocType == LinearAllocs::hipMalloc ? hipMemcpyHostToDevice : hipMemcpyHostToHost;
+  HIP_CHECK(hipMemcpy(buffer, data.data(), data.size(), kind));
+}
 
-template <typename TestType> constexpr std::pair<TestType, TestType> get_test_values() {
-  if constexpr (std::is_same_v<TestType, char>) {
-    return {'a', 'b'};
-  } else if constexpr (std::is_integral_v<TestType>) {
-    return {static_cast<TestType>(10), static_cast<TestType>(4)};
-  } else if constexpr (std::is_floating_point_v<TestType>) {
-    return {static_cast<TestType>(2.25f), static_cast<TestType>(0.25f)};
-  } else {
-    static_assert(get_test_values_unsupported_type<TestType>::value,
-                  "get_test_values: add an explicit branch for this TestType");
+// Read `buffer` back to the host, picking the copy kind from its allocation type, and require it to
+// equal `expected` byte for byte. The caller must have made the buffer's device current.
+inline void requireBufferEquals(const void* buffer, const std::vector<unsigned char>& expected,
+                                const LinearAllocs allocType) {
+  std::vector<unsigned char> host_out(expected.size());
+  const hipMemcpyKind kind =
+      allocType == LinearAllocs::hipMalloc ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
+  HIP_CHECK(hipMemcpy(host_out.data(), buffer, expected.size(), kind));
+  for (size_t j = 0; j < expected.size(); ++j) {
+    REQUIRE(host_out[j] == expected[j]);
+  }
+}
+
+// Enable peer access from the first device of each pair to the second. Tolerates pairs whose peer
+// access is already enabled so tests can share device state without failing.
+inline void EnablePeerAccess(const std::vector<std::pair<int, int>>& peer_pairs) {
+  for (const auto& [src_device, dst_device] : peer_pairs) {
+    HIP_CHECK(hipSetDevice(src_device));
+    hipError_t peer_status = hipDeviceEnablePeerAccess(dst_device, 0);
+    if (peer_status != hipSuccess && peer_status != hipErrorPeerAccessAlreadyEnabled) {
+      HIP_CHECK(peer_status);
+    }
+  }
+}
+
+inline void DisablePeerAccess(const std::vector<std::pair<int, int>>& peer_pairs) {
+  for (const auto& [src_device, dst_device] : peer_pairs) {
+    HIP_CHECK(hipSetDevice(src_device));
+    HIP_CHECK(hipDeviceDisablePeerAccess(dst_device));
   }
 }
 
