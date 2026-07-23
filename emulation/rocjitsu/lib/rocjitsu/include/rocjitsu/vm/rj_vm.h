@@ -58,7 +58,7 @@ typedef struct rj_vm_cmd_t {
   void *buf;                 ///< Command arguments buffer (with inlined arrays).
   size_t buf_size;           ///< Total size of the arguments buffer.
   int32_t result;            ///< [out] Return code (0 on success, negative errno on failure).
-  rj_handle_t shared_handle; ///< [out] Backing handle for shareable allocations, or -1.
+  rj_handle_t shared_handle; ///< [out] Borrowed backing handle, or -1; owned by the VM.
   rj_handle_t in_handle;     ///< [in,out] Client-provided fd (e.g. debugger notifier), or -1.
 } rj_vm_cmd_t;
 
@@ -296,10 +296,12 @@ RJ_API_EXPORT rj_status_t rj_vm_drm_path(rj_vm_t *vm, const char **path);
 /// @param[out] info Simulated GPU metadata.
 RJ_API_EXPORT rj_status_t rj_vm_gpu_info(rj_vm_t *vm, rj_vm_gpu_info_t *info);
 
-/// @brief Get the backing memory handle (local mode).
+/// @brief Get the borrowed backing memory handle (local mode).
+/// @details The VM retains ownership; the caller must not close the handle.
 RJ_API_EXPORT rj_status_t rj_vm_get_shared_mem(rj_vm_t *vm, int64_t offset, rj_handle_t *handle);
 
-/// @brief Get the backing memory handle for a specific process (daemon mode).
+/// @brief Get the borrowed backing memory handle for a specific process (daemon mode).
+/// @details The VM retains ownership; the caller must not close the handle.
 RJ_API_EXPORT rj_status_t rj_vm_get_shared_mem_as(rj_vm_t *vm, uint32_t process_id, int64_t offset,
                                                   rj_handle_t *handle);
 
