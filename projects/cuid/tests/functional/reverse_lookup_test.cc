@@ -32,18 +32,52 @@
 #include "src/smbios_util.h"
 
 // Strip UUIDv8 overhead from a primary CUID to recover the 122 raw data bits.
-// Raw bit layout (after stripping):
-//   [0..7]   serial number (uint64_t, little-endian)
-//   [8]      unit_id lower 8 bits (raw bits 64:71)
-//   [9]      revision_id (uint8_t) (raw bits 72:79)
-//   [10..11] device_id (uint16_t, little-endian) (raw bits 80:95)
-//   [12..13] vendor_id (uint16_t, little-endian) (raw bits 96:111)
-//   [14]     bits[4:0]=unit_id upper 5 bits | bit[5]=aux_indicator |
-//            bits[7:6]=device_type[1:0]
-//   [15]     bits[7:6]=device_type[3:2] | bits[5:0]=padding
+//
+// Raw bit layout (after stripping) — see generate_primary_cuid for packing details:
+//
+//   "Other-fields" region: raw_bits[0..6] + raw_bits[7] upper nibble (60 bits, MSB-first).
+//   Packed as a single 60-bit integer (other60) with layout:
+//     [00(2
+//     pad)][device_type(4)][temp(1)][unit_id_part2(5)][vendor_id(16)][device_id(16)][revision(8)][unit_id_part1(8)]
+//
+//   "Serial" region: raw_bits[7] lower nibble + raw_bits[8..15] (64 bits, MSB-first).
+//
+// To extract a field:
+//   uint64_t other60 = 0;
+//   for (int i = 0; i < 7; i++) other60 |= (uint64_t)raw_bits[i] << (52 - 8 * i);
+//   other60 |= (raw_bits[7] >> 4);
+//
+//   uint64_t serial = ((uint64_t)(raw_bits[7] & 0xF) << 58)
+//                   | ((uint64_t)raw_bits[8]  << 50) | ((uint64_t)raw_bits[9]  << 42)
+//                   | ((uint64_t)raw_bits[10] << 34) | ((uint64_t)raw_bits[11] << 26)
+//                   | ((uint64_t)raw_bits[12] << 18) | ((uint64_t)raw_bits[13] << 10)
+//                   | ((uint64_t)raw_bits[14] <<  2) | (raw_bits[15] >> 6);
+//
+//   uint16_t unit_id_part1 = other60 & 0xFF;
+//   uint8_t  revision_id   = (other60 >>  8) & 0xFF;
+//   uint16_t device_id     = (other60 >> 16) & 0xFFFF;
+//   uint16_t vendor_id     = (other60 >> 32) & 0xFFFF;
+//   uint8_t  unit_id_part2 = (other60 >> 48) & 0x1F;
+//   uint8_t  temp          = (other60 >> 53) & 0x1;
+//   uint8_t  device_type   = (other60 >> 54) & 0xF;
+//   uint16_t unit_id       = unit_id_part1 | (unit_id_part2 << 8);
 static void extract_primary_raw_bits(const amdcuid_id_t& uuid, uint8_t raw_bits[16]) {
   amdcuid_id_t mutable_uuid = uuid;
   CuidUtilities::remove_UUIDv8_bits(&mutable_uuid, raw_bits);
+}
+
+static uint64_t extract_other60(const uint8_t raw_bits[16]) {
+  uint64_t other60 = 0;
+  for (int i = 0; i < 7; i++) other60 |= (uint64_t)raw_bits[i] << (52 - 8 * i);
+  other60 |= (raw_bits[7] >> 4);
+  return other60;
+}
+
+static uint64_t extract_serial(const uint8_t raw_bits[16]) {
+  return ((uint64_t)(raw_bits[7] & 0xF) << 58) | ((uint64_t)raw_bits[8] << 50) |
+         ((uint64_t)raw_bits[9] << 42) | ((uint64_t)raw_bits[10] << 34) |
+         ((uint64_t)raw_bits[11] << 26) | ((uint64_t)raw_bits[12] << 18) |
+         ((uint64_t)raw_bits[13] << 10) | ((uint64_t)raw_bits[14] << 2) | (raw_bits[15] >> 6);
 }
 
 // ---------------------------------------------------------------------------
@@ -131,8 +165,7 @@ void TestReverseSerialNumber::Run() {
 
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
-    uint64_t extracted_serial = 0;
-    memcpy(&extracted_serial, raw_bits, sizeof(extracted_serial));
+    uint64_t extracted_serial = extract_serial(raw_bits);
 
     EXPECT_EQ(serial_number, extracted_serial)
         << "Serial number mismatch for device " << device_node;
@@ -174,8 +207,8 @@ void TestReverseVendorId::Run() {
 
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
-    uint16_t extracted_vendor =
-        static_cast<uint16_t>(raw_bits[12]) | (static_cast<uint16_t>(raw_bits[13]) << 8);
+    uint64_t other60 = extract_other60(raw_bits);
+    uint16_t extracted_vendor = static_cast<uint16_t>((other60 >> 32) & 0xFFFF);
 
     uint16_t queried_vendor = 0;
     length = sizeof(queried_vendor);
@@ -218,8 +251,8 @@ void TestReverseDeviceId::Run() {
 
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
-    uint16_t extracted_device_id =
-        static_cast<uint16_t>(raw_bits[10]) | (static_cast<uint16_t>(raw_bits[11]) << 8);
+    uint64_t other60 = extract_other60(raw_bits);
+    uint16_t extracted_device_id = static_cast<uint16_t>((other60 >> 16) & 0xFFFF);
 
     uint16_t queried_device_id = 0;
     length = sizeof(queried_device_id);
@@ -266,7 +299,8 @@ void TestReverseRevisionId::Run() {
 
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
-    uint16_t extracted_revision = static_cast<uint16_t>(raw_bits[9]);
+    uint64_t other60 = extract_other60(raw_bits);
+    uint16_t extracted_revision = static_cast<uint16_t>((other60 >> 8) & 0xFF);
 
     uint16_t queried_revision = 0;
     length = sizeof(queried_revision);
@@ -313,10 +347,11 @@ void TestReverseUnitId::Run() {
 
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
-    // unit_id is 13 bits: lower 8 in raw_bits[8], upper 5 in bits [4:0] of
-    // raw_bits[14].
-    uint16_t extracted_unit_id =
-        static_cast<uint16_t>(raw_bits[8]) | (static_cast<uint16_t>(raw_bits[14] & 0x1F) << 8);
+    uint64_t other60 = extract_other60(raw_bits);
+    // unit_id is 13 bits: lower 8 (unit_id_part1) in other60[7:0], upper 5 (unit_id_part2) in
+    // other60[52:48].
+    uint16_t extracted_unit_id = static_cast<uint16_t>(other60 & 0xFF) |
+                                 (static_cast<uint16_t>((other60 >> 48) & 0x1F) << 8);
 
     uint16_t queried_unit_id = 0;
     length = sizeof(queried_unit_id);
@@ -362,10 +397,9 @@ void TestReverseDeviceType::Run() {
 
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
-    // device_type is 4 bits: bits [7:6] of raw_bits[14] hold bits [1:0],
-    // bits [7:6] of raw_bits[15] hold bits [3:2].
-    uint8_t extracted_type =
-        static_cast<uint8_t>(((raw_bits[14] >> 6) & 0x3) | ((raw_bits[15] >> 4) & 0xC));
+    uint64_t other60 = extract_other60(raw_bits);
+    // device_type is 4 bits at other60[57:54].
+    uint8_t extracted_type = static_cast<uint8_t>((other60 >> 54) & 0xF);
 
     amdcuid_device_type_t queried_type = AMDCUID_DEVICE_TYPE_NONE;
     length = sizeof(queried_type);
