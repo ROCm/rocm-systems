@@ -746,11 +746,10 @@ HIP_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
     // Exit 2 == divergence guard tripped and stopped cleanly. The "replay
     // DIVERGED" text is on stderr (not captured), so the exit code is the
     // asserted contract.
-    REQUIRE(ret == 2);
-    // A clean divergence-abort, never a crash/sanitizer abort (>= 128). This
-    // path also runs the full playback teardown; ROCM-27652 tracked a leak here
-    // that the AddressSanitizer CI build catches on top of this exit contract.
+    // A clean divergence-abort, never a crash/sanitizer abort (>= 128).
     REQUIRE(ret < 128);
+    // Exit 2 == divergence guard tripped and stopped cleanly.
+    REQUIRE(ret == 2);
   }
 
   SECTION("guard OFF -> not exit 2") {
