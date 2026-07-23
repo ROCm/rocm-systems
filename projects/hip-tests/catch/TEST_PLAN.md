@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 601 | 601 | 0 |
-| **total** | **601** | **601** | **0** |
+| `contract` | 603 | 603 | 0 |
+| **total** | **603** | **603** | **0** |
 
 ## Tier: `contract`
 
@@ -612,13 +612,14 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_GraphicsInterop_UnmapResources_NullResources_IsRejected` | hipGraphicsUnmapResources | a null resource array or null element with positive count is rejected with a defined error |
 | `Contract_GraphicsInterop_UnregisterResource_NullHandle_IsRejected` | hipGraphicsUnregisterResource | a null resource handle is rejected with a defined error rather than silently succeeding |
 
-### `green_context` (5 cases)
+### `green_context` (6 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_GreenContext_Create_QueriesDeviceAndResource` | hipGreenCtxCreate | a green context binds to its creating device and exposes an SM subset and stable id (accepted-or-unsupported) |
 | `Contract_GreenContext_Event_RecordAndWaitRoundTrips` | hipExecutionCtxRecordEvent | recording then waiting on an event on a green context round-trips and syncs cleanly (accepted-or-unsupported) |
 | `Contract_GreenContext_GetDevResource_ReportsSmCount` | hipDeviceGetDevResource | device SM resource reports a positive SM count that a fresh stream's resource matches (accepted-or-unsupported) |
+| `Contract_GreenContext_NvidiaCuda12Unsupported_IsSkipped` | hipDeviceGetDevResource | CUDA versions before 13.0 do not provide the green-context resource fields required by this contract domain; the contract is skipped until backend parity exists |
 | `Contract_GreenContext_SplitByCount_ProducesBoundedSubset` | hipDevSmResourceSplitByCount | yields at least one group whose SM count is within (0, device SM count] (accepted-or-unsupported) |
 | `Contract_GreenContext_Stream_LaunchesObservableWork` | hipExecutionCtxStreamCreate | work on a green-context stream runs and is observable after context sync (accepted-or-unsupported) |
 
@@ -785,7 +786,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemBatchCopy3D_NullOpList_IsRejected` | hipMemcpy3DBatchAsync | a positive op count with a null operation list is rejected with a non-success status |
 | `Contract_MemBatchCopy3D_ZeroOps_IsRejected` | hipMemcpy3DBatchAsync | a batch with zero operations is rejected with a non-success status |
 
-### `mem_batch_discard` (6 cases)
+### `mem_batch_discard` (7 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -794,6 +795,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemBatchDiscard_DrvDiscardAndPrefetchBatch_IsAcceptedOrUnsupported` | hipDrvMemDiscardAndPrefetchBatchAsync | driver-style combined discard-and-prefetch batch over device pointers is accepted or reported unsupported |
 | `Contract_MemBatchDiscard_DrvDiscardBatch_IsAcceptedOrUnsupported` | hipDrvMemDiscardBatchAsync | driver-style discard batch over device pointers is accepted or reported unsupported |
 | `Contract_MemBatchDiscard_NullPointer_IsRejectedOrUnsupported` | hipMemDiscardBatchAsync | a batch with a null range never returns hipSuccess (rejected, or reported unsupported) |
+| `Contract_MemBatchDiscard_NvidiaPrefetchBatchUnsupported_IsSkipped` | hipMemPrefetchBatchAsync | NVIDIA CUDA versions before 13.0 do not expose the batch prefetch API; the contract is skipped until backend parity exists |
 | `Contract_MemBatchDiscard_PrefetchBatch_IsAcceptedOrUnsupported` | hipMemPrefetchBatchAsync | prefetching a batch of managed ranges to the current device is accepted or reported unsupported |
 
 ### `mem_location_pool` (3 cases)

@@ -11,6 +11,13 @@
 #include <hip_test_common.hh>
 #include <contract_cleanup.hh>
 
+#if HT_NVIDIA && defined(CUDA_VERSION) && CUDA_VERSION < 13000
+// @asserts: hipDeviceGetDevResource - CUDA versions before 13.0 do not provide the green-context resource fields required by this contract domain; the contract is skipped until backend parity exists
+HIP_TEST_CASE(Contract_GreenContext_NvidiaCuda12Unsupported_IsSkipped) {
+  HIP_SKIP_TEST("Green-context resource fields required by this contract domain are not available before CUDA 13.0.");
+}
+#else
+
 namespace {
 int CurrentDevice() {
   int device = 0;
@@ -198,3 +205,4 @@ HIP_TEST_CASE(Contract_GreenContext_Event_RecordAndWaitRoundTrips) {
   HIP_CHECK(hipExecutionCtxWaitEvent(ctx, event));
   HIP_CHECK(hipExecutionCtxSynchronize(ctx));
 }
+#endif  // HT_NVIDIA && CUDA_VERSION < 13000

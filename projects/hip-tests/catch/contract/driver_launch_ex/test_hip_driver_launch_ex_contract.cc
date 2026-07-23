@@ -168,6 +168,9 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_LaunchKernelExC_WritesExpectedValue) {
 // (0, device SM count]; the split cannot invent SMs the device lacks.
 // @asserts: hipDevSmResourceSplit - a group-params SM split yields a group whose SM count is within (0, device SM count], or skips if unsupported
 HIP_TEST_CASE(Contract_DriverLaunchEx_DevSmResourceSplit_ProducesBoundedGroup) {
+#if HT_NVIDIA && defined(CUDA_VERSION) && CUDA_VERSION < 13000
+  HIP_SKIP_TEST("SM resource fields required by hipDevSmResourceSplit are not available before CUDA 13.0.");
+#else
   SkipIfIntegratedDevice();
 
   hipDevResource device_resource{};
@@ -201,6 +204,7 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_DevSmResourceSplit_ProducesBoundedGroup) {
 
   REQUIRE(group.sm.smCount > 0);
   REQUIRE(group.sm.smCount <= device_resource.sm.smCount);
+#endif  // HT_NVIDIA && CUDA_VERSION < 13000
 }
 
 // hipDrvLaunchKernelEx submits a kernel through the driver-API extended launch:

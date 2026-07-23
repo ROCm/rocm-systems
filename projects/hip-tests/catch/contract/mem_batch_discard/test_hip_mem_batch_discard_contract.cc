@@ -22,6 +22,12 @@
 #define HIP_CONTRACT_HAS_MEM_DISCARD_BATCH 0
 #endif
 
+#if HT_AMD || (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+#define HIP_CONTRACT_HAS_MEM_PREFETCH_BATCH 1
+#else
+#define HIP_CONTRACT_HAS_MEM_PREFETCH_BATCH 0
+#endif
+
 namespace {
 constexpr size_t kRangeBytes = 4096;
 
@@ -219,6 +225,7 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_NullPointer_IsRejectedOrUnsupported) {
 }
 #endif  // HIP_CONTRACT_HAS_MEM_DISCARD_BATCH
 
+#if HIP_CONTRACT_HAS_MEM_PREFETCH_BATCH
 // @asserts: hipMemPrefetchBatchAsync - prefetching a batch of managed ranges to the current device is accepted or reported unsupported
 HIP_TEST_CASE(Contract_MemBatchDiscard_PrefetchBatch_IsAcceptedOrUnsupported) {
   SkipIfManagedMemoryUnsupported();
@@ -246,3 +253,11 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_PrefetchBatch_IsAcceptedOrUnsupported) {
     HIP_CHECK(hipStreamSynchronize(stream));
   }
 }
+#else
+#if HT_NVIDIA
+// @asserts: hipMemPrefetchBatchAsync - NVIDIA CUDA versions before 13.0 do not expose the batch prefetch API; the contract is skipped until backend parity exists
+HIP_TEST_CASE(Contract_MemBatchDiscard_NvidiaPrefetchBatchUnsupported_IsSkipped) {
+  HIP_SKIP_TEST("hipMemPrefetchBatchAsync is not exposed by this NVIDIA CUDA runtime version.");
+}
+#endif  // HT_NVIDIA
+#endif  // HIP_CONTRACT_HAS_MEM_PREFETCH_BATCH

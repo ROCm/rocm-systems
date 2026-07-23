@@ -366,6 +366,9 @@ contract:
   Contract_MemBatchDiscard_NullPointer_IsRejectedOrUnsupported:
     <<: *level_0
     tags: [mem_batch_discard]
+  Contract_MemBatchDiscard_NvidiaPrefetchBatchUnsupported_IsSkipped:
+    <<: *level_0
+    tags: [mem_batch_discard]
   Contract_MemBatchDiscard_PrefetchBatch_IsAcceptedOrUnsupported:
     <<: *level_0
     tags: [mem_batch_discard]
@@ -1503,6 +1506,9 @@ contract:
   Contract_DeviceReset_DiscardsStateAndLeavesDeviceUsable:
     <<: *level_0
     tags: [device_reset]
+  Contract_GreenContext_NvidiaCuda12Unsupported_IsSkipped:
+    <<: *level_0
+    tags: [green_context]
   Contract_GreenContext_GetDevResource_ReportsSmCount:
     <<: *level_0
     tags: [green_context]
