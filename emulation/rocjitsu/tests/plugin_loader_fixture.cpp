@@ -30,6 +30,8 @@ class BoundaryPlugin final : public rocjitsu::ExecutionPlugin {
 public:
   BoundaryPlugin() : ExecutionPlugin("boundary") { trace("create"); }
   ~BoundaryPlugin() override { trace("destroy"); }
+
+  void onInit() override { sink().write("boundary:init\n"); }
 };
 
 __attribute__((destructor)) void on_unload() { trace("unload"); }

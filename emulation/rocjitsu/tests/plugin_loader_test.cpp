@@ -92,7 +92,7 @@ TEST_F(PluginLoaderTest, RejectsProfiledGroupWithMultipleThreads) {
       std::invalid_argument);
 }
 
-TEST_F(PluginLoaderTest, FileSinkFailureFallsBackToStderr) {
+TEST_F(PluginLoaderTest, ProfileFileSinkFailureFallsBackToStderr) {
   testing::internal::CaptureStderr();
   auto group = rocjitsu::PluginLoader::configure_plugin_group(
       R"({"profiled":true,"sinks":{"types":["file"],"dir":"/dev/null"}})");
@@ -102,6 +102,19 @@ TEST_F(PluginLoaderTest, FileSinkFailureFallsBackToStderr) {
 
   EXPECT_NE(error.find("cannot open plugin sink '/dev/null/profile.log'"), std::string::npos);
   EXPECT_NE(error.find("total emulation time"), std::string::npos);
+}
+
+TEST_F(PluginLoaderTest, PluginFileSinkFailureFallsBackToStderr) {
+  testing::internal::CaptureStderr();
+  auto group = rocjitsu::PluginLoader::configure_plugin_group(
+      R"({"plugins":{"good":{}},"sinks":{"types":["file"],"dir":"/dev/null"}})",
+      PLUGIN_LOADER_FIXTURE_DIR);
+  ASSERT_EQ(group->num_plugins(), 1u);
+  group->onInit();
+  const std::string error = testing::internal::GetCapturedStderr();
+
+  EXPECT_NE(error.find("cannot open plugin sink '/dev/null/boundary.log'"), std::string::npos);
+  EXPECT_NE(error.find("boundary:init"), std::string::npos);
 }
 
 TEST_F(PluginLoaderTest, FileSinkFailureDoesNotDuplicateConfiguredStderr) {
