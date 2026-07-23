@@ -275,10 +275,17 @@ __DEVICE__ unsigned int __hip_get_grid_dim_z() { return __ockl_get_num_groups(2)
 // values; under full device LTO the missing range lets strided GEPs lose
 // inbounds, which blocks offset folding (extra v_lshl_add_u64, higher VGPR
 // pressure, lower occupancy). Only dimensions bounded by the block size
-// (threadIdx, blockDim) use this variant. Guard the attribute with
-// __has_attribute so that compilers without internal_linkage fall back to the
-// existing accessor definition instead of emitting -Wattributes.
-#if defined(__has_attribute) && __has_attribute(internal_linkage)
+// (threadIdx, blockDim) use this variant. Probe internal_linkage with a nested
+// __has_attribute check -- the combined "defined(__has_attribute) &&
+// __has_attribute(...)" form is not portable (see the GCC __has_attribute
+// docs) -- and fall back to the existing accessor when it is unavailable.
+#if defined(__has_attribute)
+#if __has_attribute(internal_linkage)
+#define __HIP_HAS_INTERNAL_LINKAGE 1
+#endif
+#endif
+
+#if defined(__HIP_HAS_INTERNAL_LINKAGE)
 #define __HIP_DEVICE_BUILTIN_INTERNAL(DIMENSION, FUNCTION)                                         \
   __declspec(property(get = __get_##DIMENSION)) unsigned int DIMENSION;                            \
   __attribute__((internal_linkage)) __DEVICE__ unsigned int __get_##DIMENSION(void) {              \
@@ -326,6 +333,7 @@ struct __hip_builtin_gridDim_t {
 
 #undef __HIP_DEVICE_BUILTIN
 #undef __HIP_DEVICE_BUILTIN_INTERNAL
+#undef __HIP_HAS_INTERNAL_LINKAGE
 #pragma pop_macro("__DEVICE__")
 
 extern const __device__ __attribute__((weak)) __hip_builtin_threadIdx_t threadIdx;
