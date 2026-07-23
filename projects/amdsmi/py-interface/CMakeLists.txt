@@ -309,16 +309,23 @@ set(AMDSMI_SYSTEM_PYTHON_ABI
     FORCE
 )
 
-install(
-    DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}
-    DESTINATION ${AMDSMI_SYSTEM_PYTHON_SITELIB}
-    COMPONENT dev
-    # Pin permissions so a permissive build umask cannot leave group/other
-    # writable .py files under a system directory (files 0644, dirs 0755).
-    FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
-    DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-    PATTERN "libamd_smi*.so" EXCLUDE
-)
+# Install the module into the system interpreter's site-packages for the
+# DEB/RPM. Skipped when building the wheel: the wheel packages its own module
+# tree, and on a manylinux-style build host the detected sitelib can be a
+# container-internal path (e.g. /opt/python/cp312-cp312/...) that exists on no
+# target system, so a cpack run in that configuration would ship files nowhere.
+if(NOT BUILD_PYTHON_WHEEL)
+    install(
+        DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}
+        DESTINATION ${AMDSMI_SYSTEM_PYTHON_SITELIB}
+        COMPONENT dev
+        # Pin permissions so a permissive build umask cannot leave group/other
+        # writable .py files under a system directory (files 0644, dirs 0755).
+        FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
+        DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+        PATTERN "libamd_smi*.so" EXCLUDE
+    )
+endif()
 
 # Also stage the module under share/amd_smi (the historical location). site-
 # packages above is the primary, importable location for the DEB/RPM and for
