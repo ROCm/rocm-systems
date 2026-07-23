@@ -58,7 +58,7 @@ To check the driver version, use:
   # Example output:
   # 6.19.14.31400000
 
-The value is also reported by ``amd-smi version`` on DKMS-built systems.
+You can also check this driver version using ``amd-smi version`` command on DKMS-built systems.
 
 Use the following command to use SPM:
 
