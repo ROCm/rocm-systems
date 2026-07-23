@@ -803,7 +803,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_MemLocationPool_HipMemGetAccess_Default_ReturnsFlagsForPooledAllocation` | hipMemGetAccess | querying access for a pooled allocation's location returns a defined protection flag |
-| `Contract_MemLocationPool_HipMemGetDefaultMemPool_CurrentDevice_ReturnsNonNullPool` | hipMemGetDefaultMemPool | querying the current device's default memory pool returns a non-null pool when memory pools are supported |
+| `Contract_MemLocationPool_HipMemGetDefaultMemPool_CurrentDevice_ReturnsNonNullPool` | hipMemGetDefaultMemPool | querying the current device location's default memory pool returns a non-null pool when memory pools are supported |
 | `Contract_MemLocationPool_HipMemGetMemPool_Default_ReturnsPoolForDeviceLocation` | hipMemGetMemPool | a location-based pool query returns a non-null pool for a valid device location |
 | `Contract_MemLocationPool_HipMemSetMemPool_Default_RoundTripsThroughGetMemPool` | hipMemSetMemPool | a pool set for a location round-trips through a subsequent hipMemGetMemPool query |
 
