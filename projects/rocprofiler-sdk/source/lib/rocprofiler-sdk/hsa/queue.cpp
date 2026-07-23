@@ -55,6 +55,7 @@
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -506,6 +507,20 @@ WriteInterceptor(const void* packets,
 
             // make a copy of the tracing data
             _packet_data.tracing_data = tracing_data_v;
+
+            // Kernel-replay localized context control: drop any dispatch-tracing context the tool
+            // disabled for this pass so its timestamp records are skipped. No-op outside a replay
+            // loop (the override is empty). See kernel_replay/local_context.hpp.
+            {
+                auto disabled = [](const auto& e) {
+                    auto ov = kernel_replay::local_context_override({.handle = e.ctx->context_idx});
+                    return ov.has_value() && !*ov;
+                };
+                auto& cbc = _packet_data.tracing_data.callback_contexts;
+                auto& bfc = _packet_data.tracing_data.buffered_contexts;
+                cbc.erase(std::remove_if(cbc.begin(), cbc.end(), disabled), cbc.end());
+                bfc.erase(std::remove_if(bfc.begin(), bfc.end(), disabled), bfc.end());
+            }
 
             tracing::populate_external_correlation_ids(
                 _packet_data.tracing_data.external_correlation_ids,
