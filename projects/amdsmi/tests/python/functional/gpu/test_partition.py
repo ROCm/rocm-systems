@@ -369,16 +369,19 @@ class TestGpuPartition(unittest.TestCase):
                 try:
                     amdsmi.amdsmi_set_gpu_memory_partition(gpu, mode_type)
                     self.common.print(msg, "SUCCESS")
-                    if self.common.check_ret("", "", cond):
-                        raise_exception = amdsmi.AmdSmiLibraryException(0)
-                    if mode_type != amdsmi.AmdSmiMemoryPartitionType(
-                        list(NPS_NAME_TO_TYPE.values())[-1]
-                    ):
+                    if cond == self.common.FAIL:
                         self.common.print(
-                            f"\t   [info] Staged {mode_name}. Apply with: "
-                            "sudo modprobe -r amdgpu && sudo modprobe amdgpu",
+                            f"\t   TEST FAILURE: expected failure for {mode_name} but call succeeded",
                             "",
                         )
+                        raise_exception = amdsmi.AmdSmiLibraryException(0)
+                    else:
+                        self.common.check_ret("", "", self.common.PASS)
+                    self.common.print(
+                        f"\t   [info] Staged {mode_name}. Apply with: "
+                        "sudo modprobe -r amdgpu && sudo modprobe amdgpu",
+                        "",
+                    )
                 except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                     if self.common.check_ret(msg, e, cond):
                         raise_exception = e
