@@ -481,11 +481,14 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
     end = std::max(sig_end, end);
   }
 
-  // Handle AccumulateCommand timestamps (convert ticks to system time)
+  // Handle AccumulateCommand timestamps (convert ticks to system time).
+  // Pass signal->queue_index_ so ReportActivity can assign each kernel to
+  // the internal parallel stream it actually ran on, not the launch stream.
   if ((command().type() == CL_COMMAND_TASK) && (signal->flags_.isPacketDispatch_ == true)) {
     static_cast<amd::AccumulateCommand&>(command()).addTimestamps(
         static_cast<uint64_t>(sig_start * ticksToTime_),
-        static_cast<uint64_t>(sig_end * ticksToTime_));
+        static_cast<uint64_t>(sig_end * ticksToTime_),
+        signal->queue_index_);
   }
 
   signal->flags_.done_ = true;
