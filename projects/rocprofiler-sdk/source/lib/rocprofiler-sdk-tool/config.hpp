@@ -134,6 +134,7 @@ struct config : output_config
     bool   rocdecode_api_trace           = get_env("ROCPROF_ROCDECODE_API_TRACE", false);
     bool   rocjpeg_api_trace             = get_env("ROCPROF_ROCJPEG_API_TRACE", false);
     bool   ompt_trace                    = get_env("ROCPROF_OMPT_TRACE", false);
+    bool   rocshmem_api_trace            = get_env("ROCPROF_ROCSHMEM_API_TRACE", false);
     bool   list_metrics                  = get_env("ROCPROF_LIST_METRICS", false);
     bool   list_metrics_output_file      = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool   advanced_thread_trace         = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
@@ -244,7 +245,8 @@ config::get_attach_invariants() const
                            counter_groups_random_seed,
                            counter_groups_interval,
                            benchmark_mode,
-                           spm_counter_collection);
+                           spm_counter_collection,
+                           rocshmem_api_trace);
 }
 
 inline bool
@@ -298,6 +300,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(rocjpeg_api_trace);
     CFG_SERIALIZE_MEMBER(ompt_trace);
     CFG_SERIALIZE_MEMBER(ompt_trace_operations);
+    CFG_SERIALIZE_MEMBER(rocshmem_api_trace);
 
     CFG_SERIALIZE_MEMBER(mpi_rank);
     CFG_SERIALIZE_MEMBER(mpi_size);

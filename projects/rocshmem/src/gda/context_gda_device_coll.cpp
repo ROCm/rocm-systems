@@ -320,7 +320,7 @@ __device__ void GDAContext::internal_get_broadcastmem_wave(void *dst, const void
 }
 
 __device__ int GDAContext::broadcastmem_wave(rocshmem_team_t team, void *dest, 
-    const void* source, int nelement, int PE_root) {
+    const void* source, int nelems, int PE_root) {
   if (dest == nullptr || 
     source == nullptr || 
     team == ROCSHMEM_TEAM_INVALID)
@@ -335,7 +335,7 @@ __device__ int GDAContext::broadcastmem_wave(rocshmem_team_t team, void *dest,
 
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(PE_root);
-  internal_broadcastmem_wave(dest, source, nelement, pe_root_world, pe_start, stride,
+  internal_broadcastmem_wave(dest, source, nelems, pe_root_world, pe_start, stride,
                pe_size, p_sync);
   return ROCSHMEM_SUCCESS;
 }
