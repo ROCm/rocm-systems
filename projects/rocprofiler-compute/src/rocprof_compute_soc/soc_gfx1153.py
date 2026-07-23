@@ -15,18 +15,8 @@ class gfx1153_soc(OmniSoC_Base):
         super().__init__(args, mspec)
         self.set_arch("gfx1153")
         self.set_compatible_profilers(["rocprofv3", "rocprofiler-sdk"])
-        try:
-            self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx1153"))
-        except KeyError:
-            self.set_perfmon_config({
-                "SQ": 16,
-                "SQC": 8,
-                "TCP": 4,
-                "GL1C": 4,
-                "GL2C": 4,
-                "SPI": 6,
-                "GRBM": 2,
-            })
+        # Per IP block max number of simultaneous counters. GFX IP Blocks
+        self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx1153"))
 
         self._mspec.l2_banks = 4
         self._mspec.lds_banks_per_cu = 32
