@@ -94,22 +94,22 @@ struct TextRelocationResult {
 /// @brief Descriptor-neutral entry layout requested by DBT or DBI.
 struct KernelEntryLayoutPlan {
   /// @brief True when hardware may enter again at source entry plus 256 bytes.
-  bool has_kernarg_preload = false;
+  bool has_kernarg_preload_firmware_skip = false;
 
   /// @brief Source `.text` offset of the compatible-firmware preload entry.
-  uint64_t kernarg_preload_entry_text_offset = 0;
+  uint64_t kernarg_preload_firmware_entry_text_offset = 0;
 
   /// @brief Target instructions that must execute before the relocated body.
   std::vector<uint32_t> prologue_words;
 };
 
-/// @brief Minimal placement facts needed to emit a skipped-kernel trap stub.
+/// @brief Minimal placement facts needed to emit a skipped-kernel no-op stub.
 struct SkippedKernelLayoutPlan {
   /// @brief Original entry offset whose 256-byte residue must be preserved.
   uint64_t source_entry = 0;
 
-  /// @brief Emit trap stubs at both legal preload firmware entry addresses.
-  bool has_kernarg_preload = false;
+  /// @brief Emit `s_endpgm` stubs at both legal preload firmware entry addresses.
+  bool has_kernarg_preload_firmware_skip = false;
 };
 
 /// @brief Result of appending descriptor-visible kernel text.
@@ -205,7 +205,7 @@ void append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text, KernelT
 /// final hardware entry location is known.
 void rebase_kernel_text_layout(KernelTextLayout &layout, uint64_t delta);
 
-/// @brief Append a target-ISA trap body for a skipped kernel.
+/// @brief Append a target-ISA `s_endpgm` body for a skipped kernel.
 ///
 /// @details The neutral plan contains only placement facts needed by the patch
 /// layer. DBT and DBI retain ownership of descriptor policy and diagnostics.

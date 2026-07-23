@@ -2155,7 +2155,7 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     // RAII (on DISABLE or process teardown). In local mode dbg_fd is the
     // debugger's own descriptor, left for the debugger to close.
     if (daemon_mode_)
-      sess.owned_dbg_fd = UniqueFd(dbg_fd);
+      sess.owned_dbg_fd = util::UniqueHandle(dbg_fd);
     sess.exception_enable_mask = args->enable.exception_mask;
 
     // Snapshot the runtime-enable state under a single lock so the marshaled
@@ -2182,7 +2182,7 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   }
   case KFD_IOC_DBG_TRAP_DISABLE:
     // Resetting the session releases the debugger notifier: in daemon mode the
-    // session's UniqueFd closes the SCM_RIGHTS-transferred fd it owns; in local
+    // session's UniqueHandle closes the SCM_RIGHTS-transferred fd it owns; in local
     // mode nothing is owned, so the debugger's own fd is left untouched.
     sess = KfdProcess::DebugSession{};
     return 0;
