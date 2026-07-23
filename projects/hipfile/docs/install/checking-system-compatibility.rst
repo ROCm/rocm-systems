@@ -16,7 +16,7 @@ alongside the other host tools when ``AIS_INSTALL_TOOLS`` is enabled. After
 installation it lands in the ``bin`` directory beneath your ROCm prefix, for
 example ``/opt/rocm/bin/ais-check`` or, on versioned core installs,
 ``/opt/rocm/core-<version>/bin/ais-check``. It is a Python 3 script that reads kernel state (optionally via ``dkms``), probes the HIP
- runtime, and scans mounted filesystems. It makes no changes to your system.
+runtime, and scans mounted filesystems. It makes no changes to your system.
 
 Run ais-check
 =============
