@@ -332,6 +332,49 @@ endfunction()
 
 # --- Unit / integration test suite ---
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(PLUGIN_LOADER_FIXTURE_DIR
+        "${CMAKE_CURRENT_BINARY_DIR}/plugin_loader_fixtures"
+    )
+    function(rj_add_plugin_loader_fixture name)
+        add_library(
+            plugin_loader_fixture_${name}
+            MODULE
+            plugin_loader_fixture.cpp
+        )
+        target_include_directories(
+            plugin_loader_fixture_${name}
+            PRIVATE
+                ${ROCJITSU_INCLUDE_DIR}
+                ${ROCJITSU_SRC_DIR}
+                ${HSA_INCLUDE_DIR}
+                $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
+                $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
+        )
+        target_compile_definitions(
+            plugin_loader_fixture_${name}
+            PRIVATE PLUGIN_FIXTURE_NAME="${name}" ${ARGN}
+        )
+        set_target_properties(
+            plugin_loader_fixture_${name}
+            PROPERTIES
+                OUTPUT_NAME rocjitsu_plugin_${name}
+                LIBRARY_OUTPUT_DIRECTORY ${PLUGIN_LOADER_FIXTURE_DIR}
+                CXX_VISIBILITY_PRESET hidden
+                VISIBILITY_INLINES_HIDDEN ON
+        )
+        rj_configure_target(plugin_loader_fixture_${name} TEST)
+    endfunction()
+
+    rj_add_plugin_loader_fixture(good)
+    rj_add_plugin_loader_fixture(
+        badabi
+        PLUGIN_FIXTURE_ABI=::rocjitsu::kPluginAbiVersion+1
+    )
+    rj_add_plugin_loader_fixture(missing PLUGIN_FIXTURE_MISSING_DESTROY=1)
+    rj_add_plugin_loader_fixture(duplicate)
+endif()
+
 add_executable(
     rocjitsu_tests
     rvsim_test.cpp
@@ -429,6 +472,7 @@ add_executable(
     simd_correctness/vop3p_dot_simd_correctness_test.cpp
     execution_plugin_test.cpp
     plugin_config_resolver_test.cpp
+    plugin_loader_test.cpp
     race-detector/race_detector_event_registry_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
@@ -470,6 +514,19 @@ target_link_libraries(
         GTest::gtest_main
 )
 rj_configure_target(rocjitsu_tests TEST)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_definitions(
+        rocjitsu_tests
+        PRIVATE PLUGIN_LOADER_FIXTURE_DIR="${PLUGIN_LOADER_FIXTURE_DIR}"
+    )
+    add_dependencies(
+        rocjitsu_tests
+        plugin_loader_fixture_good
+        plugin_loader_fixture_badabi
+        plugin_loader_fixture_missing
+        plugin_loader_fixture_duplicate
+    )
+endif()
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
 # ./rocjitsu_tests --gtest_filter='*Benchmark*').
