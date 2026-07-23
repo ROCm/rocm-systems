@@ -766,6 +766,14 @@ struct SampledAtomicPreludeState {
   std::optional<uint16_t> cas_result_vgpr;
 };
 
+[[nodiscard]] bool validate_sampled_atomic_spill_metadata(const VgprSpillSequence &spill,
+                                                          std::vector<std::string> &errors) {
+  if (spill.has_complete_slot_metadata())
+    return true;
+  errors.emplace_back("ConSan MOI sampled atomic spill has incomplete slot metadata");
+  return false;
+}
+
 [[nodiscard]] bool append_sampled_atomic_snapshot_word(std::vector<uint32_t> &words,
                                                        const VgprSpillSequence &spill,
                                                        uint16_t destination, uint16_t source,
@@ -774,6 +782,7 @@ struct SampledAtomicPreludeState {
   const uint32_t spill_end = static_cast<uint32_t>(spill.vgpr_base) + spill.vgpr_count;
   if (source >= spill.vgpr_base && source < spill_end) {
     const uint16_t slot = static_cast<uint16_t>(source - spill.vgpr_base);
+    assert(slot < spill.slot_offsets.size());
     // Spill-range sources may have been overwritten by address or evidence
     // scratch, so reload their authoritative post-guest value from private.
     const auto load =
@@ -806,8 +815,7 @@ struct SampledAtomicPreludeState {
                                                       uint16_t saved_compare, uint16_t saved_result,
                                                       rj_code_arch_t arch,
                                                       std::vector<std::string> &errors) {
-  if (!validate_consan_moi_sampled_atomic_spill_metadata(
-          spill.slot_offsets.size(), spill.vgpr_count, errors))
+  if (!validate_sampled_atomic_spill_metadata(spill, errors))
     return false;
   bool loaded_private_state = false;
   if (!append_sampled_atomic_snapshot_word(words, spill, saved_compare, compare_vgpr, arch,
@@ -828,8 +836,7 @@ struct SampledAtomicPreludeState {
 append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprSpillSequence &spill,
                                        uint16_t source_address, uint16_t saved_address,
                                        rj_code_arch_t arch, std::vector<std::string> &errors) {
-  if (!validate_consan_moi_sampled_atomic_spill_metadata(
-          spill.slot_offsets.size(), spill.vgpr_count, errors))
+  if (!validate_sampled_atomic_spill_metadata(spill, errors))
     return false;
   bool loaded_private_state = false;
   if (!append_sampled_atomic_snapshot_word(words, spill, saved_address, source_address, arch,

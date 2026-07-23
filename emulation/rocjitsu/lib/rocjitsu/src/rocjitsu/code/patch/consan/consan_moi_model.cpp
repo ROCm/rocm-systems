@@ -2087,15 +2087,6 @@ std::string_view consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSu
   return "unknown";
 }
 
-bool validate_consan_moi_sampled_atomic_spill_metadata(size_t slot_offset_count,
-                                                       uint16_t vgpr_count,
-                                                       std::vector<std::string> &errors) {
-  if (slot_offset_count == vgpr_count)
-    return true;
-  errors.emplace_back("ConSan MOI sampled atomic spill has incomplete slot metadata");
-  return false;
-}
-
 ConSanMoiAtomicAddressPlan
 plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vgpr,
                                uint16_t scratch_vgpr_count,
@@ -2229,8 +2220,12 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
       cdna_flat_encoding
           ? (site.mnemonic.starts_with("global_atomic") ? kCdnaGlobalNoSaddrEncoding : 0u)
           : flat_no_saddr_encoding(arch);
+  constexpr int32_t kSigned13Min = -(1 << 12);
+  constexpr int32_t kSigned13Max = (1 << 12) - 1;
   constexpr int32_t kSigned24Min = -(1 << 23);
   constexpr int32_t kSigned24Max = (1 << 23) - 1;
+  const int32_t signed_vglobal_offset_min = cdna_flat_encoding ? kSigned13Min : kSigned24Min;
+  const int32_t signed_vglobal_offset_max = cdna_flat_encoding ? kSigned13Max : kSigned24Max;
   const bool is_compare_exchange = consan_atomic_is_compare_exchange(site);
   const uint16_t value_word_count = static_cast<uint16_t>(site.width_bits / 32u);
   const uint16_t data_count =
@@ -2276,7 +2271,8 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
   if (*site.raw_saddr == flat_no_saddr) {
     if (*site.addr_vgpr >= 255u)
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedInputWidth);
-    if (*site.raw_ioffset < kSigned24Min || *site.raw_ioffset > kSigned24Max)
+    if (*site.raw_ioffset < signed_vglobal_offset_min ||
+        *site.raw_ioffset > signed_vglobal_offset_max)
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedOffset);
     const bool requires_materialization = *site.raw_ioffset != 0 || returned_value_aliases_address;
     const uint16_t minimum_scratch_count = requires_materialization ? 5u : 3u;
@@ -2322,7 +2318,8 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedInputWidth);
   if (*site.saddr_sgpr > 104u || (*site.saddr_sgpr & 1u) != 0u)
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
-  if (*site.raw_ioffset < kSigned24Min || *site.raw_ioffset > kSigned24Max)
+  if (*site.raw_ioffset < signed_vglobal_offset_min ||
+      *site.raw_ioffset > signed_vglobal_offset_max)
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedOffset);
   if (*site.addr_vgpr > 255u)
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedInputWidth);
@@ -2441,18 +2438,15 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
     std::optional<std::vector<uint32_t>> add_vaddr;
     if (instrumentation::is_cdna_family_arch(arch) &&
         plan.kind == ConSanMoiAtomicAddressKind::VglobalMaterialized) {
-      std::optional<uint16_t> sign_vgpr;
-      for (uint16_t candidate = plan.scratch_vgpr; candidate < plan.result_address_vgpr;
-           ++candidate) {
-        if (candidate != offset_vgpr) {
-          sign_vgpr = candidate;
-          break;
-        }
-      }
-      if (!sign_vgpr)
+      // The planner reserves at least three scratch words before the result
+      // pair. Keep a defensive check for externally constructed plans.
+      if (plan.result_address_vgpr <= plan.scratch_vgpr + 1u)
         return std::nullopt;
-      add_vaddr = instrumentation::build_v_add_u64_signed_vgpr_offset(
-          plan.result_address_vgpr, offset_vgpr, *sign_vgpr, arch);
+      uint16_t sign_vgpr = plan.scratch_vgpr;
+      if (sign_vgpr == offset_vgpr)
+        ++sign_vgpr;
+      add_vaddr = instrumentation::build_v_add_u64_signed_vgpr_offset(plan.result_address_vgpr,
+                                                                      offset_vgpr, sign_vgpr, arch);
     } else {
       add_vaddr =
           instrumentation::build_v_add_u64_vgpr_offset(plan.result_address_vgpr, offset_vgpr, arch);

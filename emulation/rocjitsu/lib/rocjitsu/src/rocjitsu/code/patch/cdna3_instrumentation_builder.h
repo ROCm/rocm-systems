@@ -282,7 +282,7 @@ build_cdna3_v_add_u64_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr,
 }
 
 /// @brief Add one sign-extended 32-bit VGPR offset to a 64-bit CDNA3 address pair.
-/// @details @p sign_vgpr is scratch distinct from the address pair and offset.
+/// @details @p sign_vgpr is a scratch VGPR distinct from the address pair and offset.
 [[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_cdna3_v_add_u64_signed_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr,
                                          uint16_t sign_vgpr, rj_code_arch_t arch) {

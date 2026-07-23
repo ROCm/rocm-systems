@@ -3,6 +3,7 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "rocjitsu/code/patch/spill_manager.h"
 
 namespace rocjitsu {
 namespace {
@@ -1012,16 +1013,39 @@ TEST(ConSanMoi, SignExtendsCdnaVglobalOffsetAt13BitBoundaries) {
   EXPECT_EQ(sign_extend_13_bit_offset(0xffffe014u), 20);
 }
 
-TEST(ConSanMoi, RejectsIncompleteSampledAtomicSpillMetadata) {
-  std::vector<std::string> errors;
-  EXPECT_FALSE(validate_consan_moi_sampled_atomic_spill_metadata(
-      /*slot_offset_count=*/1u, /*vgpr_count=*/2u, errors));
-  ASSERT_EQ(errors.size(), 1u);
-  EXPECT_EQ(errors.front(), "ConSan MOI sampled atomic spill has incomplete slot metadata");
-  errors.clear();
-  EXPECT_TRUE(validate_consan_moi_sampled_atomic_spill_metadata(
-      /*slot_offset_count=*/2u, /*vgpr_count=*/2u, errors));
-  EXPECT_TRUE(errors.empty());
+TEST(ConSanMoi, DetectsIncompleteSampledAtomicSpillMetadata) {
+  VgprSpillSequence spill;
+  spill.vgpr_count = 2u;
+  spill.slot_offsets = {0u};
+  EXPECT_FALSE(spill.has_complete_slot_metadata());
+  spill.slot_offsets.push_back(sizeof(uint32_t));
+  EXPECT_TRUE(spill.has_complete_slot_metadata());
+}
+
+TEST(ConSanMoi, CdnaVglobalMaterializationAvoidsOffsetAsSignScratch) {
+  ConSanMoiAtomicAddressPlan plan;
+  plan.kind = ConSanMoiAtomicAddressKind::VglobalMaterialized;
+  plan.support = ConSanMoiAtomicAddressSupport::Supported;
+  plan.input_address_vgpr = 4u;
+  plan.input_address_vgpr_count = 1u;
+  plan.scalar_base_sgpr = 20u;
+  plan.signed_byte_offset = 20;
+  plan.result_address_vgpr = 7u;
+  plan.result_address_vgpr_count = 2u;
+  plan.scratch_vgpr = 4u;
+  plan.scratch_vgpr_count = 5u;
+  plan.resource_source = ConSanRegisterAllocationSource::SpillRequired;
+  for (const SampledCdnaTarget &target : kSampledCdnaTargets) {
+    SCOPED_TRACE(target.label);
+    const auto materialization = build_consan_moi_atomic_address_materialization(
+        plan, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, target.arch);
+    const auto signed_add = instrumentation::build_v_add_u64_signed_vgpr_offset(
+        plan.result_address_vgpr, plan.input_address_vgpr,
+        /*sign_vgpr=*/5u, target.arch);
+    ASSERT_TRUE(materialization && signed_add);
+    ASSERT_GE(materialization->size(), 4u + signed_add->size());
+    EXPECT_TRUE(std::equal(signed_add->begin(), signed_add->end(), materialization->begin() + 4u));
+  }
 }
 
 TEST(ConSanMoi, CdnaSampledVglobalMaterializesVectorAndScalarAddressesInScratchTail) {
@@ -1150,21 +1174,41 @@ TEST(ConSanMoi, CdnaSampledVglobalMaterializesVectorAndScalarAddressesInScratchT
       EXPECT_EQ(address_plan.signed_byte_offset, test_case.signed_byte_offset);
       const uint16_t saved_address = static_cast<uint16_t>(*patch->scratch_vgpr + 8u);
       EXPECT_EQ(address_plan.result_address_vgpr, saved_address);
+      for (int32_t boundary : {-(1 << 12), (1 << 12) - 1}) {
+        ConSanAtomicSite boundary_site = *site;
+        boundary_site.raw_ioffset = boundary;
+        EXPECT_TRUE(plan_consan_moi_atomic_address(
+                        boundary_site, *patch->scratch_vgpr, patch->spilled_vgpr_count,
+                        ConSanRegisterAllocationSource::SpillRequired, target.arch,
+                        /*allow_post_guest_spill_operand_overlap=*/true)
+                        .supported());
+      }
+      for (int32_t out_of_range : {-(1 << 12) - 1, 1 << 12}) {
+        ConSanAtomicSite boundary_site = *site;
+        boundary_site.raw_ioffset = out_of_range;
+        EXPECT_EQ(plan_consan_moi_atomic_address(
+                      boundary_site, *patch->scratch_vgpr, patch->spilled_vgpr_count,
+                      ConSanRegisterAllocationSource::SpillRequired, target.arch,
+                      /*allow_post_guest_spill_operand_overlap=*/true)
+                      .support,
+                  ConSanMoiAtomicAddressSupport::UnsupportedOffset);
+      }
 
       const auto materialization = build_consan_moi_atomic_address_materialization(
           address_plan, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, target.arch);
       ASSERT_TRUE(materialization);
       if (test_case.scalar_base_sgpr) {
-        uint16_t sign_vgpr = *patch->scratch_vgpr;
-        if (sign_vgpr == address_plan.input_address_vgpr)
-          ++sign_vgpr;
+        EXPECT_NE(*patch->scratch_vgpr, address_plan.input_address_vgpr);
+        const uint16_t sign_vgpr = *patch->scratch_vgpr;
         const auto signed_add = instrumentation::build_v_add_u64_signed_vgpr_offset(
             address_plan.result_address_vgpr, address_plan.input_address_vgpr, sign_vgpr,
             target.arch);
         const auto zero_extended_add = instrumentation::build_v_add_u64_vgpr_offset(
             address_plan.result_address_vgpr, address_plan.input_address_vgpr, target.arch);
         ASSERT_TRUE(signed_add && zero_extended_add);
-        EXPECT_TRUE(contains_subsequence(*materialization, *signed_add));
+        ASSERT_GE(materialization->size(), 4u + signed_add->size());
+        EXPECT_TRUE(
+            std::equal(signed_add->begin(), signed_add->end(), materialization->begin() + 4u));
         EXPECT_FALSE(contains_subsequence(*materialization, *zero_extended_add));
       }
       AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());

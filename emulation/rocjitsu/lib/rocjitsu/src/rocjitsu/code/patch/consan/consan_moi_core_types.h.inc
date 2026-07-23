@@ -251,9 +251,6 @@ inline constexpr uint32_t kCdnaGlobalNoSaddrEncoding = 0x7fu;
   return static_cast<int32_t>(value << 19u) >> 19u;
 }
 
-[[nodiscard]] bool validate_consan_moi_sampled_atomic_spill_metadata(
-    size_t slot_offset_count, uint16_t vgpr_count, std::vector<std::string> &errors);
-
 [[nodiscard]] std::string_view
 consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSupport support);
 
@@ -266,7 +263,8 @@ consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSupport support);
 /// `saddr + zero_extend(vaddr) + signed24(ioffset)`; CDNA3/4 uses
 /// `saddr + sign_extend(vaddr) + signed13(ioffset)`. Operand overlap is only
 /// valid for a spill consumer that executes the guest first and preserves its
-/// effective-address inputs until materialization.
+/// effective-address inputs until materialization. The CDNA rule matches
+/// `shared/addr_calc_flat.h`, the simulator's effective-address source of truth.
 [[nodiscard]] ConSanMoiAtomicAddressPlan
 plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vgpr,
                                uint16_t scratch_vgpr_count,

@@ -162,6 +162,10 @@ struct VgprSpillSequence {
   std::vector<uint32_t> restore_words;
   uint32_t total_private_bytes = 0;
   bool uses_dynamic_stack_frame = false;
+
+  [[nodiscard]] bool has_complete_slot_metadata() const {
+    return slot_offsets.size() == vgpr_count;
+  }
 };
 
 /// @brief Reserve slots and encode a gfx1201 VGPR spill/fill sequence.

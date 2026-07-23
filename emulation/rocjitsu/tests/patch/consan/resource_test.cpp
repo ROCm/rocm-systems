@@ -103,6 +103,16 @@ TEST(ConSanInstructionBuilder, SignExtendsCdnaVgprOffsetBefore64BitAdd) {
   EXPECT_FALSE(instrumentation::build_v_add_u64_signed_vgpr_offset(
       kAddressVgpr, kOffsetVgpr, kOffsetVgpr, ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_FALSE(instrumentation::build_v_add_u64_signed_vgpr_offset(
+      kAddressVgpr, kOffsetVgpr, kAddressVgpr, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_FALSE(instrumentation::build_v_add_u64_signed_vgpr_offset(
+      kAddressVgpr, kOffsetVgpr, kAddressVgpr + 1u, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_FALSE(instrumentation::build_v_add_u64_signed_vgpr_offset(
+      /*address_vgpr=*/255u, kOffsetVgpr, kSignVgpr, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_FALSE(instrumentation::build_v_add_u64_signed_vgpr_offset(
+      kAddressVgpr, /*offset_vgpr=*/256u, kSignVgpr, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_FALSE(instrumentation::build_v_add_u64_signed_vgpr_offset(
+      kAddressVgpr, kOffsetVgpr, /*sign_vgpr=*/256u, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_FALSE(instrumentation::build_v_add_u64_signed_vgpr_offset(
       kAddressVgpr, kOffsetVgpr, kSignVgpr, ROCJITSU_CODE_ARCH_RDNA4));
 }
 
