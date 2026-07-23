@@ -123,9 +123,9 @@ jobs:
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
       # HARDCODED: Use prebuilt stages from known good TheRock run
-      # rocm-systems affects compiler-runtime, so we reuse downstream stages
+      # rocm-systems affects compiler-runtime; may be able to reuse math-libs
       # TODO(geomin12): Make dynamic once automatic baseline selection works
-      prebuilt_stages: ${{ inputs.prebuilt_stages || 'math-libs,profiler-apps,comm-libs,debug-tools,media-libs' }}
+      prebuilt_stages: ${{ inputs.prebuilt_stages || 'math-libs' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '29947789954' }}
       # Enable cross-repo artifact reuse: query TheRock for baseline runs
       stage_reuse_baseline_repository: "ROCm/TheRock"
