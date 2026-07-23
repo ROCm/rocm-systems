@@ -101,8 +101,15 @@ ncclResult_t ncclTuningRingModelSim(struct ncclTuningInput_t* const inputs, stru
     tuning->timeUs = -1.0;
     return ret;
   }
-  if (tuning->algo == NCCL_ALGO_RING && tuning->proto == NCCL_PROTO_SIMPLE && inputs->comm->nNodes > 1 &&
-      inputs->func == ncclFuncAllReduce && inputs->nBytes / (inputs->comm->nChannels * inputs->comm->nRanks) >= 64) {
+  // Update Ring/Simple latency for multi-node AllReduce and
+  // single NVL Domain AllGather/ReduceScatter for Blackwell
+  bool isBlackwellNvLink =
+    inputs->comm->minCompCap >= 100 && inputs->comm->graphs[NCCL_ALGO_RING].typeIntra == PATH_NVL;
+  bool ringSimplePlateau = (inputs->comm->nNodes > 1 && inputs->func == ncclFuncAllReduce) ||
+                           (inputs->comm->nNodes == 1 && isBlackwellNvLink &&
+                            (inputs->func == ncclFuncAllGather || inputs->func == ncclFuncReduceScatter));
+  if (tuning->algo == NCCL_ALGO_RING && tuning->proto == NCCL_PROTO_SIMPLE && ringSimplePlateau &&
+      inputs->nBytes / (inputs->comm->nChannels * inputs->comm->nRanks) >= 64) {
     lat *= inputs->comm->minCompCap < 80 ? 1.9 : 1.4; // Plateau effect of ring
   }
   tuning->timeUs = ncclTuningGetTime(inputs, tuning->algo, &lat, &bw);
