@@ -2719,10 +2719,9 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   return false;
 }
 
-[[nodiscard]] bool
-configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, ConSanResult &result,
-                                                      std::span<const uint8_t> bytes,
-                                                      rj_code_arch_t arch) {
+[[nodiscard]] bool configure_gfx1250_record_replay_owner_dispatch_assignments(
+    ConSanOptions &options, ConSanResult &result, std::span<const uint8_t> bytes,
+    rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_GFX1250 || options.moi_engine != ConSanMoiEngine::RecordReplay ||
       !options.automatic_moi_dispatch_id_sgprs || !options.moi_dispatch_id_sgpr ||
       !options.moi_exec_save_sgpr) {
@@ -2730,10 +2729,10 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
   }
 
   // Dispatch placement runs before transient EXEC-save placement. Ask the
-  // existing component planner to prove a complete owner-local scalar ABI for
-  // any newly included full-pressure component. Do not infer that the global
-  // EXEC-save window is safe merely because dispatch placement excluded the
-  // component before its liveness was considered.
+  // component planner to prove a complete owner-local scalar ABI for owners
+  // excluded by the global dispatch pair. The subsequent resource-plan rebuild
+  // retains owners that preserve the pair and explicitly undercovers every
+  // owner whose assignment has no unambiguous dispatch identity.
   const auto prior_assignments = options.moi_transient_sgpr_assignments;
   const auto prior_resolved_assignments = result.resolved_moi_transient_sgpr_assignments;
   const bool prior_partial_exec = options.automatic_moi_partial_exec_save_sgprs;
@@ -2747,15 +2746,10 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
     return false;
   }
 
-  // The component planner connects all callers of shared text and fails
-  // closed on gfx1250 unless it can assign every component. It also retains
-  // the hardware pair per owner exactly when that owner's scalar pressure
-  // permits it; otherwise the assignment's established contract is to record
-  // zero generation.
-  const bool selected_zero_generation =
+  const bool has_owner_without_dispatch =
       std::ranges::any_of(options.moi_transient_sgpr_assignments,
                           [](const auto &assignment) { return !assignment.dispatch_id_sgpr; });
-  if (!selected_zero_generation) {
+  if (!has_owner_without_dispatch) {
     options.moi_transient_sgpr_assignments = prior_assignments;
     result.resolved_moi_transient_sgpr_assignments = prior_resolved_assignments;
     options.automatic_moi_partial_exec_save_sgprs = prior_partial_exec;
@@ -2763,8 +2757,8 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
   }
 
   result.warnings.emplace_back(
-      "ConSan MOI selected owner-local zero-generation records where the gfx1250 hardware "
-      "dispatch-ID pair overlaps guest scalar state");
+      "ConSan MOI excluded owner components that cannot preserve an unambiguous hardware "
+      "dispatch ID");
   return true;
 }
 

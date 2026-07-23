@@ -213,8 +213,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       // local indirect island. Compact eight-word islands are not dispatchers.
       if (host.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
           host.original_size < (kMoiLocalIndirectIslandWords + 1u) * sizeof(uint32_t) ||
-          !owns_descriptor(host) ||
-          host_index + 1u >= result.patches.size())
+          !owns_descriptor(host) || host_index + 1u >= result.patches.size())
         continue;
       const ConSanPatchInfo &dispatcher = result.patches[host_index + 1u];
       if (dispatcher.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
@@ -363,10 +362,9 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       result.errors.emplace_back("ConSan MOI fence record patch has a stale cave mapping");
       return;
     }
-    const uint64_t entry_target = dense_relay
-                                      ? dense_relay->island_offset
-                                      : (has_indirect_entry_island ? indirect_entry_island
-                                                                   : placement->body_offset);
+    const uint64_t entry_target =
+        dense_relay ? dense_relay->island_offset
+                    : (has_indirect_entry_island ? indirect_entry_island : placement->body_offset);
     const auto fwd = compute_sopp_branch_simm16(placement->anchor_offset, entry_target);
     if (!fwd) {
       result.errors.emplace_back("ConSan MOI fence record forward branch is out of range");
@@ -840,13 +838,12 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
         result.sync_events, fence.communication_event_identity, &ConSanSyncEvent::identity);
     const bool unowned_communication =
         communication != result.sync_events.end() && communication->execution_owners.empty();
-    const auto fence_event = std::ranges::find(
-        result.sync_events, fence.fence_event_identity, &ConSanSyncEvent::identity);
+    const auto fence_event = std::ranges::find(result.sync_events, fence.fence_event_identity,
+                                               &ConSanSyncEvent::identity);
     const bool unowned_fence =
         fence_event != result.sync_events.end() && fence_event->execution_owners.empty();
     const bool unassociated_cache_operation =
-        fence.rejection_reason ==
-        "fence-not-associated-with-addressed-communication-sequence";
+        fence.rejection_reason == "fence-not-associated-with-addressed-communication-sequence";
     if (!fence.eligible) {
       reason = ConSanSiteDispositionReason::IneligibleFence;
     } else if (communication == result.sync_events.end() || unowned_communication) {
@@ -1015,13 +1012,9 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
       ConSanOptions owner_options = options;
       if (!options.moi_transient_sgpr_assignments.empty() &&
           !apply_moi_transient_sgpr_assignment(owner_options, plan.owner_descriptor_file_offsets)) {
-        if (state.arch == ROCJITSU_CODE_ARCH_GFX1250)
-          continue;
         owner_options.moi_dispatch_id_sgpr.reset();
       }
       if (plan.owner_descriptor_file_offsets.empty())
-        continue;
-      if (state.arch == ROCJITSU_CODE_ARCH_GFX1250 && !owner_options.moi_dispatch_id_sgpr)
         continue;
       const bool missing_dispatch = !owner_options.moi_dispatch_id_sgpr;
       const uint16_t dispatch_base = owner_options.moi_dispatch_id_sgpr.value_or(0u);

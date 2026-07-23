@@ -521,17 +521,35 @@ TEST(ConSanMoi, WorkgroupShadowLayoutUsesOneEightByteSlotPerFourByteLdsCell) {
   EXPECT_FALSE(plan_consan_moi_workgroup_shadow(21848u));
 }
 
-TEST(ConSanMoi, Gfx1250WorkgroupShadowPlansBeyond64KiB) {
-  constexpr uint32_t kOriginalLdsBytes = 71936u;
-  const auto layout = plan_consan_moi_compact_workgroup_shadow(
-      kOriginalLdsBytes, consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250));
+TEST(ConSanMoi, Gfx1250WorkgroupShadowUsesConfiguredAperture) {
+  constexpr uint32_t kConfiguredLdsBytes =
+      consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250);
+  constexpr uint32_t kOriginalLdsBytes = kConfiguredLdsBytes / 4u;
+  const auto layout =
+      plan_consan_moi_compact_workgroup_shadow(kOriginalLdsBytes, kConfiguredLdsBytes);
 
   ASSERT_TRUE(layout);
   EXPECT_EQ(layout->base, kOriginalLdsBytes);
-  EXPECT_GT(layout->required_group_segment_size, 64u * 1024u);
-  EXPECT_LE(layout->required_group_segment_size, 320u * 1024u);
+  EXPECT_LE(layout->required_group_segment_size, kConfiguredLdsBytes);
   EXPECT_TRUE(layout->compact);
   EXPECT_TRUE(layout->lazy_initialization);
+  EXPECT_FALSE(plan_consan_moi_compact_workgroup_shadow(kConfiguredLdsBytes, kConfiguredLdsBytes));
+}
+
+TEST(ConSanMoi, InlineExactDispatchBanksTrackConfiguredLdsAperture) {
+  constexpr uint64_t kExactBytesPerBank = ((static_cast<uint64_t>(kConSanMoiInlineMaximumLdsBytes) +
+                                            consan_moi_exact_shadow::granule_bytes - 1u) /
+                                           consan_moi_exact_shadow::granule_bytes) *
+                                          sizeof(ConSanMoiInlineExactShadowSlot);
+  constexpr uint64_t kExactShadowBudget = kConSanMoiAutoReportBufferCeilingBytes / 2u;
+
+  EXPECT_EQ(kConSanMoiInlineExactDispatchBankCount,
+            consan_moi_inline_exact_dispatch_bank_count_for_lds(kConSanMoiInlineMaximumLdsBytes));
+  EXPECT_LE(kExactBytesPerBank * kConSanMoiInlineExactDispatchBankCount, kExactShadowBudget);
+  if (kConSanMoiInlineExactDispatchBankCount < 256u) {
+    EXPECT_GT(kExactBytesPerBank * (kConSanMoiInlineExactDispatchBankCount * 2u),
+              kExactShadowBudget);
+  }
 }
 
 TEST(ConSanMoi, LazyWorkgroupShadowAddsTwoBitValidityState) {

@@ -940,8 +940,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               static_cast<uint32_t>(candidate.text_offset + sizeof(uint32_t) - island_offset));
         }
         std::vector<uint32_t> matched_words;
-        if (!explicit_dense_key && !collapsed_spill_router &&
-            candidate.size > sizeof(uint32_t)) {
+        if (!explicit_dense_key && !collapsed_spill_router && candidate.size > sizeof(uint32_t)) {
           const uint32_t adjustment = candidate.size - sizeof(uint32_t);
           matched_words.push_back(
               build_s_add_u32(call_return_sgpr, call_return_sgpr, /*literal=*/255u, arch));
@@ -959,8 +958,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         if (direct_body) {
           matched_words.push_back(build_s_branch(*direct_body, arch));
         } else if (!append_moi_scc_preserving_indirect_jump(
-                       matched_words, matched_offset, planned_patch->placement.body_offset,
-                       pc_sgpr,
+                       matched_words, matched_offset, planned_patch->placement.body_offset, pc_sgpr,
                        special_state.scc_save_sgpr, /*capture_scc=*/false, arch)) {
           result.errors.emplace_back(
               "ConSan MOI sampled probe could not encode a dense dispatch target");

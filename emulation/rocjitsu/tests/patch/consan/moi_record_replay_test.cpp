@@ -2053,7 +2053,7 @@ TEST(ConSanMoi, RecordReplayDeadSgprWindowRejectsAnyLiveLane) {
   }));
 }
 
-TEST(ConSanMoi, RecordReplayAutomaticExecSaveOverridesOnlyIncompatibleOwner) {
+TEST(ConSanMoi, RecordReplayAutomaticExecSaveExcludesOwnerWithoutDispatchPair) {
   const auto make_owner = [](uint16_t first_live, uint16_t last_live, uint16_t dead_destination) {
     std::vector<uint32_t> words = {
         0xD8340000u,
@@ -2066,8 +2066,9 @@ TEST(ConSanMoi, RecordReplayAutomaticExecSaveOverridesOnlyIncompatibleOwner) {
     return words;
   };
   // The first owner leaves only s0:s7 dead at its access. The second leaves
-  // only s98:s105 dead. Their union has no code-object-wide five-SGPR
-  // window, but each independent owner has a safe transient window.
+  // only s98:s105 dead. Their union has no code-object-wide five-SGPR window.
+  // An owner-local EXEC-save window is not sufficient when the owner cannot
+  // also preserve a real hardware dispatch identity.
   const std::vector<uint32_t> first_words =
       make_owner(/*first_live=*/8u, /*last_live=*/105u, /*dead_destination=*/0u);
   const std::vector<uint32_t> second_words =
@@ -2096,14 +2097,18 @@ TEST(ConSanMoi, RecordReplayAutomaticExecSaveOverridesOnlyIncompatibleOwner) {
   EXPECT_FALSE(result.resolved_moi_transient_sgpr_assignments.front().dispatch_id_sgpr);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
-            2u);
-  EXPECT_TRUE(std::ranges::all_of(result.resource_plans, [](const auto &plan) {
-    return plan.site_kind != ConSanResourceSiteKind::Access ||
-           plan.source != ConSanRegisterAllocationSource::Unsupported;
-  }));
+            1u);
+  EXPECT_EQ(
+      std::ranges::count_if(result.resource_plans,
+                            [](const auto &plan) {
+                              return plan.site_kind == ConSanResourceSiteKind::Access &&
+                                     plan.source == ConSanRegisterAllocationSource::Unsupported &&
+                                     plan.reason == ConSanRegisterPlanReason::ForbiddenOverlap;
+                            }),
+      1u);
 }
 
-TEST(ConSanMoi, Gfx1250RecordReplayKeepsDispatchOnlyFullPressureOwner) {
+TEST(ConSanMoi, Gfx1250RecordReplayExcludesDispatchOnlyFullPressureOwner) {
   std::vector<uint32_t> low_pressure_words(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   low_pressure_words[0] = 0xD8340000u;
   low_pressure_words[1] = 0x00000000u; // ds_store_b32 v0, v0
@@ -2135,11 +2140,15 @@ TEST(ConSanMoi, Gfx1250RecordReplayKeepsDispatchOnlyFullPressureOwner) {
                               return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
                                      patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
                             }),
-      2u);
-  EXPECT_TRUE(std::ranges::all_of(result.resource_plans, [](const auto &plan) {
-    return plan.site_kind != ConSanResourceSiteKind::Access ||
-           plan.source != ConSanRegisterAllocationSource::Unsupported;
-  }));
+      1u);
+  EXPECT_EQ(
+      std::ranges::count_if(result.resource_plans,
+                            [](const auto &plan) {
+                              return plan.site_kind == ConSanResourceSiteKind::Access &&
+                                     plan.source == ConSanRegisterAllocationSource::Unsupported &&
+                                     plan.reason == ConSanRegisterPlanReason::ForbiddenOverlap;
+                            }),
+      1u);
   const auto full_pressure_kernel =
       std::ranges::find(result.kernels, "lds_helper", &ConSanKernelInfo::name);
   ASSERT_NE(full_pressure_kernel, result.kernels.end());
@@ -2149,9 +2158,8 @@ TEST(ConSanMoi, Gfx1250RecordReplayKeepsDispatchOnlyFullPressureOwner) {
       });
   ASSERT_NE(full_pressure_assignment, result.resolved_moi_transient_sgpr_assignments.end());
   EXPECT_FALSE(full_pressure_assignment->dispatch_id_sgpr);
-  EXPECT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("owner-local zero-generation records") != std::string::npos;
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("zero-generation") != std::string::npos;
   }));
 }
 
@@ -2201,7 +2209,9 @@ TEST(ConSanMoi, RecordReplayOwnerLocalExecSaveRequiresCommonWindowForSharedHelpe
 TEST(ConSanMoi, RecordReplaySpillsExecVccStateOnGfx12) {
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
     SCOPED_TRACE(arch);
-    const std::array<uint16_t, 4> dead = {0u, 1u, 4u, 6u};
+    // Keep the high hardware dispatch-ID pair available while forcing the
+    // noncontiguous transient EXEC/VCC/SCC state through the spill path.
+    const std::array<uint16_t, 6> dead = {0u, 1u, 4u, 6u, 104u, 105u};
     const uint32_t access_count = arch == ROCJITSU_CODE_ARCH_GFX1250 ? 9u : 1u;
     std::vector<uint32_t> words;
     for (uint32_t index = 0; index < access_count; ++index) {
@@ -2395,7 +2405,7 @@ TEST(ConSanMoi, Rdna4ModerateSpillBackedDispatcherKeepsCompactRelaySpacing) {
 
 TEST(ConSanMoi, RecordReplaySpillBackedDenseHostDoesNotConsumeNearbyBarrier) {
   constexpr uint32_t kAccessCount = 9u;
-  const std::array<uint16_t, 6> dead = {0u, 1u, 4u, 6u, 8u, 9u};
+  const std::array<uint16_t, 8> dead = {0u, 1u, 4u, 6u, 8u, 9u, 104u, 105u};
   std::vector<uint32_t> words(
       9u, build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, ROCJITSU_CODE_ARCH_GFX1250));
   for (uint32_t index = 0; index < kAccessCount; ++index) {

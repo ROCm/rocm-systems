@@ -183,8 +183,7 @@ TEST(ConSanMoi, Cdna4UnassociatedFenceIsNotApplicable) {
   ASSERT_TRUE(fence);
   std::vector<uint32_t> text_words(fence->begin(), fence->end());
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
-  const std::vector<uint8_t> bytes =
-      make_cdna4_lds_code_object(text_words, "unassociated_fence");
+  const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words, "unassociated_fence");
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_track_atomics = true;
 

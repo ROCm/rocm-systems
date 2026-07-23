@@ -110,7 +110,7 @@ TEST(ConSanMoiAutoReportPlan, InlineRoundsDeclaredLdsAndKeepsOrderingTablesIndep
                                      7 * sizeof(ConSanMoiInlineAcquiredEpochTokenSlot));
 }
 
-TEST(ConSanMoiAutoReportPlan, InlineFullLdsRetainsBroadDispatchBanking) {
+TEST(ConSanMoiAutoReportPlan, InlineFullLdsUsesConfiguredDispatchBanking) {
   constexpr uint64_t kFullLdsBytes = 64u * 1024u;
   const ConSanMoiAutoReportInventory inventory{
       .engine = ConSanMoiEngine::InlineShadow,
@@ -120,7 +120,8 @@ TEST(ConSanMoiAutoReportPlan, InlineFullLdsRetainsBroadDispatchBanking) {
   const auto plan = plan_consan_moi_auto_report(inventory);
 
   ASSERT_TRUE(plan.complete());
-  EXPECT_GE(kConSanMoiInlineExactDispatchBankCount, 256u);
+  EXPECT_EQ(kConSanMoiInlineExactDispatchBankCount,
+            consan_moi_inline_exact_dispatch_bank_count_for_lds(kConSanMoiInlineMaximumLdsBytes));
   EXPECT_EQ(plan.layout.exact_shadow_entry_capacity,
             (kFullLdsBytes / consan_moi_exact_shadow::granule_bytes) *
                 kConSanMoiInlineExactDispatchBankCount);

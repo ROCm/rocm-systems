@@ -216,9 +216,8 @@ struct ConSanMoiPrologueScratchVgprAssignment {
 struct ConSanMoiTransientSgprAssignment {
   uint64_t descriptor_file_offset = 0;
   uint16_t exec_save_sgpr = 0;
-  /// A code-object-wide dispatch pair can be unavailable to an otherwise
-  /// patchable full-pressure owner. Such an owner keeps its instrumentation
-  /// and records zero generation rather than clobbering guest scalar state.
+  /// A missing owner-local dispatch pair excludes dispatch-qualified probes
+  /// for that owner rather than emitting records with an ambiguous identity.
   std::optional<uint16_t> dispatch_id_sgpr;
   bool spill_backed = false;
   std::optional<uint16_t> indirect_pc_sgpr;

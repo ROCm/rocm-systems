@@ -159,13 +159,13 @@ hosts by far fence probes.  The latter restores `001_sk_mxf8f4gemm_tdm` and
 `004_sk_mxf8gemm_tdm` from 8/24 to 24/24 fences without changing the RDNA4
 path.
 
-The norm/softmax regression is fixed.  Five full-pressure reduction kernels
-could not preserve the code-object-wide hardware dispatch-ID pair even though
-they had a complete owner-local scalar ABI.  Record/Replay now uses its
-defined zero-generation fallback only for those proven-safe owner components.
-The current exact run is complete at 4,756/4,756 accesses and 2,352/2,352
-barriers, and its paired one-repetition bundle measures 211.06x.  The full
-shared ConSan suite, including the RDNA4 cases, remains green.
+The norm/softmax revalidation exposed five full-pressure reduction kernels
+that could not preserve the code-object-wide hardware dispatch-ID pair.  A
+prior run retained their probes with generation zero, but replay substituted
+the report-header generation and could conflate records from different
+dispatches.  Record/Replay now excludes those owner components unless it can
+preserve a real hardware dispatch identity.  The earlier 4,756/4,756 result is
+therefore not accepted as current coverage and requires revalidation.
 
 A later cheap-row audit at source revision `b6143a2ce1` and hook SHA-256
 `fd67f1ce7ee438952d8f798b395ce1c75ea87e86fdead53eae5327e8a587fd57`
@@ -253,7 +253,7 @@ that workaround consistently.
 | P1 | `torch.sort` over segmented rows | 🟩 Exact values/indices; 48,224/48,224 accesses; current paired 184.68x | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 370.29x | 🟩 Exact values/indices; 48,224/48,224 accesses and 12,064/12,064 barrier members; current paired 171.77x; reviewed noncausal fault accepted | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 416.22x | All four profile bundles accepted. |
 | P1 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🟩 Exact collision sums; 23/23 accesses; current paired 24.37x | 🟩 Exact collision sums; 23/23 accesses; current paired 42.30x | 🟩 Exact collision sums; 23/23 accesses; current paired 41.91x | 🟩 Exact collision sums; 23/23 accesses; current paired 40.17x | All profiles accepted; ordered-atomic fault modes are typed N/A for this relaxed singleton reduction. |
 | P1 | `torch.histc` with a shared-memory-sized bin count | 🟩 Exact counts; 133/133 supported accesses; current paired 60.11x | 🟩 Exact counts; 175/175 accesses and 84/84 barriers; current paired 72.00x | 🟩 Exact counts; 175/175 accesses and 168/168 applicable barriers; current paired 67.37x | 🟩 Exact counts; 175/175 accesses and 84/84 barriers; current paired 85.86x | All four profile bundles accepted, including causal barrier-fault evidence. |
-| P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🟩 Exact norm/softmax; 4,756/4,756 accesses; current paired 315.57x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 211.06x; reviewed exact-one fault and health accepted | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 4,572/4,572 barriers; current paired 534.97x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 317.24x | Record/Replay uses owner-local zero-generation records where full-pressure kernels cannot preserve the global dispatch-ID pair; all profiles have accepted bundles. |
+| P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🟩 Exact norm/softmax; 4,756/4,756 accesses; current paired 315.57x | 🟨 Prior exact bundle invalidated; full-pressure owners without a hardware dispatch-ID pair are now explicitly undercovered and require revalidation | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 4,572/4,572 barriers; current paired 534.97x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 317.24x | Record/Replay fails closed instead of replaying ambiguous zero-generation records; the other profiles retain accepted bundles. |
 | P1 | PyTorch cluster synchronization | 🟩 Exact oracle; 25/25 applicable accesses; current paired 1.02x | 🟩 Exact oracle; 25/25 accesses and 2/2 barriers; current paired 1.03x | 🟩 Exact oracle; 25/25 accesses and 4/4 barrier members; current paired 1.07x | 🟩 Exact oracle; 25/25 accesses and 2/2 barriers; current paired 1.24x | All profiles accepted for the causal cluster-scope synchronization workload. |
 | Survey | Cluster-memory and inter-workgroup synchronization from PyTorch | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | Cluster-scope synchronization is covered; no distinct cluster-memory opcode is claimed. |
 
