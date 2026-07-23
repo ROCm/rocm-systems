@@ -172,9 +172,10 @@ struct RocpdImportData
     size_t size() const { return (connection) ? databases.size() : 0; }
     bool   empty() const { return databases.empty() || !connection; }
 
-    py::object               connection     = {};
-    std::vector<std::string> databases      = {};
-    rocpd_version_triplet_t  schema_version = {0, 0, 0};
+    py::object               connection         = {};
+    std::vector<std::string> databases          = {};
+    rocpd_version_triplet_t  schema_version     = {0, 0, 0};
+    std::vector<std::string> supported_features = {};
 };
 
 struct jinja_variables
@@ -378,7 +379,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .def(py::init<py::object, std::vector<std::string>>())
         .def_readonly("connection", &rocpd::RocpdImportData::connection)
         .def_readonly("databases", &rocpd::RocpdImportData::databases)
-        .def_readwrite("schema_version", &rocpd::RocpdImportData::schema_version);
+        .def_readwrite("schema_version", &rocpd::RocpdImportData::schema_version)
+        .def_readwrite("supported_features", &rocpd::RocpdImportData::supported_features);
 
     pyrocpd.def("load_schema",
                 [](rocpd_sql_engine_t            engine,
@@ -509,11 +511,16 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             auto  perfetto_session = rocpd::output::PerfettoSession{output_cfg, conn};
 
             //
-            // Identify schema specific limits & features here
+            // Identify schema specific limits & features here.
+            // Feature names are resolved in Python (features.py) and stored on
+            // RocpdImportData.supported_features so C++ never duplicates version constants.
             //
-            auto           schema_version           = data.schema_version;
-            constexpr auto graph_launch_min_version = rocpd_version_triplet_t{3, 0, 2};
-            const auto     graph_launch_supported   = (schema_version >= graph_launch_min_version);
+            auto schema_version = data.schema_version;
+            auto has_feature    = [&data](std::string_view name) {
+                const auto& feats = data.supported_features;
+                return std::find(feats.begin(), feats.end(), name) != feats.end();
+            };
+            const auto graph_launch_supported = has_feature("graph_launch");
 
             //
             // End of schema specific limits & features

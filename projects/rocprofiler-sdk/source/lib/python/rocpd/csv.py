@@ -32,18 +32,6 @@ from . import output_config
 from . import libpyrocpd
 
 
-_SUPPORTED_FEATURES = []
-
-_supported_features_lookup_table = {
-    "graph_launch": libpyrocpd.schema_version(3, 0, 2),
-}
-
-def _build_supported_features_list(importData):
-    for feature, schema_version in _supported_features_lookup_table.items():
-        global _SUPPORTED_FEATURES
-        if importData.schema_version >= schema_version:
-            _SUPPORTED_FEATURES.append(feature)
-
 def write_sql_query_to_csv(
     connection: RocpdImportData,
     config,
@@ -235,7 +223,7 @@ def get_kernel_csv_query(importData, config) -> str:
 
     # check if graph_launch is supported and add new fields:
     hip_graph_fields = ()
-    if "graph_launch" in _SUPPORTED_FEATURES:
+    if "graph_launch" in importData.supported_features:
         hip_graph_fields = ("graph_exec_id", "graph_node_id")
 
     select_columns = [
@@ -293,7 +281,7 @@ def write_memory_copy_csv(importData, config) -> None:
 
     # check if graph_launch is supported and add new fields:
     hip_graph_fields = ()
-    if "graph_launch" in _SUPPORTED_FEATURES:
+    if "graph_launch" in importData.supported_features:
         hip_graph_fields = (
             "graph_exec_id",
             "graph_node_id",
@@ -509,8 +497,6 @@ def write_region_csv(importData, config) -> None:
 
 def write_csv(importData, config):
 
-    _build_supported_features_list(importData)
-
     write_agent_info_csv(importData, config)
     write_counters_csv(importData, config)
     write_kernel_csv(importData, config)
@@ -520,7 +506,7 @@ def write_csv(importData, config):
     write_scratch_memory_csv(importData, config)
 
     # graph launch was not introduced until schema version 3.0.2
-    if "graph_launch" in _SUPPORTED_FEATURES:
+    if "graph_launch" in importData.supported_features:
         write_graph_launch_csv(importData, config)
 
     if importData.schema_version >= libpyrocpd.schema_version(3, 0, 3):
