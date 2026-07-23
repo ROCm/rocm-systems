@@ -3667,8 +3667,12 @@ TEST(ConSanMoi, Gfx1250RejectsConfiguredPersistentStateAtOrdinarySgprLimit) {
 }
 
 TEST(ConSanMoi, SupportedCdnaTargetsHonorConfiguredPersistentStateSgprLimit) {
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
-    SCOPED_TRACE(arch == ROCJITSU_CODE_ARCH_CDNA3 ? "gfx942/cdna3" : "gfx950/cdna4");
+  constexpr std::array kTargets = {
+      std::pair{ROCJITSU_CODE_ARCH_CDNA3, std::string_view{"gfx942/cdna3"}},
+      std::pair{ROCJITSU_CODE_ARCH_CDNA4, std::string_view{"gfx950/cdna4"}},
+  };
+  for (const auto &[arch, target_name] : kTargets) {
+    SCOPED_TRACE(target_name);
     const auto guest =
         arch == ROCJITSU_CODE_ARCH_CDNA3
             ? build_cdna3_ds_store_b32(/*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, arch)
