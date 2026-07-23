@@ -5860,7 +5860,7 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
-### amdsmi_set_gpu_memory_partition
+### amdsmi_set_gpu_memory_partition_mode
 
 Description: Set the memory partition to the given GPU. This function does not allow any concurrent operations. Devices must be idle and have no workloads when performing set partition operations.
 
@@ -5871,7 +5871,7 @@ Input parameters:
 
 Output: `None`
 
-Exceptions that can be thrown by `amdsmi_set_gpu_memory_partition` function:
+Exceptions that can be thrown by `amdsmi_set_gpu_memory_partition_mode` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
@@ -5895,7 +5895,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi.amdsmi_set_gpu_memory_partition(device, memory_partition)
+            amdsmi.amdsmi_set_gpu_memory_partition_mode(device, memory_partition)
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:

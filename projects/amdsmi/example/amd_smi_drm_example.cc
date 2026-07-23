@@ -733,13 +733,13 @@ int main() {
             amdsmi_memory_partition_type_t updatePartition =
                 static_cast<amdsmi_memory_partition_type_t>(partition);
             auto ret_set =
-                amdsmi_set_gpu_memory_partition(processor_handles[device_index], updatePartition);
+                amdsmi_set_gpu_memory_partition_mode(processor_handles[device_index], updatePartition);
             amdsmi_status_code_to_string(ret_set, &err_str);
             if (ret_set == AMDSMI_STATUS_SUCCESS) {
               PRINT_AMDSMI_RET(ret_set)
               std::cout << "    Output of amdsmi_set_gpu_memory_partition:\n";
             }
-            std::cout << "\tamdsmi_set_gpu_memory_partition(" << gpu_number << ", "
+            std::cout << "\tamdsmi_set_gpu_memory_partition_mode(" << gpu_number << ", "
                       << memoryPartitionString(updatePartition) << "): " << err_str << "\n\n";
 
             // Reload only if the memory partition was set successfully
@@ -832,14 +832,14 @@ int main() {
         // Reset to original memory partition settings
         amdsmi_memory_partition_type_t orig_partition = orig_partitions[gpu_number];
         amdsmi_status_t ret_set =
-            amdsmi_set_gpu_memory_partition(processor_handles[device_index], orig_partition);
+            amdsmi_set_gpu_memory_partition_mode(processor_handles[device_index], orig_partition);
         const char* err_str;
         amdsmi_status_code_to_string(ret_set, &err_str);
         if (ret_set == AMDSMI_STATUS_SUCCESS) {
           PRINT_AMDSMI_RET(ret_set)
           std::cout << "    Output of amdsmi_set_gpu_memory_partition:\n";
         }
-        std::cout << "\tamdsmi_set_gpu_memory_partition(" << gpu_number << ", "
+        std::cout << "\tamdsmi_set_gpu_memory_partition_mode(" << gpu_number << ", "
                   << memoryPartitionString(orig_partition) << "): " << err_str << "\n\n";
         // Reload only if the memory partition was set successfully
         if (ret_set == AMDSMI_STATUS_SUCCESS) {
