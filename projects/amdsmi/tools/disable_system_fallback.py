@@ -23,6 +23,14 @@ def main(argv: List[str]) -> None:
         sys.exit(f"usage: {argv[0]} <staged amdsmi_wrapper.py>")
     path = pathlib.Path(argv[1])
     text = path.read_text(encoding="utf-8")
+
+    # A rebuild reuses the already-flipped staged copy (copy_if_different does
+    # not re-copy an unchanged source), so treat an already-disabled flag as a
+    # no-op instead of failing.
+    if ANCHOR not in text and text.count(REPLACEMENT) == 1:
+        print(f"[disable_system_fallback] {path}: already disabled, nothing to do")
+        return
+
     count = text.count(ANCHOR)
     if count != 1:
         sys.exit(
