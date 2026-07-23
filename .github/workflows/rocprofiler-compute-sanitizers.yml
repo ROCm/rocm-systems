@@ -127,19 +127,12 @@ jobs:
       - name: Output TheRock manifest
         run: cat "${ROCM_PATH}/share/therock/therock_manifest.json"
 
-      - name: Inspect clang resource dir
-        shell: bash
-        run: |
-          resource_dir="$("${ROCM_PATH}/llvm/bin/clang" -print-resource-dir)"
-          echo "resource_dir=${resource_dir}"
-          find "${resource_dir}/lib" -maxdepth 2 | sort || true
-
       - name: Locate clang sanitizer runtime
         id: sanitizer_runtime
         shell: bash
         run: |
           resource_dir="$("${ROCM_PATH}/llvm/bin/clang" -print-resource-dir)"
-          sanitizer_lib_dir="${resource_dir}/lib/linux"
+          sanitizer_lib_dir="${resource_dir}/lib/x86_64-unknown-linux-gnu"
           if [ ! -d "${sanitizer_lib_dir}" ]; then
             echo "❌ Missing clang sanitizer runtime: ${sanitizer_lib_dir}"
             exit 1
