@@ -794,10 +794,7 @@ candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
            : 0u));
 }
 
-[[nodiscard]] uint16_t sampled_atomic_scratch_count(const ConSanOptions &options) {
-  (void)options;
-  return 10u;
-}
+[[nodiscard]] constexpr uint16_t sampled_atomic_scratch_count() { return 10u; }
 
 [[nodiscard]] bool reject_candidate_scratch_range_overlap(const ConSanMoiCandidate &candidate,
                                                           uint16_t scratch_vgpr,

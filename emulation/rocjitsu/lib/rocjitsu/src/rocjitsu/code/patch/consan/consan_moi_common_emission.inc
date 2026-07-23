@@ -363,7 +363,8 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
     // Shared text needs one immediate layout. Starting above the maximum
     // original private size makes the same save/fill sequence legal for every
     // owner; site-local spill frames may safely reuse these offsets.
-    SpillManager shared_manager(resources.original_private_segment_size, *private_limit);
+    SpillManager shared_manager(
+        private_layout_base.value_or(resources.original_private_segment_size), *private_limit);
     auto spill = build_vgpr_spill_sequence(shared_manager, resources.base, resources.count, arch);
     if (!spill)
       warnings.emplace_back("ConSan MOI could not encode the shared-owner VGPR spill window");

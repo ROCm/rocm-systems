@@ -590,7 +590,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
     for (size_t index = 0; index < candidates.size(); ++index) {
       const AtomicRecordCandidate &candidate = candidates[index];
       const uint16_t scratch_count =
-          options.moi_engine == ConSanMoiEngine::Sampled ? sampled_atomic_scratch_count(options)
+          options.moi_engine == ConSanMoiEngine::Sampled ? sampled_atomic_scratch_count()
           : options.moi_engine == ConSanMoiEngine::InlineShadow
               ? inline_shadow_atomic_scratch_count(candidate.site, candidate.event_kind, state.arch)
               : atomic_record_scratch_count(candidate.site, state.arch);

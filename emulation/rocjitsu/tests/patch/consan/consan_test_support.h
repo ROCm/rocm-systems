@@ -13,7 +13,6 @@
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/gfx1250_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
-#include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
 #include "util/bit.h"
@@ -916,6 +915,7 @@ make_cdna4_disconnected_scalar_pressure_code_object(uint16_t live_sgpr_count = 9
 }
 
 struct TwoKernelSharedFixtureOptions {
+  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
   uint32_t first_vgpr_granulated = kRdna4Wave64AllVgprsGranulated;
   uint32_t second_vgpr_granulated = kRdna4Wave64AllVgprsGranulated;
   uint32_t first_private_bytes = 0;
@@ -928,6 +928,7 @@ struct TwoKernelSharedFixtureOptions {
   bool helper_keeps_v1_v3_live = false;
   bool helper_has_ordinary_memory = false;
   bool helper_has_ordered_atomic = false;
+  bool helper_has_sampled_ordered_atomic = false;
   bool helper_atomic_acquire_release = false;
   bool helper_has_barrier = false;
   bool unrelated_has_lds = false;
@@ -943,18 +944,17 @@ make_rdna4_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOpti
   constexpr uint32_t kLiteralOperand = 255;
   std::vector<uint32_t> first_kernel(options.use_indirect_calls ? 7u : 1u, 0);
   if (options.first_continuation_uses_v1) {
-    first_kernel.push_back(
-        build_v_mov_b32_e32(/*vdst=*/1, vector_source_vgpr(1), ROCJITSU_CODE_ARCH_RDNA4));
+    first_kernel.push_back(build_v_mov_b32_e32(/*vdst=*/1, vector_source_vgpr(1), options.arch));
   }
   for (uint16_t sgpr : options.first_continuation_live_sgprs) {
     first_kernel.push_back(build_s_mov_b32(/*sdst=*/0, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
   }
-  first_kernel.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  first_kernel.push_back(build_s_endpgm(options.arch));
   std::vector<uint32_t> second_kernel(options.use_indirect_calls ? 7u : 1u, 0);
   for (uint16_t sgpr : options.second_continuation_live_sgprs) {
     second_kernel.push_back(build_s_mov_b32(/*sdst=*/105, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
   }
-  second_kernel.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  second_kernel.push_back(build_s_endpgm(options.arch));
   std::vector<uint32_t> unrelated_kernel;
   if (options.unrelated_has_lds) {
     unrelated_kernel.push_back(0xD8340000u);
@@ -962,7 +962,7 @@ make_rdna4_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOpti
   }
   if (options.unrelated_has_barrier)
     unrelated_kernel.push_back(0xBF940000u); // s_barrier_wait -1
-  unrelated_kernel.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  unrelated_kernel.push_back(build_s_endpgm(options.arch));
   std::vector<uint32_t> helper;
   if (options.helper_has_barrier) {
     helper = {
@@ -978,6 +978,25 @@ make_rdna4_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOpti
         0xEE050004u, 7u | (2u << 18u) | (1u << 20u),
         10u | (0xfffff0u << 8u), // global_load_b32 v7, v10, s[4:5] offset:-16
     };
+  } else if (options.helper_has_sampled_ordered_atomic) {
+    if (options.arch != ROCJITSU_CODE_ARCH_CDNA4)
+      return {};
+    const auto access = build_cdna4_ds_store_b32(
+        /*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, options.arch);
+    const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+    const auto atomic = build_cdna4_flat_atomic_add_u32(
+        /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true,
+        /*scope=*/2, options.arch);
+    const auto wait = build_cdna4_s_wait_flat0(options.arch);
+    const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});
+    if (!access || !atomic || !wait)
+      return {};
+    helper.insert(helper.end(), access->begin(), access->end());
+    helper.insert(helper.end(), release.begin(), release.end());
+    helper.push_back(*wait);
+    helper.insert(helper.end(), atomic->begin(), atomic->end());
+    helper.push_back(*wait);
+    helper.insert(helper.end(), acquire.begin(), acquire.end());
   } else if (options.helper_has_ordered_atomic) {
     const auto atomic = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
         /*vaddr=*/0, /*vsrc=*/2, /*vdst=*/3, /*return_old_value=*/false, /*scope=*/2,
@@ -997,14 +1016,11 @@ make_rdna4_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOpti
     };
   }
   if (options.helper_keeps_v1_v3_live) {
-    helper.push_back(
-        build_v_mov_b32_e32(/*vdst=*/1, vector_source_vgpr(1), ROCJITSU_CODE_ARCH_RDNA4));
-    helper.push_back(
-        build_v_mov_b32_e32(/*vdst=*/2, vector_source_vgpr(2), ROCJITSU_CODE_ARCH_RDNA4));
-    helper.push_back(
-        build_v_mov_b32_e32(/*vdst=*/3, vector_source_vgpr(3), ROCJITSU_CODE_ARCH_RDNA4));
+    helper.push_back(build_v_mov_b32_e32(/*vdst=*/1, vector_source_vgpr(1), options.arch));
+    helper.push_back(build_v_mov_b32_e32(/*vdst=*/2, vector_source_vgpr(2), options.arch));
+    helper.push_back(build_v_mov_b32_e32(/*vdst=*/3, vector_source_vgpr(3), options.arch));
   }
-  helper.push_back(pack_sop1(/*s_setpc_b64=*/0x48, 0, kReturnSgpr));
+  helper.push_back(build_s_setpc_b64(kReturnSgpr, options.arch));
 
   const uint64_t first_entry = 0;
   const uint64_t second_entry = first_kernel.size() * sizeof(uint32_t);
@@ -1013,9 +1029,10 @@ make_rdna4_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOpti
       (first_kernel.size() + second_kernel.size() + unrelated_kernel.size()) * sizeof(uint32_t);
   const auto encode_call = [&](std::vector<uint32_t> &kernel, uint64_t entry) {
     if (!options.use_indirect_calls) {
-      kernel[0] = pack_sopk(
-          /*s_call_b64=*/0x14, kReturnSgpr,
-          static_cast<uint16_t>((helper_entry - (entry + sizeof(uint32_t))) / sizeof(uint32_t)));
+      kernel[0] = build_s_call_b64(
+          kReturnSgpr,
+          static_cast<int16_t>((helper_entry - (entry + sizeof(uint32_t))) / sizeof(uint32_t)),
+          options.arch);
       return;
     }
     const int64_t delta =
@@ -1078,7 +1095,8 @@ make_rdna4_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOpti
   ehdr.e_machine = EM_AMDGPU;
   ehdr.e_version = 1;
   ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1201;
+  ehdr.e_flags = options.arch == ROCJITSU_CODE_ARCH_CDNA4 ? EF_AMDGPU_MACH_AMDGCN_GFX950
+                                                          : EF_AMDGPU_MACH_AMDGCN_GFX1201;
   ehdr.e_ehsize = sizeof(Elf64_Ehdr);
   ehdr.e_shentsize = sizeof(Elf64_Shdr);
   ehdr.e_shnum = section_count;
@@ -1105,6 +1123,9 @@ make_rdna4_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOpti
     descriptor.group_segment_fixed_size = options.group_bytes;
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, vgpr_granulated);
+    if (options.arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 2u);
+    }
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
                     private_bytes != 0 ? 1u : 0u);
     const uint32_t wave32_value = wave32 ? 1u : 0u;

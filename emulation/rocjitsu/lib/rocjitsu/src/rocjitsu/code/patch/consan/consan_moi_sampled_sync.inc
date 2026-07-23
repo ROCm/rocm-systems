@@ -1789,7 +1789,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorPrivateRequirements private_requirements;
   const size_t remaining = static_patch_budget;
-  const uint16_t scratch_count = sampled_atomic_scratch_count(options);
+  const uint16_t scratch_count = sampled_atomic_scratch_count();
   for (size_t index = 0; index < candidates.size() && selected.size() < remaining; ++index) {
     Candidate candidate = candidates[index];
     const ConSanAtomicSite &site = candidate.atomic.site;

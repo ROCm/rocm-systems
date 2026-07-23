@@ -763,24 +763,43 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
   return append_moi_flat_load_wait(words, arch);
 }
 
+struct SampledAtomicPreludeState {
+  std::optional<uint16_t> cas_compare_vgpr;
+  std::optional<uint16_t> cas_result_vgpr;
+};
+
 [[nodiscard]] bool append_sampled_atomic_prelude(
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes,
     const AtomicRecordCandidate &candidate, const ConSanMoiAtomicAddressPlan &address_plan,
     const ConSanOptions &options, const VgprSpillSequence *spill,
     const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch, uint16_t saved_address,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset) {
+    SampledAtomicPreludeState &state, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset) {
+  const bool is_cas = candidate.site.mnemonic.find("cmpswap") != std::string::npos ||
+                      candidate.site.mnemonic.find("cmpxchg") != std::string::npos;
+  if (is_cas) {
+    assert(candidate.site.data_vgpr && candidate.site.dst_vgpr);
+    state.cas_compare_vgpr = static_cast<uint16_t>(*candidate.site.data_vgpr + 1u);
+    state.cas_result_vgpr = *candidate.site.dst_vgpr;
+  }
   const bool guest_first =
       spill && sampled_atomic_spill_overlaps_guest_operands(*spill, candidate.site);
-  if (guest_first && !sampled_atomic_guest_preserves_address(candidate.site)) {
-    errors.emplace_back(
-        "ConSan MOI sampled atomic overlap spill cannot preserve an aliased guest address");
-    return false;
-  }
+  assert(!guest_first || sampled_atomic_guest_preserves_address(candidate.site));
   if (guest_first &&
       !append_sampled_atomic_guest(words, bytes, candidate, arch, guest_instruction_offset))
     return false;
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
+  if (guest_first && is_cas) {
+    const uint16_t saved_compare = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
+    const uint16_t saved_result = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
+    words.push_back(
+        build_v_mov_b32_e32(saved_compare, vector_source_vgpr(*state.cas_compare_vgpr), arch));
+    words.push_back(
+        build_v_mov_b32_e32(saved_result, vector_source_vgpr(*state.cas_result_vgpr), arch));
+    state.cas_compare_vgpr = saved_compare;
+    state.cas_result_vgpr = saved_result;
+  }
   if (address_plan.requires_materialization()) {
     const auto special = moi_special_state_sgprs(options);
     if (!special)
@@ -880,8 +899,9 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
       static_cast<uint64_t>(selected_slot) * sizeof(ConSanMoiSampledPendingAcquireSlot);
 
   std::vector<uint32_t> words;
+  SampledAtomicPreludeState prelude;
   if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, options, spill,
-                                     private_layout, arch, saved_address, errors,
+                                     private_layout, arch, saved_address, prelude, errors,
                                      guest_instruction_offset))
     return std::nullopt;
   InstructionSequence sequence(words);
@@ -965,11 +985,11 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
     return std::nullopt;
 
   if (is_cas) {
+    assert(prelude.cas_compare_vgpr && prelude.cas_result_vgpr);
     const auto cas_failure_label = sequence.make_label();
     const auto descriptor_done_label = sequence.make_label();
-    const uint16_t compare_vgpr = static_cast<uint16_t>(*candidate.site.data_vgpr + 1u);
-    const auto success = instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(compare_vgpr),
-                                                                 *candidate.site.dst_vgpr, arch);
+    const auto success = instrumentation::build_v_cmp_eq_u32_vcc(
+        vector_source_vgpr(*prelude.cas_compare_vgpr), *prelude.cas_result_vgpr, arch);
     if (!success)
       return std::nullopt;
     words.push_back(*success);
@@ -1139,8 +1159,9 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
       static_cast<uint64_t>(selected_slot) * sizeof(ConSanMoiSampledSyncMetadataPacked);
 
   std::vector<uint32_t> words;
+  SampledAtomicPreludeState prelude;
   if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, options, spill,
-                                     private_layout, arch, saved_address, errors,
+                                     private_layout, arch, saved_address, prelude, errors,
                                      guest_instruction_offset))
     return std::nullopt;
   InstructionSequence sequence(words);
@@ -1416,10 +1437,10 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
   };
 
   if (is_cas) {
+    assert(prelude.cas_compare_vgpr && prelude.cas_result_vgpr);
     const auto cas_failure_label = sequence.make_label();
-    const uint16_t compare_vgpr = static_cast<uint16_t>(*candidate.site.data_vgpr + 1u);
-    const auto success = instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(compare_vgpr),
-                                                                 *candidate.site.dst_vgpr, arch);
+    const auto success = instrumentation::build_v_cmp_eq_u32_vcc(
+        vector_source_vgpr(*prelude.cas_compare_vgpr), *prelude.cas_result_vgpr, arch);
     if (!success)
       return std::nullopt;
     words.push_back(*success);
