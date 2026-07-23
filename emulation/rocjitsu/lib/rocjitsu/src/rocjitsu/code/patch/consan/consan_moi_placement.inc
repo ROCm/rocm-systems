@@ -1639,11 +1639,16 @@ struct MoiArchitecturalSgprRange {
   uint16_t width = 0u;
 };
 
+inline constexpr std::array kGfx1250ReservedOrdinarySgprRanges = {
+    MoiArchitecturalSgprRange{.base = 102u, .width = 2u},
+};
+
 struct MoiArchitecturalSgprLayout {
   uint16_t ordinary_limit = kMaxSgprs;
   // Subranges of [0, ordinary_limit) that remain unsafe for persistent SALU
-  // state even though they are encodable as ordinary scalar operands.
-  std::array<MoiArchitecturalSgprRange, 1> reserved_ordinary_ranges = {};
+  // state even though they are encodable as ordinary scalar operands. Special
+  // selectors at or above ordinary_limit are rejected by the limit itself.
+  std::span<const MoiArchitecturalSgprRange> reserved_ordinary_ranges = {};
 };
 
 [[nodiscard]] constexpr MoiArchitecturalSgprLayout
@@ -1658,7 +1663,7 @@ moi_architectural_sgpr_layout(rj_code_arch_t arch) {
     // selectors s102:s103 alias FLAT_SCRATCH in persistent SALU state.
     return {
         .ordinary_limit = kMaxSgprs,
-        .reserved_ordinary_ranges = {{{.base = 102u, .width = 2u}}},
+        .reserved_ordinary_ranges = kGfx1250ReservedOrdinarySgprRanges,
     };
   }
   return {};
@@ -1692,6 +1697,8 @@ static_assert(!persistent_sgpr_range_overlaps_reserved_ordinary_range(104u, 2u,
                                                                       ROCJITSU_CODE_ARCH_GFX1250));
 static_assert(!persistent_sgpr_range_overlaps_reserved_ordinary_range(106u, 2u,
                                                                       ROCJITSU_CODE_ARCH_GFX1250));
+static_assert(moi_architectural_sgpr_layout(ROCJITSU_CODE_ARCH_CDNA4).ordinary_limit == 102u);
+static_assert(moi_architectural_sgpr_layout(ROCJITSU_CODE_ARCH_GFX1250).ordinary_limit == 106u);
 
 [[nodiscard]] uint16_t moi_dispatch_state_sgpr_count(const ConSanOptions &options) {
   (void)options;
