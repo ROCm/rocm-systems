@@ -136,6 +136,11 @@ bool resolve_config(const std::string &plugin_name, const char *schema_json,
 
     auto def = spec.AsMap()["default"];
     if (!def.IsNull()) {
+      if (!type_matches(type, def)) {
+        util::Logger::warn("plugin '", plugin_name, "': config arg '", arg,
+                           "' has a default with wrong type (expected ", type, ")");
+        return false;
+      }
       emit(arg, def);
     } else {
       util::Logger::warn("plugin '", plugin_name, "': missing required config arg '", arg, "'");

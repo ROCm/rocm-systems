@@ -81,6 +81,12 @@ TEST(PluginConfigResolver, WrongTypeFails) {
   EXPECT_FALSE(resolve(schema, R"({"level": "not-a-number"})", out));
 }
 
+TEST(PluginConfigResolver, WrongDefaultTypeFails) {
+  const char *schema = R"({ "level": { "type": "number", "default": "not-a-number" } })";
+  std::string out;
+  EXPECT_FALSE(resolve(schema, "", out));
+}
+
 TEST(PluginConfigResolver, SchemaEntryMissingTypeFails) {
   std::string out;
   EXPECT_FALSE(resolve(R"({ "level": { "default": 3 } })", R"({"level": 7})", out));
