@@ -27,10 +27,10 @@ env:
 jobs:
   analyze:
     name: Analyze C/C++ Code
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
-    container:
       image: ${{ vars.Ubuntu22_DOCKER_IMAGE }}
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
     permissions:
@@ -45,12 +45,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
         with:
           languages: ${{ matrix.language }}
+          build-mode: manual
           registries: |
             - url: https://ghcr.io/v2/
               packages:
@@ -117,7 +118,7 @@ jobs:
           make -j $(nproc)
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
         with:
           category: "/language:${{ matrix.language }}"
           upload: true

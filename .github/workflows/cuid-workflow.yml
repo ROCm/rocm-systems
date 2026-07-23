@@ -25,6 +25,7 @@ env:
 jobs:
   build-and-test:
     name: Build and Test
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
@@ -47,7 +48,7 @@ jobs:
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set Project Directory
         run: |
@@ -134,9 +135,10 @@ jobs:
           mkdir -p $OUTPUT_DIR
           TEST_LOG="$OUTPUT_DIR/amdcuid_test.log"
 
-          # set up environment for test execution
-          /opt/rocm/core/bin/amdcuid_daemon &
-
+          # Start daemon if present (daemon is not built in this workflow).
+          if [ -x /opt/rocm/core/bin/amdcuid_daemon ]; then
+            /opt/rocm/core/bin/amdcuid_daemon &
+          fi
           # Run the test binary
           if /opt/rocm/core/share/amdcuid/tests/amdcuid_test > $TEST_LOG 2>&1; then
              echo "CUID tests passed"
@@ -154,7 +156,7 @@ jobs:
 
       - name: Upload Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: cuid-test-results-${{ matrix.os }}
           path: /tmp/test-results-${{ matrix.os }}
