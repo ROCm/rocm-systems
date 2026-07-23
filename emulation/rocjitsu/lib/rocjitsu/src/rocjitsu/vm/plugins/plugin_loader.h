@@ -32,6 +32,7 @@
 
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -66,10 +67,14 @@ public:
   /// identically regardless of how the VM is brought up.
   ///
   /// @p plugin_dir has the same meaning as in load_from_config().
+  /// @p num_threads is the simulation engine worker count. Profiled groups
+  /// require single-threaded execution because their counters are not
+  /// synchronized.
   ///
   /// @returns A non-null group (empty if the config declares no plugins).
   static std::shared_ptr<ExecutionPluginGroup>
-  configure_plugin_group(const std::string &config_json, const std::string &plugin_dir = {});
+  configure_plugin_group(const std::string &config_json, const std::string &plugin_dir = {},
+                         uint32_t num_threads = 1);
 };
 
 } // namespace rocjitsu

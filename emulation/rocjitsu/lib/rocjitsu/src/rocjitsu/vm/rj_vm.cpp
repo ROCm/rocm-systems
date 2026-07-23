@@ -185,7 +185,8 @@ rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char 
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
   try {
-    auto group = PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "");
+    auto group = PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "",
+                                                      vm->engine_config.num_threads);
     shutdown_plugin_group(vm);
     vm->soc->set_plugin_group(group);
     group->onInit();

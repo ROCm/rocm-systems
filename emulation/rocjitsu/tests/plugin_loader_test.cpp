@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <stdexcept>
 #include <string>
 #include <unistd.h>
 
@@ -81,6 +82,11 @@ TEST_F(PluginLoaderTest, DestroysRejectedDuplicateBeforeUnload) {
   EXPECT_LT(created, destroyed) << events;
   EXPECT_LT(destroyed, unloaded) << events;
   EXPECT_EQ(group.num_plugins(), 1u);
+}
+
+TEST_F(PluginLoaderTest, RejectsProfiledGroupWithMultipleThreads) {
+  EXPECT_THROW(rocjitsu::PluginLoader::configure_plugin_group(R"({"profiled":true})", "", 2),
+               std::invalid_argument);
 }
 
 } // namespace
