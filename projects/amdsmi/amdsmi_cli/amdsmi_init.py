@@ -71,8 +71,17 @@ AMDSMI_INIT_FLAG = amdsmi_interface.AmdSmiInitFlags.INIT_ALL_PROCESSORS
 AMD_VENDOR_ID = 4098
 
 
+def check_wsl_dxg():
+    """Returns true if running under WSL2 with an AMD GPU (/dev/dxg present)."""
+    return Path("/dev/dxg").exists()
+
+
 def check_amdgpu_driver():
     """Returns true if amdgpu is found in the list of initialized modules"""
+    # WSL2: /dev/dxg is the WDDM device node used instead of amdgpu
+    if check_wsl_dxg():
+        return True
+
     amd_gpu_status_file = Path("/sys/module/amdgpu/initstate")
     if amd_gpu_status_file.exists():
         try:

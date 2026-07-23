@@ -112,20 +112,12 @@ TEST(WslSmiNull, PcieInfoNullReturnsInval) {
   EXPECT_EQ(rocdxg_smi_get_pcie_info(0, nullptr), HSAKMT_STATUS_INVALID_PARAMETER);
 }
 
-TEST(WslSmiNull, DriverInfoNullReturnsInval) {
-  EXPECT_EQ(rocdxg_smi_get_driver_info(0, nullptr), HSAKMT_STATUS_INVALID_PARAMETER);
-}
-
-TEST(WslSmiNull, VbiosInfoNullReturnsInval) {
-  EXPECT_EQ(rocdxg_smi_get_vbios_info(0, nullptr), HSAKMT_STATUS_INVALID_PARAMETER);
+TEST(WslSmiNull, DeviceInfoNullReturnsInval) {
+  EXPECT_EQ(rocdxg_smi_get_device_info(0, nullptr), HSAKMT_STATUS_INVALID_PARAMETER);
 }
 
 TEST(WslSmiNull, GpuMetricsInfoNullReturnsInval) {
   EXPECT_EQ(rocdxg_smi_get_gpu_metrics_info(0, nullptr), HSAKMT_STATUS_INVALID_PARAMETER);
-}
-
-TEST(WslSmiNull, BoardInfoNullReturnsInval) {
-  EXPECT_EQ(rocdxg_smi_get_board_info(0, nullptr), HSAKMT_STATUS_INVALID_PARAMETER);
 }
 
 TEST(WslSmiNull, DeviceCountNullReturnsInval) {
@@ -161,32 +153,25 @@ TEST_F(WslSmiLive, DeviceCountNonZero) {
   EXPECT_GT(count, 0u);
 }
 
-TEST_F(WslSmiLive, BdfInfoPopulated) {
-  rocdxg_smi_bdf_info_t info{};
-  ASSERT_EQ(rocdxg_smi_get_bdf_info(node_id_, &info), HSAKMT_STATUS_SUCCESS);
-  // At least one BDF field must be non-zero (bus or device)
-  EXPECT_TRUE(info.bus_number != 0 || info.device_number != 0 || info.domain_number != 0);
-}
+TEST_F(WslSmiLive, DeviceInfoPopulated) {
+  rocdxg_smi_device_info_t info{};
+  ASSERT_EQ(rocdxg_smi_get_device_info(node_id_, &info), HSAKMT_STATUS_SUCCESS);
 
-TEST_F(WslSmiLive, AsicInfoVendorIsAmd) {
-  rocdxg_smi_asic_info_t info{};
-  ASSERT_EQ(rocdxg_smi_get_asic_info(node_id_, &info), HSAKMT_STATUS_SUCCESS);
-  EXPECT_EQ(info.vendor_id, 0x1002u);
-  EXPECT_GT(info.num_of_compute_units, 0u);
-  EXPECT_NE(info.device_id, 0u);
-}
+  // BDF: at least one field non-zero
+  EXPECT_TRUE(info.bdf.bus_number != 0 || info.bdf.device_number != 0 ||
+              info.bdf.domain_number != 0);
 
-TEST_F(WslSmiLive, BoardInfoNonEmpty) {
-  rocdxg_smi_board_info_t info{};
-  ASSERT_EQ(rocdxg_smi_get_board_info(node_id_, &info), HSAKMT_STATUS_SUCCESS);
-  EXPECT_NE(info.product_name[0], '\0');
-  EXPECT_NE(info.manufacturer_name[0], '\0');
-}
+  // ASIC: vendor=AMD, non-zero CUs and device_id
+  EXPECT_EQ(info.asic.vendor_id, 0x1002u);
+  EXPECT_GT(info.asic.num_of_compute_units, 0u);
+  EXPECT_NE(info.asic.device_id, 0u);
 
-TEST_F(WslSmiLive, VramInfoNonZero) {
-  rocdxg_smi_vram_info_t info{};
-  ASSERT_EQ(rocdxg_smi_get_vram_info(node_id_, &info), HSAKMT_STATUS_SUCCESS);
-  EXPECT_GT(info.vram_size_mb, 0u);
+  // Board: product_name and manufacturer_name non-empty
+  EXPECT_NE(info.board.product_name[0], '\0');
+  EXPECT_NE(info.board.manufacturer_name[0], '\0');
+
+  // VRAM: size non-zero
+  EXPECT_GT(info.vram.vram_size_mb, 0u);
 }
 
 TEST_F(WslSmiLive, VramUsageWithinTotal) {
@@ -254,27 +239,17 @@ TEST_F(WslSmiLive, PcieInfoSuccessOrNotSupported) {
   }
 }
 
-TEST_F(WslSmiLive, DriverInfoSuccessOrNotSupported) {
-  rocdxg_smi_driver_info_t info{};
-  HSAKMT_STATUS r = rocdxg_smi_get_driver_info(node_id_, &info);
+TEST_F(WslSmiLive, DeviceInfoDriverAndVbiosFields) {
+  rocdxg_smi_device_info_t info{};
+  HSAKMT_STATUS r = rocdxg_smi_get_device_info(node_id_, &info);
   EXPECT_TRUE(r == HSAKMT_STATUS_SUCCESS || r == HSAKMT_STATUS_NOT_SUPPORTED)
       << "unexpected status: " << r;
   if (r == HSAKMT_STATUS_SUCCESS) {
-    // At least one of the three string fields must be non-empty
-    bool any_filled = info.driver_version[0] != '\0' ||
-                      info.driver_date[0]    != '\0' ||
-                      info.driver_name[0]    != '\0';
-    EXPECT_TRUE(any_filled);
-  }
-}
-
-TEST_F(WslSmiLive, VbiosInfoSuccessOrNotSupported) {
-  rocdxg_smi_vbios_info_t info{};
-  HSAKMT_STATUS r = rocdxg_smi_get_vbios_info(node_id_, &info);
-  EXPECT_TRUE(r == HSAKMT_STATUS_SUCCESS || r == HSAKMT_STATUS_NOT_SUPPORTED)
-      << "unexpected status: " << r;
-  if (r == HSAKMT_STATUS_SUCCESS) {
-    EXPECT_NE(info.version[0], '\0');
+    // At least one driver field must be non-empty
+    bool driver_filled = info.driver.driver_version[0] != '\0' ||
+                         info.driver.driver_date[0]    != '\0' ||
+                         info.driver.driver_name[0]    != '\0';
+    EXPECT_TRUE(driver_filled);
   }
 }
 

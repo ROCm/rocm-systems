@@ -93,6 +93,8 @@ ualoe_handle_t AMDSmiGPUDevice::get_ualoe_handle() {
 }
 
 AMDSmiGPUDevice::~AMDSmiGPUDevice() {
+  delete backend_;
+  backend_ = nullptr;
   if (ualoe_handle_ != -1) {
     ualoe_close(ualoe_handle_);
     ualoe_handle_ = -1;

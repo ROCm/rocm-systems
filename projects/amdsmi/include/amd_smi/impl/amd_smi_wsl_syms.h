@@ -37,10 +37,9 @@ struct WslSyms {
   HSAKMT_STATUS (*hsaKmtReleaseSystemProperties)() = nullptr;
   HSAKMT_STATUS (*hsaKmtGetNodeProperties)(HSAuint32, HsaNodeProperties*) = nullptr;
 
-  // rocdxg_smi
-  // Static device info (populated once per device via rocdxg_smi_get_device_info)
+  // rocdxg_smi — aggregate static device info (cached per device)
   HSAKMT_STATUS (*rocdxg_smi_get_device_info)(uint32_t, rocdxg_smi_device_info_t*) = nullptr;
-  // Dynamic / per-call queries
+  // rocdxg_smi — dynamic queries
   HSAKMT_STATUS (*rocdxg_smi_get_vram_usage)(uint32_t, rocdxg_smi_vram_usage_t*) = nullptr;
   HSAKMT_STATUS (*rocdxg_smi_get_power_info)(uint32_t, rocdxg_smi_power_info_t*) = nullptr;
   HSAKMT_STATUS (*rocdxg_smi_get_temperature)(uint32_t, uint32_t, uint32_t, int64_t*) = nullptr;

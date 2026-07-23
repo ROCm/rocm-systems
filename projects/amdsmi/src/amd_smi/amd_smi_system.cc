@@ -34,12 +34,7 @@
 
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #ifdef ENABLE_WSL_BACKEND
-#include <dlfcn.h>
-#include <fcntl.h>
-#include <unistd.h>
-
 #include "amd_smi/impl/amd_smi_wsl_device.h"
-#include "amd_smi/impl/amd_smi_wsl_syms.h"
 #endif
 #ifdef BRCM_NIC
 #include "amd_smi/impl/nic/amd_smi_nic_device.h"
@@ -57,108 +52,7 @@
 
 namespace amd::smi {
 namespace {
-
-#ifdef ENABLE_WSL_BACKEND
-// Runtime WSL detection: /dev/dxg is present only on WSL2 with an AMD GPU driver.
-// Native Linux never has this device node.
-static bool detect_wsl() {
-  return access("/dev/dxg", F_OK) == 0;
-}
-
-// librocdxg handle — loaded once at amdsmi_init() when WSL is detected.
-// Non-null iff the WSL path was successfully activated for this process.
-static void* g_rocdxg_handle = nullptr;
-
-// Helper: resolve one symbol from the loaded handle, return false on failure.
-template <typename T>
-static bool bind_sym(void* handle, const char* name, T& fn) {
-  fn = reinterpret_cast<T>(dlsym(handle, name));
-  if (!fn) {
-    std::cerr << "[WSL] missing symbol: " << name << std::endl;
-    return false;
-  }
-  return true;
-}
-
-// dlopen librocdxg.so and bind all required function pointers into g_wsl_syms.
-// Returns true only if every required symbol resolved successfully.
-static bool load_rocdxg() {
-  if (g_rocdxg_handle) return true;  // already loaded
-  g_rocdxg_handle = dlopen("librocdxg.so.1", RTLD_NOW | RTLD_GLOBAL);
-  if (!g_rocdxg_handle) {
-    g_rocdxg_handle = dlopen("librocdxg.so", RTLD_NOW | RTLD_GLOBAL);
-  }
-  if (!g_rocdxg_handle) {
-    std::cerr << "[WSL] dlopen librocdxg.so failed: " << dlerror() << std::endl;
-    return false;
-  }
-
-  bool ok = true;
-  ok &= bind_sym(g_rocdxg_handle, "hsaKmtOpenKFD", g_wsl_syms.hsaKmtOpenKFD);
-  ok &= bind_sym(g_rocdxg_handle, "hsaKmtCloseKFD", g_wsl_syms.hsaKmtCloseKFD);
-  ok &= bind_sym(g_rocdxg_handle, "hsaKmtAcquireSystemProperties",
-                 g_wsl_syms.hsaKmtAcquireSystemProperties);
-  ok &= bind_sym(g_rocdxg_handle, "hsaKmtReleaseSystemProperties",
-                 g_wsl_syms.hsaKmtReleaseSystemProperties);
-  ok &= bind_sym(g_rocdxg_handle, "hsaKmtGetNodeProperties", g_wsl_syms.hsaKmtGetNodeProperties);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_device_info",
-                 g_wsl_syms.rocdxg_smi_get_device_info);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_vram_usage",
-                 g_wsl_syms.rocdxg_smi_get_vram_usage);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_power_info",
-                 g_wsl_syms.rocdxg_smi_get_power_info);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_temperature",
-                 g_wsl_syms.rocdxg_smi_get_temperature);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_clock_info",
-                 g_wsl_syms.rocdxg_smi_get_clock_info);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_pcie_info", g_wsl_syms.rocdxg_smi_get_pcie_info);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_gpu_metrics_info",
-                 g_wsl_syms.rocdxg_smi_get_gpu_metrics_info);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_enum_processes",
-                 g_wsl_syms.rocdxg_smi_enum_processes);
-
-  if (!ok) {
-    dlclose(g_rocdxg_handle);
-    g_rocdxg_handle = nullptr;
-    g_wsl_syms = WslSyms{};
-    return false;
-  }
-  return true;
-}
-
-static amdsmi_status_t hsakmt_to_amdsmi_status(HSAKMT_STATUS status) {
-  switch (status) {
-    case HSAKMT_STATUS_SUCCESS:
-      return AMDSMI_STATUS_SUCCESS;
-    case HSAKMT_STATUS_INVALID_PARAMETER:
-    case HSAKMT_STATUS_INVALID_HANDLE:
-    case HSAKMT_STATUS_INVALID_NODE_UNIT:
-      return AMDSMI_STATUS_INVAL;
-    case HSAKMT_STATUS_NO_MEMORY:
-      return AMDSMI_STATUS_OUT_OF_RESOURCES;
-    case HSAKMT_STATUS_BUFFER_TOO_SMALL:
-      return AMDSMI_STATUS_INSUFFICIENT_SIZE;
-    case HSAKMT_STATUS_NOT_IMPLEMENTED:
-      return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
-    case HSAKMT_STATUS_NOT_SUPPORTED:
-      return AMDSMI_STATUS_NOT_SUPPORTED;
-    case HSAKMT_STATUS_UNAVAILABLE:
-      return AMDSMI_STATUS_SETTING_UNAVAILABLE;
-    case HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED:
-    case HSAKMT_STATUS_KERNEL_COMMUNICATION_ERROR:
-      return AMDSMI_STATUS_DRIVER_NOT_LOADED;
-    default:
-      return AMDSMI_STATUS_API_FAILED;
-  }
-}
-#endif  // ENABLE_WSL_BACKEND
-
 }  // namespace
-
-#ifdef ENABLE_WSL_BACKEND
-// Definition of the global WSL symbol table (declared extern in amd_smi_wsl_syms.h).
-WslSyms g_wsl_syms;
-#endif
 
 AMDSmiSystem& AMDSmiSystem::getInstance() {
   static AMDSmiSystem instance;
@@ -466,15 +360,11 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
 
 amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
 #ifdef ENABLE_WSL_BACKEND
-  // Runtime detection: if /dev/dxg exists we are on WSL2. Load librocdxg via
-  // dlopen (not linked at build time) and use the DXG/HSAKMT path.
-  if (detect_wsl()) {
-    if (!load_rocdxg()) {
-      return AMDSMI_STATUS_DRIVER_NOT_LOADED;
-    }
-    return populate_wsl_gpu_devices();
-  }
-  // Fall through to native Linux path if /dev/dxg is absent.
+  // WSL path: TryPopulate handles /dev/dxg detection, librocdxg loading, and
+  // device enumeration. Returns NOT_SUPPORTED when not on WSL.
+  amdsmi_status_t wsl_status = WSLGPUBackend::TryPopulate(sockets_, processors_);
+  if (wsl_status != AMDSMI_STATUS_NOT_SUPPORTED) return wsl_status;
+  // Fall through to native Linux path if not on WSL.
 #endif
   // Native Linux path: use rsmi + libdrm.
   AMDSmiSystem::cleanup();
@@ -525,59 +415,6 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   return AMDSMI_STATUS_SUCCESS;
 }
 
-#ifdef ENABLE_WSL_BACKEND
-amdsmi_status_t AMDSmiSystem::populate_wsl_gpu_devices() {
-  // Do not call AMDSmiSystem::cleanup() here — g_rocdxg_handle must stay set
-  // until amdsmi_shut_down() so the cleanup path knows WSL was active.
-
-  HSAKMT_STATUS hstatus = g_wsl_syms.hsaKmtOpenKFD();
-  if (hstatus != HSAKMT_STATUS_SUCCESS && hstatus != HSAKMT_STATUS_KERNEL_ALREADY_OPENED) {
-    return hsakmt_to_amdsmi_status(hstatus);
-  }
-
-  HsaSystemProperties system_props = {};
-  hstatus = g_wsl_syms.hsaKmtAcquireSystemProperties(&system_props);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) {
-    g_wsl_syms.hsaKmtCloseKFD();
-    return hsakmt_to_amdsmi_status(hstatus);
-  }
-  wsl_topology_acquired_ = true;
-
-  uint32_t gpu_index = 0;
-  for (uint32_t node_id = 0; node_id < system_props.NumNodes; ++node_id) {
-    HsaNodeProperties node_props = {};
-    hstatus = g_wsl_syms.hsaKmtGetNodeProperties(node_id, &node_props);
-    if (hstatus != HSAKMT_STATUS_SUCCESS) {
-      g_wsl_syms.hsaKmtReleaseSystemProperties();
-      wsl_topology_acquired_ = false;
-      g_wsl_syms.hsaKmtCloseKFD();
-      return hsakmt_to_amdsmi_status(hstatus);
-    }
-
-    if (node_props.NumFComputeCores == 0) continue;
-
-    auto* wsl_device = new AMDSmiWslGPUDevice(gpu_index++, node_id, node_props, drm_);
-    AMDSmiProcessor* device = wsl_device;
-    std::string socket_id = "wsl:";
-    socket_id += std::to_string(device->get_processor_type());
-    socket_id += ":";
-    socket_id += std::to_string(wsl_device->get_bdf().as_uint);
-
-    AMDSmiSocket* socket = new AMDSmiSocket(socket_id);
-    socket->add_processor(device);
-    sockets_.push_back(socket);
-    processors_.insert(device);
-  }
-
-  if (gpu_index == 0) {
-    g_wsl_syms.hsaKmtReleaseSystemProperties();
-    wsl_topology_acquired_ = false;
-    g_wsl_syms.hsaKmtCloseKFD();
-    return AMDSMI_STATUS_NOT_FOUND;
-  }
-  return AMDSMI_STATUS_SUCCESS;
-}
-#endif
 
 static amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint64_t bdf_int,
                                                  AMDSmiAINICDevice::AINICInfo& ai_nic_info) {
@@ -874,29 +711,15 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
     }
     drm_.cleanup();
 #ifdef ENABLE_WSL_BACKEND
-    if (g_rocdxg_handle) {
-      // WSL path was active — release HSAKMT topology and close librocdxg.
-      if (wsl_topology_acquired_) {
-        HSAKMT_STATUS release_ret = g_wsl_syms.hsaKmtReleaseSystemProperties();
-        wsl_topology_acquired_ = false;
-        if (release_ret != HSAKMT_STATUS_SUCCESS) {
-          return hsakmt_to_amdsmi_status(release_ret);
-        }
-      }
-      HSAKMT_STATUS hret = g_wsl_syms.hsaKmtCloseKFD();
-      if (hret != HSAKMT_STATUS_SUCCESS && hret != HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED) {
-        return hsakmt_to_amdsmi_status(hret);
-      }
-      // dlclose librocdxg — unloads the WSL runtime.
-      dlclose(g_rocdxg_handle);
-      g_rocdxg_handle = nullptr;
-      g_wsl_syms = WslSyms{};
-    } else {
+    bool used_wsl = WSLGPUBackend::IsActive();
+    amdsmi_status_t wsl_ret = WSLGPUBackend::Shutdown();
+    if (wsl_ret != AMDSMI_STATUS_SUCCESS) return wsl_ret;
+    if (!used_wsl) {
 #endif
-      rsmi_status_t ret = rsmi_shut_down();
-      if (ret != RSMI_STATUS_SUCCESS) {
-        return amd::smi::rsmi_to_amdsmi_status(ret);
-      }
+        rsmi_status_t ret = rsmi_shut_down();
+        if (ret != RSMI_STATUS_SUCCESS) {
+          return amd::smi::rsmi_to_amdsmi_status(ret);
+        }
 #ifdef ENABLE_WSL_BACKEND
     }
 #endif
