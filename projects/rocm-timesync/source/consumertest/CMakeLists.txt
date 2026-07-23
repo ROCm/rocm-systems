@@ -1,9 +1,9 @@
-set(PRODUCER_SOURCES
+set(TEST_SOURCES
     main.cpp
 )
 
 add_executable(test
-    ${PRODUCER_SOURCES}
+    ${TEST_SOURCES}
     $<TARGET_OBJECTS:rocm-timesync-core>
 )
 

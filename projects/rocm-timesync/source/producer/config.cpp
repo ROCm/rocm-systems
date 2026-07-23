@@ -3,9 +3,6 @@
 #include <yaml-cpp/yaml.h>
 #include "config.hpp"
 
-namespace config
-{
-
 config_t LoadConfig(const std::string filename)
 {
     auto cfg = config_t();
@@ -16,22 +13,19 @@ config_t LoadConfig(const std::string filename)
 
     auto root = YAML::LoadFile(filename);
 
-    if (auto p = root["hz_precision_high"])
+    if (auto p = root["channels"])
     {
-        cfg.hz_precision_high = p.as<uint32_t>();
-    }
+        if (auto q = p["hz_precision_high"])
+        {
+            if (auto r = q["hz"]) cfg.hz_high.hz = r.as<uint32_t>();
+            if (auto r = q["order"]) cfg.hz_high.order = r.as<uint32_t>();
+        }
 
-    if (auto p = root["hz_precision_low"])
-    {
-        cfg.hz_precision_low = p.as<uint32_t>();
+        if (auto q = p["hz_precision_low"])
+        {
+            if (auto r = q["hz"]) cfg.hz_low.hz = r.as<uint32_t>();
+            if (auto r = q["order"]) cfg.hz_low.order = r.as<uint32_t>();
+        }
     }
-
-    if (auto p = root["ring_order"])
-    {
-        cfg.ring_order = p.as<uint8_t>();
-    }
-
     return cfg; 
 }
-
-} // namespace config

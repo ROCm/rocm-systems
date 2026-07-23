@@ -1,5 +1,5 @@
 set(ROCM_TIMESYNC_CORE_SOURCES
-  ipc.cpp atomic.cpp
+  ipc.cpp atomic.cpp ringbuffer.cpp
 )
 
 add_library(rocm-timesync-core 

@@ -1,21 +1,13 @@
 #pragma once
 
-// TimeSync API
-//
-// Core needs:
-// 1) Thread that reads clocks from KFD at periodic intervals and stores in data store
-// 2) 
+#include <cstdint>
 
-// Thread config: which agents?
-// Config:
-
-// In-process:
-// 
-
-
-namespace rocm::timesync
+namespace rocm
 {
-    void initialize();
+namespace timesync
+{
 
-    // 
-}
+int translate_time(uint32_t agent_kfd_gpu_id, uint64_t agent_timestamp, uint64_t *system_timestamp);
+
+} // namespace timesync
+} // namespace rocm

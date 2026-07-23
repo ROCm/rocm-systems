@@ -2,20 +2,17 @@
 
 #include <string>
 
-namespace config
+struct channel_config_t
 {
+    uint32_t hz;
+    uint32_t order;
+    bool enabled;
+};
 
-constexpr const uint32_t DFLT_HZ_PRECISION_HIGH = 1000;
-constexpr const uint32_t DFLT_HZ_PRECISION_LOW = 1;
-constexpr const uint8_t DFLT_RING_ORDER = 16;
-
-typedef struct
+struct config_t
 {
-    uint32_t hz_precision_high = DFLT_HZ_PRECISION_HIGH;
-    uint32_t hz_precision_low = DFLT_HZ_PRECISION_LOW;
-    uint8_t ring_order = DFLT_RING_ORDER;
-} config_t;
+    channel_config_t hz_high = {100, 20, true};
+    channel_config_t hz_low = {1, 12, true};
+};
 
 config_t LoadConfig(const std::string filename);
-
-} // namespace config

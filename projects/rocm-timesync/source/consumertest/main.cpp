@@ -6,15 +6,17 @@ using namespace rocm_timesync;
 
 int main()
 {
-    auto* state = ipc::attach("test0");
-    if (state == nullptr) {
+    auto* channel = ipc::attach("hz_high");
+    if (channel == nullptr) {
         printf("could not attach ringbuffer\n");
         return 1;
     }
 
-    std::cout << "attached to ringbuffer of size = " << state->header.ring_size << std::endl;
+    std::cout << "attached to channel of size = " << ipc::size(channel) << std::endl;
 
-    auto cursor = ipc::cursor_t();
-    ipc::test(state, cursor);
+    ipc::poll(channel, [](const ipc::event_t& event) {
+        std::cout << "processed event with gpu_id:" << event.gpu_id <<
+            " and gpu_timestamp: " << event.gpu_timestamp_ns << std::endl;
+    });
     return 0;
 }
