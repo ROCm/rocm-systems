@@ -127,14 +127,14 @@ inline constexpr const char* CPU_FREQ_ENABLED = "ROCPROFSYS_CPU_FREQ_ENABLED";
 inline constexpr const char* CPU_METRICS      = "ROCPROFSYS_CPU_METRICS";
 
 // --- Domains: Parallel runtimes ---
-inline constexpr const char* USE_MPI     = "ROCPROFSYS_USE_MPI";
-inline constexpr const char* USE_MPIP    = "ROCPROFSYS_USE_MPIP";
-inline constexpr const char* USE_OMPT    = "ROCPROFSYS_USE_OMPT";
-inline constexpr const char* USE_KOKKOSP = "ROCPROFSYS_USE_KOKKOSP";
-inline constexpr const char* USE_RCCLP   = "ROCPROFSYS_USE_RCCLP";
-inline constexpr const char* USE_AINIC   = "ROCPROFSYS_USE_AINIC";
-inline constexpr const char* USE_SHMEM   = "ROCPROFSYS_USE_SHMEM";
-inline constexpr const char* USE_UCX     = "ROCPROFSYS_USE_UCX";
+inline constexpr const char* USE_MPI       = "ROCPROFSYS_USE_MPI";
+inline constexpr const char* USE_MPIP      = "ROCPROFSYS_USE_MPIP";
+inline constexpr const char* USE_OMPT      = "ROCPROFSYS_USE_OMPT";
+inline constexpr const char* USE_KOKKOSP   = "ROCPROFSYS_USE_KOKKOSP";
+inline constexpr const char* USE_RCCLP     = "ROCPROFSYS_USE_RCCLP";
+inline constexpr const char* USE_AINIC     = "ROCPROFSYS_USE_AINIC";
+inline constexpr const char* USE_OPENSHMEM = "ROCPROFSYS_USE_OPENSHMEM";
+inline constexpr const char* USE_UCX       = "ROCPROFSYS_USE_UCX";
 
 // --- Domains: Shmem ---
 inline constexpr const char* SHMEM_PERMIT_LIST = "ROCPROFSYS_SHMEM_PERMIT_LIST";

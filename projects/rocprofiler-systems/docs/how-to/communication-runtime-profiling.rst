@@ -39,7 +39,7 @@ The supported communication runtimes span multiple layers of the parallel comput
    * **UCX** (``ROCPROFSYS_USE_UCX``): Disabled by default (``OFF``). Must be explicitly enabled to trace UCX operations. This is a runtime user-configurable option.
    * **RCCL** (``ROCPROFSYS_USE_RCCLP``): Disabled by default (``OFF``). Must be explicitly enabled to trace RCCL operations.
    * **rocSHMEM** (``ROCPROFSYS_ROCM_DOMAINS=rocshmem_api``): Disabled by default. Must be included to trace rocSHMEM host-stream API calls. Requires rocprofiler-sdk ≥ 1.3.4 and rocSHMEM ≥ 3.6.0.
-   * **OpenSHMEM** (``ROCPROFSYS_USE_SHMEM``): Disabled by default (``OFF``). Must be explicitly enabled to trace OpenSHMEM (CPU-based PGAS standard) operations. This flag is unrelated to rocSHMEM; use ``ROCPROFSYS_ROCM_DOMAINS=rocshmem_api`` to enable rocSHMEM API tracing.
+   * **OpenSHMEM** (``ROCPROFSYS_USE_OPENSHMEM``): Disabled by default (``OFF``). Must be explicitly enabled to trace OpenSHMEM (CPU-based PGAS standard) operations. This flag is unrelated to rocSHMEM; use ``ROCPROFSYS_ROCM_DOMAINS=rocshmem_api`` to enable rocSHMEM API tracing.
 
    These settings can be controlled at runtime using their respective environment variables to enable or disable tracing as needed.
 
@@ -387,7 +387,7 @@ OpenSHMEM provides a PGAS-style API for one-sided RMA, atomics, collectives, and
 
 .. important::
 
-   Like UCX and RCCL, SHMEM profiling is **disabled by default** and must be explicitly enabled using ``ROCPROFSYS_USE_SHMEM=ON``.
+   Like UCX and RCCL, SHMEM profiling is **disabled by default** and must be explicitly enabled using ``ROCPROFSYS_USE_OPENSHMEM=ON``.
 
 Configuration
 -------------
@@ -396,12 +396,12 @@ Enable SHMEM tracing and profiling at runtime:
 
 .. code-block:: shell
 
-   export ROCPROFSYS_USE_SHMEM=ON
+   export ROCPROFSYS_USE_OPENSHMEM=ON
    export ROCPROFSYS_TRACE=ON
    export ROCPROFSYS_PROFILE=ON
 
    # To disable SHMEM profiling (default):
-   export ROCPROFSYS_USE_SHMEM=OFF
+   export ROCPROFSYS_USE_OPENSHMEM=OFF
 
 Permit and reject lists
 -----------------------
@@ -543,7 +543,7 @@ Since MPI profiling is enabled by default while UCX, RCCL, SHMEM, and rocSHMEM r
    # Explicitly enable UCX, RCCL, and/or SHMEM profiling
    export ROCPROFSYS_USE_UCX=ON
    export ROCPROFSYS_USE_RCCLP=ON
-   export ROCPROFSYS_USE_SHMEM=ON
+   export ROCPROFSYS_USE_OPENSHMEM=ON
    # For rocSHMEM (GPU PGAS), add rocshmem_api to ROCM_DOMAINS
    export ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocshmem_api
    export ROCPROFSYS_TRACE=ON
@@ -557,7 +557,7 @@ For complete control over all communication layers:
    export ROCPROFSYS_USE_MPIP=ON
    export ROCPROFSYS_USE_RCCLP=ON
    export ROCPROFSYS_USE_UCX=ON
-   export ROCPROFSYS_USE_SHMEM=ON
+   export ROCPROFSYS_USE_OPENSHMEM=ON
    # For rocSHMEM (GPU PGAS), add rocshmem_api to ROCM_DOMAINS
    export ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocshmem_api
    export ROCPROFSYS_TRACE=ON
@@ -615,7 +615,7 @@ Here is a complete configuration example for comprehensive communication profili
    ROCPROFSYS_USE_MPIP                = ON
    ROCPROFSYS_USE_RCCLP               = ON
    ROCPROFSYS_USE_UCX                 = ON
-   ROCPROFSYS_USE_SHMEM               = ON
+   ROCPROFSYS_USE_OPENSHMEM           = ON
 
    # Enable tracing and profiling
    ROCPROFSYS_TRACE                   = ON
