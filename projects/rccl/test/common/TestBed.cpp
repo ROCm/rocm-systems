@@ -3,18 +3,65 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
+#include <fcntl.h>
 #include <unistd.h>
 #include "TestBed.hpp"
 #include <rccl/rccl.h>
 
+
+/**
+ * @brief Reads exactly 'count' bytes from a file descriptor, handling partial 
+ * reads and signal interruptions (EINTR).
+ * @return 'count' on success, or -1 on error / premature EOF.
+ */
+inline ssize_t safe_pipe_read(int fd, void* buf, size_t count) {
+  char* ptr = static_cast<char*>(buf);
+  size_t bytesLeft = count;
+
+  while (bytesLeft > 0) {
+    ssize_t const bytesRead = read(fd, ptr, bytesLeft);
+    if (bytesRead < 0) {
+      if (errno == EINTR) continue; // Interrupted by OS signal, retry
+      return -1;                    // Read error
+    }
+    if (bytesRead == 0) {
+      return -1;                    // EOF: Pipe closed prematurely
+    }
+    ptr += bytesRead;
+    bytesLeft -= bytesRead;
+  }
+  return static_cast<ssize_t>(count); // Successfully read all requested bytes
+}
+
+/**
+ * @brief Writes exactly 'count' bytes to a file descriptor, handling partial 
+ * writes and signal interruptions (EINTR).
+ * @return 'count' on success, or -1 on error.
+ */
+inline ssize_t safe_pipe_write(int fd, const void* buf, size_t count) {
+  const char* ptr = static_cast<const char*>(buf);
+  size_t bytesLeft = count;
+
+  while (bytesLeft > 0) {
+    ssize_t const bytesWritten = write(fd, ptr, bytesLeft);
+    if (bytesWritten < 0) {
+      if (errno == EINTR) continue; // Interrupted by OS signal, retry
+      return -1;                    // Write error
+    }
+    ptr += bytesWritten;
+    bytesLeft -= bytesWritten;
+  }
+  return static_cast<ssize_t>(count); // Successfully wrote all requested bytes
+}
+
 #define PIPE_WRITE(childId, val)                                        \
-  ASSERT_EQ(write(childList[childId]->parentWriteFd, &val, sizeof(val)), sizeof(val))
+  ASSERT_EQ(safe_pipe_write(childList[childId]->parentWriteFd, &val, sizeof(val)), sizeof(val))
 
 
 #define PIPE_READ(childId, val)                                                         \
   {                                                                                     \
     if (ev.verbose) TEST_INFO("Calling PIPE_READ to Child %d", childId); \
-    ssize_t retval = read(childList[childId]->parentReadFd, &val, sizeof(val)); \
+    ssize_t retval = safe_pipe_read(childList[childId]->parentReadFd, &val, sizeof(val)); \
     if (ev.verbose) TEST_INFO("Got PIPE_READ %ld from Child %d", retval, childId); \
     if (retval == -1)                                                                   \
     {                                                                                   \
@@ -103,20 +150,52 @@ namespace RcclUnitTesting
         TEST_ERROR("Unable to create pipes to child process");
         return;
       }
+      
+      // Ensure child-side pipe descriptors remain open across execl()
+      fcntl(childList[childId]->childReadFd, F_SETFD, 0);
+      fcntl(childList[childId]->childWriteFd, F_SETFD, 0);
 
       pid_t pid = fork();
       if (pid == 0)
       {
         // Child process enters execution loop
-        childList[childId]->StartExecutionLoop();
-        return;
+
+        // 1. Close parent-side handles in child process
+        close(childList[childId]->parentWriteFd);
+        close(childList[childId]->parentReadFd);
+
+        // string arguments for execl
+         std::string sChildId      = std::to_string(childId);
+         std::string sChildReadFd  = std::to_string(childList[childId]->childReadFd);
+         std::string sChildWriteFd = std::to_string(childList[childId]->childWriteFd);
+         std::string sVerbose      = std::to_string(ev.verbose ? 1 : 0);
+         std::string sPrintVal     = std::to_string(ev.printValues);
+         std::string sThreading    = std::to_string(ev.useMultithreading ? 1 : 0);
+
+         //Re-execute binary to clear inherited HIP/HSA driver state
+         execl("/proc/self/exe", "rccl_unit_test",
+            "--child",
+            sChildId.c_str(),
+            sChildReadFd.c_str(),
+            sChildWriteFd.c_str(),
+            sVerbose.c_str(),
+            sPrintVal.c_str(),
+            sThreading.c_str(),
+            NULL);
+        perror("execl failed");
+         _exit(1);
+        // childList[childId]->StartExecutionLoop();
+        // return;
       }
-      else
+      else if (pid > 0)
       {
         // Parent records child process ID and closes unused ends of pipe
         childList[childId]->pid = pid;
         close(childList[childId]->childWriteFd);
         close(childList[childId]->childReadFd);
+      }
+      else {
+        TEST_ERROR("fork() failed when creating child process %d", childId);
       }
     }
 
@@ -169,7 +248,14 @@ namespace RcclUnitTesting
       PIPE_WRITE(childId, numGroupCalls);
 
       // Send the number of collectives to be run per group call
-      PIPE_WRITE(childId, numCollectivesInGroup);
+      // PIPE_WRITE(childId, numCollectivesInGroup);
+      int const numCollSize = this->numCollectivesInGroup.size();
+      PIPE_WRITE(childId, numCollSize);
+      if (numCollSize > 0) {
+        write(childList[childId]->parentWriteFd,
+          this->numCollectivesInGroup.data(),
+          numCollSize * sizeof(int));
+      }
 
       // Send the RCCL communication with blocking or non-blocking option
       PIPE_WRITE(childId, useBlocking);
@@ -178,7 +264,14 @@ namespace RcclUnitTesting
       PIPE_WRITE(childId, useMulti);
 
       // Send how many streams to use per group call
-      PIPE_WRITE(childId, numStreamsPerGroup);
+      // PIPE_WRITE(childId, numStreamsPerGroup);
+      int const numStreamsSize = this->numStreamsPerGroup.size();
+      PIPE_WRITE(childId, numStreamsSize);
+      if (numStreamsSize > 0) {
+        write(childList[childId]->parentWriteFd,
+        this->numStreamsPerGroup.data(),
+        numStreamsSize * sizeof(int));
+      }
 
       // Send the GPUs this child uses
       int const numGpus = deviceIdsPerProcess[childId].size();

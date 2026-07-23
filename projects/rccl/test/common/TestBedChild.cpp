@@ -55,32 +55,46 @@ static int getThreadId()
 /**
  * @brief Reads exactly 'count' bytes from a file descriptor, handling partial 
  * reads and signal interruptions (EINTR).
- * @return 'count' on success, or -1 on failure.
+ * @return 'count' on success, or -1 on error / premature EOF.
  */
 inline ssize_t safe_pipe_read(int fd, void* buf, size_t count) {
-    char* ptr = static_cast<char*>(buf);
-    size_t bytesLeft = count;
+  char* ptr = static_cast<char*>(buf);
+  size_t bytesLeft = count;
 
-    while (bytesLeft > 0) {
-        ssize_t bytesRead = read(fd, ptr, bytesLeft);
-        
-        if (bytesRead < 0) {
-            // If interrupted by an OS signal, just try reading again
-            if (errno == EINTR) {
-                continue; 
-            }
-            return -1; // A real error occurred (like EFAULT or EBADF)
-        }
-        
-        if (bytesRead == 0) {
-            // End of File (EOF): Parent closed the write end prematurely
-            return -1; 
-        }
-
-        ptr += bytesRead;
-        bytesLeft -= bytesRead;
+  while (bytesLeft > 0) {
+    ssize_t const bytesRead = read(fd, ptr, bytesLeft);
+    if (bytesRead < 0) {
+      if (errno == EINTR) continue; // Interrupted by OS signal, retry
+      return -1;                    // Read error
     }
-    return count; // Successfully read all bytes
+    if (bytesRead == 0) {
+      return -1;                    // EOF: Pipe closed prematurely
+    }
+    ptr += bytesRead;
+    bytesLeft -= bytesRead;
+  }
+  return static_cast<ssize_t>(count); // Successfully read all requested bytes
+}
+
+/**
+ * @brief Writes exactly 'count' bytes to a file descriptor, handling partial 
+ * writes and signal interruptions (EINTR).
+ * @return 'count' on success, or -1 on error.
+ */
+inline ssize_t safe_pipe_write(int fd, const void* buf, size_t count) {
+  const char* ptr = static_cast<const char*>(buf);
+  size_t bytesLeft = count;
+
+  while (bytesLeft > 0) {
+    ssize_t const bytesWritten = write(fd, ptr, bytesLeft);
+    if (bytesWritten < 0) {
+      if (errno == EINTR) continue; // Interrupted by OS signal, retry
+      return -1;                    // Write error
+    }
+    ptr += bytesWritten;
+    bytesLeft -= bytesWritten;
+  }
+  return static_cast<ssize_t>(count); // Successfully wrote all requested bytes
 }
 
 // #define PIPE_READ(val) \
@@ -124,7 +138,7 @@ namespace RcclUnitTesting
     this->parentReadFd = -1;
     if (pipe(pipefd) == -1)
     {
-      TEST_ERROR("Unable to create parent->child pipe for child %d", this->childId);
+      TEST_ERROR("Unable to create child->parent pipe for child %d", this->childId);
       return TEST_FAIL;
     }
     this->parentReadFd = pipefd[0];
@@ -136,8 +150,8 @@ namespace RcclUnitTesting
   void TestBedChild::StartExecutionLoop()
   {
     // Close unused ends of pipes
-    close(this->parentWriteFd);
-    close(this->parentReadFd);
+    // close(this->parentWriteFd);
+    // close(this->parentReadFd);
 
     // Wait for commands from parent process
     if (verbose) TEST_INFO("Child %d enters execution loop", this->childId);
@@ -145,10 +159,19 @@ namespace RcclUnitTesting
     if (verbose && useRankThreading) TEST_WARN("Multi-threaded ranks requires ENABLE_OPENMP to be defined");
     #endif
     int command;
-    while (read(childReadFd, &command, sizeof(command)) > 0)
+    while (true) /*read(childReadFd, &command, sizeof(command)) > 0*/
     {
-      if (verbose) TEST_INFO("Child %d received command [%s]:", this->childId, ChildCommandNames[command]);;
+      if (safe_pipe_read(childReadFd, &command, sizeof(command)) <= 0) {
+        break;
+      }
       ErrCode status = TEST_SUCCESS;
+      if (command < 0 || command >= NUM_CHILD_COMMANDS) {
+        TEST_ERROR("Child %d received invalid command ID: %d", this->childId, command);
+        status = TEST_FAIL;
+        goto stop;
+      }
+
+      if (verbose) TEST_INFO("Child %d received command [%s]:", this->childId, ChildCommandNames[command]);;
       std::vector<char> retValBuf;
       switch(command)
       {
@@ -164,18 +187,20 @@ namespace RcclUnitTesting
       case CHILD_DESTROY_COMMS   : status = DestroyComms();         break;
       case CHILD_DESTROY_GRAPHS  : status = DestroyGraphs();        break;
       case CHILD_STOP            : goto stop;
-      default: exit(0);
+      default: 
+        TEST_ERROR("Child %d received unknown command ID: %d", this->childId, command);
+        status = TEST_FAIL;
+        goto stop;
       }
 
       // Send back acknowledgement to parent
       if (status == TEST_FAIL)
         TEST_ERROR("Child %d failed on command [%s]:", this->childId, ChildCommandNames[command]);
-      if (write(childWriteFd, &status, sizeof(status)) < 0)
-      {
+      if (safe_pipe_write(childWriteFd, &status, sizeof(status)) < 0) {
         TEST_ERROR("Child %d write to parent failed: %s", this->childId, strerror(errno));
         break;
       }
-      if (retValBuf.size() > 0 && write(childWriteFd, retValBuf.data(), retValBuf.size()) < 0) {
+      if (retValBuf.size() > 0 && safe_pipe_write(childWriteFd, retValBuf.data(), retValBuf.size()) < 0) {
         TEST_ERROR("Child %d write return value to parent failed: %s", this->childId, strerror(errno));
         break;
       }
@@ -207,139 +232,322 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
+  // ErrCode TestBedChild::InitCommsOld()
+  // {
+  //   if (this->verbose) TEST_INFO("Child %d begins InitComms()", this->childId);
+
+  //   // Read values sent by parent [see TestBed::InitComms()]
+  //   ncclUniqueId id;
+  //   PIPE_READ(id);
+  //   PIPE_READ(this->totalRanks);
+  //   PIPE_READ(this->rankOffset);
+  //   PIPE_READ(this->numGroupCalls);
+  //   PIPE_READ(this->numCollectivesInGroup);
+  //   PIPE_READ(this->useBlocking);
+  //   bool useMultiRankPerGpu;
+  //   PIPE_READ(useMultiRankPerGpu);
+  //   PIPE_READ(this->numStreamsPerGroup);
+
+  //   // Read the GPUs this child uses and prepare storage for collective args / datasets
+  //   int numGpus;
+  //   PIPE_READ(numGpus);
+
+  //   // FIX #1: Destroy existing HIP streams before clearing vector to prevent hardware queue leak!
+  //   for (auto& groupStreams : this->streams) {
+  //     for (auto& rankStreams : groupStreams) {
+  //       for (hipStream_t& stream : rankStreams) {
+  //         if (stream != nullptr) {
+  //           hipStreamDestroy(stream);
+  //           stream = nullptr;
+  //         }
+  //       }
+  //     }
+  //   }
+
+  //   this->deviceIds.resize(numGpus);
+  //   this->streams.clear();
+  //   this->streams.resize(this->numGroupCalls);
+  //   this->collArgs.resize(this->numGroupCalls);
+  //   for (int i = 0; i < this->numGroupCalls; i++)
+  //   {
+  //     this->collArgs[i].resize(numGpus);
+  //     this->streams[i].resize(numGpus);
+  //     for (int j = 0; j < numGpus; j++)
+  //     {
+  //       //PIPE_READ(this->deviceIds[j]);
+  //       this->collArgs[i][j].clear();
+  //       this->collArgs[i][j].resize(numCollectivesInGroup[i]);
+  //       this->streams[i][j].resize(numStreamsPerGroup[i]);
+  //     }
+  //   }
+
+  //   for (int i = 0; i < numGpus; i++)
+  //     PIPE_READ(this->deviceIds[i]);
+
+  //   // Initialize graphs
+  //   this->graphs.resize(this->numGroupCalls);
+  //   this->graphExecs.resize(this->numGroupCalls);
+  //   this->graphEnabled.resize(this->numGroupCalls);
+
+  //   // Initialize communicators
+  //   comms.clear();
+  //   comms.resize(numGpus);
+
+  //   // Initialize within a group call to avoid deadlock when using multiple ranks per child
+  //   ErrCode status = TEST_SUCCESS;
+  //   CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart");
+  //   for (int groupCallIdx = 0; groupCallIdx < this->numGroupCalls; ++groupCallIdx)
+  //   {
+  //     for (int localRank = 0; localRank < numGpus; ++localRank)
+  //     {
+  //       int const globalRank = this->rankOffset + localRank;
+  //       int const currGpu = this->deviceIds[localRank];
+
+  //       if (hipSetDevice(currGpu) != hipSuccess)
+  //       {
+  //         TEST_ERROR("Rank %d on child %d unable to switch to GPU %d", globalRank, this->childId, currGpu);
+  //         status = TEST_FAIL;
+  //         break;
+  //       }
+
+  //       for (int i = 0; i < this->numStreamsPerGroup[groupCallIdx]; i++)
+  //       {
+  //         hipError_t err = hipStreamCreate(&(this->streams[groupCallIdx][localRank][i]));
+  //         if (err != hipSuccess)
+  //         {
+  //           TEST_ERROR("Rank %d on child %d unable to create stream %d for GPU %d in group %d HIP Error: %s (%d)", globalRank, this->childId, i, currGpu, groupCallIdx,hipGetErrorString(err), err);
+  //           status = TEST_FAIL;
+  //           break;
+  //         }
+  //       }
+
+  //       if (groupCallIdx == 0) {
+  //         if (useMultiRankPerGpu)
+  //         {
+  //           //if (ncclCommInitRankMulti(&this->comms[localRank], this->totalRanks, id, globalRank, globalRank) != ncclSuccess)
+  //           {
+  //             TEST_ERROR("Rank %d on child %d unable to call ncclCommInitRankMulti", globalRank, this->childId);
+  //             status = TEST_FAIL;
+  //             break;
+  //           }
+  //         }
+  //         else if (this->useBlocking == false)
+  //         {
+  //           // When non-blocking communicator is desired call ncclCommInitRankConfig with appropriate flag
+  //           ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+  //           config.blocking = 0;
+  //           ncclCommInitRankConfig(&this->comms[localRank], this->totalRanks, id, globalRank, &config);
+  //           CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorInitRankConfig", localRank);
+  //         }
+  //         else
+  //         {
+  //           if (ncclCommInitRank(&this->comms[localRank], this->totalRanks, id, globalRank) != ncclSuccess)
+  //           {
+  //             TEST_ERROR("Rank %d on child %d unable to call ncclCommInitRank", globalRank, this->childId);
+  //             status = TEST_FAIL;
+  //             break;
+  //           }
+  //         }
+  //       }
+  //     }
+  //   }
+
+  //   if (status == TEST_SUCCESS)
+  //   {
+  //     // Check if the communicator is non-blocking
+  //     if (this->useBlocking == false)
+  //     {
+  //       // handle the ncclGroupEnd in case of non-blocking communication
+  //       ncclResult_t Group_End_state = ncclGroupEnd();
+  //       if (Group_End_state != ncclSuccess)
+  //       {
+  //         for (int localRank = 0; localRank < numGpus; ++localRank)
+  //         {
+  //           CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorGroupEnd", localRank);
+  //         }
+  //       }
+  //     }
+  //     else
+  //     {
+  //       // In case of blocking communication just call ncclGroupEnd
+  //       CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd");
+  //     }
+  //   }
+
+  //   if (this->verbose) TEST_INFO("Child %d finishes InitComms() [%s]",
+  //                           this->childId, status == TEST_SUCCESS ? "SUCCESS" : "FAIL");
+  //   return status;
+  // }
+
   ErrCode TestBedChild::InitComms()
   {
     if (this->verbose) TEST_INFO("Child %d begins InitComms()", this->childId);
 
-    // Read values sent by parent [see TestBed::InitComms()]
-    ncclUniqueId id;
-    PIPE_READ(id);
-    PIPE_READ(this->totalRanks);
-    PIPE_READ(this->rankOffset);
-    PIPE_READ(this->numGroupCalls);
-    PIPE_READ(this->numCollectivesInGroup);
-    PIPE_READ(this->useBlocking);
-    bool useMultiRankPerGpu;
-    PIPE_READ(useMultiRankPerGpu);
-    PIPE_READ(this->numStreamsPerGroup);
+  // Read config sent by parent
+  ncclUniqueId id;
+  PIPE_READ(id);
+  PIPE_READ(this->totalRanks);
+  PIPE_READ(this->rankOffset);
+  PIPE_READ(this->numGroupCalls);
+  // PIPE_READ(this->numCollectivesInGroup);
+  // --- Read numCollectivesInGroup ---
+  int numCollSize = 0;
+  PIPE_READ(numCollSize);
+  this->numCollectivesInGroup.resize(numCollSize);
+  if (numCollSize > 0)
+  {
+    read(this->childReadFd,
+       this->numCollectivesInGroup.data(),
+       numCollSize * sizeof(int));
+  }
+  PIPE_READ(this->useBlocking);
+  bool useMultiRankPerGpu;
+  PIPE_READ(useMultiRankPerGpu);
+  // PIPE_READ(this->numStreamsPerGroup);
+  // --- Read numStreamsPerGroup ---
+  int numStreamsSize = 0;
+  PIPE_READ(numStreamsSize);
+  this->numStreamsPerGroup.resize(numStreamsSize);
+  if (numStreamsSize > 0)
+  {
+    read(this->childReadFd,
+       this->numStreamsPerGroup.data(),
+       numStreamsSize * sizeof(int));
+  }
 
-    // Read the GPUs this child uses and prepare storage for collective args / datasets
-    int numGpus;
-    PIPE_READ(numGpus);
-    this->deviceIds.resize(numGpus);
-    this->streams.clear();
-    this->streams.resize(this->numGroupCalls);
-    this->collArgs.resize(this->numGroupCalls);
-    for (int i = 0; i < this->numGroupCalls; i++)
-    {
-      this->collArgs[i].resize(numGpus);
-      this->streams[i].resize(numGpus);
-      for (int j = 0; j < numGpus; j++)
-      {
-        //PIPE_READ(this->deviceIds[j]);
-        this->collArgs[i][j].clear();
-        this->collArgs[i][j].resize(numCollectivesInGroup[i]);
-        this->streams[i][j].resize(numStreamsPerGroup[i]);
+  // Read GPUs and prepare storage
+  int numGpus;
+  PIPE_READ(numGpus);
+
+  // FIX #1: Destroy existing HIP streams before clearing vector to prevent hardware queue leak!
+  for (auto& groupStreams : this->streams) {
+    for (auto& rankStreams : groupStreams) {
+      for (hipStream_t& stream : rankStreams) {
+        if (stream != nullptr) {
+          hipStreamDestroy(stream);
+          stream = nullptr;
+        }
       }
     }
+  }
 
-    for (int i = 0; i < numGpus; i++)
-      PIPE_READ(this->deviceIds[i]);
+  this->deviceIds.resize(numGpus);
+  this->streams.clear();
+  this->streams.resize(this->numGroupCalls);
+  this->collArgs.resize(this->numGroupCalls);
 
-    // Initialize graphs
-    this->graphs.resize(this->numGroupCalls);
-    this->graphExecs.resize(this->numGroupCalls);
-    this->graphEnabled.resize(this->numGroupCalls);
-
-    // Initialize communicators
-    comms.clear();
-    comms.resize(numGpus);
-
-    // Initialize within a group call to avoid deadlock when using multiple ranks per child
-    ErrCode status = TEST_SUCCESS;
-    CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart");
-    for (int groupCallIdx = 0; groupCallIdx < this->numGroupCalls; ++groupCallIdx)
+  for (int i = 0; i < this->numGroupCalls; i++)
+  {
+    this->collArgs[i].resize(numGpus);
+    this->streams[i].resize(numGpus);
+    for (int j = 0; j < numGpus; j++)
     {
-      for (int localRank = 0; localRank < numGpus; ++localRank)
-      {
-        int const globalRank = this->rankOffset + localRank;
-        int const currGpu = this->deviceIds[localRank];
+      this->collArgs[i][j].clear();
+      this->collArgs[i][j].resize(numCollectivesInGroup[i]);
+      this->streams[i][j].resize(numStreamsPerGroup[i], nullptr);
+    }
+  }
 
-        if (hipSetDevice(currGpu) != hipSuccess)
+  for (int i = 0; i < numGpus; i++)
+    PIPE_READ(this->deviceIds[i]);
+
+  // Initialize graph tracking
+  this->graphs.resize(this->numGroupCalls);
+  this->graphExecs.resize(this->numGroupCalls);
+  this->graphEnabled.resize(this->numGroupCalls);
+
+  // Initialize communicators
+  comms.clear();
+  comms.resize(numGpus);
+
+  ErrCode status = TEST_SUCCESS;
+
+  // FIX #2: Create HIP streams OUTSIDE of ncclGroupStart()
+  for (int groupCallIdx = 0; groupCallIdx < this->numGroupCalls; ++groupCallIdx)
+  {
+    for (int localRank = 0; localRank < numGpus; ++localRank)
+    {
+      int const globalRank = this->rankOffset + localRank;
+      int const currGpu = this->deviceIds[localRank];
+
+      if (hipSetDevice(currGpu) != hipSuccess)
+      {
+        TEST_ERROR("Rank %d on child %d unable to switch to GPU %d", globalRank, this->childId, currGpu);
+        status = TEST_FAIL;
+        break;
+      }
+
+      for (int i = 0; i < this->numStreamsPerGroup[groupCallIdx]; i++)
+      {
+        hipError_t err = hipStreamCreate(&(this->streams[groupCallIdx][localRank][i]));
+        if (err != hipSuccess)
         {
-          TEST_ERROR("Rank %d on child %d unable to switch to GPU %d", globalRank, this->childId, currGpu);
+          TEST_ERROR("Rank %d on child %d unable to create stream %d for GPU %d in group %d. HIP Error: %s (%d)", 
+                     globalRank, this->childId, i, currGpu, groupCallIdx, hipGetErrorString(err), err);
           status = TEST_FAIL;
           break;
         }
-
-        for (int i = 0; i < this->numStreamsPerGroup[groupCallIdx]; i++)
-        {
-          hipError_t err = hipStreamCreate(&(this->streams[groupCallIdx][localRank][i]));
-          if (err != hipSuccess)
-          {
-            TEST_ERROR("Rank %d on child %d unable to create stream %d for GPU %d in group %d HIP Error: %s (%d)", globalRank, this->childId, i, currGpu, groupCallIdx,hipGetErrorString(err), err);
-            status = TEST_FAIL;
-            break;
-          }
-        }
-
-        if (groupCallIdx == 0) {
-          if (useMultiRankPerGpu)
-          {
-            //if (ncclCommInitRankMulti(&this->comms[localRank], this->totalRanks, id, globalRank, globalRank) != ncclSuccess)
-            {
-              TEST_ERROR("Rank %d on child %d unable to call ncclCommInitRankMulti", globalRank, this->childId);
-              status = TEST_FAIL;
-              break;
-            }
-          }
-          else if (this->useBlocking == false)
-          {
-            // When non-blocking communicator is desired call ncclCommInitRankConfig with appropriate flag
-            ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-            config.blocking = 0;
-            ncclCommInitRankConfig(&this->comms[localRank], this->totalRanks, id, globalRank, &config);
-            CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorInitRankConfig", localRank);
-          }
-          else
-          {
-            if (ncclCommInitRank(&this->comms[localRank], this->totalRanks, id, globalRank) != ncclSuccess)
-            {
-              TEST_ERROR("Rank %d on child %d unable to call ncclCommInitRank", globalRank, this->childId);
-              status = TEST_FAIL;
-              break;
-            }
-          }
-        }
       }
+      if (status == TEST_FAIL) break;
     }
-
-    if (status == TEST_SUCCESS)
-    {
-      // Check if the communicator is non-blocking
-      if (this->useBlocking == false)
-      {
-        // handle the ncclGroupEnd in case of non-blocking communication
-        ncclResult_t Group_End_state = ncclGroupEnd();
-        if (Group_End_state != ncclSuccess)
-        {
-          for (int localRank = 0; localRank < numGpus; ++localRank)
-          {
-            CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorGroupEnd", localRank);
-          }
-        }
-      }
-      else
-      {
-        // In case of blocking communication just call ncclGroupEnd
-        CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd");
-      }
-    }
-
-    if (this->verbose) TEST_INFO("Child %d finishes InitComms() [%s]",
-                            this->childId, status == TEST_SUCCESS ? "SUCCESS" : "FAIL");
-    return status;
+    // FIX #3: Properly break outer loop on error
+    if (status == TEST_FAIL) break;
   }
+
+  if (status == TEST_FAIL) return TEST_FAIL;
+
+  // Initialize NCCL communicators within a group call to prevent deadlock
+  CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart");
+
+  for (int localRank = 0; localRank < numGpus; ++localRank)
+  {
+    int const globalRank = this->rankOffset + localRank;
+    int const currGpu = this->deviceIds[localRank];
+
+    if (hipSetDevice(currGpu) != hipSuccess)
+    {
+      TEST_ERROR("Rank %d on child %d unable to switch to GPU %d during comm init", globalRank, this->childId, currGpu);
+      status = TEST_FAIL;
+      break;
+    }
+
+    if (useMultiRankPerGpu)
+    {
+      TEST_ERROR("Rank %d on child %d: Multi-rank per GPU requested but not implemented", globalRank, this->childId);
+      status = TEST_FAIL;
+      break;
+    }
+    else if (this->useBlocking == false)
+    {
+      ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+      config.blocking = 0;
+      ncclCommInitRankConfig(&this->comms[localRank], this->totalRanks, id, globalRank, &config);
+      CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorInitRankConfig", localRank);
+    }
+    else
+    {
+      if (ncclCommInitRank(&this->comms[localRank], this->totalRanks, id, globalRank) != ncclSuccess)
+      {
+        TEST_ERROR("Rank %d on child %d unable to call ncclCommInitRank", globalRank, this->childId);
+        status = TEST_FAIL;
+        break;
+      }
+    }
+  }
+
+  // FIX #4: ALWAYS call ncclGroupEnd() once ncclGroupStart() has been executed!
+  ncclResult_t groupEndErr = ncclGroupEnd();
+  if (groupEndErr != ncclSuccess)
+  {
+    TEST_ERROR("Child %d ncclGroupEnd failed with error %d", this->childId, groupEndErr);
+    status = TEST_FAIL;
+  }
+
+  if (this->verbose) {
+    TEST_INFO("Child %d finishes InitComms() [%s]", this->childId, status == TEST_SUCCESS ? "SUCCESS" : "FAIL");
+  }
+  return status;
+}
 
   ErrCode TestBedChild::SetCollectiveArgs()
   {
@@ -965,7 +1173,7 @@ namespace RcclUnitTesting
 
         CHECK_CALL(collArg.DeallocateMem());
       }
-      if (collArg.options.scalarMode != -1)
+      if (collArg.options.scalarMode >= 0 /*!= -1*/)
       {
         CHILD_NCCL_CALL(ncclRedOpDestroy(collArg.options.redOp, this->comms[localRank]),
                         "ncclRedOpDestroy");
