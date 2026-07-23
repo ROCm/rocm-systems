@@ -1,12 +1,12 @@
 # General guidelines:
 - Use AI tools as an instrument but avoid producing HLD via AI tools, especially for complex problems.
 ```
-"Writing is thinking. To write well is to think clearly. That's why it's so hard." 
+"Writing is thinking. To write well is to think clearly. That's why it's so hard."
                                                         - David McCullough
 ```
 - Concentrate on articulating why, ex "why is it a problem?", "why is this decision made?", etc.
 - Be short and specific:
-    - Avoid word-fluff which artificially increases text size. 
+    - Avoid word-fluff which artificially increases text size.
     - Avoid inventing new fancy terms, use simple wording.
     - Keep relevant information and decisions localized and structured - don't spread your thoughts over the whole document, organize them.
     - Use visual diagrams to provide more clarity.
