@@ -194,7 +194,7 @@ typedef enum {
 /**
  * @brief Max Number of AFIDs that will be inside one cper entry
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 #define MAX_NUMBER_OF_AFIDS_PER_RECORD 12  //!< Maximum AFIDs per CPER record
 
