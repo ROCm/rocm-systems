@@ -3576,12 +3576,19 @@ bool KernelBlitManager::batchMemOps(const void* paramArray, size_t paramSize,
   size_t dim = 1;
 
   size_t globalWorkOffset[1] = {0};
-  size_t globalWorkSize[1] = {count};
+  // Launch a single work-item; the kernel loops over all ops sequentially.
+  // CUDA spec: ops execute in array order — globalWorkSize=1 enforces this.
+  size_t globalWorkSize[1] = {1};
   size_t localWorkSize[1] = {1};
 
-  // Get constant buffer and copy the array of parameters
+  // During graph packet capture, allocate from the graph's stable kernarg pool so the
+  // address baked into the captured AQL packet remains valid on re-launch.
   constexpr bool kDirectVa = true;
-  auto constBuf = gpu().allocKernArg((count * paramSize), kCBAlignment);
+  bool isGraphPktCapturing =
+      gpu().command() != nullptr && gpu().command()->getPktCapturingState();
+  auto constBuf = isGraphPktCapturing
+      ? gpu().command()->getGraphKernArg(count * paramSize, kCBAlignment, dev().index())
+      : gpu().allocKernArg(count * paramSize, kCBAlignment);
   memcpy(constBuf, paramArray, (count * paramSize));
 
   setArgument(kernels_[blitType], 0, sizeof(cl_mem), constBuf, 0, nullptr, kDirectVa);
