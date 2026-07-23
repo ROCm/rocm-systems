@@ -70,6 +70,12 @@ replay_local_stop_context(rocprofiler_context_id_t context_id)
     return record_override(context_id, false);
 }
 
+bool
+local_context_has_overrides()
+{
+    return tl_control != nullptr && !tl_control->overrides.empty();
+}
+
 std::optional<bool>
 local_context_override(rocprofiler_context_id_t context_id)
 {
