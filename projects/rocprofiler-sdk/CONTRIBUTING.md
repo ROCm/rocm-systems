@@ -91,7 +91,9 @@ cmake -B build-rocprofiler-sdk . -DROCPROFILER_BUILD_CI=ON -DROCPROFILER_ENABLE_
 
 ## Testing Guidelines ##
 
-To run the rocprofiler-sdk test suite alongside the building rocprofiler-sdk:
+For the component-level testing strategy, including what to test at the unit, integration, performance, and coverage layers, how to run tests locally, and how to add new tests, see [TESTING.md](./TESTING.md).
+
+For a standard local test run:
 
 ```bash
 cmake -B build-rocprofiler-sdk -DROCPROFILER_BUILD_TESTS=ON -DROCPROFILER_BUILD_SAMPLES=ON .
@@ -100,82 +102,7 @@ cd build-rocprofiler-sdk
 ctest --output-on-failure -O ctest.all.log
 ```
 
-In the above `ctest` command, `--output-on-failure` shows the test log only when the test fails and `-O <filename>` writes the log to a file in addition echoing it to the terminal.
-CTest supports various options such as `-R` and `-E` for filtering which tests are run based on the test names, options such as `-L` and `-LE` for filtering which tests are run based on the test labels (Use `--print-labels` to see list of test labels).
-Other useful options are `--rerun-failed`, `--stop-on-failure`, `--repeat until-fail:<N>`, `--show-only` (`-N`), `--verbose` (`-V`), and `--extra-verbose` (`-VV`).
-Running `ctest -N -V` will show all details of the tests (command, environment, etc.) without running them.
-
-One can also use [source/scripts/run-ci.py](./source/scripts/run-ci.py) locally with the argument `--disable-cdash` to avoid submitting the job to the CDash dashboard.
-Examples using [run-ci.py](./source/scripts/run-ci.py) can be found in the [GitHub Actions workflows for rocprofiler-sdk](../../.github/workflows/rocprofiler-sdk-continuous_integration.yml).
-
-If attempting to reproduce the sanitizer jobs, e.g. `cmake -DROCPROFILER_MEMCHECK=ThreadSanitizer ...`, locally instead of using [source/script/run-ci.py](./source/scripts/run-ci.py),
-use [source/scripts/setup-sanitizer-env.sh](./source/scripts/setup-sanitizer-env.sh) to set the same sanitizer environment variables that rocprofiler-sdk uses during CI.
-
-If trying to debug a specific test, use `ctest -N -V -R <test-name>` and use the output to create a bash script to run it, e.g. `ctest -N -V -R rocprofv3-test-trace-execute` produces:
-
-```console
-# ... removed for brevity
-
-204: Test command: /home/user/rocm-systems/projects/rocprofiler-sdk/build-rocprofiler-sdk/bin/hip-graph
-204: Working Directory: /home/user/rocm-systems/projects/rocprofiler-sdk/build-rocprofiler-sdk/tests/hip-graph-tracing
-204: Environment variables:
-204:  LD_PRELOAD=/home/user/rocm-systems/projects/rocprofiler-sdk/build-rocprofiler-sdk/lib/rocprofiler-sdk/librocprofiler-sdk-json-tool.so.0.0.0
-204:  ROCPROFILER_TOOL_OUTPUT_FILE=hip-graph-tracing-test.json
-204:  LD_LIBRARY_PATH=/home/user/rocm-systems/projects/rocprofiler-sdk/build-rocprofiler-sdk/lib:/usr/lib64:/usr/lib:/usr/local/lib
-204:  ROCPROFILER_TOOL_CONTEXTS=HIP_API_CALLBACK,HIP_API_BUFFERED,KERNEL_DISPATCH_CALLBACK,KERNEL_DISPATCH_BUFFERED,CODE_OBJECT
-Labels: integration-tests
-  Test #204: test-hip-graph-tracing-execute
-
-Total Tests: 1
-```
-
-Using all of the lines prefixed with `204:`, a bash script can be easily created:
-
-```bash
-# taken from "Environment variables:"
-export LD_PRELOAD=/home/user/rocm-systems/projects/rocprofiler-sdk/build-rocprofiler-sdk/lib/rocprofiler-sdk/librocprofiler-sdk-json-tool.so.0.0.0
-export ROCPROFILER_TOOL_OUTPUT_FILE=hip-graph-tracing-test.json
-export LD_LIBRARY_PATH=/home/user/rocm-systems/projects/rocprofiler-sdk/build-rocprofiler-sdk/lib:/usr/lib64:/usr/lib:/usr/local/lib
-export ROCPROFILER_TOOL_CONTEXTS=HIP_API_CALLBACK,HIP_API_BUFFERED,KERNEL_DISPATCH_CALLBACK,KERNEL_DISPATCH_BUFFERED,CODE_OBJECT
-
-# taken from "Working Directory:"
-pushd /home/user/rocm-systems/projects/rocprofiler-sdk/build-rocprofiler-sdk/tests/hip-graph-tracing
-
-# taken from "Test command:" (and prefixed with `gdb --args` for debugging)
-gdb --args /home/user/rocm-systems/projects/rocprofiler-sdk/build-rocprofiler-sdk/bin/hip-graph
-```
-
-If the test command uses [rocprofv3](./source/bin/rocprofv3.py), using debuggers such as `gdb` will require replacing prefixing with `gdb --args python3 /path/to/rocprofv3 ...`.
-If rocprofv3 requires application replay, execute `set follow-fork-mode child` within the GDB command line prompt.
-
-### Test Locations ###
-
-* Integration tests are located in the top-level [tests](./tests) directory.
-* Unit tests are located in a `tests` subdirectory of the units being tested.
-* Samples are located in the top-level [samples](./samples) directory.
-* Applications used for integration tests are located in the [tests/bin](./tests/bin) directory.
-
-### Test Coding Style Guidelines ###
-
-* Integration Test Applications ([tests/bin](./tests/bin))
-  * These applications are a common suite of applications which can be used by any integration test.
-  * These applications should, when possible, support command-line arguments to control the number of threads, streams, problem size, etc.
-  * It is highly recommended to make use of threads, streams, etc. in the applications... few real-world applications are single-threaded and use only the default HIP stream.
-* Integration tests
-  * Should be composed of at least two tests: (1) an "execute" test which runs the profiler on the application and (2) a "validate" test
-  * Pay attention to the naming conventions of the folders, files, and test names
-  * The "validate" written in Python with PyTest, which validates the data collected during the "execute" phase. The Python script should be named `validate.py` and should be accompanied by a `conftest.py` and `pytest.ini`.
-  * The `validate.py` main should return the following: `return pytest.main(["-x", __file__] + sys.argv[1:])`
-  * In general, follow the same recipe as other integration tests
-* Samples should be kept as simple as possible when possible: a `main.cpp` with a sample test application and a `client.cpp` which contains the tool built to demonstrate the functionality of the sample.
-  * Please use existing samples such as [samples/api_buffered_tracing](./samples/api_buffered_tracing/), [samples/api_callback_tracing](./samples/api_callback_tracing/), [samples/external_correlation_id_request](./samples/external_correlation_id_request/), and [samples/intercept_table](./samples/intercept_table/) as a guide.
-* Unit tests should follow the standard recipe:
-  * Written with `GTest`
-  * The first parameter to `TEST(<group>, <name>)` or `TEST_F(<group>, <name>)` should either be the name of the file, e.g. `TEST(agent, <name>)` in `agent.cpp`, or the name of test executable.
-  * If the unit test is limit to a certain source file, e.g. `source/lib/common/utility.cpp`, then unit tests in the tests folder should be in a file by the same name, e.g. `source/lib/common/tests/utility.cpp`.
-  * All of the source files in a unit test folder should be compiled into one executable and CTests should be added via `gtest_add_tests(...)`
-  * It is permitted to deactivate clang-tidy for unit tests via `rocprofiler_deactivate_clang_tidy()`
-  * The `add_subdirectory(tests)` in parent directory's `CMakeLists.txt` should be guarded with `if(ROCPROFILER_BUILD_TESTS)`
+Use CTest filters such as `-R`, `-E`, `-L`, and `-LE` for targeted runs.
 
 ## Code License ##
 
