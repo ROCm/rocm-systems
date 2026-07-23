@@ -202,8 +202,15 @@ protected:
       composite->add(s);
     if (has_file) {
       auto fs = std::make_unique<FileSink>(sink_dir_ + "/" + file_name);
-      composite->add(fs.get());
-      owned_sinks_.push_back(std::move(fs));
+      if (fs->is_open()) {
+        composite->add(fs.get());
+        owned_sinks_.push_back(std::move(fs));
+      } else if (composite->empty()) {
+        // Preserve output when the file was the only requested destination.
+        // Do not add stderr when another configured sink is already usable,
+        // because doing so would unexpectedly duplicate output.
+        composite->add(&StderrSink::instance());
+      }
     }
     auto *result = composite.get();
     owned_sinks_.push_back(std::move(composite));

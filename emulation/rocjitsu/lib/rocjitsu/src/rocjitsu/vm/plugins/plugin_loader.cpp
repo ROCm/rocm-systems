@@ -169,19 +169,25 @@ void configure_sinks(const flexbuffers::Reference &root, ExecutionPluginGroup &g
   }
 
   auto vec = types.AsVector();
+  bool configured = false;
   for (size_t i = 0; i < vec.size(); ++i) {
     std::string token = vec[i].IsString() ? vec[i].AsString().c_str() : "";
-    if (token == "stderr")
+    if (token == "stderr") {
       group.add_sink(&StderrSink::instance());
-    else if (token == "stdout")
+      configured = true;
+    } else if (token == "stdout") {
       group.add_sink(&StdoutSink::instance());
-    else if (token == "file") {
-      if (!dir.empty())
+      configured = true;
+    } else if (token == "file") {
+      if (!dir.empty()) {
         group.set_sink_dir(dir);
-      else
+        configured = true;
+      } else
         util::Logger::warn("sink type 'file' requested but no 'dir' set");
     }
   }
+  if (!configured)
+    group.add_sink(&StderrSink::instance());
 }
 
 } // namespace

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/plugins/plugin_loader.h"
+#include "rocjitsu/vm/plugins/plugin_sink.h"
 
 #include <gtest/gtest.h>
 
@@ -87,6 +88,43 @@ TEST_F(PluginLoaderTest, DestroysRejectedDuplicateBeforeUnload) {
 TEST_F(PluginLoaderTest, RejectsProfiledGroupWithMultipleThreads) {
   EXPECT_THROW(rocjitsu::PluginLoader::configure_plugin_group(R"({"profiled":true})", "", 2),
                std::invalid_argument);
+}
+
+TEST_F(PluginLoaderTest, FileSinkFailureFallsBackToStderr) {
+  testing::internal::CaptureStderr();
+  auto group = rocjitsu::PluginLoader::configure_plugin_group(
+      R"({"profiled":true,"sinks":{"types":["file"],"dir":"/dev/null"}})");
+  group->onInit();
+  group->onShutdown();
+  const std::string error = testing::internal::GetCapturedStderr();
+
+  EXPECT_NE(error.find("cannot open plugin sink '/dev/null/profile.log'"), std::string::npos);
+  EXPECT_NE(error.find("total emulation time"), std::string::npos);
+}
+
+TEST_F(PluginLoaderTest, FileSinkFailureDoesNotDuplicateConfiguredStderr) {
+  testing::internal::CaptureStderr();
+  auto group = rocjitsu::PluginLoader::configure_plugin_group(
+      R"({"profiled":true,"sinks":{"types":["stderr","file"],"dir":"/dev/null"}})");
+  group->onInit();
+  group->onShutdown();
+  const std::string error = testing::internal::GetCapturedStderr();
+
+  const size_t output = error.find("total emulation time");
+  ASSERT_NE(output, std::string::npos);
+  EXPECT_EQ(error.find("total emulation time", output + 1), std::string::npos);
+}
+
+TEST_F(PluginLoaderTest, FileSinkWithoutDirectoryUsesDefaultStderrSink) {
+  testing::internal::CaptureStderr();
+  auto group = rocjitsu::PluginLoader::configure_plugin_group(
+      R"({"profiled":true,"sinks":{"types":["file"]}})");
+  group->onInit();
+  group->onShutdown();
+  const std::string error = testing::internal::GetCapturedStderr();
+
+  EXPECT_NE(error.find("sink type 'file' requested but no 'dir' set"), std::string::npos);
+  EXPECT_NE(error.find("total emulation time"), std::string::npos);
 }
 
 } // namespace

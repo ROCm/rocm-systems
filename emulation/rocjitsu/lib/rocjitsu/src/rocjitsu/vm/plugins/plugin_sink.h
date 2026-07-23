@@ -41,7 +41,11 @@
 
 #pragma once
 
+#include "util/log.h"
+
+#include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -80,7 +84,10 @@ public:
 /// @brief Writes to a file. Owns the FILE* handle; flushes after each write.
 class FileSink : public PluginSink {
 public:
-  explicit FileSink(const std::string &path) : file_(std::fopen(path.c_str(), "w")) {}
+  explicit FileSink(const std::string &path) : file_(std::fopen(path.c_str(), "w")) {
+    if (!file_)
+      util::Logger::warn("cannot open plugin sink '", path, "': ", std::strerror(errno));
+  }
 
   ~FileSink() override {
     if (file_)
@@ -89,6 +96,8 @@ public:
 
   FileSink(const FileSink &) = delete;
   FileSink &operator=(const FileSink &) = delete;
+
+  bool is_open() const { return file_ != nullptr; }
 
   void write(std::string_view msg) override {
     if (file_) {
