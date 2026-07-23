@@ -33,9 +33,7 @@ namespace {
 ///   * v_cvt_pk_fp8_f32, v_cvt_sr_fp8_f32 (only when CLAMP selects the B0-only
 ///     mode; the ordinary form stays on the copy path),
 ///   * v_wmma_scale / v_wmma_scale16 forms without an implemented rule,
-///   * the bare low-precision WMMA/SWMMAC families added below
-///     (v_wmma_f32_16x16x128_f8f6f4, the K=64 FP8/BF8 WMMA family, and the
-///     FP8/BF8 SWMMAC family), and
+///   * the unsupported low-precision SWMMAC families added below, and
 ///   * integer IU8/IU4 WMMA/SWMMAC.
 /// Separately, a 64-bit source using FLAT_SCRATCH_BASE_HI is classified via
 /// operand inspection (see uses_flat_scratch_base_hi_64bit_source), and the
@@ -106,21 +104,17 @@ inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
   if (mnemonic.starts_with("v_wmma_scale"))
     return true;
 
-  // Additional low-precision WMMA/SWMMAC forms are not yet supported on this
-  // target and are classified so translation fails closed rather than copying
-  // them through unchanged (see the not-yet-supported note above). These have no
-  // semantic rule yet:
-  //   * the bare K=128 F8F6F4 WMMA,
-  //   * the K=64 FP8/BF8 WMMA family, and
-  //   * the FP8/BF8 SWMMAC family (the integer SWMMAC is handled below).
+  // K=64 FP8/BF8 WMMA and K=128 F8F6F4 are present on A0 and retain their
+  // architectural encodings. They must stay on the ordinary copy path: the
+  // B0-only K=128 FP8/BF8 lowering above emits the former, and the B0-only
+  // 32x16 FP4 lowering emits the latter. This matches the gfx1250 A0/B0
+  // behavior and the required WMMA split.
+  //
+  // FP8/BF8 SWMMAC remains unsupported and fails closed.
   const auto ends_with_fp8_bf8_pair = [&] {
     return mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||
            mnemonic.ends_with("_bf8_fp8") || mnemonic.ends_with("_bf8_bf8");
   };
-  if (mnemonic == "v_wmma_f32_16x16x128_f8f6f4")
-    return true;
-  if (mnemonic.starts_with("v_wmma_f32_16x16x64_") && ends_with_fp8_bf8_pair())
-    return true;
   if (mnemonic.starts_with("v_swmmac_") && ends_with_fp8_bf8_pair())
     return true;
 

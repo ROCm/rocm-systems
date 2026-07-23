@@ -7587,16 +7587,15 @@ TEST(BinaryTranslatorE2E, RelocatesDirectCallReturnAcrossShiftedOffsets) {
 }
 
 TEST(BinaryTranslatorE2E, EndpgmAfterTrapTerminatesCfgBeforeFollowingFunction) {
-  // S_TRAP is NOT a CFG terminator: on hardware it transfers to the trap handler
-  // and returns to the next instruction, and with no handler configured (the
-  // state this emulator models) it executes as a NOP that falls through. A real
-  // terminator (S_ENDPGM) must follow it to end the block. The S_ENDPGM terminates the CFG so
-  // the following ELF function bytes stay unreachable and the unrecovered
+  // A resumable S_TRAP is not a CFG terminator: on hardware it transfers to the
+  // trap handler and may return to the next instruction. A real terminator
+  // (S_ENDPGM) must follow it to end the block. The S_ENDPGM terminates the CFG
+  // so the following ELF function bytes stay unreachable and the unrecovered
   // S_SETPC_B64 below is never decoded into the CFG.
   const std::vector<uint32_t> words = {
       rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4), // 0x00 -> trap block.
       rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x04 unreachable gap.
-      build_s_trap(2),                                       // 0x08 falls through to endpgm.
+      build_s_trap(3),                                       // 0x08 falls through to endpgm.
       rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x0c terminates the block.
       build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_CDNA4),       // 0x10 next function body.
       rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x14 unreachable.
@@ -7626,13 +7625,12 @@ TEST(BinaryTranslatorE2E, EndpgmAfterTrapTerminatesCfgBeforeFollowingFunction) {
                            [](const auto &inst) { return inst->mnemonic() == "s_setpc_b64"; }));
 }
 
-TEST(BinaryTranslatorE2E, TrapAloneFallsThroughAndDoesNotHideFollowingCode) {
-  // Corrected trap contract: a bare S_TRAP falls through, so code after it is
-  // reachable. Here the fallthrough reaches an unrecovered S_SETPC_B64, which the
-  // translator must now surface as an error instead of silently dropping it (the
-  // old contract treated S_TRAP as a terminator and hid this).
+TEST(BinaryTranslatorE2E, ResumableTrapFallsThroughAndDoesNotHideFollowingCode) {
+  // Trap IDs other than ROCr's assertion/abort trap remain resumable, so code
+  // after them is reachable. Here the fallthrough reaches an unrecovered
+  // S_SETPC_B64, which the translator must surface as an error.
   const std::vector<uint32_t> words = {
-      build_s_trap(2),                                 // 0x00 falls through.
+      build_s_trap(3),                                 // 0x00 falls through.
       build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_CDNA4), // 0x04 reachable, unrecovered.
       rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
@@ -7647,6 +7645,34 @@ TEST(BinaryTranslatorE2E, TrapAloneFallsThroughAndDoesNotHideFollowingCode) {
   EXPECT_TRUE(
       rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
                                      "indirect branch or call target recovery is not implemented"));
+}
+
+TEST(BinaryTranslatorE2E, RocrAbortTrapTerminatesCfgBeforeFollowingCode) {
+  // ROCr reserves trap ID 2 for assertion/abort handling. That path does not
+  // return, so bytes after S_TRAP 2 must not be pulled into the current CFG.
+  const std::vector<uint32_t> words = {
+      build_s_trap(2),                                 // 0x00 terminates the program path.
+      build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_CDNA4), // 0x04 unrelated, unreachable code.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_FALSE(decoded.empty());
+  EXPECT_EQ(decoded[0]->mnemonic(), "s_trap");
+  EXPECT_TRUE(std::none_of(decoded.begin(), decoded.end(),
+                           [](const auto &inst) { return inst->mnemonic() == "s_setpc_b64"; }));
 }
 
 TEST(BinaryTranslatorE2E, RejectsUnrecoveredIndirectBranchInstructions) {

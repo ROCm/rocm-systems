@@ -23,15 +23,27 @@ namespace rocjitsu {
 
 namespace {
 
+bool is_rocr_program_terminator(const Instruction &inst) {
+  // ROCr reserves trap ID 2 for an assertion/abort path that does not return
+  // to the instruction following S_TRAP. Other trap IDs remain resumable and
+  // therefore retain their normal fallthrough edge.
+  if (inst.mnemonic() != "s_trap" || inst.size() != sizeof(uint32_t))
+    return false;
+  const uint32_t *raw = inst.raw_encoding();
+  return raw != nullptr && static_cast<uint16_t>(raw[0]) == 2;
+}
+
 bool is_block_terminator(const Instruction &inst) {
-  return inst.flags() &
-         (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR);
+  return is_rocr_program_terminator(inst) ||
+         (inst.flags() &
+          (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR));
 }
 
 bool has_no_static_successor(const Instruction &inst) {
   // Indirect calls return to the fallthrough block; indirect branches do not
   // expose a statically-known successor in this local CFG.
-  return inst.flags() & (PROGRAM_TERMINATOR | INDIRECT_BRANCH);
+  return is_rocr_program_terminator(inst) ||
+         (inst.flags() & (PROGRAM_TERMINATOR | INDIRECT_BRANCH));
 }
 
 bool is_unconditional_branch(const Instruction &inst) {

@@ -1531,6 +1531,15 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
   }
 
   std::vector<LatticeFacts> entry_facts(blocks.size());
+  // Reachability is a separate lattice bit. A predecessor that has not become
+  // reachable yet is BOTTOM, not an execution path carrying unconstrained
+  // kernel-entry SGPRs. This distinction matters for loops: the first worklist
+  // visit can see a builder entry edge plus an as-yet-unvisited backedge.
+  // Treating that backedge as unconstrained permanently poisons an otherwise
+  // dominated PC builder (the RCCL call-loop shape). Blocks with no
+  // predecessors remain conservative analysis roots because they may be
+  // externally entered.
+  std::vector<bool> reachable(blocks.size(), false);
   // Keep key presence separate from the sparse fact vectors. The dataflow
   // join needs the union of predecessor keys on every worklist visit; caching
   // that bounded set avoids repeatedly scanning every fact
@@ -1550,7 +1559,11 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
 
     LatticeFacts new_entry;
     std::bitset<REGISTER_SET_MAX_SGPRS> mentioned_pairs;
-    if (!predecessors[block_index].empty()) {
+    const bool new_reachable =
+        predecessors[block_index].empty() ||
+        std::ranges::any_of(predecessors[block_index],
+                            [&](size_t predecessor) { return reachable[predecessor]; });
+    if (new_reachable && !predecessors[block_index].empty()) {
       // A predecessor exit is its sparse entry map with this block's SET/KILL
       // summaries overlaid. The old implementation materialized that complete
       // map for every predecessor on every worklist visit, then allocated a
@@ -1559,6 +1572,8 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
       // Track the bounded SGPR-pair key union in fixed storage and evaluate each
       // predecessor's exit value only for the pair currently being joined.
       for (size_t predecessor : predecessors[block_index]) {
+        if (!reachable[predecessor])
+          continue;
         mentioned_pairs |= entry_pairs[predecessor];
         for (const auto &[pair_lo, _] : blocks[predecessor].transfers) {
           if (relevant_pairs[pair_lo])
@@ -1573,6 +1588,8 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
 
         LatticeValue joined;
         for (size_t predecessor : predecessors[block_index]) {
+          if (!reachable[predecessor])
+            continue;
           const AnalysisBlock &pred_block = blocks[predecessor];
           const auto transfer = pred_block.transfers.find(pair_lo);
           if (transfer != pred_block.transfers.end()) {
@@ -1609,9 +1626,10 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
       }
     }
 
-    if (new_entry == entry_facts[block_index])
+    if (new_reachable == reachable[block_index] && new_entry == entry_facts[block_index])
       continue;
 
+    reachable[block_index] = new_reachable;
     entry_facts[block_index] = std::move(new_entry);
     entry_pairs[block_index] = mentioned_pairs;
     for (size_t successor : blocks[block_index].successors) {
@@ -1710,6 +1728,15 @@ struct VectorLaneSlotHash {
 struct StashedPcHalf {
   PcValue value;
   bool high = false;
+
+  friend bool operator==(const StashedPcHalf &, const StashedPcHalf &) = default;
+};
+
+struct VectorLaneFlowState {
+  std::unordered_map<VectorLaneSlot, StashedPcHalf, VectorLaneSlotHash> slots;
+  std::optional<uint8_t> vgpr_msb_imm;
+
+  friend bool operator==(const VectorLaneFlowState &, const VectorLaneFlowState &) = default;
 };
 
 [[nodiscard]] std::optional<uint16_t> inline_lane(const Operand *operand) {
@@ -1732,166 +1759,140 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
                                      std::vector<IndirectCallFixup> &recovered) {
   // gfx1250 device functions sometimes keep a small static call set in one
   // VGPR: getpc-built low/high halves are written to fixed lanes, then read
-  // back into an SGPR pair immediately before swappc. Track only fixed-lane
-  // writelane/readlane transport. Any ordinary write to the VGPR invalidates
-  // every recorded lane, and any SGPR write invalidates a reconstructed half.
+  // back into an SGPR pair before swappc. Track only fixed-lane
+  // writelane/readlane transport. Any ordinary write to the physical VGPR
+  // invalidates every recorded lane, and any SGPR write invalidates a
+  // reconstructed half.
   //
-  // This recovery is intentionally BLOCK-LOCAL and fails closed rather than
-  // reasoning across the CFG. The lane-slot map is scanned in source order, so a
-  // writelane that is jumped over, reached on only one predecessor, or belongs to
-  // an earlier region must not seed a later consumer. Two guards enforce this:
-  //   1. Reset all recovery state (builders, lane slots, reconstructed halves,
-  //      VGPR-MSB bank) at every basic-block LEADER, so a stash only feeds a
-  //      readlane in the SAME straight-line block. Resetting at leaders (not just
-  //      after terminators) is required: a conditional branch can jump directly
-  //      into the readlane/swappc block while the lexical fallthrough path holds
-  //      the stash, so the consumer's block leader must start from a clean state
-  //      even though its lexical predecessor fell through. The real compiler idiom
-  //      emits writelane/readlane/swappc contiguously, so true positives survive.
-  //   2. Clear `slots` on any S_SET_VGPR_MSB / MODE write, because gfx1250 encodes
-  //      only the low VGPR selector: the same VectorLaneSlot key can name a
-  //      different physical VGPR once the DST/SRC0 MSB bank changes. Rather than
-  //      key slots by proven physical bank (a full CFG bank analysis), drop stale
-  //      slots when the bank state may have moved.
+  // RCCL carries this stash across branches and repeatedly changes the operand
+  // bank selectors in between. VGPR contents do not disappear when MODE changes:
+  // S_SET_VGPR_MSB only changes how later low eight-bit selectors are mapped.
+  // Consequently slots are keyed by the resolved physical VGPR and propagated
+  // with a must-reaching-definition dataflow. A slot reaches a block only when
+  // every reachable predecessor carries the identical PcValue. A bypassed stash,
+  // conflicting definition, unknown bank, or overlapping VGPR write therefore
+  // still fails closed.
+  //
+  // The gfx1250 A0 trap-recovery workaround requires S_SET_VGPR_MSB SIMM16[15:8]
+  // to carry the previous bank state. The architectural bank update remains
+  // SIMM16[7:0], so analysis intentionally ignores the workaround metadata byte.
+  // This pass only observes MODE; it never inserts or reorders
+  // S_SETREG/S_SET_VGPR_MSB and therefore cannot violate the required co-issue
+  // spacing.
   if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
     return;
 
-  // Leaders drive the block-local reset. No extra leaders here: recovered
-  // indirect targets are outputs of this pass, and direct branch targets alone
-  // are enough to keep a jumped-into consumer from reusing a skipped stash.
-  const std::vector<uint8_t> leaders = compute_block_leaders(ctx.insts, {});
+  const std::vector<AnalysisBlock> blocks = build_analysis_blocks(ctx, {});
+  if (blocks.empty())
+    return;
 
   const auto changes_vgpr_msb_bank = [](std::string_view mnemonic) {
     return mnemonic == "s_set_vgpr_msb" || mnemonic == "s_setreg_b32" ||
            mnemonic == "s_setreg_imm32_b32";
   };
 
-  BlockState builders;
-  std::unordered_map<VectorLaneSlot, StashedPcHalf, VectorLaneSlotHash> slots;
-  std::array<std::optional<StashedPcHalf>, REGISTER_SET_MAX_SGPRS> read_halves;
-  std::set<uint16_t> active_read_halves;
-
-  // Block-local VGPR-MSB bank state. gfx1250 vector operands encode only the low
-  // eight bits of a VGPR index; s_set_vgpr_msb supplies the high two bits per role
-  // (immediate byte {DST[7:6], SRC2[5:4], SRC1[3:2], SRC0[1:0]}). v_writelane
-  // addresses its destination through the DST bank and v_readlane its source
-  // through the SRC0 bank, so equal low selectors under differing banks name
-  // different physical VGPRs. Track the current immediate; nullopt means the bank
-  // is unknown (a dynamic MODE write, or a block leader — see the reset below) and
-  // any lane transport must fail closed. The kernel entry block starts at the
-  // architectural default of bank 0 for every role; later blocks are marked
-  // unknown until they locally re-establish the bank.
-  std::optional<uint8_t> vgpr_msb_imm = uint8_t{0};
-  const auto role_bank = [&](unsigned shift) -> std::optional<uint8_t> {
-    if (!vgpr_msb_imm)
-      return std::nullopt;
-    return static_cast<uint8_t>((*vgpr_msb_imm >> shift) & 0x3u);
-  };
-  // Physical VGPR = low selector + bank * 256, or nullopt when the bank is unknown.
-  const auto physical_vgpr = [&](uint16_t low, unsigned bank_shift) -> std::optional<uint16_t> {
-    const auto bank = role_bank(bank_shift);
-    if (!bank)
-      return std::nullopt;
-    return static_cast<uint16_t>(low + static_cast<uint16_t>(*bank) * 256u);
-  };
   constexpr unsigned kDstBankShift = 6;  // s_set_vgpr_msb immediate DST field.
   constexpr unsigned kSrc0BankShift = 0; // s_set_vgpr_msb immediate SRC0 field.
 
-  for (size_t index = 0; index < ctx.insts.size(); ++index) {
-    const Instruction &inst = *ctx.insts[index];
-    const InstructionFacts &facts = ctx.facts[index];
-    const std::string_view mnemonic = inst.mnemonic();
+  const auto scan_block = [&](const AnalysisBlock &block, VectorLaneFlowState state,
+                              bool emit_fixups) {
+    BlockState builders;
+    std::array<std::optional<StashedPcHalf>, REGISTER_SET_MAX_SGPRS> read_halves;
+    std::set<uint16_t> active_read_halves;
 
-    // At every block leader after entry, discard all block-local recovery state:
-    // a jumped-into block must not inherit a lexical predecessor's stash, builders,
-    // reconstructed halves, or VGPR-MSB bank. The bank becomes unknown (only entry
-    // is guaranteed bank 0), so a leader that needs lane transport must locally
-    // re-establish it with s_set_vgpr_msb, else transport fails closed.
-    if (index != 0 && leaders[index]) {
-      builders = BlockState{};
-      slots.clear();
-      read_halves.fill(std::nullopt);
-      active_read_halves.clear();
-      vgpr_msb_imm = std::nullopt;
-    }
+    const auto physical_vgpr = [&](uint16_t low,
+                                   unsigned bank_shift) -> std::optional<uint16_t> {
+      if (!state.vgpr_msb_imm)
+        return std::nullopt;
+      const uint8_t bank = static_cast<uint8_t>((*state.vgpr_msb_imm >> bank_shift) & 0x3u);
+      return static_cast<uint16_t>(low + static_cast<uint16_t>(bank) * 256u);
+    };
 
-    if (!active_read_halves.empty()) {
-      ensure_written_sgprs(ctx, index);
-      ctx.facts[index].written_sgprs.for_each([&](uint16_t sgpr) {
-        read_halves[sgpr].reset();
-        active_read_halves.erase(sgpr);
-      });
-    }
+    for (size_t index = block.first_index; index <= block.last_index; ++index) {
+      const Instruction &inst = *ctx.insts[index];
+      const InstructionFacts &facts = ctx.facts[index];
+      const std::string_view mnemonic = inst.mnemonic();
 
-    if (facts.getpc_sdst && *facts.getpc_sdst < kMaxTrackedSgprPair) {
-      const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
-      builders.set_builder(*facts.getpc_sdst, PcValue{.offset = static_cast<int64_t>(next_offset),
-                                                      .source_getpc_offset = inst.src_loc(),
-                                                      .source_recovery_begin_offset = next_offset,
-                                                      .source_recovery_end_offset = next_offset});
-      continue;
-    }
-    if (try_apply_pair_update(ctx, index, builders))
-      continue;
+      if (!active_read_halves.empty()) {
+        ensure_written_sgprs(ctx, index);
+        ctx.facts[index].written_sgprs.for_each([&](uint16_t sgpr) {
+          read_halves[sgpr].reset();
+          active_read_halves.erase(sgpr);
+        });
+      }
 
-    if (mnemonic == "v_writelane_b32") {
-      const auto dst = operand_register(inst.dst_operand(0), RegClass::VGPR);
-      const auto src = operand_register(inst.src_operand(0), RegClass::SGPR);
-      const auto lane = inline_lane(inst.src_operand(1));
-      // Key by the PHYSICAL destination VGPR (low selector + DST bank). If the
-      // bank is unknown, fail closed: do not record a slot under an ambiguous
-      // physical register.
-      const auto dst_phys = dst ? physical_vgpr(dst->index, kDstBankShift) : std::nullopt;
-      if (dst && src && lane && dst_phys) {
-        const VectorLaneSlot written_slot{*dst_phys, *lane};
-        slots.erase(written_slot);
-        for (uint16_t pair_lo : builders.active_pairs()) {
-          const PcValue *value = builders.builder(pair_lo);
-          if (value == nullptr || (src->index != pair_lo && src->index != pair_lo + 1))
-            continue;
-          slots[written_slot] = StashedPcHalf{.value = *value, .high = src->index == pair_lo + 1};
-          break;
+      if (facts.getpc_sdst && *facts.getpc_sdst < kMaxTrackedSgprPair) {
+        const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+        builders.set_builder(
+            *facts.getpc_sdst,
+            PcValue{.offset = static_cast<int64_t>(next_offset),
+                    .source_getpc_offset = inst.src_loc(),
+                    .source_recovery_begin_offset = next_offset,
+                    .source_recovery_end_offset = next_offset});
+        continue;
+      }
+      if (try_apply_pair_update(ctx, index, builders))
+        continue;
+
+      if (mnemonic == "v_writelane_b32") {
+        const auto dst = operand_register(inst.dst_operand(0), RegClass::VGPR);
+        const auto src = operand_register(inst.src_operand(0), RegClass::SGPR);
+        const auto lane = inline_lane(inst.src_operand(1));
+        const auto dst_phys = dst ? physical_vgpr(dst->index, kDstBankShift) : std::nullopt;
+        if (dst && lane) {
+          if (dst_phys) {
+            const VectorLaneSlot written_slot{*dst_phys, *lane};
+            state.slots.erase(written_slot);
+            if (src) {
+              for (uint16_t pair_lo : builders.active_pairs()) {
+                const PcValue *value = builders.builder(pair_lo);
+                if (value == nullptr || (src->index != pair_lo && src->index != pair_lo + 1))
+                  continue;
+                state.slots[written_slot] =
+                    StashedPcHalf{.value = *value, .high = src->index == pair_lo + 1};
+                break;
+              }
+            }
+          } else {
+            // The destination bank is unknown. It may overwrite any physical
+            // register with this low selector, so invalidate all four banks.
+            std::erase_if(state.slots, [&](const auto &item) {
+              return (item.first.vgpr & 0xffu) == (dst->index & 0xffu) &&
+                     item.first.lane == *lane;
+            });
+          }
+        }
+        invalidate_written_sgprs(ctx, index, builders);
+        continue;
+      }
+
+      if (mnemonic == "v_readlane_b32") {
+        const auto dst = operand_register(inst.dst_operand(0), RegClass::SGPR);
+        const auto src = operand_register(inst.src_operand(0), RegClass::VGPR);
+        const auto lane = inline_lane(inst.src_operand(1));
+        invalidate_written_sgprs(ctx, index, builders);
+        const auto src_phys = src ? physical_vgpr(src->index, kSrc0BankShift) : std::nullopt;
+        if (dst && lane && src_phys) {
+          auto slot = state.slots.find(VectorLaneSlot{*src_phys, *lane});
+          if (slot != state.slots.end()) {
+            read_halves[dst->index] = slot->second;
+            active_read_halves.insert(dst->index);
+          }
+        }
+        continue;
+      }
+
+      if (emit_fixups && facts.swappc_ssrc &&
+          static_cast<size_t>(*facts.swappc_ssrc + 1) < read_halves.size()) {
+        const uint16_t pair_lo = *facts.swappc_ssrc;
+        const auto &lo = read_halves[pair_lo];
+        const auto &hi = read_halves[pair_lo + 1];
+        if (lo && hi && !lo->high && hi->high && lo->value == hi->value) {
+          if (auto fixup = fixup_for_value(ctx, index, pair_lo, lo->value))
+            append_unique(recovered, *fixup);
         }
       }
-      invalidate_written_sgprs(ctx, index, builders);
-      continue;
-    }
 
-    if (mnemonic == "v_readlane_b32") {
-      const auto dst = operand_register(inst.dst_operand(0), RegClass::SGPR);
-      const auto src = operand_register(inst.src_operand(0), RegClass::VGPR);
-      const auto lane = inline_lane(inst.src_operand(1));
-      invalidate_written_sgprs(ctx, index, builders);
-      // Look up by the PHYSICAL source VGPR (low selector + SRC0 bank). An unknown
-      // bank cannot match any recorded slot, so it fails closed.
-      const auto src_phys = src ? physical_vgpr(src->index, kSrc0BankShift) : std::nullopt;
-      if (dst && src && lane && src_phys) {
-        auto slot = slots.find(VectorLaneSlot{*src_phys, *lane});
-        if (slot != slots.end()) {
-          read_halves[dst->index] = slot->second;
-          active_read_halves.insert(dst->index);
-        }
-      }
-      continue;
-    }
-
-    if (facts.swappc_ssrc && static_cast<size_t>(*facts.swappc_ssrc + 1) < read_halves.size()) {
-      const uint16_t pair_lo = *facts.swappc_ssrc;
-      const auto &lo = read_halves[pair_lo];
-      const auto &hi = read_halves[pair_lo + 1];
-      if (lo && hi && !lo->high && hi->high && lo->value == hi->value) {
-        if (auto fixup = fixup_for_value(ctx, index, pair_lo, lo->value))
-          append_unique(recovered, *fixup);
-      }
-    }
-
-    if (mnemonic != "v_writelane_b32") {
-      // Any ordinary write to a stashed VGPR invalidates that slot. Build the full
-      // VGPR def set (explicit destinations of ANY width, plus implicit vector
-      // defs) rather than only width-1 destination operands: a 64-bit-or-wider
-      // destination overlapping a stashed lane must still clear it. RegisterSet
-      // handles the operand width and implicit defs, and for_each yields each
-      // covered lane individually.
       RegisterSet vgpr_defs;
       for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
         const Operand *op = inst.dst_operand(dst_index);
@@ -1904,36 +1905,106 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
       vgpr_defs.for_each([&](RegisterRef ref) {
         if (ref.cls != RegClass::VGPR)
           return;
-        // The write's physical bank is not generally known here, so conservatively
-        // invalidate every slot whose low selector matches (all four banks). Slots
-        // store the physical index (low + bank*256), so compare the low 8 bits.
-        std::erase_if(slots, [&](const auto &item) {
+        // Operand metadata does not expose a role for every implicit/wide def.
+        // Conservatively invalidate every physical bank sharing this selector.
+        std::erase_if(state.slots, [&](const auto &item) {
           return (item.first.vgpr & 0xffu) == (ref.index & 0xffu);
         });
       });
-    }
 
-    if (!builders.active_pairs().empty())
-      invalidate_written_sgprs(ctx, index, builders);
-    // Track / invalidate the VGPR-MSB bank state. An immediate s_set_vgpr_msb sets
-    // a known bank; a dynamic MODE write (s_setreg_b32) makes the bank unknown, so
-    // later transport fails closed. Either way, existing slots recorded under the
-    // previous bank are no longer trustworthy, so drop them.
-    if (changes_vgpr_msb_bank(mnemonic)) {
-      slots.clear();
-      if (mnemonic == "s_set_vgpr_msb") {
-        if (const auto *imm = inst.src_operand(0))
-          vgpr_msb_imm = static_cast<uint8_t>(imm->encoding_value() & 0xff);
-        else
-          vgpr_msb_imm = std::nullopt;
-      } else {
-        // s_setreg_b32 / s_setreg_imm32_b32 to MODE: treat the bank as unknown.
-        vgpr_msb_imm = std::nullopt;
+      if (!builders.active_pairs().empty())
+        invalidate_written_sgprs(ctx, index, builders);
+
+      if (changes_vgpr_msb_bank(mnemonic)) {
+        if (mnemonic == "s_set_vgpr_msb") {
+          if (const auto *imm = inst.src_operand(0))
+            state.vgpr_msb_imm = static_cast<uint8_t>(imm->encoding_value() & 0xffu);
+          else
+            state.vgpr_msb_imm = std::nullopt;
+        } else {
+          // Without scalar constant propagation, a SETREG write to MODE makes
+          // the operand-bank mapping unknown. Physical slots remain intact.
+          state.vgpr_msb_imm = std::nullopt;
+        }
       }
     }
-    // No reset after a terminator is needed here: the instruction following any
-    // terminator is a block leader, and the leader reset at the top of the next
-    // iteration discards all recovery state before it is used.
+    return state;
+  };
+
+  std::vector<std::vector<size_t>> predecessors(blocks.size());
+  for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
+    for (size_t successor : blocks[block_index].successors)
+      predecessors[successor].push_back(block_index);
+  }
+
+  std::vector<VectorLaneFlowState> entry_states(blocks.size());
+  std::vector<VectorLaneFlowState> exit_states(blocks.size());
+  std::vector<uint8_t> reachable(blocks.size(), 0);
+  std::vector<uint8_t> on_worklist(blocks.size(), 1);
+  std::deque<size_t> worklist;
+  for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
+    worklist.push_back(block_index);
+
+  while (!worklist.empty()) {
+    const size_t block_index = worklist.front();
+    worklist.pop_front();
+    on_worklist[block_index] = 0;
+
+    VectorLaneFlowState new_entry;
+    bool new_reachable = false;
+    bool have_predecessor_state = false;
+    for (size_t predecessor : predecessors[block_index]) {
+      if (!reachable[predecessor])
+        continue;
+      new_reachable = true;
+      if (!have_predecessor_state) {
+        new_entry = exit_states[predecessor];
+        have_predecessor_state = true;
+        continue;
+      }
+
+      for (auto it = new_entry.slots.begin(); it != new_entry.slots.end();) {
+        auto incoming = exit_states[predecessor].slots.find(it->first);
+        if (incoming == exit_states[predecessor].slots.end() || incoming->second != it->second)
+          it = new_entry.slots.erase(it);
+        else
+          ++it;
+      }
+      if (new_entry.vgpr_msb_imm != exit_states[predecessor].vgpr_msb_imm)
+        new_entry.vgpr_msb_imm = std::nullopt;
+    }
+
+    // A block with no direct predecessors is a possible kernel/device-function
+    // entry. Only the first text block is guaranteed to start with architectural
+    // bank zero; other roots must establish their bank explicitly.
+    if (predecessors[block_index].empty()) {
+      new_reachable = true;
+      new_entry = VectorLaneFlowState{};
+      if (block_index == 0)
+        new_entry.vgpr_msb_imm = uint8_t{0};
+    }
+    if (!new_reachable)
+      continue;
+
+    VectorLaneFlowState new_exit = scan_block(blocks[block_index], new_entry, false);
+    if (reachable[block_index] && entry_states[block_index] == new_entry &&
+        exit_states[block_index] == new_exit)
+      continue;
+
+    reachable[block_index] = 1;
+    entry_states[block_index] = std::move(new_entry);
+    exit_states[block_index] = std::move(new_exit);
+    for (size_t successor : blocks[block_index].successors) {
+      if (on_worklist[successor])
+        continue;
+      worklist.push_back(successor);
+      on_worklist[successor] = 1;
+    }
+  }
+
+  for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
+    if (reachable[block_index])
+      (void)scan_block(blocks[block_index], entry_states[block_index], true);
   }
 }
 
