@@ -8,6 +8,13 @@ rj_add_object_library(rocjitsu_isa
     rj_decode.cpp
 )
 
+# Keep the all-architecture decoder registry separate from the generic decoder
+# implementation. Fixed-profile frontends provide a narrow decoder factory and
+# do not need to compile or archive this target.
+rj_add_object_library(rocjitsu_isa_registry
+    decoder_factory.cpp
+)
+
 add_subdirectory(arch/amdgpu/cdna1)
 add_subdirectory(arch/amdgpu/cdna2)
 add_subdirectory(arch/amdgpu/cdna3)
@@ -18,4 +25,6 @@ add_subdirectory(arch/amdgpu/rdna3)
 add_subdirectory(arch/amdgpu/rdna3_5)
 add_subdirectory(arch/amdgpu/rdna4)
 add_subdirectory(arch/amdgpu/gfx1250)
+# \NPI new ISA family: create arch/amdgpu/<isa>/CMakeLists.txt \
+# (rj_add_object_library(rocjitsu_isa_<isa> ...)) and add_subdirectory() it here.
 add_subdirectory(arch/risc_v)

@@ -47,6 +47,8 @@
 #define ROCPROFSYS_ROCM_VERSION_MINOR @ROCPROFSYS_ROCM_VERSION_MINOR@
 #define ROCPROFSYS_ROCM_VERSION_PATCH @ROCPROFSYS_ROCM_VERSION_PATCH@
 
+#define ROCPROFSYS_ROCM_LLVM_HOST_TRIPLE "@LLVM_HOST_TRIPLE@"
+
 // these can be set via defining the variable in CMake, e.g.:
 //      cmake -D ROCPROFSYS_CACHELINE_SIZE=N /path/to/source
 // if not defined when configuring cmake, these values fall back to

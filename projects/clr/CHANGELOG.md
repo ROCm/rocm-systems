@@ -2,7 +2,20 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
-## HIP 10 for ROCm 10
+## HIP 7.15 for ROCm 7.15
+
+### Added
+* New HIP APIs
+    - Stream Ordered Memory Allocator: Support for the following APIs for parity with corresponding CUDA APIs.
+      * `hipMemGetDefaultMemPool` returns the default memory pool for the specified location and allocation type
+
+### Resolved issues
+
+* Resolved library loading error messages thrown by `rocminfo` during driver initialization in WSL (Windows Subsystem for Linux) environment due to failure in loading the HSA runtime library `libhsa-runtime64.so`
+since it is not available in the dynamic linker search path. Since `rocminfo` already links against `libhsa-runtime64.so`, the runtime now correctly locates and loads the HSA runtime library using `RTLD_NOLOAD` option,
+enabling successful ROCm initialization, HSA agent discovery, and subsequent ROCm operations.
+* Fixed a segmentation fault in HIP queue idle detection caused by referencing a recycled completion signal. Idle state is now derived from a queue-owned signal with a safe lifetime.
+* Resolved incorrect NaN handling in the ordered not-equal comparison intrinsics `__hne` (for `__half`) and `__hne` (for `__hip_bfloat16`), along with their vector forms. Being *ordered* predicates, they now correctly return `false` when either operand is NaN.
 
 ### Optimized
 
@@ -10,7 +23,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 Previously, non-4-byte-aligned row or slice pitches could cause the runtime to issue a separate copy for each row, resulting in significant
 performance degradation for workloads such as 1-byte-wide transfers with millions of rows.
 These transfers are now handled using a single shader-based copy operation, dramatically reducing transfer times.
-Copy operations at or below the 256-row threshold are unchanged. 
+Copy operations at or below the 256-row threshold are unchanged.
 
 ## HIP 7.14 for ROCm 7.14
 
@@ -65,15 +78,16 @@ allocations from `hipMalloc` leave these fields unset, leading to spurious valid
 for accurate size validation. Additionally, the exec flag is propagated through `ihipGraphNodeSetParams` to ensure executable graph updates use the correct validation path.
 * Fixed a deadlock caused by `hipMemMap`/`hipMemUnmap` operations on the null stream that could lead to hangs. The HIP runtime now implements proper synchronization to all devices with access to a mapped pointer before unmapping it.
 * Resolved an issue where streams created within an execution context remained usable after the context was destroyed, which did not align with CUDA behavior. The HIP runtime now flags such streams as detached when their execution context is destroyed and returns `hipErrorStreamDetached` if they are subsequently used.
-* Resolved library loading error messages thrown by `rocminfo` during driver initialization in WSL (Windows Subsystem for Linux) environment due to failure in loading the HSA runtime library `libhsa-runtime64.so`
-since it is not available in the dynamic linker search path. Since `rocminfo` already links against `libhsa-runtime64.so`, the runtime now correctly locates and loads the HSA runtime library using `RTLD_NOLOAD` option,
-enabling successful ROCm initialization, HSA agent discovery, and subsequent ROCm operations.
-* Fixed a segmentation fault in HIP queue idle detection caused by referencing a recycled completion signal. Idle state is now derived from a queue-owned signal with a safe lifetime.
 
 ### Optimized
 
+* Enhanced HIP graph replay performance for asynchronous memory allocations. HIP graph replay now reduces overhead for graphs that interleave asynchronous memory allocations with compute. Allocation nodes no longer block during replay — physical memory is reused across nodes instead of being mapped and unmapped on each launch, eliminating the gaps between kernels this pattern previously caused.
 * Enhanced debug information for illegal memory access errors. In multi-node and multi-GPU environments, it can be difficult to identify the source of a fault.
 The HIP runtime now includes the hostname, GPU index, and kernel name in GPU fault error messages, improving issue identification and debugging.
+
+## Known issues
+
+* Kernels using `cooperative_groups::reduce()` with block dimensions whose .y or .z component is different from 1 may produce incorrect results or fail to launch.
 
 ## HIP 7.13 for ROCm 7.13
 

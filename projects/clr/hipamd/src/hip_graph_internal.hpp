@@ -22,6 +22,7 @@
 #include "hip_platform.hpp"
 #include "hip_mempool_impl.hpp"
 #include "hip_vm.hpp"
+#include "utils/nontemporal.hpp"
 
 typedef struct ihipExtKernelEvents {
   hipEvent_t startEvent_;
@@ -258,13 +259,19 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   }
   // Return gpu packet address to update with actual packet under capture.
   std::vector<uint8_t*>& GetAqlPackets() { return gpuPackets_; }
+  // Return captured metadata-prefetch packets (parallel to gpuPackets_).
+  std::vector<uint8_t*>& GetMetadataPackets() { return gpuMetadataPackets_; }
   void SetKernelName(const std::string* kernelName) { capturedKernelName_ = kernelName; }
   const std::string* GetKernelName() const { return capturedKernelName_; }
   size_t GetKerArgSize() const { return alignedKernArgSize_; }
   size_t GetKernargSegmentByteSize() const { return kernargSegmentByteSize_; }
   size_t GetKernargSegmentAlignment() const { return kernargSegmentAlignment_; }
 
-  //! Capture packets and accumulate them into a batch if provided
+  //! Capture packets and accumulate them into a batch if provided.
+  //! |batchMetadataPackets|, when provided, receives the captured metadata-prefetch
+  //! packet for each AQL packet (pointer-parallel to |batchPackets|). Entries are
+  //! nullptr for packets that produced no metadata (e.g. device has no metadata
+  //! ring buffer), so the batch's flat metadata buffer stays index-aligned.
   hipError_t CaptureAndFormPacket(GraphKernelArgManager* kernArgMgr,
                                   std::vector<uint8_t*>* batchPackets = nullptr,
                                   std::vector<const std::string*>* batchKernelNames = nullptr,
@@ -290,6 +297,13 @@ class GraphNode : public hipGraphNodeDOTAttribute {
       // The packet is stored in gpuPacket_ and submitted during graph launch.
       command->submit(*(command->queue())->vdev());
       command->release();
+    }
+
+    // The metadata capture path appends one metadata packet per AQL packet, but
+    // only on devices with a metadata ring buffer. Normalize to be pointer-parallel
+    // with gpuPackets_ so downstream flattening can rely on a 1:1 index mapping.
+    if (gpuMetadataPackets_.empty()) {
+      gpuMetadataPackets_.resize(gpuPackets_.size(), nullptr);
     }
 
     // Accumulate packets directly into the batch (only if batch vectors are provided)
@@ -652,9 +666,6 @@ class Graph {
     }
     graphUserObj_.clear();
     memAllocNodePtrs_.clear();
-    if (captureDeviceId_ != -1) {
-      static_cast<amd::ReferenceCountedObject*>(g_devices[captureDeviceId_])->release();
-    }
   }
 
   void AddManualNodeDuringCapture(GraphNode* node) { capturedNodes_.insert(node); }
@@ -1019,6 +1030,17 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   }
 
   ~GraphExecBase() {
+    for (auto& streams : parallel_streams_) {
+      for (auto stream : streams.second) {
+        if (stream != nullptr) {
+          stream->finish();
+          stream->vdev()->UnpinQueue();
+          constexpr bool kForceDestroy = true;
+          hip::Stream::Destroy(stream, kForceDestroy);
+        }
+      }
+    }
+    parallel_streams_.clear();
     std::scoped_lock lock(graphExecSetLock_);
     // Normally erased in hipGraphExecDestroy(), but child graph nodes use delete directly.
     graphExecSet_.erase(this);
@@ -1070,19 +1092,7 @@ class GraphExecClassic : public GraphExecBase {
  public:
   bool graph_dumped_ = false;
   GraphExecClassic(uint64_t flags = 0) : GraphExecBase(flags) {}
-  ~GraphExecClassic() {
-    for (auto& streams : parallel_streams_) {
-      for (auto stream : streams.second) {
-        if (stream != nullptr) {
-          stream->finish();
-          stream->vdev()->UnpinQueue();
-          constexpr bool kForceDestroy = true;
-          hip::Stream::Destroy(stream, kForceDestroy);
-        }
-      }
-    }
-    parallel_streams_.clear();
-  }
+  ~GraphExecClassic() {}
 
   hipError_t Init() override;
   hipError_t Run(hip::Stream* launch_stream) override;
@@ -1193,14 +1203,16 @@ class GraphExecSegmented : public GraphExecBase {
     std::vector<const std::string*> enabledKernelNames;
 
     // Pre-built flat packet buffer for fast bulk dispatch (all nodes enabled).
-    std::vector<uint8_t> flatPacketData;
+    // 64-byte aligned so NT copies from this buffer can use aligned SIMD loads.
+    amd::AlignedVector64<uint8_t> flatPacketData;
     std::vector<uint32_t> validPacketFullHeaders;
+
     // Pre-built flat metadata buffer (kMetadataPktSize per AQL packet).
     std::vector<uint8_t> flatMetadataData;
 
     // Filtered flat buffer - built alongside enabledPackets when some nodes are disabled.
     // Allows the fast flat-dispatch path even in the partially-disabled case.
-    std::vector<uint8_t> filteredFlatPacketData;
+    amd::AlignedVector64<uint8_t> filteredFlatPacketData;
     std::vector<uint32_t> filteredValidPacketFullHeaders;
     std::vector<uint8_t> filteredFlatMetadataData;
     bool filteredCacheValid = false;
@@ -1229,9 +1241,14 @@ class GraphExecSegmented : public GraphExecBase {
     // Append one 64-byte AQL packet to a flat buffer: copies the body, saves the
     // full_header dword, and invalidates the header. Zeroes completion_signal
     // (ApplyHwEventPatches re-patches it directly via flat_packet pointers at launch).
+    // Also appends the matching kMetadataPktSize metadata packet to flatMetadata,
+    // keeping it index-aligned with flatData. |metadata_raw| may be nullptr, in
+    // which case a zeroed metadata slot is appended.
     static void appendPacketToFlatBuffer(const uint8_t* pkt_raw,
-                                         std::vector<uint8_t>& flatData,
-                                         std::vector<uint32_t>& fullHeaders);
+                                         const uint8_t* metadata_raw,
+                                         amd::AlignedVector64<uint8_t>& flatData,
+                                         std::vector<uint32_t>& fullHeaders,
+                                         std::vector<uint8_t>& flatMetadata);
     // Stamp the four packet headers of a 256-byte metadata slot with
     // HSA_PACKET_TYPE_INVALID (type=1) so the CP metadata-prefetch engine skips it.
     static void invalidateMetadataSlot(uint8_t* slot);
@@ -1476,6 +1493,17 @@ class GraphKernelNode : public GraphNode {
   virtual std::string GetLabel(hipGraphDebugDotFlags flag) override {
     hipFunction_t func = resolvedFunc_ ? resolvedFunc_ : getFunc(kernelParams_, dev_id_);
     amd::Kernel* kernel = hip::asKernel(func);
+    std::string demangledName;
+    if (capturedKernelName_ != nullptr) {
+      demangledName = *capturedKernelName_;
+    } else {
+      amd::Os::CxaDemangle(kernel->name(), &demangledName);
+    }
+    static constexpr size_t kMaxKernelNameLen = 256;
+    if (demangledName.size() > kMaxKernelNameLen) {
+      demangledName.resize(kMaxKernelNameLen);
+      demangledName += "...";
+    }
     std::string label;
     char buffer[4096];
     if (flag == hipGraphDebugDotFlagsVerbose) {
@@ -1484,7 +1512,7 @@ class GraphKernelNode : public GraphNode {
               "handle | func handle} | {%p | %p}}\n| {accessPolicyWindow | {base_ptr | num_bytes | "
               "hitRatio | hitProp | missProp} | {%p | %zu | %f | %d | %d}}\n| {cooperative | "
               "%u}\n| {priority | %d}\n}",
-              label_, GetID(), kernel->name().c_str(), kernelParams_.gridDim.x,
+              label_, GetID(), demangledName.c_str(), kernelParams_.gridDim.x,
               kernelParams_.gridDim.y, kernelParams_.gridDim.z, kernelParams_.blockDim.x,
               kernelParams_.blockDim.y, kernelParams_.blockDim.z,
               globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
@@ -1500,7 +1528,7 @@ class GraphKernelNode : public GraphNode {
               "| {accessPolicyWindow | {base_ptr | num_bytes | "
               "hitRatio | hitProp | missProp} |\n| {%p | %zu | %f | %d | %d}}\n| {cooperative | "
               "%u}\n| {priority | %d}\n}",
-              label_, GetID(), kernel->name().c_str(), kernelAttr_.accessPolicyWindow.base_ptr,
+              label_, GetID(), demangledName.c_str(), kernelAttr_.accessPolicyWindow.base_ptr,
               kernelAttr_.accessPolicyWindow.num_bytes, kernelAttr_.accessPolicyWindow.hitRatio,
               kernelAttr_.accessPolicyWindow.hitProp, kernelAttr_.accessPolicyWindow.missProp,
               kernelAttr_.cooperative, kernelAttr_.priority);
@@ -1508,14 +1536,14 @@ class GraphKernelNode : public GraphNode {
     }
     else if (flag == hipGraphDebugDotFlagsKernelNodeParams) {
       sprintf(buffer, "%d\n%s\n\\<\\<\\<(%u,%u,%u),(%u,%u,%u),(%u,%u,%u),%u\\>\\>\\>",
-              GetID(), kernel->name().c_str(), kernelParams_.gridDim.x,
+              GetID(), demangledName.c_str(), kernelParams_.gridDim.x,
               kernelParams_.gridDim.y, kernelParams_.gridDim.z,
               kernelParams_.blockDim.x, kernelParams_.blockDim.y, kernelParams_.blockDim.z,
               globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
               kernelParams_.sharedMemBytes);
       label = buffer;
     } else {
-      label = std::to_string(GetID()) + "\n" + kernel->name() + "\n";
+      label = std::to_string(GetID()) + "\n" + demangledName + "\n";
     }
     return label;
   }
@@ -2135,6 +2163,19 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
             dev_id_ = dstMemory->GetDeviceById()->index();
           }
         }
+        break;
+      case hipWriteBuffer:
+        // H2D: src is plain host memory (srcMemory == nullptr), dst is the only
+        // device-side memory. dev_id_ otherwise defaults to the device that was
+        // current when the node was recorded, which can differ from the device
+        // that actually owns dst (e.g. hipSetDevice() called between the
+        // hipMalloc and the node's creation) -- override it to dst's real device.
+        dev_id_ = dstMemory->GetDeviceById()->index();
+        break;
+      case hipReadBuffer:
+        // D2H: dst is plain host memory (dstMemory == nullptr), src is the only
+        // device-side memory. Same rationale as hipWriteBuffer above, mirrored.
+        dev_id_ = srcMemory->GetDeviceById()->index();
         break;
       default:
         break;
@@ -2919,8 +2960,10 @@ class GraphHostNode : public GraphNode {
     amd::Command::EventWaitList waitList;
     commands_.reserve(1);
     amd::Command* command = new amd::Marker(*stream, !kMarkerDisableFlush, waitList);
-    // This is just to invoke a callback, so no need to flush caches.
-    command->setCommandEntryScope(amd::Device::kCacheStateIgnore);
+    // Use system-scope acquire so preceding GPU writes to CPU-accessible memory
+    // (e.g. blit D2H, kernel writing managed/pinned mem) are flushed before
+    // the host callback reads them.
+    command->setCommandEntryScope(amd::Device::kCacheStateSystem);
     commands_.emplace_back(command);
     return hipSuccess;
   }
@@ -3539,24 +3582,39 @@ class hipGraphExternalSemWaitNode : public GraphNode {
 class hipGraphBatchMemOpNode : public GraphNode {
   hipBatchMemOpNodeParams batchMemOpNodeParam_;
 
+  void copyParams(const hipBatchMemOpNodeParams* src) {
+    delete[] batchMemOpNodeParam_.paramArray;
+    batchMemOpNodeParam_ = *src;
+    if (src->paramArray && src->count > 0) {
+      // Deep-copy paramArray — caller's array may be freed before graph replay.
+      batchMemOpNodeParam_.paramArray = new hipStreamBatchMemOpParams[src->count];
+      std::memcpy(batchMemOpNodeParam_.paramArray, src->paramArray,
+                  src->count * sizeof(hipStreamBatchMemOpParams));
+    }
+  }
+
  protected:
   // Copy constructor is needed for cloning the node, but it should not be used for any other
   // purpose. To prevent accidental misuse, the copy-assignment operator is deleted.
   hipGraphBatchMemOpNode(const hipGraphBatchMemOpNode& rhs) : GraphNode(rhs) {
-    batchMemOpNodeParam_ = rhs.batchMemOpNodeParam_;
+    batchMemOpNodeParam_.paramArray = nullptr;
+    copyParams(&rhs.batchMemOpNodeParam_);
   }
 
  public:
   hipGraphBatchMemOpNode(const hipBatchMemOpNodeParams* pNodeParams)
       : GraphNode(hipGraphNodeTypeBatchMemOp, "solid", "rectangle", "BATCH_MEM_OP_NODE") {
-    batchMemOpNodeParam_ = *pNodeParams;
+    batchMemOpNodeParam_.paramArray = nullptr;
+    copyParams(pNodeParams);
   }
-  ~hipGraphBatchMemOpNode() {}
+  ~hipGraphBatchMemOpNode() { delete[] batchMemOpNodeParam_.paramArray; }
 
   // Delete copy-assignment operator to prevent accidental copies causing unexpected behaviors.
   hipGraphBatchMemOpNode& operator=(const hipGraphBatchMemOpNode&) = delete;
 
   GraphNode* clone() const override { return new hipGraphBatchMemOpNode(*this); }
+
+  virtual bool GraphCaptureEnabled() override { return true; }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
@@ -3577,7 +3635,7 @@ class hipGraphBatchMemOpNode : public GraphNode {
   }
 
   hipError_t SetParams(const hipBatchMemOpNodeParams* pNodeParams) {
-    std::memcpy(&batchMemOpNodeParam_, pNodeParams, sizeof(hipBatchMemOpNodeParams));
+    copyParams(pNodeParams);
     return hipSuccess;
   }
 };

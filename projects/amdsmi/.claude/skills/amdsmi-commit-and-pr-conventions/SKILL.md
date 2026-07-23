@@ -1,6 +1,6 @@
 ---
 name: amdsmi-commit-and-pr-conventions
-description: "Use when writing or restructuring git commits or opening/updating a pull request for amd-smi — composing commit titles, commit message bodies, PR titles, or PR descriptions. Defines the [AMD-SMI] title convention, the rocm-systems PR template sections, brevity caps, and the rule that JIRA tickets appear only in the PR JIRA ID section, never in code comments or commit bodies."
+description: "Use when writing or restructuring git commits or opening/updating a pull request for amd-smi — composing commit titles, commit message bodies, PR titles, or PR descriptions. Defines the Conventional Commits `type(amdsmi):` title convention enforced by the Systems PR Bot, the rocm-systems PR template sections, the unit-test and JIRA/ISSUE-reference gates, brevity caps, and the rule that JIRA tickets appear only in the PR JIRA ID section, never in code comments or commit bodies."
 ---
 
 # Commit & PR Conventions — amd-smi
@@ -14,23 +14,31 @@ not prose. State *what changed and why* — never narrate *how the code works*.
 
 ## Title Convention (commits AND PRs)
 
-`[TAG] Imperative summary`
+`type(amdsmi): imperative summary`
+
+The PR bot (`tools/systems_pr_bot`) enforces Conventional Commits on PR titles.
+Use the same form for commit subjects so a single-commit / squash PR auto-titles
+correctly.
 
 | Rule | Value |
 |------|-------|
-| Tag | `[AMD-SMI]` by default. Use `[ROCM-NNNNN]` / `[SWDEV-NNNNNN]` / `[AILITOOLS-NNN]` **only** when the commit or PR is 1:1 with that ticket |
-| Mood | Imperative ("Add", "Fix", "Remove" — not "Added"/"Fixes"/"Fixing") |
-| Length | ≤ 72 characters including the tag |
+| Type | One of `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert` |
+| Scope | `(amdsmi)` by default; a narrower lowercase scope is fine (`fix(cli): …`, `feat(fabric): …`) |
+| Mood | Imperative ("add", "fix", "remove" — not "added"/"fixes"/"fixing") |
+| Length | PR title 10–80 chars (bot limit); keep commit subjects ≤ 72 (git norm, safely under the cap) |
 | Punctuation | No trailing period |
-| Casing | Exactly `[AMD-SMI]` — uppercase, hyphen, square brackets |
+| Breaking | Append `!` before the colon (`feat(amdsmi)!: …`) for an ABI/behavior break |
 
-Good: `[AMD-SMI] Reject nullptr mode pointer in compute-partition getter`
-Bad: `[amd-smi] fixed the partition bug.` (lowercase tag, past tense, period)
+Good: `fix(amdsmi): reject nullptr mode pointer in compute-partition getter`
+Bad: `[AMD-SMI] Fixed the partition bug.` (legacy tag, past tense, period)
+
+**No `[AMD-SMI]` / `[ROCM-NNNNN]` tag** — the `[…]` form fails the bot's title
+regex. Ticket references live only in the PR's `JIRA ID` section (below).
 
 ## Commit Message Body
 
 ```
-[AMD-SMI] Imperative summary
+type(amdsmi): imperative summary
 
 - Verb-first bullet: what changed and why it was needed
 - One bullet per distinct logical change
@@ -61,7 +69,7 @@ Follow the rocm-systems template
 |---------|---------|---------|
 | `## Motivation` | Why this PR exists, the problem it solves | 1-3 sentences |
 | `## Technical Details` | What changed, grouped **by file/layer** with bullets | Bulleted, no prose walls |
-| `## JIRA ID` | `Resolves ROCM-NNNNN` — the **only** place a ticket appears. No links | One line |
+| `## JIRA ID` | `JIRA ID: ROCM-NNNNN` (or `Closes #NNNN` for a GitHub issue) — the **only** place a ticket appears. No links | One line |
 | `## Test Plan` | How it was verified (commands, hardware) | Bulleted |
 | `## Test Result` | Outcome of those tests | Brief |
 | `## Submission Checklist` | The template checkboxes | Leave intact |
@@ -86,6 +94,25 @@ Rules:
 - Mention the cascade layers touched (header → impl → wrapper → interface → CLI
   → docs) so reviewers can check coverage.
 
+## PR Bot Policy Gate
+
+Every PR to `develop` is checked by the *Systems PR Bot* (`tools/systems_pr_bot`).
+Two failures add the **"Not ready to Review"** label and block the PR; the rest
+are advisory rows in the bot's results comment.
+
+| Check | Blocking? | Pass condition |
+|-------|-----------|----------------|
+| **Unit Test** | ❌ yes | Any changed source file (the amd-smi-relevant set is `.c/.cc/.cpp/.h/.hpp/.py/.go/.rs`; full list in `tools/systems_pr_bot/policy.yml`) needs a `test_*` / `*_test.*` file in the **same** PR. Doc/config-only PRs auto-pass |
+| **JIRA/ISSUE reference** | ❌ yes | Description has a `JIRA ID: <KEY>` / `ISSUE ID: <KEY>` line, a closing keyword (`Closes #N`), or a bare `#N`. A bare `Resolves ROCM-NNNNN` (no `#`) does **not** pass |
+| Title (Conventional Commits) | advisory | `type(scope): …`, 10–80 chars |
+| Description length | advisory | ≥ 30 chars |
+| Forbidden files | advisory | No `.pem` / `.key` / `.env` / `.crt` / private keys |
+
+A source change with no accompanying test is the most common block — pair every
+code change with a test, or split a docs-only PR out, before opening. Separately,
+`pre-commit` is a required CI status check (must be green to merge) but is not part
+of the bot's label logic above.
+
 ## Brevity Caps
 
 | Symptom | Cap |
@@ -99,9 +126,11 @@ Rules:
 
 | Mistake | Fix |
 |---------|-----|
-| Lowercase or reformatted tag (`[amd-smi]`, `(AMD-SMI)`) | Exactly `[AMD-SMI]` |
-| Past-tense subject ("Fixed…", "Added…") | Imperative ("Fix", "Add") |
+| Legacy `[AMD-SMI]` / `[ROCM-NNNNN]` tag in the title | Conventional Commits `type(amdsmi): …` (the `[…]` form fails the bot) |
+| Past-tense subject ("Fixed…", "Added…") | Imperative ("fix", "add") |
 | `ROCM-NNNNN` in commit body or code comment | PR `JIRA ID` section only |
+| Source change with no `test_*` / `*_test.*` file | Add a test in the same PR (bot blocks otherwise) |
+| `Resolves ROCM-NNNNN` as the only ticket ref | Use `JIRA ID: ROCM-NNNNN` or `Closes #N` (bot needs the prefix or `#`) |
 | Comma-list of changes in body or changelog | One bullet per change |
 | Paragraph-length code comments | One-line root-cause note, or ask |
 | PR body free-form, skipping template sections | Use all six template sections |

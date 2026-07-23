@@ -46,7 +46,7 @@ extern "C" {
 #define AMDCUID_LIB_VERSION_MINOR 4
 
 //! Patch version should be updated for each bug fix or non-API change
-#define AMDCUID_LIB_VERSION_PATCH 0
+#define AMDCUID_LIB_VERSION_PATCH 1
 
 /**
  * @brief Retrieve the version of the CUID library.

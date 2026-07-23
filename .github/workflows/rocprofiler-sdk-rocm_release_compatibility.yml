@@ -66,7 +66,7 @@ jobs:
       timeout-minutes: 25
       run: |
         apt-get update
-        apt-get install -y software-properties-common
+        apt-get install -y software-properties-common gpg-agent
         add-apt-repository -y ppa:git-core/ppa
         apt-get update
         apt-get install -y git
@@ -80,7 +80,7 @@ jobs:
         cd projects/rocprofiler-sdk
         git config --global --add safe.directory '*'
         apt update
-        apt install -y wget build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev
+        apt install -y wget build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev libdrm-dev pkg-config
 
         # Older ROCm versions don't provide these packages.
         apt install -y rccl-dev rccl-unittests || true
@@ -99,7 +99,7 @@ jobs:
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm/.info/version
+        cat /opt/rocm/.info/version 2>/dev/null || cat /opt/rocm/core/.info/version
         ls -la
 
     - name: Configure and Build
@@ -117,6 +117,7 @@ jobs:
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
           -DROCPROFILER_BUILD_{TESTS,SAMPLES,DOCS}=OFF
+          -DROCPROFILER_DISABLE_ATT_QUICK_SCAN=ON
           -DROCPROFILER_BUILD_AQLPROFILE=${{ matrix.aqlprofile == 'internal' && 'ON' || 'OFF' }}
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX="$(realpath /opt/rocm)"

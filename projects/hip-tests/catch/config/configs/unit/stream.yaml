@@ -415,6 +415,26 @@ stream:
   Unit_hipStreamBatchMemOp_Negative_Tests:
     <<: *level_2
     tags: [memory]
+  Unit_hipStreamBatchMemOp_SequentialOrdering:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, nvidia]
+    tags: [synchronization, memory]
+  Unit_hipStreamBatchMemOp_SequentialOrdering_MultiGPU:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, nvidia]
+    tags: [synchronization, memory, multigpu]
+  Unit_hipStreamWaitWriteValue32_Capture:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, nvidia]
+    tags: [synchronization]
+  Unit_hipStreamWaitWriteValue64_Capture:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, nvidia]
+    tags: [synchronization]
+  Unit_hipStreamBatchMemOp_Capture:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, nvidia]
+    tags: [synchronization, memory]
   Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic:
     <<: *level_2
     tags: [properties]

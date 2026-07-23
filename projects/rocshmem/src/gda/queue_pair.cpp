@@ -293,10 +293,12 @@ __device__ void QueuePair::quiet_single() {
  *****************************************************************************/
 __device__ void QueuePair::put_nbi(void *dest, const void *source,
     size_t length, ActiveWFInfo &wf_info) {
-  uint32_t dst_rkey = rkey;
-  uint32_t src_lkey = (static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold))
-      ? 0 : get_lkey(reinterpret_cast<uintptr_t>(source));
-  put_nbi(dest, dst_rkey, source, src_lkey, length, wf_info);
+  auto [raddr, dst_rkey] = get_raddr_info(dest);
+  uint32_t src_lkey =
+      (static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold))
+          ? 0 : get_lkey(reinterpret_cast<uintptr_t>(source));
+  put_nbi(reinterpret_cast<void *>(raddr), dst_rkey, source, src_lkey, length,
+          wf_info);
 }
 
 __device__ void QueuePair::put_nbi(void *raddr, uint32_t rkey,
@@ -329,22 +331,20 @@ __device__ void QueuePair::put_nbi_single(void *raddr, uint32_t rkey,
 }
 
 __device__ void QueuePair::get_nbi_single(void *dest, const void *source, size_t length, bool ring_db) {
-  uintptr_t src = reinterpret_cast<uintptr_t>(source);
+  auto [raddr, src_rkey] = get_raddr_info(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   uint32_t dst_lkey = get_lkey(dst);
-  post_wqe_rma_single(length, dst, dst_lkey, src, rkey,
+  post_wqe_rma_single(length, dst, dst_lkey, raddr, src_rkey,
                        gda_op_rdma_read, ring_db);
 }
 
 
 __device__ void QueuePair::get_nbi(void *dest, const void *source,
     size_t length, ActiveWFInfo &wf_info) {
-  uint32_t src_rkey = rkey;
+  auto [raddr, src_rkey] = get_raddr_info(source);
   uint32_t dst_lkey = get_lkey(reinterpret_cast<uintptr_t>(dest));
-  uintptr_t src = reinterpret_cast<uintptr_t>(source);
-  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  post_wqe_rma(static_cast<int32_t>(length), src, src_rkey, dst, dst_lkey,
-               gda_op_rdma_read, wf_info, true);
+  get_nbi(dest, dst_lkey, reinterpret_cast<void *>(raddr), src_rkey, length,
+          wf_info);
 }
 
 __device__ int64_t QueuePair::atomic_cas(void *dest, int64_t atomic_data,
@@ -375,21 +375,43 @@ __device__ void QueuePair::atomic_nofetch(void *dest, int64_t atomic_data,
                atomic_cmp, wf_info);
 }
 
+__device__ int64_t QueuePair::atomic_fetch(void *dest, uint32_t rkey,
+    int64_t value, int64_t cond, ActiveWFInfo &wf_info) {
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  return post_wqe_amo(dst, rkey, gda_op_atomic_fa, value, cond, wf_info, true);
+}
+
+__device__ void QueuePair::atomic_nofetch(void *dest, uint32_t rkey,
+    int64_t value, int64_t cond, ActiveWFInfo &wf_info) {
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  post_wqe_amo(dst, rkey, gda_op_atomic_fa, value, cond, wf_info);
+}
+
+__device__ int64_t QueuePair::atomic_cas(void *dest, uint32_t rkey,
+    int64_t atomic_data, int64_t atomic_cmp, ActiveWFInfo &wf_info) {
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  return post_wqe_amo(dst, rkey, gda_op_atomic_cs, atomic_data, atomic_cmp,
+                      wf_info, true);
+}
+
+__device__ int64_t QueuePair::atomic_cas_nofetch(void *dest, uint32_t rkey,
+    int64_t atomic_data, int64_t atomic_cmp, ActiveWFInfo &wf_info) {
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  return post_wqe_amo(dst, rkey, gda_op_atomic_cs, atomic_data, atomic_cmp,
+                      wf_info);
+}
+
+__device__ void QueuePair::get_nbi(void *dest, uint32_t lkey,
+    const void *source, uint32_t rkey, size_t length, ActiveWFInfo &wf_info) {
+  uintptr_t src = reinterpret_cast<uintptr_t>(source);
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  post_wqe_rma(static_cast<int32_t>(length), src, rkey, dst, lkey,
+               gda_op_rdma_read, wf_info, true);
+}
+
 __device__ void QueuePair::atomic_nofetch_single(void *dest, int64_t value) {
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   post_wqe_amo_single(dst, rkey, gda_op_atomic_fa, value, 0);
-}
-
-__device__ void QueuePair::atomic_add_single(void *raddr, uint32_t rkey,
-    int64_t value, bool fence) {
-  uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
-  post_wqe_amo_single(r, rkey, gda_op_atomic_fa, value, 0, false, fence);
-}
-
-__device__ void QueuePair::atomic_add(void *raddr, uint32_t rkey,
-    int64_t value, ActiveWFInfo &wf_info, bool fence) {
-  uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
-  post_wqe_amo(r, rkey, gda_op_atomic_fa, value, 0, wf_info, false, fence);
 }
 
 int QueuePair::buffer_register(uintptr_t addr, size_t length) {
@@ -464,24 +486,34 @@ void QueuePair::buffer_unregister_all() {
                       sizeof(struct user_buf_info_t) * num_user_buffers));
 }
 
-__device__ uint32_t QueuePair::get_lkey(uintptr_t addr) {
-  /* Check if in heap */
-  if (is_ptr_in_range(base_heap, base_heap_size, addr)) {
-    return lkey;
-  }
-
-  /* Get the correct lkey for the user buffer */
-  for (size_t i=0; i<num_user_buffers; i++) {
-    uintptr_t uaddr = user_buf_info[i].addr;
-    size_t uaddr_len = user_buf_info[i].length;
-
-    if (is_ptr_in_range(uaddr, uaddr_len, addr)) {
-      return user_buf_info[i].lkey;
-    }
-  }
-
-  LOGD_ERROR_ABORT("Valid lkey buffer not found");
-  return 0;
-}
-
 }  // namespace rocshmem
+
+// Exported C function for GIN QP factory to initialize __constant__ constmem.
+// Lives in librocshmem.a so HIP_SYMBOL(constmem) resolves via device linking.
+// Callable from librccl.so via -rdynamic symbol export.
+extern "C" void rocshmem_gin_init_constmem(int provider, int rank) {
+  using namespace rocshmem;
+
+  // Initialize constmem.gda_provider for QP device dispatch
+  GDAProvider gda_prov = static_cast<GDAProvider>(provider);
+  constmem_t* cm_addr{nullptr};
+  if (hipGetSymbolAddress(reinterpret_cast<void**>(&cm_addr),
+                          HIP_SYMBOL(constmem)) == hipSuccess) {
+    CHECK_HIP(hipMemcpy(&cm_addr->gda_provider, &gda_prov, sizeof(gda_prov), hipMemcpyDefault));
+  }
+
+  // Initialize logd_constants for device-side error reporting
+  log_pe_number = rank;
+  uint32_t log_flags = 0;
+  if (envvar::log_flags.show_error) log_flags |= logd_constants::SHOW_ERROR;
+  if (envvar::log_flags.show_warn)  log_flags |= logd_constants::SHOW_WARN;
+  if (envvar::log_flags.show_info)  log_flags |= logd_constants::SHOW_INFO;
+  if (envvar::log_flags.show_trace) log_flags |= logd_constants::SHOW_TRACE;
+  if (envvar::log_flags.show_color) log_flags |= logd_constants::SHOW_COLOR;
+  struct logd_constants host_logd{rank, log_flags};
+  struct logd_constants* logd_addr{nullptr};
+  if (hipGetSymbolAddress(reinterpret_cast<void**>(&logd_addr),
+                          HIP_SYMBOL(logd_constants)) == hipSuccess) {
+    CHECK_HIP(hipMemcpy(logd_addr, &host_logd, sizeof(host_logd), hipMemcpyDefault));
+  }
+}

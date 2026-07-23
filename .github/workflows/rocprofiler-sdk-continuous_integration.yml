@@ -251,7 +251,6 @@ jobs:
             ${{ matrix.system.ci-flags }} -- \
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
-            -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
             -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk \
             -DCPACK_GENERATOR='DEB;RPM;TGZ' \
@@ -465,7 +464,6 @@ jobs:
             -- \
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
-            -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
             -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
             -DPython3_EXECUTABLE=$(which python3) \
@@ -604,7 +602,6 @@ jobs:
           --memcheck ${{ matrix.system.sanitizer }} \
           --run-attempt ${{ github.run_attempt }} \
           -- \
-          -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}" \
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
