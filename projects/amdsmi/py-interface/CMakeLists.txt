@@ -25,6 +25,19 @@ set(AMDSMI_PYTHON_LIB_PATH "${PROJECT_BINARY_DIR}/src/${AMDSMI_PYTHON_LIB_NAME}"
 set(GOOD_CLANG_FOUND FALSE)
 # only try to re-generate amdsmi_wrapper.py if BUILD_WRAPPER is on/true
 if(BUILD_WRAPPER)
+    # The committed wrapper is canonical: its loader and every ctypes binding
+    # key on 'libamd_smi.so'. With BUILD_PYTHON_WHEEL=ON the generator is fed
+    # -l libamd_smi_python.so, so ctypeslib would emit bindings keyed on
+    # 'libamd_smi_python.so' while the loader still populates 'libamd_smi.so' --
+    # every API call would then KeyError. The wheel reuses the committed wrapper
+    # (only flipping the fallback flag), so it never needs regeneration. Reject
+    # the combination rather than emit a broken wrapper.
+    if(BUILD_PYTHON_WHEEL)
+        message(
+            FATAL_ERROR
+            "BUILD_WRAPPER=ON is incompatible with BUILD_PYTHON_WHEEL=ON: regenerating the wrapper against libamd_smi_python.so produces bindings that mismatch the canonical libamd_smi.so loader. Regenerate the wrapper with BUILD_PYTHON_WHEEL=OFF, then build the wheel from the committed wrapper."
+        )
+    endif()
     find_program(clang NAMES clang REQUIRED)
     # extract clang version manually because find_package(clang) doesn't work
     execute_process(COMMAND ${clang} --version OUTPUT_VARIABLE clang_full_version_string)
