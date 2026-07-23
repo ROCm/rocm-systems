@@ -689,6 +689,7 @@ __device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
     for (int j = wave_tid; j < count; j += WF_SIZE) {
       dest[offset + j] = source[team_rank * nreduce + offset + j];
     }
+	  __builtin_amdgcn_wave_barrier();
 
     // Send my contribution to each remote PE's pWrk slot, then signal.
     for (int i = PE_start; i < finish; i += stride) {
@@ -699,11 +700,12 @@ __device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
                                   source + remote_rank * nreduce + offset),
                               count * sizeof(T), i);
         if (is_thread_zero_in_wave()) {
+          fence(i);
           internal_putmem(&pSync[team_rank], &flag_val, sizeof(*pSync), i);
         }
-	__builtin_amdgcn_wave_barrier();
       }
     }
+    threadfence_system();
     __builtin_amdgcn_wave_barrier();
 
     // Wait for each remote PE's signal, then accumulate into dest.
@@ -713,28 +715,29 @@ __device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
         if (is_thread_zero_in_wave()) {
           wait_until(&pSync[remote_rank], ROCSHMEM_CMP_EQ, flag_val);
         }
-	__builtin_amdgcn_wave_barrier();
+	      __builtin_amdgcn_wave_barrier();
         T *src_chunk = &pWrk[remote_rank * chunk_size];
         T *dst_chunk = dest + offset;
         for (int j = wave_tid; j < count; j += WF_SIZE) {
           OpWrap<Op>::Calc(src_chunk, dst_chunk, j);
         }
-        // threadfence_system();
+        threadfence_system();
       }
     }
-
-    sync_wave(team);
-    __builtin_amdgcn_wave_barrier();
-
-    // Reset pSync before reuse.
-    for (int j = wave_tid; j < PE_size; j += WF_SIZE) {
-      pSync[j] = ROCSHMEM_SYNC_VALUE;
-    }
-
+    
     // Sync with wave 0 of other PEs
     sync_wave(team);
     __builtin_amdgcn_wave_barrier();
+
   }
+  // Reset pSync before reuse.
+  for (int j = wave_tid; j < PE_size; j += WF_SIZE) {
+    pSync[j] = ROCSHMEM_SYNC_VALUE;
+  }
+
+  sync_wave(team);
+  __builtin_amdgcn_wave_barrier();
+  barrier_wave(team);
 
   return ROCSHMEM_SUCCESS;
 }
