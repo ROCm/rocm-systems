@@ -330,8 +330,7 @@ class RegisteredWindowHandle(CommResource):
 
         Args:
             multimem: A :class:`MultimemHandle` returned by
-                :py:meth:`DevCommResource.multimem_handle` or
-                :py:attr:`DevCommResource.lsa_multimem`.
+                :py:meth:`DevCommResource.multimem_handle`.
             offset: Byte offset within the window buffer. Defaults to 0.
 
         Returns:
@@ -546,12 +545,6 @@ class DevCommResource(CommResource):
             RuntimeError: If the device communicator has been destroyed.
         """
         return self.dev_comm.ptr
-
-    @property
-    def lsa_multimem(self) -> MultimemHandle:
-        """Multimem handle embedded in the device communicator's LSA team."""
-        self._check_valid()
-        return MultimemHandle._from_lowpp(self.dev_comm.lsa_multimem)
 
     def multimem_handle(self, team: NCCLTeam) -> MultimemHandle:
         """Returns the multimem handle requested for ``team``.

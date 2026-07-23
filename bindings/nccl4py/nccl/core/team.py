@@ -23,8 +23,7 @@ class NCCLTeam(LowppSpec, lowpp_cls=_nccl_bindings.Team):
     Produced by
     :py:attr:`~nccl.core.communicator.Communicator.team_world`,
     :py:attr:`~nccl.core.communicator.Communicator.team_lsa`, and
-    :py:attr:`~nccl.core.communicator.Communicator.team_rail`, or constructed
-    directly for hand-built teams.
+    :py:attr:`~nccl.core.communicator.Communicator.team_rail`.
     """
 
     n_ranks: int
