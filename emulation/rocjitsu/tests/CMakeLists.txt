@@ -680,6 +680,7 @@ add_executable(
 target_include_directories(
     rj_dbt_translate_smoke_test
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
 )
@@ -966,6 +967,7 @@ target_compile_definitions(
 target_include_directories(
     hsa_hooks_unit_test
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
         ${CMAKE_SOURCE_DIR}/lib/util/include

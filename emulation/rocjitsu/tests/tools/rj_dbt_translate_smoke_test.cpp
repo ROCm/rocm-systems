@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
+#include "scoped_temp.h"
 
 #include <gtest/gtest.h>
 
@@ -31,16 +32,6 @@
 namespace {
 
 std::filesystem::path g_translate_tool;
-
-struct TempDir {
-  std::filesystem::path path;
-
-  explicit TempDir(std::filesystem::path temp_path) : path(std::move(temp_path)) {
-    std::filesystem::create_directories(path);
-  }
-
-  ~TempDir() { std::filesystem::remove_all(path); }
-};
 
 uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
@@ -219,13 +210,11 @@ bool command_exited_with(int status, int exit_code) {
 } // namespace
 
 TEST(RjDbtTranslate, Smoke) {
-  const TempDir temp_dir(
-      std::filesystem::temp_directory_path() /
-      ("rj_dbt_translate_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_smoke_");
 
-  const auto input = temp_dir.path / "smoke_gfx950.co";
-  const auto output = temp_dir.path / "stdout.txt";
-  const auto error = temp_dir.path / "stderr.txt";
+  const auto input = std::filesystem::path(temp_dir.path()) / "smoke_gfx950.co";
+  const auto output = std::filesystem::path(temp_dir.path()) / "stdout.txt";
+  const auto error = std::filesystem::path(temp_dir.path()) / "stderr.txt";
 
   {
     const auto image = make_smoke_code_object();
@@ -260,12 +249,10 @@ TEST(RjDbtTranslate, Smoke) {
 }
 
 TEST(RjDbtTranslate, RequiresRevisionsOnlyForGfx1250) {
-  const TempDir temp_dir(
-      std::filesystem::temp_directory_path() /
-      ("rj_dbt_translate_revision_" + std::to_string(static_cast<long long>(getpid()))));
-  const auto input = temp_dir.path / "smoke.co";
-  const auto output = temp_dir.path / "stdout.txt";
-  const auto error = temp_dir.path / "stderr.txt";
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_revision_");
+  const auto input = std::filesystem::path(temp_dir.path()) / "smoke.co";
+  const auto output = std::filesystem::path(temp_dir.path()) / "stdout.txt";
+  const auto error = std::filesystem::path(temp_dir.path()) / "stderr.txt";
 
   {
     const auto image = make_smoke_code_object();
