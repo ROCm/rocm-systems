@@ -79,10 +79,12 @@ inline hipError_t getSwapExpectedReturn(const LinearAllocs allocTypeA, const Lin
     return hipErrorNotSupported;
   }
 
+  // Mirrors CLR's sdma_swap_supported_ check (rocclr/device/rocm/rocsettings.cpp).
+  // Keep in sync if CLR adds architectures.
   const auto supportsSwap = [](int device) {
     int major, minor;
     HIP_CHECK(hipDeviceComputeCapability(&major, &minor, device));
-    return major == 9 && minor >= 4;
+    return (major == 9 && minor >= 4) || (major == 12 && minor >= 5);
   };
 
   if (supportsSwap(deviceA) && supportsSwap(deviceB)) {
