@@ -794,14 +794,17 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
         std::vector<uint32_t> release_words;
         std::vector<uint32_t> acquire_words;
         std::vector<uint32_t> atomic_words;
+        const uint16_t cas_address_vgpr = deferred_acquire ? 8u : 4u;
+        const uint16_t cas_result_vgpr = deferred_acquire ? 4u : 11u;
         uint32_t wait_word = 0u;
         if (target.arch == ROCJITSU_CODE_ARCH_CDNA3) {
           const auto release = cdna3::build_mubuf(cdna3::kBufferWbl2Mubuf, {.sc1 = 1});
           const auto acquire = build_cdna3_buffer_inv_sc1(target.arch);
           const auto atomic =
-              is_cas ? instrumentation::build_flat_atomic_cmpswap_b32(
-                           /*vaddr=*/8, /*vsrc=*/6, /*vdst=*/4, /*return_old_value=*/true,
-                           /*scope=*/2, target.arch)
+              is_cas ? instrumentation::build_flat_atomic_cmpswap_b32(cas_address_vgpr, /*vsrc=*/6,
+                                                                      cas_result_vgpr,
+                                                                      /*return_old_value=*/true,
+                                                                      /*scope=*/2, target.arch)
                      : instrumentation::build_flat_atomic_add_u32(
                            /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true,
                            /*scope=*/2, target.arch);
@@ -815,9 +818,10 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
           const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
           const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});
           const auto atomic =
-              is_cas ? instrumentation::build_flat_atomic_cmpswap_b32(
-                           /*vaddr=*/8, /*vsrc=*/6, /*vdst=*/4, /*return_old_value=*/true,
-                           /*scope=*/2, target.arch)
+              is_cas ? instrumentation::build_flat_atomic_cmpswap_b32(cas_address_vgpr, /*vsrc=*/6,
+                                                                      cas_result_vgpr,
+                                                                      /*return_old_value=*/true,
+                                                                      /*scope=*/2, target.arch)
                      : instrumentation::build_flat_atomic_add_u32(
                            /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true,
                            /*scope=*/2, target.arch);
@@ -922,23 +926,40 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
         if (is_cas) {
           ASSERT_TRUE(atomic->persistent_private_state_end);
           ASSERT_LE(*atomic->scratch_vgpr, 4u);
+          ASSERT_GT(static_cast<uint32_t>(*atomic->scratch_vgpr) + atomic->spilled_vgpr_count, 7u);
+          std::vector<uint32_t> evidence_snapshot = {
+              build_v_mov_b32_e32(static_cast<uint16_t>(*atomic->scratch_vgpr + 8u),
+                                  vector_source_vgpr(cas_address_vgpr), target.arch),
+              build_v_mov_b32_e32(static_cast<uint16_t>(*atomic->scratch_vgpr + 9u),
+                                  vector_source_vgpr(static_cast<uint16_t>(cas_address_vgpr + 1u)),
+                                  target.arch),
+          };
           const auto compare_load = instrumentation::build_private_load_b32(
               static_cast<uint16_t>(*atomic->scratch_vgpr + 4u),
               *atomic->persistent_private_state_end +
                   static_cast<uint32_t>(7u - *atomic->scratch_vgpr) * sizeof(uint32_t),
               target.arch);
-          const auto result_load = instrumentation::build_private_load_b32(
-              static_cast<uint16_t>(*atomic->scratch_vgpr + 5u),
-              *atomic->persistent_private_state_end +
-                  static_cast<uint32_t>(4u - *atomic->scratch_vgpr) * sizeof(uint32_t),
-              target.arch);
           const auto wait = instrumentation::build_s_wait_private_load0(target.arch);
-          ASSERT_TRUE(compare_load && result_load && wait);
-          std::vector<uint32_t> evidence_snapshot;
+          ASSERT_TRUE(compare_load && wait);
           evidence_snapshot.insert(evidence_snapshot.end(), compare_load->begin(),
                                    compare_load->end());
-          evidence_snapshot.insert(evidence_snapshot.end(), result_load->begin(),
-                                   result_load->end());
+          const uint32_t scratch_end =
+              static_cast<uint32_t>(*atomic->scratch_vgpr) + atomic->spilled_vgpr_count;
+          if (cas_result_vgpr >= *atomic->scratch_vgpr && cas_result_vgpr < scratch_end) {
+            const auto result_load = instrumentation::build_private_load_b32(
+                static_cast<uint16_t>(*atomic->scratch_vgpr + 5u),
+                *atomic->persistent_private_state_end +
+                    static_cast<uint32_t>(cas_result_vgpr - *atomic->scratch_vgpr) *
+                        sizeof(uint32_t),
+                target.arch);
+            ASSERT_TRUE(result_load);
+            evidence_snapshot.insert(evidence_snapshot.end(), result_load->begin(),
+                                     result_load->end());
+          } else {
+            evidence_snapshot.push_back(
+                build_v_mov_b32_e32(static_cast<uint16_t>(*atomic->scratch_vgpr + 5u),
+                                    vector_source_vgpr(cas_result_vgpr), target.arch));
+          }
           evidence_snapshot.push_back(*wait);
           EXPECT_TRUE(contains_subsequence(cave, evidence_snapshot));
         }
@@ -1010,7 +1031,7 @@ TEST(ConSanMoi, Cdna4SharedSampledAtomicSeparatesPersistentStateFromSpills) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
-TEST(ConSanMoi, Cdna4SampledAtomicRejectsSpilledResultAddressAlias) {
+TEST(ConSanMoi, Cdna4SampledAtomicRejectsSpillWhenResultOverwritesGuestAddress) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const auto access =
       build_cdna4_ds_store_b32(/*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, kArch);
@@ -1049,6 +1070,8 @@ TEST(ConSanMoi, Cdna4SampledAtomicRejectsSpilledResultAddressAlias) {
   EXPECT_EQ(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                               &ConSanPatchInfo::kind),
             result.patches.end());
+  // The result/address alias disables guest-first spilling, so the strict
+  // scratch-overlap rejection is expected before CAS snapshot emission.
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("scratch-operand-alias") != std::string::npos;
   })) << testing::PrintToString(result.warnings);

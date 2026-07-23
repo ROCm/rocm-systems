@@ -772,6 +772,7 @@ struct SampledAtomicPreludeState {
                                                       uint16_t saved_compare, uint16_t saved_result,
                                                       rj_code_arch_t arch,
                                                       std::vector<std::string> &errors) {
+  assert(spill.slot_offsets.size() == spill.vgpr_count);
   if (spill.slot_offsets.size() != spill.vgpr_count) {
     errors.emplace_back("ConSan MOI sampled atomic spill has incomplete slot metadata");
     return false;
@@ -781,6 +782,8 @@ struct SampledAtomicPreludeState {
     const uint32_t spill_end = static_cast<uint32_t>(spill.vgpr_base) + spill.vgpr_count;
     if (source >= spill.vgpr_base && source < spill_end) {
       const uint16_t slot = static_cast<uint16_t>(source - spill.vgpr_base);
+      // Reload from the post-guest spill slot because the source register may
+      // itself be one of the scratch destinations populated by this snapshot.
       const auto load =
           instrumentation::build_private_load_b32(destination, spill.slot_offsets[slot], arch);
       if (!load)
@@ -834,18 +837,6 @@ struct SampledAtomicPreludeState {
     return false;
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
-  if (guest_first && is_cas) {
-    const uint16_t saved_compare =
-        static_cast<uint16_t>(*options.scratch_vgpr + SampledAtomicScratchLayout::cas_compare);
-    const uint16_t saved_result =
-        static_cast<uint16_t>(*options.scratch_vgpr + SampledAtomicScratchLayout::cas_result);
-    if (!append_sampled_atomic_cas_snapshot(words, *spill, *state.cas_compare_vgpr,
-                                            *state.cas_result_vgpr, saved_compare, saved_result,
-                                            arch, errors))
-      return false;
-    state.cas_compare_vgpr = saved_compare;
-    state.cas_result_vgpr = saved_result;
-  }
   if (address_plan.requires_materialization()) {
     const auto special = moi_special_state_sgprs(options);
     if (!special)
@@ -862,6 +853,18 @@ struct SampledAtomicPreludeState {
     words.push_back(build_v_mov_b32_e32(
         static_cast<uint16_t>(saved_address + 1u),
         vector_source_vgpr(static_cast<uint16_t>(address_plan.result_address_vgpr + 1u)), arch));
+  }
+  if (guest_first && is_cas) {
+    const uint16_t saved_compare =
+        static_cast<uint16_t>(*options.scratch_vgpr + SampledAtomicScratchLayout::kCasCompare);
+    const uint16_t saved_result =
+        static_cast<uint16_t>(*options.scratch_vgpr + SampledAtomicScratchLayout::kCasResult);
+    if (!append_sampled_atomic_cas_snapshot(words, *spill, *state.cas_compare_vgpr,
+                                            *state.cas_result_vgpr, saved_compare, saved_result,
+                                            arch, errors))
+      return false;
+    state.cas_compare_vgpr = saved_compare;
+    state.cas_result_vgpr = saved_result;
   }
   if (private_layout && !append_sampled_private_owner_epoch_load(
                             words, bytes, *candidate.kernel_descriptor_file_offset, options,
@@ -933,10 +936,10 @@ struct SampledAtomicPreludeState {
     return std::nullopt;
 
   const uint16_t base = *options.scratch_vgpr;
-  const uint16_t value = static_cast<uint16_t>(base + SampledAtomicScratchLayout::value);
-  const uint16_t expected = static_cast<uint16_t>(base + SampledAtomicScratchLayout::expected);
+  const uint16_t value = static_cast<uint16_t>(base + SampledAtomicScratchLayout::kValue);
+  const uint16_t expected = static_cast<uint16_t>(base + SampledAtomicScratchLayout::kExpected);
   const uint16_t saved_address =
-      static_cast<uint16_t>(base + SampledAtomicScratchLayout::saved_address);
+      static_cast<uint16_t>(base + SampledAtomicScratchLayout::kSavedAddress);
   const uint16_t original_exec = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
   const uint16_t temporary_exec = *options.moi_exec_save_sgpr;
   const uint64_t report_base = *options.moi_report_buffer_address;
@@ -1188,10 +1191,10 @@ struct SampledAtomicPreludeState {
     return std::nullopt;
 
   const uint16_t base = *options.scratch_vgpr;
-  const uint16_t value = static_cast<uint16_t>(base + SampledAtomicScratchLayout::value);
-  const uint16_t expected = static_cast<uint16_t>(base + SampledAtomicScratchLayout::expected);
+  const uint16_t value = static_cast<uint16_t>(base + SampledAtomicScratchLayout::kValue);
+  const uint16_t expected = static_cast<uint16_t>(base + SampledAtomicScratchLayout::kExpected);
   const uint16_t saved_address =
-      static_cast<uint16_t>(base + SampledAtomicScratchLayout::saved_address);
+      static_cast<uint16_t>(base + SampledAtomicScratchLayout::kSavedAddress);
   const uint16_t original_exec = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
   const uint16_t temporary_exec = *options.moi_exec_save_sgpr;
   const uint64_t report_base = *options.moi_report_buffer_address;

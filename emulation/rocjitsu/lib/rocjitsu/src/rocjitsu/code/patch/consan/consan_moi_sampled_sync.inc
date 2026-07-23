@@ -1929,9 +1929,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     candidate_options.scratch_vgpr = planned.resources.base;
     if (planned.private_layout) {
       candidate_options.moi_owner_vgpr =
-          static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::owner);
+          static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kOwner);
       candidate_options.moi_epoch_vgpr =
-          static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::epoch);
+          static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kEpoch);
     }
     uint32_t guest_instruction_offset = 0;
     auto cave_words =

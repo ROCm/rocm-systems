@@ -938,8 +938,10 @@ struct TwoKernelSharedFixtureOptions {
 std::vector<uint8_t> make_two_kernel_shared_helper_code_object(
     const TwoKernelSharedFixtureOptions &options, rj_code_arch_t arch,
     std::span<const uint32_t> architecture_specific_helper = {}) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+    ADD_FAILURE() << "shared-helper fixture supports only RDNA4 and CDNA4";
     return {};
+  }
   if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
       (architecture_specific_helper.empty() || options.first_wave32 || options.second_wave32 ||
        options.first_continuation_uses_v1 || !options.first_continuation_live_sgprs.empty() ||
@@ -947,8 +949,11 @@ std::vector<uint8_t> make_two_kernel_shared_helper_code_object(
        options.helper_has_ordinary_memory || options.helper_has_ordered_atomic ||
        options.helper_atomic_acquire_release || options.helper_has_barrier ||
        options.unrelated_has_lds || options.unrelated_has_barrier || options.use_indirect_calls ||
-       options.group_bytes != 0u))
+       options.group_bytes != 0u)) {
+    ADD_FAILURE() << "CDNA4 shared-helper fixture accepts only an architecture-specific helper, "
+                     "VGPR counts, and private sizes";
     return {};
+  }
   constexpr uint16_t kReturnSgpr = 30;
   constexpr uint16_t kPcSgpr = 2;
   constexpr uint32_t kLiteralOperand = 255;
