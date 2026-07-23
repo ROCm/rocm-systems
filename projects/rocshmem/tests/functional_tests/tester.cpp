@@ -62,8 +62,10 @@
 #include "team_ctx_infra_tester.hpp"
 #include "team_ctx_primitive_tester.hpp"
 #include "team_fcollect_tester.hpp"
+#include "fcollect_wave_tester.hpp"
 #include "team_reduction_tester.hpp"
 #include "team_reduce_scatter_tester.hpp"
+#include "reduce_wave_tester.hpp"
 #include "wavefront_primitives.hpp"
 #include "workgroup_primitives.hpp"
 #include "flood_tester.hpp"
@@ -80,6 +82,7 @@
 #include "team_split_2d_tester.hpp"
 #include "host_team_sync_barrier_tester.hpp"
 #include "broadcast_wave_tester.hpp"
+#include "alltoall_wave_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -103,6 +106,9 @@ Tester::Tester(TesterArguments args) : args(args) {
     case WAVEPutTestType:
     case WAVEPutNBITestType:
     case BroadcastWaveTestType:
+    case AllToAllWaveTestType:
+    case FcollectWaveTestType:
+    case ReduceWaveTestType:
       num_timers = args.num_wgs * num_warps;
       break;
     default:
@@ -139,6 +145,7 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WAVEPutNBITestType:
       case WAVEPutSignalTestType:
       case WAVEPutSignalNBITestType:
+      case ReduceWaveTestType:
         max_msg_size = args.max_volume_size / args.num_wgs / num_warps;
         break;
       case WGGetTestType:
@@ -154,10 +161,12 @@ Tester::Tester(TesterArguments args) : args(args) {
       case TeamReductionTestType:
       case TeamReduceScatterTestType:
       case TeamFCollectTestType:
+      case FcollectWaveTestType:
       case CollectTestType:
       case TeamAllToAllTestType:
       case TeamAllToAllvTestType:
       case TeamAlltoallmemOnStreamTestType:
+      case AllToAllWaveTestType:
         max_msg_size = args.max_volume_size / args.num_wgs / args.numprocs;
         break;
       default:
@@ -312,6 +321,22 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
                                                    std::to_string(n_pes));
           }));
       break;
+    case ReduceWaveTestType:
+      test_name = "Wave-level Reduction";
+      testers.push_back(new ReduceWaveTester<float, ROCSHMEM_SUM>(
+          args,
+          [](float& f1, float& f2) {
+            f1 = 1;
+            f2 = 1;
+          },
+          [](float v, float n_pes) {
+            return (v == n_pes)
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false, "Got " + std::to_string(v) +
+                                                   ", Expect " +
+                                                   std::to_string(n_pes));
+          }));
+      break;
     case TeamBroadcastTestType:
       test_name = "Team Broadcast Test";
       testers.push_back(new TeamBroadcastTester<int64_t>(args));
@@ -340,6 +365,12 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case TeamAlltoallmemOnStreamTestType:
       test_name = "Alltoallmem_On_Stream";
       testers.push_back(new TeamAlltoallmemOnStreamTester(args));
+      break;
+    case AllToAllWaveTestType:
+      test_name = "AllToAll Wave Test";
+      testers.push_back(new AlltoallWaveTester<float>(args));
+      testers.push_back(new AlltoallWaveTester<char>(args));
+      testers.push_back(new AlltoallWaveTester<int>(args));
       break;
     case BarrierAllOnStreamTestType:
       test_name = "Barrier_All_On_Stream";
@@ -492,6 +523,16 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       testers.push_back(new TeamFcollectTester<double>(args));
       testers.push_back(new TeamFcollectTester<char>(args));
       testers.push_back(new TeamFcollectTester<unsigned char>(args));
+      break;
+    case FcollectWaveTestType:
+      test_name = "Fcollect Wave Test";
+      testers.push_back(new FcollectWaveTester<int64_t>(args));
+      testers.push_back(new FcollectWaveTester<int>(args));
+      testers.push_back(new FcollectWaveTester<long long>(args));
+      testers.push_back(new FcollectWaveTester<float>(args));
+      testers.push_back(new FcollectWaveTester<double>(args));
+      testers.push_back(new FcollectWaveTester<char>(args));
+      testers.push_back(new FcollectWaveTester<unsigned char>(args));
       break;
     case AMO_FAddTestType:
       test_name = "AMO Fetch_Add";
@@ -995,6 +1036,7 @@ bool Tester::peLaunchesKernel() {
     case ReduceOnStreamTestType:
     case TeamReductionTestType:
     case TeamReduceScatterTestType:
+    case ReduceWaveTestType:
     case TeamBroadcastTestType:
     case TeamCtxInfraTestType:
     case TeamCtxInfraSingleTestType:
@@ -1005,6 +1047,7 @@ bool Tester::peLaunchesKernel() {
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
     case TeamFCollectTestType:
+    case FcollectWaveTestType:
     case PingPongTestType:
     case BarrierAllTestType:
     case WAVEBarrierAllTestType:
@@ -1051,6 +1094,7 @@ bool Tester::peLaunchesKernel() {
     case TileAllgatherWaveTestType:
     case TileAllgatherWGTestType:
     case BroadcastWaveTestType:
+    case AllToAllWaveTestType:
       is_launcher = true;
       break;
     case HostPutmemTestType:

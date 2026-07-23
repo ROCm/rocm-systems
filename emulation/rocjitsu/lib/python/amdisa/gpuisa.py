@@ -26,20 +26,65 @@ class MicrocodeField:
     bit_offset: int
 
 
+#: Base C++ identifier synthesized for a fieldless operand of each operand
+#: type (fieldless operands have no ``<FieldName>`` in the MR ISA to derive a
+#: name from). Bases are deliberately distinct per type so the name reflects
+#: which operand it is -- in particular ``OPR_EXEC`` (``exec``) and
+#: ``OPR_SDST_EXEC`` (``sdst_exec``) are kept apart. This is a readability
+#: choice, not a correctness one. Any type not listed falls back to the type
+#: name with the ``OPR_`` prefix stripped and lowercased (see
+#: ``synthesize_fieldless_name``).
+_FIELDLESS_NAME_MAP: dict[str, str] = {
+    'OPR_VCC': 'vcc',
+    'OPR_EXEC': 'exec',
+    'OPR_SDST_EXEC': 'sdst_exec',
+    'OPR_SSRC_SPECIAL_SCC': 'scc',
+    'OPR_PC': 'pc',
+    'OPR_SDST_M0': 'm0',
+    'OPR_DSMEM': 'dsmem',
+    'OPR_GPUMEM': 'gpumem',
+    'OPR_FLAT_SCRATCH': 'flat_scratch',
+    # Fieldless OPR_VGPR is the image ADDRESS/coordinate operand (vaddr).
+    'OPR_VGPR': 'vaddr',
+    'OPR_SIMM32': 'simm32',
+}
+
+
+def synthesize_fieldless_name(operand_type: str) -> str:
+    """Return a stable, valid C++ base identifier for a fieldless operand.
+
+    Fieldless operands (no ``<FieldName>`` in the MR ISA) cannot derive their
+    name from an encoding field, so one is synthesized from the operand type.
+    The result is a *base* name; callers must still guarantee uniqueness within
+    an instruction (two fieldless operands can share a type). See
+    ``_FIELDLESS_NAME_MAP`` for the curated bases; anything else strips the
+    ``OPR_`` prefix and lowercases.
+    """
+    if operand_type in _FIELDLESS_NAME_MAP:
+        return _FIELDLESS_NAME_MAP[operand_type]
+    base = operand_type
+    if base.startswith('OPR_'):
+        base = base[len('OPR_') :]
+    return base.lower()
+
+
 @dataclass
 class Operand:
     """An instruction operand.
 
     Attributes:
-        name: Name of the operand.
+        name: Name of the operand (``<FieldName>`` ? name : synthesized id).
         size: Size of the operand in bits.
         operand_type: ISA-specific operand type.
         is_input: True if the operand is an input.
         is_output: True if the operand is an output.
-        is_implicit: True if the operand is implicit.
+        is_implicit: True if the operand is implicit (the MR ISA
+            ``IsImplicit`` attribute)
         is_binary_ucode_required: True if the operand is missing from the
             encoding but implied by the type of the operand.
         order: Order of the operand.
+        data_format_name: ISA data format name from the XML operand signature.
+        fieldless: True if the operand has no ``<FieldName>`` in the MR ISA.
     """
 
     name: str
@@ -50,6 +95,8 @@ class Operand:
     is_implicit: bool
     is_binary_ucode_required: bool
     order: int
+    data_format_name: str = ''
+    fieldless: bool = False
 
 
 @dataclass
@@ -145,7 +192,8 @@ class InstEncoding(InstBase):
         ucode_fields: All microcode fields in this encoding.
         enc_conds: Encoding condition (name, logic) pairs.
         insts: Instructions encoded under this encoding.
-        implied_literal_ops: Opcodes with an implied literal (second DWORD).
+        implied_literal_ops: Opcode-to-extension-DWORD-count mapping for
+            instructions whose encoding carries an implied literal.
     """
 
     def __init__(
@@ -169,12 +217,17 @@ class InstEncoding(InstBase):
         self.ucode_fields = ucode_fields
         self.enc_conds = enc_conds
         self.insts: list[Instruction] = []
-        self.implied_literal_ops: list[str] = []
+        self.implied_literal_ops: dict[str, int] = {}
 
     @cached_property
     def has_implied_literal_ops(self) -> bool:
         """True if this encoding has any implied literal opcodes."""
         return len(self.implied_literal_ops) > 0
+
+    @cached_property
+    def has_variable_implied_literal_size(self) -> bool:
+        """True if an implied literal is not the usual one DWORD."""
+        return any(words != 1 for words in self.implied_literal_ops.values())
 
 
 class Instruction(InstBase):
@@ -211,6 +264,41 @@ class Instruction(InstBase):
     def mnemonic(self) -> str:
         """Instruction mnemonic (lowercase name)."""
         return self.name.lower()
+
+    @property
+    def implicit_operands(self) -> list[Operand]:
+        """Subset of ``operands`` that are implicit (``is_implicit=True``)."""
+        return [op for op in self.operands if op.is_implicit]
+
+    @property
+    def explicit_operands(self) -> list[Operand]:
+        """Subset of ``operands`` that are explicit (``is_implicit=False``)."""
+        return [op for op in self.operands if not op.is_implicit]
+
+    @property
+    def src_operands(self) -> list[Operand]:
+        """Subset of ``operands`` that are inputs (``is_input=True``).
+
+        Includes fieldless inputs, so this is NOT the execute-visible source
+        set: the code generator filters those through
+        ``CodeGenerator._execute_operand_participates``.
+        """
+        return [op for op in self.operands if op.is_input]
+
+    @property
+    def dst_operands(self) -> list[Operand]:
+        """Subset of ``operands`` that are outputs (``is_output=True``).
+
+        Includes fieldless outputs (e.g. the SCC/EXEC side-effect defs), so like
+        :attr:`src_operands` this is NOT the execute-visible destination set. No
+        in-tree consumer yet; filter via
+        ``CodeGenerator._execute_operand_participates`` for the execute set.
+        """
+        return [op for op in self.operands if op.is_output]
+
+    def has_implicit_operand(self, operand_type: str) -> bool:
+        """True if any implicit operand has the given ``operand_type``."""
+        return any(op.operand_type == operand_type for op in self.implicit_operands)
 
 
 @dataclass
@@ -272,6 +360,9 @@ class IsaSpec:
             2, profile.max_enc_bits
         )
         self.alt_encs_with_implied_literal: set[str] = set()
+        # Every fieldless operand type observed while parsing this spec.
+        # Consumed by fieldless_policy.validate_fieldless_taxonomy.
+        self.fieldless_operand_types: set[str] = set()
         if self.version not in profile.supported_versions:
             raise ValueError(
                 f'Unsupported machine-readable ISA spec version: {self.version}'

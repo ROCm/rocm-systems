@@ -662,6 +662,11 @@ enum {
    * constraints enforced by the command processor).
    */
   HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS = 49,
+
+  /**
+   * Underlying resource is a valid resource, but it is not ready to be used.
+   */
+  HSA_STATUS_ERROR_RESOURCE_NOT_READY = 50,
 };
 
 /** @} */

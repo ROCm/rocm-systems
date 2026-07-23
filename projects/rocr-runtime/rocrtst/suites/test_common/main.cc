@@ -599,6 +599,13 @@ TEST(rocrtstFunc, VirtMemory_Interprocess_HostPool_Test) {
     RunCustomTestEpilog(&vmt);
 }
 
+TEST(rocrtstFunc, VirtMemory_FabricExport_Readiness_Test) {
+  VirtMemoryTestBasic vmt;
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestFabricExportAcceleratorReadiness();
+  RunCustomTestEpilog(&vmt);
+}
+
 TEST(rocrtstFunc, Filter_Devices_Test) {
     FilterDevicesTest fd;
     if (!RunCustomTestProlog(&fd)) return;
@@ -917,5 +924,13 @@ int main(int argc, char** argv) {
     }
     DumpMonitorInfo();
   }
-  return RUN_ALL_TESTS();
+
+  int result = RUN_ALL_TESTS();
+
+  // Print skipped test summary (grouped by reason)
+  rocrtst::SkippedTestTracker::getInstance().printSummary(
+      rocrtst::PlatformDetector::platformName(
+          rocrtst::TestFilterManager::getInstance().getPlatform()));
+
+  return result;
 }

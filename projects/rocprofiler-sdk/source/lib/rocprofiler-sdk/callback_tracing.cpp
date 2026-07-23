@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
@@ -36,6 +37,7 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
 #include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
+#include "lib/rocprofiler-sdk/rocshmem/rocshmem.hpp"
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -46,6 +48,7 @@
 #include <rocprofiler-sdk/rccl/table_id.h>
 #include <rocprofiler-sdk/rocdecode/table_id.h>
 #include <rocprofiler-sdk/rocjpeg/table_id.h>
+#include <rocprofiler-sdk/rocshmem/table_id.h>
 
 #include <atomic>
 #include <cstdint>
@@ -96,6 +99,8 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCDECODE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCJPEG_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_STREAM)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_CORE_RANGE_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_GRAPH)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCSHMEM_API)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -301,7 +306,17 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
                 operation);
             break;
         }
-    };
+        case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
+        {
+            val = rocprofiler::hip::graph::name_by_id(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+        {
+            val = rocprofiler::rocshmem::name_by_id<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>(operation);
+            break;
+        }
+    }
 
     if(!val)
     {
@@ -450,7 +465,17 @@ rocprofiler_iterate_callback_tracing_kind_operations(
             ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxCoreRange>();
             break;
         }
-    };
+        case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
+        {
+            ops = rocprofiler::hip::graph::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+        {
+            ops = rocprofiler::rocshmem::get_ids<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>();
+            break;
+        }
+    }
 
     for(const auto& itr : ops)
     {
@@ -597,6 +622,17 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
                 user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }
+        case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+        {
+            rocprofiler::rocshmem::iterate_args<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>(
+                record.operation,
+                static_cast<rocprofiler_callback_tracing_rocshmem_api_data_t*>(record.payload)
+                    ->args,
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
         case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
         case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
@@ -606,6 +642,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
         case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
         case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
+        case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }

@@ -179,7 +179,9 @@ if(BUILD_TESTS)
     AllReduceTests.cpp
     AllToAllTests.cpp
     AllToAllVTests.cpp
+    AsymmetricVisibilityTests.cpp
     BroadcastTests.cpp
+    DoneEventOrderingTests.cpp
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
@@ -241,6 +243,8 @@ if(BUILD_TESTS)
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/GinDeviceTests.cpp
+      device/GinAnvilIpcDevice_test.cpp
+      DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
@@ -248,11 +252,81 @@ if(BUILD_TESTS)
       ../src/misc/kernel_config.cc
     )
 
+  if(ENABLE_ROCSHMEM_GIN)
+    list(APPEND TEST_FIXTURE_SOURCE_FILES
+      gin/GinAnvilIpcTableHost_test.cpp
+      ../src/gin/gin_anvil_ipc_table_host.cc
+    )
+  endif()
+
+  if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
+    list(APPEND TEST_FIXTURE_SOURCE_FILES
+      device/GinAnvilSdmaTemplate_test.cpp
+    )
+  endif()
+
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
 
     target_include_directories(rccl-UnitTestsFixtures PRIVATE
       ${PROJECT_BINARY_DIR}/hipify/src/device
+      ${PROJECT_BINARY_DIR}/hipify/src/include
+      ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
     )
+
+  if(ENABLE_ROCSHMEM_GIN)
+    target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM_GIN)
+  endif()
+
+  if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
+    target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM)
+  endif()
+
+  if(ENABLE_ROCSHMEM_GIN OR GIN_ANVIL_UNIT_TESTS)
+    if(ROCSHMEM_INCLUDE_DIR)
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_INCLUDE_DIR})
+    elseif(ROCSHMEM_INSTALL_DIR)
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE
+        "${ROCSHMEM_INSTALL_DIR}/include")
+    endif()
+    if(ROCSHMEM_SOURCE_DIR)
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE
+        "${ROCSHMEM_SOURCE_DIR}/src"
+        "${ROCSHMEM_SOURCE_DIR}/include")
+    endif()
+    if(ROCSHMEM_BUILD_DIR)
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_BUILD_DIR})
+    endif()
+  endif()
+
+  if(ENABLE_ROCSHMEM_GIN AND ROCM_VERSION VERSION_GREATER_EQUAL "60400")
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsGinAnvilPlugin)
+
+    add_executable(rccl-UnitTestsGinAnvilPlugin
+      gin/GinAnvilPlugin_test.cpp
+      gin/gin_anvil_plugin_test_stubs.cc
+      ../src/gin/gin_plugin_anvil_sdma.cc
+      ../src/gin/gin_anvil_ipc_table_host.cc
+      common/main_fixtures.cpp
+      common/EnvVars.cpp
+      common/TestChecks.cpp
+      common/ProcessIsolatedTestRunner.cpp
+    )
+
+    target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
+      ${PROJECT_BINARY_DIR}/hipify/src/include
+      ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
+      ${CMAKE_CURRENT_SOURCE_DIR}/gin
+    )
+    if(ROCSHMEM_SOURCE_DIR)
+      target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
+        ${ROCSHMEM_SOURCE_DIR}/include)
+    else()
+      target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
+        ${CMAKE_SOURCE_DIR}/../rocshmem/include)
+    endif()
+
+    target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE ENABLE_ROCSHMEM_GIN)
+  endif()
   endif()
 
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
@@ -263,9 +337,12 @@ if(BUILD_TESTS)
     set(TEST_FIXTURE_DEBUG_SOURCE_FILES
       AllocTests.cpp
       ParamTests.cpp
+      ParameterApiTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
+      DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
+      DdaFabricEligibilityTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
@@ -352,6 +429,7 @@ if(BUILD_TESTS)
       GrowMPITests.cpp
       GinNcclTimeoutMPITests.cpp
       SymmetricKernelMPITests.cpp
+      SymmetricWindowMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
@@ -395,8 +473,47 @@ if(BUILD_TESTS)
       target_link_libraries(${test_executable} PRIVATE dl rt numa -lrccl -L${CMAKE_BINARY_DIR} -lrocm_smi64 -L${ROCM_PATH}/lib -L${ROCM_PATH}/rocm_smi/lib)
     endif()
 
+    # Link the GIN device backend library and device-link its rdc code (-fgpu-rdc
+    # --hip-link --offload-arch=... -rdynamic) so GIN device tests can run.
+    if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_INSTALL_DIR AND "${test_executable}" STREQUAL "rccl-UnitTestsMPI")
+      set(_ROCSHMEM_OFFLOAD_FLAGS "")
+      foreach(_g IN LISTS GPU_TARGETS)
+        if(_g)
+          list(APPEND _ROCSHMEM_OFFLOAD_FLAGS "--offload-arch=${_g}")
+        endif()
+      endforeach()
+      # Fall back to linking by bare name if the hint lookup misses (avoids injecting <VAR>-NOTFOUND into the link line).
+      find_library(_ROCSHMEM_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      find_library(_ROCSHMEM_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      if(NOT _ROCSHMEM_DRM)
+        set(_ROCSHMEM_DRM drm)
+      endif()
+      if(NOT _ROCSHMEM_DRM_AMDGPU)
+        set(_ROCSHMEM_DRM_AMDGPU drm_amdgpu)
+      endif()
+      # Enable the GIN device backend in the test kernels so ncclGinCall has a
+      # dispatch case for the corresponding runtime GIN type.
+      target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ROCSHMEM_GDA_ENABLE=1)
+      target_compile_options(${test_executable} PRIVATE -fgpu-rdc)
+      target_link_libraries(${test_executable} PRIVATE
+          ${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a
+          ibverbs hsa-runtime64 hsakmt numa ${_ROCSHMEM_DRM} ${_ROCSHMEM_DRM_AMDGPU})
+      target_link_options(${test_executable} PRIVATE -fgpu-rdc --hip-link ${_ROCSHMEM_OFFLOAD_FLAGS} -rdynamic)
+    endif()
+
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
   endforeach()
+
+  # Suite H: shadow rocSHMEM sdma headers with no-op test stubs (higher-priority include path).
+  if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
+    if(ROCSHMEM_SOURCE_DIR)
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
+    else()
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${CMAKE_SOURCE_DIR}/../rocshmem/src)
+    endif()
+    target_include_directories(rccl-UnitTestsFixtures BEFORE PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/device)
+  endif()
 
   # Create install-time test file for distribution
   set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")

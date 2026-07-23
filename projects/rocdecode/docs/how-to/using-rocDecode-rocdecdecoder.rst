@@ -111,6 +111,7 @@ The ``create_decoder()`` function sets the decoder parameters and passes them to
   
   void create_decoder(DecoderInfo& dec_info) {
     RocDecoderCreateInfo create_info = {};
+    create_info.device_id = static_cast<uint8_t>(dec_info.dec_device_id);
     create_info.codec_type = dec_info.rocdec_codec_id;     // user specified codec_type for raw files
     [...]
     CHECK(rocDecCreateDecoder(&dec_info.decoder, &create_info));

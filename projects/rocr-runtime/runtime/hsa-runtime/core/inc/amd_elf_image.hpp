@@ -223,7 +223,7 @@ namespace elf {
     Image* NewElf32Image();
     Image* NewElf64Image();
 
-    uint64_t ElfSize(const void* buffer);
+    uint64_t ElfSize(const void* buffer, size_t buffer_size);
 
     std::string GetNoteString(uint32_t s_size, const char* s);
 

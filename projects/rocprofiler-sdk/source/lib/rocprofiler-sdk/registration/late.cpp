@@ -40,7 +40,7 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <dlfcn.h>

@@ -40,92 +40,106 @@ def gen_scalar_unary(
     # Special cases that don't follow the is_64 read/write pattern.
     if op == 'flbit_i32_i64':
         # 64-bit signed input → 32-bit output (find first bit of sign).
-        L.append(f'  int64_t sval = static_cast<int64_t>({src[0]}.read_scalar64(wf));')
+        L.append(
+            f'  int64_t sval = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_scalar64({src[0]}));'
+        )
         L.append(
             '  uint64_t uval = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);'
         )
         L.append(
             '  uint32_t result = uval == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(uval));'
         )
-        L.append(f'  {dst[0]}.write_scalar(wf, result);')
+        L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, result);')
         if scc and scc != 'none':
             L.append('  wf.write_scc(result != 0);')
         return '\n'.join(L)
 
     if op == 'clz64':
         # 64-bit unsigned input → 32-bit output (count leading zeros).
-        L.append(f'  uint64_t val = {src[0]}.read_scalar64(wf);')
+        L.append(
+            f'  uint64_t val = amdgpu::RegisterAccess(wf).read_scalar64({src[0]});'
+        )
         L.append(
             '  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));'
         )
-        L.append(f'  {dst[0]}.write_scalar(wf, result);')
+        L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, result);')
         if scc and scc != 'none':
             L.append('  wf.write_scc(result != 0);')
         return '\n'.join(L)
 
     if op == 'cls64':
         # 64-bit signed input → 32-bit output (count leading sign bits).
-        L.append(f'  int64_t sval = static_cast<int64_t>({src[0]}.read_scalar64(wf));')
+        L.append(
+            f'  int64_t sval = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_scalar64({src[0]}));'
+        )
         L.append(
             '  uint64_t uval = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);'
         )
         L.append(
             '  uint32_t result = uval == 0 ? 63u : static_cast<uint32_t>(std::countl_zero(uval)) - 1;'
         )
-        L.append(f'  {dst[0]}.write_scalar(wf, result);')
+        L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, result);')
         if scc and scc != 'none':
             L.append('  wf.write_scc(result != 0);')
         return '\n'.join(L)
 
     if op == 'ctz' and is_64:
-        L.append(f'  uint64_t val = {src[0]}.read_scalar64(wf);')
+        L.append(
+            f'  uint64_t val = amdgpu::RegisterAccess(wf).read_scalar64({src[0]});'
+        )
         L.append(
             '  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(val));'
         )
-        L.append(f'  {dst[0]}.write_scalar(wf, result);')
+        L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, result);')
         if scc and scc != 'none':
             L.append('  wf.write_scc(result != 0);')
         return '\n'.join(L)
 
     if op == 'clz' and is_64:
-        L.append(f'  uint64_t val = {src[0]}.read_scalar64(wf);')
+        L.append(
+            f'  uint64_t val = amdgpu::RegisterAccess(wf).read_scalar64({src[0]});'
+        )
         L.append(
             '  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));'
         )
-        L.append(f'  {dst[0]}.write_scalar(wf, result);')
+        L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, result);')
         if scc and scc != 'none':
             L.append('  wf.write_scc(result != 0);')
         return '\n'.join(L)
 
     if op == 'cls' and is_64:
-        L.append(f'  int64_t sval = static_cast<int64_t>({src[0]}.read_scalar64(wf));')
+        L.append(
+            f'  int64_t sval = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_scalar64({src[0]}));'
+        )
         L.append(
             '  uint64_t uval = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);'
         )
         L.append(
             '  uint32_t result = uval == 0 ? 63u : static_cast<uint32_t>(std::countl_zero(uval)) - 1;'
         )
-        L.append(f'  {dst[0]}.write_scalar(wf, result);')
+        L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, result);')
         if scc and scc != 'none':
             L.append('  wf.write_scc(result != 0);')
         return '\n'.join(L)
 
     if op in ('bitset0', 'bitset1') and is_64:
         # 32-bit input (bit index), 64-bit read-modify-write destination.
-        L.append(f'  uint32_t bit = {src[0]}.read_scalar(wf);')
+        L.append(f'  uint32_t bit = amdgpu::RegisterAccess(wf).read_scalar({src[0]});')
         if op == 'bitset0':
             L.append(
-                f'  uint64_t result = {dst[0]}.read_scalar64(wf) & ~(1ULL << (bit & 63));'
+                f'  uint64_t result = amdgpu::RegisterAccess(wf).read_scalar64({dst[0]}) & ~(1ULL << (bit & 63));'
             )
         else:
             L.append(
-                f'  uint64_t result = {dst[0]}.read_scalar64(wf) | (1ULL << (bit & 63));'
+                f'  uint64_t result = amdgpu::RegisterAccess(wf).read_scalar64({dst[0]}) | (1ULL << (bit & 63));'
             )
-        L.append(f'  {dst[0]}.write_scalar64(wf, result);')
+        L.append(f'  amdgpu::RegisterAccess(wf).write_scalar64({dst[0]}, result);')
         return '\n'.join(L)
 
     if is_64:
-        L.append(f'  uint64_t val = {src[0]}.read_scalar64(wf);')
+        L.append(
+            f'  uint64_t val = amdgpu::RegisterAccess(wf).read_scalar64({src[0]});'
+        )
         op_map = {
             'not': '~val',
             'wqm': '0; for (int q = 0; q < 16; ++q) if (val & (0xFULL << (q * 4))) result |= (0xFULL << (q * 4))',
@@ -150,27 +164,33 @@ def gen_scalar_unary(
             L.append(f'  uint64_t result = {op_map[op]};')
         else:
             L.append(f'  uint64_t result = val; // unhandled: {op}')
-        L.append(f'  {dst[0]}.write_scalar64(wf, result);')
+        L.append(f'  amdgpu::RegisterAccess(wf).write_scalar64({dst[0]}, result);')
         L.append('  wf.write_scc(result != 0);')
     else:
         if op == 'abs':
             # Use unsigned negation to avoid UB when val == INT_MIN.
-            L.append(f'  int32_t val = static_cast<int32_t>({src[0]}.read_scalar(wf));')
+            L.append(
+                f'  int32_t val = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar({src[0]}));'
+            )
             L.append('  uint32_t uval = static_cast<uint32_t>(val);')
             L.append('  uint32_t result = val < 0 ? (0u - uval) : uval;')
         elif op == 'sext8':
-            L.append(f'  uint32_t val = {src[0]}.read_scalar(wf);')
+            L.append(
+                f'  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar({src[0]});'
+            )
             L.append(
                 '  uint32_t result = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(val & 0xFF)));'
             )
         elif op == 'sext16':
-            L.append(f'  uint32_t val = {src[0]}.read_scalar(wf);')
+            L.append(
+                f'  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar({src[0]});'
+            )
             L.append(
                 '  uint32_t result = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(val & 0xFFFF)));'
             )
         elif op == 'flbit_i32':
             L.append(
-                f'  int32_t sval = static_cast<int32_t>({src[0]}.read_scalar(wf));'
+                f'  int32_t sval = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar({src[0]}));'
             )
             L.append(
                 '  uint32_t val = sval < 0 ? ~static_cast<uint32_t>(sval) : static_cast<uint32_t>(sval);'
@@ -180,17 +200,23 @@ def gen_scalar_unary(
             )
         elif op == 'bitset0':
             # b64 case handled by early return above (is_64 branch).
-            L.append(f'  uint32_t bit = {src[0]}.read_scalar(wf);')
             L.append(
-                f'  uint32_t result = {dst[0]}.read_scalar(wf) & ~(1u << (bit & 31));'
+                f'  uint32_t bit = amdgpu::RegisterAccess(wf).read_scalar({src[0]});'
+            )
+            L.append(
+                f'  uint32_t result = amdgpu::RegisterAccess(wf).read_scalar({dst[0]}) & ~(1u << (bit & 31));'
             )
         elif op == 'bitset1':
-            L.append(f'  uint32_t bit = {src[0]}.read_scalar(wf);')
             L.append(
-                f'  uint32_t result = {dst[0]}.read_scalar(wf) | (1u << (bit & 31));'
+                f'  uint32_t bit = amdgpu::RegisterAccess(wf).read_scalar({src[0]});'
+            )
+            L.append(
+                f'  uint32_t result = amdgpu::RegisterAccess(wf).read_scalar({dst[0]}) | (1u << (bit & 31));'
             )
         else:
-            L.append(f'  uint32_t val = {src[0]}.read_scalar(wf);')
+            L.append(
+                f'  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar({src[0]});'
+            )
             op_map = {
                 'not': '~val',
                 'wqm': '0; for (int q = 0; q < 8; ++q) if (val & (0xFu << (q * 4))) result |= (0xFu << (q * 4))',
@@ -302,7 +328,7 @@ def gen_scalar_unary(
                 L.append(f'  uint32_t result = {op_map[op]};')
             else:
                 L.append(f'  uint32_t result = val; // TODO: {op}')
-        L.append(f'  {dst[0]}.write_scalar(wf, result);')
+        L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, result);')
         if scc and scc != 'none':
             L.append('  wf.write_scc(result != 0);')
 
@@ -338,53 +364,71 @@ def gen_scalar_binop(
     if is_64:
         if dtype == 'i64':
             L.append(
-                f'  int64_t s0 = static_cast<int64_t>({src[0]}.read_scalar64(wf));'
+                f'  int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_scalar64({src[0]}));'
             )
             L.append(
-                f'  int64_t s1 = static_cast<int64_t>({src[1]}.read_scalar64(wf));'
+                f'  int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_scalar64({src[1]}));'
             )
         else:
-            L.append(f'  uint64_t s0 = {src[0]}.read_scalar64(wf);')
-            L.append(f'  uint64_t s1 = {src[1]}.read_scalar64(wf);')
+            L.append(
+                f'  uint64_t s0 = amdgpu::RegisterAccess(wf).read_scalar64({src[0]});'
+            )
+            L.append(
+                f'  uint64_t s1 = amdgpu::RegisterAccess(wf).read_scalar64({src[1]});'
+            )
     elif dtype in ('i32',):
-        L.append(f'  int32_t s0 = static_cast<int32_t>({src[0]}.read_scalar(wf));')
-        L.append(f'  int32_t s1 = static_cast<int32_t>({src[1]}.read_scalar(wf));')
+        L.append(
+            f'  int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar({src[0]}));'
+        )
+        L.append(
+            f'  int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar({src[1]}));'
+        )
     else:
-        L.append(f'  uint32_t s0 = {src[0]}.read_scalar(wf);')
-        L.append(f'  uint32_t s1 = {src[1]}.read_scalar(wf);')
+        L.append(f'  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar({src[0]});')
+        L.append(f'  uint32_t s1 = amdgpu::RegisterAccess(wf).read_scalar({src[1]});')
 
     # Compute result
     if is_64 and op == 'mul':
-        L.append(f'  {dst[0]}.write_scalar64(wf, static_cast<uint64_t>(s0 * s1));')
+        L.append(
+            f'  amdgpu::RegisterAccess(wf).write_scalar64({dst[0]}, static_cast<uint64_t>(s0 * s1));'
+        )
     elif dtype in ('i32',) and op in ('add', 'sub'):
         sign = '+' if op == 'add' else '-'
         L.append(
             f'  int64_t wide = static_cast<int64_t>(s0) {sign} static_cast<int64_t>(s1);'
         )
         L.append('  int32_t result = static_cast<int32_t>(wide);')
-        L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(result));')
+        L.append(
+            f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, static_cast<uint32_t>(result));'
+        )
         L.append('  wf.write_scc(wide != static_cast<int64_t>(result));')
     elif dtype in ('u32',) and op == 'add':
         L.append(
             '  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(s1);'
         )
-        L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide));')
+        L.append(
+            f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, static_cast<uint32_t>(wide));'
+        )
         L.append('  wf.write_scc(wide > 0xFFFFFFFFULL);')
     elif dtype in ('u32',) and op == 'sub':
-        L.append(f'  {dst[0]}.write_scalar(wf, s0 - s1);')
+        L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, s0 - s1);')
         L.append('  wf.write_scc(s0 < s1);')
     elif dtype in ('u32',) and op == 'addc':
         L.append(
             '  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(s1) + (wf.read_scc() ? 1u : 0u);'
         )
-        L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide));')
+        L.append(
+            f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, static_cast<uint32_t>(wide));'
+        )
         L.append('  wf.write_scc(wide > 0xFFFFFFFFULL);')
     elif dtype in ('u32',) and op == 'subb':
         L.append('  uint32_t bin = wf.read_scc() ? 1u : 0u;')
         L.append(
             '  uint64_t wide = static_cast<uint64_t>(s0) - static_cast<uint64_t>(s1) - bin;'
         )
-        L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide));')
+        L.append(
+            f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, static_cast<uint32_t>(wide));'
+        )
         L.append(
             '  wf.write_scc(static_cast<uint64_t>(s0) < static_cast<uint64_t>(s1) + bin);'
         )
@@ -392,40 +436,46 @@ def gen_scalar_binop(
         # Use unsigned multiply to avoid signed overflow UB. The lower 32
         # bits are identical for signed and unsigned multiplication.
         L.append(
-            f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1)));'
+            f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, static_cast<uint32_t>(static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1)));'
         )
     elif dtype in ('u32',) and op == 'mul':
-        L.append(f'  {dst[0]}.write_scalar(wf, s0 * s1);')
+        L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, s0 * s1);')
     elif op == 'mulhi':
         if dtype in ('u32',):
             L.append(
                 '  uint64_t wide = static_cast<uint64_t>(s0) * static_cast<uint64_t>(s1);'
             )
-            L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide >> 32));')
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, static_cast<uint32_t>(wide >> 32));'
+            )
         else:
             L.append(
                 '  int64_t wide = static_cast<int64_t>(s0) * static_cast<int64_t>(s1);'
             )
             L.append(
-                f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(static_cast<uint64_t>(wide) >> 32));'
+                f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, static_cast<uint32_t>(static_cast<uint64_t>(wide) >> 32));'
             )
     elif op == 'min':
         if dtype in ('i32',):
             L.append(f'  int32_t result = s0 < s1 ? s0 : s1;')
-            L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(result));')
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, static_cast<uint32_t>(result));'
+            )
             L.append('  wf.write_scc(s0 < s1);')
         else:
             L.append(f'  uint32_t result = s0 < s1 ? s0 : s1;')
-            L.append(f'  {dst[0]}.write_scalar(wf, result);')
+            L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, result);')
             L.append('  wf.write_scc(s0 < s1);')
     elif op == 'max':
         if dtype in ('i32',):
             L.append(f'  int32_t result = s0 > s1 ? s0 : s1;')
-            L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(result));')
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, static_cast<uint32_t>(result));'
+            )
             L.append('  wf.write_scc(s0 > s1);')
         else:
             L.append(f'  uint32_t result = s0 > s1 ? s0 : s1;')
-            L.append(f'  {dst[0]}.write_scalar(wf, result);')
+            L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, result);')
             L.append('  wf.write_scc(s0 > s1);')
     elif op == 'absdiff':
         # Use int64_t to avoid signed overflow UB when s0 and s1 are
@@ -435,7 +485,7 @@ def gen_scalar_binop(
         L.append(
             '  uint32_t result = static_cast<uint32_t>(wide_s0 > wide_s1 ? (wide_s0 - wide_s1) : (wide_s1 - wide_s0));'
         )
-        L.append(f'  {dst[0]}.write_scalar(wf, result);')
+        L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, result);')
         L.append('  wf.write_scc(result != 0);')
     elif op == 'bfm':
         if is_64:
@@ -444,10 +494,10 @@ def gen_scalar_binop(
             L.append(
                 '  uint64_t result = count == 0 ? 0 : ((1ULL << count) - 1) << offset;'
             )
-            L.append(f'  {dst[0]}.write_scalar64(wf, result);')
+            L.append(f'  amdgpu::RegisterAccess(wf).write_scalar64({dst[0]}, result);')
         else:
             L.append('  uint32_t result = ::rocjitsu::amdgpu::bfm_b32(s0, s1);')
-            L.append(f'  {dst[0]}.write_scalar(wf, result);')
+            L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, result);')
     elif op == 'bfe':
         return gen_scalar_bfe(dst, src, dtype)
     elif op in ('lshl1_add', 'lshl2_add', 'lshl3_add', 'lshl4_add'):
@@ -455,7 +505,9 @@ def gen_scalar_binop(
         L.append(
             f'  uint64_t wide = (static_cast<uint64_t>(s0) << {shift}u) + static_cast<uint64_t>(s1);'
         )
-        L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide));')
+        L.append(
+            f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, static_cast<uint32_t>(wide));'
+        )
         L.append('  wf.write_scc(wide > 0xFFFFFFFFULL);')
     elif dtype == 'f32' and op in (
         'add',
@@ -484,7 +536,9 @@ def gen_scalar_binop(
         L.append('  float f0 = std::bit_cast<float>(s0);')
         L.append('  float f1 = std::bit_cast<float>(s1);')
         L.append(f'  float fr = {fp_op[op]};')
-        L.append(f'  {dst[0]}.write_scalar(wf, std::bit_cast<uint32_t>(fr));')
+        L.append(
+            f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, std::bit_cast<uint32_t>(fr));'
+        )
     elif dtype == 'f16' and op in (
         'add',
         'sub',
@@ -511,27 +565,29 @@ def gen_scalar_binop(
         L.append('  float f1 = util::f16_to_f32(static_cast<uint16_t>(s1 & 0xFFFF));')
         L.append(f'  float fr = {fp_op[op]};')
         L.append(
-            f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(util::f32_to_f16(fr)));'
+            f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, static_cast<uint32_t>(util::f32_to_f16(fr)));'
         )
     elif op == 'pack_ll':
         L.append(
-            f'  {dst[0]}.write_scalar(wf, (s0 & 0xFFFFu) | ((s1 & 0xFFFFu) << 16));'
+            f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, (s0 & 0xFFFFu) | ((s1 & 0xFFFFu) << 16));'
         )
     elif op == 'pack_lh':
-        L.append(f'  {dst[0]}.write_scalar(wf, (s0 & 0xFFFFu) | (s1 & 0xFFFF0000u));')
+        L.append(
+            f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, (s0 & 0xFFFFu) | (s1 & 0xFFFF0000u));'
+        )
     elif op == 'pack_hh':
         L.append(
-            f'  {dst[0]}.write_scalar(wf, ((s0 >> 16) & 0xFFFFu) | (s1 & 0xFFFF0000u));'
+            f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, ((s0 >> 16) & 0xFFFFu) | (s1 & 0xFFFF0000u));'
         )
     elif op == 'pack_hl':
         L.append(
-            f'  {dst[0]}.write_scalar(wf, ((s0 >> 16) & 0xFFFFu) | ((s1 & 0xFFFFu) << 16));'
+            f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, ((s0 >> 16) & 0xFFFFu) | ((s1 & 0xFFFFu) << 16));'
         )
     elif op == 'cvt_pkrtz_f16_f32':
         L.append('  float f0 = std::bit_cast<float>(s0);')
         L.append('  float f1 = std::bit_cast<float>(s1);')
         L.append(
-            f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(util::f32_to_f16_rtz(f0)) | (static_cast<uint32_t>(util::f32_to_f16_rtz(f1)) << 16));'
+            f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, static_cast<uint32_t>(util::f32_to_f16_rtz(f0)) | (static_cast<uint32_t>(util::f32_to_f16_rtz(f1)) << 16));'
         )
     else:
         # Bitwise / shift ops
@@ -551,23 +607,35 @@ def gen_scalar_binop(
         }
         if dtype == 'i32' and op == 'ashr':
             L.append(f'  int32_t result = s0 >> (s1 & 31);')
-            L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(result));')
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, static_cast<uint32_t>(result));'
+            )
         elif dtype == 'i64' and op == 'ashr':
             L.append(f'  int64_t result = s0 >> (s1 & 63);')
-            L.append(f'  {dst[0]}.write_scalar64(wf, static_cast<uint64_t>(result));')
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar64({dst[0]}, static_cast<uint64_t>(result));'
+            )
         elif op in op_map:
             L.append(f'  {utype} result = {op_map[op]};')
             if is_64:
-                L.append(f'  {dst[0]}.write_scalar64(wf, result);')
+                L.append(
+                    f'  amdgpu::RegisterAccess(wf).write_scalar64({dst[0]}, result);'
+                )
             else:
-                L.append(f'  {dst[0]}.write_scalar(wf, result);')
+                L.append(
+                    f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, result);'
+                )
         else:
             L.append('  (void)s1;')
             L.append(f'  {utype} result = s0; // TODO: op={op}')
             if is_64:
-                L.append(f'  {dst[0]}.write_scalar64(wf, result);')
+                L.append(
+                    f'  amdgpu::RegisterAccess(wf).write_scalar64({dst[0]}, result);'
+                )
             else:
-                L.append(f'  {dst[0]}.write_scalar(wf, result);')
+                L.append(
+                    f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, result);'
+                )
 
         # SCC
         if scc == 'nonzero':
@@ -595,12 +663,16 @@ def gen_scalar_bfe(dst: list[str], src: list[str], dtype: str | None) -> str:
     """
     L = []
     if dtype in ('u64', 'i64'):
-        L.append(f'  uint64_t base = {src[0]}.read_scalar64(wf);')
-        L.append(f'  uint32_t field = {src[1]}.read_scalar(wf);')
+        L.append(
+            f'  uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64({src[0]});'
+        )
+        L.append(
+            f'  uint32_t field = amdgpu::RegisterAccess(wf).read_scalar({src[1]});'
+        )
         L.append('  uint32_t offset = field & 63u;')
         L.append('  uint32_t width = (field >> 16) & 127u;')
         L.append('  if (width == 0) {')
-        L.append(f'    {dst[0]}.write_scalar64(wf, 0);')
+        L.append(f'    amdgpu::RegisterAccess(wf).write_scalar64({dst[0]}, 0);')
         L.append('    wf.write_scc(false);')
         L.append('  } else {')
         L.append('    if (offset + width > 64) width = 64 - offset;')
@@ -609,16 +681,18 @@ def gen_scalar_bfe(dst: list[str], src: list[str], dtype: str | None) -> str:
         if dtype == 'i64':
             L.append('    if (width < 64 && (extracted & (1ULL << (width - 1))))')
             L.append('      extracted |= ~mask;')
-        L.append(f'    {dst[0]}.write_scalar64(wf, extracted);')
+        L.append(f'    amdgpu::RegisterAccess(wf).write_scalar64({dst[0]}, extracted);')
         L.append('    wf.write_scc(extracted != 0);')
         L.append('  }')
     else:
-        L.append(f'  uint32_t base = {src[0]}.read_scalar(wf);')
-        L.append(f'  uint32_t field = {src[1]}.read_scalar(wf);')
+        L.append(f'  uint32_t base = amdgpu::RegisterAccess(wf).read_scalar({src[0]});')
+        L.append(
+            f'  uint32_t field = amdgpu::RegisterAccess(wf).read_scalar({src[1]});'
+        )
         L.append('  uint32_t offset = field & 31u;')
         L.append('  uint32_t width = (field >> 16) & 127u;')
         L.append('  if (width == 0) {')
-        L.append(f'    {dst[0]}.write_scalar(wf, 0);')
+        L.append(f'    amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, 0);')
         L.append('    wf.write_scc(false);')
         L.append('  } else {')
         L.append('    if (offset + width > 32) width = 32 - offset;')
@@ -627,7 +701,7 @@ def gen_scalar_bfe(dst: list[str], src: list[str], dtype: str | None) -> str:
         if dtype == 'i32':
             L.append('    if (width < 32 && (extracted & (1u << (width - 1))))')
             L.append('      extracted |= ~mask;')
-        L.append(f'    {dst[0]}.write_scalar(wf, extracted);')
+        L.append(f'    amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, extracted);')
         L.append('    wf.write_scc(extracted != 0);')
         L.append('  }')
     return '\n'.join(L)
@@ -660,30 +734,46 @@ def gen_scalar_cmp(src: list[str], op: str | None, dtype: str | None) -> str:
         'le': '<=',
     }
     if dtype in ('i32',):
-        L.append(f'  int32_t s0 = static_cast<int32_t>({src[0]}.read_scalar(wf));')
-        L.append(f'  int32_t s1 = static_cast<int32_t>({src[1]}.read_scalar(wf));')
+        L.append(
+            f'  int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar({src[0]}));'
+        )
+        L.append(
+            f'  int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar({src[1]}));'
+        )
     elif dtype in ('i64',):
-        L.append(f'  int64_t s0 = static_cast<int64_t>({src[0]}.read_scalar64(wf));')
-        L.append(f'  int64_t s1 = static_cast<int64_t>({src[1]}.read_scalar64(wf));')
+        L.append(
+            f'  int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_scalar64({src[0]}));'
+        )
+        L.append(
+            f'  int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_scalar64({src[1]}));'
+        )
     elif dtype in ('u64',):
-        L.append(f'  uint64_t s0 = {src[0]}.read_scalar64(wf);')
-        L.append(f'  uint64_t s1 = {src[1]}.read_scalar64(wf);')
+        L.append(f'  uint64_t s0 = amdgpu::RegisterAccess(wf).read_scalar64({src[0]});')
+        L.append(f'  uint64_t s1 = amdgpu::RegisterAccess(wf).read_scalar64({src[1]});')
     elif dtype == 'f64':
-        L.append(f'  double s0 = std::bit_cast<double>({src[0]}.read_scalar64(wf));')
-        L.append(f'  double s1 = std::bit_cast<double>({src[1]}.read_scalar64(wf));')
+        L.append(
+            f'  double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_scalar64({src[0]}));'
+        )
+        L.append(
+            f'  double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_scalar64({src[1]}));'
+        )
     elif dtype == 'f32':
-        L.append(f'  float s0 = std::bit_cast<float>({src[0]}.read_scalar(wf));')
-        L.append(f'  float s1 = std::bit_cast<float>({src[1]}.read_scalar(wf));')
+        L.append(
+            f'  float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar({src[0]}));'
+        )
+        L.append(
+            f'  float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar({src[1]}));'
+        )
     elif dtype == 'f16':
         L.append(
-            f'  float s0 = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_scalar(wf) & 0xFFFF));'
+            f'  float s0 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar({src[0]}) & 0xFFFF));'
         )
         L.append(
-            f'  float s1 = util::f16_to_f32(static_cast<uint16_t>({src[1]}.read_scalar(wf) & 0xFFFF));'
+            f'  float s1 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar({src[1]}) & 0xFFFF));'
         )
     else:
-        L.append(f'  uint32_t s0 = {src[0]}.read_scalar(wf);')
-        L.append(f'  uint32_t s1 = {src[1]}.read_scalar(wf);')
+        L.append(f'  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar({src[0]});')
+        L.append(f'  uint32_t s1 = amdgpu::RegisterAccess(wf).read_scalar({src[1]});')
     L.append(f'  wf.write_scc(s0 {cmp_map[op]} s1);')
     return '\n'.join(L)
 
@@ -719,10 +809,12 @@ def gen_scalar_cmpk(
         'le': '<=',
     }
     if dtype in ('i32',):
-        L.append(f'  int32_t s0 = static_cast<int32_t>({dst[0]}.read_scalar(wf));')
+        L.append(
+            f'  int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar({dst[0]}));'
+        )
         L.append(f'  int32_t imm = static_cast<int16_t>({src[0]}.encoding_value_);')
     else:
-        L.append(f'  uint32_t s0 = {dst[0]}.read_scalar(wf);')
+        L.append(f'  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar({dst[0]});')
         L.append(
             f'  uint32_t imm = static_cast<uint32_t>(static_cast<uint16_t>({src[0]}.encoding_value_));'
         )
@@ -749,11 +841,17 @@ def gen_scalar_bitcmp(src: list[str], op: str | None, dtype: str | None) -> str:
     """
     L = []
     if dtype in ('b64',):
-        L.append(f'  uint64_t val = {src[0]}.read_scalar64(wf);')
-        L.append(f'  uint32_t bit = {src[1]}.read_scalar(wf) & 63u;')
+        L.append(
+            f'  uint64_t val = amdgpu::RegisterAccess(wf).read_scalar64({src[0]});'
+        )
+        L.append(
+            f'  uint32_t bit = amdgpu::RegisterAccess(wf).read_scalar({src[1]}) & 63u;'
+        )
     else:
-        L.append(f'  uint32_t val = {src[0]}.read_scalar(wf);')
-        L.append(f'  uint32_t bit = {src[1]}.read_scalar(wf) & 31u;')
+        L.append(f'  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar({src[0]});')
+        L.append(
+            f'  uint32_t bit = amdgpu::RegisterAccess(wf).read_scalar({src[1]}) & 31u;'
+        )
     if op == 'bitcmp0':
         L.append('  wf.write_scc(!(val & (1ULL << bit)));')
     else:
@@ -784,8 +882,8 @@ def gen_scalar_saveexec(dst: list[str], src: list[str], op: str | None) -> str:
     """
     L = []
     L.append('  uint64_t old_exec = wf.exec();')
-    L.append(f'  uint64_t src = {src[0]}.read_scalar64(wf);')
-    L.append(f'  {dst[0]}.write_scalar64(wf, old_exec);')
+    L.append(f'  uint64_t src = amdgpu::RegisterAccess(wf).read_scalar64({src[0]});')
+    L.append(f'  amdgpu::RegisterAccess(wf).write_scalar64({dst[0]}, old_exec);')
     saveexec_map = {
         'and': 'old_exec & src',
         'or': 'old_exec | src',
