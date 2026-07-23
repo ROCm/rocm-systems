@@ -86,8 +86,10 @@ inline constexpr uint32_t kProbeMarkerMovS6 = 0xbe860080u; // s_mov_b32 s6, 0
 
 inline uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
-  names.insert(names.end(), name.begin(), name.end());
-  names.push_back('\0');
+  names.resize(offset + name.size() + 1);
+  if (!name.empty()) {
+    std::memcpy(names.data() + offset, name.data(), name.size());
+  }
   return offset;
 }
 
