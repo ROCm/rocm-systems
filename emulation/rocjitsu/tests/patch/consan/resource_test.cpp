@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
 
 namespace rocjitsu {
 namespace {
@@ -82,6 +83,27 @@ TEST(ConSanInstructionBuilder, EncodesSignedAddressDisplacementWithCarry) {
   EXPECT_EQ((*negative)[2], 0xfffffffcu);
   // The high add consumes carry and adds the sign-extension dword (-1).
   EXPECT_EQ((*negative)[5] & 0x1ffu, 193u);
+}
+
+TEST(ConSanInstructionBuilder, SignExtendsCdnaVgprOffsetBefore64BitAdd) {
+  constexpr uint16_t kAddressVgpr = 12u;
+  constexpr uint16_t kOffsetVgpr = 4u;
+  constexpr uint16_t kSignVgpr = 5u;
+  constexpr std::array<uint32_t, 3> kExpected = {
+      0x220a089fu, // v_ashrrev_i32_e32 v5, 31, v4
+      0x32181904u, // v_add_co_u32_e32 v12, vcc, v4, v12
+      0x381a1b05u, // v_addc_co_u32_e32 v13, vcc, v5, v13, vcc
+  };
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    const auto add = instrumentation::build_v_add_u64_signed_vgpr_offset(kAddressVgpr, kOffsetVgpr,
+                                                                         kSignVgpr, arch);
+    ASSERT_TRUE(add);
+    EXPECT_EQ(*add, (std::vector<uint32_t>{kExpected.begin(), kExpected.end()}));
+  }
+  EXPECT_FALSE(instrumentation::build_v_add_u64_signed_vgpr_offset(
+      kAddressVgpr, kOffsetVgpr, kOffsetVgpr, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_FALSE(instrumentation::build_v_add_u64_signed_vgpr_offset(
+      kAddressVgpr, kOffsetVgpr, kSignVgpr, ROCJITSU_CODE_ARCH_RDNA4));
 }
 
 TEST(ConSanResourcePlan, PrefersDeadWindowInsideCurrentAllocation) {

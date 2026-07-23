@@ -281,6 +281,27 @@ build_cdna3_v_add_u64_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr,
                          .vdst = static_cast<uint8_t>(address_vgpr + 1u)})[0]};
 }
 
+/// @brief Add one sign-extended 32-bit VGPR offset to a 64-bit CDNA3 address pair.
+/// @details @p sign_vgpr is scratch distinct from the address pair and offset.
+[[nodiscard]] inline std::optional<std::vector<uint32_t>>
+build_cdna3_v_add_u64_signed_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr,
+                                         uint16_t sign_vgpr, rj_code_arch_t arch) {
+  if (!is_cdna3_arch(arch) || address_vgpr >= 255u || offset_vgpr > 255u || sign_vgpr > 255u ||
+      sign_vgpr == offset_vgpr || sign_vgpr == address_vgpr || sign_vgpr == address_vgpr + 1u)
+    return std::nullopt;
+  return std::vector<uint32_t>{
+      cdna3::build_vop2(cdna3::kVAshrrevI32Vop2, {.src0 = scalar_positive_inline_u32(31u),
+                                                  .vsrc1 = static_cast<uint8_t>(offset_vgpr),
+                                                  .vdst = static_cast<uint8_t>(sign_vgpr)})[0],
+      cdna3::build_vop2(cdna3::kVAddCoU32Vop2, {.src0 = vector_source_vgpr(offset_vgpr),
+                                                .vsrc1 = static_cast<uint8_t>(address_vgpr),
+                                                .vdst = static_cast<uint8_t>(address_vgpr)})[0],
+      cdna3::build_vop2(cdna3::kVAddcCoU32Vop2,
+                        {.src0 = vector_source_vgpr(sign_vgpr),
+                         .vsrc1 = static_cast<uint8_t>(address_vgpr + 1u),
+                         .vdst = static_cast<uint8_t>(address_vgpr + 1u)})[0]};
+}
+
 /// @brief Add a signed 24-bit displacement to an in-place CDNA3 address pair.
 [[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_cdna3_v_add_u64_signed_i24(uint16_t address_vgpr, int32_t displacement, rj_code_arch_t arch) {

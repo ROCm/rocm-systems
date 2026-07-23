@@ -323,6 +323,25 @@ build_cdna4_v_add_u64_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr,
                         arch)};
 }
 
+/// @brief Add one sign-extended 32-bit VGPR offset to a 64-bit CDNA4 address pair.
+/// @details @p sign_vgpr is scratch distinct from the address pair and offset.
+[[nodiscard]] inline std::optional<std::vector<uint32_t>>
+build_cdna4_v_add_u64_signed_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr,
+                                         uint16_t sign_vgpr, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA4 || address_vgpr >= 255u || offset_vgpr > 255u ||
+      sign_vgpr > 255u || sign_vgpr == offset_vgpr || sign_vgpr == address_vgpr ||
+      sign_vgpr == address_vgpr + 1u)
+    return std::nullopt;
+  return std::vector<uint32_t>{
+      *build_cdna4_vop2(cdna4::kVAshrrevI32Vop2, sign_vgpr, scalar_positive_inline_u32(31u),
+                        offset_vgpr, arch),
+      *build_cdna4_vop2(cdna4::kVAddCoU32Vop2, address_vgpr, vector_source_vgpr(offset_vgpr),
+                        address_vgpr, arch),
+      *build_cdna4_vop2(cdna4::kVAddcCoU32Vop2, static_cast<uint16_t>(address_vgpr + 1u),
+                        vector_source_vgpr(sign_vgpr), static_cast<uint16_t>(address_vgpr + 1u),
+                        arch)};
+}
+
 [[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_cdna4_v_add_u64_signed_i24(uint16_t address_vgpr, int32_t displacement, rj_code_arch_t arch) {
   constexpr int32_t kSigned24Min = -(1 << 23);

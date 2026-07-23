@@ -2087,6 +2087,15 @@ std::string_view consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSu
   return "unknown";
 }
 
+bool validate_consan_moi_sampled_atomic_spill_metadata(size_t slot_offset_count,
+                                                       uint16_t vgpr_count,
+                                                       std::vector<std::string> &errors) {
+  if (slot_offset_count == vgpr_count)
+    return true;
+  errors.emplace_back("ConSan MOI sampled atomic spill has incomplete slot metadata");
+  return false;
+}
+
 ConSanMoiAtomicAddressPlan
 plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vgpr,
                                uint16_t scratch_vgpr_count,
@@ -2429,8 +2438,25 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
     words.push_back(build_v_mov_b32_e32(plan.result_address_vgpr, *plan.scalar_base_sgpr, arch));
     words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(plan.result_address_vgpr + 1u),
                                         static_cast<uint16_t>(*plan.scalar_base_sgpr + 1u), arch));
-    const auto add_vaddr =
-        instrumentation::build_v_add_u64_vgpr_offset(plan.result_address_vgpr, offset_vgpr, arch);
+    std::optional<std::vector<uint32_t>> add_vaddr;
+    if (instrumentation::is_cdna_family_arch(arch) &&
+        plan.kind == ConSanMoiAtomicAddressKind::VglobalMaterialized) {
+      std::optional<uint16_t> sign_vgpr;
+      for (uint16_t candidate = plan.scratch_vgpr; candidate < plan.result_address_vgpr;
+           ++candidate) {
+        if (candidate != offset_vgpr) {
+          sign_vgpr = candidate;
+          break;
+        }
+      }
+      if (!sign_vgpr)
+        return std::nullopt;
+      add_vaddr = instrumentation::build_v_add_u64_signed_vgpr_offset(
+          plan.result_address_vgpr, offset_vgpr, *sign_vgpr, arch);
+    } else {
+      add_vaddr =
+          instrumentation::build_v_add_u64_vgpr_offset(plan.result_address_vgpr, offset_vgpr, arch);
+    }
     if (!add_vaddr)
       return std::nullopt;
     words.insert(words.end(), add_vaddr->begin(), add_vaddr->end());

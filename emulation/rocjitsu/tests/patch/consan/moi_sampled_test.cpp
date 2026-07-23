@@ -1009,6 +1009,19 @@ TEST(ConSanMoi, SignExtendsCdnaVglobalOffsetAt13BitBoundaries) {
   EXPECT_EQ(sign_extend_13_bit_offset(0x0fffu), 4095);
   EXPECT_EQ(sign_extend_13_bit_offset(0x1000u), -4096);
   EXPECT_EQ(sign_extend_13_bit_offset(0x1fffu), -1);
+  EXPECT_EQ(sign_extend_13_bit_offset(0xffffe014u), 20);
+}
+
+TEST(ConSanMoi, RejectsIncompleteSampledAtomicSpillMetadata) {
+  std::vector<std::string> errors;
+  EXPECT_FALSE(validate_consan_moi_sampled_atomic_spill_metadata(
+      /*slot_offset_count=*/1u, /*vgpr_count=*/2u, errors));
+  ASSERT_EQ(errors.size(), 1u);
+  EXPECT_EQ(errors.front(), "ConSan MOI sampled atomic spill has incomplete slot metadata");
+  errors.clear();
+  EXPECT_TRUE(validate_consan_moi_sampled_atomic_spill_metadata(
+      /*slot_offset_count=*/2u, /*vgpr_count=*/2u, errors));
+  EXPECT_TRUE(errors.empty());
 }
 
 TEST(ConSanMoi, CdnaSampledVglobalMaterializesVectorAndScalarAddressesInScratchTail) {
@@ -1141,6 +1154,19 @@ TEST(ConSanMoi, CdnaSampledVglobalMaterializesVectorAndScalarAddressesInScratchT
       const auto materialization = build_consan_moi_atomic_address_materialization(
           address_plan, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, target.arch);
       ASSERT_TRUE(materialization);
+      if (test_case.scalar_base_sgpr) {
+        uint16_t sign_vgpr = *patch->scratch_vgpr;
+        if (sign_vgpr == address_plan.input_address_vgpr)
+          ++sign_vgpr;
+        const auto signed_add = instrumentation::build_v_add_u64_signed_vgpr_offset(
+            address_plan.result_address_vgpr, address_plan.input_address_vgpr, sign_vgpr,
+            target.arch);
+        const auto zero_extended_add = instrumentation::build_v_add_u64_vgpr_offset(
+            address_plan.result_address_vgpr, address_plan.input_address_vgpr, target.arch);
+        ASSERT_TRUE(signed_add && zero_extended_add);
+        EXPECT_TRUE(contains_subsequence(*materialization, *signed_add));
+        EXPECT_FALSE(contains_subsequence(*materialization, *zero_extended_add));
+      }
       AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
       ASSERT_TRUE(patched.is_valid());
       const std::vector<uint32_t> cave =

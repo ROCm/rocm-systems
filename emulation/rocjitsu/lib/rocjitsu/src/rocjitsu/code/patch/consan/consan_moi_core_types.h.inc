@@ -245,9 +245,14 @@ inline constexpr uint32_t kConSanMoiLdsAddressTokenTag = 0xffffffffu;
 // CDNA VGLOBAL encodes the vector-only `off` address form with SADDR=0x7f.
 inline constexpr uint32_t kCdnaGlobalNoSaddrEncoding = 0x7fu;
 
+// Interpret the low 13 bits as a signed VGLOBAL/SCRATCH displacement; higher
+// bits are intentionally ignored.
 [[nodiscard]] constexpr int32_t sign_extend_13_bit_offset(uint32_t value) {
   return static_cast<int32_t>(value << 19u) >> 19u;
 }
+
+[[nodiscard]] bool validate_consan_moi_sampled_atomic_spill_metadata(
+    size_t slot_offset_count, uint16_t vgpr_count, std::vector<std::string> &errors);
 
 [[nodiscard]] std::string_view
 consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSupport support);
@@ -256,8 +261,10 @@ consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSupport support);
 /// already resolved scratch-resource plan. FLAT aliases its guest 64-bit
 /// address unless a returned value aliases it, in which case it snapshots the
 /// pair into the scratch tail. VGLOBAL likewise reserves the last two VGPRs of
-/// a five-VGPR private window for an aliased pair or for
-/// `saddr + zero_extend(vaddr) + signed24(ioffset)`. Operand overlap is only
+/// a five-VGPR private window for an aliased pair or scalar-base address.
+/// RDNA4 scalar-base VGLOBAL uses
+/// `saddr + zero_extend(vaddr) + signed24(ioffset)`; CDNA3/4 uses
+/// `saddr + sign_extend(vaddr) + signed13(ioffset)`. Operand overlap is only
 /// valid for a spill consumer that executes the guest first and preserves its
 /// effective-address inputs until materialization.
 [[nodiscard]] ConSanMoiAtomicAddressPlan
