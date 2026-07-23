@@ -87,6 +87,12 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
     return;
   }
 
+  unsigned ver = static_cast<unsigned>(dxg_runtime->wddm_version);
+  if (ver)
+    pr_rocr_info("WDDM version %u.%u\n", ver / 1000, (ver % 1000) / 100);
+  else
+    pr_rocr_info("WDDM version: unknown\n");
+
   CreateDevice();
   SetPowerOptimization(false);
   CreatePagingQueue();
@@ -616,6 +622,14 @@ uint32_t WDDMDevice::LdsBlocks(const hsa_kernel_dispatch_packet_t *pkt) {
   return blk_num;
 }
 
+static void QueryWddmVersion(D3DKMT_HANDLE adapter) {
+  D3DKMT_DRIVERVERSION version = static_cast<D3DKMT_DRIVERVERSION>(0);
+
+  if (WDDMQueryAdapter(adapter, KMTQAITYPE_DRIVERVERSION, &version,
+                       sizeof(version)) == STATUS_SUCCESS)
+    dxg_runtime->wddm_version = version;
+}
+
 NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
 {
   bool supported = false;
@@ -638,6 +652,9 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
   ret = DXCORE_CALL(D3DKMTEnumAdapters3(&args));
   if (ret != STATUS_SUCCESS)
     goto err_out0;
+
+  if (args.NumAdapters > 0)
+    QueryWddmVersion(info[0].hAdapter);
 
   for (int i = 0; i < args.NumAdapters; i++) {
     D3DKMT_QUERY_DEVICE_IDS query = {0};
