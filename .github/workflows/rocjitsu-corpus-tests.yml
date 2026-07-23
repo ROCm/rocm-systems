@@ -93,13 +93,13 @@ jobs:
             sanitizer_runtime: SHARED
             c_compiler: gcc
             cxx_compiler: g++
-          - name: tsan-sparse-memory
+          - name: tsan-validated
             allow_failure: false
             run_static_asan_launch: true
-            # The simulator-wide stress tests exceed TSan's fixed 128-lock
-            # deadlock-tracker capacity; keep the race gate focused on the
-            # concurrent memory surfaces hardened by this change.
-            test_regex: '^(SparseMemory(Threading)?Test|GpuMemoryThreadingTest|L2CacheThreadingTest)\.'
+            # Run only tests that have passed repeated local TSan probes. Some
+            # simulator stress shapes still exceed TSan's fixed 128-lock
+            # deadlock-tracker capacity without producing a race report.
+            test_regex: ''
             build_type: RelWithDebInfo
             enable_asan: 0
             enable_ubsan: 0
@@ -186,11 +186,25 @@ jobs:
             "MatmulStressTest\.TiledAllCU"
             "MatmulStressTest\.MfmaAllCUs"
             "VectorAddStressTest\.AllCUsGoldenReference"
-            "Gfx1250SimulationTest\.*"
-            "Gfx1250ExecutionTest\.*"
-            "InterposerDupTest.SerializedReopenUnderContentionStaysRoutable"
+            "Gfx1250SimulationTest\.GlobalStoreWritesVisibleMemory"
+            "Gfx1250SimulationTest\.BufferStoreUsesM0Soffset"
+          )
+          TSAN_INCLUDED_TESTS=(
+            "SparseMemory(Threading)?Test\..*"
+            "Gfx1250ExecutionTest\..*"
+            "Gfx1250SimulationTest\..*"
+            "PacingControllerTest\.SeqlockConcurrentReads"
+            "SpinlockTest\.(ConcurrentIncrement|CrossPartitionQueueHighContention)"
+            "SidecarRegistryTest\.ConcurrentMutationAndLookupIsRaceFree"
+            "HsaHooksUnitTest\.(PoolAllocateWaitsForAgentDiscoveryPublication|UninstallDoesNotWaitForPoolMapperDiscoveryLock)"
+            "UtilSimd\.ForceScalar_ImmutableProcessWide"
+            "SimulatedKfdTest\.ConcurrentIoctlAndCloseIsRaceFree"
+            "KfdIoctlTest\.DbgTrapConcurrentEnableDisableIsRaceFree"
+            "DaemonTest\.InterposerDupSerializedReopenUnderContentionRemote"
+            "InterposerDupTest\.SerializedReopenUnderContentionStaysRoutable"
           )
 
+          TEST_REGEX="${{ matrix.test_regex }}"
           CMAKE_CONFIG_FLAGS=()
           if [[ "${{ matrix.enable_asan }}" == "1" && "${{ matrix.enable_ubsan }}" == "1" ]]; then
             EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${ASAN_UBSAN_EXCLUDED_TESTS[*]}")"
@@ -201,6 +215,7 @@ jobs:
           fi
           if [[ "${{ matrix.enable_tsan }}" == "1" ]]; then
             EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${TSAN_EXCLUDED_TESTS[*]}")"
+            TEST_REGEX="^($(IFS='|'; echo "${TSAN_INCLUDED_TESTS[*]}"))$"
           fi
           if [[ -n "${{ matrix.c_compiler }}" ]]; then
             CMAKE_CONFIG_FLAGS+=(-DCMAKE_C_COMPILER="${{ matrix.c_compiler }}")
@@ -230,8 +245,8 @@ jobs:
           cmake --build "${ROCJITSU_BUILD_DIR}" -j "${WORKERS}"
 
           CTEST_SELECTION=()
-          if [[ -n "${{ matrix.test_regex }}" ]]; then
-            CTEST_SELECTION=(-R "${{ matrix.test_regex }}")
+          if [[ -n "${TEST_REGEX}" ]]; then
+            CTEST_SELECTION=(-R "${TEST_REGEX}")
           fi
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
             "${CTEST_SELECTION[@]}" \
