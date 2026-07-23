@@ -22,6 +22,7 @@ pub fn agents() -> Vec<(&'static str, AgentDef)> {
         ("mi300x", mi300x()),
         ("mi350x", mi350x()),
         ("mi450x", mi450x()),
+        // \NPI new GPU: add a builtin agent mirroring its configs/<gpu>.json here.
     ]
 }
 

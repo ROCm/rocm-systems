@@ -35,6 +35,9 @@ hipcc -g <hip workload> -o <output>
 ## Profiling
 
 ```bash
+# Note: --no-roof is optional and skips the
+# benchmarking that is unrelated to the our purpose
+
 # baseline profile
 rocprof-compute profile -n gl2_backpressure_baseline --membw-analysis --no-roof -- ./gl2_backpressure
 # optimized profile

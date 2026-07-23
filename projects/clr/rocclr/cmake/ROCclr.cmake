@@ -94,6 +94,11 @@ if(WIN32)
   ${ROCCLR_SRC_DIR}/platform/interop_d3d9.cpp
   ${ROCCLR_SRC_DIR}/platform/interop_d3d10.cpp
   ${ROCCLR_SRC_DIR}/platform/interop_d3d11.cpp)
+  if(ROCCLR_ENABLE_HSA)
+    target_sources(rocclr PRIVATE
+    ${ROCCLR_SRC_DIR}/device/rocm/rocd3d10interop.cpp
+    ${ROCCLR_SRC_DIR}/device/rocm/rocd3d11interop.cpp)
+  endif()
   target_link_libraries(rocclr PRIVATE dxguid.lib)
   target_compile_definitions(rocclr PUBLIC ATI_OS_WIN)
 else()

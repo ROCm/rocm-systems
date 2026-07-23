@@ -313,6 +313,19 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_DTIF");
     enable_dtif_ = (var == "1") ? true : false;
 
+    // Shared DTIF/FFM fast-copy enable: skips the staging blit and uses host
+    // memcpy in the ROCr blit kernel/SDMA paths.
+    //   HSA_ENABLE_DTIF_FAST_COPY=1 -> on
+    //   HSA_ENABLE_DTIF_FAST_COPY=0 -> off
+    //   unset -> on if HSA_MODEL_TOPOLOGY is set (FFM model mode default).
+    var = os::GetEnvVar("HSA_ENABLE_DTIF_FAST_COPY");
+    enable_dtif_fast_copy_ = var.empty()
+        ? os::IsEnvVarSet("HSA_MODEL_TOPOLOGY")
+        : (var == "1");
+
+    var = os::GetEnvVar("HSA_DTIF_SKIP_INV_CODE_CACHE");
+    enable_dtif_skip_inv_code_cache_ = (var == "1") ? true : false;
+
     // This allows detecting if the dxg driver is loaded.
     var = os::GetEnvVar("HSA_ENABLE_DXG_DETECTION");
     enable_dxg_detection_ = (var == "0") ? false : true;
@@ -346,10 +359,10 @@ class Flag {
     var = os::GetEnvVar("HSA_SDMA_LINEAR_B2B");
     sdma_linear_b2b_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
-    // HSA_SDMA_FORCE_MULTICAST: 1=force gfx1250 broadcast onto the multicast
-    // packet regardless of copy size (debug only; the multicast engine drops
-    // destinations above 256 KB, so large copies will produce wrong data).
-    sdma_force_multicast_ = (os::GetEnvVar("HSA_SDMA_FORCE_MULTICAST") == "1");
+    // HSA_SDMA_MULTICAST: 1=force multicast at any size, 0=force off (fan-out),
+    // unset=auto (use multicast up to kMulticastMaxSize, fan-out above).
+    var = os::GetEnvVar("HSA_SDMA_MULTICAST");
+    sdma_multicast_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
   }
 
@@ -489,11 +502,15 @@ class Flag {
 
   bool enable_dtif() const { return enable_dtif_; }
 
+  bool enable_dtif_fast_copy() const { return enable_dtif_fast_copy_; }
+
+  bool enable_dtif_skip_inv_code_cache() const { return enable_dtif_skip_inv_code_cache_; }
+
   bool enable_dxg_detection() const { return enable_dxg_detection_; }
 
   SDMA_OVERRIDE sdma_linear_b2b() const { return sdma_linear_b2b_; }
 
-  bool sdma_force_multicast() const { return sdma_force_multicast_; }
+  SDMA_OVERRIDE sdma_multicast() const { return sdma_multicast_; }
 
   [[nodiscard]]
   bool core_dump_disable() const { return core_dump_disable_; }
@@ -573,10 +590,12 @@ class Flag {
   int  async_events_thread_priority_;
   bool enable_3d_swizzle_ = false;
   bool enable_dtif_;
+  bool enable_dtif_fast_copy_;
+  bool enable_dtif_skip_inv_code_cache_;
   bool enable_dxg_detection_;
   SDMA_OVERRIDE sdma_linear_b2b_ = SDMA_DEFAULT;
 
-  bool sdma_force_multicast_ = false;
+  SDMA_OVERRIDE sdma_multicast_ = SDMA_DEFAULT;
 
   SDMA_OVERRIDE enable_sdma_;
   SDMA_OVERRIDE enable_peer_sdma_;

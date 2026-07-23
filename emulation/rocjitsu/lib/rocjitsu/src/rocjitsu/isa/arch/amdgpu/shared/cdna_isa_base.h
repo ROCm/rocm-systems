@@ -19,13 +19,14 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_CDNA_ISA_BASE_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_CDNA_ISA_BASE_H_
 
-#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/bitfield.h"
 
 #include <cstdint>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+class Wavefront;
 
 /// @brief Shared STATUS register layout for all CDNA ISAs (GFX9 family).
 ///

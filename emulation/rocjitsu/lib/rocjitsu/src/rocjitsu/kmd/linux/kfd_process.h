@@ -6,7 +6,7 @@
 ///
 /// @details Each process that opens /dev/kfd gets a KfdProcess instance holding
 /// its allocations, queues, events, doorbells, and memory policies. The
-/// SimulatedDriver owns a process table mapping fds to KfdProcess instances,
+/// SimulatedKfd owns a process table mapping fds to KfdProcess instances,
 /// and delegates per-process ioctl operations through here.
 
 #ifndef ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
@@ -14,6 +14,7 @@
 
 #include "rocjitsu/kmd/linux/events.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "util/unique_handle.h"
 
 #include <atomic>
 #include <cassert>
@@ -24,13 +25,15 @@
 #include <unordered_set>
 #include <vector>
 
+#include <sys/types.h> // pid_t
+
 namespace rocjitsu {
 
 /// @brief Per-process KFD state.
 ///
 /// @details Mirrors the kernel's kfd_process + kfd_process_device for a
 /// single-GPU simulator. Each daemon client connection or local-mode session
-/// gets one KfdProcess. The SimulatedDriver maintains a process table and
+/// gets one KfdProcess. The SimulatedKfd maintains a process table and
 /// routes ioctls to the correct KfdProcess.
 class KfdProcess {
 public:
@@ -84,6 +87,11 @@ public:
     bool user_va = false;
     bool imported = false;
     int dmabuf_fd = -1;
+    // True when the driver created host_ptr (mmap it itself) and must munmap it
+    // on teardown. False for caller-owned pages (e.g. reused MAP_FIXED pages
+    // from the thunk) that the driver must never unmap, since unmapping them
+    // races with the owning process still accessing the memory.
+    bool host_ptr_owned = false;
   };
 
   /// @brief Memory policy descriptor.
@@ -116,6 +124,53 @@ public:
     uint32_t mode_mask = 0;
     uint32_t capabilities_mask = 0;
     uint64_t r_debug = 0;
+  };
+
+  /// @brief Per-process debugger session state.
+  ///
+  /// @details Mirrors the debug-related fields the kernel maintains on
+  /// @c struct @c kfd_process in
+  /// @c drivers/gpu/drm/amd/amdkfd/kfd_priv.h.
+  /// Managed by the @c AMDKFD_IOC_DBG_TRAP ioctl handler
+  /// (@c kfd_ioctl_set_debug_trap in the real driver).
+  ///
+  /// Field mapping to @c kfd_priv.h:
+  /// | DebugSession field     | kfd_process field                               |
+  /// |------------------------|-------------------------------------------------|
+  /// | @ref enabled           | @c bool @c debug_trap_enabled                   |
+  /// | @ref runtime_state     | @c kfd_runtime_info @c runtime_info.runtime_state (kfd_ioctl.h) |
+  /// | @ref exception_enable_mask | @c uint64_t @c exception_enable_mask        |
+  /// | @ref dbg_fd            | @c struct @c file* @c dbg_ev_file (flattened to fd) |
+  /// | @ref debugger_pid      | @c struct @c kfd_process* @c debugger_process (stored as pid) |
+  struct DebugSession {
+    /// @brief Mirrors @c kfd_process::debug_trap_enabled.
+    /// Set when the device process is debug-attached with a reserved VMID.
+    bool enabled = false;
+
+    /// @brief Mirrors @c kfd_process::runtime_info.runtime_state.
+    /// Holds a @c kfd_dbg_runtime_state value (see @c kfd_ioctl.h).
+    uint32_t runtime_state = 0;
+
+    /// @brief Mirrors @c kfd_process::exception_enable_mask.
+    /// Bitmask of exception classes that are forwarded to the debugger.
+    uint64_t exception_enable_mask = 0;
+
+    /// @brief Mirrors @c kfd_process::dbg_ev_file (flattened from @c struct @c file* to fd).
+    /// File descriptor used as the debugger notification / poll target.
+    /// -1 when no debugger is attached.
+    int dbg_fd = -1;
+
+    /// @brief Owns @ref dbg_fd when the daemon received it out-of-band.
+    /// @details In daemon mode the notifier is a descriptor dup'd into the
+    /// daemon's own fd table (SCM_RIGHTS), which the session must close when the
+    /// debug session ends (DISABLE) or the process tears down. Engaged only in
+    /// daemon mode; empty in local mode, where @ref dbg_fd is the debugger's own
+    /// descriptor and is not owned here. RAII replaces an explicit close.
+    util::UniqueHandle owned_dbg_fd;
+
+    /// @brief Mirrors @c kfd_process::debugger_process (stored as pid instead of pointer).
+    /// Linux PID of the attached debugger (ptrace parent). 0 when not attached.
+    pid_t debugger_pid = 0;
   };
 
   /// @brief Per-page translation entry, mirroring HW PTE fields.
@@ -162,6 +217,12 @@ public:
   pid_t client_pid_ = 0;
   std::atomic<uint32_t> open_ref_count_{1};
 
+  /// @brief Serializes this process's ioctls, analogous to the real KFD's
+  /// per-process lock. Taken as the outermost per-process lock in dispatch_ioctl.
+  /// AMDKFD_IOC_WAIT_EVENTS is intentionally NOT taken under this lock: it blocks
+  /// waiting for signals that SET_EVENT/RESET_EVENT (which DO run under this lock)
+  /// must produce, so holding it would deadlock forward progress.
+  std::mutex op_mutex_;
   mutable std::mutex alloc_mutex_;
   std::unordered_map<uint64_t, GpuAllocation> allocations_;
   uint64_t next_handle_ = 1;
@@ -190,6 +251,9 @@ public:
   std::unordered_map<uint64_t, SvmRange> svm_ranges_;
   std::mutex runtime_mutex_;
   RuntimeState runtime_state_;
+
+  mutable std::mutex debug_mutex_;
+  DebugSession debug_session_;
 
 private:
 };

@@ -10,12 +10,17 @@
 #include <bit>
 #include <cassert>
 #include <cstring>
+#include <span>
 
 namespace rocjitsu {
 namespace amdgpu {
 
 void L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op,
                            uint32_t vmid) {
+  if (op == simdojo::MessageOp::WRITE)
+    backing_write_transactions_.fetch_add(1, std::memory_order_relaxed);
+  else
+    backing_read_transactions_.fetch_add(1, std::memory_order_relaxed);
   if (backing_memory_) {
     if (op == simdojo::MessageOp::WRITE) {
       static std::atomic<uint64_t> wb_count{0};
@@ -23,11 +28,9 @@ void L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo:
       if (count <= 3)
         util::Logger::vm("L2 writeback(backing) #", count, " addr=0x", std::hex, addr,
                          " size=", std::dec, size);
-      for (uint32_t i = 0; i < size; ++i)
-        backing_memory_->write8(addr + i, data[i], vmid);
+      backing_memory_->write_block(addr, std::span<const uint8_t>(data, size), vmid);
     } else {
-      for (uint32_t i = 0; i < size; ++i)
-        data[i] = backing_memory_->read8(addr + i, vmid);
+      backing_memory_->read_block(addr, std::span<uint8_t>(data, size), vmid);
     }
     return;
   }
@@ -38,18 +41,19 @@ void L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo:
   hdr.addr = addr;
   hdr.size_bytes = size;
   hdr.op = op;
+  hdr.vmid = vmid;
   msg->set_payload(reinterpret_cast<uintptr_t>(data));
   req_port_->send(std::move(msg));
 }
 
 void L2Cache::ensure_line(uint64_t addr, uint32_t vmid) {
-  if (cache_.lookup(addr))
+  if (cache_.lookup(addr, nullptr, vmid))
     return;
 
   uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
   uint8_t evicted_data[LINE_SIZE];
-  cache_.allocate(addr, &evicted, evicted_data);
+  cache_.allocate(addr, vmid, &evicted, evicted_data);
 
   if (evicted.valid && evicted.dirty) {
     static constexpr uint32_t SET_INDEX_BITS = std::bit_width(NUM_SETS - 1);
@@ -60,24 +64,33 @@ void L2Cache::ensure_line(uint64_t addr, uint32_t vmid) {
       if (++evict_count <= 5 || (evict_count % 10000) == 0)
         os << std::format("L2 evict #{} addr={:#x} new={:#x}", evict_count, evicted_addr, addr);
     });
-    // Evicted dirty line uses the current request's vmid. This is correct
-    // because the only source of dirty L2 lines is K$ writeback, and K$
-    // lines belong to the same process whose wavefront is currently active.
-    send_backing(evicted_addr, evicted_data, LINE_SIZE, simdojo::MessageOp::WRITE, vmid);
+    // The evicted line is written back under its own owning vmid, which may
+    // differ from the current request's vmid when two processes alias the
+    // same GPU VA in different ways of the same set.
+    send_backing(evicted_addr, evicted_data, LINE_SIZE, simdojo::MessageOp::WRITE, evicted.vmid);
   }
 
   uint8_t line_buf[LINE_SIZE];
   send_backing(line_addr, line_buf, LINE_SIZE, simdojo::MessageOp::READ, vmid);
-  cache_.fill_line(addr, line_buf);
+  cache_.fill_line(addr, line_buf, vmid);
 }
 
 void L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, uint32_t vmid) {
+  uint32_t copied = 0;
   if (mtype == Mtype::UC) {
-    send_backing(addr, dst, size, simdojo::MessageOp::READ, vmid);
+    while (copied < size) {
+      const uint64_t ea = addr + copied;
+      const uint32_t line_offset = CacheStore::line_offset(ea);
+      const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
+
+      flush_line(ea, vmid);
+      send_backing(ea, dst + copied, chunk, simdojo::MessageOp::READ, vmid);
+      copied += chunk;
+    }
     return;
   }
 
-  uint32_t copied = 0;
+  copied = 0;
   while (copied < size) {
     const uint64_t ea = addr + copied;
     const uint32_t line_offset = CacheStore::line_offset(ea);
@@ -91,28 +104,37 @@ void L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, uint
     }
 
     ensure_line(ea, vmid);
-    cache_.read_line(ea, dst + copied, line_offset, chunk);
+    cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
     copied += chunk;
   }
 }
 
 void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype, uint32_t vmid) {
+  uint32_t copied = 0;
   if (mtype == Mtype::UC) {
-    send_backing(addr, const_cast<uint8_t *>(src), size, simdojo::MessageOp::WRITE, vmid);
+    while (copied < size) {
+      const uint64_t ea = addr + copied;
+      const uint32_t line_offset = CacheStore::line_offset(ea);
+      const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
+
+      flush_line(ea, vmid);
+      send_backing(ea, const_cast<uint8_t *>(src + copied), chunk, simdojo::MessageOp::WRITE, vmid);
+      copied += chunk;
+    }
     return;
   }
 
-  uint32_t copied = 0;
+  copied = 0;
   while (copied < size) {
     const uint64_t ea = addr + copied;
     const uint32_t line_offset = CacheStore::line_offset(ea);
     const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
 
     ensure_line(ea, vmid);
-    cache_.write_line(ea, src + copied, line_offset, chunk);
+    cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
 
     simdojo::CacheTag *tag = nullptr;
-    cache_.lookup(ea, &tag);
+    cache_.lookup(ea, &tag, vmid);
     assert(tag != nullptr && "ensure_line must guarantee hit");
 
     // Write through to backing store for all mtypes. In the simulator, GPU
@@ -133,28 +155,28 @@ void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtyp
 void L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid) {
   uint64_t line_addr = CacheStore::line_address(addr);
   ensure_line(line_addr, vmid);
-  cache_.read_line(line_addr, line_buf, 0, LINE_SIZE);
+  cache_.read_line(line_addr, line_buf, 0, LINE_SIZE, vmid);
 }
 
 void L2Cache::writeback_line(uint64_t line_addr, const uint8_t *data, Mtype mtype, uint32_t vmid) {
   simdojo::CacheTag *tag = nullptr;
-  if (cache_.lookup(line_addr, &tag)) {
-    cache_.write_line(line_addr, data, 0, LINE_SIZE);
+  if (cache_.lookup(line_addr, &tag, vmid)) {
+    cache_.write_line(line_addr, data, 0, LINE_SIZE, vmid);
   } else {
     simdojo::CacheTag evicted;
     uint8_t evicted_data[LINE_SIZE];
-    cache_.allocate(line_addr, &evicted, evicted_data);
+    cache_.allocate(line_addr, vmid, &evicted, evicted_data);
 
     if (evicted.valid && evicted.dirty) {
       static constexpr uint32_t SET_INDEX_BITS = std::bit_width(NUM_SETS - 1);
       uint64_t evicted_addr =
           (evicted.tag << (LINE_SIZE_BITS + SET_INDEX_BITS)) |
           (static_cast<uint64_t>(CacheStore::set_index(line_addr)) << LINE_SIZE_BITS);
-      send_backing(evicted_addr, evicted_data, LINE_SIZE, simdojo::MessageOp::WRITE, vmid);
+      send_backing(evicted_addr, evicted_data, LINE_SIZE, simdojo::MessageOp::WRITE, evicted.vmid);
     }
 
-    cache_.fill_line(line_addr, data);
-    cache_.lookup(line_addr, &tag);
+    cache_.fill_line(line_addr, data, vmid);
+    cache_.lookup(line_addr, &tag, vmid);
   }
 
   if (mtype == Mtype::CC) {
@@ -169,24 +191,26 @@ void L2Cache::writeback_line(uint64_t line_addr, const uint8_t *data, Mtype mtyp
 
 void L2Cache::flush_line(uint64_t addr, uint32_t vmid) {
   simdojo::CacheTag *tag = nullptr;
-  if (!cache_.lookup(addr, &tag))
+  if (!cache_.lookup(addr, &tag, vmid))
     return;
 
   if (tag->dirty) {
     uint8_t line_buf[LINE_SIZE];
-    cache_.read_line(addr, line_buf, 0, LINE_SIZE);
+    cache_.read_line(addr, line_buf, 0, LINE_SIZE, vmid);
     uint64_t line_addr = CacheStore::line_address(addr);
     send_backing(line_addr, line_buf, LINE_SIZE, simdojo::MessageOp::WRITE, vmid);
   }
-  cache_.invalidate(addr);
+  cache_.invalidate(addr, vmid);
 }
 
 void L2Cache::flush_all(uint32_t vmid) {
+  (void)vmid;
   uint32_t dirty_count = 0;
   uint64_t min_addr = UINT64_MAX, max_addr = 0;
-  cache_.for_each_dirty([this, vmid, &dirty_count, &min_addr,
+  cache_.for_each_dirty([this, &dirty_count, &min_addr,
                          &max_addr](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
-    send_backing(line_addr, data, LINE_SIZE, simdojo::MessageOp::WRITE, vmid);
+    // Each dirty line is written back under its own owning vmid.
+    send_backing(line_addr, data, LINE_SIZE, simdojo::MessageOp::WRITE, tag.vmid);
     tag.dirty = false;
     ++dirty_count;
     if (line_addr < min_addr)
@@ -197,15 +221,6 @@ void L2Cache::flush_all(uint32_t vmid) {
   util::Logger::vm("L2 flush: ", dirty_count, " dirty lines [0x", std::hex, min_addr, "-0x",
                    max_addr, "]", std::dec, " total_writes=", write_count_);
   cache_.invalidate_all();
-}
-
-void L2Cache::invalidate_range(uint64_t addr, uint32_t size) {
-  if (size == 0)
-    return;
-  uint64_t line_start = CacheStore::line_address(addr);
-  uint64_t end = addr + size;
-  for (uint64_t la = line_start; la < end; la += LINE_SIZE)
-    cache_.invalidate(la);
 }
 
 } // namespace amdgpu

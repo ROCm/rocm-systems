@@ -621,7 +621,9 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
     imgCreateInfo.swizzledFormat.swizzle = channels;
     imgCreateInfo.mipLevels = (desc_.mipLevels_) ? desc_.mipLevels_ : 1;
     imgCreateInfo.samples = 1;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
     imgCreateInfo.fragments = 1;
+#endif
     Pal::ImageTiling tiling = forceLinear ? Pal::ImageTiling::Linear : Pal::ImageTiling::Optimal;
     uint32_t rowPitch = 0;
 
@@ -863,7 +865,9 @@ bool Resource::CreateInterop(CreateParams* params) {
       imgCreateInfo.swizzledFormat.swizzle = channels;
       imgCreateInfo.mipLevels = 1;
       imgCreateInfo.samples = 1;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
       imgCreateInfo.fragments = 1;
+#endif
       imgCreateInfo.tiling = Pal::ImageTiling::Linear;
       imgCreateInfo.depthPitch = desc().height_ * imgCreateInfo.rowPitch;
 

@@ -31,6 +31,8 @@
 
 #include "simdojo/sim/component.h"
 
+#include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -74,6 +76,7 @@ struct HwQueue {
 enum class SdmaPacketDialect {
   Legacy,
   Gfx11Plus,
+  Gfx1250,
 };
 
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
@@ -89,11 +92,25 @@ enum class SdmaPacketDialect {
 /// not on global CU idle. Signals fire in per-queue submission order.
 class CommandProcessor : public simdojo::Component {
 public:
-  explicit CommandProcessor(std::string name) : simdojo::Component(std::move(name)) {}
+  explicit CommandProcessor(std::string name) : simdojo::Component(std::move(name)) {
+    // Bind the doorbell handler at construction, not in startup(): register_queue()
+    // may start the doorbell poll thread (which fires doorbell_event_ via
+    // schedule_event_now) as soon as a host-accessible queue is registered, which can
+    // happen before startup() runs. Binding here removes that ordering hazard — a
+    // handlerless doorbell_event_ would be silently dropped by the engine.
+    doorbell_event_.set_handler(
+        [this](simdojo::Tick ts, simdojo::Message *) { handle_doorbell(ts); });
+  }
   ~CommandProcessor() override { stop_doorbell_monitor(); }
 
   void set_memory(GpuMemory *mem) { memory_ = mem; }
-  void add_l2_cache(L2Cache *l2) { l2_caches_.push_back(l2); }
+  void add_l2_cache(L2Cache *l2) {
+    // Idempotent: the config-driven builder and the Xcd full constructor may
+    // both attempt to register the same L2. Avoid duplicate entries so cache
+    // maintenance does not flush the same L2 twice.
+    if (std::find(l2_caches_.begin(), l2_caches_.end(), l2) == l2_caches_.end())
+      l2_caches_.push_back(l2);
+  }
   void set_vgpr_granularity(uint32_t g) { vgpr_granularity_ = g; }
   uint32_t vgpr_granularity() const { return vgpr_granularity_; }
   void set_packed_tid(bool v) { packed_tid_ = v; }
@@ -164,6 +181,17 @@ public:
   std::vector<ClusterLdsTarget> cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id,
                                                     uint32_t mcast_mask);
 
+  /// @brief Test-only view of the doorbell monitor lifecycle flag.
+  ///
+  /// @details Exposes doorbell_running_ so a regression test can observe the
+  /// monitor retiring after the last host-accessible queue is destroyed and
+  /// restarting when a new one registers. Read under doorbell_thread_mutex_ so it
+  /// never races the loop's self-exit or ensure_doorbell_monitor().
+  [[nodiscard]] bool doorbell_monitor_running_for_test() {
+    std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
+    return doorbell_running_;
+  }
+
 private:
   /// @brief Initialize a wavefront's registers per the AMDHSA ABI.
   void init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf, const DispatchEntry &entry,
@@ -171,14 +199,45 @@ private:
 
   void handle_doorbell(simdojo::Tick timestamp);
 
-  /// @brief Fetch AQL packets from all registered HW queues.
-  void fetch_packets();
+  /// @brief Re-arm a re-check of a queue stalled on an unsatisfied external wait
+  /// (barrier/dependency signal, or an SDMA VA not yet translatable).
+  /// @details Runs on the engine thread. When a doorbell poll thread is monitoring
+  /// this CP (host-accessible/KFD queues), it sets stall_pending_ so the poll thread
+  /// re-nudges the idle engine at its 100us cadence — the engine must NOT reschedule
+  /// the doorbell on the main event queue, which models simulated timing and would
+  /// spin millions of ticks while wall-clock RPC latency elapses. Internal test
+  /// queues have no poll thread and are driven by engine->run()/step(), so there the
+  /// re-check must be kept alive by rescheduling the doorbell event at @p now + 1.
+  void arm_stall_recheck(simdojo::Tick now);
 
   /// @brief Fetch AQL packets from a single HW queue.
-  void fetch_from_queue(HwQueue &queue, HwQueueState &qs);
+  void fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdojo::Tick now);
 
   /// @brief Process SDMA packets from an SDMA queue's ring buffer.
-  void process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx);
+  void process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx, simdojo::Tick now);
+
+  /// @brief Coarse invalidate of the GPU data caches (L1 V$ + L2/GL2).
+  /// @details Emulated SDMA and CP writes land directly in the backing store,
+  /// bypassing the cache hierarchy. Real SDMA does not snoop GL2, so stale
+  /// cached copies are knocked out the way HW cache-maintenance does it: coarse
+  /// and indiscriminate, not per-range. This is the simulator's stand-in for a
+  /// GL2 invalidate; the consuming kernel's acquire fence at dispatch flushes
+  /// the remaining per-CU caches (including the scalar K$).
+  ///
+  /// @warning Drops dirty L2 lines without writeback. Only use after a direct
+  /// backing write whose destination is the only stale region; otherwise use
+  /// flush_gpu_caches() so K$-writeback dirty lines are published, not lost.
+  void invalidate_gpu_caches();
+
+  /// @brief Coarse writeback+invalidate of the GPU data caches (L1 K$/V$ + L2).
+  /// @details Like invalidate_gpu_caches(), but publishes dirty data instead of
+  /// dropping it. Ordering is load-bearing: dirty scalar L1 (K$) lines are
+  /// written back into L2 first, then L2 is flushed to backing, so a dirty K$ or
+  /// L2 line overlapping an SDMA destination reaches backing before the direct
+  /// SDMA write (which runs after this returns) rather than being written out
+  /// over it by a later K$/L2 flush. Each line is written back under its own
+  /// owning vmid. Vector L1 (V$) is write-through, so it only needs invalidation.
+  void flush_gpu_caches();
 
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and create a DispatchEntry.
   void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
@@ -193,6 +252,7 @@ private:
   void register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
                                   uint32_t global_wg_id, ComputeUnitCore *cu, uint32_t lds_base);
   void mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id);
+  void erase_cluster_workgroup(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroups(uint32_t dispatch_id);
 
   /// @brief Asynchronous Compute Engine (ACE): dispatch workgroups from all
@@ -228,7 +288,13 @@ private:
   }
 
   bool uses_gfx11_plus_sdma_packets() const {
-    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx11Plus;
+    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx11Plus ||
+           sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
+  }
+
+  // gfx1250 widens the GCR packet to 6 dwords; gfx11/12 keep the 5-dword layout.
+  bool uses_gfx1250_gcr_packet() const {
+    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
   }
 
   GpuMemory *memory_ = nullptr;
@@ -241,7 +307,13 @@ private:
 
   size_t next_cu_ = 0;
   size_t next_queue_idx_ = 0;
-  bool is_primary_ = false;
+  // Almost always accessed under hw_queue_mutex_, but the teardown path in
+  // handle_doorbell() must clear it AFTER unlocking (stop_doorbell_monitor() joins
+  // the poll thread, which takes hw_queue_mutex_). Atomic so that lock-held reads in
+  // register_queue() cannot data-race that one unlocked write. Only the internal
+  // test-queue path (!has_kfd_queues()) ever sets it; KFD queues anchor the primary
+  // at the VM level (rj_vm.cpp).
+  std::atomic<bool> is_primary_ = false;
   uint32_t workgroup_id_offset_ = 0;
   uint32_t vgpr_granularity_ = 8;
   bool packed_tid_ = false;
@@ -280,6 +352,13 @@ private:
   void write_gpu_block(uint64_t va, const void *src, size_t size, uint32_t vmid);
 
   void stop_doorbell_monitor();
+  /// @brief Start the doorbell monitor if one is not already running, reaping a
+  /// previously self-exited thread first. Serialized by doorbell_thread_mutex_.
+  /// @details Caller MUST NOT hold hw_queue_mutex_: this may join a monitor that
+  /// self-exited, and that monitor's final self-exit check takes hw_queue_mutex_,
+  /// so joining under it would deadlock. This also fixes the lock order to
+  /// doorbell_thread_mutex_ -> hw_queue_mutex_ (never the reverse).
+  void ensure_doorbell_monitor();
   bool scan_doorbells();
 
   InterruptCallback interrupt_cb_;
@@ -287,7 +366,34 @@ private:
   ScratchBackingAllocator scratch_allocator_;
   std::unique_ptr<CompletionTracker> completion_;
 
+  std::atomic<bool> invalid_pending_{false};
+
+  // Set when a queue stalls on an unsatisfied barrier/dependency signal (or an
+  // SDMA VA not yet translatable) — a wait on progress that is external to the
+  // current engine pass (a peer rank's kernel completion arriving via the daemon,
+  // or a producer on another queue). Re-checking such a stall by rescheduling the
+  // doorbell event at now+1 spins the main event queue (which models simulated
+  // timing) millions of times per collective, pegging a core while wall-clock RPC
+  // latency elapses. Instead, like invalid_pending_, the doorbell poll thread
+  // re-nudges the (idle) engine at its 100us cadence so the stall is re-evaluated
+  // without a busy simulated-time spin.
+  std::atomic<bool> stall_pending_{false};
+
   void doorbell_poll_loop(std::stop_token stop);
+
+  // The doorbell monitor's lifecycle is serialized by its OWN mutex, deliberately
+  // distinct from hw_queue_mutex_. An empty monitor exits itself when it observes
+  // the last host-accessible queue gone (so unregister_queue never has to join a
+  // thread that may be mid-iteration inside engine/event code — that join could
+  // deadlock, which is why queue destruction only removes queue state). A later
+  // register_queue reaps the already-exited jthread and starts a fresh one. Taking
+  // doorbell_thread_mutex_ (never nested under hw_queue_mutex_) keeps concurrent
+  // register/unregister from racing on doorbell_thread_ and doorbell_running_.
+  std::mutex doorbell_thread_mutex_;
+  // True while a monitor is running or about to run. The monitor clears it under
+  // doorbell_thread_mutex_ just before returning, so ensure_doorbell_monitor() can
+  // tell a live monitor from a self-exited one that still needs joining.
+  bool doorbell_running_ = false;
   std::jthread doorbell_thread_;
 };
 

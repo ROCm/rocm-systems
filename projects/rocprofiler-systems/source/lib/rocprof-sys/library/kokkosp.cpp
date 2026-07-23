@@ -324,7 +324,7 @@ extern "C"
                                                          : _initialize_arguments.at(0);
 
             _standalone_initialized = true;
-            rocprofsys_set_mpi_hidden(false, false);
+            rocprofsys_set_mpi_hidden(false);
             rocprofsys_init_hidden(_mode.c_str(), false, _arg0.c_str());
             rocprofsys_push_trace_hidden("kokkos_main");
 

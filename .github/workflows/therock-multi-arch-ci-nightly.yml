@@ -3,10 +3,17 @@
 
 # Nightly trigger for Multi-Arch CI
 #
-# This workflow triggers therock-multi-arch-ci.yml via workflow_dispatch
-# with specific GPU families. This is needed because TheRock's setup_multi_arch
-# workflow runs all families when triggered by schedule, ignoring inputs.
-# By using workflow_dispatch, TheRock respects our specified families.
+# How nightly builds work:
+# 1. This workflow runs on a schedule (cron) at 7 AM UTC daily
+# 2. It triggers therock-multi-arch-ci.yml via workflow_dispatch with specific inputs
+# 3. The inputs specify which GPU families to build/test and the test type
+#
+# Why workflow_dispatch instead of direct schedule on therock-multi-arch-ci.yml?
+# TheRock's setup_multi_arch workflow ignores family inputs when triggered by
+# schedule and runs ALL families. By using workflow_dispatch, TheRock respects
+# our specified families (gfx94X, gfx950, gfx125X for Linux, gfx1151 for Windows).
+#
+# Test type: comprehensive (via test_filter:comprehensive label)
 
 name: TheRock Multi-Arch CI Nightly Trigger
 
@@ -27,4 +34,4 @@ jobs:
         with:
           workflow: therock-multi-arch-ci.yml
           ref: develop
-          inputs: '{ "linux_amdgpu_families": "gfx94X,gfx950,gfx125X", "windows_amdgpu_families": "gfx1151" }'
+          inputs: '{ "linux_amdgpu_families": "gfx94X,gfx950,gfx125X", "windows_amdgpu_families": "gfx1151", "linux_test_labels": "test_filter:comprehensive", "windows_test_labels": "test_filter:comprehensive" }'

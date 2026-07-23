@@ -46,19 +46,9 @@ std::string_view MockInputParameters::get_pc_sampling_method()
     return std::string_view{m_pc_sampling_method};
 }
 
-std::string_view MockInputParameters::get_pc_sampling_beta_enabled()
-{
-    return std::string_view{m_pc_sampling_beta_enabled};
-}
-
 void MockInputParameters::set_pc_sampling_method(const std::string& method)
 {
     m_pc_sampling_method = method;
-}
-
-void MockInputParameters::set_pc_sampling_beta_enabled(const std::string& value)
-{
-    m_pc_sampling_beta_enabled = value;
 }
 
 void MockInputParameters::set_output_path(const std::string& output_path)

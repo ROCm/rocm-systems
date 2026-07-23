@@ -97,6 +97,33 @@ virtualMemoryManagement:
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
   Unit_hipMemCreate_Capture: *level_2
+  Unit_hipMemCreate_HostNuma_Granularity:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemCreate_HostNuma_BasicAllocDealloc:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemCreate_HostNuma_ChkDev2HstMemcpy:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemCreate_HostNuma_ChkWithKerLaunch:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  # (amd_linux) These two are the only host-NUMA tests that directly dereference
+  # the mapped VA from the CPU. On the current CI kernel/driver stack that CPU
+  # access faults with SIGBUS even though hsa_amd_vmem_set_access() reports
+  # success; the allocation + GPU/DMA-access tests above are unaffected and stay
+  # enabled. Same code works on bare-metal gfx942/gfx950; ROCr is investigating.
+  # Re-enable on amd_linux once the runtime fix lands.
+  Unit_hipMemCreate_HostNuma_HostAndDeviceAccess:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, amd_linux]
+  Unit_hipMemCreate_HostNuma_NumaTypedAccess:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, amd_linux]
+  Unit_hipMemCreate_HostNuma_Negative:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
   Unit_hipMemSetAccess_SetGet:
     <<: *level_2
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly

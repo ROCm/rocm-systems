@@ -5,7 +5,7 @@
 /// @brief HIP vector_add kernel launch through real ROCR on simulated GPU.
 ///
 /// Compiled with hipcc (HIP language support for __global__ kernels). Requires
-/// LD_PRELOAD=librocjitsu_kmd.so.
+/// LD_PRELOAD=librocjitsu.so.
 
 #include <cmath>
 #include <cstdlib>
@@ -13,6 +13,11 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+
+// ROCR keeps process-lifetime runtime state allocated after hipDeviceReset().
+// Ignore only allocations whose stack includes the external HSA runtime while
+// retaining LeakSanitizer coverage for rocjitsu and this test executable.
+extern "C" const char *__lsan_default_suppressions() { return "leak:libhsa-runtime64.so\n"; }
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);

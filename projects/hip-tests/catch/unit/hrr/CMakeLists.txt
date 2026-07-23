@@ -4,13 +4,19 @@
 
 # HRR (HIP Record & Replay) tests
 #
-# Three source files compiled into HrrTest:
+# Source files compiled into HrrTest:
 #
-#   hrr_format.cc        — CPU-only: archive format I/O unit tests (no GPU).
-#   hrr_workload.cc      — Hidden ([.][hrr-direct]) GPU test cases invoked as
-#                          subprocesses by hrr_roundtrip.cc; provides clean
+#   hrr_format_test.cc   — CPU-only: archive format I/O unit tests (no GPU).
+#   hrr_recovery_test.cc — CPU-only: crash-truncation recovery unit tests for
+#                          the archive reader (no GPU).
+#   hrr_workload_test.cc — Hidden ([.][hrr-direct]) GPU test cases invoked as
+#                          subprocesses by hrr_roundtrip_test.cc; provides clean
 #                          Windows process context for HIP + capture layer.
-#   hrr_roundtrip.cc     — Round-trip: sets HIP_HRR_CAPTURE_OUTPUT, spawns
+#   hrr_repro_workload_test.cc — Hidden ([.][hrr-direct]) regression micro-kernels
+#                          (first-hipMalloc capture, embedded-pointer struct
+#                          args, uncaptured-host-write divergence, null optional
+#                          output pointer 0x20000 fault class, replay zero-init).
+#   hrr_roundtrip_test.cc — Round-trip: sets HIP_HRR_CAPTURE_OUTPUT, spawns
 #                          Unit_HRR_GpuWorkload_Direct / Unit_HRR_GraphWorkload_Direct
 #                          as subprocesses, then runs hrr-playback to validate
 #                          replayed D2H buffers byte-for-byte against captured blobs.
@@ -30,9 +36,11 @@ if(NOT IS_DIRECTORY "${HRR_CLR_DIR}")
 endif()
 
 set(TEST_SRC
-    hrr_format.cc
-    hrr_workload.cc
-    hrr_roundtrip.cc
+    hrr_format_test.cc
+    hrr_recovery_test.cc
+    hrr_workload_test.cc
+    hrr_repro_workload_test.cc
+    hrr_roundtrip_test.cc
     ${HRR_CLR_DIR}/playback/hrr_reader.cpp
 )
 
@@ -62,7 +70,7 @@ target_compile_definitions(HrrTest PRIVATE
 )
 
 # ---------------------------------------------------------------------------
-# hrr_roundtrip.cc needs:
+# hrr_roundtrip_test.cc needs:
 #   HRR_TEST_EXE     — bare filename; SpawnProc resolves it from currentPath()
 #                      (= CTest WORKING_DIRECTORY = HrrTest's own directory).
 #   HRR_PLAYBACK_EXE — bare filename; hrr-playback is copied next to HrrTest

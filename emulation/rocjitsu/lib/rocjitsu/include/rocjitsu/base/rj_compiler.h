@@ -14,6 +14,9 @@
 #define RJ_API_EXPORT __attribute__((visibility("default")))
 #endif
 
+/// @brief Marks a libc entry point interposed by the LD_PRELOAD shim for export.
+#define RJ_INTERPOSER_EXPORT RJ_API_EXPORT
+
 /// @brief Suppress specific compiler warnings around third-party headers.
 ///
 /// Usage:
@@ -30,18 +33,22 @@
 #define RJ_DIAGNOSTIC_IGNORE_NONNULL_COMPARE                                                       \
   _Pragma("GCC diagnostic ignored \"-Wpointer-bool-conversion\"")
 #define RJ_DIAGNOSTIC_IGNORE_CLOBBERED // Clang does not have -Wclobbered.
+#define RJ_DIAGNOSTIC_IGNORE_NESTED_ANON_TYPES                                                     \
+  _Pragma("clang diagnostic ignored \"-Wnested-anon-types\"")
 #elif defined(__GNUC__)
 #define RJ_DIAGNOSTIC_PUSH _Pragma("GCC diagnostic push")
 #define RJ_DIAGNOSTIC_POP _Pragma("GCC diagnostic pop")
 #define RJ_DIAGNOSTIC_IGNORE_PEDANTIC _Pragma("GCC diagnostic ignored \"-Wpedantic\"")
 #define RJ_DIAGNOSTIC_IGNORE_NONNULL_COMPARE _Pragma("GCC diagnostic ignored \"-Wnonnull-compare\"")
 #define RJ_DIAGNOSTIC_IGNORE_CLOBBERED _Pragma("GCC diagnostic ignored \"-Wclobbered\"")
+#define RJ_DIAGNOSTIC_IGNORE_NESTED_ANON_TYPES // Clang-only warning.
 #elif defined(_MSC_VER)
 #define RJ_DIAGNOSTIC_PUSH __pragma(warning(push))
 #define RJ_DIAGNOSTIC_POP __pragma(warning(pop))
 #define RJ_DIAGNOSTIC_IGNORE_PEDANTIC __pragma(warning(disable : 4200))
 #define RJ_DIAGNOSTIC_IGNORE_NONNULL_COMPARE
 #define RJ_DIAGNOSTIC_IGNORE_CLOBBERED
+#define RJ_DIAGNOSTIC_IGNORE_NESTED_ANON_TYPES
 #else
 static_assert(false, "Unsupported compiler: define RJ_DIAGNOSTIC macros for your toolchain");
 #endif
