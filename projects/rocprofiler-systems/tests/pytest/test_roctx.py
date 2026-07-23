@@ -50,23 +50,34 @@ def roctx_rules(validation_rules_dir: Path) -> list[Path]:
 class TestROCTx(RocprofsysTest):
     """Tests for rocTX marker API."""
 
-    def roctx_cached_labels(self) -> list[str]:
+    def roctx_expected_labels(self) -> list[str]:
+        # The validate-perfetto-proto.py script aggregates (name, depth) pairs from
+        # the Perfetto slice table in dict-insertion order.  Because roctxRangeStart
+        # and roctxRangePush are each called on BOTH the main thread and the worker
+        # thread, both depths for a given name accumulate into the same outer dict
+        # entry (name → {depth: count}).  The flat list therefore groups all depths
+        # of the same name together, in the order those depths were first seen:
+        #   roctxRangeStart_GPU_Compute  d=2 (main, first call) then d=0 (worker)
+        #   roctxRangePush_HIP_Kernel    d=3 (main)             then d=1 (worker)
+        # The per-thread marks appear after those, in thread-call order.
         return [
             "roctxMark_GPU_workload",
-            "roctxRangePush_HIP_Kernel",
-            "roctxRangeStart_GPU_Compute",
+            "roctxRangePush_run_profiling",
+            "roctxRangeStart_GPU_Compute",  # d=2: main thread (inside run_profiling)
+            "roctxRangeStart_GPU_Compute",  # d=0: worker thread (top-level)
+            "roctxRangePush_HIP_Kernel",  # d=3: main thread
+            "roctxRangePush_HIP_Kernel",  # d=1: worker thread
             "roctxMark_Thread_Start",
             "roctxMark_Thread_End",
             "roctxGetThreadId",
-            "roctxRangePush_run_profiling",
             "roctxMark_Finished_GPU",
         ]
 
-    def roctx_cached_count(self) -> list[int]:
-        return [1, 2, 2, 1, 1, 1, 1, 1]
+    def roctx_expected_count(self) -> list[int]:
+        return [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 
-    def roctx_cached_depth(self) -> list[int]:
-        return [1, 1, 1, 0, 0, 1, 1, 1]
+    def roctx_expected_depth(self) -> list[int]:
+        return [1, 1, 2, 0, 3, 1, 0, 0, 2, 1]
 
     BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
     RUNTIME_INSTRUMENT_ARGS = ["-v", "2"]
@@ -100,9 +111,9 @@ class TestROCTx(RocprofsysTest):
     ):
         env = roctx_env.copy()
         categories = ["rocm_marker_api"]
-        labels = self.roctx_cached_labels()
-        counts = self.roctx_cached_count()
-        depths = self.roctx_cached_depth()
+        labels = self.roctx_expected_labels()
+        counts = self.roctx_expected_count()
+        depths = self.roctx_expected_depth()
 
         result = self.run_test(
             "sampling", target="roctx", env=env, check_target_arch=True
