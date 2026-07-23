@@ -81,6 +81,15 @@ if(PROFILER_HUB_ENABLE_COVERAGE)
     profiler_hub_add_coverage_flags(profiler-hub_unit_tests)
 endif()
 
+# amd-llvm ships no shared asan runtime, but TheRock forces -shared-libsan
+# globally; a sanitized profiler-hub_unit_tests then cannot load
+# libclang_rt.asan.so during gtest build-time discovery. Link the static asan
+# runtime for this target instead. target_link_options is emitted after the
+# directory-level add_link_options, so -static-libsan wins over -shared-libsan.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_FLAGS MATCHES "-fsanitize=address")
+    target_link_options(profiler-hub_unit_tests PRIVATE -static-libsan)
+endif()
+
 gtest_discover_tests(
     profiler-hub_unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
