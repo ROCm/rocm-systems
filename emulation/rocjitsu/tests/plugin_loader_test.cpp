@@ -125,6 +125,7 @@ TEST_F(PluginLoaderTest, FileSinkFailureDoesNotDuplicateConfiguredStderr) {
   group->onShutdown();
   const std::string error = testing::internal::GetCapturedStderr();
 
+  EXPECT_NE(error.find("cannot open plugin sink '/dev/null/profile.log'"), std::string::npos);
   const size_t output = error.find("total emulation time");
   ASSERT_NE(output, std::string::npos);
   EXPECT_EQ(error.find("total emulation time", output + 1), std::string::npos);
