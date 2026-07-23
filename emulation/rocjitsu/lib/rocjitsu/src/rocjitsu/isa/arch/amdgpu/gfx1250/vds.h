@@ -20,6 +20,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -29,6 +31,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -38,6 +42,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -47,6 +53,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -56,6 +64,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -65,6 +75,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -74,6 +86,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -83,6 +97,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -92,6 +108,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -101,6 +119,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -110,6 +130,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -119,6 +141,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -129,6 +153,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -138,6 +164,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -148,6 +175,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -158,6 +186,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -168,6 +197,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -177,6 +208,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -186,6 +219,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -202,6 +237,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -211,6 +248,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -220,6 +258,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -230,6 +269,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -240,6 +281,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -250,6 +293,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -260,6 +305,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -270,6 +317,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -280,6 +329,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -290,6 +341,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -300,6 +353,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -310,6 +365,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -320,6 +377,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -330,6 +389,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -340,6 +401,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -351,6 +414,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -361,6 +426,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -372,6 +439,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -383,6 +452,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -394,6 +465,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -404,6 +477,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -414,6 +489,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -432,6 +509,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -441,6 +519,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -450,6 +529,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -459,6 +539,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -468,6 +549,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -477,6 +559,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -486,6 +569,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -494,6 +578,8 @@ public:
   DsConsumeVds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -502,6 +588,8 @@ public:
   DsAppendVds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -511,6 +599,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -520,6 +610,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -529,6 +621,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -538,6 +632,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -547,6 +643,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -556,6 +654,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -565,6 +665,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -574,6 +676,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -583,6 +687,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -592,6 +698,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -601,6 +709,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -610,6 +720,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -620,6 +732,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -629,6 +743,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -639,6 +754,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -649,6 +765,7 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -659,6 +776,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -668,6 +787,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -677,6 +798,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -686,6 +809,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -694,6 +819,8 @@ public:
   DsAtomicAsyncBarrierArriveB64Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -704,6 +831,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -714,6 +843,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -724,6 +855,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -734,6 +867,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -744,6 +879,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -754,6 +891,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -764,6 +903,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -774,6 +915,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -784,6 +927,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -794,6 +939,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -804,6 +951,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -814,6 +963,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -825,6 +976,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -835,6 +988,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -846,6 +1001,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -857,6 +1014,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -868,6 +1027,8 @@ public:
   Operand addr;
   Operand data0;
   Operand data1;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -878,6 +1039,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -888,6 +1051,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -898,6 +1063,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -908,6 +1075,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -917,6 +1086,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -926,6 +1096,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -935,6 +1106,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -945,6 +1117,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -955,6 +1129,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -964,6 +1140,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -973,6 +1151,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -982,6 +1162,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -991,6 +1173,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -1000,6 +1184,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -1009,6 +1194,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -1018,6 +1204,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -1027,6 +1214,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -1036,6 +1224,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -1045,6 +1234,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -1054,6 +1244,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -1063,6 +1254,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -1073,6 +1265,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -1083,6 +1277,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -1093,6 +1289,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -1103,6 +1301,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
   static const bool execute_registered_;
 };
 
@@ -1111,6 +1311,8 @@ public:
   DsStoreAddtidB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand data0;
+  Operand dsmem;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -1119,6 +1321,8 @@ public:
   DsLoadAddtidB32Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand dsmem;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -1158,6 +1362,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -1167,6 +1372,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -1176,6 +1382,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -1185,6 +1392,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -1194,6 +1402,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -1203,6 +1412,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -1212,6 +1422,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -1221,6 +1432,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
