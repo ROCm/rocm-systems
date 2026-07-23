@@ -211,10 +211,11 @@ bool command_exited_with(int status, int exit_code) {
 
 TEST(RjDbtTranslate, Smoke) {
   const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_smoke_");
+  const std::filesystem::path temp_path(temp_dir.path());
 
-  const auto input = std::filesystem::path(temp_dir.path()) / "smoke_gfx950.co";
-  const auto output = std::filesystem::path(temp_dir.path()) / "stdout.txt";
-  const auto error = std::filesystem::path(temp_dir.path()) / "stderr.txt";
+  const auto input = temp_path / "smoke_gfx950.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
 
   {
     const auto image = make_smoke_code_object();
@@ -250,9 +251,10 @@ TEST(RjDbtTranslate, Smoke) {
 
 TEST(RjDbtTranslate, RequiresRevisionsOnlyForGfx1250) {
   const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_revision_");
-  const auto input = std::filesystem::path(temp_dir.path()) / "smoke.co";
-  const auto output = std::filesystem::path(temp_dir.path()) / "stdout.txt";
-  const auto error = std::filesystem::path(temp_dir.path()) / "stderr.txt";
+  const std::filesystem::path temp_path(temp_dir.path());
+  const auto input = temp_path / "smoke.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
 
   {
     const auto image = make_smoke_code_object();
