@@ -798,7 +798,8 @@ struct SampledAtomicScratchLayout {
   static constexpr uint16_t kValue = 2u;
   static constexpr uint16_t kExpected = 3u;
   // Sampled atomic lowering currently admits only 32-bit CAS, so each
-  // outcome-evidence field occupies one VGPR.
+  // outcome-evidence field occupies one VGPR. Wider support must also widen
+  // append_sampled_atomic_cas_snapshot(), not only this reservation.
   static constexpr uint16_t kCasFieldWords = 1u;
   static constexpr uint16_t kCasCompare = 4u;
   static constexpr uint16_t kCasResult = kCasCompare + kCasFieldWords;
@@ -808,12 +809,6 @@ struct SampledAtomicScratchLayout {
   static constexpr uint16_t kSavedAddressCount = 2u;
   static constexpr uint16_t kCount = kSavedAddress + kSavedAddressCount;
 };
-
-static_assert(SampledAtomicScratchLayout::kCasResult >=
-              SampledAtomicScratchLayout::kCasCompare + SampledAtomicScratchLayout::kCasFieldWords);
-static_assert(SampledAtomicScratchLayout::kSavedAddress +
-                  SampledAtomicScratchLayout::kSavedAddressCount <=
-              SampledAtomicScratchLayout::kCount);
 
 [[nodiscard]] constexpr uint16_t sampled_atomic_scratch_count() {
   return SampledAtomicScratchLayout::kCount;

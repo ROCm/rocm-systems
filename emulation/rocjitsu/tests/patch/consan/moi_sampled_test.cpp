@@ -786,6 +786,9 @@ TEST(ConSanMoi, Cdna4SampledBarrierPublishesSelectedEpochTransition) {
 }
 
 TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
+  constexpr uint16_t kCasCompareOffset = 4u;
+  constexpr uint16_t kCasResultOffset = 5u;
+  constexpr uint16_t kSavedAddressOffset = 8u;
   for (const SampledCdnaTarget &target : kSampledCdnaTargets) {
     for (bool is_cas : {false, true}) {
       for (bool deferred_acquire : {false, true}) {
@@ -794,8 +797,16 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
         std::vector<uint32_t> release_words;
         std::vector<uint32_t> acquire_words;
         std::vector<uint32_t> atomic_words;
-        const uint16_t cas_address_vgpr = deferred_acquire ? 8u : 4u;
-        const uint16_t cas_result_vgpr = deferred_acquire ? 4u : 11u;
+        // The release layouts cover an in-spill address plus mixed CAS evidence
+        // on CDNA3, and an out-of-spill address on CDNA4. The deferred layout
+        // keeps both evidence words in spill slots. Together they lock
+        // address/evidence private reloads and direct register copies.
+        const uint16_t cas_address_vgpr = deferred_acquire                          ? 8u
+                                          : target.arch == ROCJITSU_CODE_ARCH_CDNA3 ? 4u
+                                                                                    : 10u;
+        const uint16_t cas_result_vgpr = deferred_acquire                          ? 4u
+                                         : target.arch == ROCJITSU_CODE_ARCH_CDNA3 ? 11u
+                                                                                   : 4u;
         uint32_t wait_word = 0u;
         if (target.arch == ROCJITSU_CODE_ARCH_CDNA3) {
           const auto release = cdna3::build_mubuf(cdna3::kBufferWbl2Mubuf, {.sc1 = 1});
@@ -927,27 +938,43 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
           ASSERT_TRUE(atomic->persistent_private_state_end);
           ASSERT_LE(*atomic->scratch_vgpr, 4u);
           ASSERT_GT(static_cast<uint32_t>(*atomic->scratch_vgpr) + atomic->spilled_vgpr_count, 7u);
-          std::vector<uint32_t> evidence_snapshot = {
-              build_v_mov_b32_e32(static_cast<uint16_t>(*atomic->scratch_vgpr + 8u),
-                                  vector_source_vgpr(cas_address_vgpr), target.arch),
-              build_v_mov_b32_e32(static_cast<uint16_t>(*atomic->scratch_vgpr + 9u),
-                                  vector_source_vgpr(static_cast<uint16_t>(cas_address_vgpr + 1u)),
-                                  target.arch),
-          };
+          const uint32_t scratch_end =
+              static_cast<uint32_t>(*atomic->scratch_vgpr) + atomic->spilled_vgpr_count;
+          std::vector<uint32_t> evidence_snapshot;
+          bool address_loaded_from_private = false;
+          for (uint16_t word = 0; word < 2u; ++word) {
+            const uint16_t source = static_cast<uint16_t>(cas_address_vgpr + word);
+            const uint16_t destination =
+                static_cast<uint16_t>(*atomic->scratch_vgpr + kSavedAddressOffset + word);
+            if (source >= *atomic->scratch_vgpr && source < scratch_end) {
+              const auto load = instrumentation::build_private_load_b32(
+                  destination,
+                  *atomic->persistent_private_state_end +
+                      static_cast<uint32_t>(source - *atomic->scratch_vgpr) * sizeof(uint32_t),
+                  target.arch);
+              ASSERT_TRUE(load);
+              evidence_snapshot.insert(evidence_snapshot.end(), load->begin(), load->end());
+              address_loaded_from_private = true;
+            } else {
+              evidence_snapshot.push_back(
+                  build_v_mov_b32_e32(destination, vector_source_vgpr(source), target.arch));
+            }
+          }
+          const auto wait = instrumentation::build_s_wait_private_load0(target.arch);
+          ASSERT_TRUE(wait);
+          if (address_loaded_from_private)
+            evidence_snapshot.push_back(*wait);
           const auto compare_load = instrumentation::build_private_load_b32(
-              static_cast<uint16_t>(*atomic->scratch_vgpr + 4u),
+              static_cast<uint16_t>(*atomic->scratch_vgpr + kCasCompareOffset),
               *atomic->persistent_private_state_end +
                   static_cast<uint32_t>(7u - *atomic->scratch_vgpr) * sizeof(uint32_t),
               target.arch);
-          const auto wait = instrumentation::build_s_wait_private_load0(target.arch);
-          ASSERT_TRUE(compare_load && wait);
+          ASSERT_TRUE(compare_load);
           evidence_snapshot.insert(evidence_snapshot.end(), compare_load->begin(),
                                    compare_load->end());
-          const uint32_t scratch_end =
-              static_cast<uint32_t>(*atomic->scratch_vgpr) + atomic->spilled_vgpr_count;
           if (cas_result_vgpr >= *atomic->scratch_vgpr && cas_result_vgpr < scratch_end) {
             const auto result_load = instrumentation::build_private_load_b32(
-                static_cast<uint16_t>(*atomic->scratch_vgpr + 5u),
+                static_cast<uint16_t>(*atomic->scratch_vgpr + kCasResultOffset),
                 *atomic->persistent_private_state_end +
                     static_cast<uint32_t>(cas_result_vgpr - *atomic->scratch_vgpr) *
                         sizeof(uint32_t),
@@ -957,7 +984,7 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
                                      result_load->end());
           } else {
             evidence_snapshot.push_back(
-                build_v_mov_b32_e32(static_cast<uint16_t>(*atomic->scratch_vgpr + 5u),
+                build_v_mov_b32_e32(static_cast<uint16_t>(*atomic->scratch_vgpr + kCasResultOffset),
                                     vector_source_vgpr(cas_result_vgpr), target.arch));
           }
           evidence_snapshot.push_back(*wait);

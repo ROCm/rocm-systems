@@ -766,6 +766,40 @@ struct SampledAtomicPreludeState {
   std::optional<uint16_t> cas_result_vgpr;
 };
 
+[[nodiscard]] bool append_sampled_atomic_snapshot_word(std::vector<uint32_t> &words,
+                                                       const VgprSpillSequence &spill,
+                                                       uint16_t destination, uint16_t source,
+                                                       rj_code_arch_t arch,
+                                                       bool &loaded_private_state) {
+  const uint32_t spill_end = static_cast<uint32_t>(spill.vgpr_base) + spill.vgpr_count;
+  if (source >= spill.vgpr_base && source < spill_end) {
+    const uint16_t slot = static_cast<uint16_t>(source - spill.vgpr_base);
+    // Spill-range sources may have been overwritten by address or evidence
+    // scratch, so reload their authoritative post-guest value from private.
+    const auto load =
+        instrumentation::build_private_load_b32(destination, spill.slot_offsets[slot], arch);
+    if (!load)
+      return false;
+    words.insert(words.end(), load->begin(), load->end());
+    loaded_private_state = true;
+    return true;
+  }
+  words.push_back(build_v_mov_b32_e32(destination, vector_source_vgpr(source), arch));
+  return true;
+}
+
+[[nodiscard]] bool append_sampled_atomic_snapshot_wait(std::vector<uint32_t> &words,
+                                                       bool loaded_private_state,
+                                                       rj_code_arch_t arch) {
+  if (!loaded_private_state)
+    return true;
+  const auto wait = instrumentation::build_s_wait_private_load0(arch);
+  if (!wait)
+    return false;
+  words.push_back(*wait);
+  return true;
+}
+
 [[nodiscard]] bool append_sampled_atomic_cas_snapshot(std::vector<uint32_t> &words,
                                                       const VgprSpillSequence &spill,
                                                       uint16_t compare_vgpr, uint16_t result_vgpr,
@@ -778,35 +812,41 @@ struct SampledAtomicPreludeState {
     return false;
   }
   bool loaded_private_state = false;
-  const auto append_snapshot = [&](uint16_t destination, uint16_t source) {
-    const uint32_t spill_end = static_cast<uint32_t>(spill.vgpr_base) + spill.vgpr_count;
-    if (source >= spill.vgpr_base && source < spill_end) {
-      const uint16_t slot = static_cast<uint16_t>(source - spill.vgpr_base);
-      // Reload from the post-guest spill slot because the source register may
-      // itself be one of the scratch destinations populated by this snapshot.
-      const auto load =
-          instrumentation::build_private_load_b32(destination, spill.slot_offsets[slot], arch);
-      if (!load)
-        return false;
-      words.insert(words.end(), load->begin(), load->end());
-      loaded_private_state = true;
-      return true;
-    }
-    words.push_back(build_v_mov_b32_e32(destination, vector_source_vgpr(source), arch));
-    return true;
-  };
-  if (!append_snapshot(saved_compare, compare_vgpr) ||
-      !append_snapshot(saved_result, result_vgpr)) {
+  if (!append_sampled_atomic_snapshot_word(words, spill, saved_compare, compare_vgpr, arch,
+                                           loaded_private_state) ||
+      !append_sampled_atomic_snapshot_word(words, spill, saved_result, result_vgpr, arch,
+                                           loaded_private_state)) {
     errors.emplace_back("ConSan MOI sampled atomic could not preserve CAS outcome evidence");
     return false;
   }
-  if (loaded_private_state) {
-    const auto wait = instrumentation::build_s_wait_private_load0(arch);
-    if (!wait) {
-      errors.emplace_back("ConSan MOI sampled atomic could not wait for CAS outcome evidence");
-      return false;
-    }
-    words.push_back(*wait);
+  if (!append_sampled_atomic_snapshot_wait(words, loaded_private_state, arch)) {
+    errors.emplace_back("ConSan MOI sampled atomic could not wait for CAS outcome evidence");
+    return false;
+  }
+  return true;
+}
+
+[[nodiscard]] bool
+append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprSpillSequence &spill,
+                                       uint16_t source_address, uint16_t saved_address,
+                                       rj_code_arch_t arch, std::vector<std::string> &errors) {
+  assert(spill.slot_offsets.size() == spill.vgpr_count);
+  if (spill.slot_offsets.size() != spill.vgpr_count) {
+    errors.emplace_back("ConSan MOI sampled atomic spill has incomplete slot metadata");
+    return false;
+  }
+  bool loaded_private_state = false;
+  if (!append_sampled_atomic_snapshot_word(words, spill, saved_address, source_address, arch,
+                                           loaded_private_state) ||
+      !append_sampled_atomic_snapshot_word(words, spill, static_cast<uint16_t>(saved_address + 1u),
+                                           static_cast<uint16_t>(source_address + 1u), arch,
+                                           loaded_private_state)) {
+    errors.emplace_back("ConSan MOI sampled atomic could not preserve its guest address");
+    return false;
+  }
+  if (!append_sampled_atomic_snapshot_wait(words, loaded_private_state, arch)) {
+    errors.emplace_back("ConSan MOI sampled atomic could not wait for its guest address");
+    return false;
   }
   return true;
 }
@@ -848,13 +888,21 @@ struct SampledAtomicPreludeState {
     words.insert(words.end(), materialize->begin(), materialize->end());
   }
   if (guest_first) {
-    words.push_back(build_v_mov_b32_e32(
-        saved_address, vector_source_vgpr(address_plan.result_address_vgpr), arch));
-    words.push_back(build_v_mov_b32_e32(
-        static_cast<uint16_t>(saved_address + 1u),
-        vector_source_vgpr(static_cast<uint16_t>(address_plan.result_address_vgpr + 1u)), arch));
+    if (address_plan.requires_materialization()) {
+      assert(address_plan.result_address_vgpr == saved_address);
+      if (address_plan.result_address_vgpr != saved_address) {
+        errors.emplace_back(
+            "ConSan MOI sampled atomic materialized address does not use the scratch tail");
+        return false;
+      }
+    } else if (!append_sampled_atomic_address_snapshot(
+                   words, *spill, address_plan.result_address_vgpr, saved_address, arch, errors)) {
+      return false;
+    }
   }
   if (guest_first && is_cas) {
+    // Address materialization/snapshot must precede CAS evidence because the
+    // evidence destinations may overlap the live guest address pair.
     const uint16_t saved_compare =
         static_cast<uint16_t>(*options.scratch_vgpr + SampledAtomicScratchLayout::kCasCompare);
     const uint16_t saved_result =
