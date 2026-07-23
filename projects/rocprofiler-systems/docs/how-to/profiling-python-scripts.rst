@@ -81,6 +81,29 @@ and
    as the other ``rocprof-sys`` executables (``rocprof-sys-python <ROCPROFSYS_ARGS> -- <SCRIPT> <SCRIPT_ARGS>``)
    and has similar options.
 
+Capturing PyTorch record_function ranges
+-----------------------------------------
+
+Use ``--pytorch-trace`` to include existing PyTorch ``record_function`` labels
+as ROCTx ranges in ROCm Systems Profiler traces:
+
+.. code-block:: python
+
+   from torch.profiler import record_function
+
+   with record_function("optimizer_step"):
+      optimizer.step()
+
+.. code-block:: shell
+
+   rocprof-sys-run --trace --pytorch-trace -- python train.py
+
+The option sets ``TORCH_PROFILER_EMIT_ROCTX=1`` for the target process. The
+rocprofiler-sdk ``roctx`` Python module must be importable by the same Python
+interpreter that imports PyTorch, and ``marker_api`` must be included in
+``ROCPROFSYS_ROCM_DOMAINS``. It is included by default. If necessary, add
+``<rocm-root>/lib/pythonX.Y/site-packages`` to ``PYTHONPATH``.
+
 Command line options
 -----------------------------------
 

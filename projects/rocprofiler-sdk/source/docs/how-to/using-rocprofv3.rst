@@ -271,6 +271,34 @@ Marker trace
 
   To see usage of ``ROCTx`` or marker library, see :ref:`using-rocprofiler-sdk-roctx`.
 
+PyTorch trace
+++++++++++++++
+
+PyTorch ``record_function`` labels can be emitted as ROCTx ranges without adding
+profiler-specific annotations to the application. For example:
+
+.. code-block:: python
+
+    from torch.profiler import record_function
+
+    with record_function("optimizer_step"):
+        optimizer.step()
+
+Run the application with ``--pytorch-trace``:
+
+.. code-block:: bash
+
+    rocprofv3 --pytorch-trace --output-format csv -- python train.py
+
+The option enables ``--marker-trace`` and requests ROCTx emission from PyTorch.
+The rocprofiler-sdk ``roctx`` Python module must be importable by the same Python
+interpreter that imports PyTorch. If it is not already importable, add
+``<rocm-root>/lib/pythonX.Y/site-packages`` to ``PYTHONPATH`` as described in
+:ref:`using-rocprofiler-sdk-roctx`.
+
+``--pytorch-trace`` isn't supported with ``--attach`` because PyTorch must read
+the marker-emission setting when the target process starts.
+
 Kokkos trace
 ++++++++++++++
 
@@ -868,6 +896,7 @@ Here is the input schema (properties) of JSON or YAML input files:
       -  **hip_runtime_trace** *(boolean)*
       -  **hip_compiler_trace** *(boolean)*
       -  **marker_trace** *(boolean)*
+      -  **pytorch_trace** *(boolean)*
       -  **kernel_trace** *(boolean)*
       -  **memory_copy_trace** *(boolean)*
       -  **memory_allocation_trace** *(boolean)*

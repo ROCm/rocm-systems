@@ -96,6 +96,10 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                     <td>Collects marker (ROCTx) traces. Similar to --roctx-trace option in earlier rocprof versions, but with improved ROCTx library with more features. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-sdk-roctx.html#using-roctx-in-the-application">Read more...</a></td>
                 </tr>
                 <tr>
+                    <td>--pytorch-trace [BOOL]</td>
+                    <td>Emits PyTorch record_function labels as ROCTx ranges and implies --marker-trace. The rocprofiler-sdk roctx Python module must be importable by PyTorch.</td>
+                </tr>
+                <tr>
                     <td>--kernel-trace [BOOL]</td>
                     <td>Collects kernel dispatch traces. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#kernel-trace">Read more...</a></td>
                 </tr>

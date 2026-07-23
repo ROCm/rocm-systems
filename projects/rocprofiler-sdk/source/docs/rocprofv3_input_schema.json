@@ -60,6 +60,11 @@
                           "description": "For Collecting Marker (ROCTx) Traces"
                      },
 
+                     "pytorch_trace": {
+                          "type": "boolean",
+                          "description": "Emit PyTorch record_function ranges as ROCTx markers"
+                     },
+
                      "kernel_trace": {
                           "type": "boolean",
                           "description": "For Collecting Kernel Dispatch Traces"
