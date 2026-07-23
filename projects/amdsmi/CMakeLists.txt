@@ -62,6 +62,18 @@ set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING
     "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}+${${AMD_SMI_LIBS_TARGET}_VERSION_HASH}"
 )
 
+# PyPI rejects a PEP 440 local version (the +hash suffix), so a published wheel
+# needs a clean MAJOR.MINOR.PATCH. Per-commit CI wheels keep +hash for unique
+# filenames; the commit is always recoverable via amdsmi.__commit__.
+option(AMDSMI_WHEEL_RELEASE "Use a clean PEP 440 version (no +hash) for the wheel" OFF)
+if(AMDSMI_WHEEL_RELEASE)
+    set(${AMD_SMI_LIBS_TARGET}_WHEEL_VERSION
+        "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}"
+    )
+else()
+    set(${AMD_SMI_LIBS_TARGET}_WHEEL_VERSION "${${AMD_SMI_LIBS_TARGET}_VERSION_STRING}")
+endif()
+
 set(DEFAULT_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 update_version_in_file("include/amd_smi/amdsmi.h" ${DEFAULT_VERSION} "#define AMDSMI_LIB_VERSION_" " *" " ")
 update_version_in_file("rust-interface/src/amdsmi_wrapper.rs" ${DEFAULT_VERSION} "AMDSMI_LIB_VERSION_" " *: *u32 *= *"

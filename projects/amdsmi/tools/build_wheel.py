@@ -258,6 +258,7 @@ def cmake_and_build(project_dir, build_dir, cmake_python, args, extra_env):
             "-DBUILD_TESTS=" + ("ON" if args.build_tests else "OFF"),
             "-DENABLE_ESMI_LIB=" + ("ON" if args.enable_esmi else "OFF"),
             "-DBUILD_PYTHON_WHEEL=ON",
+            "-DAMDSMI_WHEEL_RELEASE=" + ("ON" if args.release else "OFF"),
             "-DCMAKE_BUILD_TYPE=" + args.build_type,
             "-DPython3_EXECUTABLE=" + cmake_python,
         ],
@@ -446,6 +447,11 @@ def parse_args():
         "--no-repair", dest="repair", action="store_false", help="Skip the auditwheel repair step."
     )
     p.add_argument("--build-tests", action="store_true", help="Build C/C++ tests  [default: OFF].")
+    p.add_argument(
+        "--release",
+        action="store_true",
+        help="Use a clean PEP 440 version (no +hash) for a PyPI-publishable wheel.",
+    )
     p.add_argument(
         "--clean",
         action="store_true",

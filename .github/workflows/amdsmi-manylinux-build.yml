@@ -55,6 +55,7 @@ jobs:
             python-bin: /opt/python/cp310-cp310/bin/python3
             os-variant: AlmaLinux8
             repair-flag: '--repair'
+            release-flag: '--release'
             artifact-prefix: amdsmi-rpm-wheels
           - id: debian
             name: Build Debian Wheels (Ubuntu 22.04)
@@ -63,6 +64,7 @@ jobs:
             python-bin: python3
             os-variant: Ubuntu22
             repair-flag: ''
+            release-flag: ''
             artifact-prefix: amdsmi-debian-wheels
 
     steps:
@@ -91,7 +93,7 @@ jobs:
             --build-dir "$AMDSMI_WHEEL_BUILD_DIR" \
             --output-dir "$GITHUB_WORKSPACE/wheels" \
             --os-variant ${{matrix.target.os-variant}} \
-            ${{matrix.target.repair-flag}}
+            ${{matrix.target.repair-flag}} ${{matrix.target.release-flag}}
 
       - name: Verify wheels exist
         run: |
