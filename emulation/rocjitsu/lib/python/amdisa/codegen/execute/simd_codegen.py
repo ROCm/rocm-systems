@@ -847,6 +847,15 @@ SIMD_VOP2_CARRY: dict[str, str] = {
 #   dst-accumulate (fmac/mac):     fma(s0, s1, dvst)        -- ignores k
 #   literal addend (fmaak/madak):  fma(s0, s1, k)           -- ignores dvst
 #   literal mult  (fmamk/madmk):   fma(s0, k, s1)           -- ignores dvst
+# The inline-literal entries read K through the RegisterAccess facade
+# (`read_scalar(inst.simm32)`), matching the scalar FMA-K executors so read-
+# observation plugins see the literal. read_scalar on the fieldless OPR_SIMM32
+# returns the literal's encoding bits and broadcast<T> bit-casts them, so this is
+# value-identical to a raw `inst.simm32.encoding_value_` read. The operand name
+# is hard-coded to `simm32` (correct for every ISA shared here; gfx1250 names its
+# field-bearing literal `literal` and is kept out of this path by the sharing
+# preflight). `simd_ternary_literal_operand_name()` below exposes that assumption
+# so the generator can assert it per ISA.
 # f16 forms (lane type uint32_t) convert each operand via f16_to_f32_simd and
 # round the result with f32_to_f16_simd (single final round, matching scalar).
 # util::stdx::fma is bit-identical to std::fma for all finite/Inf inputs
@@ -854,10 +863,8 @@ SIMD_VOP2_CARRY: dict[str, str] = {
 # conversions are already bit-exact, so the f16 forms match by composition. When
 # an input is NaN the packed and scalar FMA may pick a different NaN operand to
 # propagate (toolchain-dependent payload); that NaN-payload divergence is
-# accepted (the result is a NaN either way). Note the two
-# distinct literal members: fmaak/fmamk use inst.simm32_, while madak/madmk use
-# inst.simm32.encoding_value_ (matching the scalar bodies). v_fmac_f64 is
-# excluded (64-bit / 2-VGPR lanes — a separate width).
+# accepted (the result is a NaN either way).
+# v_fmac_f64 is excluded (64-bit / 2-VGPR lanes — a separate width).
 _FMA_ACC_F32 = '[](auto a, auto b, auto d, auto) { return util::stdx::fma(a, b, d); }'
 _FMA_ADDK_F32 = '[](auto a, auto b, auto, auto k) { return util::stdx::fma(a, b, k); }'
 _FMA_MULK_F32 = '[](auto a, auto b, auto, auto k) { return util::stdx::fma(a, k, b); }'
@@ -876,28 +883,55 @@ _FMA_MULK_F16 = (
     ' return util::f32_to_f16_simd(util::stdx::fma('
     'util::f16_to_f32_simd(a), util::f16_to_f32_simd(k), util::f16_to_f32_simd(b))); }'
 )
+# Inline-literal K read, routed through the RegisterAccess facade (see comment
+# above). Hard-coded operand name `simm32`; simd_ternary_literal_operand_name()
+# parses it back out for the generator's per-ISA assertion.
+_FMA_K_READ = 'amdgpu::RegisterAccess(wf).read_scalar(inst.simm32)'
+
 SIMD_VOP2_TERNARY: dict[str, tuple[str, str, str]] = {
     # --- f32 dst-accumulate ---
     'v_fmac_f32_vop2': ('float32_t', '0u', _FMA_ACC_F32),
     'v_fmac_dx9_zero_f32_vop2': ('float32_t', '0u', _FMA_ACC_F32),
     'v_mac_f32_vop2': ('float32_t', '0u', _FMA_ACC_F32),
     # --- f32 inline literal ---
-    'v_fmaak_f32_vop2': ('float32_t', 'inst.simm32_', _FMA_ADDK_F32),
-    'v_madak_f32_vop2': ('float32_t', 'inst.simm32.encoding_value_', _FMA_ADDK_F32),
-    'v_fmamk_f32_vop2': ('float32_t', 'inst.simm32_', _FMA_MULK_F32),
-    'v_madmk_f32_vop2': ('float32_t', 'inst.simm32.encoding_value_', _FMA_MULK_F32),
+    'v_fmaak_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_ADDK_F32),
+    'v_madak_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_ADDK_F32),
+    'v_fmamk_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_MULK_F32),
+    'v_madmk_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_MULK_F32),
     # --- f16 dst-accumulate ---
     'v_fmac_f16_vop2': ('uint32_t', '0u', _FMA_ACC_F16),
     'v_mac_f16_vop2': ('uint32_t', '0u', _FMA_ACC_F16),
     # --- f16 inline literal ---
-    'v_madak_f16_vop2': ('uint32_t', 'inst.simm32.encoding_value_', _FMA_ADDK_F16),
-    'v_fmamk_f16_vop2': ('uint32_t', 'inst.simm32_', _FMA_MULK_F16),
-    'v_madmk_f16_vop2': ('uint32_t', 'inst.simm32.encoding_value_', _FMA_MULK_F16),
-    # v_fmaak_f16 (RDNA only): dst = fma(s0, s1, K), K = f16(simm32_). Same f16
-    # FMA functor as v_madak_f16, differing only in the literal field (simm32_ vs
-    # simm32.encoding_value_); the SIMD path is identical to the tested madak_f16.
-    'v_fmaak_f16_vop2': ('uint32_t', 'inst.simm32_', _FMA_ADDK_F16),
+    'v_madak_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_ADDK_F16),
+    'v_fmamk_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_MULK_F16),
+    'v_madmk_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_MULK_F16),
+    # v_fmaak_f16 (RDNA only): dst = fma(s0, s1, K), K = f16(simm32).
+    # Same f16 FMA functor as v_madak_f16.
+    'v_fmaak_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_ADDK_F16),
 }
+
+
+def simd_ternary_literal_operand_name(template_name: str) -> str | None:
+    """Return the C++ operand name a shared SIMD ternary template reads its
+    inline literal from, or None if it has none.
+
+    Inline-literal FMA entries render ``k`` from
+    ``amdgpu::RegisterAccess(wf).read_scalar(inst.<name>)``, hard-coding
+    ``<name>`` (today always ``simm32``). The generator asserts the instruction
+    carries that operand, so an ISA whose literal is named differently fails at
+    generation instead of emitting non-compiling C++. Dst-accumulate forms
+    (``k`` == ``"0u"``) return None.
+    """
+    spec = SIMD_VOP2_TERNARY.get(template_name)
+    if spec is None:
+        return None
+    k_expr = spec[1]
+    prefix = 'amdgpu::RegisterAccess(wf).read_scalar(inst.'
+    suffix = ')'
+    if k_expr.startswith(prefix) and k_expr.endswith(suffix):
+        return k_expr[len(prefix) : -len(suffix)]
+    return None
+
 
 SIMD_VOP2_TERNARY_ACCUMULATE = {
     'v_fmac_f16_vop2',
@@ -2923,13 +2957,12 @@ def simd_probe_arch_portable(
     compare on `inst.src0` / `inst.vsrc1` / `inst.vdst`), so an ISA whose
     operand/field signature kept it out of the shared plan can still safely
     delegate to the one shared template — the body is identical. The exception
-    is the inline-literal FMA family (v_fmaak/fmamk/madak/madmk): those read the
-    32-bit literal through an ISA-divergent member (`simm32_` on some ISAs vs a
-    `simm32` Operand with `.encoding_value_` on others), so a single shared body
-    cannot satisfy every ISA. Those are identified by a non-``"0u"`` literal
-    expression in SIMD_VOP2_TERNARY and are left to the genuine shared plan;
-    the dst-accumulate forms (literal ``"0u"``: v_fmac/v_mac, and v_fmac_f64)
-    are portable.
+    is the inline-literal FMA family (v_fmaak/fmamk/madak/madmk): those carry
+    instruction-local literal state and are left to the genuine shared plan
+    instead of being force-routed into a shared SIMD probe. They are identified
+    by a non-``"0u"`` literal expression in SIMD_VOP2_TERNARY; the
+    dst-accumulate forms (literal ``"0u"``: v_fmac/v_mac, and v_fmac_f64) are
+    portable.
 
     A second non-portable family is VOP3P: the shared VOP3P execute template
     reads the op_sel field by its canonical member name (``op_sel`` /

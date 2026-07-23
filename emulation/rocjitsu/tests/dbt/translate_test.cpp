@@ -1466,6 +1466,41 @@ CHECK_NO_ILLEGAL(rdna4_to_cdna4)
 
 #undef CHECK_NO_ILLEGAL
 
+// Cross-ISA legalization of the literal FMA-K / MAD-K family. The fieldless
+// OPR_SIMM32 literal now participates in the operand signature (with its size
+// canonicalized to the 32-bit encoding word), so identical literal FMAs match
+// faithfully across ISAs. These pin the three outcomes that drives:
+//   - same opcode on both ISAs           -> Identity
+//   - same instruction, different opcode -> Substitute (with remapped target)
+//   - the V_FMAAK_F16 case whose per-ISA simm32 size (16 on rdna1/2, 32 on
+//     rdna3/4) would fragment the match without the canonicalization
+// VOP2 encoding_id is 0 on CDNA guests and 4 on RDNA guests.
+TEST(LegalizationFmaK, Cdna3ToCdna4MadmkF16IsIdentity) {
+  const auto *e = lookup(kLegalization_cdna3_to_cdna4, /*enc=*/0, /*op=*/36); // v_madmk_f16
+  ASSERT_NE(e, nullptr);
+  EXPECT_EQ(e->action, Action::Identity);
+  EXPECT_EQ(e->target_opcode, 36);
+}
+
+TEST(LegalizationFmaK, Cdna1ToRdna1MadmkF32IsSubstitute) {
+  // cdna1 v_madmk_f32 (op 23) -> rdna1 v_madmk_f32 (op 32): same instruction,
+  // different opcode number, so the literal-preserving remap is a Substitute.
+  const auto *e = lookup(kLegalization_cdna1_to_rdna1, /*enc=*/0, /*op=*/23);
+  ASSERT_NE(e, nullptr);
+  EXPECT_EQ(e->action, Action::Substitute);
+  EXPECT_EQ(e->target_opcode, 32);
+}
+
+TEST(LegalizationFmaK, Rdna1ToRdna3FmaakF16IsIdentity) {
+  // Regression guard for the simm32-size canonicalization: without it, this
+  // degrades to Lower because the literal's declared size differs (16 vs 32)
+  // for the same instruction across rdna generations.
+  const auto *e = lookup(kLegalization_rdna1_to_rdna3, /*enc=*/4, /*op=*/56); // v_fmaak_f16
+  ASSERT_NE(e, nullptr);
+  EXPECT_EQ(e->action, Action::Identity);
+  EXPECT_EQ(e->target_opcode, 56);
+}
+
 TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
   auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
   AmdGpuCodeObject co(image.data(), image.size());
