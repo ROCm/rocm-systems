@@ -140,30 +140,7 @@ rocprofiler_config_nolink_target(rocprofiler-sdk-hip-nolink hip::host)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(
-    rocprof-trace-decoder
-    QUIET
-    CONFIG
-    HINTS
-    ${rocm_version_DIR}
-    ${ROCM_PATH}
-    PATHS
-    ${rocm_version_DIR}
-    ${ROCM_PATH})
-
-set(_ROCPROFILER_DISABLE_ATT_QUICK_SCAN_DEFAULT ON)
-
-if(rocprof-trace-decoder_FOUND)
-    if(rocm_version_FOUND AND NOT rocm_version_TRIPLE_VERSION VERSION_LESS "7.14.0")
-        set(_ROCPROFILER_DISABLE_ATT_QUICK_SCAN_DEFAULT OFF)
-    elseif("${rocprof-trace-decoder_VERSION}" VERSION_GREATER_EQUAL "0.2.1")
-        set(_ROCPROFILER_DISABLE_ATT_QUICK_SCAN_DEFAULT OFF)
-    endif()
-endif()
-
-rocprofiler_add_att_quick_scan_option(${_ROCPROFILER_DISABLE_ATT_QUICK_SCAN_DEFAULT})
-
-unset(_ROCPROFILER_DISABLE_ATT_QUICK_SCAN_DEFAULT)
+find_package(rocprof-trace-decoder 0.2.1 QUIET CONFIG)
 
 # ----------------------------------------------------------------------------------------#
 #
