@@ -88,6 +88,11 @@ get_environ(int _verbose, std::string _search_paths = {},
         _search_paths = fmt::format("{}:{}", _omnilib_dl_path, _search_paths);
     }
 
+    if(delimit(_search_paths, ":").empty())
+    {
+        _search_paths = get_default_lib_search_paths();
+    }
+
     _omnilib    = common::path::find_path(_omnilib, _verbose, _search_paths);
     _omnilib_dl = common::path::find_path(_omnilib_dl, _verbose, _search_paths);
 

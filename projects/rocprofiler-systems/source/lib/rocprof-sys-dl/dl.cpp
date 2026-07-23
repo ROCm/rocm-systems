@@ -198,9 +198,12 @@ struct ROCPROFSYS_INTERNAL_API indirect
 {
     ROCPROFSYS_INLINE indirect(const std::string& _omnilib, const std::string& _userlib,
                                const std::string& _dllib)
-    : m_omnilib{ common::path::find_path(_omnilib, _rocprofsys_dl_verbose) }
-    , m_dllib{ common::path::find_path(_dllib, _rocprofsys_dl_verbose) }
-    , m_userlib{ common::path::find_path(_userlib, _rocprofsys_dl_verbose) }
+    : m_omnilib{ common::path::find_path(_omnilib, _rocprofsys_dl_verbose,
+                                         common::get_default_lib_search_paths()) }
+    , m_dllib{ common::path::find_path(_dllib, _rocprofsys_dl_verbose,
+                                       common::get_default_lib_search_paths()) }
+    , m_userlib{ common::path::find_path(_userlib, _rocprofsys_dl_verbose,
+                                         common::get_default_lib_search_paths()) }
     {
         if(_rocprofsys_dl_verbose >= 1)
         {
