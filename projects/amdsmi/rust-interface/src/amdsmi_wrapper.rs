@@ -127,6 +127,7 @@ pub const AMDSMI_APU_MAX_CORES: u32 = 16;
 pub const AMDSMI_APU_V24_CORES: u32 = 8;
 pub const AMDSMI_APU_MAX_L3: u32 = 2;
 pub const AMDSMI_APU_MAX_IPU: u32 = 8;
+pub const AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD: u32 = 12;
 pub const AMDSMI_MAX_NUM_HBM_STACKS: u32 = 12;
 pub const AMDSMI_MAX_NUM_AID: u32 = 2;
 pub const AMDSMI_MAX_NUM_MID: u32 = 2;
@@ -137,6 +138,15 @@ pub const AMDSMI_DATE_FORMAT: &[u8; 35] = b"%04d-%02d-%02d:%02d:%02d:%02d.%03d\0
 pub const AMDSMI_LIB_VERSION_MAJOR: u32 = 26;
 pub const AMDSMI_LIB_VERSION_MINOR: u32 = 5;
 pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 0;
+pub const AMDSMI_MAX_VF_COUNT: u32 = 32;
+pub const AMDSMI_MAX_DRIVER_NUM: u32 = 2;
+pub const AMDSMI_DFC_FW_NUMBER_OF_ENTRIES: u32 = 9;
+pub const AMDSMI_MAX_WHITE_LIST_ELEMENTS: u32 = 16;
+pub const AMDSMI_MAX_BLACK_LIST_ELEMENTS: u32 = 64;
+pub const AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS: u32 = 8;
+pub const AMDSMI_MAX_ERR_RECORDS: u32 = 10;
+pub const AMDSMI_MAX_PROFILE_COUNT: u32 = 16;
+pub const AMDSMI_PF_INDEX: u32 = 31;
 pub const AMDSMI_MAX_DRIVER_INFO_RSVD: u32 = 64;
 pub const AMDSMI_MAX_UUID_ELEMENTS: u32 = 16;
 pub const AMDSMI_MAX_NUM_FREQUENCIES: u32 = 33;
@@ -3835,13 +3845,6 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
-    pub fn amdsmi_get_gpu_vram_vendor(
-        processor_handle: AmdsmiProcessorHandle,
-        brand: *mut ::std::os::raw::c_char,
-        len: u32,
-    ) -> AmdsmiStatusT;
-}
-extern "C" {
     pub fn amdsmi_get_gpu_subsystem_id(
         processor_handle: AmdsmiProcessorHandle,
         id: *mut u16,
@@ -4074,6 +4077,12 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_vcn_busy_percent(
+        processor_handle: AmdsmiProcessorHandle,
+        vcn_busy_percent: *mut u32,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_utilization_count(
         processor_handle: AmdsmiProcessorHandle,
         utilization_counters: *mut AmdsmiUtilizationCounterT,
@@ -4152,14 +4161,6 @@ extern "C" {
         reg_type: AmdsmiRegTypeT,
         reg_metrics: *mut *mut AmdsmiNameValueT,
         num_of_metrics: *mut u32,
-    ) -> AmdsmiStatusT;
-}
-extern "C" {
-    pub fn amdsmi_set_gpu_clk_range(
-        processor_handle: AmdsmiProcessorHandle,
-        minclkvalue: u64,
-        maxclkvalue: u64,
-        clkType: AmdsmiClkTypeT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {
@@ -4540,6 +4541,12 @@ extern "C" {
 }
 extern "C" {
     pub fn amdsmi_get_gpu_ecc_enabled(
+        processor_handle: AmdsmiProcessorHandle,
+        enabled_blocks: *mut u64,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_gpu_ecc_supported(
         processor_handle: AmdsmiProcessorHandle,
         enabled_blocks: *mut u64,
     ) -> AmdsmiStatusT;

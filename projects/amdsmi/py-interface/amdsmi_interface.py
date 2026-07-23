@@ -5072,34 +5072,6 @@ def amdsmi_get_energy_count(processor_handle: processor_handle_t):
     }
 
 
-def amdsmi_set_gpu_clk_range(
-    processor_handle: processor_handle_t,
-    min_clk_value: int,
-    max_clk_value: int,
-    clk_type: AmdSmiClkType,
-) -> None:
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    if not isinstance(min_clk_value, int):
-        raise AmdSmiParameterException(min_clk_value, int)
-
-    if not isinstance(max_clk_value, int):
-        raise AmdSmiParameterException(min_clk_value, int)
-
-    if not isinstance(clk_type, AmdSmiClkType):
-        raise AmdSmiParameterException(clk_type, AmdSmiClkType)
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_set_gpu_clk_range(
-            processor_handle,
-            ctypes.c_uint64(min_clk_value),
-            ctypes.c_uint64(max_clk_value),
-            clk_type,
-        )
-    )
-
-
 def amdsmi_set_gpu_clk_limit(
     processor_handle: processor_handle_t, clk_type: str, limit_type: str, value: int
 ) -> None:

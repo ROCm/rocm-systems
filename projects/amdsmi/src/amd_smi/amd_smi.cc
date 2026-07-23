@@ -4428,21 +4428,6 @@ amdsmi_status_t amdsmi_set_gpu_od_volt_info(amdsmi_processor_handle processor_ha
   return rsmi_wrapper(rsmi_dev_od_volt_info_set, processor_handle, 0, vpoint, clkvalue, voltvalue);
 }
 
-amdsmi_status_t amdsmi_set_gpu_clk_range(amdsmi_processor_handle processor_handle,
-                                         uint64_t minclkvalue, uint64_t maxclkvalue,
-                                         amdsmi_clk_type_t clkType) {
-  // Bare Metal and passthrough only feature
-  amdsmi_virtualization_mode_t virt_mode;
-  if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {
-    if (virt_mode == AMDSMI_VIRTUALIZATION_MODE_GUEST) {
-      return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-  }
-
-  return rsmi_wrapper(rsmi_dev_clk_range_set, processor_handle, 0, minclkvalue, maxclkvalue,
-                      static_cast<rsmi_clk_type_t>(clkType));
-}
-
 amdsmi_status_t amdsmi_set_gpu_clk_limit(amdsmi_processor_handle processor_handle,
                                          amdsmi_clk_type_t clk_type,
                                          amdsmi_clk_limit_type_t limit_type, uint64_t clk_value) {
