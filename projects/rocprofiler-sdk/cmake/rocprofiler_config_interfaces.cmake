@@ -140,7 +140,7 @@ rocprofiler_config_nolink_target(rocprofiler-sdk-hip-nolink hip::host)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(rocprof-trace-decoder 0.2.1 QUIET CONFIG)
+find_package(rocprof-trace-decoder 0.2.1 CONFIG)
 
 # ----------------------------------------------------------------------------------------#
 #
