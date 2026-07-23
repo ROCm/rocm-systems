@@ -88,7 +88,6 @@ private:
   void init(Iter first, Iter last) {
     /* Push back iterators in range [first, last) to container in reverse order
      * Sorted so that container.back() always has the smallest iterator */
-    auto N = std::distance(first, last);
     while (first != last--) {
       container.push_back(last);
     }
@@ -495,10 +494,10 @@ enum class AMOFetchType {
 
 
 /*
- * @brief CRTP mixin class supplying a common SHMEM-like interface to Queue Pair implementations.
+ * @brief CRTP mixin class supplying a common mid-level interface to Queue Pair implementations.
  */
 template <typename Provider>
-class QueuePairSHMEM {
+class QueuePairInterface {
 /**
  * @name Provider-Defined Members
  *
@@ -535,6 +534,301 @@ public:
    */
   template <AMOFetchType Fetch>
   using amo_ret_t = std::conditional_t<Fetch == AMOFetchType::Blocking, uint64_t, void>;
+/**@}*/
+
+
+
+/**
+ * @name Remote Memory Access (RMA)
+ *
+ * @{
+ */
+public:
+  /**
+   * @brief Create and enqueue a non-blocking put work queue entry (WQE).
+   *
+   * @param[in] dest Destination address for data transmission.
+   * @param[in] dest_rkey RKey of destination address.
+   * @param[in] source Source address for data transmission.
+   * @param[in] source_lkey LKey of source address.
+   * @param[in] nelems Size in bytes of data transmission.
+   * @param[in] wf_info Wavefront information.
+   *
+   * @tparam Options Options to use when posting these WQEs.
+   */
+  template <typename... PostOptions>
+  __device__ void put_nbi(uintptr_t dest, uint32_t dest_rkey,
+                          uintptr_t source, uint32_t source_lkey, size_t nelems,
+                          const ActiveWFInfo& wf_info,
+                          PostOpt<PostOptions...> post_options = {}) {
+    provider().template post_wqe_rma<OpCode::RDMA_WRITE>(
+        source, source_lkey, dest, dest_rkey, nelems, wf_info, post_options);
+  }
+  template <typename... PostOptions>
+  __device__ void put_nbi_single(uintptr_t dest, uint32_t dest_rkey,
+                                 uintptr_t source, uint32_t source_lkey, size_t nelems,
+                                 PostOpt<PostOptions...> post_options = {}) {
+    provider().template post_wqe_rma_single<OpCode::RDMA_WRITE>(
+        source, source_lkey, dest, dest_rkey, nelems, post_options);
+  }
+
+  /**
+   * @brief Create and enqueue a non-blocking get work queue entry (WQE).
+   *
+   * @param[in] dest Destination address for data transmission.
+   * @param[in] dest_lkey LKey of destination address.
+   * @param[in] source Source address for data transmission.
+   * @param[in] source_rkey RKey of source address.
+   * @param[in] nelems Size in bytes of data transmission.
+   * @param[in] wf_info Wavefront information.
+   *
+   * @tparam Options Options to use when posting these WQEs.
+   */
+  template <typename... PostOptions>
+  __device__ void get_nbi(uintptr_t dest, uint32_t dest_lkey,
+                          uintptr_t source, uint32_t source_rkey, size_t nelems,
+                          const ActiveWFInfo& wf_info,
+                          PostOpt<PostOptions...> post_options = {}) {
+    provider().template post_wqe_rma<OpCode::RDMA_READ>(
+        dest, dest_lkey, source, source_rkey, nelems, wf_info, post_options);
+  }
+  template <typename... PostOptions>
+  __device__ void get_nbi_single(uintptr_t dest, uint32_t dest_lkey,
+                                 uintptr_t source, uint32_t source_rkey, size_t nelems,
+                                 PostOpt<PostOptions...> post_options = {}) {
+    provider().template post_wqe_rma_single<OpCode::RDMA_READ>(
+        dest, dest_lkey, source, source_rkey, nelems, post_options);
+  }
+/**@}*/
+
+
+
+/**
+ * @name Atomic Memory Operations (AMO)
+ *
+ * @{
+ */
+public:
+  /**
+   * @brief Create and enqueue a blocking atomic fetch-and-add work queue entry (WQE).
+   *
+   * @param[in] dest Destination address for data transmission.
+   * @param[in] dest_rkey RKey of destination address.
+   * @param[in] value Data value for the atomic operation.
+   * @param[in] wf_info Wavefront information.
+   *
+   * @tparam Options Options to use when posting these WQEs.
+   *
+   * @return An atomic value.
+   */
+  template <typename... PostOptions>
+  __device__ uint64_t atomic_fetch_add(uintptr_t dest, uint32_t dest_rkey, uint64_t value,
+                                       const ActiveWFInfo& wf_info,
+                                       PostOpt<PostOptions...> post_options = {}) {
+    return provider().template post_wqe_amo<OpCode::ATOMIC_FA, AMOFetchType::Blocking>(
+        dest, dest_rkey, value, 0, wf_info, post_options);
+  }
+  template <typename... PostOptions>
+  __device__ uint64_t atomic_fetch_add_single(uintptr_t dest, uint32_t dest_rkey, uint64_t value,
+                                              PostOpt<PostOptions...> post_options = {}) {
+    return provider().template post_wqe_amo_single<OpCode::ATOMIC_FA, AMOFetchType::Blocking>(
+        dest, dest_rkey, value, 0, post_options);
+  }
+
+#if 0
+  /**
+   * @brief Create and enqueue a non-blocking atomic fetch-and-add work queue entry (WQE).
+   *
+   * @param[in] fetch Address for fetched value.
+   * @param[in] fetch_lkey LKey of address for fetched value.
+   * @param[in] dest Destination address for data transmission.
+   * @param[in] dest_rkey RKey of destination address.
+   * @param[in] value Data value for the atomic operation.
+   * @param[in] wf_info Wavefront information.
+   *
+   * @tparam Options Options to use when posting these WQEs.
+   *
+   * @return An atomic value.
+   */
+  template <typename... PostOptions>
+  __device__ void atomic_fetch_add_nbi(uintptr_t fetch, uint32_t fetch_lkey,
+                                       uintptr_t dest, uint32_t dest_rkey, uint64_t value,
+                                       const ActiveWFInfo& wf_info,
+                                       PostOpt<PostOptions...> post_options = {}) {
+    provider().template post_wqe_amo<OpCode::ATOMIC_FA, AMOFetchType::NonBlocking>(
+        fetch, fetch_lkey, dest, dest_rkey, value, 0, wf_info, post_options);
+  }
+  template <typename... PostOptions>
+  __device__ void atomic_fetch_add_nbi_single(uintptr_t fetch, uint32_t fetch_lkey,
+                                              uintptr_t dest, uint32_t dest_rkey, uint64_t value,
+                                              PostOpt<PostOptions...> post_options = {}) {
+    provider().template post_wqe_amo_single<OpCode::ATOMIC_FA, AMOFetchType::NonBlocking>(
+        fetch, fetch_lkey, dest, dest_rkey, value, 0, post_options);
+  }
+#endif
+
+  /**
+   * @brief Create and enqueue a non-fetching atomic add work queue entry (WQE).
+   *
+   * @param[in] dest Destination address for data transmission.
+   * @param[in] dest_rkey RKey of destination address.
+   * @param[in] value Data value for the atomic operation.
+   * @param[in] wf_info Wavefront information.
+   *
+   * @tparam Options Options to use when posting these WQEs.
+   */
+  template <typename... PostOptions>
+  __device__ void atomic_add(uintptr_t dest, uint32_t dest_rkey, uint64_t value,
+                             const ActiveWFInfo& wf_info,
+                             PostOpt<PostOptions...> post_options = {}) {
+    provider().template post_wqe_amo<OpCode::ATOMIC_FA, AMOFetchType::NonFetching>(
+        dest, dest_rkey, value, 0, wf_info, post_options);
+  }
+  template <typename... PostOptions>
+  __device__ void atomic_add_single(uintptr_t dest, uint32_t dest_rkey, uint64_t value,
+                                    PostOpt<PostOptions...> post_options = {}) {
+    provider().template post_wqe_amo_single<OpCode::ATOMIC_FA, AMOFetchType::NonFetching>(
+        dest, dest_rkey, value, 0, post_options);
+  }
+
+  /**
+   * @brief Create and enqueue a blocking atomic compare-and-swap work queue entry (WQE).
+   *
+   * @param[in] dest Destination address for data transmission.
+   * @param[in] dest_rkey RKey of destination address.
+   * @param[in] cond Used in atomic comparisons.
+   * @param[in] value Data value for the atomic operation.
+   * @param[in] wf_info Wavefront information.
+   *
+   * @tparam Options Options to use when posting these WQEs.
+   *
+   * @return An atomic value.
+   */
+  template <typename... PostOptions>
+  __device__ uint64_t atomic_compare_swap(uintptr_t dest, uint32_t dest_rkey,
+                                          uint64_t cond, uint64_t value,
+                                          const ActiveWFInfo& wf_info,
+                                          PostOpt<PostOptions...> post_options = {}) {
+    return provider().template post_wqe_amo<OpCode::ATOMIC_CS, AMOFetchType::Blocking>(
+        dest, dest_rkey, value, cond, wf_info, post_options);
+  }
+  template <typename... PostOptions>
+  __device__ uint64_t atomic_compare_swap_single(uintptr_t dest, uint32_t dest_rkey,
+                                                 uint64_t cond, uint64_t value,
+                                                 PostOpt<PostOptions...> post_options = {}) {
+    return provider().template post_wqe_amo_single<OpCode::ATOMIC_CS, AMOFetchType::Blocking>(
+        dest, dest_rkey, value, cond, post_options);
+  }
+
+#if 0
+  /**
+   * @brief Create and enqueue a non-blocking atomic compare-and-swap work queue entry (WQE).
+   *
+   * @param[in] fetch Address for fetched value.
+   * @param[in] fetch_lkey LKey of address for fetched value.
+   * @param[in] dest Destination address for data transmission.
+   * @param[in] dest_rkey RKey of destination address.
+   * @param[in] cond Used in atomic comparisons.
+   * @param[in] value Data value for the atomic operation.
+   * @param[in] wf_info Wavefront information.
+   *
+   * @tparam Options Options to use when posting these WQEs.
+   *
+   * @return An atomic value.
+   */
+  template <typename... PostOptions>
+  __device__ void atomic_compare_swap_nbi(uintptr_t fetch, uint32_t fetch_lkey,
+                                          uintptr_t dest, uint32_t dest_rkey,
+                                          uint64_t cond, uint64_t value,
+                                          const ActiveWFInfo& wf_info,
+                                          PostOpt<PostOptions...> post_options = {}) {
+    provider().template post_wqe_amo<OpCode::ATOMIC_CS, AMOFetchType::NonBlocking>(
+        fetch, fetch_lkey, dest, dest_rkey, value, cond, wf_info, post_options);
+  }
+  template <typename... PostOptions>
+  __device__ void atomic_compare_swap_nbi_single(uintptr_t fetch, uint32_t fetch_lkey,
+                                                 uintptr_t dest, uint32_t dest_rkey,
+                                                 uint64_t cond, uint64_t value,
+                                                 PostOpt<PostOptions...> post_options = {}) {
+    provider().template post_wqe_amo_single<OpCode::ATOMIC_CS, AMOFetchType::NonBlocking>(
+        fetch, fetch_lkey, dest, dest_rkey, value, cond, post_options);
+  }
+#endif
+/**@}*/
+
+
+
+/**
+ * @name Completion and Ordering.
+ *
+ * @{
+ */
+public:
+  /**
+   * @brief Empty all completions from the completion queue.
+   *
+   * @param[in] wf_info Wavefront information.
+   */
+  __device__ void quiet(const ActiveWFInfo& wf_info) {
+    if (wf_info.is_pe_group_first) {
+      provider().quiet_single();
+    }
+  }
+/**@}*/
+
+
+
+/**
+ * @name Internal
+ *
+ * @{
+ */
+protected:
+
+  /*
+   * @brief Provider is a friend of QueuePairInterface<Provider>.
+   */
+  friend Provider;
+
+  __host__  QueuePairInterface() = default;
+  __device__ QueuePairInterface() = delete;
+
+private:
+  __device__ Provider& provider() {
+    return static_cast<Provider&>(*this);
+  }
+/**@}*/
+};
+
+
+
+/*
+ * @brief CRTP mixin class supplying a common SHMEM-like interface to Queue Pair implementations.
+ */
+template <typename Provider>
+class QueuePairSHMEM : public QueuePairInterface<Provider> {
+/**
+ * @name Inherited Members
+ *
+ * Members that are inherited from QueuePairInterface<Provider>.
+ *
+ * @{
+ */
+public:
+  using typename QueuePairInterface<Provider>::Traits;
+  using typename QueuePairInterface<Provider>::OpCode;
+
+  using QueuePairInterface<Provider>::put_nbi;
+  using QueuePairInterface<Provider>::put_nbi_single;
+  using QueuePairInterface<Provider>::get_nbi;
+  using QueuePairInterface<Provider>::get_nbi_single;
+  using QueuePairInterface<Provider>::atomic_fetch_add;
+  using QueuePairInterface<Provider>::atomic_fetch_add_single;
+  using QueuePairInterface<Provider>::atomic_add;
+  using QueuePairInterface<Provider>::atomic_add_single;
+  using QueuePairInterface<Provider>::atomic_compare_swap;
+  using QueuePairInterface<Provider>::atomic_compare_swap_single;
+  using QueuePairInterface<Provider>::quiet;
 /**@}*/
 
 
@@ -706,21 +1000,6 @@ public:
 /**@}*/
 
 
-/**
- * @name Completion and Ordering.
- *
- * @{
- */
-public:
-  /**
-   * @brief Empty all completions from the completion queue.
-   *
-   * @param[in] wf_info Wavefront information.
-   */
-  __device__ void quiet(const ActiveWFInfo& wf_info);
-/**@}*/
-
-
 
 /**
  * @name Internal
@@ -751,13 +1030,14 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::put_nbi(
     void *dest, const void *source, size_t nelems,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::RDMA_WRITE;
-  uintptr_t laddr = reinterpret_cast<uintptr_t>(source);
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  /* only need lkey when RDMA_WRITE can't be inlined */
-  uint32_t lkey = !Provider::template can_inline<Op>(nelems) ? provider().get_lkey(laddr) : 0;
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_rma<Op>(laddr, lkey, raddr, rkey, nelems, wf_info, post_options);
+  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
+  uintptr_t s_laddr = reinterpret_cast<uintptr_t>(source);
+  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  /* only need source lkey when RDMA_WRITE can't be inlined */
+  uint32_t s_lkey = !Provider::template can_inline<OpCode::RDMA_WRITE>(nelems) ?
+                                                  provider().get_lkey(s_laddr) : 0;
+  provider().put_nbi(d_raddr, d_rkey, s_laddr, s_lkey, nelems, wf_info, post_options);
+//  QueuePairInterface<Provider>::put_nbi(d_raddr, d_rkey, s_laddr, s_lkey, nelems, wf_info, post_options);
 }
 
 template <typename Provider>
@@ -765,13 +1045,13 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::put_nbi_single(
     void *dest, const void *source, size_t nelems,
     PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::RDMA_WRITE;
-  uintptr_t laddr = reinterpret_cast<uintptr_t>(source);
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  /* only need lkey when RDMA_WRITE can't be inlined */
-  uint32_t lkey = !Provider::template can_inline<Op>(nelems) ? provider().get_lkey(laddr) : 0;
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_rma_single<Op>(laddr, lkey, raddr, rkey, nelems, post_options);
+  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
+  uintptr_t s_laddr = reinterpret_cast<uintptr_t>(source);
+  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  /* only need source lkey when RDMA_WRITE can't be inlined */
+  uint32_t s_lkey = !Provider::template can_inline<OpCode::RDMA_WRITE>(nelems) ?
+                                                  provider().get_lkey(s_laddr) : 0;
+  provider().put_nbi_single(d_raddr, d_rkey, s_laddr, s_lkey, nelems, post_options);
 }
 
 template <typename Provider>
@@ -779,12 +1059,11 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::get_nbi(
     void *dest, const void *source, size_t nelems,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::RDMA_READ;
-  uintptr_t laddr = reinterpret_cast<uintptr_t>(dest);
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(source);
-  uint32_t lkey = provider().get_lkey(laddr);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_rma<Op>(laddr, lkey, raddr, rkey, nelems, wf_info, post_options);
+  uintptr_t d_laddr = reinterpret_cast<uintptr_t>(dest);
+  uintptr_t s_raddr = reinterpret_cast<uintptr_t>(source);
+  uint32_t d_lkey = provider().get_lkey(d_laddr);
+  uint32_t s_rkey = provider().get_rkey(s_raddr);
+  provider().get_nbi(d_laddr, d_lkey, s_raddr, s_rkey, nelems, wf_info, post_options);
 }
 
 template <typename Provider>
@@ -792,29 +1071,21 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::get_nbi_single(
     void *dest, const void *source, size_t nelems,
     PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::RDMA_READ;
-  uintptr_t laddr = reinterpret_cast<uintptr_t>(dest);
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(source);
-  uint32_t lkey = provider().get_lkey(laddr);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_rma_single<Op>(laddr, lkey, raddr, rkey, nelems, post_options);
+  uintptr_t d_laddr = reinterpret_cast<uintptr_t>(dest);
+  uintptr_t s_raddr = reinterpret_cast<uintptr_t>(source);
+  uint32_t d_lkey = provider().get_lkey(d_laddr);
+  uint32_t s_rkey = provider().get_rkey(s_raddr);
+  provider().get_nbi_single(d_laddr, d_lkey, s_raddr, s_rkey, nelems, post_options);
 }
 
-#if 0
 template <typename Provider>
 template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add(
     void *dest, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_FA;
-  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
-  uintptr_t laddr = /* TODO */
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t lkey = provider().get_lkey(laddr);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch>(laddr, lkey, raddr, rkey, value, 0, wf_info, post_options);
-  quiet(wf_info);
-  return *reinterpret_cast<uint64_t*>(laddr);
+  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
+  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  return provider().atomic_fetch_add(d_raddr, d_rkey, value, wf_info, post_options);
 }
 
 template <typename Provider>
@@ -822,29 +1093,22 @@ template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add_single(
     void *dest, uint64_t value,
     PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_FA;
-  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
-  uintptr_t laddr = /* TODO */
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t lkey = provider().get_lkey(laddr);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch>(laddr, lkey, raddr, rkey, value, 0, post_options);
-  provider().quiet_single();
-  return *reinterpret_cast<uint64_t*>(laddr);
+  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
+  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  return provider().atomic_fetch_add_single(d_raddr, d_rkey, value, post_options);
 }
 
+#if 0
 template <typename Provider>
 template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_fetch_add_nbi(
     uint64_t *fetch, void *dest, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_FA;
-  static constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
-  uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t lkey = provider().get_lkey(laddr);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch>(laddr, lkey, raddr, rkey, value, 0, wf_info, post_options);
+  uintptr_t f_laddr = reinterpret_cast<uintptr_t>(fetch);
+  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
+  uint32_t f_lkey = provider().get_lkey(f_laddr);
+  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  provider().atomic_fetch_add_nbi(f_laddr, f_lkey, d_raddr, d_rkey, value, wf_info, post_options);
 }
 
 template <typename Provider>
@@ -852,27 +1116,22 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_fetch_add_nbi_single(
     uint64_t *fetch, void *dest, uint64_t value,
     PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_FA;
-  static constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
-  uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t lkey = provider().get_lkey(laddr);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch>(laddr, lkey, raddr, rkey, value, 0, post_options);
+  uintptr_t f_laddr = reinterpret_cast<uintptr_t>(fetch);
+  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
+  uint32_t f_lkey = provider().get_lkey(f_laddr);
+  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  provider().atomic_fetch_add_nbi_single(f_laddr, f_lkey, d_raddr, d_rkey, value, post_options);
 }
+#endif
 
 template <typename Provider>
 template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_add(
     void *dest, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_FA;
-  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
-  uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t lkey = provider().get_lkey(laddr);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch>(laddr, lkey, raddr, rkey, value, 0, wf_info, post_options);
+  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
+  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  provider().atomic_add(d_raddr, d_rkey, value, wf_info, post_options);
 }
 
 template <typename Provider>
@@ -880,13 +1139,9 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_add_single(
     void *dest, uint64_t value,
     PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_FA;
-  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
-  uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t lkey = provider().get_lkey(laddr);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch>(laddr, lkey, raddr, rkey, value, 0, post_options);
+  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
+  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  provider().atomic_add_single(d_raddr, d_rkey, value, post_options);
 }
 
 template <typename Provider>
@@ -894,15 +1149,9 @@ template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_compare_swap(
     void *dest, uint64_t cond, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_CS;
-  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
-  uintptr_t laddr = /* TODO */
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t lkey = provider().get_lkey(laddr);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch>(laddr, lkey, raddr, rkey, value, cond, wf_info, post_options);
-  quiet(wf_info);
-  return *reinterpret_cast<uint64_t*>(laddr);
+  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
+  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  return provider().atomic_compare_swap(d_raddr, d_rkey, cond, value, wf_info, post_options);
 }
 
 template <typename Provider>
@@ -910,29 +1159,22 @@ template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_compare_swap_single(
     void *dest, uint64_t cond, uint64_t value,
     PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_CS;
-  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
-  uintptr_t laddr = /* TODO */
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t lkey = provider().get_lkey(laddr);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch>(laddr, lkey, raddr, rkey, value, cond, post_options);
-  quiet_single();
-  return *reinterpret_cast<uint64_t*>(laddr);
+  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
+  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  return provider().atomic_compare_swap_single(d_raddr, d_rkey, cond, value, post_options);
 }
 
+#if 0
 template <typename Provider>
 template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nbi(
     uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_CS;
-  static constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
-  uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t lkey = provider().get_lkey(laddr);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch>(laddr, lkey, raddr, rkey, value, cond, wf_info, post_options);
+  uintptr_t f_laddr = reinterpret_cast<uintptr_t>(fetch);
+  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
+  uint32_t f_lkey = provider().get_lkey(f_laddr);
+  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  provider().atomic_compare_swap_nbi(f_laddr, f_lkey, d_raddr, d_rkey, cond, value, wf_info, post_options);
 }
 
 template <typename Provider>
@@ -940,126 +1182,24 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nbi_single(
     uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
     PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_CS;
-  static constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
-  uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t lkey = provider().get_lkey(laddr);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch>(laddr, lkey, raddr, rkey, value, cond, post_options);
-}
-
-template <typename Provider>
-template <typename... PostOptions>
-__device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nofetch(
-    void *dest, uint64_t cond, uint64_t value,
-    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_CS;
-  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
-  uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t lkey = provider().get_lkey(laddr);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch>(laddr, lkey, raddr, rkey, value, cond, wf_info, post_options);
-}
-
-template <typename Provider>
-template <typename... PostOptions>
-__device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nofetch_single(
-    void *dest, uint64_t cond, uint64_t value,
-    PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_CS;
-  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
-  uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t lkey = provider().get_lkey(laddr);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch>(laddr, lkey, raddr, rkey, value, cond, post_options);
+  uintptr_t f_laddr = reinterpret_cast<uintptr_t>(fetch);
+  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
+  uint32_t f_lkey = provider().get_lkey(f_laddr);
+  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  provider().atomic_compare_swap_nbi_single(f_laddr, f_lkey, d_raddr, d_rkey, cond, value, post_options);
 }
 #endif
 
 template <typename Provider>
 template <typename... PostOptions>
-__device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add(
-    void *dest, uint64_t value,
-    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_FA;
-  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t rkey = provider().get_rkey(raddr);
-  return provider().template post_wqe_amo<Op, Fetch>(raddr, rkey, value, 0, wf_info, post_options);
-}
-
-template <typename Provider>
-template <typename... PostOptions>
-__device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add_single(
-    void *dest, uint64_t value,
-    PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_FA;
-  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t rkey = provider().get_rkey(raddr);
-  return provider().template post_wqe_amo_single<Op, Fetch>(raddr, rkey, value, 0, post_options);
-}
-
-template <typename Provider>
-template <typename... PostOptions>
-__device__ void QueuePairSHMEM<Provider>::atomic_add(
-    void *dest, uint64_t value,
-    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_FA;
-  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch>(raddr, rkey, value, 0, wf_info, post_options);
-}
-
-template <typename Provider>
-template <typename... PostOptions>
-__device__ void QueuePairSHMEM<Provider>::atomic_add_single(
-    void *dest, uint64_t value,
-    PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_FA;
-  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch>(raddr, rkey, value, 0, post_options);
-}
-
-template <typename Provider>
-template <typename... PostOptions>
-__device__ uint64_t QueuePairSHMEM<Provider>::atomic_compare_swap(
-    void *dest, uint64_t cond, uint64_t value,
-    const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_CS;
-  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t rkey = provider().get_rkey(raddr);
-  return provider().template post_wqe_amo<Op, Fetch>(raddr, rkey, value, cond, wf_info, post_options);
-}
-
-template <typename Provider>
-template <typename... PostOptions>
-__device__ uint64_t QueuePairSHMEM<Provider>::atomic_compare_swap_single(
-    void *dest, uint64_t cond, uint64_t value,
-    PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_CS;
-  static constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t rkey = provider().get_rkey(raddr);
-  return provider().template post_wqe_amo_single<Op, Fetch>(raddr, rkey, value, cond, post_options);
-}
-
-template <typename Provider>
-template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nofetch(
     void *dest, uint64_t cond, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_CS;
-  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo<Op, Fetch>(raddr, rkey, value, cond, wf_info, post_options);
+  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
+  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  /* QueuePairInterface doesn't provide atomic_compare_swap_nofetch */
+  provider().template post_wqe_amo<OpCode::ATOMIC_CS, AMOFetchType::NonFetching>(
+      d_raddr, d_rkey, value, cond, wf_info, post_options);
 }
 
 template <typename Provider>
@@ -1067,18 +1207,11 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nofetch_single(
     void *dest, uint64_t cond, uint64_t value,
     PostOpt<PostOptions...> post_options) {
-  static constexpr OpCode Op = OpCode::ATOMIC_CS;
-  static constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
-  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t rkey = provider().get_rkey(raddr);
-  provider().template post_wqe_amo_single<Op, Fetch>(raddr, rkey, value, cond, post_options);
-}
-
-template <typename Provider>
-__device__ void QueuePairSHMEM<Provider>::quiet(const ActiveWFInfo& wf_info) {
-  if (wf_info.is_pe_group_first) {
-    provider().quiet_single();
-  }
+  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
+  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  /* QueuePairInterface doesn't provide atomic_compare_swap_nofetch_single */
+  provider().template post_wqe_amo_single<OpCode::ATOMIC_CS, AMOFetchType::NonFetching>(
+      d_raddr, d_rkey, value, cond, post_options);
 }
 
 
@@ -1100,7 +1233,7 @@ public:
   /**
    * @brief Type alias for QueuePairTraits<Provider>.
    */
-  using Traits = QueuePairTraits<Provider>;
+  using typename QueuePairInterface<Provider>::Traits;
 
   /**
    * @brief Enumeration of the opcodes for Write, Read, Fetch-Add, and Compare-and-Swap.
@@ -1108,7 +1241,7 @@ public:
    * A definition must be provided by the QueuePairTraits<Provider> specialization
    * of each Provider subclass.
    */
-  using OpCode = typename Traits::OpCode;
+  using typename QueuePairInterface<Provider>::OpCode;
 
   /**
    * @brief Constant defining the endianness required by the provider. Used for e.g. lkey and rkey.
