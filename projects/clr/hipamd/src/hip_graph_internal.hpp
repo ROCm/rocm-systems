@@ -1301,13 +1301,11 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
   // Copy Constructor. This is protected to prevent accidental copies causing unexpected behaviors.
   ChildGraphNode(const ChildGraphNode& rhs) : GraphNode(rhs), GraphExecSegmented() {
     rhs.Graph::clone(this);
-    graphCaptureStatus_ = rhs.graphCaptureStatus_;
   }
 
  public:
   ChildGraphNode(Graph* g) : GraphNode(hipGraphNodeTypeGraph, "solid", "rectangle"), GraphExecSegmented() {
     g->clone(this);
-    graphCaptureStatus_ = false;
   }
 
   ~ChildGraphNode() {
@@ -1326,12 +1324,6 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
 
   Graph* GetChildGraph() override { return this; }
 
-  void SetGraphCaptureStatus(bool status) { graphCaptureStatus_ = status; }
-
-  bool GetGraphCaptureStatus() { return graphCaptureStatus_; }
-
-  bool GraphCaptureEnabled() override { return graphCaptureStatus_; }
-
   std::vector<Node>& GetChildGraphNodeOrder() { return topoOrder_; }
 
   void SetStream(hip::Stream* stream) override { stream_ = stream; }
@@ -1341,35 +1333,13 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
   }
 
   void EnqueueCommands(hip::Stream* stream) override {
-    // Note: For segmented graphs, EnqueueSegment now calls EnqueueSegmentedGraph recursively
-    // This method is kept as a fallback for non-segmented execution or legacy paths
-
-    if (graphCaptureStatus_ || !segments_.empty()) {
-      // Use hierarchical segment-based enqueue via EnqueueSegmentedGraph
-      // Use this child graph's own parallel_streams_, so pass empty vector
-      hipError_t status = hipSuccess;
-      amd::Command* last_cmd = EnqueueSegmentedGraph(stream, {}, &status);
-
-      if (last_cmd != nullptr) {
-        // This is a fallback path - we don't need to track the command
-        last_cmd->release();
-      }
-
-      if (status != hipSuccess) {
-        ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-                "[hipGraph] ChildGraphNode::EnqueueCommands failed with status=%d", status);
-      }
-    } else {
-      // Classic path: no segments, no AQL capture — walk topoOrder_ directly.
-      // Populate topoOrder_ on first launch if not yet done.
-      if (topoOrder_.empty()) {
-        Graph::TopologicalOrder(topoOrder_);
-      }
-      for (auto* node : topoOrder_) {
-        node->SetStream(stream);
-        [[maybe_unused]] hipError_t s = node->CreateCommand(node->GetQueue());
-        node->EnqueueCommands(stream);
-      }
+    if (topoOrder_.empty()) {
+      Graph::TopologicalOrder(topoOrder_);
+    }
+    for (auto* node : topoOrder_) {
+      node->SetStream(stream);
+      [[maybe_unused]] hipError_t s = node->CreateCommand(node->GetQueue());
+      node->EnqueueCommands(stream);
     }
   }
 
@@ -1398,8 +1368,6 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
     Graph::GenerateDOT(fout, flag);
   }
 
- private:
-  bool graphCaptureStatus_;
 };
 
 class GraphKernelNode : public GraphNode {
