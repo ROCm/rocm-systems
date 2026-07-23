@@ -4,7 +4,6 @@
 #include "core/trace_cache/discovery.hpp"
 
 #include "common/env_vars.hpp"
-#include "common/environment.hpp"
 #include "common/path.hpp"
 #include "core/config.hpp"
 #include "core/timemory.hpp"

@@ -3,7 +3,6 @@
 
 #include "perfetto.hpp"
 #include "common/env_vars.hpp"
-#include "common/environment.hpp"
 #include "common/path.hpp"
 #include "common/units.hpp"
 #include "config.hpp"
