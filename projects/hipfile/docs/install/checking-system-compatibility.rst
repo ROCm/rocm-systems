@@ -71,8 +71,7 @@ volumes, and a summary of AIS support by component.
 Mounted volumes table
 ---------------------
 
-Each row is a block-backed mount that hipFile could potentially use. Pseudo and
-network filesystems are omitted.
+Each row is a block-backed mount that hipFile could potentially use. Pseudo filesystems are omitted.
 
 - **MOUNTPOINT** — where the filesystem is mounted.
 - **FSTYPE** — the filesystem type. hipFile's fast path accepts only ``xfs`` or
