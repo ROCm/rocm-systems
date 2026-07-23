@@ -109,7 +109,7 @@ static void RunGenericTest(TestBase* test) {
 }
 
 // TEST ENTRY TEMPLATE:
-// TEST(rocrtst, Perf_<test name>) {
+// TEST(<Component><Type><Operation>, <Feature><Case>) {
 //  <Test Implementation class> <test_obj>;
 //
 //  // Copy and modify implementation of RunGenericTest() if you need to deviate
