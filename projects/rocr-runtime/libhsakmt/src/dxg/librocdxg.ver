@@ -115,6 +115,7 @@ hsaKmtMemoryGetCpuAddr;
 hsaKmtMemoryCpuMap;
 hsaKmtGetAmdGPUDeviceFd;
 rocdxg_smi_get_device_count;
+rocdxg_smi_get_device_info;
 rocdxg_smi_get_bdf_info;
 rocdxg_smi_get_asic_info;
 rocdxg_smi_get_board_info;
