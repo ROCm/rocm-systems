@@ -345,9 +345,10 @@ inline constexpr const char* NETWORK_INTERFACE     = "ROCPROFSYS_NETWORK_INTERFA
 // Names retained only for legacy/migration paths — the codebase emits deprecation
 // warnings when these are encountered. Do not introduce new references; prefer the
 // replacement (TRACE for USE_PERFETTO, PROFILE for USE_TIMEMORY).
-inline constexpr const char* USE_PERFETTO  = "ROCPROFSYS_USE_PERFETTO";
-inline constexpr const char* USE_TIMEMORY  = "ROCPROFSYS_USE_TIMEMORY";
-inline constexpr const char* USE_SHMEM     = "ROCPROFSYS_USE_SHMEM";  // deprecated: use USE_OPENSHMEM
+inline constexpr const char* USE_PERFETTO = "ROCPROFSYS_USE_PERFETTO";
+inline constexpr const char* USE_TIMEMORY = "ROCPROFSYS_USE_TIMEMORY";
+inline constexpr const char* USE_SHMEM =
+    "ROCPROFSYS_USE_SHMEM";  // deprecated: use USE_OPENSHMEM
 
 [[nodiscard]] inline int
 log_level_to_verbose(std::string_view level) noexcept
