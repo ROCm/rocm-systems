@@ -59,8 +59,15 @@ file(GLOB_RECURSE functSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/fun
 
 set(TEST "amdsmitst")
 
-# Source files
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} tstSources)
+# Harness sources at the root of this directory. Listed explicitly (rather than
+# aux_source_directory) so the set is stable and obvious; test sources live under
+# unit/ and functional/ and are globbed above.
+set(tstSources
+    ${CMAKE_CURRENT_SOURCE_DIR}/main.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_base.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_common.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_utils.cc
+)
 
 # Build rules
 add_executable(${TEST} ${tstSources} ${unitSources} ${functSources})
