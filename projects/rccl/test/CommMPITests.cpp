@@ -346,6 +346,38 @@ TEST_F(CtaConfigMPITest, DefaultConfigDoesNotClampChannels)
     }
 }
 
+namespace
+{
+/**
+ * @brief True if any single line of `log` contains both `needle_a` and `needle_b`.
+ *
+ * Used to disambiguate log substrings that appear verbatim in more than one
+ * INFO call site (e.g. "- Destroy COMPLETE" is emitted by both commFree() and
+ * COLLTRACE): a plain std::string::find() on the combined log would be
+ * satisfied by either line, so same-line co-occurrence is required instead.
+ */
+bool logHasLineContainingBoth(const std::string& log, const char* needle_a, const char* needle_b)
+{
+    std::size_t line_start = 0;
+    while(line_start <= log.size())
+    {
+        const std::size_t line_end = log.find('\n', line_start);
+        const std::size_t line_len = (line_end == std::string::npos) ? std::string::npos : (line_end - line_start);
+        const std::string line     = log.substr(line_start, line_len);
+        if(line.find(needle_a) != std::string::npos && line.find(needle_b) != std::string::npos)
+        {
+            return true;
+        }
+        if(line_end == std::string::npos)
+        {
+            break;
+        }
+        line_start = line_end + 1;
+    }
+    return false;
+}
+} // namespace
+
 /**
  * @class DestroySubsysMPITest
  * @brief Regression coverage for the NCCL 2.30.3 log-volume-reduction cherry-pick
@@ -391,13 +423,16 @@ TEST_F(DestroySubsysMPITest, DefaultSubsys_ExcludesDestroyNoise)
     // before TearDown() restores NCCL_DEBUG_FILE (and possibly unlinks the log).
     ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());
 
-    static constexpr const char* kCommFreeDestroyNeedle  = "- Destroy COMPLETE";
     static constexpr const char* kCollTraceDestroyNeedle = "- Destroy START"; // unique to CollTrace::~CollTrace()
     const std::string            from_nccl               = log_ctx.readNcclDebugLog();
     const std::string            from_rank_log            = log_ctx.readPerRankStderrLog();
     const std::string            combined                 = from_nccl + from_rank_log;
-    const bool hit_comm_free  = combined.find(kCommFreeDestroyNeedle) != std::string::npos;
-    const bool hit_colltrace  = combined.find(kCollTraceDestroyNeedle) != std::string::npos;
+    // "comm " (with trailing space) + "- Destroy COMPLETE" on the same line is
+    // specific to commFree()'s "comm %p rank ... - %s COMPLETE" line; the
+    // substring "- Destroy COMPLETE" alone would also match COLLTRACE's
+    // "COLLTRACE: commHash ... - Destroy COMPLETE" line.
+    const bool hit_comm_free = logHasLineContainingBoth(combined, "comm ", "- Destroy COMPLETE");
+    const bool hit_colltrace = combined.find(kCollTraceDestroyNeedle) != std::string::npos;
 
     if(getTestMpiRank() == 0)
     {
@@ -432,13 +467,16 @@ TEST_F(DestroySubsysMPITest, DestroySubsys_IncludesDestroyNoise)
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
     ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());
 
-    static constexpr const char* kCommFreeDestroyNeedle  = "- Destroy COMPLETE";
     static constexpr const char* kCollTraceDestroyNeedle = "- Destroy START"; // unique to CollTrace::~CollTrace()
     const std::string            from_nccl               = log_ctx.readNcclDebugLog();
     const std::string            from_rank_log            = log_ctx.readPerRankStderrLog();
     const std::string            combined                 = from_nccl + from_rank_log;
-    const bool hit_comm_free  = combined.find(kCommFreeDestroyNeedle) != std::string::npos;
-    const bool hit_colltrace  = combined.find(kCollTraceDestroyNeedle) != std::string::npos;
+    // "comm " (with trailing space) + "- Destroy COMPLETE" on the same line is
+    // specific to commFree()'s "comm %p rank ... - %s COMPLETE" line; the
+    // substring "- Destroy COMPLETE" alone would also match COLLTRACE's
+    // "COLLTRACE: commHash ... - Destroy COMPLETE" line.
+    const bool hit_comm_free = logHasLineContainingBoth(combined, "comm ", "- Destroy COMPLETE");
+    const bool hit_colltrace = combined.find(kCollTraceDestroyNeedle) != std::string::npos;
 
     if(getTestMpiRank() == 0)
     {
