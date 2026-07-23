@@ -770,10 +770,7 @@ rocprofsys_init_tooling_hidden(void)
 
                 // Safety-net subscriber for category-traited recording paths
                 // (timemory storage, perfetto trace_events from callbacks not
-                // covered by a subsystem pause subscriber). Toggles the
-                // per-category runtime_enabled trait so those sites gate off
-                // during the delay/duration window. Only registered when a
-                // trace window is configured.
+                // covered by a subsystem pause subscriber).
                 get_control_session()->subscribe(
                     { []() {
                          categories::disable_categories(config::get_enabled_categories());
