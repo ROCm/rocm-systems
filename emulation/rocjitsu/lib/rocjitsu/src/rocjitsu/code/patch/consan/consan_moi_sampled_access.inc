@@ -1225,6 +1225,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         }
         uint32_t body_guest_instruction_offset = 0;
         MoiAppendedBodyOptions body_options;
+        body_options.arch = arch;
         body_options.scalar_save_words = planned_patch.scalar_spill
                                              ? planned_patch.scalar_spill->save_words
                                              : std::span<const uint32_t>{};

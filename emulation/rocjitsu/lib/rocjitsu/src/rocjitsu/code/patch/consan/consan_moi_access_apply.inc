@@ -108,6 +108,7 @@ write_moi_entry_island(std::vector<uint8_t> &text, const PlannedPatch &planned_p
 }
 
 struct MoiAppendedBodyOptions {
+  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
   size_t deferred_guest_word_count = 0u;
   std::span<const uint32_t> scalar_save_words = {};
   std::span<const uint32_t> scalar_restore_words = {};
@@ -120,25 +121,54 @@ struct MoiAppendedBodyOptions {
   bool wrap_embedded_guest_vgpr_bank = false;
 };
 
+[[nodiscard]] constexpr bool
+moi_appended_body_uses_gfx1250_vgpr_msb(rj_code_arch_t arch,
+                                        std::optional<uint16_t> gfx1250_vgpr_msb_mode) {
+  return arch == ROCJITSU_CODE_ARCH_GFX1250 && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+}
+
+[[nodiscard]] constexpr bool
+moi_appended_body_vgpr_msb_mode_is_valid(rj_code_arch_t arch,
+                                         std::optional<uint16_t> gfx1250_vgpr_msb_mode) {
+  return gfx1250_vgpr_msb_mode.value_or(0u) == 0u || arch == ROCJITSU_CODE_ARCH_GFX1250;
+}
+
 [[nodiscard]] constexpr size_t
 moi_appended_body_vgpr_msb_transition_word_count(rj_code_arch_t arch,
                                                  std::optional<uint16_t> gfx1250_vgpr_msb_mode,
                                                  bool has_vgpr_spill, bool wraps_embedded_guest) {
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || gfx1250_vgpr_msb_mode.value_or(0u) == 0u)
+  if (!moi_appended_body_uses_gfx1250_vgpr_msb(arch, gfx1250_vgpr_msb_mode))
     return 0u;
   return (has_vgpr_spill ? 4u : 2u) + (wraps_embedded_guest ? 2u : 0u);
 }
 
+[[nodiscard]] constexpr bool
+moi_embedded_guest_vgpr_bank_plan_is_valid(bool wraps_embedded_guest, bool selects_low_vgpr_bank,
+                                           bool has_guest_instruction,
+                                           size_t trailing_guest_word_count) {
+  return !wraps_embedded_guest ||
+         (selects_low_vgpr_bank && has_guest_instruction && trailing_guest_word_count == 0u);
+}
+
+static_assert(moi_appended_body_vgpr_msb_mode_is_valid(ROCJITSU_CODE_ARCH_GFX1250, uint16_t{4u}));
+static_assert(!moi_appended_body_vgpr_msb_mode_is_valid(ROCJITSU_CODE_ARCH_CDNA4, uint16_t{4u}));
 static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_GFX1250,
                                                                std::nullopt, false, false) == 0u);
 static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_GFX1250,
                                                                uint16_t{4u}, false, false) == 2u);
+static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_GFX1250,
+                                                               uint16_t{4u}, false, true) == 4u);
 static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_GFX1250,
                                                                uint16_t{4u}, true, false) == 4u);
 static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_GFX1250,
                                                                uint16_t{4u}, true, true) == 6u);
 static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_CDNA4,
                                                                uint16_t{4u}, true, true) == 0u);
+static_assert(moi_embedded_guest_vgpr_bank_plan_is_valid(false, false, false, 1u));
+static_assert(moi_embedded_guest_vgpr_bank_plan_is_valid(true, true, true, 0u));
+static_assert(!moi_embedded_guest_vgpr_bank_plan_is_valid(true, false, true, 0u));
+static_assert(!moi_embedded_guest_vgpr_bank_plan_is_valid(true, true, false, 0u));
+static_assert(!moi_embedded_guest_vgpr_bank_plan_is_valid(true, true, true, 1u));
 
 template <typename PlannedPatch>
 [[nodiscard]] std::optional<std::vector<uint32_t>>
@@ -151,12 +181,18 @@ assemble_moi_appended_body(const PlannedPatch &planned_patch, std::span<const ui
                         " VGPR-bank guest split exceeds the probe body");
     return std::nullopt;
   }
-  const bool select_low_vgpr_bank = options.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+  if (!moi_appended_body_vgpr_msb_mode_is_valid(options.arch, options.gfx1250_vgpr_msb_mode)) {
+    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                        " has a VGPR-MSB mode on a non-gfx1250 body");
+    return std::nullopt;
+  }
+  const bool select_low_vgpr_bank =
+      moi_appended_body_uses_gfx1250_vgpr_msb(options.arch, options.gfx1250_vgpr_msb_mode);
   const size_t probe_prefix_words = probe_words.size() - options.trailing_guest_word_count;
   body.insert(body.end(), options.entry_prefix_words.begin(), options.entry_prefix_words.end());
   if (select_low_vgpr_bank)
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), 0u, ROCJITSU_CODE_ARCH_GFX1250));
+        static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), 0u, options.arch));
   if (planned_patch.spill)
     body.insert(body.end(), planned_patch.spill->save_words.begin(),
                 planned_patch.spill->save_words.end());
@@ -179,25 +215,26 @@ assemble_moi_appended_body(const PlannedPatch &planned_patch, std::span<const ui
       return std::nullopt;
     }
   }
-  // Wrapped callers always embed the guest in the unsplit probe body. Assert
-  // that internal planning contract and keep the release path iterator-safe
-  // if a future caller violates it.
-  const bool valid_embedded_guest_plan =
-      select_low_vgpr_bank && guest_word.has_value() && options.trailing_guest_word_count == 0u;
-  assert(!options.wrap_embedded_guest_vgpr_bank || valid_embedded_guest_plan);
-  const bool wrap_embedded_guest =
-      options.wrap_embedded_guest_vgpr_bank && valid_embedded_guest_plan;
+  const bool valid_embedded_guest_plan = moi_embedded_guest_vgpr_bank_plan_is_valid(
+      options.wrap_embedded_guest_vgpr_bank, select_low_vgpr_bank, guest_word.has_value(),
+      options.trailing_guest_word_count);
+  if (!valid_embedded_guest_plan) {
+    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                        " has an invalid embedded-guest VGPR-bank plan");
+    return std::nullopt;
+  }
+  const bool wrap_embedded_guest = options.wrap_embedded_guest_vgpr_bank;
   if (wrap_embedded_guest) {
     body.insert(body.end(), probe_words.begin(), probe_words.begin() + *guest_word);
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), ROCJITSU_CODE_ARCH_GFX1250));
+        0u, static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), options.arch));
     if (options.body_guest_instruction_offset)
       *options.body_guest_instruction_offset =
           static_cast<uint32_t>(body.size() * sizeof(uint32_t));
     body.insert(body.end(), probe_words.begin() + *guest_word,
                 probe_words.begin() + *guest_word + guest_word_count);
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), 0u, ROCJITSU_CODE_ARCH_GFX1250));
+        static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), 0u, options.arch));
     body.insert(body.end(), probe_words.begin() + *guest_word + guest_word_count,
                 probe_words.begin() + probe_prefix_words);
   } else {
@@ -209,7 +246,7 @@ assemble_moi_appended_body(const PlannedPatch &planned_patch, std::span<const ui
                 planned_patch.spill->restore_words.end());
   if (select_low_vgpr_bank) {
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), ROCJITSU_CODE_ARCH_GFX1250));
+        0u, static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), options.arch));
   }
   const size_t trailing_probe_body_begin = body.size();
   body.insert(body.end(), probe_words.begin() + probe_prefix_words, probe_words.end());
@@ -221,13 +258,13 @@ assemble_moi_appended_body(const PlannedPatch &planned_patch, std::span<const ui
   }
   if (select_low_vgpr_bank && planned_patch.spill)
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), 0u, ROCJITSU_CODE_ARCH_GFX1250));
+        static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), 0u, options.arch));
   if (planned_patch.spill && !options.restore_vgpr_spill_before_trailing_guest)
     body.insert(body.end(), planned_patch.spill->restore_words.begin(),
                 planned_patch.spill->restore_words.end());
   if (select_low_vgpr_bank && planned_patch.spill) {
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), ROCJITSU_CODE_ARCH_GFX1250));
+        0u, static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), options.arch));
   }
   body.insert(body.end(), planned_patch.displaced_tail_words.begin(),
               planned_patch.displaced_tail_words.end());

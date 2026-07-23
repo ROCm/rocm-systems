@@ -1250,6 +1250,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         }
 
         MoiAppendedBodyOptions body_options;
+        body_options.arch = arch;
         body_options.deferred_guest_word_count = deferred_guest_words.size();
         body_options.scalar_save_words = planned_patch.scalar_spill
                                              ? planned_patch.scalar_spill->save_words

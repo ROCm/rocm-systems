@@ -3619,6 +3619,8 @@ TEST(ConSanMoi, Gfx1250AcceptsConfiguredPersistentStateAboveFlatScratch) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  // gfx1250 has no persistent XNACK_MASK selector at s104:s105, so this pair
+  // remains ordinary scalar state above the aliased FLAT_SCRATCH selectors.
   options.moi_persistent_owner_sgpr = 104u;
   options.moi_persistent_epoch_sgpr = 105u;
   options.moi_init_owner_epoch = true;
