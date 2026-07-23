@@ -535,6 +535,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
       }
 
       // Read capabilities before attempting set; used to validate set return code.
+      current_memory_config = {};
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition_config", "gpu=" + std::to_string(dv_ind),
                          VERB(STANDARD));
       auto ret_caps = amdsmi_get_gpu_memory_partition_config(processor_handles_[dv_ind],
@@ -569,7 +570,9 @@ void TestMemoryPartitionReadWrite::Run(void) {
                   << "Available Memory Partition Capabilities: " << memory_caps_str << "\n"
                   << "\t**"
                   << "current_memory_partition_mode: "
-                  << memoryPartitionString(current_memory_config.mp_mode) << "\n"
+                  << (ret_caps == AMDSMI_STATUS_SUCCESS ? memoryPartitionString(current_memory_config.mp_mode)
+                                                       : "N/A")
+                  << "\n"
                   << "\t**"
                   << "Requested partition supported by hardware: "
                   << (partition_is_supported ? "YES" : "NO") << "\n"
@@ -597,10 +600,11 @@ void TestMemoryPartitionReadWrite::Run(void) {
                   (ret_set == AMDSMI_STATUS_AMDGPU_RESTART_ERR) ||
                   (ret_set == AMDSMI_STATUS_INVAL) || (ret_set == AMDSMI_STATUS_NOT_SUPPORTED));
 
-      // If the hardware advertises support for this mode, the set must succeed.
+      // If the hardware advertises support for this mode, the set should succeed unless the
+      // device is busy (e.g., workloads running).
       if (partition_is_supported) {
-        EXPECT_EQ(ret_set, AMDSMI_STATUS_SUCCESS)
-            << "Set failed for a partition mode advertised as supported by hardware: "
+        EXPECT_TRUE(ret_set == AMDSMI_STATUS_SUCCESS || ret_set == AMDSMI_STATUS_BUSY)
+            << "Set did not succeed for a partition mode advertised as supported by hardware: "
             << memoryPartitionString(new_memory_partition);
       }
 
