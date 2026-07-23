@@ -10,13 +10,13 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
 
 
-class gfx1152_soc(OmniSoC_Base):
+class gfx1153_soc(OmniSoC_Base):
     def __init__(self, args: argparse.Namespace, mspec: MachineSpecs) -> None:
         super().__init__(args, mspec)
-        self.set_arch("gfx1152")
+        self.set_arch("gfx1153")
         self.set_compatible_profilers(["rocprofv3", "rocprofiler-sdk"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
-        self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx1152"))
+        self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx1153"))
 
         self._mspec.l2_banks = 4
         self._mspec.lds_banks_per_cu = 32
@@ -29,7 +29,6 @@ class gfx1152_soc(OmniSoC_Base):
     def profiling_setup(self) -> Optional[list[str]]:
         """Perform any SoC-specific setup prior to profiling."""
         super().profiling_setup()
-        # Performance counter filtering
         filter_blocks = self.perfmon_filter()
         return filter_blocks
 
