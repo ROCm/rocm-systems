@@ -113,8 +113,8 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   NCCLCHECKGOTO(ncclDevrInitOnce(comm), ret, fail);
 
   // Local-only control words (no peer access -> no window registration needed).
-  CUDACHECKGOTO(hipExtMallocWithFlags((void**)&comm->ceColl.d_barrierSync, 2 * sizeof(uint32_t),
-                                      hipDeviceMallocUncached),
+  CUDACHECKGOTO(hipExtMallocWithFlags((void**)&comm->ceColl.d_barrierSync,
+                                      NCCL_CE_NUM_SLOTS * 4 * sizeof(uint32_t), hipDeviceMallocUncached),
                 ret, fail);
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&comm->ceColl.scatterStream, cudaStreamNonBlocking), ret, fail);
   CUDACHECKGOTO(cudaEventCreateWithFlags(&comm->ceColl.synceEvent, cudaEventDisableTiming), ret, fail);
@@ -967,7 +967,8 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   // =========================================================================
 
   if (totalSteps > 1) {
-    CUDACHECKGOTO(cudaMemsetAsync(ceColl->d_barrierSync, 0, 2 * sizeof(uint32_t), stream), ret, fail);
+    CUDACHECKGOTO(cudaMemsetAsync(ceColl->d_barrierSync, 0,
+                                  NCCL_CE_NUM_SLOTS * 4 * sizeof(uint32_t), stream), ret, fail);
     NCCLCHECKGOTO(ncclCeLaunchPersistentReduce(tmpBuf, outShard, comm->nRanks, baseChunkElems, tailChunkElems,
                                                chunksPerShard, slotChunkElems, signalBuffer, totalSteps,
                                                ceColl->d_barrierSync, datatype, op, stream, coopLaunch),

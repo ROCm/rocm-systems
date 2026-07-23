@@ -88,7 +88,8 @@ struct ncclCeColl {
   struct ncclDevrWindow* ceARTmpWin;
   uint32_t* signalBuffer;
   struct ncclDevrWindow* signalWin;
-  // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.
+  // Per-slot work queue for persistent reduce (NCCL_CE_NUM_SLOTS * 4 words):
+  // [slot*4+0]=workNext, [slot*4+1]=workTotal, [slot*4+2]=workDone, [slot*4+3]=slotReady.
   uint32_t* d_barrierSync;
   cudaStream_t scatterStream;     // trails the reduce kernel: waits d_reduceDone, then all-gathers
   cudaEvent_t synceEvent;  // join scatterStream back onto the caller's stream
