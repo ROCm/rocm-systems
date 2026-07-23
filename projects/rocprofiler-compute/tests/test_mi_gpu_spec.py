@@ -27,6 +27,21 @@ class TestMIGPUSpecs:
             models_from_dict.update(gpu_models)
         assert models_from_dict == all_models
 
+    def test_supported_archs_matches_soc_files(self):
+        soc_dir = Path(common.SRC) / "rocprof_compute_soc"
+        soc_archs = {f.stem.removeprefix("soc_") for f in soc_dir.glob("soc_gfx*.py")}
+
+        supported = set(common.SUPPORTED_ARCHS)
+        missing_from_supported = soc_archs - supported
+        missing_soc_file = supported - soc_archs
+        assert not missing_from_supported, (
+            f"SoC files exist but missing from SUPPORTED_ARCHS:"
+            f" {missing_from_supported}"
+        )
+        assert not missing_soc_file, (
+            f"SUPPORTED_ARCHS entries have no SoC file: {missing_soc_file}"
+        )
+
     # -- get_gpu_series ------------------------------------------------------
 
     def test_get_gpu_series_all_archs(self):
@@ -61,6 +76,13 @@ class TestMIGPUSpecs:
         for arch in MIGPUSpecs._perfmon_config:
             result = MIGPUSpecs.get_perfmon_config(arch)
             assert isinstance(result, dict)
+
+    def test_every_supported_arch_has_nonempty_perfmon_config(self):
+        for arch in common.SUPPORTED_ARCHS:
+            config = MIGPUSpecs.get_perfmon_config(arch)
+            assert config, (
+                f"perfmon_config for {arch} is missing or empty in mi_gpu_spec.yaml"
+            )
 
     # -- is_partition_supported ----------------------------------------------
 
