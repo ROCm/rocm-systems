@@ -551,6 +551,56 @@ TEST(CfgAnalysis, RecoversMultipleSgprPairsFromOneBlockEntry) {
   EXPECT_EQ(second_consumer->static_indirect_call_fixups()[0].source_target_offset, 52u);
 }
 
+TEST(CfgAnalysis, OutOfRangeIndirectConsumersRemainUnresolved) {
+  constexpr uint16_t kOutOfRangeSelector = 106;
+  const std::array<uint32_t, 2> consumers = {
+      pack_sop1(0x1d, 0, kOutOfRangeSelector),  // s_setpc_b64 vcc.
+      pack_sop1(0x1e, 30, kOutOfRangeSelector), // s_swappc_b64 s[30:31], vcc.
+  };
+
+  for (uint32_t consumer : consumers) {
+    TestCodeObject co(std::vector<uint32_t>{consumer});
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NE(decoder, nullptr);
+    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+    ASSERT_EQ(blocks.size(), 1u);
+    EXPECT_TRUE(blocks[0]->static_indirect_call_fixups().empty());
+  }
+}
+
+TEST(CfgAnalysis, IgnoresUnconsumedPairWhileRecoveringPendingConsumer) {
+  constexpr uint16_t kUnusedPcSreg = 8;
+  constexpr uint16_t kUsedPcSreg = 20;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // Both builders reach the consumer block, but only s[20:21] is consumed.
+  // The relevance filter must drop the s[8:9] transfer without disturbing the
+  // pending consumer's fact.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kUnusedPcSreg, 0),                           // 0x00: unused getpc.
+      pack_sop1(0x1c, kUsedPcSreg, 0),                             // 0x04: used getpc.
+      pack_sop2(0, kUsedPcSreg, kUsedPcSreg, kLiteralOperand),     // 0x08: used add.
+      20,                                                          // 0x0c: -> 0x1c.
+      pack_sop2(4, kUsedPcSreg + 1, kUsedPcSreg + 1, kInlineInt0), // 0x10.
+      pack_sop1(0x1d, 0, kUsedPcSreg),                             // 0x14: consumer.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                    // 0x18.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                    // 0x1c: target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 1> extra_leaders{20};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+
+  auto *consumer = block_starting_at(blocks, 20);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 28u);
+}
+
 TEST(CfgAnalysis, IncompleteFactConsumerIsFlaggedIncomplete) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint32_t kLiteralOperand = 255;
