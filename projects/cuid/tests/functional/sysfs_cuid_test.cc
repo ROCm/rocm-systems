@@ -23,6 +23,7 @@
 #include "functional/sysfs_cuid_test.h"
 
 #include <gtest/gtest.h>
+#include <limits.h>
 #include <unistd.h>
 
 #include <cstdio>

@@ -336,7 +336,8 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
  *         AMDCUID_STATUS_PERMISSION_DENIED if insufficient permissions,
  *         AMDCUID_STATUS_KEY_ERROR if there was an error writing the key,
  *         AMDCUID_STATUS_FILE_ERROR if key failed to write to any amdgpu device,
- *         AMDCUID_STATUS_DEVICE_NOT_FOUND if device discovery fails.
+ *         AMDCUID_STATUS_DEVICE_NOT_FOUND if device discovery fails,
+ *         AMDCUID_STATUS_INVALID_ARGUMENT if the key is null.
  *
  * @note This function will attempt to write the HMAC key to all discovered amdgpu devices.
  */

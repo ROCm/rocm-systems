@@ -99,7 +99,6 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info,
                                           const std::string& device_path) {
   amdcuid_gpu_info info = {};
   std::string bdf = CuidUtilities::readlink_bdf(device_path);
-  info.is_amdgpu = CuidUtilities::is_amdgpu_device(resolve_render_node(device_path));
 
   // Determine unit_id from SR-IOV VF (Virtual Function) status via ioctl.
   // In bare metal or passthrough, unit_id is 0.
@@ -191,6 +190,7 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info,
   info.header.device_type = AMDCUID_DEVICE_TYPE_GPU;
   info.bdf = bdf;
   info.render_node = full_device_node;
+  info.is_amdgpu = CuidUtilities::is_amdgpu_device(resolve_render_node(full_device_node));
 
   *gpu_info = info;
 

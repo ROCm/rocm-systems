@@ -682,6 +682,7 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
 
 amdcuid_status_t amdcuid_set_hash_key(const uint8_t key[32]) {
   if (geteuid() != 0) return AMDCUID_STATUS_PERMISSION_DENIED;
+  if (!key) return AMDCUID_STATUS_INVALID_ARGUMENT;
 
   amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
   amdcuid_status_t error_status = AMDCUID_STATUS_SUCCESS;

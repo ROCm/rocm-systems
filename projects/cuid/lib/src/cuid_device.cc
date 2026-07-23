@@ -103,6 +103,10 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac*
               if (!derived_cuid.empty()) {
                 CuidUtilities::uuid_string_to_uint8(derived_cuid, id.UUIDv8_representation.bytes);
                 CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
+                // strip unit_id (raw_bits[8], skipped by get_hash_from_raw) and
+                // temp bit (raw_bits[14] bit 5, not part of the HMAC hash)
+                get_hash_from_raw(id.raw_bits, id.hash);
+                id.hash[13] &= 0x1F;
                 return AMDCUID_STATUS_SUCCESS;
               }
             }

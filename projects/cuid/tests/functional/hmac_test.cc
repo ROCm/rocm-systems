@@ -37,14 +37,6 @@ TestHMAC::TestHMAC() {
       "amdcuid_set_hash_key accepts it. Both operations require root.");
 }
 
-// Device enumeration is needed to verify cuid_seed writes on amdgpu devices.
-void TestHMAC::SetUp() {
-  TestBase::SetUp();
-  // Snapshot cuid_seed contents before the test modifies them.
-  amdgpu_nodes_ = collect_amdgpu_render_nodes(device_handles_);
-  saved_seeds_ = save_cuid_seeds(amdgpu_nodes_);
-}
-
 // Returns the amdgpu render node paths for all discovered GPU devices.
 static std::vector<std::string> collect_amdgpu_render_nodes(
     const std::vector<amdcuid_id_t>& handles) {
@@ -105,6 +97,14 @@ static void restore_cuid_seeds(const std::vector<std::string>& nodes,
       if (f) f.write(reinterpret_cast<const char*>(saved[i].data()), saved[i].size());
     }
   }
+}
+
+// Device enumeration is needed to verify cuid_seed writes on amdgpu devices.
+void TestHMAC::SetUp() {
+  TestBase::SetUp();
+  // Snapshot cuid_seed contents before the test modifies them.
+  amdgpu_nodes_ = collect_amdgpu_render_nodes(device_handles_);
+  saved_seeds_ = save_cuid_seeds(amdgpu_nodes_);
 }
 
 // For each amdgpu render node, verifies that cuid_seed contains exactly the
