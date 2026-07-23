@@ -4172,13 +4172,23 @@ typedef struct hsa_amd_svm_attribute_pair_s {
  * Attributes HSA_AMD_SVM_ATTRIB_ACCESS_QUERY and HSA_AMD_SVM_ATTRIB_PREFETCH_LOCATION
  * may not be used with this API.
  *
+ * Passing @p attribute_count == 0 (with @p attribute_list ignored, and may be
+ * NULL) is a sentinel that resets ALL SVM attributes for the address range back
+ * to their defaults, atomically clearing any previously set attributes
+ * (including per-agent access) for the range.
+ * Note: older ROCr runtimes treat @p attribute_count == 0
+ * as a no-op, so callers relying on the reset semantic should ensure a runtime
+ * that documents this behavior.
+ *
  * @param[in] ptr Will be aligned down to nearest page boundary.
  *
  * @param[in] size Will be aligned up to nearest page boundary.
  *
  * @param[in] attribute_list List of attributes to set for the address range.
+ *            Ignored when @p attribute_count is 0.
  *
- * @param[in] attribute_count Length of @p attribute_list.
+ * @param[in] attribute_count Length of @p attribute_list. A value of 0 resets
+ *            all SVM attributes for the range to defaults (see above).
  */
 hsa_status_t hsa_amd_svm_attributes_set(void* ptr, size_t size,
                                         hsa_amd_svm_attribute_pair_t* attribute_list,

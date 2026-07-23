@@ -2793,7 +2793,8 @@ amd::Memory* Device::ImportShareableVMMHandle(void* osHandle, amd::Memory::Handl
 // ================================================================================================
 bool Device::SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
                                  bool first_alloc, bool use_cpu, int numa_id) const {
-  if ((settings().hmmFlags_ & Settings::Hmm::EnableSvmTracking) && !first_alloc) {
+  if ((settings().hmmFlags_ & Settings::Hmm::EnableSvmTracking) && !first_alloc &&
+      advice != amd::MemoryAdvice::ResetAttributes) {
     amd::Memory* svm_mem = amd::MemObjMap::FindMemObj(dev_ptr);
     if ((nullptr == svm_mem) || ((svm_mem->getMemFlags() & CL_MEM_ALLOC_HOST_PTR) == 0) ||
         // Validate the range of provided memory
@@ -2855,6 +2856,10 @@ bool Device::SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryA
         break;
       case amd::MemoryAdvice::UnsetCoarseGrain:
         attr.push_back({HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG, HSA_AMD_SVM_GLOBAL_FLAG_FINE_GRAINED});
+        break;
+      case amd::MemoryAdvice::ResetAttributes:
+        // Leave attr empty: an attribute_count of 0 is the ROCr sentinel that
+        // resets all SVM attributes for the range back to defaults.
         break;
       default:
         return false;
