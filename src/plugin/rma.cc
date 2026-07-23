@@ -91,9 +91,6 @@ static ncclResult_t ncclRmaPluginLoad(rmaPluginLib_t* pluginLib) {
 exit:
   return ncclSuccess;
 fail:
-  INFO(NCCL_INIT | NCCL_NET, "RMA/Plugin: Failed to load external plugin %s, dlHandle: %p, ncclRma: %p",
-       (ncclPluginLibPaths[ncclPluginTypeRma] ? ncclPluginLibPaths[ncclPluginTypeRma] : pluginLib->name),
-       pluginLib->dlHandle, pluginLib->ncclRma);
   if (pluginLib->dlHandle) {
     NCCLCHECK(ncclClosePluginLib(pluginLib->dlHandle, ncclPluginTypeRma));
   }

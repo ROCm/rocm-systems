@@ -74,7 +74,6 @@ ncclOsLibraryHandle ncclOsDlopen(const char* filename) {
   ncclOsLibraryHandle handle = (ncclOsLibraryHandle)LoadLibraryA(filename);
   if (handle == NULL) {
     saveDlError();
-    INFO(NCCL_INIT, "ncclOsDlopen(%s) failed: %s", filename, ncclDlErrorBuf);
   }
   return handle;
 }
@@ -83,7 +82,6 @@ void* ncclOsDlsym(ncclOsLibraryHandle handle, const char* symbol) {
   void* ptr = (void*)GetProcAddress((HMODULE)handle, symbol);
   if (ptr == NULL) {
     saveDlError();
-    INFO(NCCL_INIT, "ncclOsDlsym(%s) failed: %s", symbol, ncclDlErrorBuf);
   }
   return ptr;
 }

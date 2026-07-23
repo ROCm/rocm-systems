@@ -52,7 +52,6 @@ ncclOsLibraryHandle ncclOsDlopen(const char* filename) {
   ncclOsLibraryHandle handle = dlopen(filename, RTLD_NOW | RTLD_LOCAL);
   if (handle == NULL) {
     saveDlError();
-    INFO(NCCL_INIT, "ncclOsDlopen(%s) failed: %s", filename, ncclDlErrorBuf);
   }
   return handle;
 }
@@ -61,7 +60,6 @@ void* ncclOsDlsym(ncclOsLibraryHandle handle, const char* symbol) {
   void* ptr = dlsym(handle, symbol);
   if (ptr == NULL) {
     saveDlError();
-    INFO(NCCL_INIT, "ncclOsDlsym(%s) failed: %s", symbol, ncclDlErrorBuf);
   }
   return ptr;
 }

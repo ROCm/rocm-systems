@@ -90,9 +90,6 @@ static ncclResult_t ncclGinPluginLoad(ginPluginLib_t* pluginLib) {
 exit:
   return ncclSuccess;
 fail:
-  INFO(NCCL_INIT | NCCL_NET, "GIN/Plugin: Failed to load external plugin %s, dlHandle: %p, ncclGin: %p",
-       (ncclPluginLibPaths[ncclPluginTypeGin] ? ncclPluginLibPaths[ncclPluginTypeGin] : pluginLib->name),
-       pluginLib->dlHandle, pluginLib->ncclGin);
   if (pluginLib->dlHandle) {
     NCCLCHECK(ncclClosePluginLib(pluginLib->dlHandle, ncclPluginTypeGin));
   }
