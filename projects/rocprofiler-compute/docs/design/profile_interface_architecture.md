@@ -56,13 +56,13 @@ The purpose of this section is to outline architectural decisions which potentia
 For this purpose this also outlines ADs motivation and possible mitigation strategies.
 
 
-### AD-1: The CSV profile output format support is removed, rocpd becomes the default profile source. 
+### AD-1: The CSV profile output format support is removed, rocpd becomes the default profile source.
 
 This covers both halves of the CSV backend: the profile-side path that chose and wrote csv, and the analyze-side path that read CSVs.
 
-Primary motivation is that keeping both csv and rocpd forces two parallel storage implementations with different dependencies. 
-This doubles enabling effort for new analysis types or forces addition of "not supported in CSV" warnings to be sprinkled across every new feature. 
-Additionally, profile data is an intermediate artifact, which is consumed by analysis phase of rocprof-compute. 
+Primary motivation is that keeping both csv and rocpd forces two parallel storage implementations with different dependencies.
+This doubles enabling effort for new analysis types or forces addition of "not supported in CSV" warnings to be sprinkled across every new feature.
+Additionally, profile data is an intermediate artifact, which is consumed by analysis phase of rocprof-compute.
 Therefore, impact to the end-user is expected to be low.
 
 Users who want to collect profiling data to csv will need to install older version.
@@ -74,7 +74,7 @@ If there is future strong request to return CSV support, we may implement it und
 ### AD-2: Compress remaining CSV intermediates
 
 Gzip is short-term storage-size reduction for CSV artifacts that still exist
-after CSV profile backend removal. 
+after CSV profile backend removal.
 
 We introduce gzip streaming for two separate csv artifacts, written through its own compression interface used by both python and backend:
  - the results_*.csv(s), written by compute's Python side (rocpd_data.py) at the end of a pass, when the merged result DB is converted to csv and is the artifact analyze reads today.
@@ -118,12 +118,12 @@ Eliminate `pmc_perf.csv` generation step, so analysis converts profile output di
 
 Currently, EVERY analyze run materializes `pmc_perf.csv` and then reads it back.
 Therefore all profile formats go through a CSV regardless of how they were stored.
-This has performance cost and defeats the point of supporting varied storage and adds large csv pivot cost on big workloads. 
+This has performance cost and defeats the point of supporting varied storage and adds large csv pivot cost on big workloads.
 Also this introduces unnecessary dependency as any output format reader is forced to also produce a CSV just so downstream analyze code can read it.
 
 Essentially, `pmc_perf.csv` is an intermediate not a public contract, so analyze should not depend on it.
 
-The merged frame depends on the user's **analysis filters**, so a one time materialize and reuse does not work. 
+The merged frame depends on the user's **analysis filters**, so a one time materialize and reuse does not work.
 The reader builds the frame from source **per analysis run** with filters applied in memory and the `pmc_perf.csv` export is derived from that frame.
 
 However, `pmc_perf.csv` generation could be useful for debugging purposes and some users may use it in their flow.
@@ -296,11 +296,11 @@ flowchart LR
 
 Removed in this phase:
 
-- the `if csv` branch in `utils_profile.py` and related csv-only conversion helpers 
+- the `if csv` branch in `utils_profile.py` and related csv-only conversion helpers
 - the `--format-rocprof-output` flag and its uses (default and only output becomes rocpd)
   - while this phase results in a single format output being rocpd, we still keep the variable _PROFILE_OUTPUT_FORMAT to align with the Phase B boundary to leave the door open for future formats.
 - related csv-only test functions
-- analyze no longer supports csv-shaped workload directories. 
+- analyze no longer supports csv-shaped workload directories.
 
 Intentionally **kept** in this phase:
 
