@@ -696,26 +696,18 @@ WriteInterceptor(const void* packets,
                     }
                     if(_hwptr != 0)
                     {
-                        const uint32_t _slot = kfd::doorbell_ptr_to_page_slot(
-                            _hwptr, static_cast<uint64_t>(sysconf(_SC_PAGESIZE)));
+                        // Page size is constant for the process; cache it rather
+                        // than syscall on every dispatch.
+                        static const uint64_t _page_size =
+                            static_cast<uint64_t>(sysconf(_SC_PAGESIZE));
+                        const uint32_t _slot = kfd::doorbell_ptr_to_page_slot(_hwptr, _page_size);
 
-                        auto& _dmap = kfd::doorbell_map();
-                        _dmap.bind(queue.get_id(), _slot);
-                        if(_dmap.is_generation_certain(_slot))
-                        {
-                            _packet_data.kfd_doorbell_off          = _slot;
-                            _packet_data.kfd_generation            = _dmap.get_generation(_slot);
-                            _packet_data.kfd_correlation_key_valid = true;
-
-                            kfd::correlation_table().insert(
-                                kfd::correlation_key{_packet_data.kfd_doorbell_off,
-                                                     _packet_data.kfd_dispatch_idx_low32,
-                                                     _packet_data.kfd_generation},
-                                kfd::correlation_entry{dispatch_id,
-                                                       kernel_id,
-                                                       queue.get_id(),
-                                                       _info_session.enqueue_ts});
-                        }
+                        // bind_and_resolve binds once per queue (write lock on the
+                        // first dispatch), then is a plain read lock thereafter.
+                        auto _db = kfd::doorbell_map().bind_and_resolve(queue.get_id(), _slot);
+                        _packet_data.kfd_doorbell_off          = _db.doorbell_off;
+                        _packet_data.kfd_generation            = _db.generation;
+                        _packet_data.kfd_correlation_key_valid = true;
                     }
                 }
             }

@@ -1,8 +1,7 @@
 #
 #
-set(ROCPROFILER_LIB_KFD_EVENT_SOURCES
-    abi.cpp kfd.cpp kfd_profiler.cpp doorbell_map.cpp correlation_table.cpp
-    results_map.cpp kfd_correlation.cpp kfd_reader.cpp)
+set(ROCPROFILER_LIB_KFD_EVENT_SOURCES abi.cpp kfd.cpp kfd_profiler.cpp doorbell_map.cpp
+                                      results_map.cpp kfd_correlation.cpp kfd_reader.cpp)
 set(ROCPROFILER_LIB_KFD_EVENT_HEADERS
     defines.hpp
     kfd.hpp
@@ -11,7 +10,6 @@ set(ROCPROFILER_LIB_KFD_EVENT_HEADERS
     kfd_dlog_uapi.h
     correlation_types.hpp
     doorbell_map.hpp
-    correlation_table.hpp
     results_map.hpp
     kfd_correlation.hpp
     kfd_reader.hpp

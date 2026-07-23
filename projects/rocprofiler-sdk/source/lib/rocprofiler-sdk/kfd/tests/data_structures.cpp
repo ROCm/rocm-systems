@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "lib/rocprofiler-sdk/kfd/correlation_table.hpp"
 #include "lib/rocprofiler-sdk/kfd/correlation_types.hpp"
 #include "lib/rocprofiler-sdk/kfd/doorbell_map.hpp"
 #include "lib/rocprofiler-sdk/kfd/results_map.hpp"
@@ -62,7 +61,7 @@ TEST(correlation_key, equality_and_hash)
 TEST(DoorbellMap, bind_and_lookup)
 {
     auto m = DoorbellMap{};
-    m.bind(qid(42), /*doorbell_off=*/7);
+    m.bind_and_resolve(qid(42), /*doorbell_off=*/7);
 
     auto e = m.get_by_queue(qid(42));
     ASSERT_TRUE(e.has_value());
@@ -81,7 +80,7 @@ TEST(DoorbellMap, unknown_queue_returns_nullopt)
 TEST(DoorbellMap, destroy_bumps_generation_and_marks_uncertain)
 {
     auto m = DoorbellMap{};
-    m.bind(qid(42), 7);
+    m.bind_and_resolve(qid(42), 7);
 
     m.on_queue_destroyed(qid(42));
 
@@ -94,13 +93,13 @@ TEST(DoorbellMap, doorbell_reuse_gets_new_generation)
 {
     auto m = DoorbellMap{};
     // queue 42 on doorbell 7, then destroyed
-    m.bind(qid(42), 7);
+    m.bind_and_resolve(qid(42), 7);
     m.on_queue_destroyed(qid(42));
     EXPECT_EQ(m.get_generation(7), 1u);
 
     // a new queue 43 reuses doorbell 7 -> must carry the bumped generation,
     // so records from the old queue can never be attributed to the new one.
-    m.bind(qid(43), 7);
+    m.bind_and_resolve(qid(43), 7);
     auto e = m.get_by_queue(qid(43));
     ASSERT_TRUE(e.has_value());
     EXPECT_EQ(e->doorbell_off, 7u);
@@ -115,14 +114,13 @@ TEST(DoorbellMap, destroy_unknown_queue_is_noop)
     EXPECT_EQ(m.get_generation(7), 0u);
 }
 
-// bind() is an upsert (map[key]=), not insert-if-absent: re-binding the SAME
-// queue to a NEW doorbell must update its entry. (This is why bind() keeps []=
-// rather than emplace.)
+// Binding is an upsert (map[key]=), not insert-if-absent: re-binding the SAME
+// queue to a NEW doorbell must update its entry (kept []= rather than emplace).
 TEST(DoorbellMap, rebind_same_queue_updates_doorbell)
 {
     auto m = DoorbellMap{};
-    m.bind(qid(42), 7);
-    m.bind(qid(42), 9);  // same queue, new doorbell -> must overwrite
+    m.bind_and_resolve(qid(42), 7);
+    m.bind_and_resolve(qid(42), 9);  // same queue, new doorbell -> must overwrite
 
     auto e = m.get_by_queue(qid(42));
     ASSERT_TRUE(e.has_value());
@@ -135,8 +133,8 @@ TEST(DoorbellMap, rebind_same_queue_updates_doorbell)
 TEST(DoorbellMap, two_queues_same_doorbell_forward_resolves)
 {
     auto m = DoorbellMap{};
-    m.bind(qid(42), 7);
-    m.bind(qid(43), 7);
+    m.bind_and_resolve(qid(42), 7);
+    m.bind_and_resolve(qid(43), 7);
 
     auto a = m.get_by_queue(qid(42));
     auto b = m.get_by_queue(qid(43));
@@ -166,56 +164,62 @@ TEST(DoorbellMap, page_relative_slot_capture_matches_reader)
               doorbell_ptr_to_page_slot(0x7f0000004010ull, kPage));
 }
 
-// ---------------------------------------------------------------------------
-// CorrelationTable
-// ---------------------------------------------------------------------------
-TEST(CorrelationTable, insert_take_roundtrip)
+// bind_and_resolve is the per-dispatch hot-path helper: it binds the first time a
+// (queue, doorbell) pair is seen, then returns the cached entry on later calls.
+TEST(DoorbellMap, bind_and_resolve_binds_then_caches)
 {
-    auto t   = CorrelationTable{};
-    auto key = correlation_key{7, 100, 0};
-    t.insert(
-        key,
-        correlation_entry{/*sdk_dispatch_id=*/5, /*kernel_id=*/9, qid(42), /*enqueue_ts=*/123});
+    auto m = DoorbellMap{};
 
-    EXPECT_EQ(t.size(), 1u);
-    auto e = t.take(key);
-    ASSERT_TRUE(e.has_value());
-    EXPECT_EQ(e->sdk_dispatch_id, 5u);
-    EXPECT_EQ(e->kernel_id, 9u);
-    EXPECT_EQ(e->queue_id.handle, 42u);
-    EXPECT_EQ(e->enqueue_ts, 123u);
-    EXPECT_EQ(t.size(), 0u);  // take erased it
+    // First call binds (queue previously unknown) and resolves.
+    auto e1 = m.bind_and_resolve(qid(42), 4u);
+    EXPECT_EQ(e1.doorbell_off, 4u);
+    EXPECT_EQ(e1.generation, 0u);
+
+    // Subsequent calls return the same entry without changing state.
+    auto e2 = m.bind_and_resolve(qid(42), 4u);
+    EXPECT_EQ(e2.doorbell_off, 4u);
+    EXPECT_EQ(e2.generation, 0u);
+
+    // Equivalent to what get_by_queue reports.
+    auto snap = m.get_by_queue(qid(42));
+    ASSERT_TRUE(snap.has_value());
+    EXPECT_EQ(snap->doorbell_off, 4u);
+    EXPECT_EQ(snap->generation, 0u);
 }
 
-TEST(CorrelationTable, take_missing_returns_nullopt)
+// After a queue is destroyed and its doorbell reused by a new queue,
+// bind_and_resolve must rebind (clearing the uncertain mark) and report the
+// bumped generation -- never the stale one.
+TEST(DoorbellMap, bind_and_resolve_rebinds_on_doorbell_reuse)
 {
-    auto t = CorrelationTable{};
-    EXPECT_FALSE(t.take(correlation_key{1, 2, 3}).has_value());
+    auto m = DoorbellMap{};
+
+    m.bind_and_resolve(qid(1), 4u);  // gen 0
+    m.on_queue_destroyed(qid(1));    // doorbell 4 -> uncertain, gen bumped to 1
+    EXPECT_FALSE(m.is_generation_certain(4u));
+
+    // New queue reuses doorbell 4: resolve must rebind and hand back gen 1, certain.
+    auto e = m.bind_and_resolve(qid(2), 4u);
+    EXPECT_EQ(e.doorbell_off, 4u);
+    EXPECT_EQ(e.generation, 1u);
+    EXPECT_TRUE(m.is_generation_certain(4u));
 }
 
-TEST(CorrelationTable, erase_is_idempotent)
+// A queue that migrates to a different doorbell_off must resolve to the new slot,
+// not the cached old one.
+TEST(DoorbellMap, bind_and_resolve_follows_queue_to_new_doorbell)
 {
-    auto t   = CorrelationTable{};
-    auto key = correlation_key{7, 100, 0};
-    t.insert(key, correlation_entry{5, 9, qid(42), 123});
-    t.erase(key);  // present -> removed
-    t.erase(key);  // absent  -> no-op, must not crash
-    EXPECT_EQ(t.size(), 0u);
-}
+    auto m = DoorbellMap{};
 
-// insert() uses emplace (insert-if-absent): a duplicate key keeps the FIRST
-// entry, not the second. A correlation_key is unique per in-flight dispatch, so
-// this only guards the should-not-happen collision case.
-TEST(CorrelationTable, duplicate_insert_keeps_first)
-{
-    auto t   = CorrelationTable{};
-    auto key = correlation_key{7, 100, 0};
-    t.insert(key, correlation_entry{5, 9, qid(42), 123});
-    t.insert(key, correlation_entry{99, 88, qid(7), 456});  // must be ignored
-    EXPECT_EQ(t.size(), 1u);
-    auto e = t.take(key);
-    ASSERT_TRUE(e.has_value());
-    EXPECT_EQ(e->sdk_dispatch_id, 5u);  // first entry retained
+    auto a = m.bind_and_resolve(qid(7), 4u);
+    EXPECT_EQ(a.doorbell_off, 4u);
+
+    auto b = m.bind_and_resolve(qid(7), 8u);  // same queue, different doorbell
+    EXPECT_EQ(b.doorbell_off, 8u);
+
+    auto snap = m.get_by_queue(qid(7));
+    ASSERT_TRUE(snap.has_value());
+    EXPECT_EQ(snap->doorbell_off, 8u);
 }
 
 // ---------------------------------------------------------------------------

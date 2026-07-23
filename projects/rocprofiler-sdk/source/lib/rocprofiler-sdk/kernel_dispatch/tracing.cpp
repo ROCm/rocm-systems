@@ -23,7 +23,6 @@
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/common/logging.hpp"
 
-#include <fmt/core.h>
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -58,19 +57,22 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
     // both the GPU<->system rate ratio and epoch, via the runtime's own clock-sync
     // machinery). If anything is missing (no record, no agent, convert error) we
     // fall through to the unconditional HSA path below.
-    if(packet_data.kfd_correlation_key_valid && _hsa_agent)
+    if(packet_data.kfd_correlation_key_valid)
     {
         auto corr_key = kfd::correlation_key{packet_data.kfd_doorbell_off,
                                              packet_data.kfd_dispatch_idx_low32,
                                              packet_data.kfd_generation};
 
-        // Take the firmware result and unconditionally clear the correlation-table
-        // entry inserted at enqueue (so nothing leaks past completion), even when
-        // we ultimately fall back to HSA.
+        // Take the firmware result for this dispatch. A miss (no record yet, or
+        // never deposited) falls through to the unconditional HSA path below. The
+        // reader thread's evict_stale reclaims any result never taken here (e.g.
+        // dispatch completed via HSA fallback before its record arrived), so the
+        // results map stays bounded without an erase on this path.
         auto kfd_result = kfd::results_map().take(corr_key);
-        kfd::correlation_table().erase(corr_key);
 
-        if(kfd_result)
+        // Converting firmware ticks needs the agent; without it we cannot emit KFD
+        // timestamps, so fall through to the HSA path (which also handles null agent).
+        if(kfd_result && _hsa_agent)
         {
             const auto* _ext          = hsa::get_amd_ext_table();
             uint64_t    kfd_start_sys = 0;

@@ -40,13 +40,6 @@ doorbell_map()
     return *_v;
 }
 
-CorrelationTable&
-correlation_table()
-{
-    static auto*& _v = common::static_object<CorrelationTable>::construct();
-    return *_v;
-}
-
 ResultsMap&
 results_map()
 {

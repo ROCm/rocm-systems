@@ -184,7 +184,8 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
     const uint64_t signal_off = buf_bytes + arr_bytes * 2;
     s->alloc_size             = round_up_page(static_cast<size_t>(signal_off + arr_bytes));
 
-    uint64_t gpuvm_base = 0, gpuvm_limit = 0;
+    uint64_t gpuvm_base  = 0;
+    uint64_t gpuvm_limit = 0;
     if(!get_gpuvm_aperture(kfd, gpu_id, &gpuvm_base, &gpuvm_limit))
     {
         ROCP_WARNING << "KFD dispatch-log: gpuvm aperture lookup failed";
@@ -411,9 +412,14 @@ reader_loop()
     uint64_t total_seen    = 0;
     uint64_t last_evict_ns = common::timestamp_ns();
 
-    // Age out unpaired starts at most this often (not every 1 ms poll).
+    // Age out unpaired starts and un-taken results at most this often (not every
+    // 1 ms poll). A deposited result is normally taken within milliseconds by the
+    // completion path; anything older than kResultMaxAgeNs was never claimed (the
+    // dispatch completed via HSA fallback, or the firmware record was misattributed
+    // to a doorbell no dispatch keyed on) and must be reclaimed to bound memory.
     constexpr uint64_t kEvictIntervalNs = 1'000'000'000ull;  // 1 s
     constexpr uint64_t kStartMaxAgeNs   = 5'000'000'000ull;  // 5 s
+    constexpr uint64_t kResultMaxAgeNs  = 5'000'000'000ull;  // 5 s
 
     while(!st.stop.load(std::memory_order_acquire))
     {
@@ -439,6 +445,7 @@ reader_loop()
             if(now_ns - last_evict_ns >= kEvictIntervalNs)
             {
                 evict_stale_starts(&st.session, now_ns, kStartMaxAgeNs);
+                results_map().evict_stale(now_ns, kResultMaxAgeNs);
                 last_evict_ns = now_ns;
             }
         }

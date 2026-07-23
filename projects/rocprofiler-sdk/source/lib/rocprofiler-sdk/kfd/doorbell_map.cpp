@@ -26,19 +26,39 @@ namespace rocprofiler
 {
 namespace kfd
 {
-void
-DoorbellMap::bind(rocprofiler_queue_id_t queue_id, uint32_t doorbell_off)
+queue_doorbell_entry
+DoorbellMap::bind_locked(map_data& data, rocprofiler_queue_id_t queue_id, uint32_t doorbell_off)
 {
-    m_data.wlock([&](auto& data) {
-        // Preserve an existing generation for this doorbell; default to 0.
-        auto gen_it = data.generations.find(doorbell_off);
-        auto gen    = (gen_it != data.generations.end()) ? gen_it->second : 0u;
+    // Preserve an existing generation for this doorbell; default to 0.
+    auto gen_it = data.generations.find(doorbell_off);
+    auto gen    = (gen_it != data.generations.end()) ? gen_it->second : 0u;
 
-        data.by_queue[queue_id.handle] = queue_doorbell_entry{doorbell_off, gen};
-        data.by_doorbell[doorbell_off] = queue_id.handle;
-        data.generations[doorbell_off] = gen;
-        data.uncertain.erase(doorbell_off);  // confirmed live
+    auto entry                     = queue_doorbell_entry{doorbell_off, gen};
+    data.by_queue[queue_id.handle] = entry;
+    data.by_doorbell[doorbell_off] = queue_id.handle;
+    data.generations[doorbell_off] = gen;
+    data.uncertain.erase(doorbell_off);  // confirmed live
+    return entry;
+}
+
+queue_doorbell_entry
+DoorbellMap::bind_and_resolve(rocprofiler_queue_id_t queue_id, uint32_t doorbell_off)
+{
+    // Fast path: this queue is already bound to this exact doorbell_off and the
+    // doorbell is certain (not awaiting a post-destroy rebind). Steady state for
+    // every dispatch after the first -- a single read lock, no mutation.
+    auto fast = m_data.rlock([&](const auto& data) -> std::optional<queue_doorbell_entry> {
+        auto it = data.by_queue.find(queue_id.handle);
+        if(it == data.by_queue.end() || it->second.doorbell_off != doorbell_off)
+            return std::nullopt;
+        if(data.uncertain.find(doorbell_off) != data.uncertain.end()) return std::nullopt;
+        return it->second;
     });
+    if(fast) return *fast;
+
+    // Slow path: first dispatch for this queue, or a rebind after doorbell reuse.
+    // Take the write lock and bind (which also clears the uncertain mark).
+    return m_data.wlock([&](auto& data) { return bind_locked(data, queue_id, doorbell_off); });
 }
 
 std::optional<queue_doorbell_entry>

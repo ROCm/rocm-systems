@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: MIT */
-/* Minimal KFD dispatch-log stream UAPI for standalone test builds (v2). */
+/* KFD dispatch-log stream UAPI (profiler ABI v5). Vendored subset of the kernel
+ * UAPI needed by the SDK's dispatch-log reader; keep in sync with the kernel's
+ * kfd_dlog_uapi.h. */
 #ifndef KFD_DLOG_UAPI_H
 #define KFD_DLOG_UAPI_H
 

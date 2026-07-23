@@ -36,11 +36,11 @@
 // plus a per-doorbell generation counter.
 //
 // The active KFD ABI has no ENUM_QUEUES ioctl, so this map is NOT populated from
-// the kernel. It is built from the SDK's own view of queue lifecycle: bind() is
-// called when a queue is observed at enqueue time, on_queue_destroyed() when a
-// queue goes away. Destroying a queue bumps the doorbell's generation so a later
-// record on a reused doorbell cannot be misattributed to the dead queue's
-// dispatches.
+// the kernel. It is built from the SDK's own view of queue lifecycle:
+// bind_and_resolve() is called when a queue is observed at enqueue time,
+// on_queue_destroyed() when a queue goes away. Destroying a queue bumps the
+// doorbell's generation so a later record on a reused doorbell cannot be
+// misattributed to the dead queue's dispatches.
 
 namespace rocprofiler
 {
@@ -95,10 +95,17 @@ public:
     DoorbellMap& operator=(const DoorbellMap&) = delete;
     DoorbellMap& operator=(DoorbellMap&&) noexcept = delete;
 
-    // Record the doorbell_off for a live queue. Idempotent for an unchanged
-    // (queue_id, doorbell_off) pair. Preserves any existing generation for the
-    // doorbell and clears its "uncertain" mark (the queue is now confirmed).
-    void bind(rocprofiler_queue_id_t queue_id, uint32_t doorbell_off);
+    // Hot-path helper for the per-dispatch capture sites. Returns the queue's
+    // doorbell identity (doorbell_off + generation), binding it the first time
+    // this (queue_id, doorbell_off) pair is seen. Steady state is a single
+    // read lock: once a queue is bound and certain for this doorbell_off, this
+    // takes no write lock. The (comparatively rare) first dispatch per queue, or
+    // a rebind after doorbell reuse, takes the write lock to bind. nullopt is
+    // never returned for a valid doorbell_off; callers treat a returned entry as
+    // a certain, usable correlation key. Records the (queue_id, doorbell_off)
+    // binding and clears the doorbell's "uncertain" mark, preserving any existing
+    // generation.
+    queue_doorbell_entry bind_and_resolve(rocprofiler_queue_id_t queue_id, uint32_t doorbell_off);
 
     // Look up a queue's current doorbell + generation snapshot. nullopt if the
     // queue is unknown.
@@ -125,6 +132,11 @@ private:
         std::unordered_map<uint32_t /*doorbell_off*/, uint32_t /*generation*/>   generations;
         std::unordered_set<uint32_t /*doorbell_off*/>                            uncertain;
     };
+
+    // Shared bind logic; caller holds the write lock. Returns the bound entry.
+    static queue_doorbell_entry bind_locked(map_data&              data,
+                                            rocprofiler_queue_id_t queue_id,
+                                            uint32_t               doorbell_off);
 
     common::Synchronized<map_data> m_data = {};
 };

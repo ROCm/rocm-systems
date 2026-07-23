@@ -22,15 +22,14 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/kfd/correlation_table.hpp"
 #include "lib/rocprofiler-sdk/kfd/doorbell_map.hpp"
 #include "lib/rocprofiler-sdk/kfd/results_map.hpp"
 
-// Process-wide shared instances of the three KFD dispatch-log correlation
-// structures. Each is a single object for the whole process (see DoorbellMap
-// notes): the interceptor paths (enqueue) and the KFD reader thread all operate
-// on the same instances, bridged by correlation_key. Backed by
-// common::static_object so teardown is ordered at library unload.
+// Process-wide shared instances of the KFD dispatch-log correlation structures.
+// Each is a single object for the whole process (see DoorbellMap notes): the
+// interceptor paths (enqueue) and the KFD reader thread all operate on the same
+// instances, bridged by correlation_key. Backed by common::static_object so
+// teardown is ordered at library unload.
 
 namespace rocprofiler
 {
@@ -40,10 +39,6 @@ namespace kfd
 // queue lifecycle. Read on the enqueue path, written on queue create/destroy.
 DoorbellMap&
 doorbell_map();
-
-// in-flight dispatch -> SDK metadata. Inserted at enqueue, taken at completion.
-CorrelationTable&
-correlation_table();
 
 // firmware timing keyed by correlation_key. Deposited by the reader thread,
 // taken in get_dispatch_time().

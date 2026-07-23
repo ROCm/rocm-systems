@@ -191,7 +191,8 @@ TEST(dlog_drain, two_pipes_asymmetric_capture_both)
     uint64_t pairs = run_drain(ring, st, rec);
 
     EXPECT_EQ(pairs, 60u);  // 20 + 40, both pipes captured
-    uint32_t a = 0, b = 0;
+    uint32_t a = 0;
+    uint32_t b = 0;
     for(auto& kv : rec.pairs)
     {
         if(kv.first.first == dbA) ++a;

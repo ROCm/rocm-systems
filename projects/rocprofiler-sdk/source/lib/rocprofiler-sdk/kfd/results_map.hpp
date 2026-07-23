@@ -62,7 +62,9 @@ public:
     ResultsMap& operator=(const ResultsMap&) = delete;
     ResultsMap& operator=(ResultsMap&&) noexcept = delete;
 
-    // Deposit a paired result (KFD reader thread). Overwrites any existing entry.
+    // Deposit a paired result (KFD reader thread). Insert-if-absent
+    // (first-writer-wins): a duplicate key keeps the existing entry rather than
+    // overwriting it. See the emplace note in deposit().
     void deposit(const correlation_key& key, const kfd_timing_result& result);
 
     // Atomically find + erase. nullopt if not present.
