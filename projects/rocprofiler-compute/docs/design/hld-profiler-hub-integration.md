@@ -116,7 +116,7 @@ This section is a summary of requirements from Profiler Hub. Design section belo
 
 ## Design
 ### Linking with Profiler Hub
-- Profiler Hub should be compiled and linked with `rocprofiler-compute-tool.so` via out-of-source-tree `add_subdirectory`. 
+- Profiler Hub should be compiled and linked with `rocprofiler-compute-tool.so` via out-of-source-tree `add_subdirectory`.
 - For this, compute shall be moved in `projects/profilers` directory, so that dependent projects are localized. This localization, for example, would allow to impose a clear requirement to sparse-checkout whole `projects/profilers` directory in order to build profilers. And this requirement in turn would make it easier to reuse code between components.
 - Other options considered:
     - Sparse-checkout of Profiler Hub as submodule. Rejected because that adds an unnecessary complexity to the dependency with component which is part of profilers anyway.
@@ -199,7 +199,7 @@ Therefore, over the course of this transition the data which is collected in a `
 
 ## Implementation phases
 1. Integration of Profiler Hub in `rocprofiler-compute-tool.so`. This phase is covered by ./lld-profiler-hub-native-tool-integration.md. At the end of this phase:
-    - Metrics are written into per process databases via Profiler Hub. 
+    - Metrics are written into per process databases via Profiler Hub.
     - However analysis scripts still access per-process databases directly and merge both SDK and `rocprofiler-compute-tool.so` into a per-pass database.
 2. Implementation of Python bindings for Profiler Hub. At the end of this phase:
     - Python bindings are added to Profiler Hub library (directly in Profiler Hub project directory).
@@ -212,4 +212,3 @@ Therefore, over the course of this transition the data which is collected in a `
 ## Validation
 - Validation is done via existing functional tests, they all shall pass.
 - No additional tests or tracing/debug features required.
-
