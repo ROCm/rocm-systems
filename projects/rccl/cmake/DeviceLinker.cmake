@@ -70,6 +70,14 @@ else()
   set(DL_OPT_FLAGS -O3 -DNDEBUG)
 endif()
 
+# When RCCL_DEVICE_SAVE_TEMPS is on, tell the driver to keep intermediate
+# per-kernel assembly (.full.s/.extracted.s next to each .o) and the per-arch
+# dispatcher temps (dispatcher_<arch>.s etc.) alongside device.elf.
+set(DL_KEEP_TEMPS "")
+if(RCCL_DEVICE_SAVE_TEMPS)
+  set(DL_KEEP_TEMPS --keep-temps)
+endif()
+
 # ---------------------------------------------------------------------------
 # INTERFACE library: shared definitions and includes for device compilation.
 # Reads from the rccl target (already fully configured) and directory scope.
@@ -241,6 +249,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     ${DL_OPT_FLAGS}
     -std=c++17
     ${DL_HIP_COMPILER_FLAGS}
+    ${DL_KEEP_TEMPS}
   )
   target_compile_definitions(${_dev_target} PRIVATE RCCL_DEVICE_LINKER)
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
@@ -318,6 +327,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       --link
       --arch=${DL_GPU_TARGET}
       --clang=${DL_CLANG}
+      ${DL_KEEP_TEMPS}
       ${DL_HIP_COMPILER_FLAGS}
       --dispatcher=${HIPIFY_DIR}/src/device/common.cu.cpp
       ${_rocshmem_bitcode_arg}
@@ -758,3 +768,26 @@ set(DEVICE_LINKER_OBJECTS
 # ===========================================================================
 add_custom_target(device_ir DEPENDS ${ALL_IR_FILES})
 add_dependencies(device_ir hipify_all copy_nccl_device_headers)
+
+# ===========================================================================
+# Optional: structured per-kernel assembly summary (ninja device_asm_summary)
+# ===========================================================================
+# Parses the per-kernel .full.s saved when RCCL_DEVICE_SAVE_TEMPS=ON into a
+# <base>.analysis.json beside each object, plus an aggregate JSON + CSV under
+# device_build/.  Captures the compiler's own accounting (registers, scratch,
+# occupancy, spill/save-restore, instruction mix, intra-TU call graph) so A/B
+# analysis after a source change never has to guess from disassembly.
+add_custom_target(device_asm_summary
+  COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/analyze_device_asm.py
+    --root ${PROJECT_BINARY_DIR}
+    --aggregate ${DEVICE_BUILD_DIR}/device_asm_summary.json
+    --csv ${DEVICE_BUILD_DIR}/device_asm_summary.csv
+  WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+  COMMENT "Analyzing saved device assembly -> per-kernel .analysis.json + aggregate"
+  VERBATIM
+)
+if(NOT RCCL_DEVICE_SAVE_TEMPS)
+  add_custom_command(TARGET device_asm_summary PRE_BUILD
+    COMMAND ${CMAKE_COMMAND} -E echo
+      "WARNING: RCCL_DEVICE_SAVE_TEMPS=OFF; no per-kernel .full.s to analyze. Reconfigure with -DRCCL_DEVICE_SAVE_TEMPS=ON.")
+endif()
