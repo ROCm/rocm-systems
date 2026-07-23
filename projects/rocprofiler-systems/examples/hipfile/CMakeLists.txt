@@ -89,10 +89,7 @@ if(HIP_FOUND AND Threads_FOUND)
     target_compile_definitions(hipfile-trace PRIVATE __HIP_PLATFORM_AMD__)
     target_link_libraries(
         hipfile-trace
-        PRIVATE
-            hip::host
-            ${hipfile_TARGET}
-            Threads::Threads
+        PRIVATE hip::host ${hipfile_TARGET} Threads::Threads
     )
     target_compile_options(hipfile-trace PRIVATE ${_FLAGS})
 
