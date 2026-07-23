@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/file_io.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 #include "rocjitsu/isa/target_registry.h"
 
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <utility>
 
 namespace rocjitsu {
@@ -283,48 +285,26 @@ namespace {
   return amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF;
 }
 
-// A kernel descriptor decoded out of the section that holds it, paired with its
-// file offset (for descriptor writeback).
-struct LocatedKernelDescriptor {
-  rocr::llvm::amdhsa::kernel_descriptor_t desc;
-  uint64_t file_offset;
-};
-
-// Find the allocated section whose address range covers @p kd_vaddr and decode
-// the descriptor out of that section's own bytes (no ELF re-walk). Returns
-// nullopt when no section covers the descriptor or it does not fully fit.
-[[nodiscard]] std::optional<LocatedKernelDescriptor>
-locate_kernel_descriptor(const std::vector<std::unique_ptr<Section>> &sections, uint64_t kd_vaddr) {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
-  for (const auto &section : sections) {
-    const uint64_t base = section->vaddr();
-    if (base == 0 || kd_vaddr < base)
-      continue;
-    const uint64_t off = kd_vaddr - base;
-    if (off + sizeof(KD) > section->size())
-      continue;
-    LocatedKernelDescriptor located;
-    std::memcpy(&located.desc, section->data() + off, sizeof(KD));
-    located.file_offset = section->sectionOffset() + off;
-    return located;
-  }
-  return std::nullopt;
-}
-
 } // namespace
 
 std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch) const {
   namespace kd = rocr::llvm::amdhsa;
 
+  const std::span<const uint8_t> image{reinterpret_cast<const uint8_t *>(image_data()),
+                                       image_size()};
   std::optional<uint32_t> min_count;
-  for (const auto &entry : kd_offsets_) {
-    const auto located = locate_kernel_descriptor(all_sections(), entry.second);
-    if (!located)
-      continue;
-    const uint32_t granulated = AMDHSA_BITS_GET(
-        located->desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-    const uint32_t count = sgpr_count_from_granulated(granulated, arch);
-    min_count = min_count ? std::min(*min_count, count) : count;
+  // Discover descriptors through the shared scanner (the single DBT/DBI discovery
+  // path) rather than re-walking sections here. scan_kernel_descriptors() filters
+  // to a single .text extent, so visit each text section to cover every kernel.
+  for (const Section *text : text_sections()) {
+    for (const KernelDescriptorInfo &kernel :
+         scan_kernel_descriptors(image, text->sectionOffset(), text->size())) {
+      const uint32_t granulated =
+          AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc1,
+                          kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+      const uint32_t count = sgpr_count_from_granulated(granulated, arch);
+      min_count = min_count ? std::min(*min_count, count) : count;
+    }
   }
   return min_count;
 }
