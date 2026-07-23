@@ -59,33 +59,9 @@ Before writing new infrastructure, check these existing libraries:
 
 ## Code style
 
-- **C++20.** Use standard library features (concepts, ranges, `std::format`).
-- **Formatting.** The repo uses pre-commit hooks (clang-format for C++,
-  black for Python, gersemi for CMake). Install once and run before
-  every commit:
-  ```bash
-  pip install pre-commit
-  pre-commit install
-  pre-commit run --all-files
-  ```
-  The config lives at the repo root (`rocm-systems/.pre-commit-config.yaml`).
-- **Naming.** Use clear, descriptive names. No single-letter variables.
-  Non-trivial types with methods must be `class` (not `struct`).
-  Maintain `public:` / `protected:` / `private:` ordering.
-- **Comments.** Use `@brief` / `@details` doxygen style when documenting
-  public APIs. Avoid decorative comment lines (`---`, `===`). Default
-  to writing no comments; only comment when the *why* is non-obvious.
-- **No `fprintf`.** Always use `Logger` from `util/log.h`.
-- **Exceptions.** Exceptions are used only for unrecoverable errors
-  during initialization and configuration (`ConfigError`) or when
-  encountering invalid/unimplemented instructions during code object
-  parsing (`InvalidInst`, `UnimplementedInst`). All exception types
-  live in `util/except.h`. Do not throw exceptions in simulation hot
-  paths (event handlers, instruction execution, cache lookups). Do not
-  add `try`/`catch` blocks unless you are at a boundary that must
-  translate an error (e.g., the C API layer). There is no general
-  exception safety guarantee — assume code is not exception-safe
-  unless explicitly documented.
+Follow [docs/style.md](docs/style.md), the authoritative style guide for
+rocjitsu C++, Python, CMake, formatting, naming, documentation, logging, and
+error handling.
 
 ## ISA codegen workflow
 
