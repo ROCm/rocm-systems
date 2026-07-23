@@ -83,7 +83,7 @@ public:
     /// True iff every trigger of @p event_scope except @p name currently has
     /// a trace/skip action. Used where a trigger's own write decision must
     /// also respect other triggers' actions without double-counting its own.
-    [[nodiscard]] bool is_active_excluding_trigger(
+    [[nodiscard]] bool is_active_without(
         std::string_view name, scope event_scope = scope::global) const noexcept;
 
 private:

@@ -68,11 +68,7 @@ disable_categories(const std::set<std::string>& _categories)
 void
 setup()
 {
-    // disable user-disabled categories. TRACE_DELAY/DURATION gating is
-    // owned by the time_window trigger wired into the control session
-    // (see library.cpp); recording paths are paused via subsystem subscribers
-    // when the session pauses, so no per-category trait flipping is needed
-    // here.
+    // disable specified categories
     disable_categories();
 }
 
