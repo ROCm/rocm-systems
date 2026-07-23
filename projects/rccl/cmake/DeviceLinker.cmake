@@ -88,7 +88,20 @@ message(STATUS "Device Linker: GPU targets = ${DL_GPU_TARGETS}")
 # time. An explicit Debug + coverage build (user passed --debug) still
 # gets -g so debugging works.
 # ---------------------------------------------------------------------------
-if(RCCL_COVERAGE_FORCED_LITE_DEBUG)
+if(ENABLE_DEVICE_COVERAGE)
+  # Device coverage must drop DWARF entirely (-g0), even for an explicit --debug
+  # build. LLVM source-based coverage does NOT use DWARF: the region/line mapping
+  # lives in __llvm_covfun/__llvm_covmap and the counters in __llvm_prf_*, so
+  # llvm-cov needs only device.elf + the merged .profdata. RCCL instantiates
+  # thousands of specialized device kernels; even -gline-tables-only emits ~660 MB
+  # of .debug_* (one subprogram DIE per function). Together with the instrumented
+  # .text (~1.5 GB) that pushes the per-arch device.elf past ~2 GB (INT32_MAX), at
+  # which point the compressed HIP fat binary can no longer be unbundled at load
+  # (COMGR AMD_COMGR_ACTION_UNBUNDLE fails -> "Failed to unbundle code object" ->
+  # every collective kernel launch returns hipErrorInvalidDeviceFunction). Dropping
+  # DWARF holds the object comfortably under that limit without affecting coverage.
+  set(DL_OPT_FLAGS -O1 -g0)
+elseif(RCCL_COVERAGE_FORCED_LITE_DEBUG)
   set(DL_OPT_FLAGS -O1 -gline-tables-only)
 elseif(CMAKE_BUILD_TYPE MATCHES "Debug")
   set(DL_OPT_FLAGS -O1 -g)
@@ -217,6 +230,37 @@ if(DL_DEVICE_PROFILE_RT)
     -Xoffload-linker -plugin-opt=-amdgpu-internalize-symbols=false
     -Xoffload-linker "${DL_DEVICE_PROFILE_ANCHOR}"
     -Xoffload-linker "${DL_DEVICE_PROFILE_RT}")
+endif()
+
+# ---------------------------------------------------------------------------
+# Main-module coverage drain: deterministic compilation-unit ID (-cuid).
+#
+# The device profile runtime drains a per-arch device.elf by looking up a host
+# "shadow" variable __llvm_profile_sections_<CUIDHash> (registered from the host
+# TU via __hipRegisterVar) and resolving it to the identically-named device
+# global with hipGetSymbolAddress. The device global points at the module-wide
+# __start/__stop___llvm_prf_{cnts,data,names} boundaries, so draining through
+# ANY ONE descriptor drains the entire linked device.elf.
+#
+# The main RDC module is compiled in two separate steps: the device side
+# (dispatcher common.cu.cpp inside --link, plus the per-kernel TUs) and the host
+# side (common.cu.cpp --offload-host-only). With the default -fuse-cuid=hash each
+# step derives a different CUID from its own file path + command line, so the
+# host shadow name (e.g. a2f3...) never matches any of the device descriptors and
+# hipGetSymbolAddress fails -> device counters read back as zero.
+#
+# Pin BOTH the dispatcher device compile and the host common.cu.cpp compile to
+# the same explicit -cuid so their __llvm_profile_sections_<CUIDHash> names match
+# (CUIDHash = MD5(cuid), identical across separate invocations). This is the
+# compiler's intended lever for split host/device compilation (see the codegen
+# test clang/test/CodeGenHIP/offload-pgo-sections.hip, which passes -cuid=abc to
+# both cc1 jobs). It must NOT be applied to the per-kernel device TUs: they are
+# distinct compilation units and a shared CUID would collide on the (non-weak)
+# __llvm_profile_sections_<CUIDHash> device global at link time.
+set(DL_MAIN_MODULE_CUID_FLAGS "")
+if(ENABLE_DEVICE_COVERAGE)
+  set(DL_MAIN_MODULE_CUID_FLAGS -cuid=rccl_main_module)
+  message(STATUS "Device Linker: main-module coverage CUID pinned = rccl_main_module")
 endif()
 
 # Expose the resolved device profile RT to other subdirectories (e.g. test/),
@@ -489,6 +533,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       ${_link_inc_flags}
       ${DL_OPT_FLAGS}
       ${DL_COVERAGE_FLAGS}
+      ${DL_MAIN_MODULE_CUID_FLAGS}
       -std=c++17
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
@@ -622,6 +667,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_COVERAGE_FLAGS}
+    ${DL_MAIN_MODULE_CUID_FLAGS}
     -std=c++17
     -fPIC
     ${DL_HOST_COMPRESS}
