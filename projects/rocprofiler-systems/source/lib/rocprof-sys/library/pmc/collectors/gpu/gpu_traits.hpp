@@ -169,8 +169,7 @@ struct gpu_traits
                                   (filter.mode == device_selection_mode::SPECIFIC &&
                                    filter.indices.count(index) > 0);
 
-            if(should_include && restrict_visibility &&
-               !is_runtime_visible(device, visible_bdfs))
+            if(should_include && !is_runtime_visible(device, visible_bdfs))
             {
                 LOG_INFO("{} device [{}] (BDF {}) is not visible to the ROCm runtime "
                          "(ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES); excluding from "
