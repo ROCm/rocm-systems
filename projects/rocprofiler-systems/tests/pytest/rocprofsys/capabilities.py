@@ -407,11 +407,12 @@ class SystemCapabilities:
             timeout=10,
             check=True,
         )
-        # This should never fail
-        match = re.search(r"ROCPROFSYS_MAX_THREADS\s*=\s*(\d+)", result.stdout)
+        # Must stay in sync with the exact line printed by rocprof-sys-avail's
+        # `--max-threads` action (source/bin/rocprof-sys-avail/avail.cpp).
+        match = re.search(r"total number of threads:\s*(\d+)", result.stdout)
         if not match:
             raise RuntimeError(
-                "Could not parse ROCPROFSYS_MAX_THREADS from "
+                "Could not parse the thread limit from "
                 f"'{self.rocprofsys_avail} --max-threads' output: "
                 f"{result.stdout!r}"
             )
