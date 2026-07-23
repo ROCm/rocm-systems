@@ -1243,8 +1243,7 @@ static bool is_supported_on_drm(alloc_flags_t alloc_flags) {
 	 * already handles ALLOC_DOMAIN_SYSTEM (userptr or GTT heap). */
 	return (alloc_flags.domain == ALLOC_DOMAIN_VRAM) ||
                (alloc_flags.domain == ALLOC_DOMAIN_SYSTEM) ||
-               (alloc_flags.domain == ALLOC_DOMAIN_USERMEM) ||
-               (alloc_flags.domain == ALLOC_DOMAIN_MMIO);
+               (alloc_flags.domain == ALLOC_DOMAIN_USERMEM);
 }
 
 static uint32_t fmm_translate_alloc_to_kfd_ioc_flags(
@@ -1505,9 +1504,6 @@ static vm_object_t *fmm_allocate_memory_object_drm(
 			}
 			} else if (alloc_flags.domain == ALLOC_DOMAIN_SYSTEM) {
 					gem_domain = AMDGPU_GEM_DOMAIN_GTT;
-			} else if (alloc_flags.domain == ALLOC_DOMAIN_MMIO) {
-					gem_domain = AMDGPU_GEM_DOMAIN_MMIO_REMAP;
-					gem_flags |= AMDGPU_GEM_CREATE_COHERENT;
 			} else {
 					pr_err("Unsupported allocation domain! (domain: %u)\n", alloc_flags.domain);
 					return NULL;
@@ -3198,6 +3194,63 @@ static void *map_mmio(HsaKFDContext *ctx,
 	uint64_t mmap_offset;
 	alloc_flags_t alloc_flags = { .domain = ALLOC_DOMAIN_MMIO, .mflags = {{{0}}} };
 
+	/* DRM user-queue mode: the MMIO_REMAP page is a kernel-internal global BO
+	 * (kernel commit "Drop MMIO_REMAP domain bit and keep it Internal"). It is
+	 * no longer allocatable via a GEM domain; instead open the kernel's global
+	 * MMIO_REMAP BO with AMDGPU_GEM_OP_OPEN_GLOBAL and mmap it for HDP flush
+	 * register access. This uses the DRM render node only (no KFD). */
+	if (hsakmt_enable_drm) {
+		amdgpu_device_handle dev;
+		struct drm_amdgpu_gem_op gem_op = {0};
+		union drm_amdgpu_gem_mmap mmap_arg = {0};
+		int drm_fd;
+		void *cpu;
+
+		dev = fmm_get_amdgpu_device_handle(fmm_ctx, gpu_id);
+		if (!dev) {
+			pr_err("map_mmio(drm): no amdgpu device handle for gpu_id 0x%x\n", gpu_id);
+			return NULL;
+		}
+		drm_fd = hsakmt_amdgpu_device_get_fd(dev);
+		if (drm_fd < 0) {
+			pr_err("map_mmio(drm): amdgpu_device_get_fd failed: %d\n", drm_fd);
+			return NULL;
+		}
+
+		/* Open the kernel's global MMIO_REMAP BO -> per-file GEM handle. */
+		gem_op.handle = AMDGPU_GEM_GLOBAL_MMIO_REMAP;
+		gem_op.op = AMDGPU_GEM_OP_OPEN_GLOBAL;
+		gem_op.value = 0;
+		if (hsakmt_ioctl(drm_fd, DRM_IOCTL_AMDGPU_GEM_OP, &gem_op)) {
+			pr_err("map_mmio(drm): GEM_OP_OPEN_GLOBAL(MMIO_REMAP) failed: %s\n",
+			       strerror(errno));
+			return NULL;
+		}
+
+		/* Query the mmap offset and map the page for CPU (HDP flush) access. */
+		mmap_arg.in.handle = gem_op.handle;
+		if (hsakmt_ioctl(drm_fd, DRM_IOCTL_AMDGPU_GEM_MMAP, &mmap_arg)) {
+			pr_err("map_mmio(drm): GEM_MMAP failed: %s\n", strerror(errno));
+			goto drm_close;
+		}
+		cpu = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
+			   drm_fd, mmap_arg.out.addr_ptr);
+		if (cpu == MAP_FAILED) {
+			pr_err("map_mmio(drm): mmap MMIO_REMAP failed: %s\n", strerror(errno));
+			goto drm_close;
+		}
+		return cpu;
+
+drm_close:
+		{
+			struct drm_gem_close gem_close = {0};
+
+			gem_close.handle = gem_op.handle;
+			hsakmt_ioctl(drm_fd, DRM_IOCTL_GEM_CLOSE, &gem_close);
+		}
+		return NULL;
+	}
+
 	/* Allocate physical memory and vm object*/
 	mem = __fmm_allocate_device(ctx,
 			gpu_id, NULL, PAGE_SIZE, aperture,
@@ -3246,6 +3299,13 @@ static void release_mmio(HsaKFDContext *ctx)
 	for (gpu_mem_id = 0; gpu_mem_id < fmm_ctx->gpu_mem_count; gpu_mem_id++) {
 		if (!fmm_ctx->gpu_mem[gpu_mem_id].mmio_aperture.base)
 			continue;
+		/* DRM mode: the MMIO_REMAP page is a plain mmap of the kernel's global
+		 * BO (opened via GEM_OP_OPEN_GLOBAL, not tracked in an SVM aperture),
+		 * so just unmap it. The GEM handle is released on render-fd close. */
+		if (hsakmt_enable_drm) {
+			munmap(fmm_ctx->gpu_mem[gpu_mem_id].mmio_aperture.base, PAGE_SIZE);
+			continue;
+		}
 		hsakmt_fmm_unmap_from_gpu(ctx, fmm_ctx->gpu_mem[gpu_mem_id].mmio_aperture.base);
 		munmap(fmm_ctx->gpu_mem[gpu_mem_id].mmio_aperture.base, PAGE_SIZE);
 		hsakmt_fmm_release(ctx, fmm_ctx->gpu_mem[gpu_mem_id].mmio_aperture.base);
