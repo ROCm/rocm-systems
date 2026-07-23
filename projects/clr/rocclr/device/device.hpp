@@ -102,7 +102,9 @@ enum MemoryAdvice : uint32_t {
                                ///< the amount of page faults
   UnsetAccessedBy = 6,         ///< HMM decides on the page faulting policy for the specified device
   SetCoarseGrain = 100,        ///< Change cache policy to improve performance (disables coherency)
-  UnsetCoarseGrain = 101       ///< Restore coherent cache policy at the cost of some performance
+  UnsetCoarseGrain = 101,      ///< Restore coherent cache policy at the cost of some performance
+  ResetAttributes = 200        ///< Internal: reset all SVM attributes for the range to defaults
+                               ///< (maps to hsa_amd_svm_attributes_set with attribute_count == 0)
 };
 
 enum MemRangeAttribute : uint32_t {

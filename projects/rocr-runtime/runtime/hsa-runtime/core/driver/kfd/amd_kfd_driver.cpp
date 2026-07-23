@@ -964,6 +964,10 @@ hsa_status_t KfdDriver::SvmSetAttr(void* base, size_t size,
   uint32_t set_flags = 0;
   uint32_t clear_flags = 0;
 
+    //do not set any attributes if count is 0, just return success
+  if (count == 0)
+    return HSA_STATUS_SUCCESS;
+
   auto kmtPair = [](uint32_t attrib, uint32_t value) {
     HSA_SVM_ATTRIBUTE pair = {attrib, value};
     return pair;

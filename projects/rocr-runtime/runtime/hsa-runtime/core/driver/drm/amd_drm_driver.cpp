@@ -434,6 +434,18 @@ hsa_status_t DrmDriver::SvmSetAttr(void* base, size_t size,
   if (gpu_agents.empty())
     return HSA_STATUS_ERROR;
 
+  // if count is 0, reset all attributes to default values
+  if (count == 0) {
+    for (core::Agent* agent : gpu_agents) {
+      amdgpu_device_handle dev = static_cast<GpuAgent*>(agent)->libDrmDev();
+      if (dev == nullptr)
+        continue;
+      if (amdgpu_svm_reset_attr(dev, reinterpret_cast<uint64_t>(base), size))
+        return HSA_STATUS_ERROR;
+    }
+    return HSA_STATUS_SUCCESS;
+  }
+
   std::vector<drm_amdgpu_svm_attribute> common;
   std::unordered_map<core::Agent*, std::vector<drm_amdgpu_svm_attribute>> per_device;
   // Bitmasks of boolean DRM attributes to set (=1) or clear (=0), indexed by

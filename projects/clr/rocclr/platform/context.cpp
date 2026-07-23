@@ -374,6 +374,15 @@ void Context::svmFree(void* ptr) const {
   // The actual HSA free (release) is deferred until after all devices have
   // iterated, so KFD cannot reuse the VA during the loop.
   amd::Memory* svmMem = amd::MemObjMap::FindAndRemoveMemObj(ptr);
+
+  // Reset kernel SVM attributes before the underlying munmap to prevent
+  // residual attributes from leaking to future allocations that reuse
+  // the same virtual address range.
+  if (svmMem != nullptr && !svmAllocDevice_.empty()) {
+    svmAllocDevice_.front()->SetSvmAttributes(ptr, svmMem->getSize(),
+                                              amd::MemoryAdvice::ResetAttributes);
+  }
+
   for (const auto& dev : svmAllocDevice_) {
     dev->svmFree(ptr);  // FindMemObj returns nullptr → no-op for GPU path
   }
