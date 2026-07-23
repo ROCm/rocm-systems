@@ -2834,11 +2834,11 @@
       "tests": [
         {
           "name": "Bootstrap_Combined",
-          "description": "Combined NCCL_OOB_NET_ENABLE + NCCL_OOB_NET_IFNAME + NCCL_UID_STAGGER_RATE + NCCL_UID_STAGGER_THRESHOLD",
+          "description": "Combined NCCL_OOB_NET_ENABLE + NCCL_OOB_NET_IFNAME + NCCL_UID_STAGGER_RATE + NCCL_UID_STAGGER_THRESHOLD. With OOB net enabled the OOB device is selected from the NET plugin (IB) device list, so NCCL_OOB_NET_IFNAME must name an HCA (mlx5_*), not an ethernet interface.",
           "command_args": "-o all",
           "env_variables": {
             "NCCL_OOB_NET_ENABLE": "1",
-            "NCCL_OOB_NET_IFNAME": "eth0",
+            "NCCL_OOB_NET_IFNAME": "mlx5_0",
             "NCCL_UID_STAGGER_RATE": "5000",
             "NCCL_UID_STAGGER_THRESHOLD": "128"
           }
