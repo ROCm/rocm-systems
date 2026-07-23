@@ -37,6 +37,12 @@ jobs:
     name: ${{matrix.target.name}}
     runs-on: ${{matrix.target.runs-on}}
     container: ${{matrix.target.container}}
+    # Shared build directory: build_wheel.py writes the CMake build tree here,
+    # and the SONAME conflict check reads both libraries back from it. Setting
+    # it explicitly (rather than relying on build_wheel.py's default) keeps the
+    # two steps coupled to one value.
+    env:
+      AMDSMI_WHEEL_BUILD_DIR: /tmp/amdsmi-build
 
     strategy:
       fail-fast: false
@@ -82,6 +88,7 @@ jobs:
           ${{matrix.target.python-bin}} \
             "$GITHUB_WORKSPACE/projects/amdsmi/tools/build_wheel.py" \
             --project-dir "$GITHUB_WORKSPACE/projects/amdsmi" \
+            --build-dir "$AMDSMI_WHEEL_BUILD_DIR" \
             --output-dir "$GITHUB_WORKSPACE/wheels" \
             --os-variant ${{matrix.target.os-variant}} \
             ${{matrix.target.repair-flag}}
@@ -98,13 +105,17 @@ jobs:
         run: |
           ${{matrix.target.python-bin}} \
             "$GITHUB_WORKSPACE/projects/amdsmi/tests/run_amdsmi_pkg_conflict_test.py" \
-            --build-root /tmp/amdsmi-build
+            --build-root "$AMDSMI_WHEEL_BUILD_DIR"
 
       - name: Smoke test (install + import)
         run: |
           ${{matrix.target.python-bin}} -m pip install --upgrade pip
           ${{matrix.target.python-bin}} -m pip install "$GITHUB_WORKSPACE"/wheels/*.whl
           ${{matrix.target.python-bin}} -c "import amdsmi; print('amdsmi import OK')"
+          # The wheel must ship with the system-library fallback disabled, so a
+          # build-step ordering regression that leaves it enabled fails here
+          # rather than shipping a wheel that can silently load a system .so.
+          ${{matrix.target.python-bin}} -c "import amdsmi.amdsmi_wrapper as w; assert not w._AMDSMI_ALLOW_SYSTEM_FALLBACK, 'wheel shipped with system fallback enabled'; print('fallback disabled OK')"
 
       - name: Upload wheels (by SHA)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
