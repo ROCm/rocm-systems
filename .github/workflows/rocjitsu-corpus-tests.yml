@@ -74,7 +74,8 @@ jobs:
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
           - name: tsan
-            allow_failure: true
+            allow_failure: false
+            run_static_asan_launch: true
             test_regex: ''
             build_type: RelWithDebInfo
             enable_asan: 0
@@ -93,16 +94,6 @@ jobs:
             sanitizer_runtime: SHARED
             c_compiler: gcc
             cxx_compiler: g++
-          - name: tsan-validated
-            allow_failure: false
-            run_static_asan_launch: true
-            test_regex: ''
-            build_type: RelWithDebInfo
-            enable_asan: 0
-            enable_ubsan: 0
-            enable_tsan: 1
-            enable_expensive_checks: 0
-            sanitizer_runtime: STATIC
 
     steps:
       - name: Install base dependencies
@@ -186,8 +177,8 @@ jobs:
           )
           TSAN_SHARED_EXCLUDED_TESTS=(
             # With the shared TSan runtime, the nested HIP process repeatedly
-            # returns EPERM from process_vm_readv and the test times out. The
-            # static TSan configuration runs this test successfully.
+            # returns EPERM from process_vm_readv and the test times out. A
+            # local static TSan configuration runs this test successfully.
             "RocjitsuCliDaemon\.LaunchesApplicationAfterDaemonIsReady"
           )
 
