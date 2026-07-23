@@ -115,6 +115,18 @@ namespace rocjitsu::amdgpu {
 #include <cstdio>  // not <stdio.h>
 ```
 
+- Use `auto` only when the type is obvious from the immediate context (e.g. the
+  RHS spells out the type, such as a constructor call or a cast). Do not use
+  `auto` when the type can't be determined by looking at the line itself.
+
+```cpp
+auto x = foo(); // BAD, type not obvious
+
+auto x = std::make_unique<Foo>(); // OK, can tell from the RHS
+
+Foo foo = static_cast<Foo>(bar); // OK but could use auto instead to avoid repetitiveness
+```
+
 ## Logging
 
 - Never use `fprintf`, `printf`, or `std::cerr`. Use `Logger` from `util/log.h`
