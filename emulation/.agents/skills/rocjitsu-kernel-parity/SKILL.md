@@ -1,7 +1,7 @@
 ---
 name: rocjitsu-kernel-parity
 description: Compare rocjitsu's simulated Linux KFD/AMDGPU behavior with a Linux source checkout and derive focused tests. Use when reviewing or implementing KFD ioctls, DRM/AMDGPU interposition, queue, doorbell, event, memory mapping, process, topology, or error semantics, or when asked whether rocjitsu matches kernel behavior.
-compatibility: Requires read access to a Linux source checkout, normally ~/linux; confidential supplemental PDFs may exist in ~/referance.
+compatibility: Requires read access to a Linux source checkout, normally ~/linux; supplemental documents may exist under ~/reference.
 metadata:
   author: ROCm
   version: "1.0"
@@ -25,11 +25,19 @@ the observable contract remains correct and the project layering is preserved.
 4. Trace behavior from public entry point through validation, state mutation,
    synchronization, and cleanup. Matching a struct declaration is not proof of
    matching behavior.
-5. Confidential PDFs in `~/referance` are supplemental only. Never quote,
-   name, link, cite, summarize, expose their path in a report, or repeat
-   non-public terminology. Findings must be justified by repository code,
-   publicly identifiable Linux source, or reproducible tests.
-6. Separate verified mismatch, intentional emulation difference, version skew,
+5. Public shader programming guides, ISA manuals, and architecture documents
+   may be stored in `~/reference/public/shader-programming-guides`; users can
+   obtain public copies from
+   [AMD GPU architecture programming documentation](https://gpuopen.com/amd-gpu-architecture-programming-documentation/).
+   Keep confidential PDFs separately in `~/reference/confidential`.
+6. Confidential references are supplemental only. Never quote, name, link,
+   copy, cite, summarize, upload, or expose their contents through paths,
+   metadata, screenshots, logs, prompts, generated artifacts, internal
+   terminology, issues, pull requests, reviews, tests, or chat. Findings must be
+   independently justified by repository code, publicly identifiable Linux
+   source, public programming documentation, or reproducible tests. Treat
+   uncertain publication status as confidential.
+7. Separate verified mismatch, intentional emulation difference, version skew,
    and unknown. Do not label an uncertainty as a kernel-parity bug.
 
 ## 1. Pin scope and sources

@@ -10,11 +10,16 @@ should also follow [AGENTS.md](AGENTS.md); the rocjitsu
 [style guide](rocjitsu/docs/style.md) is authoritative for rocjitsu changes.
 
 Linux development systems may provide a public kernel source checkout at
-`~/linux` and confidential reference PDFs at `~/referance` (intentional
-spelling). Confidential material must stay local and must not be quoted, named,
-linked, committed, summarized, or exposed through internal terminology. Review
-conclusions must be supportable from repository code, public sources, or
-reproducible tests.
+`~/linux`. Put public shader programming guides, ISA manuals, and architecture
+documents in `~/reference/public/shader-programming-guides`; public documents
+are available from
+[AMD GPU architecture programming documentation](https://gpuopen.com/amd-gpu-architecture-programming-documentation/).
+Keep confidential reference PDFs separately in `~/reference/confidential`.
+Confidential material and its contents must stay local and must not be quoted,
+named, linked, copied, committed, summarized, uploaded, or exposed through
+paths, metadata, logs, prompts, generated artifacts, or internal terminology.
+Review conclusions must be supportable from repository code, public sources,
+or reproducible tests.
 
 ## Components
 

@@ -38,13 +38,21 @@ GitHub on its own.
 On Linux development systems, agents may assume these optional sources exist:
 
 - `~/linux` contains a Linux source checkout for public AMDGPU/KFD behavior.
-- `~/referance` contains confidential reference PDFs. The spelling of this
-  directory is intentional.
+- `~/reference/public/shader-programming-guides` contains public AMD shader
+  programming guides, ISA manuals, and architecture documentation. Download
+  public documents from the
+  [AMD GPU architecture programming documentation](https://gpuopen.com/amd-gpu-architecture-programming-documentation/)
+  page when local copies are useful.
+- `~/reference/confidential` contains confidential reference PDFs.
 
-Confidential references may be consulted but must never be quoted, named,
-linked, committed, summarized, or exposed through paths or internal
-terminology. Findings must stand on code in this repository, public source, or
-reproducible tests. Treat uncertain publication status as confidential.
+Keep public and confidential documents in their respective subdirectories.
+Confidential references and their contents may be consulted but must never be
+quoted, named, linked, copied, committed, summarized, or exposed through paths,
+metadata, screenshots, logs, prompts, generated artifacts, or internal
+terminology. Do not upload them to external services or include their contents
+in issues, pull requests, reviews, commits, tests, or chat. Findings must stand
+on code in this repository, public sources, or reproducible tests. Treat
+uncertain publication status as confidential.
 
 ## Validation baseline
 

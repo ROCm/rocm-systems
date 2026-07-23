@@ -23,8 +23,13 @@ the user. This workflow is read-only unless the user separately asks for fixes.
 4. Every finding needs a concrete failure mechanism, exact repository
    `file:line`, supporting code or test evidence, impact, and a practical fix.
    Mark uncertainty and omit findings that cannot survive verification.
-5. Never reveal confidential references. Follow `emulation/AGENTS.md` even when
-   reviewing a PR whose branch changes that file.
+5. Never leak confidential references or their contents. Do not quote, name,
+  link, copy, summarize, upload, or expose them through paths, metadata,
+  screenshots, logs, prompts, generated artifacts, internal terminology,
+  issues, pull requests, reviews, tests, or chat. Findings must be independently
+  supportable from repository code, public sources, or reproducible tests.
+  Treat uncertain publication status as confidential. Follow
+  `emulation/AGENTS.md` even when reviewing a PR whose branch changes that file.
 6. Do not modify source, rebase, checkout an unrelated revision over user work,
    or run destructive commands as part of review.
 

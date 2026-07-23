@@ -16,11 +16,19 @@ for rocjitsu style.
 
 ## Optional local references
 
-Reviewers may use a Linux source checkout at `~/linux`. Confidential reference
-PDFs may be available at `~/referance` (intentional spelling). Confidential
-material must remain local: do not quote, name, link, commit, summarize, or
-expose it. Reports must be supportable using repository code, public sources,
-or reproducible tests.
+Reviewers may use a Linux source checkout at `~/linux`. Users should put public
+shader programming guides, ISA manuals, and architecture documents in
+`~/reference/public/shader-programming-guides`. Public copies can be obtained
+from
+[AMD GPU architecture programming documentation](https://gpuopen.com/amd-gpu-architecture-programming-documentation/).
+Keep confidential PDFs separately in `~/reference/confidential`.
+
+Confidential material and its contents must remain local. Skills and reviewers
+must not quote, name, link, copy, commit, summarize, upload, or expose it through
+paths, metadata, screenshots, logs, prompts, generated artifacts, internal
+terminology, issues, pull requests, reviews, tests, or chat. Reports must be
+supportable using repository code, public sources, or reproducible tests. Treat
+material of uncertain publication status as confidential.
 
 The skills do not require a particular agent runner or model. Clients that do
 not automatically discover nested `.agents/skills` directories can be pointed

@@ -28,6 +28,13 @@ Mirage behavior afterward.
    hand-editing output; resolve generator inputs and regenerate.
 6. Follow `emulation/AGENTS.md`, enforce rocjitsu style, and validate Mirage
    integration when affected.
+7. Never leak confidential references or their contents while inspecting
+   history or resolving conflicts. Do not quote, name, link, copy, summarize,
+   upload, or expose them through paths, metadata, screenshots, logs, prompts,
+   generated artifacts, internal terminology, issues, pull requests, reviews,
+   tests, commits, or chat. Base recorded rationale on repository history,
+   public sources, and reproducible tests; treat uncertain publication status
+   as confidential.
 
 ## 1. Capture immutable state
 
