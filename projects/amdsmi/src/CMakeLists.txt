@@ -56,7 +56,6 @@ set(SRC_LIST
 )
 
 if(ENABLE_WSL_BACKEND)
-    list(APPEND SRC_LIST "${SRC_DIR}/amd_smi_wsl_backend.cc")
     list(APPEND SRC_LIST "${SRC_DIR}/amd_smi_wsl_device.cc")
 endif()
 
@@ -252,7 +251,6 @@ install(
 # error. Build them, but keep them out of the installed dev headers.
 set(INSTALL_IMPL_HEADERS ${IMPL_HEADERS})
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "_test")
-list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_backend")
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_device")
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_syms")
 install(FILES ${INSTALL_IMPL_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/ COMPONENT dev)

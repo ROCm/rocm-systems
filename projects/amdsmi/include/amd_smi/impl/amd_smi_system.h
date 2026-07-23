@@ -80,9 +80,6 @@ class AMDSmiSystem {
   */
   amdsmi_status_t get_gpu_socket_id(uint32_t index, std::string& socketid);
   amdsmi_status_t populate_amd_gpu_devices();
-#ifdef ENABLE_WSL_BACKEND
-  amdsmi_status_t populate_wsl_gpu_devices();
-#endif
   amdsmi_status_t populate_amd_cpus();
   amdsmi_status_t populate_amd_ainic_devices();
   amdsmi_status_t populate_brcm_nic_devices();
@@ -91,9 +88,6 @@ class AMDSmiSystem {
   AMDSmiDrm drm_;
   smi_nic_ctx_t ainic_ctx_;
   std::vector<AMDSmiAINICDevice::AINICInfo> ai_nic_info_;
-#ifdef ENABLE_WSL_BACKEND
-  bool wsl_topology_acquired_ = false;
-#endif
 #ifdef BRCM_NIC
   AMDSmiNoDrmNIC no_drm_nic_;
   AMDSmiNoDrmSwitch no_drm_switch_;

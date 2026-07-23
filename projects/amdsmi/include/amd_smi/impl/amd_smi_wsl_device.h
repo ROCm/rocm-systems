@@ -16,57 +16,71 @@
 #ifndef AMD_SMI_INCLUDE_IMPL_AMD_SMI_WSL_DEVICE_H_
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_WSL_DEVICE_H_
 
+#ifdef ENABLE_WSL_BACKEND
+
+#include <set>
 #include <string>
 #include <vector>
 
-#include "amd_smi/impl/amd_smi_gpu_device.h"
-
-#if __has_include(<hsakmt/rocdxg_smi.h>)
-#include <hsakmt/rocdxg_smi.h>
-#define AMDSMI_HAS_ROCDXG_SMI 1
-#endif
-
+#include "amd_smi/impl/amd_smi_gpu_backend.h"
+#include "amd_smi/impl/amd_smi_processor.h"
+#include "amd_smi/impl/amd_smi_socket.h"
+#include "hsakmt/rocdxg_smi.h"
 
 typedef struct _HsaNodeProperties HsaNodeProperties;
 
 namespace amd::smi {
 
-class AMDSmiWslGPUDevice : public AMDSmiGPUDevice {
+class AMDSmiSocket;
+
+// WSL GPU backend: implements IGPUBackend by calling rocdxg_smi_* functions
+// resolved at runtime via dlopen. One instance per GPU device.
+class WSLGPUBackend : public IGPUBackend {
  public:
-  AMDSmiWslGPUDevice(uint32_t gpu_id, uint32_t node_id, const HsaNodeProperties& props,
-                     AMDSmiDrm& drm);
+  // Checks /dev/dxg, loads librocdxg, enumerates GPU nodes, creates
+  // AMDSmiGPUDevice + WSLGPUBackend pairs, and populates sockets/processors.
+  // Returns NOT_SUPPORTED if not a WSL environment.
+  // Returns other error codes on WSL init failure.
+  static amdsmi_status_t TryPopulate(std::vector<AMDSmiSocket*>& sockets,
+                                     std::set<AMDSmiProcessor*>& processors);
 
-  bool is_wsl_device() const override { return true; }
+  // Returns true if TryPopulate succeeded (WSL devices are in use).
+  static bool IsActive();
+
+  // Closes the KFD channel opened by TryPopulate. No-op if never populated.
+  static amdsmi_status_t Shutdown();
+
+  // IGPUBackend overrides
+  amdsmi_status_t GetAsicInfo(amdsmi_asic_info_t*) override;
+  amdsmi_status_t GetBoardInfo(amdsmi_board_info_t*) override;
+  amdsmi_status_t GetKfdInfo(amdsmi_kfd_info_t*) override;
+  amdsmi_status_t GetVramInfo(amdsmi_vram_info_t*) override;
+  amdsmi_status_t GetMemoryTotal(amdsmi_memory_type_t, uint64_t*) override;
+  amdsmi_status_t GetMemoryUsage(amdsmi_memory_type_t, uint64_t*) override;
+  amdsmi_status_t GetTempMetric(amdsmi_temperature_type_t, amdsmi_temperature_metric_t,
+                                int64_t*) override;
+  amdsmi_status_t GetVoltMetric(amdsmi_voltage_type_t, amdsmi_voltage_metric_t,
+                                int64_t*) override;
+  amdsmi_status_t GetPowerInfo(amdsmi_power_info_t*) override;
+  amdsmi_status_t GetGpuActivity(amdsmi_engine_usage_t*) override;
+  amdsmi_status_t GetBusyPercent(uint32_t*) override;
+  amdsmi_status_t GetClockInfo(amdsmi_clk_type_t, amdsmi_clk_info_t*) override;
+  amdsmi_status_t GetPcieInfo(amdsmi_pcie_info_t*) override;
+  amdsmi_status_t GetDriverInfo(amdsmi_driver_info_t*) override;
+  amdsmi_status_t GetVbiosInfo(amdsmi_vbios_info_t*) override;
+  amdsmi_status_t GetProcessList(std::vector<amdsmi_proc_info_t>*) override;
+  amdsmi_status_t GetUuid(unsigned int*, char*) override;
+  amdsmi_status_t GetGpuCacheInfo(amdsmi_gpu_cache_info_t*) override;
+  amdsmi_status_t GetFwInfo(amdsmi_fw_info_t*) override;
+
+  // Device identity (populated from HsaNodeProperties at construction).
   uint32_t node_id() const { return node_id_; }
-  uint64_t unique_id() const { return unique_id_; }
-  uint32_t num_compute_units() const { return num_compute_units_; }
-  uint32_t num_xcc() const { return num_xcc_; }
-  uint64_t local_mem_size() const { return local_mem_size_; }
-  const std::string& marketing_name() const { return marketing_name_; }
-
-  amdsmi_status_t get_kfd_info(amdsmi_kfd_info_t* info) const;
-  amdsmi_status_t get_asic_info(amdsmi_asic_info_t* info) const;
-  amdsmi_status_t get_board_info(amdsmi_board_info_t* info) const;
-  amdsmi_status_t get_vram_info(amdsmi_vram_info_t* info) const;
-  amdsmi_status_t get_memory_total(amdsmi_memory_type_t mem_type, uint64_t* total) const;
-  amdsmi_status_t get_memory_usage(amdsmi_memory_type_t mem_type, uint64_t* used) const;
-  amdsmi_status_t get_temp_metric(amdsmi_temperature_type_t sensor_type,
-                                  amdsmi_temperature_metric_t metric, int64_t* temperature) const;
-  amdsmi_status_t get_volt_metric(amdsmi_voltage_type_t sensor_type,
-                                  amdsmi_voltage_metric_t metric, int64_t* voltage) const;
-  amdsmi_status_t get_power_info(amdsmi_power_info_t* info) const;
-  amdsmi_status_t get_busy_percent(uint32_t* gpu_busy_percent) const;
-  amdsmi_status_t get_activity(amdsmi_engine_usage_t* info) const;
-  amdsmi_status_t get_clock_info(amdsmi_clk_type_t clk_type, amdsmi_clk_info_t* info) const;
-  amdsmi_status_t get_pcie_info(amdsmi_pcie_info_t* info) const;
-  amdsmi_status_t get_driver_info(amdsmi_driver_info_t* info) const;
-  amdsmi_status_t get_vbios_info(amdsmi_vbios_info_t* info) const;
-  amdsmi_status_t get_process_list(std::vector<amdsmi_proc_info_t>* processes) const;
-  amdsmi_status_t get_gpu_cache_info(amdsmi_gpu_cache_info_t* info) const;
-  amdsmi_status_t get_fw_info(amdsmi_fw_info_t* info) const;
-  amdsmi_status_t get_uuid(unsigned int* uuid_length, char* uuid) const;
+  amdsmi_bdf_t bdf() const { return bdf_; }
 
  private:
+  explicit WSLGPUBackend(uint32_t gpu_id, uint32_t node_id, const HsaNodeProperties& props);
+
+  uint32_t gpu_id_;
   uint32_t node_id_;
   uint16_t vendor_id_;
   uint16_t device_id_;
@@ -77,16 +91,15 @@ class AMDSmiWslGPUDevice : public AMDSmiGPUDevice {
   uint64_t local_mem_size_;
   amdsmi_bdf_t bdf_;
   std::string marketing_name_;
-#ifdef AMDSMI_HAS_ROCDXG_SMI
+
+  // Lazily-loaded aggregate static device info from rocdxg_smi_get_device_info().
   mutable rocdxg_smi_device_info_t device_info_ = {};
   mutable bool device_info_loaded_ = false;
-#endif
-};
 
-bool is_wsl_gpu_device(const AMDSmiGPUDevice* device);
-AMDSmiWslGPUDevice* as_wsl_gpu_device(AMDSmiGPUDevice* device);
-const AMDSmiWslGPUDevice* as_wsl_gpu_device(const AMDSmiGPUDevice* device);
+  amdsmi_status_t load_device_info() const;
+};
 
 }  // namespace amd::smi
 
+#endif  // ENABLE_WSL_BACKEND
 #endif  // AMD_SMI_INCLUDE_IMPL_AMD_SMI_WSL_DEVICE_H_

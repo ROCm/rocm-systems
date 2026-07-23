@@ -90,6 +90,8 @@ AMDSmiGPUDevice::AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm)
 }
 
 AMDSmiGPUDevice::~AMDSmiGPUDevice() {
+  delete backend_;
+  backend_ = nullptr;
   if (ualoe_handle_ != -1) {
     ualoe_close(ualoe_handle_);
     ualoe_handle_ = -1;
