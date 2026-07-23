@@ -136,6 +136,10 @@ profiled execution group, which emits per-hook timing data
 data goes to stderr; stdout sends it to stdout, and file sinks write it to
 `<dir>/profile.log`.
 
+Profiled execution requires the simulation engine to use `"num_threads": 1`.
+Multithreaded configurations are rejected because the profiling counters are
+not synchronized.
+
 ### Examples
 
 Interactive use — output goes to stderr (the default):
