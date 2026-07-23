@@ -143,6 +143,56 @@ public:
 
   uint8_t *translate_debug(uint64_t addr, uint32_t vmid) const { return translate(addr, vmid); }
 
+  /// @brief Find the contiguous host range containing a VMID-scoped GPU VA.
+  /// @details KFD dispatches use per-process page tables. Kernel-symbol
+  /// resolution needs a daemon-accessible host pointer range so it can scan
+  /// backward from the kernel descriptor to the loaded ELF header.
+  std::pair<uint64_t, uint64_t> find_host_range(uint64_t addr, uint32_t vmid) const {
+    if (vmid == 0) {
+      auto *host = translate(addr, vmid);
+      if (!host)
+        return {0, 0};
+      return {reinterpret_cast<uint64_t>(host), PAGE_SIZE};
+    }
+
+    std::shared_lock vmid_lock(vmid_mutex_);
+    auto vmid_entry = vmid_table_.find(vmid);
+    if (vmid_entry == vmid_table_.end())
+      return {0, 0};
+
+    auto &entry = vmid_entry->second;
+    std::shared_lock page_table_lock(*entry.mutex);
+    const uint64_t page = addr >> PAGE_SHIFT;
+    auto page_entry = entry.page_table->find(page);
+    if (page_entry == entry.page_table->end())
+      return {0, 0};
+
+    uint64_t first_page = page;
+    uint8_t *first_host_page = page_entry->second.host_ptr;
+    while (first_page > 0) {
+      auto previous_page_entry = entry.page_table->find(first_page - 1);
+      if (previous_page_entry == entry.page_table->end() ||
+          previous_page_entry->second.host_ptr + PAGE_SIZE != first_host_page)
+        break;
+      --first_page;
+      first_host_page = previous_page_entry->second.host_ptr;
+    }
+
+    uint64_t last_page = page;
+    uint8_t *last_host_page = page_entry->second.host_ptr;
+    while (true) {
+      auto next_page_entry = entry.page_table->find(last_page + 1);
+      if (next_page_entry == entry.page_table->end() ||
+          next_page_entry->second.host_ptr != last_host_page + PAGE_SIZE)
+        break;
+      ++last_page;
+      last_host_page = next_page_entry->second.host_ptr;
+    }
+
+    const uint64_t range_size = ((last_page - first_page) + 1) << PAGE_SHIFT;
+    return {reinterpret_cast<uint64_t>(first_host_page), range_size};
+  }
+
   std::string debug_page_table_info(uint32_t vmid, uint64_t page_key) const {
     std::shared_lock lk(vmid_mutex_);
     auto it = vmid_table_.find(vmid);

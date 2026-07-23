@@ -55,7 +55,7 @@ uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
   engine.topology().set_root(std::move(vm));
   loaded.wire_links(engine.topology());
   soc->wire_backing(engine.topology());
-  engine.build();
+  engine.create();
   engine.register_as_primary();
 
   driver->setup_topology(loaded.device, num_xcds);
@@ -92,7 +92,7 @@ protected:
     engine_->topology().set_root(std::move(vm));
     loaded_.wire_links(engine_->topology());
     soc->wire_backing(engine_->topology());
-    engine_->build();
+    engine_->create();
     engine_->register_as_primary();
 
     driver_->setup_topology(loaded_.device, num_xcds);
@@ -723,6 +723,85 @@ TEST_F(KfdIoctlTest, DbgTrapEnableOversizedRuntimeInfoPreservesTailInDaemonMode)
   EXPECT_EQ(daemon_driver.close(process_id), 0);
 }
 
+// Serializing an ioctl with an embedded input array grows the request vector.
+// Capture the application pointer before that resize: pointers into the vector's
+// copied argument area are invalidated when its storage is reallocated.
+TEST(RemoteDriverEmbeddedArrayTest, MapMemorySerializesDeviceIdsAcrossBufferGrowth) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+
+  constexpr std::array<uint32_t, 2> device_ids{38144, 38145};
+  std::jthread server([server_fd = sv[1], device_ids] {
+    rocjitsu::RpcHeader hdr{};
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &hdr, sizeof(hdr)));
+    ASSERT_EQ(hdr.opcode, rocjitsu::RPC_IOCTL);
+    std::vector<uint8_t> payload(hdr.payload_bytes);
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, payload.data(), payload.size()));
+
+    const auto *request = reinterpret_cast<const rocjitsu::RpcIoctlRequest *>(payload.data());
+    EXPECT_EQ(request->ioctl_cmd, AMDKFD_IOC_MAP_MEMORY_TO_GPU);
+    const auto *args = reinterpret_cast<const kfd_ioctl_map_memory_to_gpu_args *>(payload.data() +
+                                                                                  sizeof(*request));
+    const auto *inline_ids =
+        reinterpret_cast<const uint32_t *>(payload.data() + sizeof(*request) + sizeof(*args));
+    ASSERT_EQ(args->n_devices, device_ids.size());
+    EXPECT_TRUE(std::equal(device_ids.begin(), device_ids.end(), inline_ids));
+
+    rocjitsu::RpcHeader response{};
+    response.opcode = rocjitsu::RPC_IOCTL;
+    response.request_id = hdr.request_id;
+    response.result = -EINVAL;
+    ASSERT_TRUE(rocjitsu::rpc_send_exact(server_fd, &response, sizeof(response)));
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver driver(sv[0]);
+  kfd_ioctl_map_memory_to_gpu_args args{};
+  args.device_ids_array_ptr = reinterpret_cast<uint64_t>(device_ids.data());
+  args.n_devices = device_ids.size();
+  EXPECT_EQ(driver.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &args), -EINVAL);
+}
+
+TEST(RemoteDriverEmbeddedArrayTest, WaitEventsSerializesEventsAcrossBufferGrowth) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+
+  std::array<kfd_event_data, 2> events{};
+  events[0].event_id = 17;
+  events[1].event_id = 29;
+  std::jthread server([server_fd = sv[1]] {
+    rocjitsu::RpcHeader hdr{};
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &hdr, sizeof(hdr)));
+    ASSERT_EQ(hdr.opcode, rocjitsu::RPC_IOCTL);
+    std::vector<uint8_t> payload(hdr.payload_bytes);
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, payload.data(), payload.size()));
+
+    const auto *request = reinterpret_cast<const rocjitsu::RpcIoctlRequest *>(payload.data());
+    EXPECT_EQ(request->ioctl_cmd, AMDKFD_IOC_WAIT_EVENTS);
+    const auto *args =
+        reinterpret_cast<const kfd_ioctl_wait_events_args *>(payload.data() + sizeof(*request));
+    const auto *inline_events =
+        reinterpret_cast<const kfd_event_data *>(payload.data() + sizeof(*request) + sizeof(*args));
+    ASSERT_EQ(args->num_events, 2u);
+    EXPECT_EQ(inline_events[0].event_id, 17u);
+    EXPECT_EQ(inline_events[1].event_id, 29u);
+
+    rocjitsu::RpcHeader response{};
+    response.opcode = rocjitsu::RPC_IOCTL;
+    response.request_id = hdr.request_id;
+    response.result = -EINVAL;
+    ASSERT_TRUE(rocjitsu::rpc_send_exact(server_fd, &response, sizeof(response)));
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver driver(sv[0]);
+  kfd_ioctl_wait_events_args args{};
+  args.events_ptr = reinterpret_cast<uint64_t>(events.data());
+  args.num_events = events.size();
+  args.timeout = 1;
+  EXPECT_EQ(driver.ioctl(AMDKFD_IOC_WAIT_EVENTS, &args), -EINVAL);
+}
+
 // --- Daemon-mode DBG_TRAP notifier-fd transfer via SCM_RIGHTS ---
 //
 // In daemon mode the debugger's dbg_fd is a number in the *client's* fd table
@@ -1215,6 +1294,89 @@ TEST(RemoteDriverDbgEnableTest, FailedEnableLeavesCallerRuntimeInfoUntouched) {
 
   ::close(notifier_fd);
   server.join();
+}
+
+// Deterministic regression for the close()-vs-in-flight-ioctl teardown ordering.
+// After close() fully tears a process down, a subsequent ioctl on that process id
+// must FAIL cleanly (-ESRCH) rather than operate on dismantled per-process state
+// (allocations/queues/doorbells already cleared). This exercises the lifetime
+// invariant that ioctl() must not mutate a torn-down process; the threaded
+// SimulatedKfdTest.ConcurrentIoctlAndCloseIsRaceFree covers the racing variant
+// under TSan, this one pins the post-teardown contract without timing.
+TEST_F(KfdIoctlTest, IoctlAfterCloseFailsCleanly) {
+  ASSERT_NE(soc_, nullptr);
+  rocjitsu::SimulatedKfd daemon_driver(*soc_, true);
+  uint32_t pid = daemon_driver.open_process();
+  ASSERT_NE(pid, 0u);
+
+  // A state-touching ioctl works while the process is live.
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = 0x100000000ULL;
+  alloc.size = 0x1000;
+  alloc.gpu_id = kGpuId;
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  EXPECT_EQ(daemon_driver.ioctl(pid, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+
+  // Tear the process down (single open reference -> full teardown).
+  EXPECT_EQ(daemon_driver.close(pid), 0);
+
+  // Any ioctl on the now-closed process id must fail cleanly, not touch freed
+  // state. -ESRCH is returned once the process is gone from the table.
+  kfd_ioctl_alloc_memory_of_gpu_args after{};
+  after.va_addr = 0x200000000ULL;
+  after.size = 0x1000;
+  after.gpu_id = kGpuId;
+  after.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  EXPECT_EQ(daemon_driver.ioctl(pid, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &after), -ESRCH);
+
+  kfd_ioctl_get_version_args ver{};
+  EXPECT_EQ(daemon_driver.ioctl(pid, AMDKFD_IOC_GET_VERSION, &ver), -ESRCH);
+}
+
+// Deterministic regression for destructor teardown of a multiply-opened process.
+// close() only tears a process down on the LAST open reference, so a process with
+// open_ref_count_ > 1 survives a single close(). ~SimulatedKfd must keep closing
+// each snapshotted pid until it is fully drained, otherwise its allocations,
+// queues, and CP callbacks leak past the driver. This pins that drain: a daemon
+// process opened twice (same client_pid -> shared, refcount 2) plus a live
+// allocation, then the driver is destroyed without an explicit close().
+TEST_F(KfdIoctlTest, DestructorDrainsMultiplyOpenedProcess) {
+  ASSERT_NE(soc_, nullptr);
+  uint32_t pid = 0;
+  {
+    rocjitsu::SimulatedKfd daemon_driver(*soc_, true);
+    // Same client_pid twice -> one shared process with open_ref_count_ == 2.
+    pid = daemon_driver.open_process(/*client_pid=*/4242);
+    ASSERT_NE(pid, 0u);
+    uint32_t pid2 = daemon_driver.open_process(/*client_pid=*/4242);
+    EXPECT_EQ(pid2, pid);
+
+    kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+    alloc.va_addr = 0x100000000ULL;
+    alloc.size = 0x1000;
+    alloc.gpu_id = kGpuId;
+    alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    EXPECT_EQ(daemon_driver.ioctl(pid, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+
+    // A single close() drops one of the two references; the process is still live.
+    EXPECT_EQ(daemon_driver.close(pid), 0);
+
+    // Prove the process survived the first close() (open_ref_count_ still 1): a
+    // state-touching ioctl must still succeed rather than return -ESRCH. If close()
+    // had torn it down on the first reference, this would fail cleanly instead.
+    kfd_ioctl_alloc_memory_of_gpu_args live{};
+    live.va_addr = 0x200000000ULL;
+    live.size = 0x1000;
+    live.gpu_id = kGpuId;
+    live.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    EXPECT_EQ(daemon_driver.ioctl(pid, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &live), 0);
+
+    // daemon_driver goes out of scope here -> ~SimulatedKfd must drain the
+    // still-open (refcount 1) process fully. Under ASan/leak checking this fails
+    // if the destructor leaks the process's allocation/memfd.
+  }
+  // No crash / no leak reported == pass. (pid intentionally unused past scope.)
+  (void)pid;
 }
 
 } // namespace

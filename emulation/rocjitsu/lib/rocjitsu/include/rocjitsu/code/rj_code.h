@@ -363,6 +363,14 @@ RJ_API_EXPORT const rj_code_inst_t *rj_code_inst_next(const rj_code_inst_t *inst
 /// @defgroup dbt Dynamic Binary Translation
 /// @{
 
+/// @brief Options for rj_code_translate.
+///
+/// @details Silicon revision is intentionally NOT part of this struct. gfx1250 A0
+/// and B0 share an ELF machine ID, so a same-architecture gfx1250 translation is
+/// direction-ambiguous; rather than carry a revision through this C ABI, that case
+/// is rejected here. The revision-aware B0->A0 path is driven internally through
+/// the C++ BinaryTranslator (used by the DBT hook, which sources the revision from
+/// its guest configuration, and by the rj_dbt_translate CLI).
 typedef struct rj_code_dbt_options_t {
   rj_code_arch_t guest_arch;
   rj_code_arch_t host_arch;

@@ -12,6 +12,7 @@ from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest.mock import patch
 
+import common
 import pytest
 from common import ROOT
 
@@ -244,6 +245,8 @@ def binary_handler_profile_rocprof_compute(request):
         num_ranks: Number of MPI ranks (1 = no MPI, >1 = use mpirun).
         capture_output: If True, capture stdout/stderr and return
             (returncode, stdout, stderr) tuple instead of just returncode.
+        stream: If True, echo child output line by line as it is produced
+            (requires capture_output).
 
     Returns:
         If capture_output is False: returncode (int)
@@ -262,6 +265,7 @@ def binary_handler_profile_rocprof_compute(request):
         workload_dir_type="output_directory",
         num_ranks=1,
         capture_output=False,
+        stream=False,
     ):
         # Skip test if multiple ranks are requested but mpirun is not available
         if num_ranks > 1 and shutil.which("mpirun") is None:
@@ -314,16 +318,9 @@ def binary_handler_profile_rocprof_compute(request):
                     command_rocprof_compute, num_ranks
                 )
 
-            process = subprocess.run(
-                command_rocprof_compute,
-                text=True,
-                capture_output=True,
+            process = common.run_subprocess(
+                command_rocprof_compute, capture_output=True, stream=stream
             )
-            # Print output so capsys can capture it
-            if process.stdout:
-                print(process.stdout, end="")
-            if process.stderr:
-                print(process.stderr, end="", file=sys.stderr)
             # verify run status
             if check_success:
                 assert process.returncode == 0
@@ -382,10 +379,10 @@ def binary_handler_profile_rocprof_compute(request):
                 if num_ranks == 1:
                     command_rocprof_compute[0] = rocprof_compute_script_path
 
-                process = subprocess.run(
+                process = common.run_subprocess(
                     command_rocprof_compute,
-                    text=True,
                     capture_output=capture_output,
+                    stream=stream,
                 )
 
                 # Verify run status

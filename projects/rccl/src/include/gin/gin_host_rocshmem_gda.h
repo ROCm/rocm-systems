@@ -17,15 +17,15 @@ struct ncclComm;
 // after init() succeeds, passed to connect() as ctx parameter.
 // Shared by all rocshmem GIN plugins (GDA and API).
 struct ginRocshmemInitCtx {
-  struct ncclComm *comm;
+  struct ncclComm* comm;
 };
 
 // Set RCCL-internal state into the plugin init context.
 // Called from gin.cc immediately after a rocshmem plugin's init() succeeds.
 // The GIN vtable init() doesn't receive comm, so this post-init injection is
 // needed to pass comm->bootstrap to connect().
-static inline void ncclGinRocshmemSetInitContext(void *initCtx, struct ncclComm *comm) {
-  struct ginRocshmemInitCtx *ctx = (struct ginRocshmemInitCtx *)initCtx;
+static inline void ncclGinRocshmemSetInitContext(void* initCtx, struct ncclComm* comm) {
+  struct ginRocshmemInitCtx* ctx = (struct ginRocshmemInitCtx*)initCtx;
   ctx->comm = comm;
 }
 

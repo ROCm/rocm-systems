@@ -338,25 +338,6 @@ class IPCBackend : public Backend {
   void cleanup_symm_registration();
 
   /**
-   * @brief IPC-specific per-registration state.
-   *
-   * The common base/length bookkeeping lives in Backend::symm_buffer_regions;
-   * this map holds the transport-specific state needed to tear a registration
-   * down, keyed by the registered buffer's base address.
-   */
-  struct IpcSymmRecord {
-    int slot{-1};                       // index into the device symm_table
-    char** dev_peer_bases{nullptr};     // device array[num_pes] (published to table)
-    std::vector<char*> peer_bases{};    // host copy[num_pes] (for CloseIpcHandle)
-    std::vector<char> local_handle{};   // exported IPC handle (for cleanup)
-  };
-
-  /**
-   * @brief Host-side map of IPC-specific symmetric registration state.
-   */
-  std::map<uintptr_t, IpcSymmRecord> ipc_symm_records_{};
-
-  /**
    * @brief
    */
   void Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes,

@@ -4,8 +4,10 @@
 #include "rocjitsu/analysis/liveness.h"
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/instruction.h"
+#include "util/bit.h"
 
 #include <algorithm>
 #include <cassert>
@@ -44,13 +46,6 @@ void dfs_reverse_post_order(const BasicBlock &start,
   }
 }
 
-std::vector<const Instruction *> instructions_in_order(BasicBlock &block) {
-  std::vector<const Instruction *> insts;
-  for (const auto &inst : block.instructions())
-    insts.push_back(&inst);
-  return insts;
-}
-
 [[nodiscard]] bool any_live_in_range(const RegisterSet &live, RegClass cls, uint16_t base,
                                      uint16_t count) {
   for (uint16_t i = 0; i < count; ++i) {
@@ -65,6 +60,13 @@ std::vector<const Instruction *> instructions_in_order(BasicBlock &block) {
   // Predicated defs and EXEC-masked vector defs preserve old values on at least
   // one path or lane. Until EXEC state is tracked at each program point, those
   // writes cannot be treated as unconditional liveness kills.
+  //
+  // The VGPR/ACC_VGPR kill suppression below is also load-bearing for the gfx1250
+  // VGPR-MSB def handling: InstDefUse records NOTHING for an unknown-bank VGPR def
+  // (see expand_operand_register in def_use_chain.cpp) on the assumption that such
+  // a def never becomes a liveness kill. Every VGPR def is exec-masked, so this
+  // clear is what upholds that assumption. If this suppression is removed or made
+  // conditional, revisit that def handling so an unknown-bank def does not over-kill.
   if (du.has_predicated_def)
     return {};
   if (du.has_exec_masked_vector_def) {
@@ -99,16 +101,41 @@ std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
 LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, LivenessAnalysisOptions options,
                                    std::span<const ScopedCfgEdge> extra_edges) {
   min_free_vgpr_ = options.min_free_vgpr;
-  analyze(blocks, extra_edges);
+  max_free_vgpr_ =
+      static_cast<uint16_t>(std::min<size_t>(options.max_free_vgpr, REGISTER_SET_MAX_VGPRS));
+  analyze(blocks, options, extra_edges);
 }
 
-void LivenessAnalysis::analyze(KernelBlockScope blocks,
+LivenessAnalysis::~LivenessAnalysis() = default;
+LivenessAnalysis::LivenessAnalysis(LivenessAnalysis &&) noexcept = default;
+LivenessAnalysis &LivenessAnalysis::operator=(LivenessAnalysis &&) noexcept = default;
+
+void LivenessAnalysis::analyze(KernelBlockScope blocks, const LivenessAnalysisOptions &options,
                                std::span<const ScopedCfgEdge> extra_edges) {
+  if (options.arch == ROCJITSU_CODE_ARCH_GFX1250 && options.entry_block != nullptr) {
+    gfx1250_vgpr_msb_ = std::make_unique<Gfx1250VgprMsbAnalysis>(blocks, options.entry_block,
+                                                                 extra_edges, options.text);
+  }
   liveness_.resize(blocks.size());
+  block_index_.reserve(blocks.size());
   for (size_t i = 0; i < blocks.size(); ++i) {
     if (blocks[i] != nullptr)
       block_index_.emplace(blocks[i], i);
   }
+
+  const bool filter_live_before = options.restrict_live_before_to_instructions;
+  std::unordered_set<const Instruction *> requested_live_before;
+  if (filter_live_before) {
+    requested_live_before.reserve(options.live_before_instructions.size());
+    for (const Instruction *inst : options.live_before_instructions) {
+      if (inst != nullptr)
+        requested_live_before.insert(inst);
+    }
+    live_before_.reserve(requested_live_before.size());
+  }
+  std::vector<size_t> requested_live_before_by_block;
+  if (filter_live_before)
+    requested_live_before_by_block.resize(blocks.size());
 
   std::vector<std::vector<size_t>> successors(blocks.size());
   std::vector<std::vector<size_t>> predecessors(blocks.size());
@@ -136,13 +163,17 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks,
   // Compute each block's local transfer function before iterating across CFG
   // edges. `gen` keeps only uses that occur before a local definition, because
   // later uses are satisfied inside the block. `kill` is every local def.
+  size_t instruction_count = 0;
   for (size_t i = 0; i < blocks.size(); ++i) {
     auto *block = blocks[i];
     if (block == nullptr)
       continue;
     auto &state = liveness_[i];
     for (const auto &inst : block->instructions()) {
-      InstDefUse du(inst);
+      ++instruction_count;
+      if (filter_live_before && requested_live_before.contains(&inst))
+        ++requested_live_before_by_block[i];
+      InstDefUse du(inst, gfx1250_vgpr_msb_.get());
       RegisterSet kills = kill_defs(du);
       RegisterSet upward_uses = du.uses;
       upward_uses -= state.kill;
@@ -150,6 +181,8 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks,
       state.kill |= kills;
     }
   }
+  if (!filter_live_before)
+    live_before_.reserve(instruction_count);
 
   std::deque<size_t> worklist;
   std::vector<bool> in_worklist(blocks.size(), false);
@@ -201,15 +234,23 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks,
     auto *block = blocks[i];
     if (block == nullptr)
       continue;
+    if (filter_live_before && requested_live_before_by_block[i] == 0)
+      continue;
     RegisterSet live = liveness_[i].live_out;
-    auto insts = instructions_in_order(*block);
-    for (auto it = insts.rbegin(); it != insts.rend(); ++it) {
-      const Instruction *inst = *it;
-      InstDefUse du(*inst);
+    size_t remaining_requested = filter_live_before ? requested_live_before_by_block[i] : 0;
+    auto &insts = block->instructions();
+    for (auto it = insts.end(); it != insts.begin();) {
+      --it;
+      const Instruction *inst = &*it;
+      InstDefUse du(*inst, gfx1250_vgpr_msb_.get());
       RegisterSet kills = kill_defs(du);
       live -= kills;
       live |= du.uses;
-      live_before_.emplace(inst, live);
+      if (!filter_live_before || requested_live_before.contains(inst)) {
+        live_before_.emplace(inst, live);
+        if (filter_live_before && --remaining_requested == 0)
+          break;
+      }
     }
   }
 }
@@ -230,16 +271,26 @@ bool LivenessAnalysis::is_live_before(const Instruction &inst, RegisterRef ref) 
   return live_before(inst).contains(ref);
 }
 
+std::optional<uint8_t> LivenessAnalysis::vgpr_msb_bank_before(const Instruction &inst,
+                                                              amdgpu::VgprMsbRole role) const {
+  if (gfx1250_vgpr_msb_ == nullptr)
+    return std::nullopt;
+  return gfx1250_vgpr_msb_->bank_before(inst, role);
+}
+
 std::optional<uint16_t> LivenessAnalysis::find_free_run(const Instruction *inst, uint16_t count,
-                                                        uint16_t search_start) const {
+                                                        uint16_t search_start,
+                                                        uint16_t base_alignment) const {
   assert(count > 0 && "Must request at least one register");
+  assert(base_alignment > 0 && "Register tuple alignment must be non-zero");
   auto live_it = live_before_.find(inst);
   if (live_it == live_before_.end())
     return std::nullopt;
 
   const RegisterSet &live = live_it->second;
   const size_t first_candidate = std::max<size_t>(search_start, min_free_vgpr_);
-  for (size_t base = first_candidate; base + count <= REGISTER_SET_MAX_VGPRS; ++base) {
+  for (size_t base = util::align_up(first_candidate, static_cast<size_t>(base_alignment));
+       base + count <= max_free_vgpr_; base += base_alignment) {
     if (!any_live_in_range(live, RegClass::VGPR, static_cast<uint16_t>(base), count))
       return static_cast<uint16_t>(base);
   }

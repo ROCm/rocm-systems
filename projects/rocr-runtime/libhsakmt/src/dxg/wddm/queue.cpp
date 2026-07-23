@@ -764,10 +764,21 @@ hsa_status_t ComputeQueue::KernelDispatchAqlToPm4(char* cpu, hsa_kernel_dispatch
     i += cmd_util.BuildWriteData64Command(cpu + i, (uint64_t*)ring_rptr,
                                           cmdbuf_aql_frame_write_index + 1);
 
-  // Check if we exceeded the frame size
-  if ((i - ib_size) > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in KernelDispatch: used %" PRIu64 " bytes, limit %u bytes\n",
-           i - ib_size, cmdbuf_aql_frame_size);
+  // Check for overflow: both per-packet and cumulative.
+  // Per-packet check: ensures this single packet's PM4 output doesn't exceed frame size.
+  // Multiple AQL packets may be merged and processed together, so track both.
+  uint64_t packet_size = i - ib_size;
+  if (packet_size > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in KernelDispatch: "
+           "packet used %" PRIu64 " bytes, frame limit %u bytes\n",
+           packet_size, cmdbuf_aql_frame_size);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  // Cumulative check: ensures total accumulated PM4 from merged packets fits in frame.
+  if (i > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in KernelDispatch: "
+           "cumulative %" PRIu64 " bytes exceeds frame limit %u bytes\n",
+           i, cmdbuf_aql_frame_size);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -853,10 +864,21 @@ hsa_status_t ComputeQueue::BarrierGenericAqlToPm4(char* cpu, hsa_barrier_and_pac
     i += cmd_util.BuildWriteData64Command(cpu + i, (uint64_t*)ring_rptr,
                                           cmdbuf_aql_frame_write_index + 1);
 
-  // Check if we exceeded the frame size
-  if ((i - ib_size) > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in BarrierGeneric: used %" PRIu64 " bytes, limit %u bytes\n",
-           i - ib_size, cmdbuf_aql_frame_size);
+  // Check for overflow: both per-packet and cumulative.
+  // Per-packet check: ensures this single packet's PM4 output doesn't exceed frame size.
+  // Multiple AQL packets may be merged and processed together, so track both.
+  uint64_t packet_size = i - ib_size;
+  if (packet_size > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in BarrierGeneric: "
+           "packet used %" PRIu64 " bytes, frame limit %u bytes\n",
+           packet_size, cmdbuf_aql_frame_size);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  // Cumulative check: ensures total accumulated PM4 from merged packets fits in frame.
+  if (i > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in BarrierGeneric: "
+           "cumulative %" PRIu64 " bytes exceeds frame limit %u bytes\n",
+           i, cmdbuf_aql_frame_size);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -884,12 +906,24 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
     pr_debug("pm4_addr[%d]=%#x\n", i, pm4_addr[i]);
   }
 
-  int i = ib_size;
+  // Note: At this point i == ib_size (no PM4 built yet for this packet).
+  // This pre-check guards the memcpy below. The post-check at function end
+  // covers combined overflow from Build* calls (BuildBarrier, BuildAcquireMem, etc.).
+  uint64_t i = ib_size;
+
+  // Bounds check before copy to prevent heap buffer overflow
+  uint32_t pm4_bytes = pm4_size * sizeof(uint32_t);
+  if (i + pm4_bytes > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in VendorSpecific: "
+           "need %u bytes at offset %" PRIu64 ", frame limit %u bytes\n",
+           pm4_bytes, i, cmdbuf_aql_frame_size);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
 
   if (dxg_runtime->vendor_packet_process) {
     int major = device->Major();
-    memcpy(cpu + i, pm4_addr, pm4_size * sizeof(uint32_t));
-    i += pm4_size * sizeof(uint32_t);
+    memcpy(cpu + i, pm4_addr, pm4_bytes);
+    i += pm4_bytes;
 
     if (packet->completion_signal.handle != 0) {
       amd_signal_t* signal = (amd_signal_t*)packet->completion_signal.handle;
@@ -932,10 +966,21 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
     i += cmd_util.BuildWriteData64Command(cpu + i, (uint64_t*)ring_rptr,
                                           cmdbuf_aql_frame_write_index + 1);
 
-  // Check if we exceeded the frame size
-  if ((i - ib_size) > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in VendorSpecific: used %" PRIu64 " bytes, limit %u bytes\n",
-           i - ib_size, cmdbuf_aql_frame_size);
+  // Check for overflow: both per-packet and cumulative.
+  // Per-packet check: ensures this single packet's PM4 output doesn't exceed frame size.
+  // Multiple AQL packets may be merged and processed together, so track both.
+  uint64_t packet_size = i - ib_size;
+  if (packet_size > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in VendorSpecific: "
+           "packet used %" PRIu64 " bytes, frame limit %u bytes\n",
+           packet_size, cmdbuf_aql_frame_size);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  // Cumulative check: ensures total accumulated PM4 from merged packets fits in frame.
+  if (i > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in VendorSpecific: "
+           "cumulative %" PRIu64 " bytes exceeds frame limit %u bytes\n",
+           i, cmdbuf_aql_frame_size);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 

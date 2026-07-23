@@ -503,6 +503,12 @@ memory:
     tags: [multigpu]
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
+  Unit_hipManagedMultiGpuVaConsistency_MultiDevice:
+    <<: *level_2
+    tags: [alloc, multigpu]
+  Unit_hipManagedMultiGpuVaConsistency_HostAllocNoDivergence:
+    <<: *level_2
+    tags: [alloc, multigpu]
   Unit_hipMemset_Negative_InvalidPtr:
     <<: *level_2
     tags: [memset]
@@ -1797,7 +1803,9 @@ memory:
   Unit_hipMalloc3DArray_Negative_NumericLimit:
     <<: *level_2
     tags: [alloc, image]
-  Unit_hipMalloc3DArray_Negative_Non2DTextureGather: *level_2
+  Unit_hipMalloc3DArray_Negative_Non2DTextureGather:
+    <<: *level_2
+    tags: [image]
   Unit_hipArray3DCreate_happy:
     <<: *level_2
     tags: [image]
@@ -1862,13 +1870,13 @@ memory:
     tags: [image]
   Unit_hipDrvMemcpy3D_HosttoDevice:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, image]
   Unit_hipDrvMemcpy3D_Negative:
     <<: *level_2
     tags: [transfer, image]
   Unit_hipDrvMemcpy3D_ExtentValidation:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, image]
   Unit_hipDrvMemcpy3D_H2DDeviceContextChange:
     <<: *level_2
     tags: [multigpu, transfer]
@@ -1991,7 +1999,7 @@ memory:
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_MultiDevice:
     <<: *level_2
-    tags: [query]
+    tags: [query, multigpu]
   Unit_hipMemPrefetchBatchAsync_ManagedGlobalVariable:
     <<: *level_2
     tags: [query]
@@ -2135,10 +2143,10 @@ memory:
     tags: [multigpu, query]
   Unit_hipMemAdvise_TstAccessedByFlg2:
     <<: *level_2
-    tags: [query]
+    tags: [query, multigpu]
   Unit_hipMemAdvise_TstAccessedByFlg3:
     <<: *level_2
-    tags: [query]
+    tags: [query, multigpu]
   Unit_hipMemAdvise_TstAccessedByFlg4:
     <<: *level_2
     # Note: Windows disabled
@@ -2355,7 +2363,9 @@ memory:
   Unit_hipMallocMipmappedArray_Negative_NumericLimit:
     <<: *level_2
     tags: [alloc]
-  Unit_hipMallocMipmappedArray_Negative_Non2DTextureGather: *level_2
+  Unit_hipMallocMipmappedArray_Negative_Non2DTextureGather:
+    <<: *level_2
+    tags: [image]
   Unit_hipMallocMipmappedArray_Negative_NumLevels:
     <<: *level_2
     tags: [alloc]
@@ -2372,6 +2382,15 @@ memory:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows, amd_wsl]
+  Unit_hipFreeMipmappedArray_NoLeakAfterGetLevel:
+    <<: *level_2
+    tags: [alloc]
+  Unit_hipFreeMipmappedArray_NoLeakAfterGetAllLevels:
+    <<: *level_2
+    tags: [alloc]
+  Unit_hipFreeMipmappedArray_NoLeakAfterDuplicateGetLevel:
+    <<: *level_2
+    tags: [alloc]
   Unit_hipMallocArray_DiffSizes:
     <<: *level_2
     tags: [alloc, image]
@@ -2570,3 +2589,15 @@ memory:
   Unit_hipMemPoolExportToShareableHandle_multiproc_child:
     <<: *level_2
     disabled: [amd_wsl, amd_linux, nvidia_windows, nvidia_linux, amd_windows]
+  Unit_hipMemGetDefaultMemPool_Negative:
+    <<: *level_2
+    tags: [alloc]
+  Unit_hipMemGetDefaultMemPool_Basic:
+    <<: *level_2
+    tags: [alloc]
+  Unit_hipMemGetDefaultMemPool_Functional:
+    <<: *level_2
+    tags: [alloc]
+  Unit_hipMemGetDefaultMemPool_Multidevice:
+    <<: *level_2
+    tags: [alloc, multigpu]

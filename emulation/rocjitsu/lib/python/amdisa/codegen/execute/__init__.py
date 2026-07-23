@@ -261,7 +261,6 @@ def _register_handlers() -> None:
         c.dst_ops,
         c.src_ops,
         opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
     )
     DISPATCH['mad_mix_f32'] = lambda c: gen_mad_mix_f32(
         c.dst_ops,
