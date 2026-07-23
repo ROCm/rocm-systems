@@ -96,7 +96,8 @@ AIS support summary
 -------------------
 
 The final block reports the required components. All four must be ``True`` for
-hipFile to use its fast path:
+hipFile to use its fast path. The HIP runtime and amdgpu components require
+ROCm 7.14.0 or later:
 
 - **Kernel P2PDMA support** — the kernel supports peer-to-peer DMA between the
   GPU and the NVMe device. On recent amdgpu drivers this reflects the KFD

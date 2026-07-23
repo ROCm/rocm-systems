@@ -15,24 +15,30 @@ Use the ``ais-check`` utility provided by hipFile to verify that the system
 meets the prerequisites for the fastpath. If any check fails, hipFile uses the
 fallback path instead.
 
-hipFile's fastpath requires the following:
-
-* A Linux kernel with P2PDMA support enabled
-* ROCm 7.14.0 or later, including:
-
-  * the HIP runtime
-  * ``amdgpu``
-
 .. code-block:: none
 
-  $ ais-check
+  $ sudo ais-check
+
+  Linux myhost 6.16.13-2278356.24.04 #1 SMP ... x86_64
+
+  Mounted volumes:
+  MOUNTPOINT  FSTYPE          DEVICE  BACKING  O_DIRECT  HIPFILE
+  /           ext4 (ordered)  nvme0n1  nvme     yes       yes
+  /home       xfs             nvme1n1  nvme     yes       yes
+  /data       ext4 (ordered)  dm-0     lvm      yes       no
+
   AIS support in:
           Kernel P2PDMA support   : True
           HIP runtime             : True
           amdgpu                  : True
+          hipFile-capable volume  : True
 
-For hipFile to use the fastpath, each reported requirement should be ``True``.
-If any check fails, resolve that issue first before investigating further.
+For hipFile to use the fastpath, each reported requirement should be ``True``
+and at least one volume should be ``hipFile``-capable. If any check fails,
+resolve that issue first before investigating further.
+
+For the full list of fastpath prerequisites, how to run ``ais-check``, and how
+to interpret its output, see :doc:`/install/checking-system-compatibility`.
 
 Backing Storage
 ===============
