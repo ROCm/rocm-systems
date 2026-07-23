@@ -1,5 +1,11 @@
 # HIP Record & Replay (HRR) — In-Tree Dispatch Table Design
 
+HRR captures every HIP API call made by an application into a binary archive (`.hrr`
+directory), then replays that archive against a live GPU to reproduce the original
+workload — including multi-threaded submission, graph execution, and GPU memory
+transfers. Primary uses: bug reproduction, performance regression testing, and
+kernel benchmarking without the original application.
+
 User-facing quick start: [README.md](README.md).
 
 ## Quick Start
@@ -19,8 +25,25 @@ hrr-playback ./my_capture.hrr --info [--events]
 
 ## Implementation Summary
 
-### What It Does
-HRR captures every HIP API call made by an application into a binary archive (`.hrr` directory), then replays that archive against a live GPU to reproduce the original workload exactly — including multi-threaded submission, graph execution, and all GPU memory transfers. Primary uses: bug reproduction, performance regression testing, and kernel benchmarking without the original application.
+### Capture overhead
+
+Capture is **not free**. When `HIP_HRR_CAPTURE_OUTPUT` is set, every HIP API call
+flows through a capture shim (fixed-size event header + serialized arguments), and
+selected APIs add extra work:
+
+- **H2D / registered host memory:** host source buffers are hashed and written to
+  `blobs/` (content-addressed snapshots).
+- **D2H:** replay validation captures expected outputs after a forced stream sync at
+  capture time.
+- **Kernel launches:** argument scanning and embedded-pointer detection run per
+  launch; memoization exists because naive per-word probing would dominate cost on
+  large workloads.
+
+Expect **higher host CPU use, extra I/O, and longer runtimes** versus an uncaptured
+run — often acceptable for debugging and repro, but HRR is not intended for
+production performance measurement while capture is enabled. Replay has its own
+cost (re-executing the workload on GPU plus D2H validation); see sync and progress
+options in [README.md](README.md).
 
 ### Capture Layer (`hipamd/src/hrr/`)
 At HIP init time the capture layer snapshots the real `HipDispatchTable` and installs a parallel capture table with ~529 shim function pointers. Every HIP API call flows through one of these shims, which records a fixed-size `hrr_event_header` (32 bytes: type, sequence ID, timestamp, thread ID) followed by a variable-length payload of serialised arguments into a streaming `events.bin` file.
