@@ -32,7 +32,6 @@ def resolve_paths():
         return {
             "rocprofv3": str(therock_bin / "rocprofv3"),
             "rccl_unittests": str(therock_bin / "rccl-UnitTests"),
-            "all_reduce_perf": str(therock_bin / "all_reduce_perf"),
             "lib_path": str(therock_path / "lib"),
             "extra_lib_paths": [],
             "sysdeps_lib_path": str(therock_path / "lib" / "rocm_sysdeps" / "lib"),
@@ -42,7 +41,6 @@ def resolve_paths():
     rccl_build_dir = os.getenv("RCCL_BUILD_DIR", "")
 
     rccl_ut = shutil.which("rccl-UnitTests") or f"{rocm_path}/bin/rccl-UnitTests"
-    ar_perf = shutil.which("all_reduce_perf") or f"{rocm_path}/bin/all_reduce_perf"
 
     extra_lib_paths = []
     if rccl_build_dir:
@@ -56,7 +54,6 @@ def resolve_paths():
     return {
         "rocprofv3": shutil.which("rocprofv3") or f"{rocm_path}/bin/rocprofv3",
         "rccl_unittests": rccl_ut,
-        "all_reduce_perf": ar_perf,
         "lib_path": f"{rocm_path}/lib",
         "extra_lib_paths": extra_lib_paths,
         "sysdeps_lib_path": "",
