@@ -22,11 +22,6 @@ constexpr int kExpectedValue = 0x1234;
 constexpr char const kWriteKernelName[] = "write_value";
 constexpr char const kGlobalName[] = "g_value";
 
-// Magic that prefixes an uncompressed clang offload bundle. Kept as a local
-// literal so the contract does not depend on hipamd-internal headers; it must
-// stay in sync with symbols::kOffloadBundleUncompressedMagicStr in
-// clr/hipamd/src/hip_code_object.hpp.
-constexpr char const kUncompressedBundleMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
 
 // In-source device code compiled at runtime with HIPRTC. It exposes two named
 // kernels plus a resolvable device global so the library lookup, enumeration,
