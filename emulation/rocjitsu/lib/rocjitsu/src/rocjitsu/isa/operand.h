@@ -339,6 +339,14 @@ private:
     simd_notify_read64_mut_impl(wf, lane_mask, byte_mask);
   }
 
+  void simd_notify_write_mut(amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const {
+    simd_notify_write_mut_impl(wf, lane_mask, byte_mask);
+  }
+
+  void simd_notify_write64_mut(amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const {
+    simd_notify_write64_mut_impl(wf, lane_mask, byte_mask);
+  }
+
   amdgpu::ConstVgprStoragePair64 simd_vgpr_storage64(const amdgpu::Wavefront &wf) const {
     if (delegate_)
       return delegate_->simd_vgpr_storage64(wf);
@@ -396,6 +404,15 @@ private:
   /// @brief 64-bit counterpart of `simd_notify_read_mut`.
   virtual void simd_notify_read64_mut_impl(amdgpu::Wavefront & /*wf*/, uint64_t /*lane_mask*/,
                                            uint8_t /*byte_mask*/) const {}
+
+  /// @brief Notify that this mutable destination operand's VGPR was written.
+  /// No-op for non-VGPR operands.
+  virtual void simd_notify_write_mut_impl(amdgpu::Wavefront & /*wf*/, uint64_t /*lane_mask*/,
+                                          uint8_t /*byte_mask*/) const {}
+
+  /// @brief 64-bit counterpart of `simd_notify_write_mut`.
+  virtual void simd_notify_write64_mut_impl(amdgpu::Wavefront & /*wf*/, uint64_t /*lane_mask*/,
+                                            uint8_t /*byte_mask*/) const {}
 
   /// @brief 64-bit-lane counterpart of `simd_vgpr_storage`. A per-lane f64/i64
   /// value occupies two consecutive VGPRs (reg N + reg N+1), so this returns a
@@ -490,6 +507,10 @@ private:
                                uint8_t byte_mask) const override;
   void simd_notify_read64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
                                    uint8_t byte_mask) const override;
+  void simd_notify_write_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                  uint8_t byte_mask) const override;
+  void simd_notify_write64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                    uint8_t byte_mask) const override;
 };
 
 /// @brief DPP-aware operand proxy that applies lane permutation on read.
