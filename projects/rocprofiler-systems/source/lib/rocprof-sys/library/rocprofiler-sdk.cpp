@@ -71,6 +71,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <cctype>
 #include <cstdint>
 #include <iostream>
@@ -101,41 +102,7 @@ using rocprofiler_sdk::wrapper;
 using tool_agent_vec_t                         = std::vector<tool_agent>;
 client_data*                    tool_data      = new client_data{};
 std::shared_ptr<roctx_client<>> g_roctx_client = {};
-
-std::shared_ptr<roctx_client<>>
-get_roctx_client()
-{
-    if(!g_roctx_client)
-    {
-        const auto _domains = rocprofsys::delimit(
-            config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
-                .value_or(std::string{}),
-            " ,;:\t\n");
-        const auto has_marker_domain =
-            (std::find(_domains.begin(), _domains.end(), "marker_api") !=
-                 _domains.end() ||
-             std::find(_domains.begin(), _domains.end(), "roctx") != _domains.end());
-        const auto roctx_traced_regions = config::get_trace_region();
-        const auto has_trace_regions    = !roctx_traced_regions.empty();
-
-        // Case 1: no marker domain and no trace regions — nothing to do
-        if(!has_marker_domain && !has_trace_regions)
-        {
-            return nullptr;
-        }
-
-        const auto roctx_config = roctx_client_config{
-            .pause_resume_enabled  = has_marker_domain,
-            .use_perfetto          = config::get_use_perfetto(),
-            .use_timemory          = config::get_use_timemory(),
-            .perfetto_annotations  = config::get_perfetto_annotations(),
-            .selected_trace_regions = roctx_traced_regions,
-        };
-        g_roctx_client = std::make_shared<roctx_client<>>(roctx_config);
-    }
-
-    return g_roctx_client;
-}
+control::session*               g_session      = nullptr;
 
 std::atomic<bool> tool_fini_done{ false };
 std::atomic<bool> tool_init_done{ false };
@@ -2796,16 +2763,41 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         pmc::set_state(state::process::Active);
     }
 
-    // Setup roctx client (must happen within tool_init for rocprofiler-sdk context
-    // creation). Roctx client configures MARKER_CORE_API and MARKER_CONTROL_API
-    // on control_ctx. The control session's pause/resume callbacks are routed
-    // through roctx_client (registered later in library.cpp).
-    auto roctx_client = get_roctx_client();
-    if(roctx_client)
+    // Roctx client configures MARKER_CORE_API and MARKER_CONTROL_API on
+    // control_ctx, which requires the context available here in tool_init.
+    assert(g_session);
+    if(!g_roctx_client)
     {
-        roctx_client->configure_services(_data->get_control_context());
+        const auto _domains = rocprofsys::delimit(
+            config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
+                .value_or(std::string{}),
+            " ,;:\t\n");
+        const auto has_marker_domain =
+            (std::find(_domains.begin(), _domains.end(), "marker_api") !=
+                 _domains.end() ||
+             std::find(_domains.begin(), _domains.end(), "roctx") != _domains.end());
+        const auto roctx_traced_regions = config::get_trace_region();
+        const auto has_trace_regions    = !roctx_traced_regions.empty();
 
-        const auto filtering_active = roctx_client->get_trigger().filter_active();
+        // Case 1: no marker domain and no trace regions — nothing to do
+        if(has_marker_domain || has_trace_regions)
+        {
+            const auto roctx_config = roctx_client_config{
+                .pause_resume_enabled   = has_marker_domain,
+                .use_perfetto           = config::get_use_perfetto(),
+                .use_timemory           = config::get_use_timemory(),
+                .perfetto_annotations   = config::get_perfetto_annotations(),
+                .selected_trace_regions = roctx_traced_regions,
+            };
+            g_roctx_client = std::make_shared<roctx_client<>>(*g_session, roctx_config);
+        }
+    }
+
+    if(g_roctx_client)
+    {
+        g_roctx_client->configure_services(_data->get_control_context());
+
+        const auto filtering_active = g_roctx_client->get_trigger().filter_active();
         if(!filtering_active)
         {
             start();
@@ -2900,12 +2892,10 @@ flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
 
 }  // namespace
 
-std::shared_ptr<control::session>
-get_session()
+void
+bind_session(control::session& sess)
 {
-    const auto roctx_client = get_roctx_client();
-    if(!roctx_client) return nullptr;
-    return roctx_client->get_session();
+    g_session = &sess;
 }
 
 void
@@ -2922,13 +2912,6 @@ setup()
 void
 shutdown()
 {
-    auto roctx_client = get_roctx_client();
-    if(roctx_client)
-    {
-        roctx_client->get_session()->shutdown();
-    }
-
-    // shutdown
     if(tool_data && tool_data->client_id && tool_data->client_fini)
         tool_data->client_fini(*tool_data->client_id);
 }

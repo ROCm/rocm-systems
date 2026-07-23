@@ -113,6 +113,8 @@ std::atomic<bool>  rocprofsys_finalization_done{ false };
 auto               _timemory_manager  = tim::manager::instance();
 auto               _timemory_settings = tim::settings::shared_instance();
 
+control::session g_control_session;
+
 void
 set_metadata_process_start_timestamp(std::int64_t _ts)
 {
@@ -670,8 +672,8 @@ rocprofsys_init_tooling_hidden(void)
             trace_cache::get_buffer_storage().start(getpid());
         }
 
-        auto session = rocprofiler_sdk::get_session();
-        if(session)
+        rocprofiler_sdk::bind_session(g_control_session);
+
         {
             using shmem_t = component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>;
             using ucx_t   = component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>;
@@ -692,9 +694,9 @@ rocprofsys_init_tooling_hidden(void)
             } };
             // clang-format on
             for(const auto& sub : subscribers)
-                session->subscribe(sub);
+                g_control_session.subscribe(sub);
 
-            session->force_initial_pause();
+            g_control_session.force_initial_pause();
         }
 
         state::process::set(
@@ -929,6 +931,9 @@ rocprofsys_finalize_hidden(void)
         LOG_DEBUG("Shutting down ROCm...");
         rocprofiler_sdk::shutdown();
 
+        LOG_DEBUG("Shutting down control session...");
+        g_control_session.shutdown();
+
         auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         const auto _agents  = get_agent_manager_instance().get_agents();
         _manager.shutdown();
@@ -1041,6 +1046,9 @@ rocprofsys_finalize_hidden(void)
 
     LOG_DEBUG("Shutting down ROCm...");
     rocprofiler_sdk::shutdown();
+
+    LOG_DEBUG("Shutting down control session...");
+    g_control_session.shutdown();
 
     LOG_DEBUG("Stopping and destroying instrumentation bundles...");
     auto* _bundles = instrumentation_bundles::get();
