@@ -38,6 +38,7 @@
 #include "functional/device_refresh_test.h"
 #include "functional/hmac_test.h"
 #include "functional/reverse_lookup_test.h"
+#include "functional/sysfs_cuid_test.h"
 
 // =============================================================================
 // cuidtstUnprivileged — tests that run without root
@@ -180,6 +181,22 @@ TEST(cuidtstPrivileged, ReverseDeviceType) {
     GTEST_SKIP() << "Requires root; run with sudo to enable.";
   }
   TestReverseDeviceType tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstPrivileged, SysfsReadPrimaryCuid) {
+  if (geteuid() != 0) {
+    GTEST_SKIP() << "Requires root; run with sudo to enable.";
+  }
+  TestSysfsReadPrimaryCuid tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstPrivileged, SysfsReadSecondaryCuid) {
+  if (geteuid() != 0) {
+    GTEST_SKIP() << "Requires root; run with sudo to enable.";
+  }
+  TestSysfsReadSecondaryCuid tst;
   RunGenericTest(&tst);
 }
 

@@ -20,22 +20,29 @@
  * THE SOFTWARE.
  */
 
-#ifndef CUID_TEST_FUNCTIONAL_HMAC_TEST_H_
-#define CUID_TEST_FUNCTIONAL_HMAC_TEST_H_
+#ifndef CUID_TEST_FUNCTIONAL_SYSFS_CUID_TEST_H_
+#define CUID_TEST_FUNCTIONAL_SYSFS_CUID_TEST_H_
 
 #include "test_base.h"
 
-class TestHMAC : public TestBase {
+// Verify that the primary CUID read directly from the cuid_primary sysfs file
+// matches the value returned by AMDCUID_QUERY_PRIMARY_CUID for each amdgpu
+// device.  Requires root (the library returns a temporary primary CUID for
+// non-root callers, which would not match the sysfs value).
+class TestSysfsReadPrimaryCuid : public TestBase {
  public:
-  TestHMAC();
-  void SetUp() override;
+  TestSysfsReadPrimaryCuid();
   void Run() override;
-  void Close() override;
-
- private:
-  void VerifyCuidSeedWritten(const uint8_t key[32]);
-  std::vector<std::string> amdgpu_nodes_;
-  std::vector<std::vector<uint8_t>> saved_seeds_;
 };
 
-#endif  // CUID_TEST_FUNCTIONAL_HMAC_TEST_H_
+// Verify that the derived CUID read directly from the cuid_secondary sysfs
+// file matches the value returned by AMDCUID_QUERY_DERIVED_CUID for each
+// amdgpu device.  Requires root so that the library uses the real HMAC key
+// when computing the derived CUID, which must match the driver-generated value.
+class TestSysfsReadSecondaryCuid : public TestBase {
+ public:
+  TestSysfsReadSecondaryCuid();
+  void Run() override;
+};
+
+#endif  // CUID_TEST_FUNCTIONAL_SYSFS_CUID_TEST_H_
