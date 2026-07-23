@@ -21,6 +21,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+  Operand vcc;
   static const bool execute_registered_;
 };
 
@@ -309,8 +310,10 @@ public:
   VAddCoCiU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand vcc_in;
   static const bool execute_registered_;
 };
 
@@ -319,8 +322,10 @@ public:
   VSubCoCiU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand vcc_in;
   static const bool execute_registered_;
 };
 
@@ -329,8 +334,10 @@ public:
   VSubrevCoCiU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand vcc_in;
   static const bool execute_registered_;
 };
 
