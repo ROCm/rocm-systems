@@ -68,12 +68,20 @@ target_link_libraries(
 # $<LINK_LANGUAGE:CXX>:-rdynamic applies in every build configuration (not just Debug).
 set_target_properties(kernel-replay-snapshot-test PROPERTIES LINKER_LANGUAGE CXX)
 
+# RESOURCE_LOCK serializes these snapshot tests against each other: gtest_add_tests
+# registers each TEST() as its own ctest process, and each allocates several device
+# buffers plus matching host snapshot copies. Under `ctest --parallel`, running them
+# concurrently stacked their GPU/host footprint and intermittently OOM'd/partial-copied
+# the largest (multi-buffer) test on shared CI GPUs. The lock keeps them sequential
+# without forcing the whole suite serial.
 rocprofiler_add_unit_test(
     TARGET kernel-replay-snapshot-test
     SOURCES ${KERNEL_REPLAY_SNAP_RESTORE_SOURCES}
     TIMEOUT 60
     ENVIRONMENT
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:$ENV{LD_LIBRARY_PATH}"
+        RESOURCE_LOCK
+        "rocprofiler_kernel_replay_snapshot"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 # Localized context control is pure host logic (thread-local override state) with no GPU

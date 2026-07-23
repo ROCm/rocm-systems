@@ -168,7 +168,13 @@ launch_add(float* d, float delta, int n)
     sync_ok();
 }
 
-constexpr size_t N_ELEMS = 64U * 1024U * 1024U;
+// 32 MB/buffer (8Mi floats). Large enough to exercise real multi-MB DMA snap/restore, yet well
+// under the FP32 exact-integer limit (2^24) so `base + i` compares exactly. These snapshot tests
+// also share a ctest RESOURCE_LOCK (see tests/CMakeLists.txt) so they never run concurrently with
+// each other, bounding the 3-buffer test to ~192 MB device+host. At 256 MB/buffer, and unlocked,
+// the 3-buffer restore_reverts_multiple_buffers test intermittently OOM'd/partial-copied on shared
+// CI GPUs (single/double-buffer variants passed), producing zeroed tail regions after restore.
+constexpr size_t N_ELEMS = 8U * 1024U * 1024U;
 }  // namespace
 
 // A plain hipMalloc must be captured automatically by the tracker the SDK installed on the live HSA
