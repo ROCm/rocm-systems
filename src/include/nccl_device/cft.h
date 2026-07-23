@@ -37,43 +37,52 @@ struct ncclCft : ncclCft_internal<Coop> {
 
   NCCL_DEVICE_INLINE ~ncclCft();
 
-  NCCL_DEVICE_INLINE void submit(Coop coop);
+  template <typename OpCoop>
+  NCCL_DEVICE_INLINE void submit(OpCoop coop);
 
-  NCCL_DEVICE_INLINE void flushLocal(Coop coop);
+  template <typename OpCoop>
+  NCCL_DEVICE_INLINE void flushLocal(OpCoop coop);
 
-  NCCL_DEVICE_INLINE void flush(Coop coop, bool* hasReport = nullptr, uint32_t* report = nullptr);
+  template <typename OpCoop>
+  NCCL_DEVICE_INLINE void flush(OpCoop coop, bool* hasReport = nullptr, uint32_t* report = nullptr);
 
-  NCCL_DEVICE_INLINE void put(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemSource, uint32_t bytes);
+  template <typename OpCoop>
+  NCCL_DEVICE_INLINE void put(OpCoop coop, ncclCftLeId leId, size_t leOffset, void* smemSource, uint32_t bytes);
 
-  NCCL_DEVICE_INLINE void putCpMask(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemSource, uint32_t bytes,
+  template <typename OpCoop>
+  NCCL_DEVICE_INLINE void putCpMask(OpCoop coop, ncclCftLeId leId, size_t leOffset, void* smemSource, uint32_t bytes,
                                     uint16_t cpMask);
 
-  NCCL_DEVICE_INLINE void putMultimem(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemSource, uint32_t bytes);
-
-  NCCL_DEVICE_INLINE void putMultimemCpMask(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,
-                                            uint32_t bytes, uint16_t cpMask);
-
-  NCCL_DEVICE_INLINE void get(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemDestination, uint32_t bytes);
-
-  template <typename RedOp>
-  NCCL_DEVICE_INLINE void red(Coop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red, void* smemSource,
-                              uint32_t bytes);
-
-  template <typename RedOp>
-  NCCL_DEVICE_INLINE void redCpMask(Coop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red, void* smemSource,
-                                    uint32_t bytes, uint16_t cpMask);
-
-  template <typename RedOp>
-  NCCL_DEVICE_INLINE void redMultimem(Coop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red, void* smemSource,
+  template <typename OpCoop>
+  NCCL_DEVICE_INLINE void putMultimem(OpCoop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,
                                       uint32_t bytes);
 
-  template <typename RedOp>
-  NCCL_DEVICE_INLINE void redMultimemCpMask(Coop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
+  template <typename OpCoop>
+  NCCL_DEVICE_INLINE void putMultimemCpMask(OpCoop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,
+                                            uint32_t bytes, uint16_t cpMask);
+
+  template <typename OpCoop>
+  NCCL_DEVICE_INLINE void get(OpCoop coop, ncclCftLeId leId, size_t leOffset, void* smemDestination, uint32_t bytes);
+
+  template <typename RedOp, typename OpCoop>
+  NCCL_DEVICE_INLINE void red(OpCoop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red, void* smemSource,
+                              uint32_t bytes);
+
+  template <typename RedOp, typename OpCoop>
+  NCCL_DEVICE_INLINE void redCpMask(OpCoop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red, void* smemSource,
+                                    uint32_t bytes, uint16_t cpMask);
+
+  template <typename RedOp, typename OpCoop>
+  NCCL_DEVICE_INLINE void redMultimem(OpCoop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
+                                      void* smemSource, uint32_t bytes);
+
+  template <typename RedOp, typename OpCoop>
+  NCCL_DEVICE_INLINE void redMultimemCpMask(OpCoop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
                                             void* smemSource, uint32_t bytes, uint16_t cpMask);
 
-  template <typename RedOp>
-  NCCL_DEVICE_INLINE void pullRed(Coop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red, void* smemDestination,
-                                  uint32_t bytes);
+  template <typename RedOp, typename OpCoop>
+  NCCL_DEVICE_INLINE void pullRed(OpCoop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
+                                  void* smemDestination, uint32_t bytes);
 };
 #endif // __CUDACC__
 

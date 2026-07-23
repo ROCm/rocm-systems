@@ -377,7 +377,8 @@ NCCL_DEVICE_INLINE ncclCft<Coop>::~ncclCft() {
 }
 
 template <typename Coop>
-NCCL_DEVICE_INLINE void ncclCft<Coop>::submit(Coop coop) {
+template <typename OpCoop>
+NCCL_DEVICE_INLINE void ncclCft<Coop>::submit(OpCoop coop) {
 #if NCCL_CFT_ENABLE
   if (nccl::cft::internal::elected(coop)) {
     asm volatile("fabric.submit;" ::: "memory");
@@ -394,7 +395,8 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::submit(Coop coop) {
 }
 
 template <typename Coop>
-NCCL_DEVICE_INLINE void ncclCft<Coop>::flushLocal(Coop coop) {
+template <typename OpCoop>
+NCCL_DEVICE_INLINE void ncclCft<Coop>::flushLocal(OpCoop coop) {
 #if NCCL_CFT_ENABLE
   // Wait for fabric operations to consume/read shared memory
   asm volatile("fabric.wait.sync_restrict::reads;" ::: "memory");
@@ -405,7 +407,8 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::flushLocal(Coop coop) {
 }
 
 template <typename Coop>
-NCCL_DEVICE_INLINE void ncclCft<Coop>::flush(Coop coop, bool* hasReport, uint32_t* report) {
+template <typename OpCoop>
+NCCL_DEVICE_INLINE void ncclCft<Coop>::flush(OpCoop coop, bool* hasReport, uint32_t* report) {
 #if NCCL_CFT_ENABLE
   // Wait for fabric operations to consume/read shared memory
   asm volatile("fabric.wait.sync_restrict::reads;" ::: "memory");
@@ -433,7 +436,8 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::flush(Coop coop, bool* hasReport, uint32_
 }
 
 template <typename Coop>
-NCCL_DEVICE_INLINE void ncclCft<Coop>::put(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,
+template <typename OpCoop>
+NCCL_DEVICE_INLINE void ncclCft<Coop>::put(OpCoop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,
                                            uint32_t bytes) {
 #if NCCL_CFT_ENABLE
   coop.sync();
@@ -464,7 +468,8 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::put(Coop coop, ncclCftLeId leId, size_t l
 }
 
 template <typename Coop>
-NCCL_DEVICE_INLINE void ncclCft<Coop>::putCpMask(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,
+template <typename OpCoop>
+NCCL_DEVICE_INLINE void ncclCft<Coop>::putCpMask(OpCoop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,
                                                  uint32_t bytes, uint16_t cpMask) {
 #if NCCL_CFT_ENABLE
   coop.sync();
@@ -495,7 +500,8 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::putCpMask(Coop coop, ncclCftLeId leId, si
 }
 
 template <typename Coop>
-NCCL_DEVICE_INLINE void ncclCft<Coop>::putMultimem(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,
+template <typename OpCoop>
+NCCL_DEVICE_INLINE void ncclCft<Coop>::putMultimem(OpCoop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,
                                                    uint32_t bytes) {
 #if NCCL_CFT_ENABLE
   coop.sync();
@@ -526,8 +532,9 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::putMultimem(Coop coop, ncclCftLeId leId, 
 }
 
 template <typename Coop>
-NCCL_DEVICE_INLINE void ncclCft<Coop>::putMultimemCpMask(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,
-                                                         uint32_t bytes, uint16_t cpMask) {
+template <typename OpCoop>
+NCCL_DEVICE_INLINE void ncclCft<Coop>::putMultimemCpMask(OpCoop coop, ncclCftLeId leId, size_t leOffset,
+                                                         void* smemSource, uint32_t bytes, uint16_t cpMask) {
 #if NCCL_CFT_ENABLE
   coop.sync();
   if (nccl::cft::internal::elected(coop)) {
@@ -558,7 +565,8 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::putMultimemCpMask(Coop coop, ncclCftLeId 
 }
 
 template <typename Coop>
-NCCL_DEVICE_INLINE void ncclCft<Coop>::get(Coop coop, ncclCftLeId leId, size_t leOffset, void* smemDestination,
+template <typename OpCoop>
+NCCL_DEVICE_INLINE void ncclCft<Coop>::get(OpCoop coop, ncclCftLeId leId, size_t leOffset, void* smemDestination,
                                            uint32_t bytes) {
 #if NCCL_CFT_ENABLE
   coop.sync();
@@ -589,8 +597,8 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::get(Coop coop, ncclCftLeId leId, size_t l
 }
 
 template <typename Coop>
-template <typename RedOp>
-NCCL_DEVICE_INLINE void ncclCft<Coop>::red(Coop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
+template <typename RedOp, typename OpCoop>
+NCCL_DEVICE_INLINE void ncclCft<Coop>::red(OpCoop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
                                            void* smemSource, uint32_t bytes) {
 #if NCCL_CFT_ENABLE
   coop.sync();
@@ -616,8 +624,8 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::red(Coop coop, ncclCftLeId leId, size_t l
 }
 
 template <typename Coop>
-template <typename RedOp>
-NCCL_DEVICE_INLINE void ncclCft<Coop>::redCpMask(Coop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
+template <typename RedOp, typename OpCoop>
+NCCL_DEVICE_INLINE void ncclCft<Coop>::redCpMask(OpCoop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
                                                  void* smemSource, uint32_t bytes, uint16_t cpMask) {
 #if NCCL_CFT_ENABLE
   coop.sync();
@@ -644,8 +652,8 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::redCpMask(Coop coop, ncclCftLeId leId, si
 }
 
 template <typename Coop>
-template <typename RedOp>
-NCCL_DEVICE_INLINE void ncclCft<Coop>::redMultimem(Coop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
+template <typename RedOp, typename OpCoop>
+NCCL_DEVICE_INLINE void ncclCft<Coop>::redMultimem(OpCoop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
                                                    void* smemSource, uint32_t bytes) {
 #if NCCL_CFT_ENABLE
   coop.sync();
@@ -671,9 +679,9 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::redMultimem(Coop coop, ncclCftLeId leId, 
 }
 
 template <typename Coop>
-template <typename RedOp>
-NCCL_DEVICE_INLINE void ncclCft<Coop>::redMultimemCpMask(Coop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
-                                                         void* smemSource, uint32_t bytes, uint16_t cpMask) {
+template <typename RedOp, typename OpCoop>
+NCCL_DEVICE_INLINE void ncclCft<Coop>::redMultimemCpMask(
+  OpCoop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red, void* smemSource, uint32_t bytes, uint16_t cpMask) {
 #if NCCL_CFT_ENABLE
   coop.sync();
   if (nccl::cft::internal::elected(coop)) {
@@ -699,8 +707,8 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::redMultimemCpMask(Coop coop, ncclCftLeId 
 }
 
 template <typename Coop>
-template <typename RedOp>
-NCCL_DEVICE_INLINE void ncclCft<Coop>::pullRed(Coop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
+template <typename RedOp, typename OpCoop>
+NCCL_DEVICE_INLINE void ncclCft<Coop>::pullRed(OpCoop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
                                                void* smemDestination, uint32_t bytes) {
 #if NCCL_CFT_ENABLE
   coop.sync();
