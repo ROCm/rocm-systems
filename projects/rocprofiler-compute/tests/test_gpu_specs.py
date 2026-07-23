@@ -299,7 +299,7 @@ def test_is_single_panel_config_accepts_shared_gfx115x_dir(tmp_path):
         "gfx1150": "rdna35_point_1",
         "gfx1151": "rdna35_halo",
         "gfx1152": "rdna35_point_2",
-        "gfx1153": "rdna35_krackan2e",
+        "gfx1153": "rdna35_gorgon_point",
     }
 
     assert is_single_panel_config(str(tmp_path), supported_archs) is False
