@@ -92,6 +92,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amd-smi process --sort-by-pid` and `amd-smi monitor --sort-by-pid` group output by PID, merging each PID's per-GPU usage into one row.
   - New C and Python API `amdsmi_get_gpu_process_list_by_pid()`.
 
+- **Added `amdsmi_get_vcn_busy_percent` API**.  
+  - Navi devices were incorrectly displaying N/A for vcn_busy in their metrics output due to a difference in design. This API was added to allow users to properly obtain the vcn_busy metric from Navi and other similar devices.
+
 ### Changed
 
 - **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.  
@@ -179,6 +182,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed fabric telemetry APIs returning the wrong status on non-IFoE systems**.  
   - `amdsmi_alloc_fabric_telemetry()`, `amdsmi_get_fabric_telemetry_data()`, and `amdsmi_free_fabric_telemetry()` now return `AMDSMI_STATUS_NOT_SUPPORTED` on systems without fabric hardware, consistent with `amdsmi_get_gpu_fabric_info()`.
+
+- **Fixed incorrect N/A output for vcn_busy field in `amd-smi metric --usage`**.  
+  - On devices without XCP partitions (e.g. Navi), the CLI now reads `vcn_busy_percent` via the new `amdsmi_get_vcn_busy_percent()` sysfs API.
 
 ## amd_smi_lib for ROCm 7.13.0
 

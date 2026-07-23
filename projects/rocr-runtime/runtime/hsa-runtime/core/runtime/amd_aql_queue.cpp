@@ -606,11 +606,19 @@ void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
                                 "Trying to allocate an AQL ring buffer in device memory without "
                                 "large BAR PCIe enabled.");
     }
-    // Device-memory ring buffers use the region's default CPU mapping; callers
-    // that select this path are responsible for the required packet-store ordering.
+    // AllocateExecutable: the CP hardware requests execute permissions for
+    // packet buffer accesses — it treats AQL packets as an execution language
+    // and will fault on ring buffers without the execute attribute.
+    //
+    // AllocateUncached: propagates through KFD (KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED)
+    // → AMDGPU (AMDGPU_GEM_CREATE_UNCACHED) and sets the page MTYPE to UC in the
+    // GPU page tables.  This is a GPU-side attribute, not CPU-side.
+    //
+    // Callers are responsible for the required CPU-side packet-store ordering
+    // (non-temporal stores + sfence / MOVDIR64B).
     ring_buf_ = agent_->coarsegrain_allocator()(
         ring_buf_alloc_bytes_ + ring_buf_metadata_alloc_bytes_,
-        core::MemoryRegion::AllocateExecutable);
+        core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
   } else {
     ring_buf_ = agent_->system_allocator()(
         ring_buf_alloc_bytes_ + ring_buf_metadata_alloc_bytes_, 0x1000,

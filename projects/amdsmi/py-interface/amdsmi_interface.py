@@ -7120,6 +7120,17 @@ def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
     return _validate_if_max_uint(gpu_busy_percent.value, MaxUIntegerTypes.UINT32_T)
 
 
+def amdsmi_get_vcn_busy_percent(processor_handle: processor_handle_t):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    vcn_busy_percent = ctypes.c_uint32(0)
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_vcn_busy_percent(processor_handle, ctypes.byref(vcn_busy_percent))
+    )
+    return vcn_busy_percent.value
+
+
 # Memory Size Management Functions
 # Note: UMA carveout and TTM are kernel UAPI features (sysfs/modprobe.d), not libdrm.
 

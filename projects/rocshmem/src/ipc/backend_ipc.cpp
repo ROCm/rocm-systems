@@ -513,7 +513,7 @@ void IPCBackend::setup_fence_buffer() {
 }
 
 void IPCBackend::setup_symm_registration() {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   /* The table alloc is shared with other backends (see Backend). */
   alloc_ipc_symm_table();
 #else
@@ -522,7 +522,7 @@ void IPCBackend::setup_symm_registration() {
 }
 
 void IPCBackend::cleanup_symm_registration() {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   /*
    * Unregister anything the user left registered. buffer_unregister_symmetric
    * mutates ipc_symm_records_, so iterate over a snapshot of the keys.
@@ -543,7 +543,7 @@ void IPCBackend::cleanup_symm_registration() {
 int IPCBackend::buffer_register_symmetric([[maybe_unused]] void *addr,
                                           [[maybe_unused]] size_t length,
                                           [[maybe_unused]] void **registered_addr) {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   if (registered_addr == nullptr) {
     return ROCSHMEM_ERROR;
   }
@@ -602,8 +602,8 @@ int IPCBackend::buffer_register_symmetric([[maybe_unused]] void *addr,
 }
 
 int IPCBackend::buffer_unregister_symmetric([[maybe_unused]] void *addr) {
-#if HIP_VERSION >= 70000000
-  if (addr == nullptr) {
+#if HIP_VERSION >= 70200000
+  if (addr == nullptr || ipcImpl.symm_table == nullptr) {
     return ROCSHMEM_ERROR;
   }
 
