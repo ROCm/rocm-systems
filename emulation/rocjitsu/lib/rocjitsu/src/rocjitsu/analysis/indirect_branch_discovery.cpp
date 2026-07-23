@@ -1447,10 +1447,11 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
         // source pair unless the instruction also defines it. Real kernels can
         // build one callee address once and issue multiple swappc calls through
         // that same pair on the fallthrough path.
-      } else if (!state.pair_dirty(*consumer_pair)) {
+      } else if (*consumer_pair < kMaxTrackedSgprPair && !state.pair_dirty(*consumer_pair)) {
         // The block did not touch the pair, so any useful fact must come from
         // predecessor blocks. Defer classification until the block-entry
-        // lattice is available.
+        // lattice is available. Out-of-range selectors cannot name a tracked
+        // SGPR pair and deliberately remain unresolved.
         pending_consumers.push_back(PendingConsumer{
             .block_index = block_index,
             .inst_index = index,
@@ -1501,7 +1502,8 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
 }
 
 [[nodiscard]] std::vector<LatticeFacts>
-run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
+run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
+                   std::span<const PendingConsumer> pending_consumers) {
   // Phase 3: compute block-entry facts to a fixed point.
   //
   // entry[B] = JOIN(exit[P]) for every predecessor P of B.
@@ -1516,11 +1518,23 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
       predecessors[successor].push_back(block_index);
   }
 
+  // Dataflow results are consumed only by pending cross-block branches. A pair
+  // that is built or killed somewhere but never reaches such a consumer cannot
+  // affect any emitted fixup, so exclude it from the lattice entirely. Local
+  // consumers were already resolved during scan_block(). This set must contain
+  // every tracked pair used by a cross-block consumer; omitted consumers remain
+  // unresolved.
+  std::bitset<REGISTER_SET_MAX_SGPRS> relevant_pairs;
+  for (const PendingConsumer &consumer : pending_consumers) {
+    if (consumer.pair_lo < kMaxTrackedSgprPair)
+      relevant_pairs.set(consumer.pair_lo);
+  }
+
   std::vector<LatticeFacts> entry_facts(blocks.size());
-  // Keep key presence separate from the sparse value maps. The dataflow
+  // Keep key presence separate from the sparse fact vectors. The dataflow
   // join needs the union of predecessor keys on every worklist visit; caching
   // that bounded set avoids repeatedly scanning every fact
-  // to recover information that changes only when the corresponding map does.
+  // to recover information that changes only when the corresponding vector does.
   std::vector<std::bitset<REGISTER_SET_MAX_SGPRS>> entry_pairs(blocks.size());
   std::deque<size_t> worklist;
   std::vector<bool> on_worklist(blocks.size(), false);
@@ -1546,8 +1560,10 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
       // predecessor's exit value only for the pair currently being joined.
       for (size_t predecessor : predecessors[block_index]) {
         mentioned_pairs |= entry_pairs[predecessor];
-        for (const auto &[pair_lo, _] : blocks[predecessor].transfers)
-          mentioned_pairs.set(pair_lo);
+        for (const auto &[pair_lo, _] : blocks[predecessor].transfers) {
+          if (relevant_pairs[pair_lo])
+            mentioned_pairs.set(pair_lo);
+        }
       }
 
       new_entry.reserve(mentioned_pairs.count());
@@ -2055,7 +2071,7 @@ discover_indirect_branch_edges(std::span<const Instruction *const> insts,
 
     size_t unresolved_consumers = 0;
     if (!pending_consumers.empty()) {
-      const auto entry_facts = run_block_dataflow(blocks);
+      const auto entry_facts = run_block_dataflow(blocks, pending_consumers);
       unresolved_consumers = classify_pending_consumers(ctx, blocks, entry_facts, pending_consumers,
                                                         iteration_recovered);
     }
