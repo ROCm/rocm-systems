@@ -23,6 +23,10 @@ NCCL_PARAM(DevApiJit, "DEV_API_JIT", 0);
 const int proxyBackendMinVersions[] = {0, NCCL_VERSION(2, 30, 3), NCCL_VERSION(2, 30, 5)};
 const int gdakiBackendMinVersions[] = {0, NCCL_VERSION(2, 30, 3), NCCL_VERSION(2, 30, 5)};
 const int gpiBackendMinVersions[] = {0, NCCL_VERSION(2, 30, 5)};
+// AMD device-initiated backends do not use the host-provided backendVersion
+// (their createContext ignores it); expose a single version so backendVersion=0.
+const int rocshmemGdaBackendMinVersions[] = {0};
+const int anvilSdmaBackendMinVersions[] = {0};
 
 ncclResult_t ncclGetGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
   if (comm == nullptr || ginType == nullptr) return ncclInternalError;
@@ -280,6 +284,14 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
   case NCCL_GIN_TYPE_GPI:
     backendVersionArray = gpiBackendMinVersions;
     nVersions = sizeof(gpiBackendMinVersions) / sizeof(int);
+    break;
+  case NCCL_GIN_TYPE_ROCSHMEM_GDA:
+    backendVersionArray = rocshmemGdaBackendMinVersions;
+    nVersions = sizeof(rocshmemGdaBackendMinVersions) / sizeof(int);
+    break;
+  case NCCL_GIN_TYPE_ANVIL_SDMA:
+    backendVersionArray = anvilSdmaBackendMinVersions;
+    nVersions = sizeof(anvilSdmaBackendMinVersions) / sizeof(int);
     break;
   default:
     WARN("Cannot get backend version for invalid GIN type %d", ginState->ginType);

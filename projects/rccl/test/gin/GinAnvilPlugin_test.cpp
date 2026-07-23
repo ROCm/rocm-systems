@@ -229,7 +229,7 @@ TEST_F(GinAnvilPluginTest, CreateContext_MissingInfra) {
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll);
-  ncclGinConfig_v13_t cfg{};
+  ncclGinConfig_v14_t cfg{};
   cfg.nSignals = 0;
   cfg.nCounters = 0;
   void* ginCtx = nullptr;
@@ -247,7 +247,7 @@ TEST_F(GinAnvilPluginTest, CreateContext_EnvAndCounters) {
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll);
-  ncclGinConfig_v13_t cfg{};
+  ncclGinConfig_v14_t cfg{};
   cfg.nSignals = 2;
   cfg.nCounters = 1;
   void* ginCtx = nullptr;
@@ -285,7 +285,7 @@ TEST_F(GinAnvilPluginTest, BindSignals_SlotOutOfRange) {
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll);
-  ncclGinConfig_v13_t cfg{};
+  ncclGinConfig_v14_t cfg{};
   cfg.nSignals = 1;
   void* ginCtx1 = nullptr;
   void* ginCtx2 = nullptr;
@@ -309,7 +309,7 @@ TEST_F(GinAnvilPluginTest, BindSignals_Success) {
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll);
-  ncclGinConfig_v13_t cfg{};
+  ncclGinConfig_v14_t cfg{};
   cfg.nSignals = 2;
   void* ginCtx = nullptr;
   ncclNetDeviceHandle_v11_t* devHandle = nullptr;
@@ -355,7 +355,7 @@ TEST_F(GinAnvilPluginTest, BindSignals_LsaResolveFail) {
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll);
-  ncclGinConfig_v13_t cfg{};
+  ncclGinConfig_v14_t cfg{};
   cfg.nSignals = 1;
   void* ginCtx = nullptr;
   ncclNetDeviceHandle_v11_t* devHandle = nullptr;
@@ -376,7 +376,7 @@ TEST_F(GinAnvilPluginTest, BindSignals_IpcTableFull) {
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll);
-  ncclGinConfig_v13_t cfg{};
+  ncclGinConfig_v14_t cfg{};
   cfg.nSignals = 1;
   void* ginCtx = nullptr;
   ncclNetDeviceHandle_v11_t* devHandle = nullptr;
@@ -407,7 +407,7 @@ TEST_F(GinAnvilPluginTest, CloseColl_AfterSignalBind) {
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll);
-  ncclGinConfig_v13_t cfg{};
+  ncclGinConfig_v14_t cfg{};
   cfg.nSignals = 1;
   void* ginCtx = nullptr;
   ncclNetDeviceHandle_v11_t* devHandle = nullptr;
