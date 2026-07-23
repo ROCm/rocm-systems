@@ -526,7 +526,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                      : 0u;
     const uint64_t vgpr_msb_bytes =
         arch == ROCJITSU_CODE_ARCH_GFX1250 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u
-            ? (spill ? 4u : 2u) * sizeof(uint32_t)
+            ? (spill ? 4u : 2u) * sizeof(uint32_t) +
+                  (options.moi_dynamic_access_records ? 2u : 0u) * sizeof(uint32_t)
             : 0u;
     std::vector<uint32_t> displaced_tail_words;
     uint32_t displaced_original_size = candidate.size;
@@ -1061,7 +1062,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             planned_patch.gfx1250_vgpr_msb_mode,
             options.moi_dynamic_access_records ? 0u : candidate.size / sizeof(uint32_t), {},
             planned_patch.probe_guest_instruction_offset, &body_guest_instruction_offset,
-            planned_patch.spill_overlaps_guest_operands);
+            planned_patch.spill_overlaps_guest_operands,
+            /*wrap_embedded_guest_with_guest_vgpr_bank=*/options.moi_dynamic_access_records);
         if (!cave_words)
           return;
         if (planned_patch.dense_call_anchor) {

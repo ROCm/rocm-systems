@@ -1642,6 +1642,15 @@ inline_shadow_visible_evidence_sgpr(const ConSanOptions &options) {
   return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 102u : kMaxSgprs;
 }
 
+[[nodiscard]] bool persistent_sgpr_range_overlaps_flat_scratch(uint16_t base, uint16_t width,
+                                                               rj_code_arch_t arch) {
+  // gfx1250 scalar selectors 102:103 alias FLAT_SCRATCH. Short-lived scalar
+  // save windows may use the physical registers when no scratch operation is
+  // live, but persistent owner/epoch state would silently retarget every
+  // later address-free private spill.
+  return arch == ROCJITSU_CODE_ARCH_GFX1250 && range_overlaps(base, width, 102u, 2u);
+}
+
 [[nodiscard]] uint16_t moi_dispatch_state_sgpr_count(const ConSanOptions &options) {
   (void)options;
   return 2u;
@@ -2674,6 +2683,10 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   const uint16_t dispatch_state_count = moi_dispatch_state_sgpr_count(options);
   const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
   for (uint32_t base = first; base + dispatch_state_count <= ordinary_sgpr_limit; base += 2u) {
+    if (persistent_sgpr_range_overlaps_flat_scratch(static_cast<uint16_t>(base),
+                                                    dispatch_state_count, arch)) {
+      continue;
+    }
     if (instrumentation::is_cdna_family_arch(arch) &&
         std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
           return !plan.owner_descriptor_file_offsets.empty() &&
@@ -2715,6 +2728,10 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     const int32_t last_base =
         static_cast<int32_t>((ordinary_sgpr_limit - dispatch_state_count) & ~1u);
     for (int32_t base = last_base; base >= 20; base -= 2) {
+      if (persistent_sgpr_range_overlaps_flat_scratch(static_cast<uint16_t>(base),
+                                                      dispatch_state_count, arch)) {
+        continue;
+      }
       const bool admits_owner =
           std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
             return plan.source != ConSanRegisterAllocationSource::Unsupported &&
@@ -2823,6 +2840,7 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
                                             moi_exec_save_sgpr_count(options, arch));
   if (base < 20u || base % 2u != 0u ||
       static_cast<uint32_t>(base) + dispatch_state_count > moi_ordinary_sgpr_limit(arch) ||
+      persistent_sgpr_range_overlaps_flat_scratch(base, dispatch_state_count, arch) ||
       overlaps_owner || overlaps_exec) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.warnings.emplace_back(
@@ -2845,7 +2863,16 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
       (options.moi_persistent_owner_sgpr && *options.moi_persistent_owner_sgpr >= limit) ||
       (options.moi_persistent_epoch_sgpr && *options.moi_persistent_epoch_sgpr >= limit) ||
       (options.moi_persistent_workgroup_key_sgpr &&
-       *options.moi_persistent_workgroup_key_sgpr >= limit);
+       *options.moi_persistent_workgroup_key_sgpr >= limit) ||
+      (options.moi_persistent_owner_sgpr &&
+       persistent_sgpr_range_overlaps_flat_scratch(*options.moi_persistent_owner_sgpr, 1u,
+                                                   arch)) ||
+      (options.moi_persistent_epoch_sgpr &&
+       persistent_sgpr_range_overlaps_flat_scratch(*options.moi_persistent_epoch_sgpr, 1u,
+                                                   arch)) ||
+      (options.moi_persistent_workgroup_key_sgpr &&
+       persistent_sgpr_range_overlaps_flat_scratch(
+           *options.moi_persistent_workgroup_key_sgpr, 1u, arch));
   const bool inline_external_invalid =
       (options.moi_inline_indirect_pc_sgpr &&
        static_cast<uint32_t>(*options.moi_inline_indirect_pc_sgpr) + 2u > limit) ||
@@ -3571,7 +3598,9 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
               range_overlaps(base, scalar_count, *options.moi_owner_sgpr, 1u));
     };
     for (uint32_t base = first; base + scalar_count <= moi_ordinary_sgpr_limit(arch); ++base) {
-      if (overlaps_reserved_state(static_cast<uint16_t>(base)))
+      if (overlaps_reserved_state(static_cast<uint16_t>(base)) ||
+          persistent_sgpr_range_overlaps_flat_scratch(static_cast<uint16_t>(base), scalar_count,
+                                                      arch))
         continue;
       std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch;
       // Record/Replay's scalar prologue initializes both persistent values

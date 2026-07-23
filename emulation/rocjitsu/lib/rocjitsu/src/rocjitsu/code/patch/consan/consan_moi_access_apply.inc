@@ -117,7 +117,8 @@ template <typename PlannedPatch>
     size_t trailing_guest_word_count = 0u, std::span<const uint32_t> entry_prefix_words = {},
     std::optional<uint32_t> probe_guest_instruction_offset = std::nullopt,
     uint32_t *body_guest_instruction_offset = nullptr,
-    bool restore_vgpr_spill_before_trailing_guest = false) {
+    bool restore_vgpr_spill_before_trailing_guest = false,
+    bool wrap_embedded_guest_with_guest_vgpr_bank = false) {
   std::vector<uint32_t> body;
   if (trailing_guest_word_count > probe_words.size()) {
     errors.emplace_back("ConSan MOI " + std::string(probe_name) +
@@ -135,7 +136,46 @@ template <typename PlannedPatch>
                 planned_patch.spill->save_words.end());
   body.insert(body.end(), scalar_save_words.begin(), scalar_save_words.end());
   const size_t probe_body_begin = body.size();
-  body.insert(body.end(), probe_words.begin(), probe_words.begin() + probe_prefix_words);
+  std::optional<size_t> guest_word;
+  size_t guest_word_count = 0u;
+  if (probe_guest_instruction_offset) {
+    if (*probe_guest_instruction_offset % sizeof(uint32_t) != 0u) {
+      errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                          " has an unaligned relocated guest offset");
+      return std::nullopt;
+    }
+    guest_word = *probe_guest_instruction_offset / sizeof(uint32_t);
+    guest_word_count = planned_patch.candidate->size / sizeof(uint32_t);
+    if (*guest_word >= probe_words.size() || guest_word_count == 0u ||
+        guest_word_count > probe_words.size() - *guest_word) {
+      errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                          " has an invalid relocated guest range");
+      return std::nullopt;
+    }
+  }
+  const bool wrap_embedded_guest = select_low_vgpr_bank &&
+                                   wrap_embedded_guest_with_guest_vgpr_bank && guest_word &&
+                                   *guest_word < probe_prefix_words;
+  if (wrap_embedded_guest) {
+    if (guest_word_count > probe_prefix_words - *guest_word) {
+      errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                          " has a relocated guest range crossing its VGPR-bank split");
+      return std::nullopt;
+    }
+    body.insert(body.end(), probe_words.begin(), probe_words.begin() + *guest_word);
+    body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), ROCJITSU_CODE_ARCH_GFX1250));
+    if (body_guest_instruction_offset)
+      *body_guest_instruction_offset = static_cast<uint32_t>(body.size() * sizeof(uint32_t));
+    body.insert(body.end(), probe_words.begin() + *guest_word,
+                probe_words.begin() + *guest_word + guest_word_count);
+    body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+        static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), 0u, ROCJITSU_CODE_ARCH_GFX1250));
+    body.insert(body.end(), probe_words.begin() + *guest_word + guest_word_count,
+                probe_words.begin() + probe_prefix_words);
+  } else {
+    body.insert(body.end(), probe_words.begin(), probe_words.begin() + probe_prefix_words);
+  }
   body.insert(body.end(), scalar_restore_words.begin(), scalar_restore_words.end());
   if (restore_vgpr_spill_before_trailing_guest && planned_patch.spill)
     body.insert(body.end(), planned_patch.spill->restore_words.begin(),
@@ -146,17 +186,10 @@ template <typename PlannedPatch>
   }
   const size_t trailing_probe_body_begin = body.size();
   body.insert(body.end(), probe_words.begin() + probe_prefix_words, probe_words.end());
-  if (probe_guest_instruction_offset && body_guest_instruction_offset) {
-    const size_t guest_word = *probe_guest_instruction_offset / sizeof(uint32_t);
-    if (*probe_guest_instruction_offset % sizeof(uint32_t) != 0u ||
-        guest_word >= probe_words.size()) {
-      errors.emplace_back("ConSan MOI " + std::string(probe_name) +
-                          " has an invalid relocated guest offset");
-      return std::nullopt;
-    }
-    const size_t body_word = guest_word < probe_prefix_words
-                                 ? probe_body_begin + guest_word
-                                 : trailing_probe_body_begin + guest_word - probe_prefix_words;
+  if (guest_word && body_guest_instruction_offset && !wrap_embedded_guest) {
+    const size_t body_word = *guest_word < probe_prefix_words
+                                 ? probe_body_begin + *guest_word
+                                 : trailing_probe_body_begin + *guest_word - probe_prefix_words;
     *body_guest_instruction_offset = static_cast<uint32_t>(body_word * sizeof(uint32_t));
   }
   if (select_low_vgpr_bank && planned_patch.spill)

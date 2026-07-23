@@ -494,6 +494,29 @@ function(rj_add_consan_gfx1250_sim_cases)
         SHARED_INIT_OWNER_EPOCH 0
     )
 
+    rj_add_consan_hip_case(
+        NAME "${_sim_PREFIX}.MoiRelocatedB128LoadRecordReplay"
+        TARGET ${_sim_MOI_TARGET}
+        FILTER
+            "ConSanMoiHipTest.RelocatedB128LoadAfterBarrierPreservesLoadedValue"
+        CONFIG "${_sim_CONFIG}"
+        TIMEOUT 60
+        RUN_SERIAL
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=record-replay"
+            "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=1048576"
+            "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+            "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+            "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_relocated_b128_load_after_barrier_for_instrumentation"
+            "RJ_CONSAN_LOG=1"
+            "RJ_CONSAN_MAX_PATCHES=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+
     # gfx1250 uses the general RDNA fixture, whose focused inline,
     # synchronization, atomic, and dynamic-stack cases differ from CDNA.
     rj_add_consan_hip_case(

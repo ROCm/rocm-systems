@@ -5,6 +5,7 @@
 /// @brief Real-HIP smoke tests for ConSan MOI DBI report-buffer instrumentation.
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -570,6 +571,27 @@ __global__ __launch_bounds__(
     out[output_base + i] = values[i];
 }
 
+__attribute__((amdgpu_num_vgpr(256))) __global__ __launch_bounds__(
+    64) void moi_relocated_b128_load_after_barrier_for_instrumentation(uint32_t *out) {
+  __shared__ uint4 lds[1];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  if (tid == 0)
+    lds[0] = make_uint4(0x10203040u, 0x50607080u, 0x90A0B0C0u, 0xD0E0F000u);
+  __syncthreads();
+
+  // Keep the descriptor full and omit a local NOP cave so the access must use
+  // the spill-backed appended-body path exercised by the Tensile regression.
+  asm volatile("v_mov_b32 v255, 0" ::: "v255");
+  if (tid == 0) {
+    const uint4 loaded = lds[0];
+    out[0] = loaded.x;
+    out[1] = loaded.y;
+    out[2] = loaded.z;
+    out[3] = loaded.w;
+  }
+  __syncthreads();
+}
+
 __attribute__((amdgpu_num_vgpr(256))) __global__
 __launch_bounds__(64) void moi_full_vgpr_file_test_kernel_for_instrumentation(uint32_t *out) {
   __shared__ uint32_t lds[1];
@@ -1017,6 +1039,27 @@ TEST(ConSanMoiHipTest, ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord)
   EXPECT_EQ(record->access_kind, kMoiAccessKindWrite);
   EXPECT_EQ(record->lds_byte_count, sizeof(uint32_t));
   EXPECT_EQ(record->cell_count, 1u);
+}
+
+TEST(ConSanMoiHipTest, RelocatedB128LoadAfterBarrierPreservesLoadedValue) {
+  constexpr std::array<uint32_t, 4> kExpected = {
+      0x10203040u,
+      0x50607080u,
+      0x90A0B0C0u,
+      0xD0E0F000u,
+  };
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, kExpected.size() * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(d_out, 0, kExpected.size() * sizeof(uint32_t)));
+
+  moi_relocated_b128_load_after_barrier_for_instrumentation<<<1, 64>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  std::array<uint32_t, 4> out{};
+  HIP_ASSERT(hipMemcpy(out.data(), d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  EXPECT_EQ(out, kExpected);
 }
 
 TEST(ConSanMoiHipTest, ForcedSpillSampledPreservesLiveVgprsAndWritesEntry) {

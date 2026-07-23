@@ -3520,6 +3520,75 @@ TEST(ConSanMoi, Gfx1250FullVgprRecordReplayUsesScalarEpochCoalescing) {
             access_words.end());
 }
 
+TEST(ConSanMoi, Gfx1250HighSgprPressureSkipsFlatScratchForPersistentEpoch) {
+  constexpr uint32_t kBarrierWait = 0xBF94FFFFu;
+  std::vector<uint32_t> text_words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+      kBarrierWait,
+      build_s_mov_b32(/*sdst=*/0u, /*ssrc=*/101u, ROCJITSU_CODE_ARCH_GFX1250),
+      build_v_mov_b32_e32(/*vdst=*/255, vector_source_vgpr(255), ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  text_words.resize(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_dynamic_access_records = true;
+  options.moi_track_barriers = true;
+  options.moi_init_owner_epoch = true;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(64, 64, 0, 0, 64);
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_flat_scratch_alias_pressure"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 104u);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_FALSE(result.resolved_moi_persistent_owner_sgpr);
+  EXPECT_FALSE(result.resolved_moi_persistent_epoch_sgpr);
+  EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                              &ConSanPatchInfo::kind),
+            result.patches.end());
+  EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
+                              &ConSanPatchInfo::kind),
+            result.patches.end());
+}
+
+TEST(ConSanMoi, Gfx1250RejectsExplicitPersistentStateInFlatScratch) {
+  std::vector<uint32_t> text_words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+  };
+  text_words.resize(128u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+
+  const auto patch_with = [&](ConSanOptions options) {
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(64, 0, 0, 0);
+    return try_patch_consan(
+        make_gfx1250_code_object(text_words, "gfx1250_explicit_flat_scratch_state"), options);
+  };
+
+  ConSanOptions dispatch_options = moi_options(ConSanMoiEngine::RecordReplay);
+  dispatch_options.moi_dispatch_id_sgpr = 102u;
+  const ConSanResult dispatch_result = patch_with(dispatch_options);
+  EXPECT_EQ(dispatch_result.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_FALSE(dispatch_result.modified);
+
+  ConSanOptions epoch_options = moi_options(ConSanMoiEngine::RecordReplay);
+  epoch_options.moi_persistent_owner_sgpr = 102u;
+  epoch_options.moi_persistent_epoch_sgpr = 103u;
+  epoch_options.moi_init_owner_epoch = true;
+  const ConSanResult epoch_result = patch_with(epoch_options);
+  EXPECT_EQ(epoch_result.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_FALSE(epoch_result.modified);
+}
+
 TEST(ConSanMoi, Cdna4AccvgprBoundaryRecordReplayUsesScalarEpochCoalescing) {
   const auto guest = build_cdna4_ds_store_b32(
       /*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
@@ -4478,6 +4547,7 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
   options.moi_exec_save_sgpr = 80;
   options.moi_owner_vgpr = 40;
   options.moi_epoch_vgpr = 41;
+  options.moi_dynamic_access_records = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -4507,7 +4577,14 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
         text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
     ASSERT_GE(words.size(), 5u);
     EXPECT_EQ(words.front(), select_low);
-    EXPECT_EQ(words[words.size() - 4u], restore_guest);
+    EXPECT_EQ(std::ranges::count(words, select_low), 2u);
+    EXPECT_EQ(std::ranges::count(words, restore_guest), 2u);
+    ASSERT_TRUE(patch.relocated_guest_instruction_offset);
+    ASSERT_GE(*patch.relocated_guest_instruction_offset,
+              patch.trampoline_offset + sizeof(uint32_t));
+    const size_t guest_word = static_cast<size_t>(
+        (*patch.relocated_guest_instruction_offset - patch.trampoline_offset) / sizeof(uint32_t));
+    EXPECT_EQ(words[guest_word - 1u], restore_guest);
     ++checked;
   }
   EXPECT_EQ(checked, kAccessCount);
