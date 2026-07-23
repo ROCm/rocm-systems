@@ -861,8 +861,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap) {
   std::vector<void*> swapPtrsB(count);
   std::vector<LinearAllocGuard<unsigned char>> allocations;
 
+  HIP_CHECK(hipSetDevice(0));
   StreamGuard stream_guard(Streams::created);
-
   for (size_t i = 0; i < count; ++i) {
     LinearAllocGuard<unsigned char> allocB(allocTypeB, size_in_bytes);
     swapPtrsB[i] = allocB.ptr();
@@ -903,8 +903,8 @@ static void RunMulticastCopyTest(size_t count, size_t size_in_bytes, LinearAlloc
   std::vector<void*> dstPtrs(count);
   std::vector<LinearAllocGuard<unsigned char>> allocations;
 
+  HIP_CHECK(hipSetDevice(0));
   StreamGuard stream_guard(Streams::created);
-
   LinearAllocGuard<unsigned char> srcAlloc(srcAllocType, size_in_bytes);
   void* srcMem = srcAlloc.ptr();
   fillBuffer(srcMem, initialValues, srcAllocType);
@@ -969,6 +969,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources) {
   constexpr int k_count = 7;
   const size_t size_in_bytes = 4096;
 
+  HIP_CHECK(hipSetDevice(0));
   std::vector<unsigned char> pattern_a(size_in_bytes, 10);
   std::vector<unsigned char> pattern_b(size_in_bytes, 4);
 
