@@ -86,8 +86,10 @@ TEST_F(PluginLoaderTest, DestroysRejectedDuplicateBeforeUnload) {
 }
 
 TEST_F(PluginLoaderTest, RejectsProfiledGroupWithMultipleThreads) {
-  EXPECT_THROW(rocjitsu::PluginLoader::configure_plugin_group(R"({"profiled":true})", "", 2),
-               std::invalid_argument);
+  const simdojo::SimulationEngine::Config engine_config{.num_threads = 2};
+  EXPECT_THROW(
+      rocjitsu::PluginLoader::configure_plugin_group(R"({"profiled":true})", "", engine_config),
+      std::invalid_argument);
 }
 
 TEST_F(PluginLoaderTest, FileSinkFailureFallsBackToStderr) {

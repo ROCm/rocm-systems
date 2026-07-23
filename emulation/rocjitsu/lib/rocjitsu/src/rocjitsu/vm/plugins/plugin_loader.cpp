@@ -220,15 +220,16 @@ int PluginLoader::load_from_config(const std::string &config_json, ExecutionPlug
 
 std::shared_ptr<ExecutionPluginGroup>
 PluginLoader::configure_plugin_group(const std::string &config_json, const std::string &plugin_dir,
-                                     uint32_t num_threads) {
+                                     const simdojo::SimulationEngine::Config &engine_config) {
   flexbuffers::Builder root_fbb;
   bool parsed = flexbuffer_from_json(config_json, root_fbb);
   auto root = parsed ? flexbuffers::GetRoot(root_fbb.GetBuffer()) : flexbuffers::Reference();
 
   bool profiled =
       root.IsMap() && root.AsMap()["profiled"].IsBool() && root.AsMap()["profiled"].AsBool();
-  if (profiled && num_threads > 1) {
-    util::Logger::warn("profiled plugin execution requires num_threads=1 (got ", num_threads, ")");
+  if (profiled && engine_config.num_threads > 1) {
+    util::Logger::warn("profiled plugin execution requires num_threads=1 (got ",
+                       engine_config.num_threads, ")");
     throw std::invalid_argument("profiled plugin execution requires num_threads=1");
   }
 
