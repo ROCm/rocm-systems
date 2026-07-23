@@ -679,7 +679,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // must spill grows that one kernel's per-lane scratch. The SpillManager is
   // created lazily on the first spilling site and shared by the rest; its final
   // size is written back to the descriptor after all sites succeed.
-  const std::vector<ScannedKernelDescriptor> kernels =
+  const std::vector<KernelDescriptorInfo> kernels =
       scan_kernel_descriptors(patcher.image_bytes(), patcher.text_offset(), patcher.text_size());
   std::optional<SpillManager> spills;
   uint64_t spill_descriptor_file_offset = 0;
@@ -774,7 +774,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
               "fixed scratch to spill into");
           continue;
         }
-        const ScannedKernelDescriptor &kernel = kernels.front();
+        const KernelDescriptorInfo &kernel = kernels.front();
         if (!spills) {
           // Cap total per-lane scratch at the widest slot the scratch offset field
           // can encode, so the SpillManager limit and the per-instruction offset

@@ -845,10 +845,10 @@ std::vector<KdTranslation> KernelDescriptorTranslator::translate_image(
     const KernelDescriptorTranslationOptions &options) const {
   std::vector<KdTranslation> translations;
 
-  for (ScannedKernelDescriptor &scanned : scan_kernel_descriptors(image, text_offset, text_size)) {
+  for (KernelDescriptorInfo &kd : scan_kernel_descriptors(image, text_offset, text_size)) {
     translations.push_back(translate_one_descriptor(
-        guest_arch_, host_arch_, scanned.descriptor_file_offset, std::move(scanned.kernel_name),
-        scanned.entry_text_offset, scanned.descriptor, options));
+        guest_arch_, host_arch_, kd.descriptor_file_offset, std::move(kd.kernel_name),
+        kd.entry_text_offset, kd.descriptor, options));
   }
 
   return translations;
