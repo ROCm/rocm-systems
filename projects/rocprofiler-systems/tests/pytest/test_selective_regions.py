@@ -8,6 +8,7 @@ Validates that:
 - roctxProfilerPause/Resume correctly excludes kernels from traces
 - ROCPROFSYS_SELECTED_REGIONS filters tracing to specific roctx regions
 - Pause/resume interacts correctly with region filtering at various boundaries
+- --selected-regions (CLI flag) filters identically to the env var
 """
 
 from __future__ import annotations
@@ -119,6 +120,8 @@ class TestSelectiveRegion(RocprofsysTest):
 
     Both roctxRangeStartA/Stop (start_stop) and roctxRangePushA/Pop (push_pop)
     marker styles are tested — expected kernel presence is identical for both.
+    test_region_1_filter also covers setting the filter via the
+    --selected-regions CLI flag instead of the env var (region_source).
     """
 
     def test_no_filter(self, mode, marker_style, selective_region_env):
@@ -152,21 +155,40 @@ class TestSelectiveRegion(RocprofsysTest):
             pass_regex=["Region1", "Region2", "Region3"],
         )
 
-    def test_region_1_filter(self, mode, marker_style, selective_region_env):
+    @pytest.mark.parametrize("region_source", ["env", "cli"])
+    def test_region_1_filter(
+        self, mode, marker_style, region_source, selective_region_env
+    ):
         """ROCPROFSYS_SELECTED_REGIONS='Region1' — only Region1 content traced.
+
+        region_source="cli" sets the same filter via --selected-regions
+        instead of the env var. One case is enough since both just write the
+        flag value straight into ROCPROFSYS_SELECTED_REGIONS.
 
         Region1 spans: CodeBlock_B, CodeBlock_C (nested Region2), CodeBlock_D,
                         CodeBlock_F (second Region1 open)
         Outside Region1: CodeBlock_A (before), CodeBlock_E (Region3), CodeBlock_G (after)
         """
         env = selective_region_env.copy()
-        env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
+        tool_args = {}
+        if region_source == "env":
+            env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
+        else:
+            # run_test names this kwarg differently per mode: sys_run_args for
+            # rocprof-sys-run, sampling_args for rocprof-sys-sample
+            if mode == "sys_run":
+                tool_args_key = "sys_run_args"
+            else:
+                tool_args_key = "sampling_args"
+            tool_args = {tool_args_key: ["--selected-regions=Region1"]}
+
         result = self.run_test(
             mode,
             "selective-region",
             env=env,
             run_args=["--push-pop"] if marker_style == "push_pop" else None,
             check_target_arch=True,
+            **tool_args,
         )
         self.assert_regex(result)
         self.assert_perfetto(
