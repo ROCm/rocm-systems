@@ -216,6 +216,47 @@ inline uint64_t dpp_write_mask(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row
   return mask;
 }
 
+/// @brief Return destination lanes enabled by EXEC and instruction modifiers.
+///
+/// Applies DPP destination masking without changing architectural wave state.
+template <typename Inst>
+inline uint64_t execution_lane_mask(const Inst &inst, const amdgpu::Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  if constexpr (requires {
+                  inst.inst_.src0;
+                  inst.dpp_ctrl_;
+                  inst.dpp_row_mask_;
+                  inst.dpp_bank_mask_;
+                  inst.dpp_bound_ctrl_;
+                }) {
+    if (inst.inst_.src0 == amdgpu::SRC_DPP)
+      exec &= dpp_write_mask(wf.wf_size(), inst.dpp_ctrl_, inst.dpp_row_mask_, inst.dpp_bank_mask_,
+                             inst.dpp_bound_ctrl_);
+  }
+  return exec;
+}
+
+/// @brief Compute the VGPR source lanes read by active DPP destination lanes.
+inline uint64_t dpp_source_lane_mask(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
+                                     uint32_t bank_mask, uint32_t bound_ctrl, uint32_t fi,
+                                     uint64_t destination_lane_mask, uint64_t exec_mask) {
+  uint64_t source_lane_mask = 0;
+  for (uint32_t lane = 0; lane < wf_size; ++lane) {
+    if ((destination_lane_mask & (uint64_t{1} << lane)) == 0)
+      continue;
+    if (!dpp_lane_write_enabled(static_cast<int>(lane), static_cast<int>(wf_size), dpp_ctrl,
+                                row_mask, bank_mask, bound_ctrl))
+      continue;
+    bool out_of_bounds = false;
+    int source_lane =
+        dpp_permute(dpp_ctrl, static_cast<int>(lane), static_cast<int>(wf_size), out_of_bounds);
+    if (out_of_bounds || (!fi && (exec_mask & (uint64_t{1} << source_lane)) == 0))
+      continue;
+    source_lane_mask |= uint64_t{1} << source_lane;
+  }
+  return source_lane_mask;
+}
+
 /// @brief Apply a complete DPP read for one lane.
 ///
 /// Reads the permuted source value from a VGPR across the wavefront.
@@ -273,16 +314,24 @@ inline void apply_dpp(Operand *&src0, uint32_t dpp_ctrl, uint32_t row_mask, uint
                       uint32_t bound_ctrl, uint32_t fi, std::unique_ptr<DppOperand> &storage,
                       amdgpu::Wavefront &wf) {
   uint32_t ws = wf.wf_size();
-  uint64_t lane_mask = ws >= 64 ? ~uint64_t{0} : ((uint64_t{1} << ws) - 1);
-  RegisterAccess regs(wf);
-  auto src_view = regs.read_operand(*src0, lane_mask);
   uint64_t exec_mask = wf.exec();
-  uint32_t raw[64], result[64];
-  for (uint32_t i = 0; i < ws; ++i)
-    raw[i] = src_view.lane(i);
-  for (uint32_t i = 0; i < ws; ++i)
-    result[i] = dpp_read(raw, static_cast<int>(i), static_cast<int>(ws), dpp_ctrl, row_mask,
-                         bank_mask, bound_ctrl, fi, raw[i], exec_mask);
+  uint64_t destination_lane_mask =
+      exec_mask & dpp_write_mask(ws, dpp_ctrl, row_mask, bank_mask, bound_ctrl);
+  uint64_t source_lane_mask = dpp_source_lane_mask(ws, dpp_ctrl, row_mask, bank_mask, bound_ctrl,
+                                                   fi, destination_lane_mask, exec_mask);
+  RegisterAccess regs(wf);
+  auto src_view = regs.read_operand(*src0, source_lane_mask);
+  uint32_t result[64] = {};
+  for (uint32_t lane = 0; lane < ws; ++lane) {
+    if ((destination_lane_mask & (uint64_t{1} << lane)) == 0)
+      continue;
+    bool out_of_bounds = false;
+    int source_lane =
+        dpp_permute(dpp_ctrl, static_cast<int>(lane), static_cast<int>(ws), out_of_bounds);
+    if (out_of_bounds || (!fi && (exec_mask & (uint64_t{1} << source_lane)) == 0))
+      continue;
+    result[lane] = src_view.lane(static_cast<uint32_t>(source_lane));
+  }
   storage = std::make_unique<DppOperand>(*src0, result, static_cast<int>(ws));
   src0 = storage.get();
 }
@@ -305,15 +354,26 @@ inline uint32_t dpp8_read(const uint32_t *src_data, uint32_t lane, uint32_t wf_s
 inline void apply_dpp8(Operand *&src0, uint32_t lane_sel, uint32_t fi,
                        std::unique_ptr<DppOperand> &storage, amdgpu::Wavefront &wf) {
   uint32_t ws = wf.wf_size();
-  uint64_t lane_mask = ws >= 64 ? ~uint64_t{0} : ((uint64_t{1} << ws) - 1);
-  RegisterAccess regs(wf);
-  auto src_view = regs.read_operand(*src0, lane_mask);
   uint64_t exec_mask = wf.exec();
-  uint32_t raw[64], result[64];
-  for (uint32_t i = 0; i < ws; ++i)
-    raw[i] = src_view.lane(i);
-  for (uint32_t lane = 0; lane < ws; ++lane)
-    result[lane] = dpp8_read(raw, lane, ws, lane_sel, fi, exec_mask);
+  uint64_t source_lane_mask = 0;
+  for (uint32_t lane = 0; lane < ws; ++lane) {
+    if ((exec_mask & (uint64_t{1} << lane)) == 0)
+      continue;
+    uint32_t source_lane = dpp8_src_lane(lane, lane_sel);
+    if (source_lane < ws && (fi || (exec_mask & (uint64_t{1} << source_lane)) != 0))
+      source_lane_mask |= uint64_t{1} << source_lane;
+  }
+  RegisterAccess regs(wf);
+  auto src_view = regs.read_operand(*src0, source_lane_mask);
+  uint32_t result[64] = {};
+  for (uint32_t lane = 0; lane < ws; ++lane) {
+    if ((exec_mask & (uint64_t{1} << lane)) == 0)
+      continue;
+    uint32_t source_lane = dpp8_src_lane(lane, lane_sel);
+    if (source_lane >= ws || (!fi && (exec_mask & (uint64_t{1} << source_lane)) == 0))
+      continue;
+    result[lane] = src_view.lane(source_lane);
+  }
   storage = std::make_unique<DppOperand>(*src0, result, static_cast<int>(ws));
   src0 = storage.get();
 }
@@ -321,6 +381,17 @@ inline void apply_dpp8(Operand *&src0, uint32_t lane_sel, uint32_t fi,
 } // namespace dpp
 
 namespace sdwa {
+
+/// @brief Return the architectural source bytes selected by an SDWA selector.
+inline uint8_t sdwa_src_byte_mask(uint32_t sel) {
+  if (sel <= BYTE_3)
+    return uint8_t{1} << sel;
+  if (sel == WORD_0)
+    return 0b0011;
+  if (sel == WORD_1)
+    return 0b1100;
+  return rocjitsu::ExecutionPlugin::kFullByteMask;
+}
 
 /// @brief Extract a sub-dword from a source value per SDWA sel.
 ///
@@ -388,6 +459,96 @@ inline uint32_t sdwa_dst_merge(uint32_t result, uint32_t old_dst, uint32_t dst_s
   else
     fill = 0;
   return fill | merged;
+}
+
+inline uint8_t sdwa_dst_byte_mask(uint32_t dst_sel, uint32_t dst_unused) {
+  if (dst_sel == DWORD || dst_unused != UNUSED_PRESERVE)
+    return rocjitsu::ExecutionPlugin::kFullByteMask;
+  return sdwa_src_byte_mask(dst_sel);
+}
+
+inline uint32_t sdwa_clamp_f32(uint32_t result);
+
+/// @brief Whether a generated SIMD path can store its result without a
+/// destination transform.
+template <typename Inst> inline bool supports_direct_simd_store(const Inst &inst) {
+  if constexpr (requires {
+                  inst.inst_.src0;
+                  inst.sdwa_dst_sel_;
+                  inst.sdwa_clamp_;
+                }) {
+    return inst.inst_.src0 != amdgpu::SRC_SDWA ||
+           (inst.sdwa_dst_sel_ == DWORD && !inst.sdwa_clamp_);
+  }
+  return true;
+}
+
+/// @brief Store one semantic result with destination modifiers applied.
+///
+/// Destination preservation and optional clamp are part of one architectural
+/// write.
+template <bool ApplyFloatClamp, typename Inst, typename Op>
+inline void write_lane(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t lane,
+                       uint32_t value) {
+  if constexpr (requires {
+                  inst.inst_.src0;
+                  inst.sdwa_dst_sel_;
+                  inst.sdwa_dst_unused_;
+                  inst.sdwa_clamp_;
+                  inst.dst_operand(0);
+                }) {
+    if (inst.inst_.src0 == amdgpu::SRC_SDWA && op.is_vgpr() &&
+        inst.dst_operand(0) == static_cast<const Operand *>(&op)) {
+      const bool clamp = ApplyFloatClamp && inst.sdwa_clamp_;
+      const uint8_t update_byte_mask =
+          sdwa_dst_byte_mask(inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);
+      const uint8_t observed_byte_mask =
+          clamp ? rocjitsu::ExecutionPlugin::kFullByteMask : update_byte_mask;
+      const uint32_t placed = sdwa_dst_merge(value, 0, inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);
+      amdgpu::RegisterAccess(wf).write_lane_masked(
+          op, lane, placed, update_byte_mask, observed_byte_mask,
+          clamp ? amdgpu::RegisterAccess::PostWriteTransform::ClampF32
+                : amdgpu::RegisterAccess::PostWriteTransform::None);
+      return;
+    }
+  }
+  amdgpu::RegisterAccess(wf).write_lane(op, lane, value);
+}
+
+/// @brief 64-bit counterpart of `write_lane`.
+///
+/// SDWA placement applies to the low physical dword, matching the existing
+/// execution contract, while the high dword receives the semantic 64-bit
+/// result normally.
+template <bool ApplyFloatClamp, typename Inst, typename Op>
+inline void write_lane64(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t lane,
+                         uint64_t value) {
+  if constexpr (requires {
+                  inst.inst_.src0;
+                  inst.sdwa_dst_sel_;
+                  inst.sdwa_dst_unused_;
+                  inst.sdwa_clamp_;
+                  inst.dst_operand(0);
+                }) {
+    if (inst.inst_.src0 == amdgpu::SRC_SDWA && op.is_vgpr() &&
+        inst.dst_operand(0) == static_cast<const Operand *>(&op)) {
+      const bool clamp = ApplyFloatClamp && inst.sdwa_clamp_;
+      const uint8_t low_update_byte_mask =
+          sdwa_dst_byte_mask(inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);
+      const uint8_t low_observed_byte_mask =
+          clamp ? rocjitsu::ExecutionPlugin::kFullByteMask : low_update_byte_mask;
+      const uint32_t placed_low = sdwa_dst_merge(static_cast<uint32_t>(value), 0,
+                                                 inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);
+      const uint64_t placed_value = uint64_t{placed_low} | (value & 0xFFFFFFFF00000000ULL);
+      amdgpu::RegisterAccess(wf).write_lane64_masked(
+          op, lane, placed_value, low_update_byte_mask, rocjitsu::ExecutionPlugin::kFullByteMask,
+          low_observed_byte_mask, rocjitsu::ExecutionPlugin::kFullByteMask,
+          clamp ? amdgpu::RegisterAccess::PostWriteTransform::ClampF32
+                : amdgpu::RegisterAccess::PostWriteTransform::None);
+      return;
+    }
+  }
+  amdgpu::RegisterAccess(wf).write_lane64(op, lane, value);
 }
 
 /// @brief Apply SDWA clamp to an ALU result.

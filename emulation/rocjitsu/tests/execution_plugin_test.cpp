@@ -10,6 +10,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/decoder.h"
@@ -37,6 +38,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <format>
@@ -78,9 +80,9 @@ constexpr uint32_t vop1_dpp_word(uint32_t vsrc0, uint32_t dpp_ctrl, uint32_t row
 }
 
 constexpr uint32_t vop1_sdwa_word(uint32_t vsrc0, uint32_t dst_sel, uint32_t dst_unused,
-                                  uint32_t src0_sel) {
+                                  uint32_t src0_sel, bool clamp = false) {
   return (vsrc0 & 0xFF) | ((dst_sel & 0x7) << 8) | ((dst_unused & 0x3) << 11) |
-         ((src0_sel & 0x7) << 16);
+         (static_cast<uint32_t>(clamp) << 13) | ((src0_sel & 0x7) << 16);
 }
 
 constexpr void vop3_encode(uint32_t opcode, uint32_t vdst, uint32_t src0, uint32_t src1,
@@ -728,7 +730,7 @@ TEST(ExecutionPluginTest, ValuSimdWriteObservationUsesActiveExecMask) {
   }
 }
 
-TEST(ExecutionPluginTest, DppObservationCharacterizesUnsupportedConservativeEffects) {
+TEST(ExecutionPluginTest, DppObservationReportsExactSourceAndDestinationLanes) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
     return;
@@ -752,15 +754,10 @@ TEST(ExecutionPluginTest, DppObservationCharacterizesUnsupportedConservativeEffe
       cu->write_vgpr(vb + kDst, lane, kOldDst);
     }
 
-    // V_MOV_B32 with a partial row/bank mask. The architectural destination
-    // mask is EXEC & kDppWriteMask. Until DPP effects are applied before the
-    // semantic store, observation deliberately remains unsupported and reports
-    // one conservative EXEC-wide write.
-    //
-    // TODO(newling): Report architectural DPP effects directly: one source
-    // read containing only lanes selected by active destination lanes and one
-    // destination write with EXEC & kDppWriteMask. Remove the full-wave staging
-    // and duplicate semantic source-read events when that effects model lands.
+    // V_MOV_B32 with a partial row/bank mask. Only lane 0 survives EXEC and the
+    // DPP destination mask. dpp_ctrl=0 selects lane 0 for every destination in
+    // its quad, so the instruction reads source lane 0 and writes destination
+    // lane 0 without touching or restoring any other lane.
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     uint32_t words[2] = {
         vop1_encode(/*opcode=*/1, kDst, amdgpu::SRC_DPP),
@@ -779,24 +776,20 @@ TEST(ExecutionPluginTest, DppObservationCharacterizesUnsupportedConservativeEffe
     }
 
     const auto reads = vgpr_read_events(*plugin);
-    ASSERT_EQ(reads.size(), 2u);
+    ASSERT_EQ(reads.size(), 1u);
     EXPECT_EQ(reads[0].physical_reg, vb + kSrc);
-    EXPECT_EQ(reads[0].lane_mask, ~uint64_t{0});
+    EXPECT_EQ(reads[0].lane_mask, 1u);
     EXPECT_EQ(reads[0].byte_mask, ExecutionPlugin::kFullByteMask);
-    EXPECT_EQ(reads[1].physical_reg, vb + kSrc);
-    EXPECT_EQ(reads[1].lane_mask, kPartialExecMask);
-    EXPECT_EQ(reads[1].byte_mask, ExecutionPlugin::kFullByteMask);
 
     const auto writes = vgpr_write_events(*plugin);
     ASSERT_EQ(writes.size(), 1u);
     EXPECT_EQ(writes[0].physical_reg, vb + kDst);
-    EXPECT_EQ(writes[0].lane_mask, kPartialExecMask);
+    EXPECT_EQ(writes[0].lane_mask, kPartialExecMask & kDppWriteMask);
     EXPECT_EQ(writes[0].byte_mask, ExecutionPlugin::kFullByteMask);
-    EXPECT_NE(writes[0].lane_mask, kPartialExecMask & kDppWriteMask);
   }
 }
 
-TEST(ExecutionPluginTest, SdwaObservationCharacterizesUnsupportedPreserveEffects) {
+TEST(ExecutionPluginTest, SdwaObservationReportsExactSourceAndDestinationBytes) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
     return;
@@ -821,24 +814,21 @@ TEST(ExecutionPluginTest, SdwaObservationCharacterizesUnsupportedPreserveEffects
       uint32_t src0_sel;
       uint32_t expected_active;
       uint8_t architectural_byte_mask;
-      bool source_staging_reads_full_wave;
     };
     constexpr std::array cases{
         Case{amdgpu::sdwa::BYTE_1, amdgpu::sdwa::UNUSED_PRESERVE, amdgpu::sdwa::BYTE_2, 0xAABB22DDu,
-             0b0010, true},
+             0b0010},
         Case{amdgpu::sdwa::WORD_1, amdgpu::sdwa::UNUSED_PRESERVE, amdgpu::sdwa::DWORD, 0x3344CCDDu,
-             0b1100, false},
+             0b1100},
         Case{amdgpu::sdwa::BYTE_1, amdgpu::sdwa::UNUSED_PAD, amdgpu::sdwa::DWORD, 0x00004400u,
-             ExecutionPlugin::kFullByteMask, false},
+             ExecutionPlugin::kFullByteMask},
         Case{amdgpu::sdwa::DWORD, amdgpu::sdwa::UNUSED_PAD, amdgpu::sdwa::DWORD, kSrcValue,
-             ExecutionPlugin::kFullByteMask, false},
+             ExecutionPlugin::kFullByteMask},
     };
 
-    // TODO(newling): Report architectural SDWA effects directly. Selected
-    // sources should carry their precise lane and byte masks, while
-    // UNUSED_PRESERVE destinations should report only dst_sel bytes. Remove
-    // the per-lane full-dword staging reads and conservative full-dword writes
-    // when the execution/effects refactor lands.
+    // Selected sources and destinations carry their precise lane and byte
+    // masks. Partial destinations currently use the scalar semantic path, so
+    // they may report one exact write event per active lane.
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     for (const Case &test_case : cases) {
       SCOPED_TRACE(test_case.dst_sel);
@@ -864,34 +854,111 @@ TEST(ExecutionPluginTest, SdwaObservationCharacterizesUnsupportedPreserveEffects
       }
 
       const auto writes = vgpr_write_events(*plugin);
-      ASSERT_EQ(writes.size(), 1u);
-      EXPECT_EQ(writes[0].physical_reg, vb + kDst);
-      EXPECT_EQ(writes[0].lane_mask, kPartialExecMask);
-      EXPECT_EQ(writes[0].byte_mask, ExecutionPlugin::kFullByteMask);
-      if (test_case.dst_unused == amdgpu::sdwa::UNUSED_PRESERVE)
-        EXPECT_NE(writes[0].byte_mask, test_case.architectural_byte_mask);
-      else
-        EXPECT_EQ(writes[0].byte_mask, test_case.architectural_byte_mask);
+      ASSERT_FALSE(writes.empty());
+      uint64_t observed_write_lanes = 0;
+      for (const auto &write : writes) {
+        EXPECT_EQ(write.physical_reg, vb + kDst);
+        EXPECT_EQ(write.byte_mask, test_case.architectural_byte_mask);
+        observed_write_lanes |= write.lane_mask;
+      }
+      EXPECT_EQ(observed_write_lanes, kPartialExecMask);
 
       const auto reads = vgpr_read_events(*plugin);
-      if (test_case.source_staging_reads_full_wave) {
-        ASSERT_EQ(reads.size(), wf->wf_size() + 1);
-        for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-          EXPECT_EQ(reads[lane].physical_reg, vb + kSrc);
-          EXPECT_EQ(reads[lane].lane_mask, uint64_t{1} << lane);
-          EXPECT_EQ(reads[lane].byte_mask, ExecutionPlugin::kFullByteMask);
-        }
-        EXPECT_EQ(reads.back().physical_reg, vb + kSrc);
-        EXPECT_EQ(reads.back().lane_mask, kPartialExecMask);
-        EXPECT_EQ(reads.back().byte_mask, ExecutionPlugin::kFullByteMask);
-      } else {
-        ASSERT_EQ(reads.size(), 1u);
-        EXPECT_EQ(reads[0].physical_reg, vb + kSrc);
-        EXPECT_EQ(reads[0].lane_mask, kPartialExecMask);
-        EXPECT_EQ(reads[0].byte_mask, ExecutionPlugin::kFullByteMask);
+      ASSERT_FALSE(reads.empty());
+      uint64_t observed_read_lanes = 0;
+      for (const auto &read : reads) {
+        EXPECT_EQ(read.physical_reg, vb + kSrc);
+        EXPECT_EQ(read.byte_mask, amdgpu::sdwa::sdwa_src_byte_mask(test_case.src0_sel));
+        observed_read_lanes |= read.lane_mask;
       }
+      EXPECT_EQ(observed_read_lanes, kPartialExecMask);
     }
   }
+}
+
+TEST(ExecutionPluginTest, SdwaClampIsAppliedInsideArchitecturalDestinationWrite) {
+  ForceScalarOverride force_simd(false);
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  constexpr uint32_t kSrc = 2;
+  constexpr uint32_t kDst = 5;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + kSrc, 0, std::bit_cast<uint32_t>(0.5f));
+  cu->write_vgpr(vb + kDst, 0, 0xDEADBEEFu);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  uint32_t words[2] = {
+      vop1_encode(/*v_rcp_f32 opcode=*/34, kDst, amdgpu::SRC_SDWA),
+      vop1_sdwa_word(kSrc, amdgpu::sdwa::DWORD, amdgpu::sdwa::UNUSED_PAD, amdgpu::sdwa::DWORD,
+                     /*clamp=*/true),
+  };
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  plugin->events.clear();
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), std::bit_cast<uint32_t>(1.0f));
+  const auto reads = vgpr_read_events(*plugin);
+  ASSERT_EQ(reads.size(), 1u);
+  EXPECT_EQ(reads[0].physical_reg, vb + kSrc);
+  EXPECT_EQ(reads[0].lane_mask, 1u);
+  EXPECT_EQ(reads[0].byte_mask, ExecutionPlugin::kFullByteMask);
+  const auto writes = vgpr_write_events(*plugin);
+  ASSERT_EQ(writes.size(), 1u);
+  EXPECT_EQ(writes[0].physical_reg, vb + kDst);
+  EXPECT_EQ(writes[0].lane_mask, 1u);
+  EXPECT_EQ(writes[0].byte_mask, ExecutionPlugin::kFullByteMask);
+}
+
+TEST(ExecutionPluginTest, Sdwa64BitDestinationReportsLowByteAndHighDwordWrites) {
+  ForceScalarOverride force_simd(false);
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  constexpr uint32_t kSrc = 2;
+  constexpr uint32_t kDst = 6;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + kSrc, 0, 1u);
+  cu->write_vgpr(vb + kDst, 0, 0xAABBCCDDu);
+  cu->write_vgpr(vb + kDst + 1, 0, 0x11223344u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  uint32_t words[2] = {
+      vop1_encode(/*v_cvt_f64_i32 opcode=*/4, kDst, amdgpu::SRC_SDWA),
+      vop1_sdwa_word(kSrc, amdgpu::sdwa::BYTE_1, amdgpu::sdwa::UNUSED_PRESERVE,
+                     amdgpu::sdwa::DWORD),
+  };
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  plugin->events.clear();
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0xAABB00DDu);
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst + 1, 0), 0x3FF00000u);
+
+  const auto reads = vgpr_read_events(*plugin);
+  ASSERT_EQ(reads.size(), 1u);
+  EXPECT_EQ(reads[0].physical_reg, vb + kSrc);
+  EXPECT_EQ(reads[0].lane_mask, 1u);
+  EXPECT_EQ(reads[0].byte_mask, ExecutionPlugin::kFullByteMask);
+
+  const auto writes = vgpr_write_events(*plugin);
+  ASSERT_EQ(writes.size(), 2u);
+  EXPECT_EQ(writes[0].physical_reg, vb + kDst);
+  EXPECT_EQ(writes[0].lane_mask, 1u);
+  EXPECT_EQ(writes[0].byte_mask, 0b0010);
+  EXPECT_EQ(writes[1].physical_reg, vb + kDst + 1);
+  EXPECT_EQ(writes[1].lane_mask, 1u);
+  EXPECT_EQ(writes[1].byte_mask, ExecutionPlugin::kFullByteMask);
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite) {

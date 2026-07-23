@@ -312,6 +312,10 @@ private:
     return simd_vgpr_base_impl(wf);
   }
 
+  std::optional<uint32_t> simd_vgpr_base_mut(amdgpu::Wavefront &wf) const {
+    return simd_vgpr_base_mut_impl(wf);
+  }
+
   const amdgpu::VgprStorage *simd_vgpr_storage(const amdgpu::Wavefront &wf) const {
     if (delegate_)
       return delegate_->simd_vgpr_storage(wf);
@@ -323,6 +327,10 @@ private:
   }
 
   void simd_notify_read(const amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const {
+    if (delegate_) {
+      delegate_->simd_notify_read(wf, lane_mask, byte_mask);
+      return;
+    }
     simd_notify_read_impl(wf, lane_mask, byte_mask);
   }
 
@@ -332,6 +340,10 @@ private:
 
   void simd_notify_read64(const amdgpu::Wavefront &wf, uint64_t lane_mask,
                           uint8_t byte_mask) const {
+    if (delegate_) {
+      delegate_->simd_notify_read64(wf, lane_mask, byte_mask);
+      return;
+    }
     simd_notify_read64_impl(wf, lane_mask, byte_mask);
   }
 
@@ -364,6 +376,15 @@ private:
   /// the full register extent. Internal SIMD fast-path hook, reachable only
   /// through `amdgpu::RegisterAccess`.
   virtual std::optional<uint32_t> simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const {
+    (void)wf;
+    return std::nullopt;
+  }
+
+  /// @brief Mutable-destination counterpart of `simd_vgpr_base_impl`.
+  ///
+  /// Write-side resolution is separate because GPR indexing can select a
+  /// different physical register for destination operands than for sources.
+  virtual std::optional<uint32_t> simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const {
     (void)wf;
     return std::nullopt;
   }
@@ -465,9 +486,9 @@ public:
 /// (e.g. RISC-V) inherit directly from `IsaOperand` and use the base
 /// `Operand` defaults.
 ///
-/// TODO: this AMDGPU-specific operand machinery could move under the
-/// `isa/arch/amdgpu/shared` directory alongside the other per-arch shared
-/// code; left here for now to keep the SIMD change self-contained.
+/// The declaration remains in the core ISA layer because conventional targets
+/// and split model/execution targets share it. Execution-only definitions live
+/// in `isa_operand_simd_inl.h`.
 ///
 /// @tparam Isa AMDGPU arch ISA traits providing the SIMD helpers above.
 template <typename Isa> class AmdgpuIsaOperand : public IsaOperand<Isa> {
@@ -494,6 +515,7 @@ private:
                         const uint32_t *vals, uint64_t mask) const override;
 
   std::optional<uint32_t> simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const override;
+  std::optional<uint32_t> simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const override;
   const amdgpu::VgprStorage *simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;
   amdgpu::VgprStorage *simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const override;
   amdgpu::ConstVgprStoragePair64
