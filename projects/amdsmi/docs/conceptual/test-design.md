@@ -63,17 +63,19 @@ tests/amd_smi_test/
 ├── detect_asic_filter.sh            # ASIC detection and per-ASIC exclusion
 │
 ├── unit/                            # No hardware required; pure TEST() macro tests
-│   └── gpu/
-│       ├── dynamic_metrics_test.cc  # Metric struct versioning and compatibility checks
-│       ├── cper_read_test.cc        # CPER read path: synthetic edge cases (no fixtures)
-│       ├── mock_cper_test.cc        # CPER parse/severity filtering vs mock_cper/ fixtures
-│       └── mock_cper/               # Sanitized real CPER fixtures used by mock_cper_test.cc
-│           ├── README.md            # Fixture provenance and scrubbing notes
-│           ├── sanitize_cper.py     # Regenerates fixtures from raw captures
-│           ├── cper_corrected.cper
-│           ├── cper_fatal.cper
-│           ├── cper_mixed.cper
-│           └── cper_uncorrected.cper
+│   ├── gpu/
+│   │   ├── dynamic_metrics_test.cc  # Metric struct versioning and compatibility checks
+│   │   ├── cper_read_test.cc        # CPER read path: synthetic edge cases (no fixtures)
+│   │   ├── mock_cper_test.cc        # CPER parse/severity filtering vs mock_cper/ fixtures
+│   │   └── mock_cper/               # Sanitized real CPER fixtures used by mock_cper_test.cc
+│   │       ├── README.md            # Fixture provenance and scrubbing notes
+│   │       ├── sanitize_cper.py     # Regenerates fixtures from raw captures
+│   │       ├── cper_corrected.cper
+│   │       ├── cper_fatal.cper
+│   │       ├── cper_mixed.cper
+│   │       └── cper_uncorrected.cper
+│   └── system/
+│       └── lib_loader_test.cc       # Library loader soname fallback (no hardware; uses libm)
 │
 └── functional/                      # Requires live hardware; uses TestBase lifecycle
     ├── gpu/
@@ -182,11 +184,12 @@ names lets a feature line up across both suites. Adapt them as the APIs warrant.
 | `GpuFunctionalReadOnly` | functional | GPU tests that only read device state; no root required |
 | `GpuFunctionalReadWrite` | functional | GPU tests that modify device state; root typically required |
 | `GpuUnit` | unit | Pure unit tests under `unit/gpu/`; no device required |
+| `SystemUnit` | unit | Pure unit tests under `unit/system/` (e.g. library loader); no device required |
 
 The full suite name scheme is `<Component><Type>[<Operation>]`. Use the PascalCase component name
 from the source path as the suite prefix. Functional suites include an operation suffix, so they use
 `<Component>Functional<Operation>`, where operation is `ReadOnly` or `ReadWrite`. Unit suites omit
-the operation suffix and use `<Component>Unit`, for example `GpuUnit`, `CpuUnit`, or `NicUnit`.
+the operation suffix and use `<Component>Unit`, for example `GpuUnit`, `SystemUnit`, `CpuUnit`, or `NicUnit`.
 This keeps component, type, and functional operation independently filterable via
 `--gtest_filter` wildcards.
 
