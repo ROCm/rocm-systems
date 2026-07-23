@@ -13,11 +13,12 @@ Construct via :meth:`DevComm.gin`::
 import cutlass
 import cutlass.cute as cute
 from cutlass._mlir.dialects import llvm
-from cutlass.cutlass_dsl import dsl_user_op
+from cutlass.cutlass_dsl import dsl_user_op, ir
 
 from . import _bindings
 from ._helpers import _to_ptr, _to_coop_value, _to_value
 from ._structs import _LLVMPtrType, ncclGin_C, ncclTeam, ncclCoopAny
+from .types import ThreadScope
 
 
 @cute.native_struct
@@ -47,8 +48,8 @@ class Gin:
         counter_id: int = 0,
         is_descriptor: bool = False,
         descriptor_ptr=0,
-        given_release: int = 3,
-        required_release: int = 1,
+        given_release: int = ThreadScope.THREAD,
+        required_release: int = ThreadScope.DEVICE,
         opt_flags: int = 0,
     ) -> None:
         """Put ``src`` to ``dst`` on ``peer`` of ``team``.
@@ -73,8 +74,11 @@ class Gin:
             counter_id: counter id (when ``is_counter``).
             is_descriptor: ``descriptor_ptr`` carries an external descriptor.
             descriptor_ptr: descriptor pointer (when ``is_descriptor``).
-            given_release: release-fence flags from the caller.
-            required_release: release-fence flags required by the op.
+            given_release: ``cuda::thread_scope`` released by the caller;
+                default ``THREAD``. See
+                :class:`~nccl.core.device.cute.types.ThreadScope`.
+            required_release: ``cuda::thread_scope`` the op requires released;
+                default ``DEVICE``.
         """
         # Window.local_pointer returns a raw !llvm.ptr; wrap it via cute.make_ptr
         # so both sides expose .toint() and we can subtract uniformly. dtype is
@@ -113,8 +117,8 @@ class Gin:
         signal_op_arg: int = 0,
         is_descriptor: bool = False,
         descriptor_ptr=0,
-        given_release: int = 3,
-        required_release: int = 1,
+        given_release: int = ThreadScope.THREAD,
+        required_release: int = ThreadScope.DEVICE,
         opt_flags: int = 0,
     ) -> None:
         """Put scalar ``value`` to ``dst`` on ``peer`` of ``team``.
@@ -135,8 +139,11 @@ class Gin:
             signal_op_arg: argument to ``signal_op`` (when ``is_signal``).
             is_descriptor: ``descriptor_ptr`` carries an external descriptor.
             descriptor_ptr: descriptor pointer (when ``is_descriptor``).
-            given_release: release-fence flags from the caller.
-            required_release: release-fence flags required by the op.
+            given_release: ``cuda::thread_scope`` released by the caller;
+                default ``THREAD``. See
+                :class:`~nccl.core.device.cute.types.ThreadScope`.
+            required_release: ``cuda::thread_scope`` the op requires released;
+                default ``DEVICE``.
         """
         # Window.local_pointer returns a raw !llvm.ptr; wrap it via cute.make_ptr
         # so both sides expose .toint() and we can subtract uniformly. dtype is
@@ -216,8 +223,8 @@ class Gin:
         *,
         is_descriptor: bool = False,
         descriptor_ptr=0,
-        given_release: int = 3,
-        required_release: int = 1,
+        given_release: int = ThreadScope.THREAD,
+        required_release: int = ThreadScope.DEVICE,
         opt_flags: int = 0,
     ) -> None:
         """Signal a GIN operation.
@@ -232,8 +239,11 @@ class Gin:
             coop: cooperative group issuing the signal.
             is_descriptor: ``descriptor_ptr`` carries an external descriptor.
             descriptor_ptr: descriptor pointer (when ``is_descriptor``).
-            given_release: release-fence flags from the caller.
-            required_release: release-fence flags required by the op.
+            given_release: ``cuda::thread_scope`` released by the caller;
+                default ``THREAD``. See
+                :class:`~nccl.core.device.cute.types.ThreadScope`.
+            required_release: ``cuda::thread_scope`` the op requires released;
+                default ``DEVICE``.
         """
         _bindings.nccl_gin_signal(
             self.ptr, _to_value(team), cutlass.Int32(peer),
@@ -289,6 +299,91 @@ class Gin:
         _bindings.nccl_gin_wait_signal(
             self.ptr, _to_coop_value(coop), cutlass.Int32(signal),
             cutlass.Int64(least), cutlass.Int32(bits), cutlass.Int32(ord))
+
+    def read_counter(
+        self,
+        *,
+        counter: int = 0,
+        bits: int = 56,
+        ord: int = 2,
+    ) -> cutlass.Int64:
+        """Read the value of a GIN counter.
+
+        Args:
+            counter: counter id (matches ``counter_id`` of the producing
+                :meth:`put`). Default 0.
+            bits: counter width in bits. Default 56.
+            ord: ``cuda::memory_order`` integer; default 2 = ``ACQUIRE``.
+                See :class:`~nccl.core.device.cute.types.MemoryOrder`.
+
+        Returns:
+            value of the counter.
+        """
+        return cutlass.Int64(_bindings.nccl_gin_read_counter(
+            self.ptr, cutlass.Int32(counter), cutlass.Int32(bits), cutlass.Int32(ord)))
+
+    def wait_counter(
+        self,
+        coop: ncclCoopAny,
+        *,
+        counter: int = 0,
+        least: int,
+        bits: int = 56,
+        ord: int = 2,
+    ) -> None:
+        """Wait for a GIN counter to reach a threshold value.
+
+        Args:
+            coop: cooperative group issuing the wait.
+            counter: counter id (matches ``counter_id`` of the producing
+                :meth:`put`). Default 0.
+            least: minimum value the counter must reach (required, no default;
+                matches the C++ ``waitCounter`` which has no default).
+            bits: counter width in bits. Default 56.
+            ord: ``cuda::memory_order`` integer; default 2 = ``ACQUIRE``.
+                See :class:`~nccl.core.device.cute.types.MemoryOrder`.
+        """
+        _bindings.nccl_gin_wait_counter(
+            self.ptr, _to_coop_value(coop), cutlass.Int32(counter),
+            cutlass.Int64(least), cutlass.Int32(bits), cutlass.Int32(ord))
+
+    def reset_counter(self, *, counter: int = 0) -> None:
+        """Reset a GIN counter to zero.
+
+        This operation must not race with concurrent modifications to the
+        counter.
+
+        Args:
+            counter: counter id to reset. Default 0.
+        """
+        _bindings.nccl_gin_reset_counter(self.ptr, cutlass.Int32(counter))
+
+    def reset_signal(self, *, signal: int = 0) -> None:
+        """Reset a GIN signal slot and its user-managed shadow to zero.
+
+        This operation must not race with concurrent modifications to the
+        signal.
+
+        Args:
+            signal: signal slot id to reset. Default 0.
+        """
+        _bindings.nccl_gin_reset_signal(self.ptr, cutlass.Int32(signal))
+
+    def signal_shadow_pointer(self, *, signal: int = 0) -> ir.Value:
+        """Return the device pointer to a signal slot's user-managed shadow.
+
+        The shadow is independent state and is not automatically kept in sync
+        with the signal. :meth:`reset_signal` resets both the signal and this
+        shadow to zero.
+
+        Args:
+            signal: signal slot id. Default 0.
+
+        Returns:
+            ``!llvm.ptr`` MLIR value pointing at the ``uint64_t`` shadow.
+        """
+        return _bindings.nccl_gin_get_signal_shadow_ptr(
+            self.ptr, cutlass.Int32(signal))
 
     def flush(self, coop: ncclCoopAny, ord: int = 2) -> None:
         """Flush pending GIN operations.

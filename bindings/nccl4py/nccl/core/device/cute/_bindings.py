@@ -129,10 +129,10 @@ def nccl_get_peer_pointer_team(
 
 # === GIN API ===
 
-@cute.extern(name="ncclGin_C_init", source=_BC)
+@cute.extern(name="ncclGin_C_initWithResourceSharingMode", source=_BC)
 def nccl_gin_c_init(
     gin: _LLVMPtrType, backend_mask: cutlass.Int32, dev_comm: _LLVMPtrType,
-    context_id: cutlass.Int32,
+    context_id: cutlass.Int32, resource_sharing_mode: cutlass.Uint8,
 ) -> None: ...
 
 @cute.extern(name="ncclGinPut_v2", source=_BC)
@@ -229,6 +229,33 @@ def nccl_gin_wait_signal(
     gin: _LLVMPtrType, coop: ncclCoopAny, signal: cutlass.Int32,
     least: cutlass.Int64, bits: cutlass.Int32, ord: cutlass.Int32,
 ) -> None: ...
+
+@cute.extern(name="ncclGinReadCounter", source=_BC)
+def nccl_gin_read_counter(
+    gin: _LLVMPtrType, counter: cutlass.Int32, bits: cutlass.Int32,
+    ord: cutlass.Int32,
+) -> cutlass.Int64: ...
+
+@cute.extern(name="ncclGinWaitCounter", source=_BC)
+def nccl_gin_wait_counter(
+    gin: _LLVMPtrType, coop: ncclCoopAny, counter: cutlass.Int32,
+    least: cutlass.Int64, bits: cutlass.Int32, ord: cutlass.Int32,
+) -> None: ...
+
+@cute.extern(name="ncclGinResetCounter", source=_BC)
+def nccl_gin_reset_counter(
+    gin: _LLVMPtrType, counter: cutlass.Int32,
+) -> None: ...
+
+@cute.extern(name="ncclGinResetSignal", source=_BC)
+def nccl_gin_reset_signal(
+    gin: _LLVMPtrType, signal: cutlass.Int32,
+) -> None: ...
+
+@cute.extern(name="ncclGinGetSignalShadowPtr", source=_BC)
+def nccl_gin_get_signal_shadow_ptr(
+    gin: _LLVMPtrType, signal: cutlass.Int32,
+) -> _LLVMPtrType: ...
 
 
 # === LSA Barrier Session API ===

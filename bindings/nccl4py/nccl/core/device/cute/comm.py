@@ -24,7 +24,7 @@ from ._structs import (
     ncclMultimemHandle,
 )
 from .gin import Gin
-from .types import GinBackendMask
+from .types import GinBackendMask, GinResourceSharingMode
 
 
 def _device_function_entry_block():
@@ -173,19 +173,30 @@ class DevComm:
 
     # === Gin factory ===
 
-    def gin(self, backend: GinBackendMask, context_id: int) -> Gin:
+    def gin(
+        self,
+        backend: GinBackendMask,
+        context_id: int,
+        *,
+        resource_sharing_mode: GinResourceSharingMode = GinResourceSharingMode.GPU,
+    ) -> Gin:
         """Allocate and initialize a :class:`Gin` rooted on this comm.
 
         Args:
             backend: backend selection mask.
             context_id: GIN context id.
+            resource_sharing_mode: scope at which GIN network resources are
+                shared: across the GPU, within each CTA, or exclusively by
+                each thread. Default ``GPU`` matches the NCCL C++ constructor
+                default.
 
         Returns:
             Initialized :class:`Gin`.
         """
         storage = _alloca_struct(ncclGin_C)
         _bindings.nccl_gin_c_init(
-            storage, cutlass.Int32(int(backend)), self.ptr, cutlass.Int32(context_id))
+            storage, cutlass.Int32(int(backend)), self.ptr,
+            cutlass.Int32(context_id), cutlass.Uint8(int(resource_sharing_mode)))
         return Gin(ptr=storage)
 
 
