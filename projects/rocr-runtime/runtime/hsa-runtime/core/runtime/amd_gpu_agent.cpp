@@ -228,6 +228,11 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   }
 #endif
 
+#if defined(HSA_ROCM_TIMESYNC) && HSA_ROCM_TIMESYNC > 0
+  // XXX we might want LOW
+  ::rocm_timesync::timesync_init(::rocm_timesync::ts_precision_t::TIMESYNC_PRECISION_HIGH);
+#endif
+
   auto& first_cpu = core::Runtime::runtime_singleton_->cpu_agents()[0];
   auto link_info = core::Runtime::runtime_singleton_->GetLinkInfo(first_cpu->node_id(), node_id());
   xgmi_cpu_gpu_ = (link_info.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
@@ -251,6 +256,11 @@ GpuAgent::~GpuAgent() {
 
   std::for_each(regions_.begin(), regions_.end(), DeleteObject());
   regions_.clear();
+
+#if defined(HSA_ROCM_TIMESYNC) && HSA_ROCM_TIMESYNC > 0
+  // XXX we might want LOW
+  ::rocm_timesync::timesync_deinit();
+#endif
 }
 
 void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_target,
@@ -2159,10 +2169,11 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
     debug_print("Signal %p time stamps may be invalid.\n", &signal->signal_);
 }
 
-
 #if defined(HSA_ROCM_TIMESYNC) && HSA_ROCM_TIMESYNC > 0
 uint64_t GpuAgent::TranslateTime(uint64_t tick) {
-  ::rocm::timesync::initialize();
+  uint64_t system_time;
+  ::rocm_timesync::timesync_translate(KfdGpuID(), tick, &system_time);
+  return system_time;
 }
 #else
 /*
