@@ -123,6 +123,95 @@ def _find_metadata_range(lines):
     return None
 
 
+_RE_LLABEL = re.compile(r'^\.L[\w.$]+:')
+
+
+def _is_info_comment(line):
+    """A standalone resource/occupancy comment worth keeping (not code noise)."""
+    s = line.lstrip()
+    if not s.startswith(';'):
+        return False
+    body = s[1:].strip()
+    if not body or body.startswith('--'):
+        return False
+    if body.lower().startswith('kernel info'):
+        return True
+    # "Key: value" / "Key = value" with an alphanumeric key (excludes "%bb.0:").
+    return bool(re.match(r'[A-Za-z][\w .]*\s*[:=]\s*\S', body))
+
+
+def _find_kernel_code_range(lines):
+    """Locate the ncclDevKernel trampoline block (preamble..module trailer).
+
+    The kernel entry is a tiny trampoline that tail-calls the devFunc; its code
+    is dead in the final link (the patched dispatcher supplies the real entry),
+    so we strip it.  Returns (start, end, ksym) covering the kernel's preamble,
+    body, trailing .set block, its .rodata/.AMDGPU.csdata/.AMDGPU.gpr_maximums
+    sections and padding, or None if no kernel is present.
+    """
+    ktype = None
+    ksym = None
+    for i, l in enumerate(lines):
+        m = re.match(r'\s*\.type\s+([^,]+),\s*@function', l)
+        if m and 'ncclDevKernel' in m.group(1):
+            ktype, ksym = i, m.group(1).strip()
+            break
+    if ktype is None:
+        return None
+
+    # Walk back over the "Begin function" preamble (.globl/.protected/.p2align).
+    start = ktype
+    j = ktype - 1
+    while j >= 0:
+        s = lines[j].strip()
+        if s.startswith('.p2align') or \
+                ((s.startswith('.globl') or s.startswith('.protected')) and ksym in s):
+            start = j
+            j -= 1
+            continue
+        break
+
+    # Walk forward to the module trailer / next real function.  The kernel's own
+    # sections (.rodata for the descriptor, .AMDGPU.csdata for the info comment
+    # block, .AMDGPU.gpr_maximums) stay inside the block.
+    end = len(lines)
+    k = ktype + 1
+    while k < len(lines):
+        s = lines[k].strip()
+        if s.startswith('.section'):
+            if ('.AMDGPU.csdata' in s) or ('.AMDGPU.gpr_maximums' in s) or ('.rodata' in s):
+                k += 1
+                continue
+            end = k
+            break
+        m = re.match(r'\.type\s+([^,]+),\s*@function', s)
+        if m and 'ncclDevKernel' not in m.group(1):
+            end = k
+            break
+        k += 1
+    return (start, end, ksym)
+
+
+def _render_stripped_kernel(lines, block):
+    """Replace the kernel block with just its label defs + tagged info comments.
+
+    Keeping every compiler-internal .L* label (collapsed to end-of-devFunc)
+    means any debug reference (e.g. DW_AT_high_pc = .Lfunc_endN - .Lfunc_begin0,
+    or .debug_line address labels) still resolves, while no kernel code, data,
+    symbol (.type/.globl), or resource .set survives.
+    """
+    start, end, ksym = block
+    out = ['\t.text\n',
+           f'; RCCL-EXTRACT: kernel entry {ksym} code removed; resource comments retained\n']
+    for line in lines[start:end]:
+        if _RE_LLABEL.match(line.strip()):
+            out.append(line)
+        elif _is_info_comment(line):
+            out.append(line)
+    out.append(f'; RCCL-EXTRACT: end kernel entry {ksym}\n')
+    return out
+
+
 def extract_device_function(asm_lines):
     """Extract device function from assembly lines.
     Returns (extracted_asm_lines, resources_dict) or raises on error."""
@@ -146,9 +235,19 @@ def extract_device_function(asm_lines):
     def in_skip_range(idx):
         return any(s <= idx < e for s, e in skip_ranges)
 
+    # The kernel trampoline is stripped down to its label defs + info comments.
+    kernel_block = _find_kernel_code_range(asm_lines)
+    k_start = kernel_block[0] if kernel_block else None
+    k_end = kernel_block[1] if kernel_block else None
+
     out_lines = []
     globl_inserted = False
     for i, line in enumerate(asm_lines):
+        if kernel_block and i == k_start:
+            out_lines.extend(_render_stripped_kernel(asm_lines, kernel_block))
+            continue
+        if kernel_block and k_start < i < k_end:
+            continue
         if in_skip_range(i):
             continue
         stripped = line.strip()
