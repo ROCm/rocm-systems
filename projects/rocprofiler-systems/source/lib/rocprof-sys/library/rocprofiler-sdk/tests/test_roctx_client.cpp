@@ -1042,7 +1042,7 @@ protected:
     static bool observed_should_write(const roctx_client_t& client)
     {
         return client.get_trigger().should_write_markers() &&
-               client.get_session()->is_active_excluding_trigger(
+               client.get_session()->is_active_without(
                    rocprofsys::control::triggers::roctx::trigger_name);
     }
 };
