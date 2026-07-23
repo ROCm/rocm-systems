@@ -119,7 +119,7 @@ jobs:
           tarball_rocm_version="$(echo "${tarball}" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)"
           mkdir -p "${ROCM_PATH}-${tarball_rocm_version}"
           tar -xf "${tarball}" -C "${ROCM_PATH}-${tarball_rocm_version}"
-          ln -s "${ROCM_PATH}-${tarball_rocm_version}" "${ROCM_PATH}"
+          ln -sf "${ROCM_PATH}-${tarball_rocm_version}" "${ROCM_PATH}"
           echo "ROCm ${tarball_rocm_version} installed to: ${ROCM_PATH}"
           echo "✅ ROCm Installation Complete!"
 
