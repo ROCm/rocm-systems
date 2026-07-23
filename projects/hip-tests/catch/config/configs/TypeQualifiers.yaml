@@ -20,6 +20,9 @@ TypeQualifiers:
   Unit_hipManagedKeyword_hipLaunchKernel_SyncBehavior:
     <<: *level_2
     disabled: [amd_wsl]
+  Unit_hipManagedKeyword_NonBlockingStreamOrdering:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipManagedKeyword_hipMemcpyBatchAsync: *level_2
   Unit_hipManagedKeyword_hipMemcpyPeer:
     <<: *level_2

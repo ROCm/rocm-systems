@@ -488,6 +488,15 @@ void StatCO::RemoveAllFatBinaries() {
   }
   managedVars_.clear();
 
+  // Release any retained managed-var init completion markers
+  for (auto& [_, initCmd] : managedVarInitCmd_) {
+    if (initCmd != nullptr) {
+      initCmd->release();
+    }
+  }
+  managedVarInitCmd_.clear();
+  managedVarsDevicePtrInitalized_.clear();
+
   // Delete all registered functions and clear the container
   for (auto const& [_, func] : functions_) {
     delete func;
@@ -633,33 +642,68 @@ void StatCO::ResizeForDevices(size_t device_count) {
 }
 
 // ================================================================================================
-hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
+hipError_t StatCO::InitManagedVarDevicePtr(int deviceId, hip::Stream* orderStream) {
   std::scoped_lock lock(sclock_);
   hipError_t err = hipSuccess;
-  if (managedVarsDevicePtrInitalized_.find(deviceId) == managedVarsDevicePtrInitalized_.end() ||
-      !managedVarsDevicePtrInitalized_[deviceId]) {
-    for (auto& vecIter : managedVars_) {
-      for (auto& var : vecIter.second) {
-        // Lazy load
-        FatBinaryInfo** module = var->ModuleInfo();
-        if (*(module) == nullptr) {
-          std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
-        }
-        hip::Stream* stream = g_devices.at(deviceId)->NullStream();
-        if (stream == nullptr) {
-          ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
-          return hipErrorInvalidResourceHandle;
-        }
-        // Allocate managed var for deferred loading
-        IHIP_RETURN_ONFAIL(var->AllocateManagedVarPtr());
-        // Copy from managed var host to device ptr
-        amd::Memory* mem = nullptr;
-        IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&mem, deviceId));
-        err = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), var->GetManagedVarPtr(),
-                         mem->getSize(), hipMemcpyHostToDevice, *stream);
+  const bool initialized =
+      managedVarsDevicePtrInitalized_.find(deviceId) != managedVarsDevicePtrInitalized_.end() &&
+      managedVarsDevicePtrInitalized_[deviceId];
+
+  if (!initialized) {
+    if (!managedVars_.empty()) {
+      hip::Stream* stream = g_devices.at(deviceId)->NullStream();
+      if (stream == nullptr) {
+        ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
+        return hipErrorInvalidResourceHandle;
       }
+      for (auto& vecIter : managedVars_) {
+        for (auto& var : vecIter.second) {
+          // Lazy load
+          FatBinaryInfo** module = var->ModuleInfo();
+          if (*(module) == nullptr) {
+            std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
+          }
+          // Allocate managed var for deferred loading
+          IHIP_RETURN_ONFAIL(var->AllocateManagedVarPtr());
+          // Copy from managed var host to device ptr. This is enqueued
+          // host-asynchronously and never waited on here: a host-synchronous copy
+          // would block the calling thread on the null stream, which the
+          // application may have left blocked (for example with a pending host
+          // callback), and would deadlock.
+          amd::Memory* mem = nullptr;
+          IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&mem, deviceId));
+          err = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), var->GetManagedVarPtr(),
+                           mem->getSize(), hipMemcpyHostToDevice, *stream, /*isHostAsync=*/true);
+        }
+      }
+      // Record a completion marker after the async init copies and retain it so
+      // later work on other streams can be ordered after the init below.
+      amd::Command* initCmd = new amd::Marker(*stream, kMarkerDisableFlush);
+      initCmd->enqueue();
+      managedVarInitCmd_[deviceId] = initCmd;  // retained (released once complete)
     }
     managedVarsDevicePtrInitalized_[deviceId] = true;
+  }
+
+  // The init copies run on the null stream and are host-asynchronous, so a stream
+  // that does not serialize with the null stream (e.g. hipStreamNonBlocking, or a
+  // per-thread default stream) would not otherwise observe them. Add an explicit
+  // device-side dependency so orderStream waits for the init to complete. This
+  // never blocks the host, and self-limits to the startup window: once the init
+  // marker completes it is released and this becomes a no-op.
+  auto cmdIter = managedVarInitCmd_.find(deviceId);
+  if (cmdIter != managedVarInitCmd_.end() && cmdIter->second != nullptr) {
+    amd::Command* initCmd = cmdIter->second;
+    if (initCmd->status() <= CL_COMPLETE) {
+      initCmd->release();
+      cmdIter->second = nullptr;
+    } else if (orderStream != nullptr && orderStream != g_devices.at(deviceId)->GetNullStream()) {
+      amd::Command::EventWaitList waitList;
+      waitList.push_back(initCmd);
+      amd::Command* waitMarker = new amd::Marker(*orderStream, kMarkerDisableFlush, waitList);
+      waitMarker->enqueue();
+      waitMarker->release();
+    }
   }
   return err;
 }

@@ -111,9 +111,13 @@ class PlatformState {
 }  // namespace hip
 
 // Initializes __managed__ symbols when deferred loading is enabled. For external APIs.
-#define HIP_INIT_MANAGED_VAR_DEVICE_PTR(device_id)                                                 \
-  HIP_RETURN_ONFAIL(hip::PlatformState::Instance().StatCO().InitManagedVarDevicePtr(device_id))
+// Pass the hip::Stream* the operation runs on so it is ordered after the init.
+#define HIP_INIT_MANAGED_VAR_DEVICE_PTR(stream)                                                    \
+  HIP_RETURN_ONFAIL(hip::PlatformState::Instance().StatCO().InitManagedVarDevicePtr(              \
+      (stream)->DeviceId(), (stream)))
 
 // Initializes __managed__ symbols when deferred loading is enabled. For internal functions.
-#define IHIP_INIT_MANAGED_VAR_DEVICE_PTR(device_id)                                                \
-  IHIP_RETURN_ONFAIL(hip::PlatformState::Instance().StatCO().InitManagedVarDevicePtr(device_id))
+// Pass the hip::Stream* the operation runs on so it is ordered after the init.
+#define IHIP_INIT_MANAGED_VAR_DEVICE_PTR(stream)                                                   \
+  IHIP_RETURN_ONFAIL(hip::PlatformState::Instance().StatCO().InitManagedVarDevicePtr(             \
+      (stream)->DeviceId(), (stream)))

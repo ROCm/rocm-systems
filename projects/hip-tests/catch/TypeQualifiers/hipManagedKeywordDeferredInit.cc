@@ -34,6 +34,9 @@ __managed__ int g_managed_b[kN];
 __managed__ int g_managed_3d[k3dDim][k3dDim][k3dDim];
 __managed__ int g_managed_initialized[kStaticInitLen] = {1, 2, 3, 4, 5, 6, 7, 8};
 __managed__ int g_managed_launch[kN];
+// Used only by Unit_hipManagedKeyword_NonBlockingStreamOrdering so its starting
+// value is deterministic regardless of test ordering.
+__managed__ int g_managed_nonblocking[kN];
 
 static __global__ void AddConst(int* data, int n, int addend) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -43,6 +46,14 @@ static __global__ void AddConst(int* data, int n, int addend) {
 static __global__ void SumTwo(int* a, int* b, int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) a[i] += b[i];
+}
+
+// References the managed symbol by name so the device reads the symbol's pointer,
+// which is what deferred init populates (a pointer passed as a kernel argument
+// would bypass the symbol and not exercise the init ordering).
+static __global__ void WriteManagedNonBlocking(int v) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < kN) g_managed_nonblocking[i] = v;
 }
 
 HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy) {
@@ -452,5 +463,34 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyPeer) {
   for (int i = 0; i < kN; ++i) {
     INFO("Index " << i);
     REQUIRE(g_managed_b[i] == i);
+  }
+}
+
+// A hipStreamNonBlocking stream does not serialize with the null stream where the
+// deferred init runs, so the runtime must add an explicit dependency. The null
+// stream is blocked so the init cannot complete until unblocked; the kernel below
+// references the managed symbol by name as the first managed-touching op, so it
+// must still observe the initialized symbol rather than an uninitialized pointer.
+HIP_TEST_CASE(Unit_hipManagedKeyword_NonBlockingStreamOrdering) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  hipStream_t nb_stream = nullptr;
+  HIP_CHECK(hipStreamCreateWithFlags(&nb_stream, hipStreamNonBlocking));
+
+  HipTest::BlockingContext b_context{nullptr};
+  b_context.block_stream();
+  REQUIRE(b_context.is_blocked());
+
+  constexpr int kSentinel = 0x5151;
+  WriteManagedNonBlocking<<<dim3(kNumBlocks), dim3(kBlockSize), 0, nb_stream>>>(kSentinel);
+  HIP_CHECK(hipGetLastError());
+
+  b_context.unblock_stream();
+  HIP_CHECK(hipStreamSynchronize(nb_stream));
+  HIP_CHECK(hipStreamDestroy(nb_stream));
+
+  for (int i = 0; i < kN; ++i) {
+    INFO("Index " << i);
+    REQUIRE(g_managed_nonblocking[i] == kSentinel);
   }
 }

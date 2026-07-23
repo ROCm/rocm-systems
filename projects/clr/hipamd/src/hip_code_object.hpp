@@ -179,8 +179,10 @@ class StatCO : public CodeObject {
                           size_t* size_ptr);
 
   // Managed variable is a defined symbol in code object
-  // pointer to the alocated managed memory has to be copied to the address of symbol
-  hipError_t InitManagedVarDevicePtr(int deviceId);
+  // pointer to the alocated managed memory has to be copied to the address of symbol.
+  // orderStream (if non-null) is ordered device-side after the init so it observes
+  // the initialized symbols even when it does not serialize with the null stream.
+  hipError_t InitManagedVarDevicePtr(int deviceId, hip::Stream* orderStream);
 
   // Find a deferred managed var whose mmap address equals ptr
   Var* FindDeferredManagedVar(const void* ptr);
@@ -209,6 +211,10 @@ class StatCO : public CodeObject {
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
   //! Tracks managed var initialization per device
   std::unordered_map<int, bool> managedVarsDevicePtrInitalized_;
+  //! Per-device completion marker for the async managed-var init copies. Used to
+  //! order later work after the init; released and set to nullptr once observed
+  //! complete (steady state) or during teardown.
+  std::unordered_map<int, amd::Command*> managedVarInitCmd_;
 };
 
 };  // namespace hip

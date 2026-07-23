@@ -890,7 +890,7 @@ hipError_t hipMemcpy_common(void* dst, const void* src, size_t sizeBytes, hipMem
     return hipErrorInvalidValue;
   }
 
-  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream->DeviceId());
+  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
 
   return ihipMemcpy(dst, src, sizeBytes, kind, *hip_stream);
 }
@@ -924,7 +924,7 @@ hipError_t hipMemcpyWithStream(void* dst, const void* src, size_t sizeBytes, hip
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream->DeviceId());
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
 
   HIP_RETURN_DURATION(ihipMemcpy(dst, src, sizeBytes, kind, *hip_stream, false));
 }
@@ -1539,7 +1539,7 @@ hipError_t hipMemcpyAsync_common(void* dst, const void* src, size_t sizeBytes, h
     return hipErrorInvalidValue;
   }
 
-  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream->DeviceId());
+  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
 
   return ihipMemcpy(dst, src, sizeBytes, kind, *hip_stream, true);
 }
@@ -1709,7 +1709,7 @@ hipError_t hipMemcpyHtoD(hipDeviceptr_t dstDevice, const void* srcHost, size_t B
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  HIP_INIT_MANAGED_VAR_DEVICE_PTR(stream->DeviceId());
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(stream);
 
   HIP_RETURN_DURATION(ihipMemcpy(dstDevice, srcHost, ByteCount, hipMemcpyHostToDevice, *stream));
 }
@@ -1722,7 +1722,7 @@ hipError_t hipMemcpyDtoH(void* dstHost, hipDeviceptr_t srcDevice, size_t ByteCou
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  HIP_INIT_MANAGED_VAR_DEVICE_PTR(stream->DeviceId());
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(stream);
 
   HIP_RETURN_DURATION(ihipMemcpy(dstHost, srcDevice, ByteCount, hipMemcpyDeviceToHost, *stream));
 }
@@ -1735,7 +1735,7 @@ hipError_t hipMemcpyDtoD(hipDeviceptr_t dstDevice, hipDeviceptr_t srcDevice, siz
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  HIP_INIT_MANAGED_VAR_DEVICE_PTR(stream->DeviceId());
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(stream);
 
   HIP_RETURN_DURATION(
       ihipMemcpy(dstDevice, srcDevice, ByteCount, hipMemcpyDeviceToDevice, *stream));
@@ -1771,7 +1771,7 @@ hipError_t hipMemcpyHtoDAsync(hipDeviceptr_t dstDevice, const void* srcHost, siz
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream->DeviceId());
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
 
   HIP_RETURN_DURATION(ihipMemcpy(dstDevice, srcHost, ByteCount, kind, *hip_stream, true));
 }
@@ -1793,7 +1793,7 @@ hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dstDevice, hipDeviceptr_t srcDevice
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream->DeviceId());
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
 
   HIP_RETURN_DURATION(ihipMemcpy(dstDevice, srcDevice, ByteCount, kind, *hip_stream, true));
 }
@@ -1815,7 +1815,7 @@ hipError_t hipMemcpyDtoHAsync(void* dstHost, hipDeviceptr_t srcDevice, size_t By
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream->DeviceId());
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
 
   HIP_RETURN_DURATION(ihipMemcpy(dstHost, srcDevice, ByteCount, kind, *hip_stream, true));
 }
@@ -2468,7 +2468,7 @@ hipError_t ihipMemcpyParam3D(const HIP_MEMCPY3D* pCopy, hipStream_t stream, bool
     return hipErrorInvalidValue;
   }
 
-  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream->DeviceId());
+  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
 
   amd::Command* command = nullptr;
   status = ihipGetMemcpyParam3DCommand(command, pCopy, hip_stream);
@@ -2872,7 +2872,7 @@ hipError_t ihipMemcpy3D(const hipMemcpy3DParms* p, hipStream_t stream, bool isAs
   if (hip_stream == nullptr) {
     return hipErrorInvalidValue;
   }
-  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream->DeviceId());
+  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
 
   hipError_t status = ihipMemcpy3D_validate(p);
   if (status != hipSuccess) {
@@ -3337,7 +3337,7 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream->DeviceId());
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
 
   // Call internal batch implementation
   hipError_t status =
@@ -3468,7 +3468,7 @@ hipError_t ihipMemset(void* dst, int64_t value, size_t valueSize, size_t sizeByt
     return hipErrorInvalidValue;
   }
 
-  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream->DeviceId());
+  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
 
   size_t offset = 0;
   amd::Memory* memObj = getMemoryObject(hip::getCurrentDevice(), dst, offset);
@@ -3656,7 +3656,7 @@ hipError_t ihipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent
   if (hip_stream == nullptr) {
     return hipErrorInvalidValue;
   }
-  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream->DeviceId());
+  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
 
   size_t offset = 0;
   amd::Memory* memory = getMemoryObject(hip::getCurrentDevice(), pitchedDevPtr.ptr, offset, sizeBytes);
