@@ -241,6 +241,46 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
       .ephemeral_base = *ephemeral_base};
 }
 
+[[nodiscard]] std::optional<MoiPrivateEpochLayout> build_sampled_private_epoch_layout(
+    const ConSanResult &result, const ResolvedMoiScratchPlan &resources,
+    const ConSanOptions &options, rj_code_arch_t arch, std::vector<std::string> &warnings) {
+  return build_moi_private_epoch_layout(
+      result, resources, arch, warnings,
+      /*include_sample_sequence=*/options.automatic_moi_private_sample_sequence,
+      /*include_owner=*/options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId);
+}
+
+[[nodiscard]] bool append_sampled_private_owner_epoch_load(
+    std::vector<uint32_t> &words, std::span<const uint8_t> bytes, uint64_t descriptor_file_offset,
+    const ConSanOptions &options, const MoiPrivateEpochLayout &layout, rj_code_arch_t arch,
+    std::vector<std::string> &errors) {
+  if (!options.automatic_moi_private_epoch || !options.moi_owner_vgpr || !options.moi_epoch_vgpr ||
+      !layout.owner_offset) {
+    errors.emplace_back("ConSan MOI sampled sync has an invalid private owner/epoch plan");
+    return false;
+  }
+  const auto owner_shift = moi_descriptor_owner_shift(bytes, descriptor_file_offset, errors);
+  const auto load_epoch =
+      instrumentation::build_private_load_b32(*options.moi_epoch_vgpr, layout.epoch_offset, arch);
+  const auto load_owner =
+      instrumentation::build_private_load_b32(*options.moi_owner_vgpr, *layout.owner_offset, arch);
+  const auto wait = instrumentation::build_s_wait_private_load0(arch);
+  const auto owner =
+      owner_shift ? instrumentation::build_v_lshrrev_b32(*options.moi_owner_vgpr,
+                                                         scalar_positive_inline_u32(*owner_shift),
+                                                         *options.moi_owner_vgpr, arch)
+                  : std::nullopt;
+  if (!owner_shift || !load_epoch || !load_owner || !wait || !owner) {
+    errors.emplace_back("ConSan MOI sampled sync could not load private owner/epoch state");
+    return false;
+  }
+  words.insert(words.end(), load_epoch->begin(), load_epoch->end());
+  words.insert(words.end(), load_owner->begin(), load_owner->end());
+  words.push_back(*wait);
+  words.push_back(*owner);
+  return true;
+}
+
 [[nodiscard]] std::optional<VgprSpillSequence>
 build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPlan &resources,
                          const ConSanOptions &options, MoiSpillManagers &managers,

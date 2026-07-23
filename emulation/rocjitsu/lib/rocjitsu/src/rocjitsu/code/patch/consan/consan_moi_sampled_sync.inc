@@ -125,9 +125,8 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
     std::span<const uint8_t> bytes, const SampledBarrierCandidate &candidate,
     const ConSanOptions &options, const VgprSpillSequence *spill, rj_code_arch_t arch,
     const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
-    uint64_t return_text_offset, std::optional<uint32_t> private_epoch_offset,
-    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> gfx1250_vgpr_msb_mode,
-    std::vector<std::string> &errors) {
+    uint64_t return_text_offset, const MoiPrivateEpochLayout *private_layout,
+    std::optional<uint16_t> gfx1250_vgpr_msb_mode, std::vector<std::string> &errors) {
   if (!options.scratch_vgpr || !options.moi_report_buffer_address || !options.moi_epoch_vgpr ||
       !options.moi_exec_save_sgpr || !options.moi_owner_vgpr ||
       options.moi_owner_source != ConSanMoiOwnerSource::WorkitemId ||
@@ -210,34 +209,10 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   // window and advance its epoch. A separate workgroup-residue gate can skip a
   // workgroup which touched a selected address, leaving its recorded accesses
   // in one epoch with no synchronization metadata.
-  if (private_epoch_offset) {
-    if (!options.automatic_moi_private_epoch || !private_owner_offset) {
-      errors.emplace_back("ConSan MOI sampled barrier has an invalid private owner/epoch plan");
-      return std::nullopt;
-    }
-    const auto owner_shift =
-        moi_descriptor_owner_shift(bytes, *candidate.barrier.kernel_descriptor_file_offset, errors);
-    const auto load_epoch = instrumentation::build_private_load_b32(*options.moi_epoch_vgpr,
-                                                                    *private_epoch_offset, arch);
-    const auto load_owner = instrumentation::build_private_load_b32(*options.moi_owner_vgpr,
-                                                                    *private_owner_offset, arch);
-    const auto wait_epoch = instrumentation::build_s_wait_private_load0(arch);
-    const auto wait_owner = instrumentation::build_s_wait_private_load0(arch);
-    const auto owner =
-        owner_shift ? instrumentation::build_v_lshrrev_b32(*options.moi_owner_vgpr,
-                                                           scalar_positive_inline_u32(*owner_shift),
-                                                           *options.moi_owner_vgpr, arch)
-                    : std::nullopt;
-    if (!owner_shift || !load_epoch || !load_owner || !wait_epoch || !wait_owner || !owner) {
-      errors.emplace_back("ConSan MOI sampled barrier could not load private owner/epoch state");
-      return std::nullopt;
-    }
-    words.insert(words.end(), load_epoch->begin(), load_epoch->end());
-    words.push_back(*wait_epoch);
-    words.insert(words.end(), load_owner->begin(), load_owner->end());
-    words.push_back(*wait_owner);
-    words.push_back(*owner);
-  }
+  if (private_layout && !append_sampled_private_owner_epoch_load(
+                            words, bytes, *candidate.barrier.kernel_descriptor_file_offset, options,
+                            *private_layout, arch, errors))
+    return std::nullopt;
   if (!append_save_moi_special_state(words, options, arch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
     return std::nullopt;
@@ -586,9 +561,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   }
   words.insert(words.end(), advance_epoch->begin(), advance_epoch->end());
   words.push_back(*restore_after_advance);
-  if (private_epoch_offset) {
+  if (private_layout) {
     const auto store = instrumentation::build_private_store_b32(*options.moi_epoch_vgpr,
-                                                                *private_epoch_offset, arch);
+                                                                private_layout->epoch_offset, arch);
     const auto wait = instrumentation::build_s_wait_private_store0(arch);
     if (!store || !wait) {
       errors.emplace_back("ConSan MOI sampled barrier failed at private epoch store");
@@ -892,10 +867,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     SampledBarrierCandidate candidate;
     ResolvedMoiScratchPlan resources;
     std::optional<VgprSpillSequence> spill;
-    std::optional<uint32_t> private_epoch_offset;
-    std::optional<uint32_t> private_owner_offset;
-    std::optional<uint32_t> private_sample_sequence_offset;
-    uint32_t persistent_private_state_end = 0;
+    std::optional<MoiPrivateEpochLayout> private_layout;
     uint32_t required_private_bytes = 0;
   };
   std::vector<Planned> selected;
@@ -958,10 +930,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       continue;
     std::optional<MoiPrivateEpochLayout> private_layout;
     if (options.automatic_moi_private_epoch) {
-      private_layout = build_moi_private_epoch_layout(
-          result, *resources, arch, result.warnings,
-          /*include_sample_sequence=*/options.automatic_moi_private_sample_sequence,
-          /*include_owner=*/options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId);
+      private_layout =
+          build_sampled_private_epoch_layout(result, *resources, options, arch, result.warnings);
       if (!private_layout)
         continue;
     }
@@ -985,12 +955,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       }
     }
     note_descriptor_requirements(descriptor_requirements, *resources);
-    selected.push_back(
-        {std::move(candidate), *resources, std::move(spill),
-         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
-         private_layout ? private_layout->owner_offset : std::nullopt,
-         private_layout ? private_layout->sample_sequence_offset : std::nullopt,
-         private_layout ? private_layout->ephemeral_base : 0u, required_private_bytes});
+    selected.push_back({std::move(candidate), *resources, std::move(spill),
+                        std::move(private_layout), required_private_bytes});
   }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan MOI sampled barrier sync found no patchable sequence");
@@ -1227,7 +1193,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         const ConSanBarrierSite &site = planned.candidate.barrier.site;
         ConSanOptions candidate_options = options;
         candidate_options.scratch_vgpr = planned.resources.base;
-        if (planned.private_epoch_offset) {
+        if (planned.private_layout) {
           candidate_options.moi_owner_vgpr = static_cast<uint16_t>(planned.resources.base + 7u);
           candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(planned.resources.base + 8u);
         }
@@ -1237,8 +1203,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
             planned.candidate.barrier.container_entry_text_offset, site.file_offset);
         auto body_words = build_sampled_barrier_sync_cave_words(
             bytes, planned.candidate, candidate_options, planned.spill ? &*planned.spill : nullptr,
-            arch, layout, body_offset, site.text_offset + site.size, planned.private_epoch_offset,
-            planned.private_owner_offset, vgpr_msb_mode, result.errors);
+            arch, layout, body_offset, site.text_offset + site.size,
+            planned.private_layout ? &*planned.private_layout : nullptr, vgpr_msb_mode,
+            result.errors);
         if (!body_words)
           return;
         append_words_bytes(new_text, *body_words);
@@ -1360,11 +1327,13 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         info.covered_sync_event_count =
             static_cast<uint32_t>(planned.candidate.sequence->member_event_identities.size());
         info.scratch_vgpr = planned.resources.base;
-        info.persistent_epoch_private_offset = planned.private_epoch_offset;
-        info.persistent_owner_private_offset = planned.private_owner_offset;
-        info.persistent_sample_sequence_private_offset = planned.private_sample_sequence_offset;
-        if (planned.private_epoch_offset)
-          info.persistent_private_state_end = planned.persistent_private_state_end;
+        if (planned.private_layout) {
+          info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
+          info.persistent_owner_private_offset = planned.private_layout->owner_offset;
+          info.persistent_sample_sequence_private_offset =
+              planned.private_layout->sample_sequence_offset;
+          info.persistent_private_state_end = planned.private_layout->ephemeral_base;
+        }
         info.required_private_segment_size = planned.required_private_bytes;
         info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
         if (planned.spill)
@@ -1391,14 +1360,14 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     const uint64_t cave_offset = new_text.size();
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
-    if (planned.private_epoch_offset) {
+    if (planned.private_layout) {
       candidate_options.moi_owner_vgpr = static_cast<uint16_t>(planned.resources.base + 7u);
       candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(planned.resources.base + 8u);
     }
     auto cave_words = build_sampled_barrier_sync_cave_words(
         bytes, planned.candidate, candidate_options, planned.spill ? &*planned.spill : nullptr,
-        arch, layout, cave_offset, site.text_offset + site.size, planned.private_epoch_offset,
-        planned.private_owner_offset, std::nullopt, result.errors);
+        arch, layout, cave_offset, site.text_offset + site.size,
+        planned.private_layout ? &*planned.private_layout : nullptr, std::nullopt, result.errors);
     if (!cave_words) {
       result.errors.emplace_back(
           "ConSan MOI sampled barrier sync could not encode its probe with scratch v" +
@@ -1467,11 +1436,13 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     info.covered_sync_event_count =
         static_cast<uint32_t>(planned.candidate.sequence->member_event_identities.size());
     info.scratch_vgpr = planned.resources.base;
-    info.persistent_epoch_private_offset = planned.private_epoch_offset;
-    info.persistent_owner_private_offset = planned.private_owner_offset;
-    info.persistent_sample_sequence_private_offset = planned.private_sample_sequence_offset;
-    if (planned.private_epoch_offset)
-      info.persistent_private_state_end = planned.persistent_private_state_end;
+    if (planned.private_layout) {
+      info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
+      info.persistent_owner_private_offset = planned.private_layout->owner_offset;
+      info.persistent_sample_sequence_private_offset =
+          planned.private_layout->sample_sequence_offset;
+      info.persistent_private_state_end = planned.private_layout->ephemeral_base;
+    }
     info.required_private_segment_size = planned.required_private_bytes;
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
     if (planned.spill) {
@@ -1809,6 +1780,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     ResolvedMoiScratchPlan resources;
     ConSanMoiAtomicAddressPlan address_plan;
     std::optional<VgprSpillSequence> spill;
+    std::optional<MoiPrivateEpochLayout> private_layout;
+    uint32_t required_private_bytes = 0;
     uint64_t physical_anchor_offset = 0;
   };
   std::vector<Planned> selected;
@@ -1816,6 +1789,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorPrivateRequirements private_requirements;
   const size_t remaining = static_patch_budget;
+  const uint16_t scratch_count = sampled_atomic_scratch_count(options);
   for (size_t index = 0; index < candidates.size() && selected.size() < remaining; ++index) {
     Candidate candidate = candidates[index];
     const ConSanAtomicSite &site = candidate.atomic.site;
@@ -1847,19 +1821,23 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         existing ? *existing
                  : plan_moi_resource_site(resource_state, options, ConSanResourceSiteKind::Atomic,
                                           index, site.text_offset,
-                                          candidate.atomic.kernel_descriptor_file_offset, 10u,
-                                          nullptr, &site);
+                                          candidate.atomic.kernel_descriptor_file_offset,
+                                          scratch_count, nullptr, &site);
     if (!existing)
       result.resource_plans.push_back(plan);
-    const auto resources = resolve_moi_scratch_plan(plan, options, 10u);
+    const auto resources = resolve_moi_scratch_plan(plan, options, scratch_count);
     if (!resources) {
-      result.warnings.emplace_back(
-          "ConSan MOI sampled atomic sync has no ten-VGPR resource plan in " +
-          candidate.atomic.container_name);
+      result.warnings.emplace_back("ConSan MOI sampled atomic sync has no " +
+                                   std::to_string(scratch_count) + "-VGPR resource plan in " +
+                                   candidate.atomic.container_name);
       continue;
     }
-    const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
-        site, resources->base, resources->count, resources->source, arch);
+    const bool allow_post_guest_spill_operand_overlap =
+        resources->source == ConSanRegisterAllocationSource::SpillRequired &&
+        sampled_atomic_guest_preserves_address(site);
+    const ConSanMoiAtomicAddressPlan address_plan =
+        plan_consan_moi_atomic_address(site, resources->base, resources->count, resources->source,
+                                       arch, allow_post_guest_spill_operand_overlap);
     if (!address_plan.supported()) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync rejected exact address plan: " +
@@ -1872,17 +1850,35 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       if (!candidate.atomic.kernel_descriptor_file_offset)
         continue;
     }
+    std::optional<MoiPrivateEpochLayout> private_layout;
+    if (options.automatic_moi_private_epoch) {
+      private_layout =
+          build_sampled_private_epoch_layout(result, *resources, options, arch, result.warnings);
+      if (!private_layout)
+        continue;
+    }
     std::optional<VgprSpillSequence> spill;
     if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
-      spill = build_moi_spill_sequence(result, *resources, options, spill_managers, arch,
-                                       result.warnings);
+      spill = build_moi_spill_sequence(
+          result, *resources, options, spill_managers, arch, result.warnings,
+          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
       if (!spill)
         continue;
-      note_spill_descriptor_requirements(private_requirements, *resources, *spill);
+    }
+    const uint32_t required_private_bytes =
+        std::max(private_layout ? private_layout->ephemeral_base : 0u,
+                 spill ? spill->total_private_bytes : 0u);
+    if (required_private_bytes != 0u) {
+      for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {
+        auto [it, inserted] =
+            private_requirements.emplace(descriptor_offset, required_private_bytes);
+        if (!inserted)
+          it->second = std::max(it->second, required_private_bytes);
+      }
     }
     note_descriptor_requirements(descriptor_requirements, *resources);
-    selected.push_back(
-        {std::move(candidate), *resources, address_plan, std::move(spill), physical_anchor_offset});
+    selected.push_back({std::move(candidate), *resources, address_plan, std::move(spill),
+                        std::move(private_layout), required_private_bytes, physical_anchor_offset});
   }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan MOI sampled atomic sync found no patchable sequence");
@@ -1932,19 +1928,25 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     const uint64_t cave_offset = placement_planner.appended_end();
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
+    if (planned.private_layout) {
+      candidate_options.moi_owner_vgpr = static_cast<uint16_t>(planned.resources.base + 6u);
+      candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(planned.resources.base + 7u);
+    }
     uint32_t guest_instruction_offset = 0;
     auto cave_words =
         planned.candidate.deferred_acquire
             ? build_sampled_pending_acquire_cave_words(
                   bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
-                  planned.spill ? &*planned.spill : nullptr, arch, planned.candidate.selected_slot,
-                  layout, cave_offset, physical_anchor_offset + site.size, result.errors,
-                  &guest_instruction_offset)
+                  planned.spill ? &*planned.spill : nullptr,
+                  planned.private_layout ? &*planned.private_layout : nullptr, arch,
+                  planned.candidate.selected_slot, layout, cave_offset,
+                  physical_anchor_offset + site.size, result.errors, &guest_instruction_offset)
             : build_sampled_atomic_sync_cave_words(
                   bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
-                  planned.spill ? &*planned.spill : nullptr, arch, planned.candidate.selected_slot,
-                  layout, cave_offset, physical_anchor_offset + site.size, result.errors,
-                  &guest_instruction_offset);
+                  planned.spill ? &*planned.spill : nullptr,
+                  planned.private_layout ? &*planned.private_layout : nullptr, arch,
+                  planned.candidate.selected_slot, layout, cave_offset,
+                  physical_anchor_offset + site.size, result.errors, &guest_instruction_offset);
     if (!cave_words) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync could not lower associated " +
@@ -2008,10 +2010,16 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     info.relocated_guest_instruction_offset = cave_offset + guest_instruction_offset;
     info.scratch_vgpr = planned.resources.base;
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
-    if (planned.spill) {
-      info.spilled_vgpr_count = planned.spill->vgpr_count;
-      info.required_private_segment_size = planned.spill->total_private_bytes;
+    if (planned.private_layout) {
+      info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
+      info.persistent_owner_private_offset = planned.private_layout->owner_offset;
+      info.persistent_sample_sequence_private_offset =
+          planned.private_layout->sample_sequence_offset;
+      info.persistent_private_state_end = planned.private_layout->ephemeral_base;
     }
+    info.required_private_segment_size = planned.required_private_bytes;
+    if (planned.spill)
+      info.spilled_vgpr_count = planned.spill->vgpr_count;
     patches.push_back(std::move(info));
   }
   if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {

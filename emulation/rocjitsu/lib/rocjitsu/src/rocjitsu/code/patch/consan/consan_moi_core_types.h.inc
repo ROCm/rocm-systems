@@ -251,11 +251,14 @@ consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSupport support);
 /// address unless a returned value aliases it, in which case it snapshots the
 /// pair into the scratch tail. VGLOBAL likewise reserves the last two VGPRs of
 /// a five-VGPR private window for an aliased pair or for
-/// `saddr + zero_extend(vaddr) + signed24(ioffset)`.
+/// `saddr + zero_extend(vaddr) + signed24(ioffset)`. Operand overlap is only
+/// valid for a spill consumer that executes the guest first and preserves its
+/// effective-address inputs until materialization.
 [[nodiscard]] ConSanMoiAtomicAddressPlan
 plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vgpr,
                                uint16_t scratch_vgpr_count,
-                               ConSanRegisterAllocationSource resource_source, rj_code_arch_t arch);
+                               ConSanRegisterAllocationSource resource_source, rj_code_arch_t arch,
+                               bool allow_post_guest_spill_operand_overlap = false);
 
 /// Emit the consumer-neutral VGLOBAL materialization. The returned sequence
 /// snapshots and restores both VCC and SCC; @p vcc_save_sgpr names a pair and

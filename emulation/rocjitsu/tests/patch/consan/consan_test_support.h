@@ -13,6 +13,7 @@
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/gfx1250_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
 #include "util/bit.h"

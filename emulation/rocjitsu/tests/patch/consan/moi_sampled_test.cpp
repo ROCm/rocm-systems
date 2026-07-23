@@ -774,6 +774,147 @@ TEST(ConSanMoi, Cdna4SampledBarrierPublishesSelectedEpochTransition) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
+  struct Target {
+    rj_code_arch_t arch;
+    std::string_view label;
+  };
+  constexpr std::array<Target, 2> kTargets = {{
+      {ROCJITSU_CODE_ARCH_CDNA3, "gfx942/cdna3"},
+      {ROCJITSU_CODE_ARCH_CDNA4, "gfx950/cdna4"},
+  }};
+  for (const Target &target : kTargets) {
+    for (bool deferred_acquire : {false, true}) {
+      SCOPED_TRACE(testing::Message()
+                   << target.label << (deferred_acquire ? " deferred-acquire" : " release"));
+      std::vector<uint32_t> release_words;
+      std::vector<uint32_t> acquire_words;
+      std::vector<uint32_t> atomic_words;
+      uint32_t wait_word = 0u;
+      if (target.arch == ROCJITSU_CODE_ARCH_CDNA3) {
+        const auto release = cdna3::build_mubuf(cdna3::kBufferWbl2Mubuf, {.sc1 = 1});
+        const auto acquire = build_cdna3_buffer_inv_sc1(target.arch);
+        const auto atomic = build_cdna3_flat_atomic_add_u32(
+            /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true,
+            /*scope=*/2, target.arch);
+        const auto wait = build_cdna3_s_wait_vmcnt_lgkmcnt0(target.arch);
+        ASSERT_TRUE(acquire && atomic && wait);
+        release_words.assign(release.begin(), release.end());
+        acquire_words.assign(acquire->begin(), acquire->end());
+        atomic_words.assign(atomic->begin(), atomic->end());
+        wait_word = *wait;
+      } else {
+        const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+        const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});
+        const auto atomic = build_cdna4_flat_atomic_add_u32(
+            /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true,
+            /*scope=*/2, target.arch);
+        const auto wait = build_cdna4_s_wait_flat0(target.arch);
+        ASSERT_TRUE(atomic && wait);
+        release_words.assign(release.begin(), release.end());
+        acquire_words.assign(acquire.begin(), acquire.end());
+        atomic_words.assign(atomic->begin(), atomic->end());
+        wait_word = *wait;
+      }
+      std::vector<uint32_t> access_words;
+      if (deferred_acquire) {
+        if (target.arch == ROCJITSU_CODE_ARCH_CDNA3) {
+          const auto access = build_cdna3_ds_load_b32(
+              /*vdst=*/11, /*vaddr=*/10, /*byte_offset=*/0, target.arch);
+          ASSERT_TRUE(access);
+          access_words.assign(access->begin(), access->end());
+        } else {
+          access_words = {
+              0xd86c0000u,
+              0x0b00000au, // ds_read_b32 v11, v10
+          };
+        }
+      } else {
+        const auto access = target.arch == ROCJITSU_CODE_ARCH_CDNA3
+                                ? build_cdna3_ds_store_b32(
+                                      /*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, target.arch)
+                                : build_cdna4_ds_store_b32(
+                                      /*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, target.arch);
+        ASSERT_TRUE(access);
+        access_words.assign(access->begin(), access->end());
+      }
+
+      std::vector<uint32_t> text_words;
+      if (!deferred_acquire)
+        text_words.insert(text_words.end(), access_words.begin(), access_words.end());
+      text_words.insert(text_words.end(), release_words.begin(), release_words.end());
+      text_words.push_back(wait_word);
+      text_words.insert(text_words.end(), atomic_words.begin(), atomic_words.end());
+      text_words.push_back(wait_word);
+      text_words.insert(text_words.end(), acquire_words.begin(), acquire_words.end());
+      if (deferred_acquire)
+        text_words.insert(text_words.end(), access_words.begin(), access_words.end());
+      text_words.resize(800u, build_s_nop(0, target.arch));
+      text_words.back() = build_s_endpgm(target.arch);
+      std::vector<uint8_t> bytes =
+          target.arch == ROCJITSU_CODE_ARCH_CDNA3
+              ? make_cdna3_lds_code_object(text_words, "sampled_atomic_accvgpr_boundary",
+                                           /*vgpr_granulated=*/3u)
+              : make_cdna4_lds_code_object(text_words, "sampled_atomic_accvgpr_boundary",
+                                           /*vgpr_granulated=*/3u);
+      mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+        AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                        2u);
+      });
+
+      ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+      options.moi_runtime_sample_stride = 2u;
+      options.moi_track_barriers = false;
+      options.moi_track_atomics = true;
+      options.moi_report_buffer_address = 0x123456780000ull;
+      options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+      options.max_patches = 3u;
+
+      const ConSanResult result = try_patch_consan(bytes, options);
+
+      ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      EXPECT_TRUE(result.moi_private_epoch_automatic);
+      const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+        return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+               patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+      });
+      const auto atomic =
+          std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                            &ConSanPatchInfo::kind);
+      const auto prologue =
+          std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
+                            &ConSanPatchInfo::kind);
+      ASSERT_NE(access, result.patches.end());
+      ASSERT_NE(atomic, result.patches.end()) << testing::PrintToString(result.warnings);
+      ASSERT_NE(prologue, result.patches.end());
+      EXPECT_EQ(atomic->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
+      EXPECT_EQ(atomic->persistent_owner_private_offset, access->persistent_owner_private_offset);
+      EXPECT_EQ(atomic->persistent_sample_sequence_private_offset,
+                access->persistent_sample_sequence_private_offset);
+      EXPECT_EQ(prologue->persistent_private_state_end, access->persistent_private_state_end);
+
+      ASSERT_TRUE(atomic->scratch_vgpr);
+      ASSERT_TRUE(atomic->persistent_owner_private_offset);
+      EXPECT_EQ(atomic->spilled_vgpr_count, 10u);
+      EXPECT_EQ(atomic->relocated_guest_instruction_offset, atomic->trampoline_offset);
+      AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(patched.is_valid());
+      const std::vector<uint32_t> cave =
+          text_words_at_offset(patched, atomic->trampoline_offset, atomic->trampoline_size);
+      const uint16_t owner_vgpr = static_cast<uint16_t>(*atomic->scratch_vgpr + 6u);
+      const auto owner_load = instrumentation::build_private_load_b32(
+          owner_vgpr, *atomic->persistent_owner_private_offset, target.arch);
+      ASSERT_TRUE(owner_load);
+      EXPECT_TRUE(contains_subsequence(cave, *owner_load));
+      EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+        return warning.find("sampled atomic sync could not lower associated") != std::string::npos;
+      }));
+      EXPECT_TRUE(result.final_validation_passed);
+    }
+  }
+}
+
 TEST(ConSanMoi, Cdna4SampledAtomicRejectsFlatScratchScalarAlias) {
   const auto atomic = build_cdna4_flat_atomic_add_u32(
       /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true,
@@ -1239,70 +1380,102 @@ TEST(ConSanMoi, Cdna4Wave64AccvgprBoundarySampledUsesPrivatePersistentState) {
 }
 
 TEST(ConSanMoi, CdnaSampledBarrierUsesPrivatePersistentStateAtAccvgprBoundary) {
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
-    SCOPED_TRACE(arch);
-    const auto guest =
-        arch == ROCJITSU_CODE_ARCH_CDNA3
-            ? build_cdna3_ds_store_b32(/*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, arch)
-            : build_cdna4_ds_store_b32(/*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, arch);
-    const auto barrier = arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_s_barrier(arch)
-                                                          : build_cdna4_s_barrier(arch);
-    ASSERT_TRUE(guest && barrier);
-    std::vector<uint32_t> text_words(540u, build_s_nop(0, arch));
-    std::copy(guest->begin(), guest->end(), text_words.begin());
-    text_words[400] = *barrier;
-    text_words.back() = build_s_endpgm(arch);
-    std::vector<uint8_t> bytes =
-        arch == ROCJITSU_CODE_ARCH_CDNA3
-            ? make_cdna3_lds_code_object(text_words, "sampled_barrier_accvgpr_boundary",
-                                         /*vgpr_granulated=*/3u)
-            : make_cdna4_lds_code_object(text_words, "sampled_barrier_accvgpr_boundary",
-                                         /*vgpr_granulated=*/3u);
-    mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
-      // v12 is the first accumulator while ordinary guest code reaches v11.
-      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 2u);
-    });
+  struct Target {
+    rj_code_arch_t arch;
+    std::string_view label;
+  };
+  constexpr std::array<Target, 2> kTargets = {{
+      {ROCJITSU_CODE_ARCH_CDNA3, "gfx942/cdna3"},
+      {ROCJITSU_CODE_ARCH_CDNA4, "gfx950/cdna4"},
+  }};
+  for (const Target &target : kTargets) {
+    for (uint32_t sample_stride : {1u, 2u}) {
+      SCOPED_TRACE(testing::Message() << target.label << " sample_stride=" << sample_stride);
+      const auto guest =
+          target.arch == ROCJITSU_CODE_ARCH_CDNA3
+              ? build_cdna3_ds_store_b32(/*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, target.arch)
+              : build_cdna4_ds_store_b32(/*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0,
+                                         target.arch);
+      const auto barrier = target.arch == ROCJITSU_CODE_ARCH_CDNA3
+                               ? build_cdna3_s_barrier(target.arch)
+                               : build_cdna4_s_barrier(target.arch);
+      ASSERT_TRUE(guest && barrier);
+      std::vector<uint32_t> text_words(540u, build_s_nop(0, target.arch));
+      std::copy(guest->begin(), guest->end(), text_words.begin());
+      text_words[400] = *barrier;
+      text_words.back() = build_s_endpgm(target.arch);
+      std::vector<uint8_t> bytes =
+          target.arch == ROCJITSU_CODE_ARCH_CDNA3
+              ? make_cdna3_lds_code_object(text_words, "sampled_barrier_accvgpr_boundary",
+                                           /*vgpr_granulated=*/3u)
+              : make_cdna4_lds_code_object(text_words, "sampled_barrier_accvgpr_boundary",
+                                           /*vgpr_granulated=*/3u);
+      mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+        // v12 is the first accumulator while ordinary guest code reaches v11.
+        AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                        2u);
+      });
 
-    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
-    options.moi_runtime_sample_stride = 2u;
-    options.moi_report_buffer_address = 0x123456780000ull;
-    options.moi_report_buffer_size = direct_sampled_report_bytes(2);
-    options.moi_track_barriers = true;
-    options.moi_track_atomics = false;
-    options.max_patches = 3u;
+      ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+      options.moi_runtime_sample_stride = sample_stride;
+      options.moi_report_buffer_address = 0x123456780000ull;
+      options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+      options.moi_track_barriers = true;
+      options.moi_track_atomics = false;
+      options.max_patches = 3u;
 
-    const ConSanResult result = try_patch_consan(bytes, options);
+      const ConSanResult result = try_patch_consan(bytes, options);
 
-    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    EXPECT_TRUE(result.moi_private_epoch_automatic);
-    EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
-    const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-      return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
-             patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
-    });
-    const auto barrier_patch = std::ranges::find(
-        result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
-    const auto prologue =
-        std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
-                          &ConSanPatchInfo::kind);
-    ASSERT_NE(access, result.patches.end());
-    ASSERT_NE(barrier_patch, result.patches.end());
-    ASSERT_NE(prologue, result.patches.end());
-    EXPECT_TRUE(access->persistent_epoch_private_offset);
-    EXPECT_TRUE(access->persistent_owner_private_offset);
-    EXPECT_TRUE(access->persistent_sample_sequence_private_offset);
-    EXPECT_EQ(barrier_patch->persistent_epoch_private_offset,
-              access->persistent_epoch_private_offset);
-    EXPECT_EQ(barrier_patch->persistent_owner_private_offset,
-              access->persistent_owner_private_offset);
-    EXPECT_EQ(barrier_patch->persistent_sample_sequence_private_offset,
-              access->persistent_sample_sequence_private_offset);
-    EXPECT_EQ(prologue->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
-    EXPECT_EQ(prologue->persistent_owner_private_offset, access->persistent_owner_private_offset);
-    EXPECT_EQ(prologue->persistent_sample_sequence_private_offset,
-              access->persistent_sample_sequence_private_offset);
-    EXPECT_TRUE(result.final_validation_passed);
+      ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      EXPECT_TRUE(result.moi_private_epoch_automatic);
+      EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
+      const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+        return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+               patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+      });
+      const auto barrier_patch =
+          std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                            &ConSanPatchInfo::kind);
+      const auto prologue =
+          std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
+                            &ConSanPatchInfo::kind);
+      ASSERT_NE(access, result.patches.end());
+      ASSERT_NE(barrier_patch, result.patches.end());
+      ASSERT_NE(prologue, result.patches.end());
+      EXPECT_TRUE(access->persistent_epoch_private_offset);
+      EXPECT_TRUE(access->persistent_owner_private_offset);
+      EXPECT_EQ(access->persistent_sample_sequence_private_offset.has_value(), sample_stride > 1u);
+      EXPECT_EQ(barrier_patch->persistent_epoch_private_offset,
+                access->persistent_epoch_private_offset);
+      EXPECT_EQ(barrier_patch->persistent_owner_private_offset,
+                access->persistent_owner_private_offset);
+      EXPECT_EQ(barrier_patch->persistent_sample_sequence_private_offset,
+                access->persistent_sample_sequence_private_offset);
+      EXPECT_EQ(prologue->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
+      EXPECT_EQ(prologue->persistent_owner_private_offset, access->persistent_owner_private_offset);
+      EXPECT_EQ(prologue->persistent_sample_sequence_private_offset,
+                access->persistent_sample_sequence_private_offset);
+
+      ASSERT_TRUE(barrier_patch->scratch_vgpr);
+      ASSERT_TRUE(barrier_patch->persistent_owner_private_offset);
+      AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(patched.is_valid());
+      const std::vector<uint32_t> cave = text_words_at_offset(
+          patched, barrier_patch->trampoline_offset, barrier_patch->trampoline_size);
+      const uint16_t owner_vgpr = static_cast<uint16_t>(*barrier_patch->scratch_vgpr + 7u);
+      const auto owner_load = instrumentation::build_private_load_b32(
+          owner_vgpr, *barrier_patch->persistent_owner_private_offset, target.arch);
+      const auto captured_owner = instrumentation::build_v_lshrrev_b32(
+          owner_vgpr, scalar_positive_inline_u32(6u), owner_vgpr, target.arch);
+      const auto live_owner = instrumentation::build_v_lshrrev_b32(
+          owner_vgpr, scalar_positive_inline_u32(6u), /*workitem_id_x=*/0u, target.arch);
+      ASSERT_TRUE(owner_load && captured_owner && live_owner);
+      EXPECT_TRUE(contains_subsequence(cave, *owner_load));
+      EXPECT_NE(std::ranges::find(cave, *captured_owner), cave.end());
+      EXPECT_EQ(std::ranges::find(cave, *live_owner), cave.end());
+      EXPECT_TRUE(result.final_validation_passed);
+    }
   }
 }
 

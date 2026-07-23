@@ -720,12 +720,106 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
   return std::nullopt;
 }
 
+[[nodiscard]] bool sampled_atomic_guest_preserves_address(const ConSanAtomicSite &site) {
+  if (!site.addr_vgpr || !site.dst_vgpr)
+    return true;
+  const uint16_t address_count =
+      site.mnemonic.starts_with("buffer_") || site.mnemonic.starts_with("ds_") ? 1u : 2u;
+  const uint16_t destination_count =
+      site.returns_old_value.value_or(false)
+          ? static_cast<uint16_t>(std::max<uint32_t>(site.width_bits / 32u, 1u))
+          : 0u;
+  return destination_count == 0u ||
+         !range_overlaps(*site.addr_vgpr, address_count, *site.dst_vgpr, destination_count);
+}
+
+[[nodiscard]] bool sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
+                                                                const ConSanAtomicSite &site) {
+  const auto overlaps = [&](std::optional<uint16_t> base, uint16_t count) {
+    return base && range_overlaps(spill.vgpr_base, spill.vgpr_count, *base, count);
+  };
+  const bool is_cas = site.mnemonic.find("cmpswap") != std::string::npos ||
+                      site.mnemonic.find("cmpxchg") != std::string::npos;
+  const uint16_t value_count = static_cast<uint16_t>(std::max<uint32_t>(site.width_bits / 32u, 1u));
+  const uint16_t address_count =
+      site.mnemonic.starts_with("buffer_") || site.mnemonic.starts_with("ds_") ? 1u : 2u;
+  return overlaps(site.addr_vgpr, address_count) ||
+         overlaps(site.data_vgpr, static_cast<uint16_t>(value_count * (is_cas ? 2u : 1u))) ||
+         overlaps(site.dst_vgpr, value_count);
+}
+
+[[nodiscard]] bool append_sampled_atomic_guest(std::vector<uint32_t> &words,
+                                               std::span<const uint8_t> bytes,
+                                               const AtomicRecordCandidate &candidate,
+                                               rj_code_arch_t arch,
+                                               uint32_t *guest_instruction_offset) {
+  if (guest_instruction_offset)
+    *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
+  for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
+    uint32_t word = 0;
+    std::memcpy(&word, bytes.data() + candidate.site.file_offset + offset, sizeof(word));
+    words.push_back(word);
+  }
+  return append_moi_flat_load_wait(words, arch);
+}
+
+[[nodiscard]] bool append_sampled_atomic_prelude(
+    std::vector<uint32_t> &words, std::span<const uint8_t> bytes,
+    const AtomicRecordCandidate &candidate, const ConSanMoiAtomicAddressPlan &address_plan,
+    const ConSanOptions &options, const VgprSpillSequence *spill,
+    const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch, uint16_t saved_address,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset) {
+  const bool guest_first =
+      spill && sampled_atomic_spill_overlaps_guest_operands(*spill, candidate.site);
+  if (guest_first && !sampled_atomic_guest_preserves_address(candidate.site)) {
+    errors.emplace_back(
+        "ConSan MOI sampled atomic overlap spill cannot preserve an aliased guest address");
+    return false;
+  }
+  if (guest_first &&
+      !append_sampled_atomic_guest(words, bytes, candidate, arch, guest_instruction_offset))
+    return false;
+  if (spill)
+    words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
+  if (address_plan.requires_materialization()) {
+    const auto special = moi_special_state_sgprs(options);
+    if (!special)
+      return false;
+    const auto materialize = build_consan_moi_atomic_address_materialization(
+        address_plan, special->vcc_save_sgpr, special->scc_save_sgpr, arch);
+    if (!materialize)
+      return false;
+    words.insert(words.end(), materialize->begin(), materialize->end());
+  }
+  if (guest_first) {
+    words.push_back(build_v_mov_b32_e32(
+        saved_address, vector_source_vgpr(address_plan.result_address_vgpr), arch));
+    words.push_back(build_v_mov_b32_e32(
+        static_cast<uint16_t>(saved_address + 1u),
+        vector_source_vgpr(static_cast<uint16_t>(address_plan.result_address_vgpr + 1u)), arch));
+  }
+  if (private_layout && !append_sampled_private_owner_epoch_load(
+                            words, bytes, *candidate.kernel_descriptor_file_offset, options,
+                            *private_layout, arch, errors))
+    return false;
+  if (!guest_first) {
+    if (!append_sampled_atomic_guest(words, bytes, candidate, arch, guest_instruction_offset))
+      return false;
+    words.push_back(build_v_mov_b32_e32(
+        saved_address, vector_source_vgpr(address_plan.result_address_vgpr), arch));
+    words.push_back(build_v_mov_b32_e32(
+        static_cast<uint16_t>(saved_address + 1u),
+        vector_source_vgpr(static_cast<uint16_t>(address_plan.result_address_vgpr + 1u)), arch));
+  }
+  return true;
+}
+
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_pending_acquire_cave_words(
     std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &options,
-    const VgprSpillSequence *spill, rj_code_arch_t arch, uint32_t selected_slot,
-    const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
-    uint64_t return_text_offset, std::vector<std::string> &errors,
+    const VgprSpillSequence *spill, const MoiPrivateEpochLayout *private_layout,
+    rj_code_arch_t arch, uint32_t selected_slot, const ConSanMoiReportBufferLayout &layout,
+    uint64_t cave_text_offset, uint64_t return_text_offset, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset = nullptr) {
   if (!options.scratch_vgpr || !options.moi_report_buffer_address || !options.moi_owner_vgpr ||
       !options.moi_epoch_vgpr || !options.moi_exec_save_sgpr ||
@@ -786,32 +880,10 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
       static_cast<uint64_t>(selected_slot) * sizeof(ConSanMoiSampledPendingAcquireSlot);
 
   std::vector<uint32_t> words;
-  if (spill)
-    words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
-  if (address_plan.requires_materialization()) {
-    const auto special = moi_special_state_sgprs(options);
-    if (!special)
-      return std::nullopt;
-    const auto materialize = build_consan_moi_atomic_address_materialization(
-        address_plan, special->vcc_save_sgpr, special->scc_save_sgpr, arch);
-    if (!materialize)
-      return std::nullopt;
-    words.insert(words.end(), materialize->begin(), materialize->end());
-  }
-  if (guest_instruction_offset)
-    *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
-  for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
-    uint32_t word = 0;
-    std::memcpy(&word, bytes.data() + candidate.site.file_offset + offset, sizeof(word));
-    words.push_back(word);
-  }
-  if (!append_moi_flat_load_wait(words, arch))
+  if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, options, spill,
+                                     private_layout, arch, saved_address, errors,
+                                     guest_instruction_offset))
     return std::nullopt;
-  words.push_back(build_v_mov_b32_e32(saved_address,
-                                      vector_source_vgpr(address_plan.result_address_vgpr), arch));
-  words.push_back(build_v_mov_b32_e32(
-      static_cast<uint16_t>(saved_address + 1u),
-      vector_source_vgpr(static_cast<uint16_t>(address_plan.result_address_vgpr + 1u)), arch));
   InstructionSequence sequence(words);
   ConSanMoiRecordEmitter record(words, base, value, arch);
   const auto contention_label = sequence.make_label();
@@ -988,9 +1060,9 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_atomic_sync_cave_words(
     std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &options,
-    const VgprSpillSequence *spill, rj_code_arch_t arch, uint32_t selected_slot,
-    const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
-    uint64_t return_text_offset, std::vector<std::string> &errors,
+    const VgprSpillSequence *spill, const MoiPrivateEpochLayout *private_layout,
+    rj_code_arch_t arch, uint32_t selected_slot, const ConSanMoiReportBufferLayout &layout,
+    uint64_t cave_text_offset, uint64_t return_text_offset, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset = nullptr) {
   if (!options.scratch_vgpr || !options.moi_report_buffer_address || !options.moi_owner_vgpr ||
       !options.moi_epoch_vgpr || !options.moi_exec_save_sgpr ||
@@ -1067,32 +1139,10 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
       static_cast<uint64_t>(selected_slot) * sizeof(ConSanMoiSampledSyncMetadataPacked);
 
   std::vector<uint32_t> words;
-  if (spill)
-    words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
-  if (address_plan.requires_materialization()) {
-    const auto special = moi_special_state_sgprs(options);
-    if (!special)
-      return std::nullopt;
-    const auto materialize = build_consan_moi_atomic_address_materialization(
-        address_plan, special->vcc_save_sgpr, special->scc_save_sgpr, arch);
-    if (!materialize)
-      return std::nullopt;
-    words.insert(words.end(), materialize->begin(), materialize->end());
-  }
-  if (guest_instruction_offset)
-    *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
-  for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
-    uint32_t word = 0;
-    std::memcpy(&word, bytes.data() + candidate.site.file_offset + offset, sizeof(word));
-    words.push_back(word);
-  }
-  if (!append_moi_flat_load_wait(words, arch))
+  if (!append_sampled_atomic_prelude(words, bytes, candidate, address_plan, options, spill,
+                                     private_layout, arch, saved_address, errors,
+                                     guest_instruction_offset))
     return std::nullopt;
-  words.push_back(build_v_mov_b32_e32(saved_address,
-                                      vector_source_vgpr(address_plan.result_address_vgpr), arch));
-  words.push_back(build_v_mov_b32_e32(
-      static_cast<uint16_t>(saved_address + 1u),
-      vector_source_vgpr(static_cast<uint16_t>(address_plan.result_address_vgpr + 1u)), arch));
   InstructionSequence sequence(words);
   const auto collision_label = sequence.make_label();
   const auto restore_label = sequence.make_label();

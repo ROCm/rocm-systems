@@ -2087,9 +2087,11 @@ std::string_view consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSu
   return "unknown";
 }
 
-ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
-    const ConSanAtomicSite &site, uint16_t scratch_vgpr, uint16_t scratch_vgpr_count,
-    ConSanRegisterAllocationSource resource_source, rj_code_arch_t arch) {
+ConSanMoiAtomicAddressPlan
+plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vgpr,
+                               uint16_t scratch_vgpr_count,
+                               ConSanRegisterAllocationSource resource_source, rj_code_arch_t arch,
+                               bool allow_post_guest_spill_operand_overlap) {
   ConSanMoiAtomicAddressPlan plan;
   plan.scratch_vgpr = scratch_vgpr;
   plan.scratch_vgpr_count = scratch_vgpr_count;
@@ -2136,9 +2138,10 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
         static_cast<uint16_t>(scratch_vgpr + scratch_vgpr_count - 2u);
     if (overlaps(result_address_vgpr, 2u, *site.addr_vgpr, 1u))
       return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
-    if (overlaps(scratch_vgpr, scratch_vgpr_count - 2u, *site.addr_vgpr, 1u) ||
-        overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, 1u) ||
-        (site.dst_vgpr && overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, 1u)))
+    if (!allow_post_guest_spill_operand_overlap &&
+        (overlaps(scratch_vgpr, scratch_vgpr_count - 2u, *site.addr_vgpr, 1u) ||
+         overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, 1u) ||
+         (site.dst_vgpr && overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, 1u))))
       return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
     plan.kind = ConSanMoiAtomicAddressKind::LdsByteOffsetToken;
     plan.support = ConSanMoiAtomicAddressSupport::Supported;
@@ -2177,8 +2180,9 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
     const uint16_t result_address_vgpr =
         static_cast<uint16_t>(scratch_vgpr + scratch_vgpr_count - 2u);
-    if (overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, 1u) ||
-        (site.dst_vgpr && overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, 1u)))
+    if (!allow_post_guest_spill_operand_overlap &&
+        (overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, 1u) ||
+         (site.dst_vgpr && overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, 1u))))
       return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
     plan.kind = ConSanMoiAtomicAddressKind::BufferResourceMaterialized;
     plan.support = ConSanMoiAtomicAddressSupport::Supported;
@@ -2236,10 +2240,11 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
     if ((scratch_vgpr_count != minimum_scratch_count && scratch_vgpr_count < 7u) ||
         static_cast<uint32_t>(scratch_vgpr) + scratch_vgpr_count > 256u)
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
-    if (overlaps(scratch_vgpr, scratch_vgpr_count, *site.addr_vgpr, 2u) ||
-        overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-        (site.dst_vgpr &&
-         overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count)))
+    if (!allow_post_guest_spill_operand_overlap &&
+        (overlaps(scratch_vgpr, scratch_vgpr_count, *site.addr_vgpr, 2u) ||
+         overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
+         (site.dst_vgpr &&
+          overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count))))
       return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
     plan.kind = returned_value_aliases_address
                     ? ConSanMoiAtomicAddressKind::FlatGuestPairMaterialized
@@ -2268,10 +2273,11 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
         static_cast<uint32_t>(scratch_vgpr) + scratch_vgpr_count > 256u)
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
     if (!requires_materialization) {
-      if (overlaps(scratch_vgpr, scratch_vgpr_count, *site.addr_vgpr, 2u) ||
-          overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-          (site.dst_vgpr &&
-           overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count)))
+      if (!allow_post_guest_spill_operand_overlap &&
+          (overlaps(scratch_vgpr, scratch_vgpr_count, *site.addr_vgpr, 2u) ||
+           overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
+           (site.dst_vgpr &&
+            overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count))))
         return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
       plan.kind = ConSanMoiAtomicAddressKind::VglobalGuestPair;
       plan.support = ConSanMoiAtomicAddressSupport::Supported;
@@ -2286,10 +2292,11 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
         static_cast<uint16_t>(scratch_vgpr + scratch_vgpr_count - 2u);
     if (overlaps(result_address_vgpr, 2u, *site.addr_vgpr, 2u))
       return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
-    if (overlaps(scratch_vgpr, scratch_vgpr_count - 2u, *site.addr_vgpr, 2u) ||
-        overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-        (site.dst_vgpr &&
-         overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count)))
+    if (!allow_post_guest_spill_operand_overlap &&
+        (overlaps(scratch_vgpr, scratch_vgpr_count - 2u, *site.addr_vgpr, 2u) ||
+         overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
+         (site.dst_vgpr &&
+          overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count))))
       return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
     plan.kind = ConSanMoiAtomicAddressKind::VglobalGuestPairMaterialized;
     plan.support = ConSanMoiAtomicAddressSupport::Supported;
@@ -2316,10 +2323,11 @@ ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(
       static_cast<uint16_t>(scratch_vgpr + scratch_vgpr_count - 2u);
   if (overlaps(result_address_vgpr, 2u, *site.addr_vgpr, 1u))
     return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
-  if (overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
-      (site.dst_vgpr &&
-       overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count)) ||
-      overlaps(scratch_vgpr, scratch_vgpr_count - 2u, *site.addr_vgpr, 1u))
+  if (!allow_post_guest_spill_operand_overlap &&
+      (overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
+       (site.dst_vgpr &&
+        overlaps(scratch_vgpr, scratch_vgpr_count, *site.dst_vgpr, destination_count)) ||
+       overlaps(scratch_vgpr, scratch_vgpr_count - 2u, *site.addr_vgpr, 1u)))
     return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
 
   plan.kind = ConSanMoiAtomicAddressKind::VglobalMaterialized;

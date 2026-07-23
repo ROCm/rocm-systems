@@ -794,6 +794,11 @@ candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
            : 0u));
 }
 
+[[nodiscard]] uint16_t sampled_atomic_scratch_count(const ConSanOptions &options) {
+  (void)options;
+  return 10u;
+}
+
 [[nodiscard]] bool reject_candidate_scratch_range_overlap(const ConSanMoiCandidate &candidate,
                                                           uint16_t scratch_vgpr,
                                                           uint16_t scratch_count,
@@ -1398,19 +1403,23 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   }
 
   ConSanRegisterPlan register_plan = plan_consan_registers(request, live_before_all_owners);
-  const bool supports_operand_overlap_spill =
+  const bool supports_access_operand_overlap_spill =
       options.moi_engine == ConSanMoiEngine::InlineShadow ||
       ((state.arch == ROCJITSU_CODE_ARCH_CDNA3 || state.arch == ROCJITSU_CODE_ARCH_CDNA4) &&
        options.moi_engine == ConSanMoiEngine::RecordReplay && !options.moi_dynamic_access_records);
+  const bool supports_sampled_atomic_operand_overlap_spill =
+      (state.arch == ROCJITSU_CODE_ARCH_CDNA3 || state.arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      options.moi_engine == ConSanMoiEngine::Sampled && site_kind == ConSanResourceSiteKind::Atomic;
   if (register_plan.source == ConSanRegisterAllocationSource::Unsupported &&
       register_plan.reason == ConSanRegisterPlanReason::NoLegalWindow &&
-      supports_operand_overlap_spill && site_kind == ConSanResourceSiteKind::Access &&
+      ((supports_access_operand_overlap_spill && site_kind == ConSanResourceSiteKind::Access) ||
+       supports_sampled_atomic_operand_overlap_spill) &&
       !request.explicit_base) {
-    // InlineShadow and CDNA static Record/Replay access bodies execute in
-    // appended caves as save -> probe -> restore -> displaced guest access.
-    // Their spill tier may therefore use a window overlapping the guest
-    // instruction's operands. Persistent state remains forbidden because it
-    // must survive the complete kernel lifetime.
+    // These appended-cave bodies preserve guest operands even when no
+    // disjoint ordinary-VGPR window exists. Sampled atomics execute the guest
+    // before clobbering an overlapping saved window; access bodies restore the
+    // window before the displaced guest. Persistent state remains forbidden
+    // because it must survive the complete kernel lifetime.
     ConSanRegisterRequest spill_request = request;
     spill_request.force_spill = true;
     spill_request.forbidden = {};
