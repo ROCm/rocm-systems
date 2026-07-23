@@ -20,15 +20,15 @@ hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
       * :doc:`Install hipFile <install/install>`
       * :doc:`Build hipFile from source <install/build-from-source>`
       * :doc:`Install the hipFile Python bindings <install/python-bindings>`
-      * :doc:`Set up a local NVMe drive <install/setup-local-nvme>`
-      * :doc:`Set up an NVMeoF disk <install/setup-nvmeof>`
-      * :doc:`Set up an NFSoRDMA share <install/setup-nfsordma>`
 
 .. grid:: 2
    :gutter: 3
 
    .. grid-item-card:: How to
 
+      * :doc:`Set up a local NVMe drive <how-to/setup-local-nvme>`
+      * :doc:`Set up an NVMe-oF disk <how-to/setup-nvmeof>`
+      * :doc:`Set up an NFSoRDMA share <how-to/setup-nfsordma>`
       * :doc:`Register a file and GPU buffer for GPU I/O <how-to/register-file-and-buffer>`
       * :doc:`Benchmark hipFile with fio <how-to/use-with-fio>`
       * :doc:`Use the hipFile Python API <how-to/use-python-api>`
