@@ -64,7 +64,11 @@ jobs:
                 --output json \
                 --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.gpu }}') && !contains(Key, 'asan') && !contains(Key, '-tests-')], &LastModified)[-1].Key")
           KEY=${KEY//\"/}
-          test -n "$KEY" || { echo "No ${{ matrix.gpu }} tarball found"; exit 1; }
+          # A no-match filter returns the JSON literal "null" (or "None" for text
+          # output), which is a non-empty string, so guard against it explicitly.
+          if [[ -z "$KEY" || "$KEY" == "null" || "$KEY" == "None" ]]; then
+            echo "No ${{ matrix.gpu }} tarball found"; exit 1
+          fi
           echo "tarball=${KEY}" >> $GITHUB_OUTPUT
 
       - name: Login to Docker Hub
