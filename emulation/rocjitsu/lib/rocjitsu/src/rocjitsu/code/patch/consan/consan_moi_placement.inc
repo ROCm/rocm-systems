@@ -1634,21 +1634,39 @@ inline_shadow_visible_evidence_sgpr(const ConSanOptions &options) {
                                (options.moi_dynamic_stack_spill ? 25u : 24u));
 }
 
+struct MoiArchitecturalSgprLayout {
+  uint16_t ordinary_limit = kMaxSgprs;
+  uint16_t flat_scratch_base = kMaxSgprs;
+  uint16_t flat_scratch_width = 0u;
+};
+
+[[nodiscard]] constexpr MoiArchitecturalSgprLayout
+moi_architectural_sgpr_layout(rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    // Encoded s102:s103 and s104:s105 name FLAT_SCRATCH and XNACK_MASK,
+    // respectively, so neither pair is ordinary allocatable storage.
+    return {.ordinary_limit = 102u, .flat_scratch_base = 102u, .flat_scratch_width = 2u};
+  }
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+    // RDNA4 retains ordinary physical SGPRs through s105, but scalar
+    // selectors s102:s103 alias FLAT_SCRATCH in persistent SALU state.
+    return {.ordinary_limit = kMaxSgprs, .flat_scratch_base = 102u, .flat_scratch_width = 2u};
+  }
+  return {};
+}
+
 [[nodiscard]] constexpr uint16_t moi_ordinary_sgpr_limit(rj_code_arch_t arch) {
-  // On CDNA3/4, encoded SGPR numbers 102:103 and 104:105 name FLAT_SCRATCH and
-  // XNACK_MASK rather than ordinary scalar registers.  RDNA4 retains ordinary
-  // SGPRs through s105 before VCC at s106.  Instrumentation state must never
-  // treat either CDNA special pair as allocatable storage.
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 102u : kMaxSgprs;
+  return moi_architectural_sgpr_layout(arch).ordinary_limit;
 }
 
 [[nodiscard]] bool persistent_sgpr_range_overlaps_flat_scratch(uint16_t base, uint16_t width,
                                                                rj_code_arch_t arch) {
-  // gfx1250 scalar selectors 102:103 alias FLAT_SCRATCH. Short-lived scalar
-  // save windows may use the physical registers when no scratch operation is
-  // live, but persistent owner/epoch state would silently retarget every
-  // later address-free private spill.
-  return arch == ROCJITSU_CODE_ARCH_GFX1250 && range_overlaps(base, width, 102u, 2u);
+  const MoiArchitecturalSgprLayout layout = moi_architectural_sgpr_layout(arch);
+  // gfx1250 short-lived scalar save windows may use the underlying physical
+  // registers when no scratch operation is live. Persistent state cannot:
+  // writing the aliased selectors would silently retarget later private spills.
+  return layout.flat_scratch_width != 0u &&
+         range_overlaps(base, width, layout.flat_scratch_base, layout.flat_scratch_width);
 }
 
 [[nodiscard]] uint16_t moi_dispatch_state_sgpr_count(const ConSanOptions &options) {
@@ -2845,7 +2863,7 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.warnings.emplace_back(
         "ConSan MOI persistent dispatch-ID SGPR pair is unaligned, overlaps entry/scratch "
-        "state, or exceeds the architectural SGPR file");
+        "state, aliases an architectural special SGPR, or exceeds the architectural SGPR file");
     return false;
   }
   return true;

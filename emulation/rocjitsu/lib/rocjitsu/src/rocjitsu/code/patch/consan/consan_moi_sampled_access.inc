@@ -177,6 +177,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     uint32_t required_private_bytes = 0;
     uint32_t probe_guest_instruction_offset = 0;
     std::optional<uint16_t> transient_exec_save_sgpr;
+    bool wrap_embedded_guest_vgpr_bank = false;
   };
   std::vector<PlannedSampledPatch> planned_patches;
   planned_patches.reserve(candidates.size());
@@ -630,9 +631,14 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                              scalar_spill->restore_words.size()) *
                            sizeof(uint32_t)
                      : 0u;
-    const uint64_t vgpr_msb_bytes = use_indirect_appended && arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-                                            candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u
-                                        ? (spill ? 4u : 2u) * sizeof(uint32_t)
+    const bool wrap_embedded_guest_vgpr_bank = use_indirect_appended &&
+                                               arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                               candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+    const uint64_t vgpr_msb_bytes = use_indirect_appended
+                                        ? moi_appended_body_vgpr_msb_transition_word_count(
+                                              candidate.gfx1250_vgpr_msb_mode, spill.has_value(),
+                                              wrap_embedded_guest_vgpr_bank) *
+                                              sizeof(uint32_t)
                                         : 0u;
     const uint64_t patch_bytes =
         static_cast<uint64_t>((words->size() + displaced_tail_words.size()) * sizeof(uint32_t)) +
@@ -709,6 +715,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     planned.required_private_bytes = required_private_bytes;
     planned.probe_guest_instruction_offset = probe_guest_instruction_offset;
     planned.transient_exec_save_sgpr = candidate_options.moi_exec_save_sgpr;
+    planned.wrap_embedded_guest_vgpr_bank = wrap_embedded_guest_vgpr_bank;
     planned_patches.push_back(std::move(planned));
     if (use_indirect_appended && !use_dense_call)
       planned_anchor_end = candidate.text_offset + placement->original_size;
@@ -1094,9 +1101,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               : 0u;
       const uint64_t displaced_tail_bytes =
           planned_patch.displaced_tail_words.size() * sizeof(uint32_t);
-      const uint64_t vgpr_msb_bytes = planned_patch.gfx1250_vgpr_msb_mode.value_or(0u) != 0u
-                                          ? (planned_patch.spill ? 4u : 2u) * sizeof(uint32_t)
-                                          : 0u;
+      const uint64_t vgpr_msb_bytes =
+          moi_appended_body_vgpr_msb_transition_word_count(
+              planned_patch.gfx1250_vgpr_msb_mode, planned_patch.spill.has_value(),
+              planned_patch.wrap_embedded_guest_vgpr_bank) *
+          sizeof(uint32_t);
       const uint64_t dense_gate_bytes =
           planned_patch.dense_runtime_fast_gate ? access_island_word_count * sizeof(uint32_t) : 0u;
       if (spill_bytes + scalar_spill_bytes + displaced_tail_bytes + dense_gate_bytes +
@@ -1215,16 +1224,20 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           dense_gate_words = std::move(*gate);
         }
         uint32_t body_guest_instruction_offset = 0;
-        auto cave_words = assemble_moi_appended_body(
-            planned_patch, *words, "sampled probe", result.errors,
-            /*deferred_guest_word_count=*/0u,
-            planned_patch.scalar_spill ? planned_patch.scalar_spill->save_words
-                                       : std::span<const uint32_t>{},
-            planned_patch.scalar_spill ? planned_patch.scalar_spill->restore_words
-                                       : std::span<const uint32_t>{},
-            planned_patch.gfx1250_vgpr_msb_mode,
-            /*trailing_guest_word_count=*/0u, dense_gate_words,
-            planned_patch.probe_guest_instruction_offset, &body_guest_instruction_offset);
+        MoiAppendedBodyOptions body_options;
+        body_options.scalar_save_words = planned_patch.scalar_spill
+                                             ? planned_patch.scalar_spill->save_words
+                                             : std::span<const uint32_t>{};
+        body_options.scalar_restore_words = planned_patch.scalar_spill
+                                                ? planned_patch.scalar_spill->restore_words
+                                                : std::span<const uint32_t>{};
+        body_options.gfx1250_vgpr_msb_mode = planned_patch.gfx1250_vgpr_msb_mode;
+        body_options.entry_prefix_words = dense_gate_words;
+        body_options.probe_guest_instruction_offset = planned_patch.probe_guest_instruction_offset;
+        body_options.body_guest_instruction_offset = &body_guest_instruction_offset;
+        body_options.wrap_embedded_guest_vgpr_bank = planned_patch.wrap_embedded_guest_vgpr_bank;
+        auto cave_words = assemble_moi_appended_body(planned_patch, *words, "sampled probe",
+                                                     result.errors, body_options);
         if (!cave_words)
           return;
         if (planned_patch.dense_call_anchor) {

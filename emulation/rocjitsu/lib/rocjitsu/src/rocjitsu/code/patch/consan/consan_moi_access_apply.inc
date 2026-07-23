@@ -107,44 +107,58 @@ write_moi_entry_island(std::vector<uint8_t> &text, const PlannedPatch &planned_p
   return true;
 }
 
+struct MoiAppendedBodyOptions {
+  size_t deferred_guest_word_count = 0u;
+  std::span<const uint32_t> scalar_save_words = {};
+  std::span<const uint32_t> scalar_restore_words = {};
+  std::optional<uint16_t> gfx1250_vgpr_msb_mode = std::nullopt;
+  size_t trailing_guest_word_count = 0u;
+  std::span<const uint32_t> entry_prefix_words = {};
+  std::optional<uint32_t> probe_guest_instruction_offset = std::nullopt;
+  uint32_t *body_guest_instruction_offset = nullptr;
+  bool restore_vgpr_spill_before_trailing_guest = false;
+  bool wrap_embedded_guest_vgpr_bank = false;
+};
+
+[[nodiscard]] size_t
+moi_appended_body_vgpr_msb_transition_word_count(std::optional<uint16_t> gfx1250_vgpr_msb_mode,
+                                                 bool has_vgpr_spill, bool wraps_embedded_guest) {
+  if (gfx1250_vgpr_msb_mode.value_or(0u) == 0u)
+    return 0u;
+  return (has_vgpr_spill ? 4u : 2u) + (wraps_embedded_guest ? 2u : 0u);
+}
+
 template <typename PlannedPatch>
-[[nodiscard]] std::optional<std::vector<uint32_t>> assemble_moi_appended_body(
-    const PlannedPatch &planned_patch, std::span<const uint32_t> probe_words,
-    std::string_view probe_name, std::vector<std::string> &errors,
-    size_t deferred_guest_word_count = 0u, std::span<const uint32_t> scalar_save_words = {},
-    std::span<const uint32_t> scalar_restore_words = {},
-    std::optional<uint16_t> gfx1250_vgpr_msb_mode = std::nullopt,
-    size_t trailing_guest_word_count = 0u, std::span<const uint32_t> entry_prefix_words = {},
-    std::optional<uint32_t> probe_guest_instruction_offset = std::nullopt,
-    uint32_t *body_guest_instruction_offset = nullptr,
-    bool restore_vgpr_spill_before_trailing_guest = false,
-    bool wrap_embedded_guest_with_guest_vgpr_bank = false) {
+[[nodiscard]] std::optional<std::vector<uint32_t>>
+assemble_moi_appended_body(const PlannedPatch &planned_patch, std::span<const uint32_t> probe_words,
+                           std::string_view probe_name, std::vector<std::string> &errors,
+                           const MoiAppendedBodyOptions &options = {}) {
   std::vector<uint32_t> body;
-  if (trailing_guest_word_count > probe_words.size()) {
+  if (options.trailing_guest_word_count > probe_words.size()) {
     errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                         " VGPR-bank guest split exceeds the probe body");
     return std::nullopt;
   }
-  const bool select_low_vgpr_bank = gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
-  const size_t probe_prefix_words = probe_words.size() - trailing_guest_word_count;
-  body.insert(body.end(), entry_prefix_words.begin(), entry_prefix_words.end());
+  const bool select_low_vgpr_bank = options.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+  const size_t probe_prefix_words = probe_words.size() - options.trailing_guest_word_count;
+  body.insert(body.end(), options.entry_prefix_words.begin(), options.entry_prefix_words.end());
   if (select_low_vgpr_bank)
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), 0u, ROCJITSU_CODE_ARCH_GFX1250));
+        static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), 0u, ROCJITSU_CODE_ARCH_GFX1250));
   if (planned_patch.spill)
     body.insert(body.end(), planned_patch.spill->save_words.begin(),
                 planned_patch.spill->save_words.end());
-  body.insert(body.end(), scalar_save_words.begin(), scalar_save_words.end());
+  body.insert(body.end(), options.scalar_save_words.begin(), options.scalar_save_words.end());
   const size_t probe_body_begin = body.size();
   std::optional<size_t> guest_word;
   size_t guest_word_count = 0u;
-  if (probe_guest_instruction_offset) {
-    if (*probe_guest_instruction_offset % sizeof(uint32_t) != 0u) {
+  if (options.probe_guest_instruction_offset) {
+    if (*options.probe_guest_instruction_offset % sizeof(uint32_t) != 0u) {
       errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                           " has an unaligned relocated guest offset");
       return std::nullopt;
     }
-    guest_word = *probe_guest_instruction_offset / sizeof(uint32_t);
+    guest_word = *options.probe_guest_instruction_offset / sizeof(uint32_t);
     guest_word_count = planned_patch.candidate->size / sizeof(uint32_t);
     if (*guest_word >= probe_words.size() || guest_word_count == 0u ||
         guest_word_count > probe_words.size() - *guest_word) {
@@ -153,62 +167,66 @@ template <typename PlannedPatch>
       return std::nullopt;
     }
   }
-  const bool wrap_embedded_guest = select_low_vgpr_bank &&
-                                   wrap_embedded_guest_with_guest_vgpr_bank && guest_word &&
-                                   *guest_word < probe_prefix_words;
+  // Wrapped callers always embed the guest in the unsplit probe body. Validate
+  // that planning/emission contract defensively before doing iterator
+  // arithmetic, even though current callers establish it during planning.
+  if (options.wrap_embedded_guest_vgpr_bank &&
+      (!select_low_vgpr_bank || !guest_word || options.trailing_guest_word_count != 0u)) {
+    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                        " has an invalid embedded-guest VGPR-bank plan");
+    return std::nullopt;
+  }
+  const bool wrap_embedded_guest =
+      select_low_vgpr_bank && options.wrap_embedded_guest_vgpr_bank && guest_word;
   if (wrap_embedded_guest) {
-    if (guest_word_count > probe_prefix_words - *guest_word) {
-      errors.emplace_back("ConSan MOI " + std::string(probe_name) +
-                          " has a relocated guest range crossing its VGPR-bank split");
-      return std::nullopt;
-    }
     body.insert(body.end(), probe_words.begin(), probe_words.begin() + *guest_word);
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), ROCJITSU_CODE_ARCH_GFX1250));
-    if (body_guest_instruction_offset)
-      *body_guest_instruction_offset = static_cast<uint32_t>(body.size() * sizeof(uint32_t));
+        0u, static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), ROCJITSU_CODE_ARCH_GFX1250));
+    if (options.body_guest_instruction_offset)
+      *options.body_guest_instruction_offset =
+          static_cast<uint32_t>(body.size() * sizeof(uint32_t));
     body.insert(body.end(), probe_words.begin() + *guest_word,
                 probe_words.begin() + *guest_word + guest_word_count);
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), 0u, ROCJITSU_CODE_ARCH_GFX1250));
+        static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), 0u, ROCJITSU_CODE_ARCH_GFX1250));
     body.insert(body.end(), probe_words.begin() + *guest_word + guest_word_count,
                 probe_words.begin() + probe_prefix_words);
   } else {
     body.insert(body.end(), probe_words.begin(), probe_words.begin() + probe_prefix_words);
   }
-  body.insert(body.end(), scalar_restore_words.begin(), scalar_restore_words.end());
-  if (restore_vgpr_spill_before_trailing_guest && planned_patch.spill)
+  body.insert(body.end(), options.scalar_restore_words.begin(), options.scalar_restore_words.end());
+  if (options.restore_vgpr_spill_before_trailing_guest && planned_patch.spill)
     body.insert(body.end(), planned_patch.spill->restore_words.begin(),
                 planned_patch.spill->restore_words.end());
   if (select_low_vgpr_bank) {
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), ROCJITSU_CODE_ARCH_GFX1250));
+        0u, static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), ROCJITSU_CODE_ARCH_GFX1250));
   }
   const size_t trailing_probe_body_begin = body.size();
   body.insert(body.end(), probe_words.begin() + probe_prefix_words, probe_words.end());
-  if (guest_word && body_guest_instruction_offset && !wrap_embedded_guest) {
+  if (guest_word && options.body_guest_instruction_offset && !wrap_embedded_guest) {
     const size_t body_word = *guest_word < probe_prefix_words
                                  ? probe_body_begin + *guest_word
                                  : trailing_probe_body_begin + *guest_word - probe_prefix_words;
-    *body_guest_instruction_offset = static_cast<uint32_t>(body_word * sizeof(uint32_t));
+    *options.body_guest_instruction_offset = static_cast<uint32_t>(body_word * sizeof(uint32_t));
   }
   if (select_low_vgpr_bank && planned_patch.spill)
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), 0u, ROCJITSU_CODE_ARCH_GFX1250));
-  if (planned_patch.spill && !restore_vgpr_spill_before_trailing_guest)
+        static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), 0u, ROCJITSU_CODE_ARCH_GFX1250));
+  if (planned_patch.spill && !options.restore_vgpr_spill_before_trailing_guest)
     body.insert(body.end(), planned_patch.spill->restore_words.begin(),
                 planned_patch.spill->restore_words.end());
   if (select_low_vgpr_bank && planned_patch.spill) {
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), ROCJITSU_CODE_ARCH_GFX1250));
+        0u, static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), ROCJITSU_CODE_ARCH_GFX1250));
   }
   body.insert(body.end(), planned_patch.displaced_tail_words.begin(),
               planned_patch.displaced_tail_words.end());
-  if ((body.size() + deferred_guest_word_count) * sizeof(uint32_t) !=
+  if ((body.size() + options.deferred_guest_word_count) * sizeof(uint32_t) !=
       planned_patch.placement.body_size) {
     errors.emplace_back(
         "ConSan MOI " + std::string(probe_name) + " body size changed after placement: emitted=" +
-        std::to_string((body.size() + deferred_guest_word_count) * sizeof(uint32_t)) +
+        std::to_string((body.size() + options.deferred_guest_word_count) * sizeof(uint32_t)) +
         " planned=" + std::to_string(planned_patch.placement.body_size));
     return std::nullopt;
   }

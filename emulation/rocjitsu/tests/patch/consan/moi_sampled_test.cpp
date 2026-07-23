@@ -226,6 +226,69 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPartitionRelayWindowsAcrossLargeKerne
   }));
 }
 
+TEST(ConSanMoi, Gfx1250DenseSampledAccessesPreserveGuestVgprMsbMode) {
+  constexpr uint32_t kAccessCount = 9u;
+  constexpr uint16_t kGuestVgprMsbTransition = 0x4004u;
+  constexpr uint8_t kGuestVgprMsbMode = 0x04u;
+  std::vector<uint32_t> text_words(
+      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbTransition, ROCJITSU_CODE_ARCH_GFX1250));
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(kAccessCount);
+  options.moi_runtime_sample_stride = 1u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_dense_sampled_vgpr_msb"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const uint32_t select_low =
+      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t restore_guest =
+      *build_gfx1250_s_set_vgpr_msb_transition(0u, kGuestVgprMsbMode, ROCJITSU_CODE_ARCH_GFX1250);
+  uint32_t checked = 0u;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
+      continue;
+    const std::vector<uint32_t> words =
+        text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+    // The sampled body has one pair around its spill sequence and another
+    // around the embedded guest instruction.
+    EXPECT_EQ(std::ranges::count(words, select_low), 4u);
+    EXPECT_EQ(std::ranges::count(words, restore_guest), 4u);
+    ASSERT_TRUE(patch.relocated_guest_instruction_offset);
+    ASSERT_GE(*patch.relocated_guest_instruction_offset,
+              patch.trampoline_offset + sizeof(uint32_t));
+    const size_t guest_word = static_cast<size_t>(
+        (*patch.relocated_guest_instruction_offset - patch.trampoline_offset) / sizeof(uint32_t));
+    EXPECT_EQ(words[guest_word - 1u], restore_guest);
+    constexpr size_t kGuestWordCount = 2u;
+    ASSERT_LT(guest_word + kGuestWordCount, words.size());
+    EXPECT_EQ(words[guest_word + kGuestWordCount], select_low);
+    ++checked;
+  }
+  EXPECT_EQ(checked, kAccessCount);
+}
+
 TEST(ConSanMoi, Cdna4DirectSampledProbeEmitsNativePublicationRecipes) {
   std::vector<uint32_t> text_words(600, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
   text_words[0] = 0xd81a0004u;

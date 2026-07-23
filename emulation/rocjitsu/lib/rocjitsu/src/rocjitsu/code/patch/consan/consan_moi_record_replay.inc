@@ -87,6 +87,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     uint32_t required_private_bytes = 0;
     uint32_t probe_guest_instruction_offset = 0;
     bool spill_overlaps_guest_operands = false;
+    bool wrap_embedded_guest_vgpr_bank = false;
   };
   std::vector<PlannedAccessRecordPatch> planned_patches;
   uint32_t planned_record_count = 0;
@@ -524,11 +525,13 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                              scalar_spill->restore_words.size()) *
                            sizeof(uint32_t)
                      : 0u;
+    const bool wrap_embedded_guest_vgpr_bank =
+        use_indirect_appended && options.moi_dynamic_access_records &&
+        arch == ROCJITSU_CODE_ARCH_GFX1250 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
     const uint64_t vgpr_msb_bytes =
-        arch == ROCJITSU_CODE_ARCH_GFX1250 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u
-            ? (spill ? 4u : 2u) * sizeof(uint32_t) +
-                  (options.moi_dynamic_access_records ? 2u : 0u) * sizeof(uint32_t)
-            : 0u;
+        moi_appended_body_vgpr_msb_transition_word_count(
+            candidate.gfx1250_vgpr_msb_mode, spill.has_value(), wrap_embedded_guest_vgpr_bank) *
+        sizeof(uint32_t);
     std::vector<uint32_t> displaced_tail_words;
     uint32_t displaced_original_size = candidate.size;
     bool entry_island_at_anchor = false;
@@ -642,6 +645,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     }
     planned.required_private_bytes = required_private_bytes;
     planned.spill_overlaps_guest_operands = spill_overlaps_guest_operands;
+    planned.wrap_embedded_guest_vgpr_bank = wrap_embedded_guest_vgpr_bank;
     planned_patches.push_back(std::move(planned));
     if (use_indirect_appended && !use_dense_call)
       planned_anchor_end = candidate.text_offset + placement->original_size;
@@ -1052,18 +1056,23 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         }
 
         uint32_t body_guest_instruction_offset = 0;
-        auto cave_words = assemble_moi_appended_body(
-            planned_patch, *words, "first-light probe", result.errors,
-            /*deferred_guest_word_count=*/0u,
-            planned_patch.scalar_spill ? planned_patch.scalar_spill->save_words
-                                       : std::span<const uint32_t>{},
-            planned_patch.scalar_spill ? planned_patch.scalar_spill->restore_words
-                                       : std::span<const uint32_t>{},
-            planned_patch.gfx1250_vgpr_msb_mode,
-            options.moi_dynamic_access_records ? 0u : candidate.size / sizeof(uint32_t), {},
-            planned_patch.probe_guest_instruction_offset, &body_guest_instruction_offset,
-            planned_patch.spill_overlaps_guest_operands,
-            /*wrap_embedded_guest_with_guest_vgpr_bank=*/options.moi_dynamic_access_records);
+        MoiAppendedBodyOptions body_options;
+        body_options.scalar_save_words = planned_patch.scalar_spill
+                                             ? planned_patch.scalar_spill->save_words
+                                             : std::span<const uint32_t>{};
+        body_options.scalar_restore_words = planned_patch.scalar_spill
+                                                ? planned_patch.scalar_spill->restore_words
+                                                : std::span<const uint32_t>{};
+        body_options.gfx1250_vgpr_msb_mode = planned_patch.gfx1250_vgpr_msb_mode;
+        body_options.trailing_guest_word_count =
+            options.moi_dynamic_access_records ? 0u : candidate.size / sizeof(uint32_t);
+        body_options.probe_guest_instruction_offset = planned_patch.probe_guest_instruction_offset;
+        body_options.body_guest_instruction_offset = &body_guest_instruction_offset;
+        body_options.restore_vgpr_spill_before_trailing_guest =
+            planned_patch.spill_overlaps_guest_operands;
+        body_options.wrap_embedded_guest_vgpr_bank = planned_patch.wrap_embedded_guest_vgpr_bank;
+        auto cave_words = assemble_moi_appended_body(planned_patch, *words, "first-light probe",
+                                                     result.errors, body_options);
         if (!cave_words)
           return;
         if (planned_patch.dense_call_anchor) {

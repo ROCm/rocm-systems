@@ -2424,6 +2424,9 @@ TEST(ConSanMoi, Gfx1250RecordReplayKeepsDispatchOnlyFullPressureOwner) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  // s101 is the highest guest reference, so the unguarded aligned allocator
+  // chooses s102:s103. The architectural-alias guard must skip directly to
+  // the only remaining ordinary pair.
   EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 104u);
   EXPECT_EQ(
       std::ranges::count_if(result.patches,
@@ -3574,19 +3577,37 @@ TEST(ConSanMoi, Gfx1250RejectsExplicitPersistentStateInFlatScratch) {
         make_gfx1250_code_object(text_words, "gfx1250_explicit_flat_scratch_state"), options);
   };
 
+  const auto expect_special_alias_rejected = [&](const ConSanOptions &options) {
+    const ConSanResult result = patch_with(options);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
+    EXPECT_FALSE(result.modified);
+    EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+      return warning.find("architectural special SGPR") != std::string::npos;
+    })) << testing::PrintToString(result.warnings);
+  };
+
   ConSanOptions dispatch_options = moi_options(ConSanMoiEngine::RecordReplay);
   dispatch_options.moi_dispatch_id_sgpr = 102u;
-  const ConSanResult dispatch_result = patch_with(dispatch_options);
-  EXPECT_EQ(dispatch_result.outcome, ConSanTransformOutcome::Unsupported);
-  EXPECT_FALSE(dispatch_result.modified);
+  expect_special_alias_rejected(dispatch_options);
+
+  ConSanOptions owner_options = moi_options(ConSanMoiEngine::RecordReplay);
+  owner_options.moi_persistent_owner_sgpr = 102u;
+  owner_options.moi_persistent_epoch_sgpr = 81u;
+  owner_options.moi_init_owner_epoch = true;
+  expect_special_alias_rejected(owner_options);
 
   ConSanOptions epoch_options = moi_options(ConSanMoiEngine::RecordReplay);
-  epoch_options.moi_persistent_owner_sgpr = 102u;
+  epoch_options.moi_persistent_owner_sgpr = 80u;
   epoch_options.moi_persistent_epoch_sgpr = 103u;
   epoch_options.moi_init_owner_epoch = true;
-  const ConSanResult epoch_result = patch_with(epoch_options);
-  EXPECT_EQ(epoch_result.outcome, ConSanTransformOutcome::Unsupported);
-  EXPECT_FALSE(epoch_result.modified);
+  expect_special_alias_rejected(epoch_options);
+
+  ConSanOptions workgroup_options = moi_options(ConSanMoiEngine::RecordReplay);
+  workgroup_options.moi_persistent_owner_sgpr = 80u;
+  workgroup_options.moi_persistent_epoch_sgpr = 81u;
+  workgroup_options.moi_persistent_workgroup_key_sgpr = 102u;
+  workgroup_options.moi_init_owner_epoch = true;
+  expect_special_alias_rejected(workgroup_options);
 }
 
 TEST(ConSanMoi, Cdna4AccvgprBoundaryRecordReplayUsesScalarEpochCoalescing) {
@@ -4585,6 +4606,9 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
     const size_t guest_word = static_cast<size_t>(
         (*patch.relocated_guest_instruction_offset - patch.trampoline_offset) / sizeof(uint32_t));
     EXPECT_EQ(words[guest_word - 1u], restore_guest);
+    constexpr size_t kGuestWordCount = 2u;
+    ASSERT_LT(guest_word + kGuestWordCount, words.size());
+    EXPECT_EQ(words[guest_word + kGuestWordCount], select_low);
     ++checked;
   }
   EXPECT_EQ(checked, kAccessCount);

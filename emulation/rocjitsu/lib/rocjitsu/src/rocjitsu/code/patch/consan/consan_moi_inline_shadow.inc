@@ -1249,14 +1249,17 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             return;
         }
 
-        auto cave_words = assemble_moi_appended_body(
-            planned_patch, *words, "inline-shadow probe", result.errors,
-            deferred_guest_words.size(),
-            planned_patch.scalar_spill ? planned_patch.scalar_spill->save_words
-                                       : std::span<const uint32_t>{},
-            planned_patch.scalar_spill ? planned_patch.scalar_spill->restore_words
-                                       : std::span<const uint32_t>{},
-            candidate.gfx1250_vgpr_msb_mode);
+        MoiAppendedBodyOptions body_options;
+        body_options.deferred_guest_word_count = deferred_guest_words.size();
+        body_options.scalar_save_words = planned_patch.scalar_spill
+                                             ? planned_patch.scalar_spill->save_words
+                                             : std::span<const uint32_t>{};
+        body_options.scalar_restore_words = planned_patch.scalar_spill
+                                                ? planned_patch.scalar_spill->restore_words
+                                                : std::span<const uint32_t>{};
+        body_options.gfx1250_vgpr_msb_mode = candidate.gfx1250_vgpr_msb_mode;
+        auto cave_words = assemble_moi_appended_body(planned_patch, *words, "inline-shadow probe",
+                                                     result.errors, body_options);
         if (!cave_words)
           return;
         // An anchor-resident indirect island may displace instructions after
