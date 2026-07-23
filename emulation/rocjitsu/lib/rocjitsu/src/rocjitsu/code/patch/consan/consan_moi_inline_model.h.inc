@@ -13,7 +13,7 @@ static_assert(alignof(ConSanMoiInlineExactShadowSlot) == 8);
 /// is available to the report header, diagnostics, atomic-release state, and
 /// causal metadata.
 [[nodiscard]] constexpr uint32_t
-consan_moi_inline_exact_dispatch_bank_count_for_lds(uint32_t max_lds_bytes) {
+consan_moi_inline_exact_dispatch_bank_count_for_lds(uint64_t max_lds_bytes) {
   constexpr uint32_t kMaximumDispatchBankCount = 256u;
   constexpr uint32_t kGuestLdsGranuleBytes = 4u;
   const uint64_t lds_cell_count =
@@ -33,21 +33,13 @@ consan_moi_inline_exact_dispatch_bank_count_for_lds(uint32_t max_lds_bytes) {
 // A code object owns one report buffer while several hardware dispatches can
 // execute concurrently. Hash the dispatch and workgroup identities into
 // independent exact-shadow banks so correct, unrelated workgroups do not
-// serialize every LDS cell through one versioned slot. The full dispatch and
-// packed workgroup identities remain in each slot and are still authoritative;
-// banking only removes avoidable contention. Derive the global contract from
-// the largest supported aperture so changing gfx1250.json keeps every planner,
-// emitter, and test in agreement.
-inline constexpr uint32_t kConSanMoiInlineMaximumLdsBytes =
-    consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250) > 64u * 1024u
-        ? consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250)
-        : 64u * 1024u;
-inline constexpr uint32_t kConSanMoiInlineExactDispatchBankCount =
-    consan_moi_inline_exact_dispatch_bank_count_for_lds(kConSanMoiInlineMaximumLdsBytes);
-static_assert(kConSanMoiInlineExactDispatchBankCount != 0u,
+// serialize every LDS cell through one versioned slot. The planner selects the
+// largest fitting fanout for each report's LDS inventory and carries it in the
+// layout; explicit legacy buffers retain the original maximum fanout.
+inline constexpr uint32_t kConSanMoiInlineMaximumDispatchBankCount = 256u;
+static_assert(consan_moi_inline_exact_dispatch_bank_count_for_lds(
+                  consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250)) != 0u,
               "the configured LDS aperture cannot fit one InlineShadow dispatch bank");
-static_assert((kConSanMoiInlineExactDispatchBankCount &
-               (kConSanMoiInlineExactDispatchBankCount - 1u)) == 0u);
 
 struct alignas(8) ConSanMoiInlineAtomicReleaseSlot {
   uint32_t version = 0;

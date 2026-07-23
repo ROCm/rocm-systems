@@ -82,6 +82,42 @@ rocjitsu::ConSanResult run_consan_transform(std::span<const uint8_t> bytes,
   return rocjitsu::try_patch_consan(bytes, options);
 }
 
+struct GroupSegmentRegionSearch {
+  CoreApiTable *core = nullptr;
+  std::optional<uint32_t> size_bytes;
+};
+
+hsa_status_t HSA_API select_group_segment_region(hsa_region_t region, void *data) {
+  auto *search = static_cast<GroupSegmentRegionSearch *>(data);
+  hsa_region_segment_t segment{};
+  hsa_status_t status =
+      search->core->hsa_region_get_info_fn(region, HSA_REGION_INFO_SEGMENT, &segment);
+  if (status != HSA_STATUS_SUCCESS || segment != HSA_REGION_SEGMENT_GROUP)
+    return status;
+  size_t size_bytes = 0;
+  status = search->core->hsa_region_get_info_fn(region, HSA_REGION_INFO_SIZE, &size_bytes);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+  if (size_bytes == 0 || size_bytes > std::numeric_limits<uint32_t>::max())
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  search->size_bytes = static_cast<uint32_t>(size_bytes);
+  return HSA_STATUS_INFO_BREAK;
+}
+
+[[nodiscard]] std::optional<uint32_t> runtime_group_segment_size_bytes(CoreApiTable *core,
+                                                                       hsa_agent_t agent) {
+  if (core == nullptr || core->hsa_agent_iterate_regions_fn == nullptr ||
+      core->hsa_region_get_info_fn == nullptr) {
+    return std::nullopt;
+  }
+  GroupSegmentRegionSearch search{.core = core, .size_bytes = std::nullopt};
+  const hsa_status_t status =
+      core->hsa_agent_iterate_regions_fn(agent, select_group_segment_region, &search);
+  if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+    return std::nullopt;
+  return search.size_bytes;
+}
+
 enum class WaitcheckPreflightOutcome { NotApplicable, Passed, HazardReported, AnalysisFailed };
 
 [[nodiscard]] const char *waitcheck_target_name(rj_code_target_id_t target) {
@@ -2415,6 +2451,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.report_buffer_address = config->report_buffer_address;
     patch_options.moi_report_buffer_address = config->moi_report_buffer_address;
     patch_options.moi_report_buffer_size = config->moi_report_buffer_size;
+    patch_options.moi_max_workgroup_lds_bytes =
+        runtime_group_segment_size_bytes(layer().core_table(), agent);
     patch_options.delay_nops = config->delay_nops;
     patch_options.max_patches = config->max_patches;
     patch_options.max_patches_is_expert_limit = config->max_patches_explicit;

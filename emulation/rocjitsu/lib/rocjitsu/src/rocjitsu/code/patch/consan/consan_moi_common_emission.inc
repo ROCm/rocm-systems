@@ -85,9 +85,9 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
 
 [[nodiscard]] std::optional<ConSanMoiWorkgroupShadowLayout> common_moi_workgroup_shadow_layout(
     std::span<const uint8_t> image, const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
-    std::vector<std::string> &warnings, bool prefer_compact = false) {
+    const ConSanOptions &options, std::vector<std::string> &warnings, bool prefer_compact = false) {
   std::optional<ConSanMoiWorkgroupShadowLayout> common;
-  const uint32_t max_workgroup_lds_bytes = consan_moi_max_workgroup_lds_bytes(arch);
+  const uint32_t max_workgroup_lds_bytes = consan_moi_max_workgroup_lds_bytes(options, arch);
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
     if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset) {
       warnings.emplace_back("ConSan MOI workgroup shadow descriptor exceeds ELF bytes");
@@ -437,11 +437,10 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
   return true;
 }
 
-[[nodiscard]] bool
-apply_lds_descriptor_requirements(CodeObjectPatcher &patcher, const ConSanResult &result,
-                                  const AmdGpuCodeObject &code_object,
-                                  const MoiDescriptorLdsRequirements &requirements,
-                                  rj_code_arch_t arch, std::vector<std::string> &errors) {
+[[nodiscard]] bool apply_lds_descriptor_requirements(
+    CodeObjectPatcher &patcher, const ConSanResult &result, const AmdGpuCodeObject &code_object,
+    const MoiDescriptorLdsRequirements &requirements, const ConSanOptions &options,
+    rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
     const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
     const auto active_kernel =
@@ -463,7 +462,7 @@ apply_lds_descriptor_requirements(CodeObjectPatcher &patcher, const ConSanResult
     }
     KD descriptor{};
     std::memcpy(&descriptor, current_image.data() + active_descriptor_offset, sizeof(descriptor));
-    if (required_bytes > consan_moi_max_workgroup_lds_bytes(arch) ||
+    if (required_bytes > consan_moi_max_workgroup_lds_bytes(options, arch) ||
         descriptor.group_segment_fixed_size > required_bytes) {
       errors.emplace_back("ConSan MOI LDS-plan descriptor has an incompatible fixed-LDS size");
       return false;
@@ -532,7 +531,8 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
 [[nodiscard]] bool
 apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResult &result,
                                   const MoiDescriptorLdsRequirements &requirements,
-                                  rj_code_arch_t arch, std::vector<std::string> &errors) {
+                                  const ConSanOptions &options, rj_code_arch_t arch,
+                                  std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
     if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset ||
         kernel_for_descriptor(result, descriptor_offset) == nullptr) {
@@ -541,7 +541,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     }
     KD descriptor{};
     std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
-    if (required_bytes > consan_moi_max_workgroup_lds_bytes(arch) ||
+    if (required_bytes > consan_moi_max_workgroup_lds_bytes(options, arch) ||
         descriptor.group_segment_fixed_size > required_bytes) {
       errors.emplace_back("ConSan MOI LDS-plan descriptor has an incompatible fixed-LDS size");
       return false;

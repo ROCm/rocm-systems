@@ -26,9 +26,10 @@ project(rocm_jit_suite VERSION 0.2.0)
 include(rj_version)
 include(rj_configure_target)
 
-# ConSan must use the LDS aperture exposed by the simulator configuration. Keep
-# the value in a compile definition so its constexpr planners and their tests
-# share the same source of truth, and reconfigure when the JSON changes.
+# Offline ConSan planning uses the LDS aperture exposed by the simulator
+# configuration. Runtime callers can override this default through
+# ConSanOptions, while constexpr planners and offline tests retain the JSON as
+# their source of truth. Reconfigure when the JSON changes.
 set(_RJ_GFX1250_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/configs/gfx1250.json")
 set_property(
     DIRECTORY

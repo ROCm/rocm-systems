@@ -38,6 +38,7 @@ struct ConSanMoiReportBufferLayout {
   uint32_t fence_record_capacity = 0;
   uint32_t diagnostic_capacity = 0;
   uint32_t exact_shadow_entry_capacity = 0;
+  uint32_t inline_exact_dispatch_bank_count = 0;
   uint32_t inline_atomic_release_capacity = 0;
   uint32_t inline_acquired_epoch_token_capacity = 0;
   uint32_t inline_causal_snapshot_capacity = 0;

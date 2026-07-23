@@ -2168,7 +2168,7 @@
       words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
 
       const uint32_t entries_per_dispatch_bank =
-          layout.exact_shadow_entry_capacity / kConSanMoiInlineExactDispatchBankCount;
+          layout.exact_shadow_entry_capacity / layout.inline_exact_dispatch_bank_count;
       const uint32_t dispatch_bank_stride =
           entries_per_dispatch_bank * sizeof(ConSanMoiInlineExactShadowSlot);
       std::vector<uint32_t> copy_dispatch_id;
@@ -2190,12 +2190,15 @@
           vector_source_vgpr(loop_external_cells ? saved_workgroup_key_vgpr : workgroup_key_vgpr),
           tmp_vgpr, arch);
       const auto select_dispatch_bank = instrumentation::build_v_and_b32_literal(
-          tmp_vgpr, kConSanMoiInlineExactDispatchBankCount - 1u, tmp_vgpr, arch);
+          tmp_vgpr, layout.inline_exact_dispatch_bank_count - 1u, tmp_vgpr, arch);
       const auto scale_dispatch_bank = instrumentation::build_v_mul_lo_u32_literal(
           tmp_vgpr, old_value_vgpr, dispatch_bank_stride, tmp_vgpr, arch);
       const auto add_dispatch_bank =
           instrumentation::build_v_add_u64_vgpr_offset(address_lo_vgpr, tmp_vgpr, arch);
-      if (entries_per_dispatch_bank == 0u || dispatch_bank_stride == 0u || !mix_workgroup_key ||
+      if (layout.inline_exact_dispatch_bank_count == 0u ||
+          (layout.inline_exact_dispatch_bank_count &
+           (layout.inline_exact_dispatch_bank_count - 1u)) != 0u ||
+          entries_per_dispatch_bank == 0u || dispatch_bank_stride == 0u || !mix_workgroup_key ||
           !select_dispatch_bank || !scale_dispatch_bank || !add_dispatch_bank) {
         errors.emplace_back("ConSan MOI inline-shadow probe could not encode dispatch bank");
         return std::nullopt;

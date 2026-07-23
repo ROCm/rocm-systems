@@ -162,6 +162,7 @@ struct ConSanMoiReportLayoutOverride {
   uint32_t fence_record_capacity = 0;
   uint32_t diagnostic_capacity = 0;
   uint32_t exact_shadow_entry_capacity = 0;
+  uint32_t inline_exact_dispatch_bank_count = 0;
   uint32_t inline_atomic_release_capacity = 0;
   uint32_t inline_acquired_epoch_token_capacity = 0;
   uint32_t inline_causal_snapshot_capacity = 0;
@@ -420,6 +421,10 @@ struct ConSanOptions {
   std::optional<uint64_t> report_buffer_address;
   std::optional<uint64_t> moi_report_buffer_address;
   uint64_t moi_report_buffer_size = 0;
+  /// Effective per-workgroup LDS aperture supplied by the execution runtime.
+  /// Offline callers leave this unset and use the architecture's configured
+  /// default (gfx1250.json for gfx1250).
+  std::optional<uint32_t> moi_max_workgroup_lds_bytes;
   std::optional<ConSanMoiReportLayoutOverride> moi_report_layout;
   /// Generation stored in direct sampled entries. Auto report buffers set
   /// this from their versioned header; explicit buffers default to zero.
