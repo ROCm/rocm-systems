@@ -46,6 +46,8 @@ using namespace rocjitsu;
 
 namespace {
 
+constexpr int kDaemonReadyTimeoutMs = 30'000;
+
 int run_daemon_server(const char *config_path, const std::string &socket_path = {},
                       int ready_fd = -1) {
   sigset_t daemon_signals;
@@ -592,7 +594,7 @@ int main(int argc, char *argv[]) {
     pollfd ready_poll{.fd = ready_pipe[0], .events = POLLIN | POLLHUP, .revents = 0};
     int poll_result = 0;
     do {
-      poll_result = poll(&ready_poll, 1, 3000);
+      poll_result = poll(&ready_poll, 1, kDaemonReadyTimeoutMs);
     } while (poll_result < 0 && errno == EINTR);
     uint8_t ready = 0;
     const ssize_t ready_bytes = poll_result > 0 ? read(ready_pipe[0], &ready, sizeof(ready)) : -1;
