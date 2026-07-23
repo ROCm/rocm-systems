@@ -40,8 +40,9 @@ ncclResult_t ncclTopoComputeMesh(struct ncclTopoSystem* system, struct ncclTopoG
     return ncclSuccess;
   }
 
-  // One logical channel is enough for a one-hop algorithm.
-  graph->nChannels = 1;
+  // Two channels for large-message bandwidth: the fan-out writes and proxy
+  // progress of the 3 peers are split across two channel thread groups.
+  graph->nChannels = 2;
   graph->sameChannels = 1;
   graph->nHops = 1;
   graph->typeIntra = PATH_NET; // 1 GPU per node: there is no intra-node path

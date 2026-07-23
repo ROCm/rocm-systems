@@ -1716,10 +1716,12 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   meshGraph->id = 5;
   meshGraph->pattern = NCCL_TOPO_PATTERN_MESH;
   meshGraph->minChannels = 1;
-  meshGraph->maxChannels = 1;
+  meshGraph->maxChannels = 2;
   if (comm->directA2aSupport) {
     NCCLCHECKGOTO(ncclTopoComputeMesh(comm->topo, meshGraph), ret, fail);
-    NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, meshGraph), ret, fail);
+    // [RCCL] Skip ncclTopoPrintGraph for the mesh graph: it resolves graph
+    // intra ranks against local-only GPU nodes and spuriously warns on
+    // multi-node setups. ncclTopoComputeMesh logs the essentials itself.
   }
   timers[TIMER_INIT_GRAPHS] = clockNano() - timers[TIMER_INIT_GRAPHS];
 

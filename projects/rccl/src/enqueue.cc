@@ -2572,8 +2572,11 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
       nc = std::min(maxNChannels, nc);
     }
   } else if (info->algorithm == NCCL_ALGO_DIRECT_A2A) {
-    // [RCCL] DIRECT_A2A v1: single channel.
-    nc = 1;
+    // [RCCL] DIRECT_A2A: 1 channel for latency-bound small messages, 2
+    // channels for large ones to split the (nranks-1)x fan-out traffic across
+    // two kernel/proxy thread groups. Mesh connectors are set up on
+    // graphs[DIRECT_A2A]->nChannels (2) channels.
+    nc = (nBytes >= (1 << 20)) ? comm->graphs[NCCL_ALGO_DIRECT_A2A].nChannels : 1;
   } else {
     rcclUpdateThreadThreshold(comm, nBytes, info, threadThreshold);
     INFO(NCCL_TUNING, "pre-adjustment threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
