@@ -275,12 +275,18 @@ __DEVICE__ unsigned int __hip_get_grid_dim_z() { return __ockl_get_num_groups(2)
 // values; under full device LTO the missing range lets strided GEPs lose
 // inbounds, which blocks offset folding (extra v_lshl_add_u64, higher VGPR
 // pressure, lower occupancy). Only dimensions bounded by the block size
-// (threadIdx, blockDim) use this variant.
+// (threadIdx, blockDim) use this variant. Guard the attribute with
+// __has_attribute so that compilers without internal_linkage fall back to the
+// existing accessor definition instead of emitting -Wattributes.
+#if defined(__has_attribute) && __has_attribute(internal_linkage)
 #define __HIP_DEVICE_BUILTIN_INTERNAL(DIMENSION, FUNCTION)                                         \
   __declspec(property(get = __get_##DIMENSION)) unsigned int DIMENSION;                            \
   __attribute__((internal_linkage)) __DEVICE__ unsigned int __get_##DIMENSION(void) {              \
     return FUNCTION;                                                                               \
   }
+#else
+#define __HIP_DEVICE_BUILTIN_INTERNAL(DIMENSION, FUNCTION) __HIP_DEVICE_BUILTIN(DIMENSION, FUNCTION)
+#endif
 
 struct __hip_builtin_threadIdx_t {
   __HIP_DEVICE_BUILTIN_INTERNAL(x, __hip_get_thread_idx_x());
