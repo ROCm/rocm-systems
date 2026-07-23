@@ -3512,12 +3512,6 @@ try:
 except AttributeError:
     pass
 try:
-    amdsmi_set_gpu_clk_range = _libraries['libamd_smi.so'].amdsmi_set_gpu_clk_range
-    amdsmi_set_gpu_clk_range.restype = amdsmi_status_t
-    amdsmi_set_gpu_clk_range.argtypes = [amdsmi_processor_handle, uint64_t, uint64_t, amdsmi_clk_type_t]
-except AttributeError:
-    pass
-try:
     amdsmi_set_gpu_clk_limit = _libraries['libamd_smi.so'].amdsmi_set_gpu_clk_limit
     amdsmi_set_gpu_clk_limit.restype = amdsmi_status_t
     amdsmi_set_gpu_clk_limit.argtypes = [amdsmi_processor_handle, amdsmi_clk_type_t, amdsmi_clk_limit_type_t, uint64_t]
@@ -5413,8 +5407,7 @@ __all__ = \
     'amdsmi_set_cpu_socket_power_cap',
     'amdsmi_set_cpu_xgmi_pstate_range', 'amdsmi_set_cpu_xgmi_width',
     'amdsmi_set_gpu_accelerator_partition_profile',
-    'amdsmi_set_gpu_clk_limit', 'amdsmi_set_gpu_clk_range',
-    'amdsmi_set_gpu_compute_partition',
+    'amdsmi_set_gpu_clk_limit', 'amdsmi_set_gpu_compute_partition',
     'amdsmi_set_gpu_compute_partition_mem_alloc_mode',
     'amdsmi_set_gpu_event_notification_mask',
     'amdsmi_set_gpu_fan_speed', 'amdsmi_set_gpu_memory_partition',

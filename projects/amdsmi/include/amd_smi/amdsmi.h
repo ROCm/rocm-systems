@@ -5065,37 +5065,6 @@ amdsmi_status_t amdsmi_get_gpu_reg_table_info(amdsmi_processor_handle processor_
                                               uint32_t* num_of_metrics);
 
 /**
- *  @brief This function sets the clock range information. It is not supported on virtual
- *  machine guest
- *
- *  @deprecated ::amdsmi_set_gpu_clk_limit() should be used, with an
- *  interface that set the min_value and then max_value.
- *
- *  @ingroup tagClkPowerPerfQuery
- *
- *  @platform{gpu_bm_linux}
- *
- *  @details Given a processor handle @p processor_handle, a minimum clock value @p minclkvalue,
- *  a maximum clock value @p maxclkvalue and a clock type @p clkType this function
- *  will set the sclk|mclk range
- *
- *  @param[in] processor_handle a processor handle
- *
- *  @param[in] minclkvalue value to apply to the clock range. Frequency values
- *  are in MHz.
- *
- *  @param[in] maxclkvalue value to apply to the clock range. Frequency values
- *  are in MHz.
- *
- *  @param[in] clkType AMDSMI_CLK_TYPE_SYS | AMDSMI_CLK_TYPE_MEM range type
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_set_gpu_clk_range(amdsmi_processor_handle processor_handle,
-                                         uint64_t minclkvalue, uint64_t maxclkvalue,
-                                         amdsmi_clk_type_t clkType);
-
-/**
  *  @brief This function sets the clock sets the clock min/max level
  *
  *  @ingroup tagClkPowerPerfQuery

@@ -180,7 +180,6 @@ from .amdsmi_interface import amdsmi_gpu_validate_ras_eeprom
 from .amdsmi_interface import amdsmi_set_gpu_pci_bandwidth
 from .amdsmi_interface import amdsmi_set_power_cap
 from .amdsmi_interface import amdsmi_set_gpu_power_profile
-from .amdsmi_interface import amdsmi_set_gpu_clk_range
 from .amdsmi_interface import amdsmi_set_gpu_clk_limit
 from .amdsmi_interface import amdsmi_set_gpu_od_clk_info
 from .amdsmi_interface import amdsmi_set_gpu_od_volt_info

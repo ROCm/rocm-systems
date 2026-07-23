@@ -708,12 +708,6 @@ def run_tests():
         lambda: amdsmi.amdsmi_get_gpu_target_frequency_range(gpu_handle),
     )
 
-    test_api(
-        "amdsmi_set_gpu_clk_range",
-        lambda: amdsmi.amdsmi_set_gpu_clk_range(gpu_handle, 500, 2500, need("AmdSmiClkType").GFX),
-        requires_root=True,
-    )
-
     # set_gpu_clk_limit takes (handle, clk_type, limit_type, value).
     # Read the current target range and replay max as a no-op-ish write.
     def _set_clk_limit_noop():
