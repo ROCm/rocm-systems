@@ -45,7 +45,7 @@ RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
 RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
-RCCL_PARAM_DECLARE(ForceCe);
+RCCL_PARAM_DECLARE(ForceCeAllReduce);
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
 RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
@@ -595,7 +595,7 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
 bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count,
                         ncclDataType_t datatype, ncclRedOp_t op) {
   static int enabled = rcclParamCeAllReduce();
-  static int force = rcclParamForceCe();
+  static int force = rcclParamForceCeAllReduce();
   if (!enabled) {
     INFO(NCCL_INIT, "CE AllReduce not enabled. Set RCCL_CE_ALLREDUCE=1 to enable.");
     return false;

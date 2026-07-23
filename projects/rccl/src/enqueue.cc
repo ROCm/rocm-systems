@@ -3579,7 +3579,7 @@ static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
   return ncclSuccess;
 }
 
-RCCL_PARAM(ForceCe,"FORCE_CE",0);
+RCCL_PARAM(ForceCeAllReduce,"FORCE_CE_ALLREDUCE",0);
 RCCL_PARAM_DECLARE(CeAllReduce);
 // Converts `info` to a task and adds it to `comm->planner`. The exception is with
 // single rank communicators, collectives are issued as `ncclMemcpyAsync`s and
@@ -3632,7 +3632,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // the CE runtime (ceARTmpBuf stays NULL).
       if (ncclCeImplemented(info->coll, info->op, info->datatype) &&
           comm->symmetricSupport && comm->nNodes == 1 &&
-          (comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO || rcclParamForceCe()) &&
+          (comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO || rcclParamForceCeAllReduce()) &&
           comm->ceColl.baseUCSymReadyPtr == NULL &&
           ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
         if (ncclCudaGraphValid(comm->planner.capturingGraph)) {
@@ -3667,7 +3667,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         } else if (ceAllReduceOpSupported) {
           // check if we want to force CE AllReduce without symmetric window registration
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || !rcclParamForceCe() || !comm->symmetricSupport || comm->nNodes > 1) {
+          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || !rcclParamForceCeAllReduce() || !comm->symmetricSupport || comm->nNodes > 1) {
             ceAllReduceFits = false;
           } else {
             ceAllReduceFits = true;

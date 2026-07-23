@@ -200,7 +200,7 @@ RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 1);
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
 RCCL_PARAM(InitChannels, "INIT_CHANNELS", -1);
-RCCL_PARAM_DECLARE(ForceCe);
+RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
 // GDRCOPY support: Off by default
 NCCL_PARAM(GdrCopyEnable, "GDRCOPY_ENABLE", 0);
@@ -2330,7 +2330,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // CTA_POLICY_ZERO and would otherwise hit "CE AllReduce invoked before CE
   // init" because the enqueue-time trigger never drains before doLaunches.
   if (comm->symmetricSupport && comm->nNodes == 1 &&
-      (comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO || rcclParamForceCe()) &&
+      (comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO || rcclParamForceCeAllReduce()) &&
       comm->ceColl.baseUCSymReadyPtr == NULL) {
     NCCLCHECKGOTO(ncclCeInit(comm), ret, fail);
   }
