@@ -7,6 +7,10 @@ add_library(rocm-timesync-core
     ${ROCM_TIMESYNC_CORE_SOURCES}
 )
 
+target_compile_options(rocm-timesync-core
+    PRIVATE -fPIC
+)
+
 target_link_libraries(rocm-timesync-core
     PUBLIC rocm-timesync-core-headers
 )

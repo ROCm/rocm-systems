@@ -30,11 +30,14 @@ uint64_t size(const channel_t* channel);
 
 // producer
 channel_t* create(std::string name, uint8_t ring_order);
+void destroy(channel_t*);
 void publish(channel_t* channel, std::vector<event_t>& events);
 
 // consumer
 channel_t* attach(std::string name);
+void detach(const channel_t*);
 void poll(const channel_t* channel, const callback_t& callback);
+void stop(channel_t* channel);
 
 } // namespace ipc
 

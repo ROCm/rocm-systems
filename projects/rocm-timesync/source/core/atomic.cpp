@@ -4,6 +4,7 @@
 #include <linux/futex.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <time.h>
 
 namespace rocm_timesync
 {
@@ -37,8 +38,16 @@ void atomic_notify_all(std::atomic<uint32_t>& atomic)
     );
 }
 
-void atomic_wait(const std::atomic<uint32_t>& atomic, uint32_t expected)
+void atomic_wait_for(const std::atomic<uint32_t>& atomic, uint32_t expected, int64_t timeout_ms)
 {
+    struct timespec ts{};
+
+    if (timeout_ms >= 0)
+    {
+        ts.tv_sec = timeout_ms / 1000;
+        ts.tv_nsec = (timeout_ms % 1000) * 1000000ULL;
+    }
+
     syscall(
         SYS_futex,
         const_cast<uint32_t*>(
@@ -46,10 +55,15 @@ void atomic_wait(const std::atomic<uint32_t>& atomic, uint32_t expected)
         ),
         FUTEX_WAIT,
         expected,
-        nullptr,
+        timeout_ms < 0 ? nullptr : &ts,
         nullptr,
         0
     );
+}
+
+void atomic_wait(const std::atomic<uint32_t>& atomic, uint32_t expected)
+{
+    return atomic_wait_for(atomic, expected, -1);
 }
 
 } // namespace ipc

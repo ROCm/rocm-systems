@@ -27,7 +27,10 @@ struct ringbuffer_t
     uint64_t length() const;
     void publish(std::vector<event_t>& events);
     void poll(const callback_t& callback) const;
+    void stop();
 
+private:
+    mutable std::atomic<bool> stop_requested{false};
 };
 
 } // namespace ipc

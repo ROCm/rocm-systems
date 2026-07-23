@@ -50,6 +50,12 @@ channel_t* create(std::string name, uint8_t ring_order)
     return channel;
 }
 
+void destroy(channel_t* channel)
+{
+    assert(channel->mode == channel_t::mode_t::producer);
+    channel->rbuf.destroy();
+}
+
 channel_t* attach(std::string name)
 {
     channel_t* channel = new channel_t();
@@ -65,6 +71,12 @@ channel_t* attach(std::string name)
     return channel;
 }
 
+void detach(channel_t* channel)
+{
+    assert(channel->mode == channel_t::mode_t::consumer);
+    channel->rbuf.detach();
+}
+
 void publish(channel_t* channel, std::vector<event_t>& events)
 {
     assert(channel->mode == channel_t::mode_t::producer);
@@ -75,6 +87,12 @@ void poll(const channel_t* channel, const callback_t& callback)
 {
     assert(channel->mode == channel_t::mode_t::consumer);
     channel->rbuf.poll(callback);
+}
+
+void stop(channel_t* channel)
+{
+    assert(channel->mode == channel_t::mode_t::consumer);
+    channel->rbuf.stop();
 }
 
 uint64_t size(const channel_t* channel)

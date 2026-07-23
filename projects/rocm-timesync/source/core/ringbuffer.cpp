@@ -18,6 +18,8 @@ namespace rocm_timesync
 namespace ipc
 {
 
+#define POLL_WAIT_MS 100
+
 struct header_t
 {
     uint32_t magic;
@@ -229,7 +231,7 @@ void ringbuffer_t::poll(const callback_t& callback) const
     const ring_t& ring = rbuf->ring;
     auto cursor = cursor_t();
 
-    while (true) {
+    while (!stop_requested.load(std::memory_order_acquire)) {
         // cache last produced value
         uint32_t seq = ring.write_seq.load(std::memory_order_relaxed);
 
@@ -237,10 +239,17 @@ void ringbuffer_t::poll(const callback_t& callback) const
         auto processed = consume(rbuf, cursor, callback);
         if (!processed) {
             printf("waiting ...\n");
-            atomic_wait(ring.write_seq, seq);
+            atomic_wait_for(ring.write_seq, seq, POLL_WAIT_MS);
         }
     }
 }
+
+void ringbuffer_t::stop()
+{
+    stop_requested.store(true, std::memory_order_release);
+}
+
+#undef POLL_WAIT_MS
 
 } // namespace ipc
 } // namespace rocm_timesync

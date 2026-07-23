@@ -2,12 +2,12 @@ option(ROCM_TIMESYNC_BUILD_SHARED "Build shared library" ON)
 option(ROCM_TIMESYNC_BUILD_STATIC "Build static library" ON)
 
 set(ROCM_TIMESYNC_SOURCES
-  consumer.cpp
+  consumer.cpp influxdb.cpp
 )
 
 # Shared library
 if(ROCM_TIMESYNC_BUILD_SHARED)
-  add_library(rocm-timesync SHARED ${ROCM_TIMESYNC_SOURCES})
+  add_library(rocm-timesync SHARED ${ROCM_TIMESYNC_SOURCES} $<TARGET_OBJECTS:rocm-timesync-core>)
 
   target_link_libraries(rocm-timesync
     PRIVATE rocm-timesync-core-headers
@@ -28,7 +28,7 @@ endif()
 
 # Static library
 if(ROCM_TIMESYNC_BUILD_STATIC)
-  add_library(rocm-timesync-static STATIC ${ROCM_TIMESYNC_SOURCES})
+  add_library(rocm-timesync-static STATIC ${ROCM_TIMESYNC_SOURCES} $<TARGET_OBJECTS:rocm-timesync-core>)
 
   target_link_libraries(rocm-timesync-static
     PRIVATE rocm-timesync-core-headers
