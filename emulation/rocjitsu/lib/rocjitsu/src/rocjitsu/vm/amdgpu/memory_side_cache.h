@@ -9,10 +9,10 @@
 #include "simdojo/sim/message.h"
 
 #include <array>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <shared_mutex>
 #include <string>
 #include <utility>
 
@@ -32,10 +32,13 @@ namespace amdgpu {
 /// through the requester port (req), which is connected to the HBM controller via a link.
 ///
 /// @par Thread safety
-/// All public methods are thread-safe. Striped locking (by cache set index)
-/// serializes access because multiple XCDs assigned to the same IOD may share
-/// this MSC from different partition threads. Stripes allow concurrent access
-/// to different cache sets, eliminating contention for non-overlapping addresses.
+/// @c read(), @c write(), and @c flush_all() are thread-safe. Reads and writes
+/// acquire the writer-preference access gate in shared mode before acquiring a
+/// stripe mutex by cache set index. A waiting flush blocks new shared entrants,
+/// then acquires the gate exclusively after active accesses finish. This
+/// guarantees flush progress while preserving concurrent access to different
+/// cache sets. The required lock order is access gate before stripe; no path
+/// may acquire them in the opposite order.
 class MemorySideCache : public simdojo::Component {
 public:
   static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
@@ -98,6 +101,21 @@ public:
   }
 
 private:
+  class WriterPreferredAccessGate {
+  public:
+    void lock_shared();
+    void unlock_shared();
+    void lock();
+    void unlock();
+
+  private:
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    uint32_t active_readers_ = 0;
+    uint32_t waiting_writers_ = 0;
+    bool writer_active_ = false;
+  };
+
   void ensure_line(uint64_t addr, uint32_t vmid);
 
   /// @brief Send a read or write request to the backing store via the req port.
@@ -110,7 +128,7 @@ private:
   }
 
   mutable std::array<std::mutex, STRIPE_COUNT> stripes_;
-  mutable std::shared_mutex access_mutex_;
+  WriterPreferredAccessGate access_gate_;
   CacheStore cache_;
   simdojo::Port *req_ = nullptr;
   std::vector<simdojo::Port *> cpl_ports_;

@@ -47,6 +47,7 @@ RJ_DIAGNOSTIC_POP
 #include <atomic>
 #include <barrier>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -5128,12 +5129,21 @@ TEST(Gfx1250SimulationTest, MemorySideCacheFlushSerializesConcurrentAccess) {
 
   Gfx1250Sim sim;
   auto *msc = sim.soc->iod(0)->msc();
-  std::barrier start(2);
+  std::barrier start(3);
 
   std::thread writer([&] {
     start.arrive_and_wait();
     for (uint32_t value = 1; value <= iterations; ++value) {
       msc->write(output_addr, reinterpret_cast<const uint8_t *>(&value), sizeof(value));
+      std::this_thread::yield();
+    }
+  });
+  std::thread reader([&] {
+    start.arrive_and_wait();
+    for (uint32_t i = 0; i < iterations; ++i) {
+      uint32_t value = 0;
+      msc->read(output_addr, reinterpret_cast<uint8_t *>(&value), sizeof(value));
+      EXPECT_LE(value, iterations);
       std::this_thread::yield();
     }
   });
@@ -5146,10 +5156,57 @@ TEST(Gfx1250SimulationTest, MemorySideCacheFlushSerializesConcurrentAccess) {
   });
 
   writer.join();
+  reader.join();
   flusher.join();
   msc->flush_all();
 
   EXPECT_EQ(sim.memory->read32(output_addr), iterations);
+}
+
+TEST(Gfx1250SimulationTest, MemorySideCacheFlushMakesProgressUnderContinuousReads) {
+  constexpr uint64_t output_addr = 0x2000;
+  constexpr uint32_t reader_count = 4;
+
+  Gfx1250Sim sim;
+  auto *msc = sim.soc->iod(0)->msc();
+  std::barrier start(reader_count + 1);
+  std::atomic<bool> stop_readers = false;
+  std::atomic<uint32_t> completed_reads = 0;
+  std::vector<std::thread> readers;
+  readers.reserve(reader_count);
+  for (uint32_t i = 0; i < reader_count; ++i) {
+    readers.emplace_back([&] {
+      start.arrive_and_wait();
+      while (!stop_readers.load(std::memory_order_acquire)) {
+        uint32_t value = 0;
+        msc->read(output_addr, reinterpret_cast<uint8_t *>(&value), sizeof(value));
+        completed_reads.fetch_add(1, std::memory_order_relaxed);
+      }
+    });
+  }
+
+  start.arrive_and_wait();
+  while (completed_reads.load(std::memory_order_relaxed) < reader_count)
+    std::this_thread::yield();
+
+  std::atomic<bool> flush_completed = false;
+  std::thread flusher([&] {
+    msc->flush_all();
+    flush_completed.store(true, std::memory_order_release);
+  });
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (!flush_completed.load(std::memory_order_acquire) &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  const bool completed_while_readers_active = flush_completed.load(std::memory_order_acquire);
+
+  stop_readers.store(true, std::memory_order_release);
+  for (auto &reader : readers)
+    reader.join();
+  flusher.join();
+
+  EXPECT_TRUE(completed_while_readers_active);
 }
 
 } // namespace

@@ -9,9 +9,45 @@
 #include <bit>
 #include <cassert>
 #include <cstring>
+#include <shared_mutex>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+void MemorySideCache::WriterPreferredAccessGate::lock_shared() {
+  std::unique_lock lock(mutex_);
+  cv_.wait(lock, [this] { return !writer_active_ && waiting_writers_ == 0; });
+  ++active_readers_;
+}
+
+void MemorySideCache::WriterPreferredAccessGate::unlock_shared() {
+  bool notify_writer = false;
+  {
+    std::lock_guard lock(mutex_);
+    assert(active_readers_ != 0 && "unlock_shared without an active reader");
+    --active_readers_;
+    notify_writer = active_readers_ == 0 && waiting_writers_ != 0;
+  }
+  if (notify_writer)
+    cv_.notify_all();
+}
+
+void MemorySideCache::WriterPreferredAccessGate::lock() {
+  std::unique_lock lock(mutex_);
+  ++waiting_writers_;
+  cv_.wait(lock, [this] { return !writer_active_ && active_readers_ == 0; });
+  --waiting_writers_;
+  writer_active_ = true;
+}
+
+void MemorySideCache::WriterPreferredAccessGate::unlock() {
+  {
+    std::lock_guard lock(mutex_);
+    assert(writer_active_ && "unlock without an active writer");
+    writer_active_ = false;
+  }
+  cv_.notify_all();
+}
 
 void MemorySideCache::send_backing(uint64_t addr, uint8_t *data, uint32_t size,
                                    simdojo::MessageOp op, uint32_t vmid) {
@@ -55,7 +91,7 @@ void MemorySideCache::ensure_line(uint64_t addr, uint32_t vmid) {
 }
 
 void MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t vmid) {
-  std::shared_lock access_lock(access_mutex_);
+  std::shared_lock access_lock(access_gate_);
   uint32_t copied = 0;
   while (copied < size) {
     const uint64_t ea = addr + copied;
@@ -70,7 +106,7 @@ void MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t 
 }
 
 void MemorySideCache::write(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid) {
-  std::shared_lock access_lock(access_mutex_);
+  std::shared_lock access_lock(access_gate_);
   uint32_t copied = 0;
   while (copied < size) {
     const uint64_t ea = addr + copied;
@@ -93,8 +129,9 @@ void MemorySideCache::write(uint64_t addr, const uint8_t *src, uint32_t size, ui
 
 void MemorySideCache::flush_all() {
   // Exclude reads and writes while iterating every set. Ordinary accesses hold
-  // this gate in shared mode and retain their per-stripe concurrency.
-  std::unique_lock access_lock(access_mutex_);
+  // this gate in shared mode and retain their per-stripe concurrency. Once a
+  // flush waits, the gate blocks new shared entrants so the flush makes progress.
+  std::unique_lock access_lock(access_gate_);
   cache_.for_each_dirty([this](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
     send_backing(line_addr, data, LINE_SIZE, simdojo::MessageOp::WRITE, tag.vmid);
     tag.dirty = false;
