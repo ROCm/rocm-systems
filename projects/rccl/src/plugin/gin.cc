@@ -126,15 +126,16 @@ static ncclResult_t ncclGinPluginInit(struct ncclComm* comm, ginPluginLib_t* plu
       pluginLib->state = ncclGinPluginStateDisabled;
     } else {
       ginInitCompleted = true;
-    }
 #ifdef ENABLE_ROCSHMEM_GIN
-    else if (comm->ginContext && pluginLib->ncclGin == &ncclGinRocshmemGdaPlugin) {
-      ncclGinRocshmemSetInitContext(comm->ginContext, comm);
-    }
-    else if (comm->ginContext && pluginLib->ncclGin == &ncclGinAnvilSdmaPlugin) {
-      ncclGinAnvilSetInitContext(comm->ginContext, comm);
-    }
+      // For internal rocSHMEM-based plugins, hand the freshly created device
+      // context back the owning comm so device-side setup can resolve it.
+      if (comm->ginContext && pluginLib->ncclGin == &ncclGinRocshmemGdaPlugin) {
+        ncclGinRocshmemSetInitContext(comm->ginContext, comm);
+      } else if (comm->ginContext && pluginLib->ncclGin == &ncclGinAnvilSdmaPlugin) {
+        ncclGinAnvilSetInitContext(comm->ginContext, comm);
+      }
 #endif
+    }
   }
   if (pluginLib->state == ncclGinPluginStateInitReady && pluginLib->ncclGin) {
     if (pluginLib->ncclGin->devices(&ndev) != ncclSuccess || ndev <= 0) {
@@ -297,20 +298,16 @@ static void initPluginLibsOnceFunc() {
   pluginCounter++;
 
 #ifdef ENABLE_ROCSHMEM_GIN
-  // Add internal rocshmem GDA plugin (device-initiated, GIN_TYPE=4)
-  {
-    extern ncclGin_t ncclGinRocshmemGdaPlugin;
-    ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemGdaPlugin;
-    ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
-    pluginCounter++;
-  }
-  // Add internal SDMA Anvil plugin (GIN_TYPE=5)
-  {
-    extern ncclGin_t ncclGinAnvilSdmaPlugin;
-    ginPluginLibs[pluginCounter].ncclGin = &ncclGinAnvilSdmaPlugin;
-    ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
-    pluginCounter++;
-  }
+  // Add internal rocshmem GDA plugin (device-initiated, GIN_TYPE=5)
+  pluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemGdaPlugin;
+  pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
+  pluginLibs[pluginCounter].version = ncclGinVersion[0];
+  pluginCounter++;
+  // Add internal SDMA Anvil plugin (GIN_TYPE=6)
+  pluginLibs[pluginCounter].ncclGin = &ncclGinAnvilSdmaPlugin;
+  pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
+  pluginLibs[pluginCounter].version = ncclGinVersion[0];
+  pluginCounter++;
 #endif
 
   pluginCount = pluginCounter;

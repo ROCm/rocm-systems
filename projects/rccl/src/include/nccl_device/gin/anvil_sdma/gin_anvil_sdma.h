@@ -343,10 +343,10 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 
 template <>
 struct ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
-  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinCounter_t counterId) {
+  NCCL_DEVICE_INLINE static ncclGinOffsetPtr call(ncclGinCtx ctx, ncclGinCounter_t counterId) {
     ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)ctx.handle;
-    if (!nccl::gin::anvil::detail::anvilCtxValid(rsCtx)) return nullptr;
-    return nccl::utility::loadConst(&rsCtx->counters) + counterId;
+    if (!nccl::gin::anvil::detail::anvilCtxValid(rsCtx)) return {nullptr, 0};
+    return {nccl::utility::loadConst(&rsCtx->counters) + counterId, 0};
   }
 };
 
@@ -362,9 +362,9 @@ struct ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 
 template <>
 struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
-  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
+  NCCL_DEVICE_INLINE static ncclGinOffsetPtr call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
     ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)ctx.handle;
-    return nccl::gin::anvil::detail::anvilSignalPtrOrDummy(rsCtx, signalId);
+    return {nccl::gin::anvil::detail::anvilSignalPtrOrDummy(rsCtx, signalId), 0};
   }
 };
 
@@ -383,7 +383,10 @@ struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 template <>
 struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
   template <typename Coop>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, cuda::memory_order ord, uint32_t* abortFlag) {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, bool hasDescriptor,
+                                      ncclGinDescriptorSmem* descriptor, cuda::memory_order ord, uint32_t* abortFlag) {
+    (void)hasDescriptor;
+    (void)descriptor;
     (void)ord;
     (void)abortFlag;
     using nccl::utility::loadConst;
