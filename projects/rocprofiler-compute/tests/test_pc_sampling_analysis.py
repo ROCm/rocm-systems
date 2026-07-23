@@ -13,6 +13,13 @@ import common
 import pandas as pd
 import pytest
 
+from pc_sampling.pc_sampling_analysis import (
+    aggregate_pc_sample_records,
+    detect_pc_sampling_method,
+    enrich_with_metadata,
+    load_aggregated_pc_sampling,
+    load_pc_sample_records,
+)
 from rocprof_compute_analyze.analysis_db import db_analysis
 from utils import schema
 from utils.file_io import (
@@ -28,16 +35,9 @@ from utils.parser import (
     load_table_data,
     nullify_unevaluated_metric_values,
 )
-from utils.pc_sampling_analysis import (
-    aggregate_pc_sample_records,
-    detect_pc_sampling_method,
-    enrich_with_metadata,
-    load_aggregated_pc_sampling,
-    load_pc_sample_records,
-)
 from utils.utils_common import is_only_pc_sampling
 
-PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI300A_A1"
+PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI300X_A1"
 
 PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 INST_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_"
@@ -1557,7 +1557,7 @@ def test_pc_sampling_analyze_db_output(
     binary_handler_analyze_rocprof_compute,
     monkeypatch,
 ) -> None:
-    """Analyze in db mode produces a populated pc sampling table."""
+    """Analyze in db mode records sampled rows and the dispatched kernels' ISA."""
     workload_dir = Path(common.setup_workload_dir(PC_SAMPLING_WORKLOAD)).resolve()
     db_name = "pc_sampling_db_test"
     db_path = workload_dir / f"{db_name}.db"
@@ -1589,27 +1589,45 @@ def test_pc_sampling_analyze_db_output(
                     "compute_instruction_sample",
                 )
             }
-            # Each instruction line has exactly one sample state.
             line_count = counts["compute_instruction_line"]
+            state_count = counts["compute_pc_sample_state"]
             state_total = conn.execute(
                 "SELECT SUM(total_count) FROM compute_pc_sample_state"
             ).fetchone()[0]
             inst_sample_total = conn.execute(
                 "SELECT SUM(count) FROM compute_instruction_sample"
             ).fetchone()[0]
-            # Every instruction line resolves to a real kernel row.
+            # Only dispatched kernels' ISA is stored, so every line is attributed.
             attributed = conn.execute(
                 "SELECT COUNT(*) FROM compute_instruction_line il "
                 "JOIN compute_kernel k ON il.kernel_uuid = k.kernel_uuid"
             ).fetchone()[0]
+            unattributed = conn.execute(
+                "SELECT COUNT(*) FROM compute_instruction_line "
+                "WHERE kernel_uuid IS NULL"
+            ).fetchone()[0]
+            # The (code object, offset) pair is unique across all lines.
+            duplicate_offsets = conn.execute(
+                "SELECT COUNT(*) FROM ("
+                "SELECT code_object_uuid, code_object_offset "
+                "FROM compute_instruction_line "
+                "GROUP BY code_object_uuid, code_object_offset "
+                "HAVING COUNT(*) > 1)"
+            ).fetchone()[0]
         finally:
             conn.close()
         assert counts["compute_code_object_store"] > 0
-        assert line_count > 0
-        assert counts["compute_pc_sample_state"] == line_count
+        # Only sampled offsets carry a sample state; the dispatched kernels' full
+        # disassembly is added as extra lines, so lines outnumber states.
+        assert state_count > 0
+        assert line_count > state_count
+        # Un-dispatched ISA is never stored, so no line is left un-attributed.
+        assert attributed == line_count
+        assert unattributed == 0
+        # No duplicate ISA: sampled offsets are not re-inserted.
+        assert duplicate_offsets == 0
         # inst_type is a per-sample class, so its counts sum to the sample total.
         assert inst_sample_total == state_total
-        assert attributed == line_count
     finally:
         common.clean_output_dir(True, str(workload_dir))
 
