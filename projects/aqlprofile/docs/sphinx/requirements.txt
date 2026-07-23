@@ -70,7 +70,7 @@ fonttools==4.59.2
     # via matplotlib
 gitdb==4.0.12
     # via gitpython
-gitpython==3.1.45
+gitpython==3.1.52
     # via rocm-docs-core
 greenlet==3.2.4
     # via sqlalchemy
