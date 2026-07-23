@@ -3667,18 +3667,27 @@ TEST(ConSanMoi, Gfx1250RejectsConfiguredPersistentStateAtOrdinarySgprLimit) {
 }
 
 TEST(ConSanMoi, SupportedCdnaTargetsHonorConfiguredPersistentStateSgprLimit) {
+  using GuestBuilder =
+      std::optional<std::array<uint32_t, 2>> (*)(uint16_t, uint16_t, uint8_t, rj_code_arch_t);
+  using ObjectBuilder = std::vector<uint8_t> (*)(std::span<const uint32_t>, std::string_view);
   struct Target {
     rj_code_arch_t arch;
     std::string_view label;
     std::string_view object_name;
-    decltype(&build_cdna3_ds_store_b32) build_guest;
-    decltype(&make_cdna3_lds_code_object) make_object;
+    GuestBuilder build_guest;
+    ObjectBuilder make_object;
   };
   constexpr std::array<Target, 2> kTargets = {{
       {ROCJITSU_CODE_ARCH_CDNA3, "gfx942/cdna3", "cdna3_explicit_state_at_ordinary_limit",
-       &build_cdna3_ds_store_b32, &make_cdna3_lds_code_object},
+       &build_cdna3_ds_store_b32,
+       +[](std::span<const uint32_t> words, std::string_view name) {
+         return make_cdna3_lds_code_object(words, name);
+       }},
       {ROCJITSU_CODE_ARCH_CDNA4, "gfx950/cdna4", "cdna4_explicit_state_at_ordinary_limit",
-       &build_cdna4_ds_store_b32, &make_cdna4_lds_code_object},
+       &build_cdna4_ds_store_b32,
+       +[](std::span<const uint32_t> words, std::string_view name) {
+         return make_cdna4_lds_code_object(words, name);
+       }},
   }};
   for (const Target &target : kTargets) {
     SCOPED_TRACE(target.label);
@@ -3687,10 +3696,7 @@ TEST(ConSanMoi, SupportedCdnaTargetsHonorConfiguredPersistentStateSgprLimit) {
     std::vector<uint32_t> text_words(128u, build_s_nop(0, target.arch));
     std::copy(guest->begin(), guest->end(), text_words.begin());
     text_words.back() = build_s_endpgm(target.arch);
-    const std::vector<uint8_t> bytes =
-        target.make_object(text_words, target.object_name, /*vgpr_granulated=*/0u,
-                           /*uses_dynamic_stack=*/false, /*workgroup_id_dimension_mask=*/0u,
-                           /*group_segment_fixed_size=*/0u);
+    const std::vector<uint8_t> bytes = target.make_object(text_words, target.object_name);
 
     const auto patch_with = [&](uint16_t owner) {
       ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
