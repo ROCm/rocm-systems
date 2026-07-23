@@ -58,9 +58,9 @@ kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t s
 
 } // namespace
 
-std::vector<ScannedKernelDescriptor>
+std::vector<KernelDescriptorInfo>
 scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size) {
-  std::vector<ScannedKernelDescriptor> out;
+  std::vector<KernelDescriptorInfo> out;
   if (image.size() < sizeof(Elf64_Ehdr))
     return out;
 
@@ -127,7 +127,7 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
       if (entry_vaddr < *text_vaddr || entry_vaddr >= text_end)
         continue;
 
-      out.push_back(ScannedKernelDescriptor{
+      out.push_back(KernelDescriptorInfo{
           .descriptor_file_offset = file_off,
           .kernel_name = std::move(*kernel_name),
           .entry_text_offset = entry_vaddr - *text_vaddr,

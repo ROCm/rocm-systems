@@ -27,7 +27,7 @@ using namespace rocjitsu::test;
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 
 // scan the fixture image using its own .text section coordinates.
-std::vector<ScannedKernelDescriptor> scan_via_text_section(const std::vector<uint8_t> &image) {
+std::vector<KernelDescriptorInfo> scan_via_text_section(const std::vector<uint8_t> &image) {
   AmdGpuCodeObject obj(image.data(), image.size());
   EXPECT_TRUE(obj.is_valid());
   EXPECT_FALSE(obj.text_sections().empty());
