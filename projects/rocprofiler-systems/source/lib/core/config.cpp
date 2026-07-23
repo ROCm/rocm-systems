@@ -668,6 +668,10 @@ configure_settings(bool _init)
                               "Enable support for OpenSHMEM functions", false, "shmem",
                               "backend", "parallelism");
 
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_SHMEM,
+                              "[DEPRECATED] Renamed to ROCPROFSYS_USE_OPENSHMEM", false,
+                              "shmem", "backend", "parallelism", "deprecated");
+
     ROCPROFSYS_CONFIG_SETTING(
         bool, env_vars::USE_RCCLP,
         "Enable support for ROCm Communication Collectives Library (RCCL) Performance",
@@ -1491,6 +1495,8 @@ configure_settings(bool _init)
                               std::string{ env_vars::LOG_LEVEL });
     handle_deprecated_setting(std::string{ env_vars::TRACE_LEGACY },
                               std::string{ env_vars::TRACE });
+    handle_deprecated_setting(std::string{ env_vars::USE_SHMEM },
+                              std::string{ env_vars::USE_OPENSHMEM });
 
     scope::get_fields()[scope::flat::value]     = _config->get_flat_profile();
     scope::get_fields()[scope::timeline::value] = _config->get_timeline_profile();
