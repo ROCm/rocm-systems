@@ -21,7 +21,7 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 
 /// @brief One AMDHSA kernel descriptor located in an ELF image.
-struct ScannedKernelDescriptor {
+struct KernelDescriptorInfo {
   uint64_t descriptor_file_offset = 0; ///< File offset of the 64-byte descriptor (pre-growth).
   std::string kernel_name;             ///< Symbol name minus the ".kd" suffix.
   uint64_t entry_text_offset = 0;      ///< .text-relative kernel entry.
@@ -34,7 +34,7 @@ struct ScannedKernelDescriptor {
 /// .text-relative entry, drops entries outside .text, and dedups by file offset.
 /// The single discovery routine shared by DBT translation and DBI; operates on the
 /// raw, pre-growth image.
-[[nodiscard]] std::vector<ScannedKernelDescriptor>
+[[nodiscard]] std::vector<KernelDescriptorInfo>
 scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size);
 
 } // namespace rocjitsu
