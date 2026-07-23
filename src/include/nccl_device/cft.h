@@ -41,7 +41,7 @@ struct ncclCft : ncclCft_internal<Coop> {
   NCCL_DEVICE_INLINE void submit(OpCoop coop);
 
   template <typename OpCoop>
-  NCCL_DEVICE_INLINE void flushLocal(OpCoop coop);
+  NCCL_DEVICE_INLINE void flushSmem(OpCoop coop);
 
   template <typename OpCoop>
   NCCL_DEVICE_INLINE void flush(OpCoop coop, bool* hasReport = nullptr, uint32_t* report = nullptr);
@@ -54,8 +54,7 @@ struct ncclCft : ncclCft_internal<Coop> {
                                     uint16_t cpMask);
 
   template <typename OpCoop>
-  NCCL_DEVICE_INLINE void putMultimem(OpCoop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,
-                                      uint32_t bytes);
+  NCCL_DEVICE_INLINE void putMultimem(OpCoop coop, ncclCftLeId leId, size_t leOffset, void* smemSource, uint32_t bytes);
 
   template <typename OpCoop>
   NCCL_DEVICE_INLINE void putMultimemCpMask(OpCoop coop, ncclCftLeId leId, size_t leOffset, void* smemSource,

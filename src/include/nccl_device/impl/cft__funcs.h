@@ -13,6 +13,7 @@
 #include <assert.h>
 
 #ifdef __CUDACC__
+#include <type_traits>
 
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000 && defined(CUDART_VERSION) && CUDART_VERSION >= 13030
 #define NCCL_CFT_ENABLE 1
@@ -27,25 +28,25 @@ namespace internal {
 
 template <typename Coop>
 NCCL_DEVICE_INLINE bool elected(Coop coop) {
-  if NCCL_IF_CONSTEXPR (ncclCoopIsThread(Coop{})) {
-    return true;
-  } else {
-    return coop.thread_rank() == 0;
-  }
+  return coop.thread_rank() == 0;
 }
 
-template <typename Coop>
-NCCL_DEVICE_INLINE bool electedFlush(Coop) {
-  // v1 mbarrier layout supports an arvCount between 1 and 511.
-  // CoopThread.size and CoopWarp.size are at most 32 threads.
-  return false;
-}
 template <>
-NCCL_DEVICE_INLINE bool electedFlush<ncclCoopCta>(ncclCoopCta coop) {
-  // v1 mbarrier layout supports an arvCount between 1 and 511.
-  // CoopCta can contain more than 511 threads.
-  constexpr int mbarrierMaxArvCount = 511;
-  return coop.size() > mbarrierMaxArvCount;
+NCCL_DEVICE_INLINE bool elected(ncclCoopThread coop) {
+  return true;
+}
+
+template <>
+NCCL_DEVICE_INLINE bool elected(ncclCoopWarp coop) {
+  int chosen;
+  asm volatile("{\n\t"
+               ".reg .pred p;\n\t"
+               "elect.sync _|p, %1;\n\t"
+               "selp.b32 %0, 1, 0, p;\n"
+               "}"
+               : "=r"(chosen)
+               : "r"(0xFFFFFFFFu));
+  return chosen;
 }
 
 NCCL_DEVICE_INLINE void unsupported() {
@@ -347,8 +348,7 @@ NCCL_DEVICE_INLINE ncclCft<Coop>::ncclCft(Coop coop, ncclCftSmem& cftSmem)
   if (nccl::cft::internal::elected(coop)) {
     asm volatile("mbarrier.init.shared.layout::v1.b64 [%0], %1;"
                  :
-                 : "r"(nccl::cft::internal::smemAddr(cftSmem)),
-                   "r"(nccl::cft::internal::electedFlush(coop) ? 1 : coop.size())
+                 : "r"(nccl::cft::internal::smemAddr(cftSmem)), "r"(1)
                  : "memory");
   }
   // Every thread in coop must wait for mbarrier to be initialize before using it
@@ -396,12 +396,13 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::submit(OpCoop coop) {
 
 template <typename Coop>
 template <typename OpCoop>
-NCCL_DEVICE_INLINE void ncclCft<Coop>::flushLocal(OpCoop coop) {
+NCCL_DEVICE_INLINE void ncclCft<Coop>::flushSmem(OpCoop coop) {
 #if NCCL_CFT_ENABLE
-  // Wait for fabric operations to consume/read shared memory
   asm volatile("fabric.wait.sync_restrict::reads;" ::: "memory");
+  // Every thread in the coop must wait for fabric operations to consume shared memory.
   coop.sync();
 #else
+  (void)coop;
   nccl::cft::internal::unsupported();
 #endif
 }
@@ -410,10 +411,7 @@ template <typename Coop>
 template <typename OpCoop>
 NCCL_DEVICE_INLINE void ncclCft<Coop>::flush(OpCoop coop, bool* hasReport, uint32_t* report) {
 #if NCCL_CFT_ENABLE
-  // Wait for fabric operations to consume/read shared memory
-  asm volatile("fabric.wait.sync_restrict::reads;" ::: "memory");
-
-  if (!nccl::cft::internal::electedFlush(coop) || nccl::cft::internal::elected(coop)) {
+  if (nccl::cft::internal::elected(coop)) {
     asm volatile("mbarrier.arrive.relaxed.cta.shared::cta.b64 _, [%0], %1;"
                  :
                  : "r"(nccl::cft::internal::smemAddr(this->cftSmem)), "r"(1)
@@ -710,6 +708,7 @@ template <typename Coop>
 template <typename RedOp, typename OpCoop>
 NCCL_DEVICE_INLINE void ncclCft<Coop>::pullRed(OpCoop coop, ncclCftLeId leId, size_t leOffset, RedOp const& red,
                                                void* smemDestination, uint32_t bytes) {
+  static_assert(std::is_same<OpCoop, ncclCoopWarp>::value, "ncclCft::pullRed requires ncclCoopWarp");
 #if NCCL_CFT_ENABLE
   coop.sync();
 #ifdef NCCL_DEVICE_CFT_ENABLE_DEBUG
@@ -718,6 +717,7 @@ NCCL_DEVICE_INLINE void ncclCft<Coop>::pullRed(OpCoop coop, ncclCftLeId leId, si
   assert(bytes % 16 == 0 && "ncclCft::pullRed requires 'bytes' to be a multiple of 16.");
 #endif
   nccl::cft::internal::Red<RedOp>::pullred(leId, leOffset, smemDestination, bytes, this->cftSmem);
+  asm volatile("fabric.submit.op_restrict::fetching;" ::: "memory");
   this->txCount += nccl::cft::internal::elected(coop) ? bytes : 0;
   (void)red;
 #else
