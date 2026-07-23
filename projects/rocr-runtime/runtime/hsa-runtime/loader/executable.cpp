@@ -882,6 +882,11 @@ static bool LoadLazyTranslatedKernel(std::shared_ptr<HotSwapKernelRecord> record
   record->TargetPrivateSegmentSize = targetPrivateSegmentSize;
   record->TargetGroupSegmentSize = targetGroupSegmentSize;
   record->TargetGroupSegmentLimit = targetGroupSegmentLimit;
+  int64_t scaledDispatchFactor = 1;
+  GetComgrResultInfo(comgrResult,
+                     AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_SCALED_DISPATCH_FACTOR,
+                     scaledDispatchFactor);
+  record->ScaledDispatchFactor = static_cast<uint32_t>(scaledDispatchFactor);
   record->TranslationSucceeded = true;
   {
     std::lock_guard<std::mutex> Guard(
@@ -929,13 +934,15 @@ static bool LoadLazyTranslatedKernel(std::shared_ptr<HotSwapKernelRecord> record
 static void PatchHotSwapDispatchToTargetOrAbort(
     const std::shared_ptr<HotSwapKernelRecord>& record, uint64_t* address,
     uint32_t* private_segment_size, uint32_t* group_segment_size,
-    HotSwapKernelKind kind) {
+    uint32_t* scaled_dispatch_factor, HotSwapKernelKind kind) {
   const uint64_t sourceKernelObject = *address;
   std::string segmentFailure;
   if (!PatchHotSwapTranslatedDispatch(
           *record, *address, *private_segment_size, *group_segment_size,
           segmentFailure))
     FatalHotSwapDispatch(sourceKernelObject, record->Name, kind, segmentFailure);
+
+  *scaled_dispatch_factor = record->ScaledDispatchFactor;
 
   std::ostringstream proof;
   proof << "\"event\":\"hotswap_lazy_dispatch_patch\""
@@ -946,6 +953,8 @@ static void PatchHotSwapDispatchToTargetOrAbort(
         << "\"" << std::dec
         << ",\"private_segment_size\":" << *private_segment_size
         << ",\"group_segment_size\":" << *group_segment_size;
+  if (record->ScaledDispatchFactor > 1)
+    proof << ",\"scaled_dispatch_factor\":" << record->ScaledDispatchFactor;
   AppendHotSwapProofJson(proof.str());
 }
 
@@ -957,10 +966,16 @@ static void PatchHotSwapDispatchToTargetOrAbort(
 // unregistered aborts the dispatch. Returns true once the packet is safe to run.
 bool PrepareHotSwapDispatchKernelObject(uint64_t* address,
                                         uint32_t* private_segment_size,
-                                        uint32_t* group_segment_size) {
-  if (!address || !private_segment_size || !group_segment_size)
+                                        uint32_t* group_segment_size,
+                                        uint32_t* scaled_dispatch_factor) {
+  if (!address || !private_segment_size || !group_segment_size ||
+      !scaled_dispatch_factor)
     FatalHotSwapDispatch(0, "", HotSwapKernelKind::Untranslated,
                          "invalid dispatch packet pointer");
+  // A kernel needs x-extent scaling only if it was raised under the comgr
+  // ScaledModuloReplicationProjection; PatchHotSwapDispatchToTargetOrAbort
+  // reports the factor once the target record is known.
+  *scaled_dispatch_factor = 1;
 
   std::shared_ptr<HotSwapKernelRecord> record =
       LookupHotSwapKernelRecord(*address);
@@ -972,7 +987,8 @@ bool PrepareHotSwapDispatchKernelObject(uint64_t* address,
   if (kind == HotSwapKernelKind::Translated) {
     if (record->TargetKernelObject != 0)
       PatchHotSwapDispatchToTargetOrAbort(record, address, private_segment_size,
-                                          group_segment_size, kind);
+                                          group_segment_size,
+                                          scaled_dispatch_factor, kind);
     return true;
   }
 
@@ -1025,7 +1041,8 @@ bool PrepareHotSwapDispatchKernelObject(uint64_t* address,
 
   kind = record->Kind.load(std::memory_order_acquire);
   PatchHotSwapDispatchToTargetOrAbort(record, address, private_segment_size,
-                                      group_segment_size, kind);
+                                      group_segment_size,
+                                      scaled_dispatch_factor, kind);
 
   return true;
 }

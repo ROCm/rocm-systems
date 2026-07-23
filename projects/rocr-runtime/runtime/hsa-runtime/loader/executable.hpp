@@ -151,7 +151,8 @@ void UnregisterHotSwapRocrBlitTargetKernelObject(uint64_t address);
 bool ShouldCheckHotSwapDispatchKernelObjects();
 bool PrepareHotSwapDispatchKernelObject(uint64_t* address,
                                         uint32_t* private_segment_size,
-                                        uint32_t* group_segment_size);
+                                        uint32_t* group_segment_size,
+                                        uint32_t* scaled_dispatch_factor);
 #endif
 
 //===----------------------------------------------------------------------===//

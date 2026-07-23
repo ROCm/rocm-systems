@@ -89,6 +89,10 @@ struct HotSwapKernelRecord {
   uint32_t TargetPrivateSegmentSize = 0;
   uint32_t TargetGroupSegmentSize = 0;
   uint32_t TargetGroupSegmentLimit = UINT32_MAX;
+  // Factor to scale the block's x extent by when the kernel was raised under the
+  // comgr ScaledModuloReplicationProjection (the wave-carrying dimension is
+  // always x). 1 means the kernel needs no scaling.
+  uint32_t ScaledDispatchFactor = 1;
 
   bool IsRegisteredRocrBlit(uint64_t address) const {
     return Kind.load(std::memory_order_acquire) ==

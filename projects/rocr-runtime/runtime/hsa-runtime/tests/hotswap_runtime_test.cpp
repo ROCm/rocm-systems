@@ -51,17 +51,32 @@ uint16_t ExtDispatchHeader() {
 
 bool PreparePatchSuccess(uint64_t* kernel_object,
                          uint32_t* private_segment_size,
-                         uint32_t* group_segment_size) {
+                         uint32_t* group_segment_size,
+                         uint32_t* scaled_dispatch_factor) {
   PrepareCalled = true;
   if (PacketUnderPatch)
     HeaderDuringPrepare = PacketUnderPatch->packet.header;
   *kernel_object = 0x2000;
   *private_segment_size = 64;
   *group_segment_size = 128;
+  *scaled_dispatch_factor = 1;
   return true;
 }
 
-bool PreparePatchFailure(uint64_t*, uint32_t*, uint32_t*) { return false; }
+bool PreparePatchFailure(uint64_t*, uint32_t*, uint32_t*, uint32_t*) {
+  return false;
+}
+
+bool PrepareScaledPatchSuccess(uint64_t* kernel_object,
+                               uint32_t* private_segment_size,
+                               uint32_t* group_segment_size,
+                               uint32_t* scaled_dispatch_factor) {
+  *kernel_object = 0x2000;
+  *private_segment_size = 64;
+  *group_segment_size = 128;
+  *scaled_dispatch_factor = 2;
+  return true;
+}
 
 void PacketBodyFence() {
   FenceCalled = true;
@@ -143,6 +158,32 @@ void TestPatchPublishedExtKernelDispatchPacket() {
   EXPECT_EQ(packet.ext_dispatch.kernel_object, 0x2000u);
   EXPECT_EQ(packet.ext_dispatch.private_segment_size, 64u);
   EXPECT_EQ(packet.ext_dispatch.group_segment_size, 128u);
+}
+
+void TestPatchScalesDispatchExtent() {
+  rocr::core::AqlPacket packet = MakeKernelDispatchPacket();
+  packet.dispatch.workgroup_size_x = 32;
+  packet.dispatch.grid_size_x = 512;
+
+  const bool patched = rocr::AMD::hotswap::lazy::PatchPublishedKernelDispatchPacket(
+      packet, PrepareScaledPatchSuccess, PacketBodyFence);
+
+  EXPECT_TRUE(patched);
+  EXPECT_EQ(packet.dispatch.workgroup_size_x, 64u);
+  EXPECT_EQ(packet.dispatch.grid_size_x, 1024u);
+}
+
+void TestPatchLeavesUnscaledDispatchExtent() {
+  rocr::core::AqlPacket packet = MakeKernelDispatchPacket();
+  packet.dispatch.workgroup_size_x = 32;
+  packet.dispatch.grid_size_x = 512;
+
+  const bool patched = rocr::AMD::hotswap::lazy::PatchPublishedKernelDispatchPacket(
+      packet, PreparePatchSuccess, PacketBodyFence);
+
+  EXPECT_TRUE(patched);
+  EXPECT_EQ(packet.dispatch.workgroup_size_x, 32u);
+  EXPECT_EQ(packet.dispatch.grid_size_x, 512u);
 }
 
 void TestPatchSkipsNonKernelPacket() {
@@ -520,6 +561,8 @@ void TestHotSwapEnvFlagParsing() {
 int main() {
   TestPatchPublishedKernelDispatchPacket();
   TestPatchPublishedExtKernelDispatchPacket();
+  TestPatchScalesDispatchExtent();
+  TestPatchLeavesUnscaledDispatchExtent();
   TestPatchSkipsNonKernelPacket();
   TestDoorbellPatchRangeMonotonic();
   TestDoorbellPatchRangeSkipsReplayedDoorbell();

@@ -19,6 +19,7 @@ namespace lazy {
 
 using PrepareDispatchKernelObjectCallback = bool (*)(uint64_t*,
                                                      uint32_t*,
+                                                     uint32_t*,
                                                      uint32_t*);
 using PacketBodyFenceCallback = void (*)();
 
@@ -59,16 +60,25 @@ inline bool PatchPublishedKernelDispatchPacket(
   uint64_t* kernel_object = nullptr;
   uint32_t* private_segment_size = nullptr;
   uint32_t* group_segment_size = nullptr;
+  uint16_t* workgroup_size_x = nullptr;
+  // Set only for the standard dispatch packet, whose grid extent is in
+  // workitems: it scales alongside the block so the block count stays constant.
+  // The ext (cluster) packet expresses its grid through cluster_count/size, so
+  // scaling the block extent alone keeps its block count constant.
+  uint32_t* grid_size_x = nullptr;
   if (type == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
     kernel_object = &packet.dispatch.kernel_object;
     private_segment_size = &packet.dispatch.private_segment_size;
     group_segment_size = &packet.dispatch.group_segment_size;
+    workgroup_size_x = &packet.dispatch.workgroup_size_x;
+    grid_size_x = &packet.dispatch.grid_size_x;
   } else if (type == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
              packet.ext_dispatch.amd_format ==
                  HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH) {
     kernel_object = &packet.ext_dispatch.kernel_object;
     private_segment_size = &packet.ext_dispatch.private_segment_size;
     group_segment_size = &packet.ext_dispatch.group_segment_size;
+    workgroup_size_x = &packet.ext_dispatch.workgroup_size_x;
   } else {
     return false;
   }
@@ -78,11 +88,22 @@ inline bool PatchPublishedKernelDispatchPacket(
   __atomic_store_n(reinterpret_cast<uint16_t*>(&packet.packet.header),
                    invalid_header, __ATOMIC_RELEASE);
 
+  uint32_t scaled_dispatch_factor = 1;
   if (!prepare_kernel_object ||
       !prepare_kernel_object(kernel_object, private_segment_size,
-                             group_segment_size)) {
+                             group_segment_size, &scaled_dispatch_factor)) {
     fprintf(stderr, "hotswap: refusing kernel dispatch: packet patch failed\n");
     std::abort();
+  }
+
+  // A kernel raised under the comgr ScaledModuloReplicationProjection runs with
+  // its x extent scaled so each target wave hosts one source wave in its low
+  // lanes and replicas of those lanes above. Only such kernels report a factor
+  // above 1.
+  if (scaled_dispatch_factor > 1) {
+    *workgroup_size_x = static_cast<uint16_t>(*workgroup_size_x *
+                                              scaled_dispatch_factor);
+    if (grid_size_x) *grid_size_x *= scaled_dispatch_factor;
   }
 
   if (packet_body_fence) packet_body_fence();
