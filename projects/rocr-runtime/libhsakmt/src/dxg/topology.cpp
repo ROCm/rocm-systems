@@ -767,8 +767,14 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   } else {
     props.NumCUPerArray = device->ComputeUnitCount() / props.NumArrays;
   }
-  props.NumSIMDPerCU = device->SimdPerCu();
+  props.NumSIMDPerCU = simd_per_cu;
   props.MaxSlotsScratchCU = device->MaxScratchSlotsPerCu();
+
+  // MaxWavesPerSIMD = (waves per CU) / (SIMDs per CU)
+  // WKMI provides wave_per_cu which is the total waves per CU.
+  // We need to divide by NumSIMDPerCU to get waves per SIMD.
+  props.MaxWavesPerSIMD = device->WavePerCu() / simd_per_cu;
+
   props.VendorId = 0x1002;
   props.DeviceId = device->DeviceId();
   props.LocationId = device->PciBusAddr();

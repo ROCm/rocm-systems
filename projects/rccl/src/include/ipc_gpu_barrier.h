@@ -21,29 +21,25 @@ namespace meta::comms {
 namespace {
 
 template <std::memory_order Sem>
-__device__ __forceinline__ uint32_t
-cas(uint32_t* addr, uint32_t compare, uint32_t val) {
+__device__ __forceinline__ uint32_t cas(uint32_t* addr, uint32_t compare, uint32_t val) {
 #if !defined(USE_ROCM) && defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600)
   ::cuda::atomic_ref<uint32_t, ::cuda::thread_scope_system> ref(*addr);
   ref.compare_exchange_strong(compare, val, ::cuda::std::memory_order(Sem));
   return compare;
 #elif defined(USE_ROCM) || defined(__HIP_PLATFORM_AMD__)
-  __atomic_compare_exchange_n(
-      addr, &compare, val, false, static_cast<int>(Sem), __ATOMIC_RELAXED);
+  __atomic_compare_exchange_n(addr, &compare, val, false, static_cast<int>(Sem), __ATOMIC_RELAXED);
   return compare;
 #endif
 }
 
 template <std::memory_order Sem>
 __device__ __forceinline__ void putFlag(uint32_t* addr) {
-  while (cas<Sem>(addr, 0, 1) != 0)
-    ;
+  while (cas<Sem>(addr, 0, 1) != 0);
 }
 
 template <std::memory_order Sem>
 __device__ __forceinline__ void waitFlag(uint32_t* addr) {
-  while (cas<Sem>(addr, 1, 0) != 1)
-    ;
+  while (cas<Sem>(addr, 1, 0) != 1);
 }
 
 constexpr int NRANKS = 8;
@@ -51,36 +47,31 @@ constexpr int NRANKS = 8;
 } // namespace
 
 class DeviceMailbox {
- public:
+public:
   using FlagType = uint32_t;
-  static __host__ std::pair<std::unique_ptr<DeviceBuffer>, DeviceMailbox>
-  mallocAndInit(int nRanks, int nBlocks);
+  static __host__ std::pair<std::unique_ptr<DeviceBuffer>, DeviceMailbox> mallocAndInit(int nRanks, int nBlocks);
 
   DeviceMailbox() = default;
 
   __host__ DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf);
 
   __device__ inline void setFlagNoMemFence(int senderRank, int senderBlock) {
-    putFlag<std::memory_order_relaxed>(
-        flags_ + getFlagIdx(senderRank, senderBlock));
+    putFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock));
   }
 
   __device__ inline void waitFlagNoMemFence(int senderRank, int senderBlock) {
-    waitFlag<std::memory_order_relaxed>(
-        flags_ + getFlagIdx(senderRank, senderBlock));
+    waitFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock));
   }
 
   __device__ inline void setFlagWithMemFence(int senderRank, int senderBlock) {
-    putFlag<std::memory_order_release>(
-        flags_ + getFlagIdx(senderRank, senderBlock));
+    putFlag<std::memory_order_release>(flags_ + getFlagIdx(senderRank, senderBlock));
   }
 
   __device__ inline void waitFlagWithMemFence(int senderRank, int senderBlock) {
-    waitFlag<std::memory_order_acquire>(
-        flags_ + getFlagIdx(senderRank, senderBlock));
+    waitFlag<std::memory_order_acquire>(flags_ + getFlagIdx(senderRank, senderBlock));
   }
 
- private:
+private:
   int nBlocks_;
   FlagType* flags_;
 
@@ -97,17 +88,12 @@ struct IpcGpuBarrierResources {
 };
 
 class IpcGpuBarrier {
- public:
+public:
   using FlagType = DeviceMailbox::FlagType;
   __host__ IpcGpuBarrier() = default;
 
-  static __host__
-      std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier>
-      mallocAndInit(
-          int nRanks,
-          int nBlocks,
-          int selfRank,
-          void* bootstrap);
+  static __host__ std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> mallocAndInit(
+    int nRanks, int nBlocks, int selfRank, void* bootstrap);
 
   template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
   __device__ __forceinline__ void syncOnSameBlockIdx() {
@@ -120,10 +106,9 @@ class IpcGpuBarrier {
     static_assert(hasPreviousMemAccess || hasSubsequentMemAccess);
 
     constexpr MemFenceType fenceType =
-        hasPreviousMemAccess && hasSubsequentMemAccess
-        ? MemFenceType::RELEASE_ACQUIRE
-        : (!hasPreviousMemAccess ? MemFenceType::ACQUIRE_ONLY
-                                 : MemFenceType::RELEASE_ONLY);
+      hasPreviousMemAccess && hasSubsequentMemAccess ?
+        MemFenceType::RELEASE_ACQUIRE :
+        (!hasPreviousMemAccess ? MemFenceType::ACQUIRE_ONLY : MemFenceType::RELEASE_ONLY);
 
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
@@ -147,16 +132,12 @@ class IpcGpuBarrier {
     }
   }
 
- private:
+private:
   int nBlocks_{-1};
   int selfRank_{-1};
   std::array<DeviceMailbox, NRANKS> allMailboxes_;
 
-  __host__ IpcGpuBarrier(
-      int nRanks,
-      int nBlocks,
-      int selfRank,
-      const std::array<DeviceMailbox, NRANKS>& allMailboxes);
+  __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes);
 };
 
 } // namespace meta::comms

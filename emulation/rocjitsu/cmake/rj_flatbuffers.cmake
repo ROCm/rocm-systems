@@ -12,6 +12,11 @@ set(SCHEMA_FILES
     ${PROJECT_SOURCE_DIR}/schemas/checkpoint.fbs
 )
 
+# embedded_schema.h is generated at configure time below. Make schema edits
+# trigger CMake regeneration as well as the flatc custom command so the runtime
+# JSON parser and generated typed accessors always use the same table layout.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${SCHEMA_FILES})
+
 set(GENERATED_HEADERS)
 foreach(schema ${SCHEMA_FILES})
     get_filename_component(schema_name ${schema} NAME_WE)

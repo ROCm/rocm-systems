@@ -222,7 +222,7 @@ void AieAqlQueue::SubmitPackets() {
 
   const auto num_pkts = last_pkt_idx - first_pkt_idx;
   hsa_status_t err = driver.SubmitCmdChain(amd_queue_.hsa_queue, kmq_metadata_, first_pkt_idx,
-                                           num_pkts, agent.properties().NumNeuralCores);
+                                           num_pkts, agent.properties().NumNeuralCores, agent);
   if (err != HSA_STATUS_SUCCESS) {
     throw hsa_exception(err, "Could not submit packets");
   }

@@ -142,7 +142,7 @@ jobs:
             /bin/bash -c '
               python3.12 -m venv .venv
               .venv/bin/pip install --upgrade pip
-              .venv/bin/pip install build
+              .venv/bin/pip install build pytest
             '
       - name: Build hipFile Python sdist & capture metadata
         id: sdist-metadata
@@ -185,6 +185,15 @@ jobs:
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
               .venv/bin/python -c "import hipfile; print(f\"hipfile {hipfile.__version__} installed successfully\")"
+            '
+      - name: Run hipFile Python unit tests
+        run: |
+          docker exec \
+            -t \
+            -w /ais/rocm-systems/projects/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              .venv/bin/python -m pytest python/tests
             '
       - name: Copy sdist out of the container
         run: |

@@ -2,7 +2,12 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
-## HIP 10 for ROCm 10
+## HIP 7.15 for ROCm 7.15
+
+### Added
+* New HIP APIs
+    - Stream Ordered Memory Allocator: Support for the following APIs for parity with corresponding CUDA APIs.
+      * `hipMemGetDefaultMemPool` returns the default memory pool for the specified location and allocation type
 
 ### Resolved issues
 
@@ -78,6 +83,10 @@ for accurate size validation. Additionally, the exec flag is propagated through 
 * Enhanced HIP graph replay performance for asynchronous memory allocations. HIP graph replay now reduces overhead for graphs that interleave asynchronous memory allocations with compute. Allocation nodes no longer block during replay — physical memory is reused across nodes instead of being mapped and unmapped on each launch, eliminating the gaps between kernels this pattern previously caused.
 * Enhanced debug information for illegal memory access errors. In multi-node and multi-GPU environments, it can be difficult to identify the source of a fault.
 The HIP runtime now includes the hostname, GPU index, and kernel name in GPU fault error messages, improving issue identification and debugging.
+
+## Known issues
+
+* Kernels using `cooperative_groups::reduce()` with block dimensions whose .y or .z component is different from 1 may produce incorrect results or fail to launch.
 
 ## HIP 7.13 for ROCm 7.13
 

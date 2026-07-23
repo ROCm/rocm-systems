@@ -18,28 +18,19 @@ using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 
 /**
- * @class TrafficClassMPITest
- * @brief Test fixture for Traffic Class (QoS) configuration
- *
- * This test requires ncclCommInitRankConfig() to pass trafficClass,
- * so we override createTestCommunicator() to inject the config while
- * reusing base class members (test_comm_, test_stream_, nccl_id_).
- *
- * Pattern follows MPITestRunner.md "Example 8: Custom Test Class"
+ * @class ConfigCommMPITestBase
+ * @brief Shared fixture that builds the test communicator via
+ *        ncclCommInitRankConfig() with RAII cleanup. Subclasses fill in the
+ *        ncclConfig_t fields they want to exercise by overriding applyConfig().
  */
-class TrafficClassMPITest : public MPITestBase
+class ConfigCommMPITestBase : public MPITestBase
 {
 protected:
-    int configured_traffic_class_ = NCCL_CONFIG_UNDEF_INT;
+    virtual void applyConfig(ncclConfig_t& config) = 0;
 
-    /**
-     * @brief Override to use ncclCommInitRankConfig with trafficClass
-     *
-     * Follows same pattern as base createTestCommunicator() but uses
-     * ncclCommInitRankConfig() to pass the trafficClass configuration.
-     * Stores results in base class members for getActiveCommunicator()/getActiveStream().
-     * Uses RAII guards for proper cleanup on failure.
-     */
+    // Human-readable description of the config under test, for diagnostic logs.
+    virtual std::string configLabel() const = 0;
+
     ncclResult_t createTestCommunicator() override
     {
         int world_rank = MPIEnvironment::world_rank;
@@ -47,8 +38,7 @@ protected:
 
         if(world_rank == 0)
         {
-            TEST_INFO("Creating test-specific communicator with trafficClass=%d",
-                      configured_traffic_class_);
+            TEST_INFO("Creating test-specific communicator with %s", configLabel().c_str());
         }
 
         // Rank 0 generates unique ID
@@ -60,9 +50,9 @@ protected:
         // Broadcast ID to all ranks
         MPI_Bcast(&nccl_id_, sizeof(ncclUniqueId), MPI_BYTE, 0, MPI_COMM_WORLD);
 
-        // Configure with traffic class
+        // Let the subclass populate the ncclConfig_t fields under test.
         ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-        config.trafficClass = configured_traffic_class_;
+        applyConfig(config);
 
         // Initialize NCCL communicator with automatic cleanup on error
         RCCL_TEST_CHECK(ncclGroupStart());
@@ -116,6 +106,26 @@ protected:
 };
 
 /**
+ * @class TrafficClassMPITest
+ * @brief Test fixture for Traffic Class (QoS) configuration via ncclConfig_t.
+ */
+class TrafficClassMPITest : public ConfigCommMPITestBase
+{
+protected:
+    int configured_traffic_class_ = NCCL_CONFIG_UNDEF_INT;
+
+    void applyConfig(ncclConfig_t& config) override
+    {
+        config.trafficClass = configured_traffic_class_;
+    }
+
+    std::string configLabel() const override
+    {
+        return "trafficClass=" + std::to_string(configured_traffic_class_);
+    }
+};
+
+/**
  * @test TrafficClassMPITest.ConfiguredTrafficClass
  * @brief Verify traffic class in communicator and in NCCL debug output
  *
@@ -156,6 +166,184 @@ TEST_F(TrafficClassMPITest, ConfiguredTrafficClass)
     }
 
     ASSERT_MPI_TRUE(found_line);
+}
+
+/**
+ * @class CtaConfigMPITest
+ * @brief Fixture for the CTA override paths on AMD GPUs. Injects minCTAs/maxCTAs
+ *        through ncclCommInitRankConfig() and inspects the resulting comm->config
+ *        and comm->nChannels.
+ */
+class CtaConfigMPITest : public ConfigCommMPITestBase
+{
+protected:
+    int configured_min_ctas_ = NCCL_CONFIG_UNDEF_INT;
+    int configured_max_ctas_ = NCCL_CONFIG_UNDEF_INT;
+
+    void applyConfig(ncclConfig_t& config) override
+    {
+        config.minCTAs = configured_min_ctas_;
+        config.maxCTAs = configured_max_ctas_;
+    }
+
+    std::string configLabel() const override
+    {
+        return "minCTAs=" + std::to_string(configured_min_ctas_)
+             + " maxCTAs=" + std::to_string(configured_max_ctas_);
+    }
+};
+
+/**
+ * @test CtaConfigMPITest.ConfigOverrideAppliesMinMaxCTAs
+ * @brief ncclConfig_t minCTAs/maxCTAs land in comm->config and clamp
+ *        comm->nChannels into [minCTAs, maxCTAs].
+ */
+TEST_F(CtaConfigMPITest, ConfigOverrideAppliesMinMaxCTAs)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    constexpr int kMinCTAs = 2;
+    constexpr int kMaxCTAs = 4;
+    configured_min_ctas_   = kMinCTAs;
+    configured_max_ctas_   = kMaxCTAs;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+
+    // Config-override path: ncclConfig_t values are accepted into comm->config.
+    ASSERT_MPI_EQ(comm->config.minCTAs, kMinCTAs);
+    ASSERT_MPI_EQ(comm->config.maxCTAs, kMaxCTAs);
+
+    ASSERT_MPI_TRUE(comm->nChannels >= kMinCTAs);
+    ASSERT_MPI_TRUE(comm->nChannels <= kMaxCTAs);
+
+    if(getTestMpiRank() == 0)
+    {
+        TEST_INFO("minCTAs=%d maxCTAs=%d -> nChannels=%d",
+                  comm->config.minCTAs,
+                  comm->config.maxCTAs,
+                  comm->nChannels);
+    }
+}
+
+/**
+ * @test CtaConfigMPITest.EnvKnobsApplyMinMaxCTAs
+ * @brief NCCL_MIN_CTAS / NCCL_MAX_CTAS env knobs override comm->config; skips when unset.
+ */
+TEST_F(CtaConfigMPITest, EnvKnobsApplyMinMaxCTAs)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    const char* min_env = std::getenv("NCCL_MIN_CTAS");
+    const char* max_env = std::getenv("NCCL_MAX_CTAS");
+    if(min_env == nullptr && max_env == nullptr)
+    {
+        GTEST_SKIP() << "NCCL_MIN_CTAS / NCCL_MAX_CTAS not set; run under the CTA env CI tier.";
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+
+    // Env-knob path: NCCL_MIN_CTAS / NCCL_MAX_CTAS override comm->config.
+    if(min_env != nullptr)
+    {
+        const int expected_min = std::atoi(min_env);
+        ASSERT_MPI_EQ(comm->config.minCTAs, expected_min);
+        ASSERT_MPI_TRUE(comm->nChannels >= expected_min);
+    }
+    if(max_env != nullptr)
+    {
+        const int expected_max = std::atoi(max_env);
+        ASSERT_MPI_EQ(comm->config.maxCTAs, expected_max);
+        ASSERT_MPI_TRUE(comm->nChannels <= expected_max);
+    }
+
+    if(getTestMpiRank() == 0)
+    {
+        TEST_INFO("env NCCL_MIN_CTAS=%s NCCL_MAX_CTAS=%s -> config min=%d max=%d nChannels=%d",
+                  min_env ? min_env : "(unset)",
+                  max_env ? max_env : "(unset)",
+                  comm->config.minCTAs,
+                  comm->config.maxCTAs,
+                  comm->nChannels);
+    }
+}
+
+/**
+ * @test CtaConfigMPITest.EnvKnobsIgnoreNonPositiveCTAs
+ * @brief Negative test: env values <= 0 are rejected and config resolves to its positive default; skips when no knob is non-positive.
+ */
+TEST_F(CtaConfigMPITest, EnvKnobsIgnoreNonPositiveCTAs)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    const char* min_env     = std::getenv("NCCL_MIN_CTAS");
+    const char* max_env     = std::getenv("NCCL_MAX_CTAS");
+    const bool  min_nonpos  = (min_env != nullptr && std::atoi(min_env) <= 0);
+    const bool  max_nonpos  = (max_env != nullptr && std::atoi(max_env) <= 0);
+    if(!min_nonpos && !max_nonpos)
+    {
+        GTEST_SKIP() << "Negative CTA env test: set NCCL_MIN_CTAS and/or NCCL_MAX_CTAS <= 0.";
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+
+    if(min_nonpos)
+    {
+        ASSERT_MPI_TRUE(comm->config.minCTAs > 0);
+    }
+    if(max_nonpos)
+    {
+        ASSERT_MPI_TRUE(comm->config.maxCTAs > 0);
+    }
+
+    // Comm still initialized with a usable channel count (not clamped to 0).
+    ASSERT_MPI_TRUE(comm->nChannels >= 1);
+
+    if(getTestMpiRank() == 0)
+    {
+        TEST_INFO("rejected non-positive CTAs -> config min=%d max=%d nChannels=%d",
+                  comm->config.minCTAs,
+                  comm->config.maxCTAs,
+                  comm->nChannels);
+    }
+}
+
+/**
+ * @test CtaConfigMPITest.DefaultConfigDoesNotClampChannels
+ * @brief Guard: with no min/maxCTAs (config or env), the maxCTAs clamp is a no-op and does not reduce nChannels; skips when the env knobs are set.
+ */
+TEST_F(CtaConfigMPITest, DefaultConfigDoesNotClampChannels)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    if(std::getenv("NCCL_MIN_CTAS") != nullptr || std::getenv("NCCL_MAX_CTAS") != nullptr)
+    {
+        GTEST_SKIP() << "NCCL_MIN_CTAS / NCCL_MAX_CTAS set; this test validates the default (unset) path.";
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+
+    // Default maxCTAs (MAXCHANNELS) must be >= nChannels, i.e. the cap did not reduce the channel count.
+    ASSERT_MPI_TRUE(comm->nChannels >= 1);
+    ASSERT_MPI_TRUE(comm->config.maxCTAs >= comm->nChannels);
+
+    if(getTestMpiRank() == 0)
+    {
+        TEST_INFO("default config -> maxCTAs=%d nChannels=%d (cap is a no-op)",
+                  comm->config.maxCTAs,
+                  comm->nChannels);
+    }
 }
 
 #endif // MPI_TESTS_ENABLED

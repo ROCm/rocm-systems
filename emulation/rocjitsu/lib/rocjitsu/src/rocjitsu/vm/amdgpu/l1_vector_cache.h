@@ -36,11 +36,12 @@ public:
   void set_l2(L2Cache *l2) { l2_ = l2; }
   void set_memory(GpuMemory *mem) { memory_ = mem; }
   void load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size, uint32_t num_elems,
-            uint8_t *dst, Mtype mtype, bool non_temporal, bool request_l1_bypass,
+            uint8_t *dst, Mtype mtype, bool non_temporal, bool request_l1_bypass, uint32_t wf_size,
             uint32_t vmid = 0);
 
   void store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size, uint32_t num_elems,
-             const uint8_t *src, Mtype mtype, bool non_temporal, uint32_t vmid = 0);
+             const uint8_t *src, Mtype mtype, bool non_temporal, uint32_t wf_size,
+             uint32_t vmid = 0);
 
   void invalidate(uint64_t addr, uint32_t vmid = 0) { cache_.invalidate(addr, vmid); }
   void invalidate_all() { cache_.invalidate_all(); }

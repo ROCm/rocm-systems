@@ -1,0 +1,309 @@
+name: rocprofiler-systems CI / Build and Test
+run-name: rocprofiler-systems build and test
+
+# Path exclusions are defined once here. The top-level workflow owns the visible
+# graph, while reusable workflows own execution details for each group.
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/rocprofiler-systems-build.yml'
+      - '.github/workflows/rocprofiler-systems-build-group.yml'
+      - '.github/workflows/rocprofiler-systems-code-coverage.yml'
+      - '.github/workflows/rocprofiler-systems-ubuntu-noble-sanitizers.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-systems-build.yml'
+      - '.github/workflows/rocprofiler-systems-build-group.yml'
+      - '.github/workflows/rocprofiler-systems-code-coverage.yml'
+      - '.github/workflows/rocprofiler-systems-ubuntu-noble-sanitizers.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matrix-setup:
+    name: Matrix setup
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      ubuntu_2204_primary_matrix: ${{ steps.ubuntu_2204.outputs.primary_matrix }}
+      ubuntu_2204_system_deps_matrix: ${{ steps.ubuntu_2204.outputs.system_deps_matrix }}
+      ubuntu_2204_has_primary: ${{ steps.ubuntu_2204.outputs.has_primary }}
+      ubuntu_2204_has_system_deps: ${{ steps.ubuntu_2204.outputs.has_system_deps }}
+      ubuntu_2404_primary_matrix: ${{ steps.ubuntu_2404.outputs.primary_matrix }}
+      ubuntu_2404_system_deps_matrix: ${{ steps.ubuntu_2404.outputs.system_deps_matrix }}
+      ubuntu_2404_has_primary: ${{ steps.ubuntu_2404.outputs.has_primary }}
+      ubuntu_2404_has_system_deps: ${{ steps.ubuntu_2404.outputs.has_system_deps }}
+      debian_primary_matrix: ${{ steps.debian.outputs.primary_matrix }}
+      debian_system_deps_matrix: ${{ steps.debian.outputs.system_deps_matrix }}
+      debian_has_primary: ${{ steps.debian.outputs.has_primary }}
+      debian_has_system_deps: ${{ steps.debian.outputs.has_system_deps }}
+      rhel_primary_matrix: ${{ steps.rhel.outputs.primary_matrix }}
+      rhel_system_deps_matrix: ${{ steps.rhel.outputs.system_deps_matrix }}
+      rhel_has_primary: ${{ steps.rhel.outputs.has_primary }}
+      rhel_has_system_deps: ${{ steps.rhel.outputs.has_system_deps }}
+    steps:
+      - name: Checkout matrix helper
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-systems/.github/ci-build-matrix.json
+            projects/rocprofiler-systems/scripts/generate-ci-build-matrix.py
+          sparse-checkout-cone-mode: false
+
+      - name: Generate Ubuntu 22.04 matrix
+        id: ubuntu_2204
+        shell: bash
+        run: |
+          python3 projects/rocprofiler-systems/scripts/generate-ci-build-matrix.py \
+            --group ubuntu-22.04 \
+            --matrix-file projects/rocprofiler-systems/.github/ci-build-matrix.json
+
+      - name: Generate Ubuntu 24.04 matrix
+        id: ubuntu_2404
+        shell: bash
+        run: |
+          python3 projects/rocprofiler-systems/scripts/generate-ci-build-matrix.py \
+            --group ubuntu-24.04 \
+            --matrix-file projects/rocprofiler-systems/.github/ci-build-matrix.json
+
+      - name: Generate Debian matrix
+        id: debian
+        shell: bash
+        run: |
+          python3 projects/rocprofiler-systems/scripts/generate-ci-build-matrix.py \
+            --group debian \
+            --matrix-file projects/rocprofiler-systems/.github/ci-build-matrix.json
+
+      - name: Generate RHEL matrix
+        id: rhel
+        shell: bash
+        run: |
+          python3 projects/rocprofiler-systems/scripts/generate-ci-build-matrix.py \
+            --group rhel \
+            --matrix-file projects/rocprofiler-systems/.github/ci-build-matrix.json
+
+  ubuntu-2204:
+    name: Ubuntu 22.04
+    needs: matrix-setup
+    uses: ./.github/workflows/rocprofiler-systems-build-group.yml
+    permissions:
+      contents: read
+    with:
+      group_key: ubuntu-22.04
+      group_name: Ubuntu 22.04
+      primary_matrix: ${{ needs.matrix-setup.outputs.ubuntu_2204_primary_matrix }}
+      system_deps_matrix: ${{ needs.matrix-setup.outputs.ubuntu_2204_system_deps_matrix }}
+      has_primary: ${{ needs.matrix-setup.outputs.ubuntu_2204_has_primary }}
+      has_system_deps: ${{ needs.matrix-setup.outputs.ubuntu_2204_has_system_deps }}
+
+  ubuntu-2404:
+    name: Ubuntu 24.04
+    needs: matrix-setup
+    uses: ./.github/workflows/rocprofiler-systems-build-group.yml
+    permissions:
+      contents: read
+    with:
+      group_key: ubuntu-24.04
+      group_name: Ubuntu 24.04
+      primary_matrix: ${{ needs.matrix-setup.outputs.ubuntu_2404_primary_matrix }}
+      system_deps_matrix: ${{ needs.matrix-setup.outputs.ubuntu_2404_system_deps_matrix }}
+      has_primary: ${{ needs.matrix-setup.outputs.ubuntu_2404_has_primary }}
+      has_system_deps: ${{ needs.matrix-setup.outputs.ubuntu_2404_has_system_deps }}
+
+  debian:
+    name: Debian
+    needs: matrix-setup
+    uses: ./.github/workflows/rocprofiler-systems-build-group.yml
+    permissions:
+      contents: read
+    with:
+      group_key: debian
+      group_name: Debian
+      primary_matrix: ${{ needs.matrix-setup.outputs.debian_primary_matrix }}
+      system_deps_matrix: ${{ needs.matrix-setup.outputs.debian_system_deps_matrix }}
+      has_primary: ${{ needs.matrix-setup.outputs.debian_has_primary }}
+      has_system_deps: ${{ needs.matrix-setup.outputs.debian_has_system_deps }}
+
+  rhel:
+    name: RHEL
+    needs: matrix-setup
+    uses: ./.github/workflows/rocprofiler-systems-build-group.yml
+    permissions:
+      contents: read
+    with:
+      group_key: rhel
+      group_name: RHEL
+      primary_matrix: ${{ needs.matrix-setup.outputs.rhel_primary_matrix }}
+      system_deps_matrix: ${{ needs.matrix-setup.outputs.rhel_system_deps_matrix }}
+      has_primary: ${{ needs.matrix-setup.outputs.rhel_has_primary }}
+      has_system_deps: ${{ needs.matrix-setup.outputs.rhel_has_system_deps }}
+
+  code-coverage:
+    name: Code coverage
+    needs: matrix-setup
+    uses: ./.github/workflows/rocprofiler-systems-code-coverage.yml
+    permissions:
+      contents: read
+      pull-requests: write
+
+  sanitizers:
+    name: Sanitizers
+    needs: matrix-setup
+    uses: ./.github/workflows/rocprofiler-systems-ubuntu-noble-sanitizers.yml
+    permissions:
+      contents: read
+
+  publish-test-results:
+    name: Summary report
+    needs:
+      - ubuntu-2204
+      - ubuntu-2404
+      - debian
+      - rhel
+      - code-coverage
+      - sanitizers
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout summary script
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-systems/scripts/summarize-junit-results.py
+          sparse-checkout-cone-mode: false
+
+      - name: Download build JUnit artifacts
+        uses: actions/download-artifact@v7
+        continue-on-error: true
+        with:
+          pattern: junit-build-*
+          path: junit-results
+          merge-multiple: false
+
+      - name: Download sanitizer JUnit artifacts
+        uses: actions/download-artifact@v7
+        continue-on-error: true
+        with:
+          pattern: junit-sanitizer-*
+          path: sanitizer-junit-results
+          merge-multiple: false
+
+      - name: Download sanitizer status artifacts
+        uses: actions/download-artifact@v7
+        continue-on-error: true
+        with:
+          pattern: sanitizer-summary-*
+          path: sanitizer-status
+          merge-multiple: false
+
+      - name: Generate test result summary
+        shell: bash
+        run: |
+          python3 projects/rocprofiler-systems/scripts/summarize-junit-results.py \
+            --mode build \
+            --junit-glob 'junit-results/**/*.xml' \
+            --output junit-summary.md \
+            --commit-sha '${{ github.sha }}' \
+            --commit-url '${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}'
+          cat junit-summary.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Generate sanitizer result summary
+        shell: bash
+        run: |
+          python3 projects/rocprofiler-systems/scripts/summarize-junit-results.py \
+            --mode sanitizer \
+            --junit-glob 'sanitizer-junit-results/**/*.xml' \
+            --status-glob 'sanitizer-status/**/*.json' \
+            --output sanitizer-summary.md
+          cat sanitizer-summary.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Update PR CI result summary
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- rocprofiler-systems-ci-summary -->';
+            const start = '<!-- rocprofiler-systems-build-summary:start -->';
+            const end = '<!-- rocprofiler-systems-build-summary:end -->';
+            const sanitizerStart = '<!-- rocprofiler-systems-sanitizer-summary:start -->';
+            const sanitizerEnd = '<!-- rocprofiler-systems-sanitizer-summary:end -->';
+            const buildSection = `${start}\n${fs.readFileSync('junit-summary.md', 'utf8').trim()}\n${end}`;
+            const sanitizerSection = `${sanitizerStart}\n${fs.readFileSync('sanitizer-summary.md', 'utf8').trim()}\n${sanitizerEnd}`;
+
+            function replaceSection(body, sectionStart, sectionEnd, replacement) {
+              const begin = body.indexOf(sectionStart);
+              const finish = body.indexOf(sectionEnd);
+              if (begin !== -1 && finish !== -1 && finish > begin) {
+                return `${body.slice(0, begin)}${replacement}${body.slice(finish + sectionEnd.length)}`;
+              }
+              return `${body.trim()}\n\n${replacement}`;
+            }
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const comment = comments.find((item) =>
+              item.user.type === 'Bot' && item.body && item.body.includes(marker)
+            );
+
+            if (comment) {
+              let body = replaceSection(comment.body, start, end, buildSection);
+              body = replaceSection(body, sanitizerStart, sanitizerEnd, sanitizerSection);
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: comment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body: `${marker}\n# rocprofiler-systems CI Summary\n\n${buildSection}\n\n${sanitizerSection}`,
+              });
+            }

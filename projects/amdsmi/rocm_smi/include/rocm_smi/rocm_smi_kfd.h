@@ -109,6 +109,7 @@ int ReadKFDDeviceProperties(uint32_t dev_id, std::vector<std::string>* retVec);
 int read_node_properties(uint32_t node, std::string property_name, uint64_t* val);
 int get_gpu_id(uint32_t node, uint64_t* gpu_id);
 
+// Replaces the contents of *out with the KFD GPU ids for pid (clears first).
 int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out);
 
 }  // namespace amd::smi

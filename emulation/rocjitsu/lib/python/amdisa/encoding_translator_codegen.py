@@ -5,7 +5,9 @@
 
 For each (src_ISA, dst_ISA) pair, emits C++ functions that translate
 instructions by decoding fields from the source ISA's machine_insts.h
-bitfield struct and re-encoding into the target ISA's struct.
+bitfield struct and re-encoding with the target ISA's generated builders.
+Decoder-only alternate target encodings, which do not yet have standalone
+builders, retain the existing MachineInst serialization path.
 
 Fields are classified as:
 - COPY:   same name, same width -- bitfield value is copied directly.
@@ -230,6 +232,7 @@ class EncodingTranslation:
     src_dt_index: int = 0  # primary decode table index (for dispatch)
     src_enc_field_bit_cnt: int = 9  # encoding field width in bits
     dst_enc_field_val: int = 0  # actual encoding bitfield value (for dst.encoding)
+    dst_has_builder: bool = False  # target is emitted by gen_instruction_builders
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +256,18 @@ def _struct_name(enc_name: str) -> str:
     if parts[0] == 'ENC':
         parts = parts[1:]
     return ''.join(p.capitalize() for p in parts) + 'MachineInst'
+
+
+def _builder_fields_name(enc_name: str) -> str:
+    """Derive the C++ generated-builder field structure name."""
+    return _struct_name(enc_name).replace('MachineInst', 'BuilderFields')
+
+
+def _builder_function_name(enc_name: str) -> str:
+    """Derive the generated format-builder function name."""
+    if enc_name.startswith('ENC_'):
+        enc_name = enc_name[len('ENC_') :]
+    return f'build_{enc_name.lower()}'
 
 
 def _dt_index(enc: InstEncoding, spec: IsaSpec) -> int:
@@ -618,7 +633,11 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
     base = trans.src_enc_name.lower().replace('enc_', '')
     fn = f'encode_{base}_{dst_name}'
     fsname = _fields_struct_name(trans.src_enc_name)
-    full_type = f'{dst_ns}::{trans.dst_struct}'
+    full_type = (
+        f'{dst_ns}::{_builder_fields_name(trans.dst_enc_name)}'
+        if trans.dst_has_builder
+        else f'{dst_ns}::{trans.dst_struct}'
+    )
     bit_cnt = trans.dst_bit_cnt
 
     lines = []
@@ -626,8 +645,9 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
         f'inline TranslationResult {fn}(const {fsname} &f, uint16_t dst_op) {{'
     )
     lines.append(f'    {full_type} dst{{}};')
-    lines.append(f'    dst.encoding = 0x{trans.dst_enc_field_val:X};')
-    lines.append(f'    dst.op = dst_op;')
+    if not trans.dst_has_builder:
+        lines.append(f'    dst.encoding = 0x{trans.dst_enc_field_val:X};')
+        lines.append(f'    dst.op = dst_op;')
 
     # Coherency remap
     if trans.has_coherency_remap:
@@ -676,8 +696,20 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
             if any(m.src_name == 'soffset_en' for m in trans.mappings):
                 lines.append('    if (f.soffset_en == 0) dst.soffset = 0x7C;')
 
-    # Return
-    if bit_cnt <= 32:
+    # Builders are the canonical target-layout encoder. Alternate decoder-only
+    # formats do not have builders yet because their selector conditions are
+    # not represented by a single fixed encoding field; keep their generated
+    # MachineInst path until selector-aware builders are available.
+    if trans.dst_has_builder:
+        builder = _builder_function_name(trans.dst_enc_name)
+        n = (bit_cnt + 31) // 32
+        lines.append(f'    const auto words = {dst_ns}::{builder}(dst_op, dst);')
+        lines.append(f'    TranslationResult r{{}};')
+        lines.append(f'    r.word_count = uint8_t{{{n}}};')
+        for word in range(n):
+            lines.append(f'    r.words[{word}] = words[{word}];')
+        lines.append(f'    return r;')
+    elif bit_cnt <= 32:
         lines.append(
             f'    return TranslationResult{{{{std::bit_cast<uint32_t>(dst), 0u, 0u}}, uint8_t{{1}}}};'
         )
@@ -883,6 +915,11 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
                 src_dt_index=src_dts.get(se, 0),
                 src_enc_field_bit_cnt=src_enc.enc_field_bit_cnt,
                 dst_enc_field_val=dst_evs.get(de, 0),
+                # Keep this predicate identical to gen_instruction_builders:
+                # only concrete encodings with their own instruction list get
+                # a builder. Alternate decoder-only formats need condition-aware
+                # construction before they can safely use this path.
+                dst_has_builder=bool(dst_enc.insts),
             )
         )
     translations.sort(key=lambda t: (t.src_bit_cnt, t.src_enc_name))
@@ -902,6 +939,7 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
         '#include <cstring>',
         '',
         f'#include "rocjitsu/isa/arch/amdgpu/{src_name}/machine_insts.h"',
+        f'#include "rocjitsu/isa/arch/amdgpu/{dst_name}/builders.h"',
         f'#include "rocjitsu/isa/arch/amdgpu/{dst_name}/machine_insts.h"',
         '#include "rocjitsu/code/dbt/encoding_translator.h"',
         '#include "encoding_fields.h"',

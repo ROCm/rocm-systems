@@ -137,3 +137,10 @@ SELECT
     *
 FROM
     `rocpd_memory_allocate{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
+    `rocpd_graph_launch` AS
+SELECT
+    *
+FROM
+    `rocpd_graph_launch{{uuid}}`;
