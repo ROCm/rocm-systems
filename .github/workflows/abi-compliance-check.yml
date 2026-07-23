@@ -60,10 +60,13 @@ jobs:
       - name: Run Major ABI Compliance Check
         id: run_major
         if: steps.base_ref.outputs.ref != ''
+        env:
+          BASE_REF: ${{ steps.base_ref.outputs.ref }}
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
         run: |
           python3 projects/amdsmi/tests/abi_check/abi_check.py \
-            --base-ref "${{ steps.base_ref.outputs.ref }}" \
-            --head-ref "${{ github.head_ref || github.ref_name }}" \
+            --base-ref "$BASE_REF" \
+            --head-ref "$HEAD_REF" \
             --project-path projects/amdsmi \
             --mode major
         continue-on-error: true
@@ -71,15 +74,17 @@ jobs:
       - name: Label PR on Major ABI Breakage
         if: always() && github.event_name == 'pull_request'
         run: |
-          if [[ "${{ steps.run_major.outcome }}" == "failure" ]]; then
-            echo "Major ABI check failed, adding MAJOR ABI BREAKAGE label to PR #${{ github.event.pull_request.number }}"
-            gh pr edit ${{ github.event.pull_request.number }} --add-label "MAJOR ABI BREAKAGE"
+          if [[ "$RUN_MAJOR_OUTCOME" == "failure" ]]; then
+            echo "Major ABI check failed, adding MAJOR ABI BREAKAGE label to PR #${PR_NUMBER}"
+            gh pr edit "$PR_NUMBER" --add-label "MAJOR ABI BREAKAGE"
           else
             echo "Major ABI check passed, removing MAJOR ABI BREAKAGE label if present"
-            gh pr edit ${{ github.event.pull_request.number }} --remove-label "MAJOR ABI BREAKAGE" || true
+            gh pr edit "$PR_NUMBER" --remove-label "MAJOR ABI BREAKAGE" || true
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_MAJOR_OUTCOME: ${{ steps.run_major.outcome }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
 
       - name: Upload Major ABI Report
         if: always()
@@ -143,10 +148,13 @@ jobs:
       - name: Run Minor ABI Compliance Check (Strict)
         id: run_minor
         if: steps.base_ref_minor.outputs.ref != ''
+        env:
+          BASE_REF: ${{ steps.base_ref_minor.outputs.ref }}
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
         run: |
           python3 projects/amdsmi/tests/abi_check/abi_check.py \
-            --base-ref "${{ steps.base_ref_minor.outputs.ref }}" \
-            --head-ref "${{ github.head_ref || github.ref_name }}" \
+            --base-ref "$BASE_REF" \
+            --head-ref "$HEAD_REF" \
             --project-path projects/amdsmi \
             --mode minor
         continue-on-error: true
@@ -154,15 +162,17 @@ jobs:
       - name: Label PR on Minor ABI Breakage
         if: always() && github.event_name == 'pull_request'
         run: |
-          if [[ "${{ steps.run_minor.outcome }}" == "failure" ]]; then
-            echo "Minor ABI check failed, adding MINOR ABI BREAKAGE label to PR #${{ github.event.pull_request.number }}"
-            gh pr edit ${{ github.event.pull_request.number }} --add-label "MINOR ABI BREAKAGE"
+          if [[ "$RUN_MINOR_OUTCOME" == "failure" ]]; then
+            echo "Minor ABI check failed, adding MINOR ABI BREAKAGE label to PR #${PR_NUMBER}"
+            gh pr edit "$PR_NUMBER" --add-label "MINOR ABI BREAKAGE"
           else
             echo "Minor ABI check passed, removing MINOR ABI BREAKAGE label if present"
-            gh pr edit ${{ github.event.pull_request.number }} --remove-label "MINOR ABI BREAKAGE" || true
+            gh pr edit "$PR_NUMBER" --remove-label "MINOR ABI BREAKAGE" || true
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_MINOR_OUTCOME: ${{ steps.run_minor.outcome }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
 
       - name: Upload Minor ABI Report
         if: always()
