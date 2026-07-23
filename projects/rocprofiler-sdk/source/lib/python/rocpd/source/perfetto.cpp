@@ -194,6 +194,7 @@ write_perfetto(
     const types::process&  process,
     const std::unordered_map<uint64_t, std::pair<rocpd::types::agent, tool::agent_index>>&
                                                      agent_data,
+    rocpd_version_triplet_t                          schema_version,
     const tool::generator<types::thread>&            thread_gen,
     const tool::generator<types::region>&            region_gen,
     const tool::generator<types::sample>&            sample_gen,
@@ -220,6 +221,8 @@ write_perfetto(
 
     auto uuid_pid       = common::fnv1a_hasher::combine(this_nid, this_pid_init_ns, this_pid);
     auto this_pid_track = ::perfetto::Track{uuid_pid, ::perfetto::Track{}};
+
+    common::consume_args(schema_version);
 
     {
         auto desc = orig_process_desc;
@@ -372,6 +375,8 @@ write_perfetto(
                 _namess << "(CPU)";
             else if(_agent.type == "GPU")
                 _namess << "(GPU)";
+            else if(_agent.type == "NIC")
+                _namess << "(NIC)";
             else
                 _namess << "(UNK)";
 

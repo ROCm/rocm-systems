@@ -152,9 +152,8 @@ struct RocpdImportData
     {
         if(py::isinstance<RocpdImportData>(_obj))
         {
-            connection     = _obj.cast<RocpdImportData>().connection;
-            databases      = _obj.cast<RocpdImportData>().databases;
-            schema_version = _obj.cast<RocpdImportData>().schema_version;
+            connection = _obj.cast<RocpdImportData>().connection;
+            databases  = _obj.cast<RocpdImportData>().databases;
         }
         else
         {
@@ -509,8 +508,16 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             auto* conn             = rocpd::interop::get_connection(std::move(data.connection));
             auto  perfetto_session = rocpd::output::PerfettoSession{output_cfg, conn};
 
+            //
+            // Identify schema specific limits & features here
+            //
+            auto           schema_version           = data.schema_version;
             constexpr auto graph_launch_min_version = rocpd_version_triplet_t{3, 0, 2};
-            auto           db_schema_version        = data.schema_version;
+            const auto     graph_launch_supported   = (schema_version >= graph_launch_min_version);
+
+            //
+            // End of schema specific limits & features
+            //
 
             auto sqlgen_perf = common::simple_timer{
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
@@ -556,9 +563,6 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                 nitr.id,
                                 pitr.pid);
                         };
-
-                        const bool graph_launch_supported =
-                            (db_schema_version >= graph_launch_min_version);
 
                         auto _sqlgen_perft = common::simple_timer{fmt::format(
                             "Perfetto generation from SQL for process {} (total)", pitr.pid)};
@@ -621,6 +625,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         rocpd::output::write_perfetto(perfetto_session,
                                                       pitr,
                                                       agents_map,
+                                                      schema_version,
                                                       threads,
                                                       regions,
                                                       samples,
