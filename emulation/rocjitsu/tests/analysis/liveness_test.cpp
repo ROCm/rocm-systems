@@ -16,6 +16,8 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vbuffer.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -579,6 +581,15 @@ TEST(InstDefUseSpecialEffects, SpecialEffectsDoNotEnterScratchLiveness) {
   EXPECT_TRUE(du.memory.any());
 }
 
+// Build a SpecialRegisterSet from a list so a test can assert the *exact* set of
+// special registers an instruction reads or writes, not just membership.
+SpecialRegisterSet special_regs(std::initializer_list<RegClass> classes) {
+  SpecialRegisterSet s;
+  for (RegClass c : classes)
+    s.insert(c);
+  return s;
+}
+
 TEST(SpecialEffectAnalysis, SaveexecReportsExecAndSccFromDecodedOperands) {
   // Real decoded instruction: s_and_saveexec_b64 s[0:1], s[0:1] (CDNA4). Its
   // fieldless special operands drive the InstDefUse special sets by direction:
@@ -595,10 +606,8 @@ TEST(SpecialEffectAnalysis, SaveexecReportsExecAndSccFromDecodedOperands) {
 
   InstDefUse du(*inst);
 
-  EXPECT_TRUE(du.special_defs.contains(RegClass::EXEC));
-  EXPECT_TRUE(du.special_defs.contains(RegClass::SCC));
-  EXPECT_TRUE(du.special_uses.contains(RegClass::EXEC));
-  EXPECT_FALSE(du.special_uses.contains(RegClass::SCC));
+  EXPECT_EQ(du.special_defs, special_regs({RegClass::EXEC, RegClass::SCC}));
+  EXPECT_EQ(du.special_uses, special_regs({RegClass::EXEC}));
 
   // Ordinary sdst/ssrc0 (s[0:1]) still tracked as ordinary registers.
   EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 0, 2}));
@@ -621,6 +630,201 @@ TEST(SpecialEffectAnalysis, OrdinaryInstructionReportsNoSpecialEffects) {
   InstDefUse du(*inst);
   EXPECT_TRUE(du.special_defs.empty());
   EXPECT_TRUE(du.special_uses.empty());
+}
+
+// Decode-time special-effect coverage for the hidden-side-effect instruction
+// families. Encodings are built through the generated per-ISA encoders so they
+// cannot silently drift, and each case locks the operand-driven special
+// defs/uses so a change elsewhere cannot alter them unnoticed.
+
+// V_CMPX writes EXEC on every ISA, and additionally VCC on CDNA/GFX9 (its
+// operand list carries a VCC destination). gfx1250 is EXEC-only, so the same
+// mnemonic has a genuinely different side-effect set across ISAs.
+TEST(SpecialEffectAnalysis, CmpxWritesVccAndExecOnCdna) {
+  const auto built = cdna3::build_vopc(cdna3::kVCmpxEqF32Vopc, {.src0 = 256, .vsrc1 = 1});
+  const std::array<uint32_t, 2> words{built[0], 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_cmpx_eq_f32_e32");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(du.special_defs, special_regs({RegClass::EXEC, RegClass::VCC}));
+  EXPECT_TRUE(du.special_uses.empty());
+}
+
+TEST(SpecialEffectAnalysis, CmpxWritesExecOnlyOnGfx1250) {
+  const auto built = gfx1250::build_vopc(gfx1250::kVCmpxEqF32Vopc, {.src0 = 256, .vsrc1 = 1});
+  const std::array<uint32_t, 2> words{built[0], 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_cmpx_eq_f32_e32");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(du.special_defs, special_regs({RegClass::EXEC}));
+  EXPECT_TRUE(du.special_uses.empty());
+}
+
+// RDNA CMPX is EXEC-only like gfx1250 (and unlike CDNA), tested directly on an
+// RDNA target rather than inferred from the CDNA-family gfx1250.
+TEST(SpecialEffectAnalysis, CmpxWritesExecOnlyOnRdna) {
+  const auto built = rdna4::build_vopc(rdna4::kVCmpxEqF32Vopc, {.src0 = 256, .vsrc1 = 1});
+  const std::array<uint32_t, 2> words{built[0], 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_cmpx_eq_f32_e32");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(du.special_defs, special_regs({RegClass::EXEC}));
+  EXPECT_TRUE(du.special_uses.empty());
+}
+
+// s_cbranch_{scc,vcc,exec}* read a special condition register and branch. The
+// condition operand is a special use; nothing is defined.
+TEST(SpecialEffectAnalysis, CbranchSccIsSpecialSccUse) {
+  const uint32_t word = cdna3::build_sopp(cdna3::kSCbranchScc0Sopp, {.simm16 = 0})[0];
+  const std::array<uint32_t, 2> words{word, 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_cbranch_scc0");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(du.special_uses, special_regs({RegClass::SCC}));
+  EXPECT_TRUE(du.special_defs.empty());
+}
+
+TEST(SpecialEffectAnalysis, CbranchVccIsSpecialVccUse) {
+  const uint32_t word = cdna3::build_sopp(cdna3::kSCbranchVcczSopp, {.simm16 = 0})[0];
+  const std::array<uint32_t, 2> words{word, 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_cbranch_vccz");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(du.special_uses, special_regs({RegClass::VCC}));
+  EXPECT_TRUE(du.special_defs.empty());
+}
+
+TEST(SpecialEffectAnalysis, CbranchExecIsSpecialExecUse) {
+  const uint32_t word = cdna3::build_sopp(cdna3::kSCbranchExeczSopp, {.simm16 = 0})[0];
+  const std::array<uint32_t, 2> words{word, 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_cbranch_execz");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(du.special_uses, special_regs({RegClass::EXEC}));
+  EXPECT_TRUE(du.special_defs.empty());
+}
+
+// VOP2 carry reads and writes VCC implicitly. The mnemonic differs by ISA
+// (CDNA/GFX9 v_addc_co_u32 vs RDNA/gfx1250 v_add_co_ci_u32) but both expose the
+// same VCC carry-in use and carry-out def.
+TEST(SpecialEffectAnalysis, Vop2CarryCdnaAddcUsesAndDefsVcc) {
+  const auto built =
+      cdna3::build_vop2(cdna3::kVAddcCoU32Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 2});
+  const std::array<uint32_t, 2> words{built[0], 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_addc_co_u32_e32");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(du.special_defs, special_regs({RegClass::VCC}));
+  EXPECT_EQ(du.special_uses, special_regs({RegClass::VCC}));
+  EXPECT_TRUE(du.defs.contains({RegClass::VGPR, 2, 1})); // ordinary vdst still tracked
+}
+
+TEST(SpecialEffectAnalysis, Vop2CarryGfx1250AddCoCiUsesAndDefsVcc) {
+  const auto built =
+      gfx1250::build_vop2(gfx1250::kVAddCoCiU32Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 2});
+  const std::array<uint32_t, 2> words{built[0], 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_add_co_ci_u32_e32");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(du.special_defs, special_regs({RegClass::VCC}));
+  EXPECT_EQ(du.special_uses, special_regs({RegClass::VCC}));
+}
+
+// PC family: getpc reads PC (writes an ordinary SGPR pair), setpc writes PC
+// (reads an ordinary SGPR pair), s_call does both.
+TEST(SpecialEffectAnalysis, GetpcReadsPc) {
+  const uint32_t word = cdna3::build_sop1(0x1c, {.ssrc0 = 0, .sdst = 8})[0]; // s_getpc_b64 s[8:9]
+  const std::array<uint32_t, 2> words{word, 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_getpc_b64");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(du.special_uses, special_regs({RegClass::PC}));
+  EXPECT_TRUE(du.special_defs.empty());
+  EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 8, 2}));
+}
+
+TEST(SpecialEffectAnalysis, SetpcWritesPc) {
+  const uint32_t word = cdna3::build_sop1(0x1d, {.ssrc0 = 8, .sdst = 0})[0]; // s_setpc_b64 s[8:9]
+  const std::array<uint32_t, 2> words{word, 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_setpc_b64");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(du.special_defs, special_regs({RegClass::PC}));
+  EXPECT_TRUE(du.special_uses.empty());
+  EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 8, 2}));
+}
+
+TEST(SpecialEffectAnalysis, ScallReadsAndWritesPc) {
+  const uint32_t word = build_s_call_b64(8, 0); // s_call_b64 s[8:9], <rel>
+  const std::array<uint32_t, 2> words{word, 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_call_b64");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(du.special_defs, special_regs({RegClass::PC}));
+  EXPECT_EQ(du.special_uses, special_regs({RegClass::PC}));
+  EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 8, 2}));
+}
+
+// A buffer load's fieldless GPUMEM operand is inert: it yields neither a special
+// register class nor an ordinary register ref, and InstDefUse::memory carries no
+// effect (memory-effect metadata is not modeled for memory pseudo-operands).
+TEST(SpecialEffectAnalysis, MemoryPseudoOperandProducesNoSpecialEffect) {
+  const auto words =
+      gfx1250::build_vbuffer(gfx1250::kBufferLoadB32Vbuffer, {.vdata = 1, .rsrc = 0});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "buffer_load_b32");
+
+  InstDefUse du(*inst);
+  EXPECT_TRUE(du.special_defs.empty());
+  EXPECT_TRUE(du.special_uses.empty());
+  EXPECT_FALSE(du.memory.any());
 }
 
 TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {
