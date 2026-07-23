@@ -32,6 +32,19 @@ from .importer import RocpdImportData
 from . import output_config
 from . import libpyrocpd
 
+# SUPPORTED FEATURES handling with mapping to schema versions
+_SUPPORTED_FEATURES = []
+
+_supported_features_lookup_table = {
+    "graph_launch": libpyrocpd.schema_version(3, 0, 2),
+}
+
+def _build_supported_features_list(importData):
+    for feature, schema_version in _supported_features_lookup_table.items():
+        global _SUPPORTED_FEATURES
+        if importData.schema_version >= schema_version:
+            _SUPPORTED_FEATURES.append(feature)
+
 
 def get_perfetto_category_name(category):
     """Map category names to perfetto category names"""
@@ -107,8 +120,9 @@ def write_otf2(importData, config):
             "otf2 module not found. Please install it using 'pip install otf2' to convert to OTF2 format"
         ) from e
 
+    _build_supported_features_list(importData)
+
     timer_resolution = 1_000_000_000
-    _schema_version = importData.schema_version
     trace_dir = getattr(config, "output_path", "./otf_traces")
     trace_file = f"{getattr(config, 'output_file', 'traces')}_results"
     if not os.path.exists(trace_dir):
@@ -185,9 +199,9 @@ def write_otf2(importData, config):
                     kernel_rename = getattr(config, "kernel_rename")
                     agent_index_value = getattr(config, "agent_index_value")
 
-                    hip_graph_fields = []
-                    if _schema_version >= libpyrocpd.schema_version(3, 0, 2):
-                        hip_graph_fields = ["graph_exec_id", "graph_node_id"]
+                    hip_graph_fields = ()
+                    if "graph_launch" in _SUPPORTED_FEATURES:
+                        hip_graph_fields = ("graph_exec_id", "graph_node_id")
 
                     cursor = conn.cursor()
                     cursor.execute("SELECT DISTINCT guid, id FROM rocpd_info_node")
@@ -299,7 +313,7 @@ def write_otf2(importData, config):
                                         (start, end, name, *_hip_graph_values)
                                     )
 
-                            if _schema_version >= libpyrocpd.schema_version(3, 0, 2):
+                            if "graph_launch" in _SUPPORTED_FEATURES:
                                 cursor = conn.cursor()
                                 cursor.execute(
                                     """SELECT tid, start, end, graph_exec_id,
@@ -442,7 +456,7 @@ def write_otf2(importData, config):
                                         memory_copy_writer.leave(timestamp, region)
 
                             # Write HIP Graph Launch Events
-                            if _schema_version >= libpyrocpd.schema_version(3, 0, 2):
+                            if "graph_launch" in _SUPPORTED_FEATURES:
                                 for tid, data in graph_launches.items():
                                     graph_launch_location = archive.definitions.location(
                                         name=f"Thread {tid}, HIP Graph Launch",
