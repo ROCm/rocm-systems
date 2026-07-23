@@ -513,6 +513,38 @@
       "group": "ubuntu-24.04"
     },
     {
+      "name": "Debian 12 \u2022 g++ \u2022 system deps",
+      "image": "dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-debian-12",
+      "distro": "debian-system-deps",
+      "compiler": "g++",
+      "cc": "gcc",
+      "use_clang_omp": "OFF",
+      "cdash_suffix": "debian-system-deps-g++",
+      "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_OMPT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network\" -DCMAKE_PREFIX_PATH=/opt/rocm",
+      "python_envs_glob": "py3.{8,9,10,11,12,13}",
+      "install_prefix": "/opt/rocprofiler-systems",
+      "sanity_check_rocm": true,
+      "ccache_key_distro": "debian-system-deps",
+      "system_deps_apt": "g++ binutils-dev libboost-all-dev libtbb-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev",
+      "group": "debian"
+    },
+    {
+      "name": "Debian 12 \u2022 amdclang++ \u2022 system deps",
+      "image": "dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-debian-12",
+      "distro": "debian-system-deps",
+      "compiler": "amdclang++",
+      "cc": "amdclang",
+      "use_clang_omp": "ON",
+      "cdash_suffix": "debian-system-deps-amdclang++",
+      "cmake_flags": "-DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems -DROCPROFSYS_USE_OMPT=OFF \"-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13\" \"-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network\" -DCMAKE_PREFIX_PATH=/opt/rocm",
+      "python_envs_glob": "py3.{8,9,10,11,12,13}",
+      "install_prefix": "/opt/rocprofiler-systems",
+      "sanity_check_rocm": true,
+      "ccache_key_distro": "debian-system-deps",
+      "system_deps_apt": "g++ binutils-dev libboost-all-dev libtbb-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev",
+      "group": "debian"
+    },
+    {
       "name": "RHEL 9 \u2022 g++ \u2022 system deps",
       "image": "dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-rhel-9",
       "distro": "rhel-9-system-deps",

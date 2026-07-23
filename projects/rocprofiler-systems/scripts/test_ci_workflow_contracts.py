@@ -232,6 +232,16 @@ def check_junit_publication(
         "build-group workflow must not contain an internal matrix setup job",
     )
     require(
+        "rhel-compiler-check" in orchestrator_jobs,
+        "build workflow is missing top-level job 'rhel-compiler-check'",
+    )
+    require(
+        "rhel-compiler-check" not in workflow_jobs,
+        "rhel-compiler-check must live in the orchestrator, not the shared "
+        "build-group workflow — otherwise it reappears as a phantom skipped "
+        "job with an unresolved matrix name under the other 3 groups",
+    )
+    require(
         "primary-build" in workflow_jobs,
         "build group workflow is missing job 'primary-build'",
     )
@@ -431,7 +441,7 @@ def check_build_matrix_file() -> None:
     expected_counts = {
         "ubuntu-22.04": (5, 2),
         "ubuntu-24.04": (5, 2),
-        "debian": (4, 0),
+        "debian": (4, 2),
         "rhel": (12, 4),
     }
     for group, (primary_count, system_deps_count) in expected_counts.items():
