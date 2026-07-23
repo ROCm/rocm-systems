@@ -7,6 +7,8 @@
 #include "library/pmc/common/types.hpp"
 
 #include <cstdint>
+#include <set>
+#include <string>
 
 namespace rocprofsys
 {
@@ -102,6 +104,20 @@ select_socket_power(const enabled_metrics& enabled, const metrics& values)
 socket_power_track_label(const enabled_metrics& enabled)
 {
     return has_current_socket_power(enabled) ? "Current Power" : "Avg. Power";
+}
+
+/**
+ * @brief Whether a device's PCIe BDF indicates it is visible to the ROCm runtime.
+ *
+ * A device is runtime-visible iff it reports a non-empty PCIe BDF that appears in
+ * @p visible_bdfs (the set the runtime exposes via ROCR_VISIBLE_DEVICES /
+ * HIP_VISIBLE_DEVICES). An empty BDF means the device identity could not be
+ * determined, so it is treated as NOT visible.
+ */
+[[nodiscard]] inline bool
+is_runtime_visible(const std::string& bdf, const std::set<std::string>& visible_bdfs)
+{
+    return !bdf.empty() && visible_bdfs.count(bdf) > 0;
 }
 
 }  // namespace gpu
