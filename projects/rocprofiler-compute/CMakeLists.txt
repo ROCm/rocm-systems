@@ -609,6 +609,14 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_code_object_analysis
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_code_object_analysis.xml ${COV_OPTION}
+        tests/test_code_object_analysis.py ${WORKING_DIR_OPTION}
+)
+
 # -----------------------------------
 # Metrics unit tests
 # -----------------------------------
@@ -863,6 +871,24 @@ if(${ENABLE_COVERAGE})
         test_profile_triton_trace
         test_torch_cpp_loader
         test_inject_roctx_package
+        test_analysis_db
+        test_analysis_orm
+        test_code_object_analysis
+        test_pc_sampling_analysis
+        test_pc_sampling_profile
+        test_metrics_common
+        test_metric_validation
+        test_native_tool_finder
+        test_profiler_base
+        test_soc_base
+        test_tty
+        test_utils_profile_csv
+        test_import_guard
+        test_profile_iteration_multiplexing_1
+        test_profile_iteration_multiplexing_2
+        test_profile_iteration_multiplexing_stochastic
+        test_profile_live_attach_detach
+        test_profile_multi_rank
     )
 
     string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")
