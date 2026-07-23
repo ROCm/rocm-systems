@@ -54,12 +54,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def _find_py_interface() -> Path:
     """Directory holding amdsmi_wrapper.py, across source and installed layouts.
 
-    Source tree: ``py-interface/`` under ``projects/amdsmi``. Installed
-    package: the ``amdsmi`` package in site-packages -- in CI this test runs
-    from the installed tests directory, where ``py-interface/`` is absent and
-    the wrapper instead ships inside the importable ``amdsmi`` package.
+    Resolution order is deliberate: the wheel-loader tests copy this wrapper
+    expecting the committed system variant (``_AMDSMI_ALLOW_SYSTEM_FALLBACK =
+    True``), so it must NOT resolve to a coexisting pip wheel's wrapper (which
+    ships the flag flipped to ``False``).
+
+      1. ``py-interface/`` in the source checkout.
+      2. The co-installed ``share/amd_smi/amdsmi`` copy (installed alongside the
+         tests, always the system variant, and immune to a wheel shadowing
+         ``import amdsmi`` on sys.path).
+      3. Only then the imported ``amdsmi`` package, as a last resort.
     """
-    candidates = [REPO_ROOT / "py-interface"]
+    candidates = [REPO_ROOT / "py-interface", REPO_ROOT / "amdsmi"]
     try:
         import amdsmi
 
