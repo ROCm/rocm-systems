@@ -32,7 +32,8 @@ typedef ncclNvlDomainInfo_v6_t ncclNvlDomainInfo_t;
 #define NCCL_ALGO_NVLS 4
 #define NCCL_ALGO_NVLS_TREE 5
 #define NCCL_ALGO_PAT 6
-#define NCCL_NUM_ALGORITHMS NCCL_NUM_ALGORITHMS_V5 // Tree/Ring/CollNet*/PAT
+#define NCCL_ALGO_DIRECT_A2A 7 // One-hop direct all-to-all on full-mesh net topologies
+#define NCCL_NUM_ALGORITHMS NCCL_NUM_ALGORITHMS_V5 // Tree/Ring/CollNet*/PAT/DIRECT_A2A
 
 #define NCCL_PROTO_UNDEF -1
 #define NCCL_PROTO_LL 0

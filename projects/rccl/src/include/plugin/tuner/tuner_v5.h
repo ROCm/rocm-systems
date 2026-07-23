@@ -16,7 +16,10 @@ typedef struct {
   int maxRanksPerNvlDomain;           // maximum ranks across all NVLink domains
 } ncclNvlDomainInfo_v5_t;
 
-#define NCCL_NUM_ALGORITHMS_V5 7 // Tree/Ring/CollNet*/PAT
+// NOTE: bumped 7->8 for NCCL_ALGO_DIRECT_A2A. This resizes the algo-indexed
+// tables in the tuner plugin ABI; external tuner plugins built against the
+// old v5 headers must be rebuilt. TODO: move this to a new tuner version.
+#define NCCL_NUM_ALGORITHMS_V5 8 // Tree/Ring/CollNet*/PAT/DIRECT_A2A
 #define NCCL_NUM_PROTOCOLS_V5 3 // Simple/LL/LL128
 #define NCCL_NUM_HW_LINKS_V5 3
 #define NCCL_NUM_COMPCAPS_V5 4
