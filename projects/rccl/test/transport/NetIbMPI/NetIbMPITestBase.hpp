@@ -334,7 +334,10 @@ protected:
             int attempts = 0;
             while (!done) {
                 ncclResult_t result = AcceptConnection(pair.listenComm, &pair.recvComm);
-                if (result == ncclSuccess && pair.recvComm != nullptr) {
+                if (result != ncclSuccess) {
+                    return result;
+                }
+                if (pair.recvComm != nullptr) {
                     done = 1;
                     break;
                 }
