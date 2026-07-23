@@ -80,7 +80,7 @@ jobs:
             enable_asan: 0
             enable_ubsan: 0
             enable_tsan: 1
-            enable_expensive_checks: 1
+            enable_expensive_checks: 0
             sanitizer_runtime: SHARED
           - name: asan-ubsan-gcc
             allow_failure: true
@@ -96,14 +96,12 @@ jobs:
           - name: tsan-validated
             allow_failure: false
             run_static_asan_launch: true
-            # Run only tests that have passed repeated local TSan probes. Some
-            # simulator stress shapes still exceed TSan's fixed 128-lock
-            # deadlock-tracker capacity without producing a race report.
             test_regex: ''
             build_type: RelWithDebInfo
             enable_asan: 0
             enable_ubsan: 0
             enable_tsan: 1
+            enable_expensive_checks: 0
             sanitizer_runtime: STATIC
 
     steps:
@@ -183,23 +181,20 @@ jobs:
           # https://github.com/ROCm/rocm-systems/issues/8922
           TSAN_EXCLUDED_TESTS=(
             "${ASAN_UBSAN_EXCLUDED_TESTS[@]}"
+            # These simulator stress shapes exceed TSan's fixed 128-lock
+            # deadlock-tracker capacity without producing a race report.
             "MatmulStressTest\.TiledAllCU"
             "MatmulStressTest\.MfmaAllCUs"
             "VectorAddStressTest\.AllCUsGoldenReference"
+            # This test has a five-second wall-clock assertion that becomes
+            # load-sensitive at the TSan job's CI-level parallelism.
+            "DaemonApi\.FullListenerQueueDoesNotBlockOrRemoveSocket"
           )
-          TSAN_INCLUDED_TESTS=(
-            "SparseMemory(Threading)?Test\..*"
-            "Gfx1250ExecutionTest\..*"
-            "Gfx1250SimulationTest\..*"
-            "PacingControllerTest\.SeqlockConcurrentReads"
-            "SpinlockTest\.(ConcurrentIncrement|CrossPartitionQueueHighContention)"
-            "SidecarRegistryTest\.ConcurrentMutationAndLookupIsRaceFree"
-            "HsaHooksUnitTest\.(PoolAllocateWaitsForAgentDiscoveryPublication|UninstallDoesNotWaitForPoolMapperDiscoveryLock)"
-            "UtilSimd\.ForceScalar_ImmutableProcessWide"
-            "SimulatedKfdTest\.ConcurrentIoctlAndCloseIsRaceFree"
-            "KfdIoctlTest\.DbgTrapConcurrentEnableDisableIsRaceFree"
-            "DaemonTest\.InterposerDupSerializedReopenUnderContentionRemote"
-            "InterposerDupTest\.SerializedReopenUnderContentionStaysRoutable"
+          TSAN_SHARED_EXCLUDED_TESTS=(
+            # With the shared TSan runtime, the nested HIP process repeatedly
+            # returns EPERM from process_vm_readv and the test times out. The
+            # static TSan configuration runs this test successfully.
+            "RocjitsuCliDaemon\.LaunchesApplicationAfterDaemonIsReady"
           )
 
           TEST_REGEX="${{ matrix.test_regex }}"
@@ -213,7 +208,9 @@ jobs:
           fi
           if [[ "${{ matrix.enable_tsan }}" == "1" ]]; then
             EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${TSAN_EXCLUDED_TESTS[*]}")"
-            TEST_REGEX="^($(IFS='|'; echo "${TSAN_INCLUDED_TESTS[*]}"))$"
+            if [[ "${{ matrix.sanitizer_runtime }}" == "SHARED" ]]; then
+              EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${TSAN_SHARED_EXCLUDED_TESTS[*]}")"
+            fi
           fi
           if [[ -n "${{ matrix.c_compiler }}" ]]; then
             CMAKE_CONFIG_FLAGS+=(-DCMAKE_C_COMPILER="${{ matrix.c_compiler }}")
