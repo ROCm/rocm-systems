@@ -355,7 +355,10 @@ protected:
             int attempts = 0;
             while (!done) {
                 ncclResult_t result = ConnectToRemote(dev, &pair.handle, &pair.sendComm);
-                if (result == ncclSuccess && pair.sendComm != nullptr) {
+                if (result != ncclSuccess) {
+                    return result;
+                }
+                if (pair.sendComm != nullptr) {
                     done = 1;
                     break;
                 }
