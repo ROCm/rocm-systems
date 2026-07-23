@@ -29,7 +29,7 @@ int main(int argc, char **argv) {
     ASSERT_EQ(err, hipSuccess) << "HIP error: " << hipGetErrorString(err);                         \
   } while (0)
 
-#if defined(__gfx942__)
+#if defined(__gfx942__) || defined(__gfx950__)
 #define RJ_CONSAN_TEST_WORKGROUP_BARRIER "s_barrier\n\t"
 #define RJ_CONSAN_TEST_DS_STORE_B32 "ds_write_b32 %0, %1\n\t"
 #else
