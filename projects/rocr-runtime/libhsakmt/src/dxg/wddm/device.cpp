@@ -296,10 +296,37 @@ hsa_status_t WDDMDevice::QueryNonLocalVramUsage(
   return found_segment ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
 }
 
+uint64_t WDDMDevice::VramTotal() {
+  uint64_t total = LocalHeapSize();
+  if (!IsDgpu())
+    total += NonLocalHeapSize();
+  return total;
+}
+
+hsa_status_t WDDMDevice::QueryVramUsage(uint64_t* usage_bytes) {
+  hsa_status_t ret = QueryLocalVramUsage(usage_bytes);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
+
+  if (IsDgpu())
+    return HSA_STATUS_SUCCESS;
+
+  uint64_t used_non_local = 0;
+  ret = QueryNonLocalVramUsage(&used_non_local);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
+
+  *usage_bytes += used_non_local;
+  return HSA_STATUS_SUCCESS;
+}
+
 /*Local heap(dedicated GPU memory) includes visible heap and invisible heap.
  *Non local heap refers to shared GPU memory and it is system memory.
  */
 hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
+  if (!available_bytes)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
   *available_bytes = 0;
 
   // wait fence complete
@@ -307,36 +334,13 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
   if (!CpuWait(&page_syncobj_, &value, 1, false))
     return HSA_STATUS_ERROR;
 
-  if (IsDgpu()) {
-    uint64_t used_local = 0;
-    hsa_status_t ret = QueryLocalVramUsage(&used_local);
-    if (ret != HSA_STATUS_SUCCESS)
-      return ret;
+  uint64_t used = 0;
+  hsa_status_t ret = QueryVramUsage(&used);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
 
-    const uint64_t total = LocalHeapSize();
-    *available_bytes = used_local >= total ? 0 : total - used_local;
-  } else {
-    // APU: the shared-system-memory budget is exposed as aperture segments
-    // with the SystemMemory bit set (collapsed to kAperture above), so
-    // FindSegmentId(kSystemMemory) always missed. Sum BytesResident across
-    // every aperture+system_memory segment for the residency footprint.
-    const uint64_t budget = NonLocalHeapSize();
-    if (budget == 0) {
-      // No budget from WKMI — bail rather than underflow VramAvail.
-      return HSA_STATUS_ERROR;
-    }
-
-    uint64_t used_non_local = 0;
-    hsa_status_t ret = QueryNonLocalVramUsage(&used_non_local);
-    if (ret != HSA_STATUS_SUCCESS)
-      return ret;
-
-    // Virtual apertures can double-count residency — saturate at zero
-    // instead of underflowing.
-    *available_bytes =
-        used_non_local >= budget ? 0 : budget - used_non_local;
-  }
-
+  const uint64_t total = VramTotal();
+  *available_bytes = used >= total ? 0 : total - used;
   return HSA_STATUS_SUCCESS;
 }
 
