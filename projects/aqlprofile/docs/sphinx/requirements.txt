@@ -193,7 +193,7 @@ pygments==2.19.2
     #   sphinx
 pyjson5==1.6.9
     # via doxysphinx
-pyjwt[crypto]==2.10.1
+pyjwt[crypto]==2.13.0
     # via pygithub
 pynacl==1.6.0
     # via pygithub
@@ -303,6 +303,7 @@ typing-extensions==4.15.0
     #   myst-nb
     #   pydata-sphinx-theme
     #   pygithub
+    #   pyjwt
     #   referencing
     #   sqlalchemy
 urllib3==2.5.0
