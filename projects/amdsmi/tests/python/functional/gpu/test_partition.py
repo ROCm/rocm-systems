@@ -277,10 +277,10 @@ class TestGpuPartition(unittest.TestCase):
         )
         return
 
-    def test_get_gpu_compute_partition_mem_alloc_mode(self):
+    def test_get_gpu_accelerator_partition_mem_alloc_mode(self):
         self.common.print_func_name("")
         self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_compute_partition_mem_alloc_mode=amdsmi.amdsmi_get_gpu_compute_partition_mem_alloc_mode
+            amdsmi_get_gpu_accelerator_partition_mem_alloc_mode=amdsmi.amdsmi_get_gpu_accelerator_partition_mem_alloc_mode
         )
         return
 
@@ -480,12 +480,12 @@ class TestGpuPartition(unittest.TestCase):
         )
         return
 
-    def test_set_gpu_compute_partition_mem_alloc_mode(self):
+    def test_set_gpu_accelerator_partition_mem_alloc_mode(self):
         self.common.print_func_name("")
 
         self.common.Test_Per_GPU_With_One_Enum(
-            amdsmi_set_gpu_compute_partition_mem_alloc_mode=amdsmi.amdsmi_set_gpu_compute_partition_mem_alloc_mode,
-            compute_partition_mem_alloc_mode=common.COMPUTE_PARTITION_MEM_ALLOC_MODE_TYPES,
+            amdsmi_set_gpu_accelerator_partition_mem_alloc_mode=amdsmi.amdsmi_set_gpu_accelerator_partition_mem_alloc_mode,
+            accelerator_partition_mem_alloc_mode=common.ACCELERATOR_PARTITION_MEM_ALLOC_MODE_TYPES,
         )
         return
 
