@@ -60,7 +60,7 @@ unset(_clr_werror_default)
 # via target_link_libraries(<tgt> PRIVATE clr_warnings). When CLR_ENABLE_WERROR
 # is OFF the target carries no flags, so linking it is always safe.
 add_library(clr_warnings INTERFACE)
-if(CLR_ENABLE_WERROR)
+if(CLR_ENABLE_WERROR AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(clr_warnings INTERFACE
         -Wall -Werror -Wno-error=deprecated-declarations)
     # GCC <= 11 ignores [[maybe_unused]] on non-static data members and emits

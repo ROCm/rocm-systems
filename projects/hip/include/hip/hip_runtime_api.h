@@ -3300,7 +3300,7 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
 
 /**
  *@brief queries stream attribute.
- * @param[in] stream - Stream to geet attributes from
+ * @param[in] stream - Stream to get attributes from
  * @param[in] attr   - Attribute ID for the attribute to query
  * @param[out] value_out  - Attribute value output
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle
