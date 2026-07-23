@@ -128,13 +128,10 @@ jobs:
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx1151' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
-      # Note: rocm-systems cannot use automatic stage reuse yet because:
-      # 1. Copied artifacts don't produce native packages (RPM/DEB)
-      # 2. Native package install tests fail with 404 errors
-      # The reusable_stages output is computed but not used until native
-      # package copying is implemented.
-      # TODO(geomin12): Enable stage reuse once native package copying works
-      # Computed reusable_stages: ${{ needs.configure.outputs.reusable_stages }}
+      # rocm-systems affects compiler-runtime (HIP, CLR, runtime, profiler-core)
+      # which cascades to ALL downstream stages. No stages can be reused.
+      # Additionally, copied artifacts don't produce native packages (RPM/DEB).
+      # TODO(geomin12): Investigate if any stages can be reused for non-HIP changes
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       # Enable cross-repo artifact reuse: query TheRock for baseline runs
