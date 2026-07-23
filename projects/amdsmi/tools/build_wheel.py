@@ -335,7 +335,11 @@ def build_smoke(pkg_dir, interpreters):
 
 
 def repair_or_copy(raw_wheels, output_dir, cmake_python, repair):
-    """Run ``auditwheel repair`` if requested; otherwise just copy raw wheels."""
+    """Copy raw wheels, or run ``auditwheel repair`` when *repair* is set.
+
+    With *repair* the output must be a manylinux wheel; a missing auditwheel or
+    a failed repair is fatal rather than silently shipping the un-audited wheel.
+    """
     if not repair:
         for whl in raw_wheels:
             shutil.copy2(whl, output_dir)
@@ -350,10 +354,9 @@ def repair_or_copy(raw_wheels, output_dir, cmake_python, repair):
         == 0
     )
     if not auditwheel_ok:
-        log.warning("auditwheel not available; copying raw wheels.")
-        for whl in raw_wheels:
-            shutil.copy2(whl, output_dir)
-        return
+        abort(
+            "auditwheel requested (--repair) but not available; cannot produce a manylinux wheel."
+        )
 
     log.info("Repairing wheels with auditwheel ...")
     for whl in raw_wheels:
@@ -362,8 +365,11 @@ def repair_or_copy(raw_wheels, output_dir, cmake_python, repair):
             check=False,
         )
         if result.returncode != 0:
-            log.warning("auditwheel repair failed for %s; copying raw wheel.", whl.name)
-            shutil.copy2(whl, output_dir)
+            abort(
+                "auditwheel repair failed for "
+                + whl.name
+                + "; refusing to ship an un-audited wheel."
+            )
 
 
 # ---------------------------------------------------------------------------
