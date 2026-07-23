@@ -124,7 +124,8 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
 
           auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(),
                                               w->vcc(), w->m0(), w->is_halted(), w->status_raw(),
-                                              sgprs_vec, vgprs_vec, w->mode_raw());
+                                              sgprs_vec, vgprs_vec, w->mode_raw(),
+                                              w->wave_sched_mode_raw());
           wf_offsets.push_back(wfs);
         }
 
@@ -245,6 +246,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           wf->set_state(wf_state->halted() ? amdgpu::WfState::HALTED : amdgpu::WfState::RUNNING);
           wf->set_status_raw(wf_state->status());
           wf->set_mode_raw(wf_state->mode());
+          wf->set_wave_sched_mode_raw(wf_state->wave_sched_mode());
 
           if (auto *sgprs = wf_state->sgprs()) {
             for (size_t r = 0; r < sgprs->size() && r < wf->num_sgprs(); ++r) {

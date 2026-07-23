@@ -893,9 +893,9 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   EXPECT_EQ(restored_wf->exec_raw(), 0xDEADBEEF0000000FULL);
 }
 
-TEST(CheckpointTest, SaveAndRestoreModePreservesFp16Ovfl) {
+TEST(CheckpointTest, SaveAndRestoreHwregState) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
-    "vm":{"arch":"cdna3"},
+    "vm":{"arch":"gfx1250"},
     "topology":{
       "root":{
         "name":"soc","type":"soc",
@@ -928,22 +928,26 @@ TEST(CheckpointTest, SaveAndRestoreModePreservesFp16Ovfl) {
 
   auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
+  constexpr uint32_t kStatus = 0xA5A55A5Au;
+  constexpr uint32_t kWaveSchedMode = 0x5A5AA5A5u;
+  wf->set_status_raw(kStatus);
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
+  wf->set_wave_sched_mode_raw(kWaveSchedMode);
   ASSERT_TRUE(wf->fp16_ovfl());
 
-  const char *path = "/tmp/rocjitsu_test_checkpoint_mode.bin";
-  config::save_checkpoint(path, *loaded.soc(), 42, loaded.engine_config);
-  ASSERT_TRUE(std::filesystem::exists(path));
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
+  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
+  ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
-  auto restored = config::restore_checkpoint(path);
+  auto restored = config::restore_checkpoint(checkpoint.path());
   auto *restored_vm = dynamic_cast<VirtualMachine *>(restored.build_result.root.get());
   ASSERT_NE(restored_vm, nullptr);
   auto *restored_wf = restored_vm->soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
   ASSERT_NE(restored_wf, nullptr);
+  EXPECT_EQ(restored_wf->status_raw(), kStatus);
   EXPECT_EQ(restored_wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
+  EXPECT_EQ(restored_wf->wave_sched_mode_raw(), kWaveSchedMode);
   EXPECT_TRUE(restored_wf->fp16_ovfl());
-
-  std::filesystem::remove(path);
 }
 
 TEST(CApiTest, CreateAndDestroyFromString) {
