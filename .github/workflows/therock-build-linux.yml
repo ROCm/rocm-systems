@@ -50,7 +50,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: users/dravindr/tr_amdsmi # WIP: amdsmi test filter (tr_amdsmi); revert to pinned ROCm/TheRock SHA before merge
+          ref: 2e7c190b99caa226a8644eda6eca720b3db102d5 # 2026-07-22
 
       - name: Install python deps
         run: |
