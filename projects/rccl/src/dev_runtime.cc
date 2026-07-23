@@ -685,7 +685,7 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     size_t offset = 0;
     for (int segment = 0; segment < mem->numSegments; segment++) {
       CUmemLocationType locType = segmentTypes[segment];
-      int ptrType = (locType == CU_MEM_LOCATION_TYPE_HOST_NUMA) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;
+      int ptrType = ncclSymIsHostSegment(locType) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;
       NCCLCHECKGOTO(ncclGinRegister(comm, (char*)mem->primaryAddr + offset, mem->segmentSizes[segment],
                                     mem->ginSegmentInfos[segment].ginHostWins, mem->ginSegmentInfos[segment].ginDevWins,
                                     mem->winFlags, mem->maxGlobalNumSegments > 1, ptrType),
