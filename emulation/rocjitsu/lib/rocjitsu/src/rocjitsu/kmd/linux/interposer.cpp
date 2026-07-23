@@ -854,9 +854,12 @@ public:
       return false;
     }
 
-    if (rj_vm_->soc) {
-      std::string config_json = read_file_passthrough(config_path.c_str());
-      rj_vm_->soc->set_plugin_group(rocjitsu::PluginLoader::configure_plugin_group(config_json));
+    std::string config_json = read_file_passthrough(config_path.c_str());
+    if (rj_vm_load_plugins(rj_vm_, config_json.c_str(), nullptr) != ROCJITSU_STATUS_SUCCESS) {
+      util::Logger::debug_print("rocjitsu: failed to configure execution plugins");
+      rj_vm_destroy(rj_vm_);
+      rj_vm_ = nullptr;
+      return false;
     }
     return true;
   }

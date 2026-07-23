@@ -85,13 +85,13 @@ public:
   uint32_t num_plugins() const { return static_cast<uint32_t>(plugins_.size()); }
   bool empty() const { return plugins_.empty(); }
 
-  // -- Lifecycle (non-virtual) --
-  void onInit() {
+  // -- Lifecycle --
+  virtual void onInit() {
     for (auto &p : plugins_)
       p->onInit();
   }
 
-  void onShutdown() {
+  virtual void onShutdown() {
     for (auto &p : plugins_)
       p->onShutdown();
   }
