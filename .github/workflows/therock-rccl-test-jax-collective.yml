@@ -119,19 +119,17 @@ jobs:
         timeout-minutes: 10
         env:
           NCCL_DEBUG: INFO
+          NOTIFY_EMAIL: ${{ inputs.notify_email }}
+          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook }}
         run: |
-          NOTIFY_ARGS=""
-          if [ -n "${{ inputs.notify_email }}" ]; then
-            NOTIFY_ARGS="$NOTIFY_ARGS --notify-email ${{ inputs.notify_email }}"
-          fi
-          if [ -n "${{ inputs.notify_webhook }}" ]; then
-            NOTIFY_ARGS="$NOTIFY_ARGS --notify-webhook ${{ inputs.notify_webhook }}"
-          fi
+          NOTIFY_ARGS=()
+          [ -n "$NOTIFY_EMAIL" ] && NOTIFY_ARGS+=(--notify-email "$NOTIFY_EMAIL")
+          [ -n "$NOTIFY_WEBHOOK" ] && NOTIFY_ARGS+=(--notify-webhook "$NOTIFY_WEBHOOK")
           python rocm-systems/.github/scripts/test_jax_collective.py \
             --artifact-dir ${{ env.OUTPUT_ARTIFACTS_DIR }} \
             --jax-src ${{ env.JAX_SRC }} \
             --results-log ${{ env.JAX_SRC }}/jax_collective_results.log \
-            $NOTIFY_ARGS
+            "${NOTIFY_ARGS[@]}"
 
       - name: Upload test results
         if: always()
