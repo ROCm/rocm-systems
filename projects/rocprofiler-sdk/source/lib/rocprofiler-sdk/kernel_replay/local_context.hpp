@@ -92,6 +92,12 @@ replay_local_start_context(rocprofiler_context_id_t context_id);
 rocprofiler_status_t
 replay_local_stop_context(rocprofiler_context_id_t context_id);
 
+// Cheap fast-path gate: true only while a replay loop on this thread has recorded at least one
+// override. Per-dispatch consumers check this first so normal dispatches (and replay passes with no
+// toggles) pay a single thread-local read instead of a per-context scan.
+bool
+local_context_has_overrides();
+
 // Consumer query: this thread's replay override for `context_id`, or std::nullopt when there is no
 // active replay loop on this thread or the context has not been toggled. true = forced active,
 // false = forced inactive. Callers fall back to the global/default active check on nullopt.

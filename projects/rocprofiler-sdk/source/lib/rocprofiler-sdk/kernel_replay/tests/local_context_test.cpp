@@ -41,6 +41,7 @@ TEST(kernel_replay_local_context, inactive_outside_loop)
     EXPECT_EQ(lc::replay_local_start_context({1}), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR);
     EXPECT_EQ(lc::replay_local_stop_context({1}), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR);
     EXPECT_FALSE(lc::local_context_override({1}).has_value());
+    EXPECT_FALSE(lc::local_context_has_overrides());  // no active loop on this thread
 }
 
 // Inside a loop but before the PASS-enter arm window, toggles still fail and nothing is recorded.
@@ -50,6 +51,7 @@ TEST(kernel_replay_local_context, loop_without_arm_rejects_toggles)
 
     EXPECT_EQ(lc::replay_local_start_context({7}), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR);
     EXPECT_FALSE(lc::local_context_override({7}).has_value());
+    EXPECT_FALSE(lc::local_context_has_overrides());  // loop active but nothing recorded
 }
 
 // Armed within a loop: start forces active, stop forces inactive, and the recorded value persists
@@ -61,6 +63,7 @@ TEST(kernel_replay_local_context, armed_toggles_record_and_stick)
     lc::set_toggles_armed(true);
     EXPECT_EQ(lc::replay_local_start_context({3}), ROCPROFILER_STATUS_SUCCESS);
     lc::set_toggles_armed(false);
+    EXPECT_TRUE(lc::local_context_has_overrides());  // an override is now recorded
 
     // arm window closed: the override sticks, but a new toggle is rejected.
     ASSERT_TRUE(lc::local_context_override({3}).has_value());
