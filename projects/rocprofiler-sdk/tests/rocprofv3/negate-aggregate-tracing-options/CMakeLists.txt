@@ -50,7 +50,7 @@ rocprofiler_add_integration_execute_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -M --sys-trace -d
         ${CMAKE_CURRENT_BINARY_DIR} -o out --log-level info --hip-trace=no --hsa-trace=no
-        --marker-trace=no --kernel-trace=no --memory-copy-trace=no
+        --marker-trace=no --pytorch-trace=no --kernel-trace=no --memory-copy-trace=no
         --memory-allocation-trace=no --scratch-memory-trace=no --rccl-trace=no
         --kokkos-trace=no --ompt-trace=no --rocdecode-trace=no --rocjpeg-trace=no
         --rocshmem-trace=no --hip-runtime-trace=no --hip-compiler-trace=no
@@ -64,6 +64,37 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     WILL_FAIL)
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-pytorch-trace-environment
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pytorch-trace --marker-trace=no --
+        ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/validate-pytorch-trace-env.cmake
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "TORCH_PROFILER_EMIT_ROCTX=0;ROCPROF_MARKER_API_TRACE=0")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-pytorch-trace-disabled-environment
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pytorch-trace=no -- ${CMAKE_COMMAND}
+        -DEXPECTED_ROCTX=0 -P ${CMAKE_CURRENT_SOURCE_DIR}/validate-pytorch-trace-env.cmake
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "TORCH_PROFILER_EMIT_ROCTX=1")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-pytorch-trace-attach-will-fail
+    COMMAND ${CMAKE_COMMAND} -DROCPROFV3=$<TARGET_FILE:rocprofiler-sdk::rocprofv3> -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/validate-pytorch-trace-attach.cmake
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}")
 
 ##########################################################################################
 #

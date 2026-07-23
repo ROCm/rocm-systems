@@ -612,7 +612,7 @@ domain_topic_table()
         { "rocm",
           { "ROCm API tracing options",
             { "--rocm", "-T", "--trace", "--hsa-interrupt", "--selected-regions",
-              "--use-amd-smi", "--gpus", "--ai-nics" } } },
+              "--pytorch-trace", "--use-amd-smi", "--gpus", "--ai-nics" } } },
         { "parallel",
           { "MPI, OpenMP, Kokkos, RCCL options",
             { "--parallel", "-I", "--include", "-E", "--exclude" } } },

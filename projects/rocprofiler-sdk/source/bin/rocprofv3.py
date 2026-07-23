@@ -543,6 +543,11 @@ For attachment profiling of running processes:
     )
     add_parser_bool_argument(
         basic_tracing_options,
+        "--pytorch-trace",
+        help="Emit PyTorch record_function ranges as ROCTx markers (implies --marker-trace and requires the rocprofiler-sdk roctx Python module)",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
         "--kernel-trace",
         help="For collecting Kernel Dispatch Traces",
     )
@@ -1668,6 +1673,16 @@ def run(app_args, args, **kwargs):
         ):
             setattrifnone(args, itr, True)
 
+    if args.pytorch_trace is not None:
+        update_env("TORCH_PROFILER_EMIT_ROCTX", args.pytorch_trace)
+        if args.pytorch_trace:
+            if args.pid:
+                fatal_error(
+                    "--pytorch-trace cannot be used with --attach because marker "
+                    "emission must be enabled before PyTorch starts"
+                )
+            args.marker_trace = True
+
     if args.sys_trace:
         for itr in (
             "hip_trace",
@@ -2424,6 +2439,12 @@ def main(argv=None):
 
         args = get_args(cmd_args, inp_args[0])
         validate_selected_regions_conflicts(args)
+
+        if args.pid and args.pytorch_trace:
+            fatal_error(
+                "--pytorch-trace cannot be used with --attach because marker "
+                "emission must be enabled before PyTorch starts"
+            )
 
         if args.pid:
             # For reattachment support, args must be the same as previous rocprofv3 sessions

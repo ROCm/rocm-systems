@@ -914,6 +914,7 @@ def kitchen_sink_args(
         f"--trace-file={trace_file}",
         "--trace-buffer-size=100",
         "--trace-fill-policy=ring_buffer",
+        "--pytorch-trace",
         "--profile-format",
         "console",
         "json",
@@ -1008,6 +1009,23 @@ class TestRocprofilerSystemsRun(RocprofsysTest):
         )
 
         self.assert_regex(result)
+
+    def test_pytorch_trace_environment(self):
+        """Test that --pytorch-trace enables ROCTX emission in the target."""
+        env_cmd = shutil.which("env")
+        if not env_cmd:
+            pytest.skip("env command not found")
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--pytorch-trace", "--", env_cmd],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[r"TORCH_PROFILER_EMIT_ROCTX=1"],
+        )
 
     def test_args(self, test_output_dir):
         """Test rocprof-sys-run with comprehensive arguments."""

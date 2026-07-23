@@ -782,6 +782,23 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.reg.processed_environs.emplace("selected_regions");
     }
 
+    if(_data.reg.environ_filter("pytorch_trace", _data))
+    {
+        _parser
+            .add_argument(
+                { "--pytorch-trace" },
+                "Emit PyTorch record_function ranges as ROCTx markers. Requires the "
+                "rocprofiler-sdk roctx Python module and marker_api in the ROCm domains")
+            .max_count(1)
+            .dtype("bool")
+            .action([&](parser_t& p) {
+                update_env(_data, "TORCH_PROFILER_EMIT_ROCTX",
+                           p.get<bool>("pytorch-trace") ? "1" : "0");
+            });
+
+        _data.reg.processed_environs.emplace("pytorch_trace");
+    }
+
     if(_data.reg.environ_filter("trace_clock_id", _data))
     {
         auto _clock_id_choices = get_clock_id_choices();
