@@ -15194,7 +15194,7 @@ rocprofiler-sdk:
             - gfx1151
             - gfx1152
           expression: reduce(TCP_TCP_TA_REQ_STALL,sum)
-  fw-restriction-schema-version: 1
+  fw-restriction-schema-version: 2
   firmware_restrictions:
     - affected_architectures:
         - gfx940
