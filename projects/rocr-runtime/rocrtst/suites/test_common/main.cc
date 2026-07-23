@@ -60,6 +60,7 @@
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/svm_memory.h"
+#include "suites/functional/queue_modify.h"
 #include "suites/functional/time_stamp.h"
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
@@ -412,6 +413,13 @@ TEST(rocrtstFunc, FP_Exception_Shutdown) {
     if (!RunCustomTestProlog(&fpx)) return;
     fpx.TestShutdownSurvivesStrictFpEnv();
     RunCustomTestEpilog(&fpx);
+}
+
+TEST(rocrtstFunc, Queue_Modify_Test) {
+    QueueModifyTest qm;
+    if (!RunCustomTestProlog(&qm)) return;
+    qm.TestQueueModify();
+    RunCustomTestEpilog(&qm);
 }
 
 
