@@ -198,11 +198,20 @@ TEST(DoorbellMap, bind_and_resolve_rebinds_on_doorbell_reuse)
     m.on_queue_destroyed(qid(1));    // doorbell 4 -> uncertain, gen bumped to 1
     EXPECT_FALSE(m.is_generation_certain(4u));
 
-    // New queue reuses doorbell 4: resolve must rebind and hand back gen 1, certain.
+    // New queue reuses doorbell 4: the FIRST resolve rebinds via the slow
+    // (write-lock) path because qid(2) is absent from by_queue -- hand back the
+    // bumped gen 1, certain.
     auto e = m.bind_and_resolve(qid(2), 4u);
     EXPECT_EQ(e.doorbell_off, 4u);
     EXPECT_EQ(e.generation, 1u);
     EXPECT_TRUE(m.is_generation_certain(4u));
+
+    // A SECOND resolve on the reused queue now takes the fast (read-lock) path
+    // (qid(2) bound, doorbell certain). It must still report the bumped gen 1,
+    // never a stale 0 -- guards against the fast path serving pre-reuse state.
+    auto e2 = m.bind_and_resolve(qid(2), 4u);
+    EXPECT_EQ(e2.doorbell_off, 4u);
+    EXPECT_EQ(e2.generation, 1u);
 }
 
 // A queue that migrates to a different doorbell_off must resolve to the new slot,
