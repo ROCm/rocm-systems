@@ -20,7 +20,7 @@ endif()
 # HIP runtime is required for hipStream_t, hipStreamCreate/Synchronize/Destroy
 find_package(hip HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm QUIET)
 if(NOT hip_FOUND)
-    message(${_MSG_TYPE} "rocshmem skipped: HIP not found.")
+    message(${_MSG_TYPE} "rocshmem-test skipped: HIP not found.")
     return()
 endif()
 
@@ -31,7 +31,7 @@ if(NOT TARGET roc::rocshmem)
     find_package(rocshmem HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm QUIET)
 endif()
 if(NOT TARGET roc::rocshmem)
-    message(${_MSG_TYPE} "rocshmem skipped: rocSHMEM (roc::rocshmem) not found.")
+    message(${_MSG_TYPE} "rocshmem-test skipped: rocSHMEM (roc::rocshmem) not found.")
     return()
 endif()
 
@@ -50,11 +50,11 @@ find_package(MPI QUIET)
 
 enable_language(HIP)
 
-add_executable(rocshmem rocshmem.cpp)
+add_executable(rocshmem-test rocshmem.cpp)
 set_source_files_properties(rocshmem.cpp PROPERTIES LANGUAGE HIP)
 
 set_target_properties(
-    rocshmem
+    rocshmem-test
     PROPERTIES
         HIP_STANDARD 17
         HIP_STANDARD_REQUIRED ON
@@ -63,7 +63,7 @@ set_target_properties(
 )
 
 target_link_libraries(
-    rocshmem
+    rocshmem-test
     PRIVATE
         roc::rocshmem
         hip::host
@@ -73,7 +73,7 @@ target_link_libraries(
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
-        TARGETS rocshmem
+        TARGETS rocshmem-test
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
         COMPONENT rocprofiler-systems-examples
         OPTIONAL
