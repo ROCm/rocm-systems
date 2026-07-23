@@ -2,139 +2,127 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""
-simple_model.py - Basic PyTorch model for rocjitsu debugging
+"""simple_model.py - PyTorch NaN-localization debugging under rocjitsu.
 
-Demonstrates:
-- Simple neural network definition
-- Training loop with GPU
-- Loss monitoring
-- Basic error checking
+Runs a tiny network's forward pass on the (emulated) GPU and uses per-layer
+forward hooks to pinpoint *where* a NaN/Inf first appears and how it propagates:
+
+  * clean pass    - well-formed input, every layer clean -> PASSED
+  * corrupt pass  - one layer's weights corrupted (e.g. a bad checkpoint); the
+                    hooks show the NaN originates at that layer and propagates
+                    to every layer after it -> FAILED
+
+Why inference only: a training step (autograd backward + optimizer) issues far
+too many kernels to emulate in practical time. A small forward pass completes in
+tens of seconds; training does not. The model is intentionally tiny for the same
+reason.
+
+What rocjitsu contributes: it runs the real ROCm PyTorch workload (device='cuda'
+-> HIP kernels the emulator executes; no physical GPU), and RJ_LOG=1 shows the
+kernel dispatches (incl. 'mfma detected' for the matmuls). The NaN/Inf detection
+itself is ordinary host-side PyTorch (torch.isnan / torch.isinf), not a rocjitsu
+feature.
 """
 
+import sys
 import torch
 import torch.nn as nn
-import torch.optim as optim
-import sys
 
-class SimpleNet(nn.Module):
-    """Simple feedforward neural network for MNIST-like data"""
 
-    def __init__(self, input_size=784, hidden1=128, hidden2=64, num_classes=10):
-        super(SimpleNet, self).__init__()
-        self.fc1 = nn.Linear(input_size, hidden1)
-        self.fc2 = nn.Linear(hidden1, hidden2)
-        self.fc3 = nn.Linear(hidden2, num_classes)
+class TinyNet(nn.Module):
+    """Three tiny linear layers so a NaN can be seen originating and propagating."""
+
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(16, 12)
+        self.fc2 = nn.Linear(12, 8)
+        self.fc3 = nn.Linear(8, 4)
         self.relu = nn.ReLU()
 
     def forward(self, x):
-        # Flatten input
         x = x.view(x.size(0), -1)
-
-        # Forward pass
         x = self.relu(self.fc1(x))
         x = self.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
+        return self.fc3(x)
 
-def train_model(epochs=5, batch_size=32, lr=0.01, device='cuda'):
-    """Train a simple model and monitor progress"""
 
-    print("PyTorch Simple Model Training")
-    print(f"Device: {device}")
+def register_nan_hooks(model, trace):
+    """Register a forward hook per named Linear.
 
-    # Check if CUDA is available
-    if device == 'cuda' and not torch.cuda.is_available():
-        print("WARNING: CUDA not available, using CPU")
-        device = 'cpu'
+    Each hook records (layer_name, bad?) into `trace` in execution order and
+    prints the per-layer status, so the output localizes the first bad layer and
+    shows propagation. This is plain host-side PyTorch, not a rocjitsu feature.
+    """
 
-    # Create model
-    model = SimpleNet().to(device)
-    print(f"Model: SimpleNet (784 -> 128 -> 64 -> 10)")
-    print()
+    def make_hook(name):
+        def hook(module, inputs, output):
+            bad = bool(torch.isnan(output).any() or torch.isinf(output).any())
+            trace.append((name, bad))
+            print(f"  [hook] {name} -> {'NaN/Inf' if bad else 'clean'}")
 
-    # Loss and optimizer
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+        return hook
 
-    # Create dummy data (simulating MNIST)
-    # In real usage, you would use a DataLoader with actual data
-    x = torch.randn(batch_size, 1, 28, 28, device=device)
-    y = torch.randint(0, 10, (batch_size,), device=device)
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Linear):
+            module.register_forward_hook(make_hook(name))
 
-    # Training loop
-    print(f"Training for {epochs} epochs...")
-    print()
 
-    for epoch in range(epochs):
-        # Forward pass
-        optimizer.zero_grad()
-        outputs = model(x)
-        loss = criterion(outputs, y)
+def report(trace):
+    """Summarize a pass: pinpoint the first bad layer and the propagation path."""
+    bad_layers = [name for name, bad in trace if bad]
+    if not bad_layers:
+        print("  result: PASSED (no NaN/Inf)")
+        return True
+    origin = bad_layers[0]
+    propagated = bad_layers[1:]
+    print(f"  result: FAILED - NaN/Inf originates at '{origin}'"
+          + (f", propagates through: {', '.join(propagated)}" if propagated else ""))
+    return False
 
-        # Backward pass
-        loss.backward()
-
-        # Check for NaN/Inf in gradients
-        has_nan = False
-        has_inf = False
-        for name, param in model.named_parameters():
-            if param.grad is not None:
-                if torch.isnan(param.grad).any():
-                    has_nan = True
-                    print(f"  WARNING: NaN gradient in {name}")
-                if torch.isinf(param.grad).any():
-                    has_inf = True
-                    print(f"  WARNING: Inf gradient in {name}")
-
-        # Update weights
-        optimizer.step()
-
-        # Calculate accuracy
-        _, predicted = torch.max(outputs.data, 1)
-        correct = (predicted == y).sum().item()
-        accuracy = 100.0 * correct / batch_size
-
-        # Print progress
-        print(f"Epoch {epoch+1}/{epochs}")
-        print(f"  Loss: {loss.item():.4f}")
-        print(f"  Accuracy: {accuracy:.1f}%")
-
-        if has_nan or has_inf:
-            print("  ERROR: Numerical instability detected!")
-            return False
-
-        # Check if loss is NaN
-        if torch.isnan(loss):
-            print("  ERROR: Loss became NaN!")
-            return False
-
-        print()
-
-    print("Training completed successfully!")
-
-    # Test inference
-    with torch.no_grad():
-        test_x = torch.randn(10, 1, 28, 28, device=device)
-        test_outputs = model(test_x)
-        _, test_predicted = torch.max(test_outputs, 1)
-        print(f"Inference test: Predicted classes: {test_predicted.cpu().numpy()}")
-
-    return True
 
 def main():
-    """Main entry point"""
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print("PyTorch NaN-localization debugging under rocjitsu")
+    print(f"  torch: {torch.__version__}   cuda_available: {torch.cuda.is_available()}   device: {device}")
+    if device == "cpu":
+        print("  NOTE: no GPU/HIP backend — install a ROCm PyTorch wheel (torch+rocm).")
+    print()
 
-    # Parse command line arguments
-    epochs = 5
-    if len(sys.argv) > 1:
-        epochs = int(sys.argv[1])
+    torch.manual_seed(0)
+    model = TinyNet().to(device).eval()
+    trace = []
+    register_nan_hooks(model, trace)
 
-    # Run training
-    success = train_model(epochs=epochs)
+    x = torch.randn(2, 16, device=device)
 
-    # Exit with appropriate code
-    return 0 if success else 1
+    # 1) Clean pass: well-formed input, all layers clean.
+    print("[clean] forward pass:")
+    trace.clear()
+    with torch.no_grad():
+        model(x)
+    clean_ok = report(trace)
+    print()
 
-if __name__ == '__main__':
+    # 2) Corrupt pass: simulate a bad layer (e.g. a corrupted checkpoint) by
+    #    writing NaN into fc2's weights. The hooks show fc1 clean, then NaN
+    #    originating at fc2 and propagating to fc3.
+    print("[corrupt] set fc2.weight[0,0] = nan (simulates a corrupted layer):")
+    with torch.no_grad():
+        model.fc2.weight[0, 0] = float("nan")
+    trace.clear()
+    with torch.no_grad():
+        model(x)
+    corrupt_ok = report(trace)
+    print()
+
+    # The example "succeeds" if it behaves as designed: clean passes, corrupt is
+    # caught and localized.
+    if clean_ok and not corrupt_ok:
+        print("NaN debugging worked: clean input passed; corrupt layer was localized.")
+        return 0
+    print("Unexpected: clean should PASS and corrupt should be caught.")
+    return 1
+
+
+if __name__ == "__main__":
     sys.exit(main())
