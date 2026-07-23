@@ -48,6 +48,9 @@ jobs:
   # cluster = one more provision-<cluster> call here. ---
   provision-ruby:
     name: Provision (ruby)
+    # TEMP(ruby-down): ruby cluster offline ~36-48h (2026-07-23). Re-enable the
+    # ruby leg (provision-ruby, device-api, cleanup-ruby) by removing `if: false`.
+    if: false
     uses: ./.github/workflows/rccl-provision.yml
     with:
       runs_on: '["ruby-linux-slurm-scale-runner"]'
@@ -78,6 +81,9 @@ jobs:
   # device-API suite.
   device-api:
     name: device-API
+    # TEMP(ruby-down): ruby cluster offline ~36-48h (2026-07-23). Re-enable by
+    # removing `if: false`.
+    if: false
     needs: provision-ruby
     uses: ./.github/workflows/rccl-suite.yml
     with:
@@ -128,7 +134,9 @@ jobs:
   cleanup-ruby:
     name: Cleanup ROCm (ruby)
     needs: [provision-ruby, device-api]
-    if: always()
+    # TEMP(ruby-down): ruby cluster offline ~36-48h (2026-07-23). Restore to
+    # `if: always()` to re-enable ruby cleanup.
+    if: false
     runs-on: ruby-linux-slurm-scale-runner
     env:
       ROCM_RELEASE: ${{ needs.provision-ruby.outputs.rocm_release }}
