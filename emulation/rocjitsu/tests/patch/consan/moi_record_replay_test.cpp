@@ -3666,7 +3666,7 @@ TEST(ConSanMoi, Gfx1250RejectsConfiguredPersistentStateAtOrdinarySgprLimit) {
   })) << testing::PrintToString(result.warnings);
 }
 
-TEST(ConSanMoi, Cdna4RejectsConfiguredPersistentStateAtSpecialSgprs) {
+TEST(ConSanMoi, Cdna4ConfiguredPersistentStateHonorsOrdinarySgprLimit) {
   const auto guest = build_cdna4_ds_store_b32(
       /*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(guest);
@@ -3674,29 +3674,31 @@ TEST(ConSanMoi, Cdna4RejectsConfiguredPersistentStateAtSpecialSgprs) {
   std::copy(guest->begin(), guest->end(), text_words.begin());
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   const std::vector<uint8_t> bytes =
-      make_cdna4_lds_code_object(text_words, "cdna4_explicit_state_at_special_sgpr");
+      make_cdna4_lds_code_object(text_words, "cdna4_explicit_state_at_ordinary_limit");
 
-  // FLAT_SCRATCH, XNACK_MASK, and VCC all begin at or beyond CDNA4's ordinary
-  // s0:s101 file and are rejected by its architectural limit.
-  for (const uint16_t owner : {102u, 104u, 106u}) {
+  const auto patch_with = [&](uint16_t owner) {
     ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.moi_persistent_owner_sgpr = owner;
     options.moi_persistent_epoch_sgpr = static_cast<uint16_t>(owner + 1u);
     options.moi_init_owner_epoch = true;
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(64, 0, 0, 0);
+    return try_patch_consan(bytes, options);
+  };
 
-    const ConSanResult result = try_patch_consan(bytes, options);
+  // s100:s101 are the final pair inside CDNA4's ordinary scalar file.
+  const ConSanResult below_limit = patch_with(100u);
+  ASSERT_TRUE(consan_patch_succeeded(below_limit)) << testing::PrintToString(below_limit.errors);
+  EXPECT_TRUE(below_limit.modified) << testing::PrintToString(below_limit.warnings);
+  EXPECT_TRUE(below_limit.final_validation_passed);
 
-    EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported) << owner;
-    EXPECT_FALSE(result.modified) << owner;
-    EXPECT_TRUE(std::ranges::any_of(result.warnings,
-                                    [](const std::string &warning) {
-                                      return warning.find("architectural special SGPR") !=
-                                             std::string::npos;
-                                    }))
-        << owner << ": " << testing::PrintToString(result.warnings);
-  }
+  // s102:s103 start at the limit and must be rejected.
+  const ConSanResult at_limit = patch_with(102u);
+  EXPECT_EQ(at_limit.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_FALSE(at_limit.modified);
+  EXPECT_TRUE(std::ranges::any_of(at_limit.warnings, [](const std::string &warning) {
+    return warning.find("architectural special SGPR") != std::string::npos;
+  })) << testing::PrintToString(at_limit.warnings);
 }
 
 TEST(ConSanMoi, Cdna4AccvgprBoundaryRecordReplayUsesScalarEpochCoalescing) {

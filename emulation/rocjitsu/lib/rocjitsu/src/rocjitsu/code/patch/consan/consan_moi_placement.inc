@@ -1648,6 +1648,7 @@ struct MoiArchitecturalSgprLayout {
   // Subranges of [0, ordinary_limit) that remain unsafe for persistent SALU
   // state even though they are encodable as ordinary scalar operands. Special
   // selectors at or above ordinary_limit are rejected by the limit itself.
+  // Referenced range tables must have static storage duration.
   std::span<const MoiArchitecturalSgprRange> reserved_ordinary_ranges = {};
 };
 
@@ -1697,6 +1698,7 @@ static_assert(!persistent_sgpr_range_overlaps_reserved_ordinary_range(104u, 2u,
                                                                       ROCJITSU_CODE_ARCH_GFX1250));
 static_assert(!persistent_sgpr_range_overlaps_reserved_ordinary_range(106u, 2u,
                                                                       ROCJITSU_CODE_ARCH_GFX1250));
+static_assert(moi_architectural_sgpr_layout(ROCJITSU_CODE_ARCH_CDNA3).ordinary_limit == 102u);
 static_assert(moi_architectural_sgpr_layout(ROCJITSU_CODE_ARCH_CDNA4).ordinary_limit == 102u);
 static_assert(moi_architectural_sgpr_layout(ROCJITSU_CODE_ARCH_GFX1250).ordinary_limit == 106u);
 
