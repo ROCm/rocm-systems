@@ -39,6 +39,9 @@ SUITE_RE = re.compile(r"^(Gpu|Cpu|Nic|Ifoe|System)(Unit|FunctionalReadOnly|Funct
 # Captures the suite from TEST(Suite, Name) and TEST_F(Suite, Name).
 _TEST_MACRO_RE = re.compile(r"\bTEST(?:_F)?\(\s*([A-Za-z_]\w*)\s*,")
 
+# Declares a functional fixture, e.g. `class TestFanRead : public TestBase`.
+_FIXTURE_DECL_RE = re.compile(r"^class\s+([A-Za-z_]\w*)\s*:\s*public\b", re.M)
+
 
 def _pascal(component: str) -> str:
     """Component dir name -> suite prefix ('gpu' -> 'Gpu', 'ifoe' -> 'Ifoe')."""
@@ -142,14 +145,80 @@ def _check_suites(tier: str, component: str | None, path: Path) -> Iterator[str]
                 )
 
 
-def _check_main_cc() -> Iterator[str]:
-    """Functional tests register in main.cc; validate their suite names there."""
+def _main_cc_tests() -> Iterator[tuple[str, str]]:
+    """Yield ``(suite, body)`` for each TEST()/TEST_F() block in main.cc.
+
+    Comments are stripped first (so disabled/example tests are ignored), and
+    ``body`` spans from the macro to the start of the next TEST.
+    """
     main_cc = TEST_ROOT / "main.cc"
     if not main_cc.is_file():
         return
-    for suite in _suites_in(main_cc):
+    text = _strip_comments(main_cc.read_text(errors="replace"))
+    tests = list(_TEST_MACRO_RE.finditer(text))
+    for current, following in zip(tests, tests[1:] + [None]):
+        body_end = following.start() if following else len(text)
+        yield current.group(1), text[current.end() : body_end]
+
+
+def _check_main_cc() -> Iterator[str]:
+    """Functional tests register in main.cc; validate their suite names there."""
+    for suite, _body in _main_cc_tests():
         if not SUITE_RE.match(suite):
-            yield _bad_pattern(main_cc, suite)
+            yield _bad_pattern(TEST_ROOT / "main.cc", suite)
+
+
+def _functional_fixture_components() -> dict[str, str]:
+    """Map each functional fixture class to its component directory.
+
+    Reads every header under ``functional/<component>/…``; each declares one
+    ``class <Fixture> : public TestBase``.
+    """
+    components: dict[str, str] = {}
+    functional = TEST_ROOT / "functional"
+    if not functional.is_dir():
+        return components
+    for header in functional.rglob("*.h"):
+        parts = header.relative_to(functional).parts
+        if len(parts) < 2:
+            continue  # loose header directly under functional/, no component
+        component = parts[0]
+        for match in _FIXTURE_DECL_RE.finditer(header.read_text(errors="replace")):
+            components[match.group(1)] = component
+    return components
+
+
+def _fixture_instantiated(body: str, fixtures: dict[str, str]) -> str | None:
+    """Return the fixture class a TEST body instantiates (``TestFoo tst;``)."""
+    for fixture in fixtures:
+        if re.search(rf"\b{re.escape(fixture)}\s+\w+\s*;", body):
+            return fixture
+    return None
+
+
+def _check_main_cc_component_match() -> Iterator[str]:
+    """Flag a main.cc TEST whose suite component disagrees with the component
+    directory of the fixture it runs.
+
+    Functional tests register in main.cc, decoupled from their source directory,
+    so this catches the one mismatch the per-file checks cannot see — e.g. a
+    ``functional/system/`` test left under ``GpuFunctionalReadOnly``.
+    """
+    fixtures = _functional_fixture_components()
+    main_cc = TEST_ROOT / "main.cc"
+    for suite, body in _main_cc_tests():
+        matched = SUITE_RE.match(suite)
+        fixture = _fixture_instantiated(body, fixtures)
+        if not matched or fixture is None:
+            continue  # malformed suites are reported by _check_main_cc
+        actual = matched.group(1)  # suite prefix: Gpu | Cpu | Nic | Ifoe | System
+        expected = _pascal(fixtures[fixture])
+        if actual != expected:
+            yield (
+                f"{_rel(main_cc)}: TEST({suite}, …) runs fixture '{fixture}' from "
+                f"functional/{fixtures[fixture]}/ — suite component should be "
+                f"'{expected}', not '{actual}'"
+            )
 
 
 def _check_stray_test_files() -> Iterator[str]:
@@ -172,6 +241,7 @@ def collect_violations() -> list[str]:
         violations += _check_layout_and_naming(tier, component, path)
         violations += _check_suites(tier, component, path)
     violations += _check_main_cc()
+    violations += _check_main_cc_component_match()
     violations += _check_stray_test_files()
     return violations
 

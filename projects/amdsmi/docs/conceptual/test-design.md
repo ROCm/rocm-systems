@@ -177,21 +177,20 @@ names lets a feature line up across both suites. Adapt them as the APIs warrant.
 **Classes**: `Test<FeatureName><Operation>` derived from `TestBase` for functional tests; plain
 `TEST(Suite, Name)` for unit tests.
 
-**GTest suites registered in `main.cc`**:
+**GTest suites registered in `main.cc` follow the `<Component><Type>[<Operation>]` scheme**:
 
-| Suite | Type | When used |
+| Suite pattern | Type | When used |
 | :--- | :--- | :--- |
-| `GpuFunctionalReadOnly` | functional | GPU tests that only read device state; no root required |
-| `GpuFunctionalReadWrite` | functional | GPU tests that modify device state; root typically required |
-| `GpuUnit` | unit | Pure unit tests under `unit/gpu/`; no device required |
-| `SystemUnit` | unit | Pure unit tests under `unit/system/` (e.g. library loader); no device required |
+| `<Component>FunctionalReadOnly` | functional | Only reads device/host state; no root required |
+| `<Component>FunctionalReadWrite` | functional | Modifies device/host state; root typically required |
+| `<Component>Unit` | unit | Pure logic; no device required |
 
-The full suite name scheme is `<Component><Type>[<Operation>]`. Use the PascalCase component name
-from the source path as the suite prefix. Functional suites include an operation suffix, so they use
-`<Component>Functional<Operation>`, where operation is `ReadOnly` or `ReadWrite`. Unit suites omit
-the operation suffix and use `<Component>Unit`, for example `GpuUnit`, `SystemUnit`, `CpuUnit`, or `NicUnit`.
-This keeps component, type, and functional operation independently filterable via
-`--gtest_filter` wildcards.
+`<Component>` is the PascalCase name from the source path — one of `Gpu`, `Cpu`, `Nic`, `Ifoe`, or
+`System` (see [Component taxonomy](#component-taxonomy)). Functional suites always carry a `ReadOnly`
+or `ReadWrite` operation suffix; unit suites omit it. Only combinations that have tests are
+registered — currently `GpuFunctionalReadOnly`, `GpuFunctionalReadWrite`, `SystemFunctionalReadOnly`,
+`IfoeFunctionalReadOnly`, `GpuUnit`, and `SystemUnit`. This keeps component, type, and operation
+independently filterable via `--gtest_filter` wildcards.
 
 ### Mocked unit tests and fixtures
 
