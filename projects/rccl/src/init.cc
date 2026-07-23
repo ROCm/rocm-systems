@@ -631,7 +631,15 @@ static ncclResult_t dmaBufSupported(struct ncclComm* comm) {
   CUCHECK(cuDeviceGet(&dev, comm->cudaDev));
   // Query device to see if DMA-BUF support is available
   (void)CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED, dev));
-  if (flag == 0) return ncclInternalError;
+  if (flag == 0) {
+    // [RCCL] The DMA_BUF device attribute can report 0 on consumer APUs
+    // (gfx115x) even when ROCr exports hsa_amd_portable_export_dmabuf and the
+    // kernel supports DMA-BUF (both verified by rocmLibraryInit()). Trust the
+    // ROCr/kernel checks instead of the device attribute.
+    if (pfn_hsa_amd_portable_export_dmabuf == NULL) return ncclInternalError;
+    INFO(NCCL_INIT, "DMA-BUF device attribute reports 0 on GPU device %d; proceeding based on ROCr runtime support",
+         comm->cudaDev);
+  }
   INFO(NCCL_INIT, "DMA-BUF is available on GPU device %d", comm->cudaDev);
   return ncclSuccess;
 #else
