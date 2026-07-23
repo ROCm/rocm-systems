@@ -122,11 +122,12 @@ jobs:
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx1151' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
-      # HARDCODED: Use prebuilt stages from known good TheRock run
-      # rocm-systems affects compiler-runtime; may be able to reuse math-libs
-      # TODO(geomin12): Make dynamic once automatic baseline selection works
-      prebuilt_stages: ${{ inputs.prebuilt_stages || 'math-libs' }}
-      baseline_run_id: ${{ inputs.baseline_run_id || '29947789954' }}
+      # Note: No prebuilt stages for rocm-systems. Copying artifacts from TheRock
+      # doesn't produce native packages (RPM/DEB), causing install tests to fail
+      # with 404 errors. rocm-systems must build everything locally.
+      # TODO(geomin12): Investigate native package copying to enable stage reuse
+      prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
+      baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       # Enable cross-repo artifact reuse: query TheRock for baseline runs
       stage_reuse_baseline_repository: "ROCm/TheRock"
       repository: ROCm/TheRock
