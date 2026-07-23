@@ -558,15 +558,12 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   // may not be ready yet; ncclEnqueueCheck will trigger CE init as a side
   // effect (because ncclCeImplemented now returns true for AllReduce), so the
   // second and all subsequent calls use the CE path.
-  if (ncclGroupDepth == 0 &&
-      rcclUseCeAllReduce(comm, count, datatype, op) &&
-      comm->ceColl.ceARTmpBuf != NULL) {
+  if (ncclGroupDepth == 0 && rcclUseCeAllReduce(comm, count, datatype, op) && comm->ceColl.ceARTmpBuf != NULL) {
     if (count == 0) return ncclSuccess;
     struct ncclDevrWindow* recvWin = nullptr;
     NCCLCHECK(ncclDevrFindWindow(comm, recvbuff, &recvWin));
-    INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu rank=%d/%d recvWin=%p userPtr=%p",
-         count, comm->rank, comm->nRanks, (void*)recvWin,
-         recvWin ? recvWin->userPtr : nullptr);
+    INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu rank=%d/%d recvWin=%p userPtr=%p", count, comm->rank, comm->nRanks,
+         (void*)recvWin, recvWin ? recvWin->userPtr : nullptr);
     return ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream, recvWin);
   }
 

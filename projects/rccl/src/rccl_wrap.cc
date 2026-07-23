@@ -592,8 +592,7 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   return (comm->enableCustColl && (msgSize <= threshold) && (threshold != -1) && !rankMultiple);
 }
 
-bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count,
-                        ncclDataType_t datatype, ncclRedOp_t op) {
+bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
   static int enabled = rcclParamCeAllReduce();
   static int force = rcclParamForceCeAllReduce();
   if (!enabled) {

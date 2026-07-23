@@ -102,7 +102,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     // not catch this because it consults a separate kernel-mask table.  Force
     // AllReduce out of the symmetric path so it falls back to the standard
     // ring/tree kernels (or to the CE AllReduce path when message size fits).
-    if (task->func == ncclFuncAllReduce) symAvailable = false;
+      if (task->func == ncclFuncAllReduce) symAvailable = false;
 #endif
 
       index =

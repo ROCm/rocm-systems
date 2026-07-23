@@ -3579,7 +3579,7 @@ static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
   return ncclSuccess;
 }
 
-RCCL_PARAM(ForceCeAllReduce,"FORCE_CE_ALLREDUCE",0);
+RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 0);
 RCCL_PARAM_DECLARE(CeAllReduce);
 // Converts `info` to a task and adds it to `comm->planner`. The exception is with
 // single rank communicators, collectives are issued as `ncclMemcpyAsync`s and
@@ -3630,11 +3630,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // ceCollTaskAppend path when user buffers are not symmetrically registered.
       // Without this trigger, CE AllReduce-only workloads would never initialize
       // the CE runtime (ceARTmpBuf stays NULL).
-      if (ncclCeImplemented(info->coll, info->op, info->datatype) &&
-          comm->symmetricSupport && comm->nNodes == 1 &&
+      if (ncclCeImplemented(info->coll, info->op, info->datatype) && comm->symmetricSupport && comm->nNodes == 1 &&
           (comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO || rcclParamForceCeAllReduce()) &&
-          comm->ceColl.baseUCSymReadyPtr == NULL &&
-          ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
+          comm->ceColl.baseUCSymReadyPtr == NULL && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
         if (ncclCudaGraphValid(comm->planner.capturingGraph)) {
           // CE runtime not initialized and we're capturing a graph: symmetric
           // window registration is illegal during capture. Fall back to legacy.
@@ -3654,8 +3652,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool graphCapture = ncclCudaGraphValid(comm->planner.capturingGraph);
       if (info->coll == ncclFuncAllReduce) {
 #if NCCL_CE_REDUCE_ALL_OPS
-        const bool ceAllReduceOpSupported = (info->op == ncclSum || info->op == ncclProd ||
-                                             info->op == ncclMin || info->op == ncclMax);
+        const bool ceAllReduceOpSupported =
+          (info->op == ncclSum || info->op == ncclProd || info->op == ncclMin || info->op == ncclMax);
 #else
         const bool ceAllReduceOpSupported = (info->op == ncclSum);
 #endif
@@ -3667,7 +3665,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         } else if (ceAllReduceOpSupported) {
           // check if we want to force CE AllReduce without symmetric window registration
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || !rcclParamForceCeAllReduce() || !comm->symmetricSupport || comm->nNodes > 1) {
+          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || !rcclParamForceCeAllReduce() ||
+              !comm->symmetricSupport || comm->nNodes > 1) {
             ceAllReduceFits = false;
           } else {
             ceAllReduceFits = true;

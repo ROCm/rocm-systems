@@ -17,9 +17,9 @@
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
 #define RCCL_CE_NUM_COPY_STREAMS 8
 
-// Default is <= 2 MiB (holds NUM_SLOTS * nRanks chunks (2 scatter slots), 
+// Default is <= 2 MiB (holds NUM_SLOTS * nRanks chunks (2 scatter slots),
 // and the reduced output goes to the user recvbuff)
-#define NCCL_CE_AR_MAX_MSG_BYTES  (256ull * 1024 * 1024)
+#define NCCL_CE_AR_MAX_MSG_BYTES (256ull * 1024 * 1024)
 
 #ifndef NCCL_CE_REDUCE_MAX_BLOCKS
 #define NCCL_CE_REDUCE_MAX_BLOCKS 46
@@ -55,14 +55,14 @@ struct ncclCeColl {
   // CE AllReduce staging buffer (symmetric), double-buffered scatter staging:
   // Layout: [slot 0: nRanks chunks][slot 1: nRanks chunks], slot stride = nRanks*chunkBytes.
   // The reduced result is written straight into the user recvbuff (no scratch).
-  uint8_t*               ceARTmpBuf;
+  uint8_t* ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
   uint32_t* signalBuffer;
   struct ncclDevrWindow* signalWin;
   // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.
   uint32_t* d_barrierSync;
   cudaStream_t scatterStream;     // trails the reduce kernel: waits d_reduceDone, then all-gathers
-  cudaEvent_t  synceEvent;  // join scatterStream back onto the caller's stream
+  cudaEvent_t synceEvent;  // join scatterStream back onto the caller's stream
 };
 
 struct ncclCeInitTask {
@@ -121,9 +121,7 @@ ncclResult_t ncclCeAlltoAll(struct ncclComm* comm, struct ncclCeCollArgs* args, 
 
 // CE AllReduce: scatter → local-reduce → allgather (→ optional copy-to-user-recvbuff).
 // Requires comm->ceColl.ceARTmpBuf != NULL (i.e. ncclCeInit has run).
-ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff,
-                              void* recvbuff, size_t count,
-                              ncclDataType_t datatype, ncclRedOp_t op,
-                              cudaStream_t stream,
-                              struct ncclDevrWindow* recvWin = nullptr);
+ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                             ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
+                             struct ncclDevrWindow* recvWin = nullptr);
 #endif /* NCCL_CE_COLL_H_ */
