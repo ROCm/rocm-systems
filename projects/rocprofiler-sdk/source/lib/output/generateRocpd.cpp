@@ -2207,10 +2207,18 @@ write_rocpd(
     auto dispatch_to_agent_id  = std::unordered_map<uint64_t, uint64_t>{};
     auto dispatch_to_thread_id = std::unordered_map<uint64_t, uint64_t>{};
     // ---------------------------------------------------------------------------
-    // Packed blob struct — architecture-specific fields stored alongside each
-    // PC sample row.  The schema is self-describing via rocpd_info_blob_schema /
+    // Packed blob structs - architecture-specific fields stored alongside each PC
+    // sample row.  The schema is self-describing via rocpd_info_blob_schema /
     // rocpd_info_blob_field, so Python consumers can decode the binary without
     // hard-coding offsets.
+    //
+    // Two layouts coexist so a heterogeneous (multi-architecture) run can store each
+    // sample using the schema that fits its hardware:
+    //   * v1 - hw_id + generic + arbiter-state snapshot (pre-gfx1250 layout).
+    //   * v2 - v1 plus sampling_lock_error and memory counters (gfx12+/gfx1250).
+    // v2 appends its new fields after the complete v1 prefix, so a v2 buffer
+    // truncated to sizeof(v1) is a byte-valid v1 blob (asserted below).  Each
+    // rocpd_blob_event row records which layout it used via its schema_id.
     // ---------------------------------------------------------------------------
 #pragma pack(push, 1)
     struct pc_sample_extdata_v1
@@ -2258,10 +2266,100 @@ write_rocpd(
 #pragma pack(pop)
 
     static_assert(sizeof(pc_sample_extdata_v1) == (4 * sizeof(uint32_t) + 32),
-                  "PC sample blob layout changed; update its schema version");
+                  "PC sample v1 blob layout changed; bump its schema version");
     static_assert(alignof(pc_sample_extdata_v1) == 1, "PC sample blob must remain byte-packed");
     static_assert(std::is_standard_layout_v<pc_sample_extdata_v1>);
     static_assert(std::is_trivially_copyable_v<pc_sample_extdata_v1>);
+
+#pragma pack(push, 1)
+    struct pc_sample_extdata_v2
+    {
+        // hw_id fields
+        uint8_t hw_id_chiplet          = 0;
+        uint8_t hw_id_wave_id          = 0;
+        uint8_t hw_id_simd_id          = 0;
+        uint8_t hw_id_pipe_id          = 0;
+        uint8_t hw_id_cu_or_wgp_id     = 0;
+        uint8_t hw_id_shader_array_id  = 0;
+        uint8_t hw_id_shader_engine_id = 0;
+        uint8_t hw_id_workgroup_id     = 0;
+        uint8_t hw_id_vm_id            = 0;
+        uint8_t hw_id_queue_id         = 0;
+        uint8_t hw_id_microengine_id   = 0;
+        // Generic PC sample fields retained for decode.
+        uint32_t wave_in_group  = 0;
+        uint32_t workgroup_id_x = 0;
+        uint32_t workgroup_id_y = 0;
+        uint32_t workgroup_id_z = 0;
+        // arbiter-state fields (stochastic only; remain zero for host-trap)
+        uint8_t dual_issue_valu            = 0;
+        uint8_t arb_state_issue_valu       = 0;
+        uint8_t arb_state_issue_matrix     = 0;
+        uint8_t arb_state_issue_lds        = 0;
+        uint8_t arb_state_issue_lds_direct = 0;
+        uint8_t arb_state_issue_scalar     = 0;
+        uint8_t arb_state_issue_vmem_tex   = 0;
+        uint8_t arb_state_issue_flat       = 0;
+        uint8_t arb_state_issue_exp        = 0;
+        uint8_t arb_state_issue_misc       = 0;
+        uint8_t arb_state_issue_brmsg      = 0;
+        uint8_t arb_state_stall_valu       = 0;
+        uint8_t arb_state_stall_matrix     = 0;
+        uint8_t arb_state_stall_lds        = 0;
+        uint8_t arb_state_stall_lds_direct = 0;
+        uint8_t arb_state_stall_scalar     = 0;
+        uint8_t arb_state_stall_vmem_tex   = 0;
+        uint8_t arb_state_stall_flat       = 0;
+        uint8_t arb_state_stall_exp        = 0;
+        uint8_t arb_state_stall_misc       = 0;
+        uint8_t arb_state_stall_brmsg      = 0;
+        // sampling_lock_error: stochastic only; relevant for gfx1250.
+        uint8_t sampling_lock_error = 0;
+        // Memory counters (stochastic only; valid when has_memory_counter != 0).
+        // load_cnt..km_cnt exist on gfx12+; async/tensor/xnack are gfx1250 only.
+        uint8_t has_memory_counter = 0;
+        uint8_t mem_load_cnt       = 0;
+        uint8_t mem_store_cnt      = 0;
+        uint8_t mem_bvh_cnt        = 0;
+        uint8_t mem_sample_cnt     = 0;
+        uint8_t mem_ds_cnt         = 0;
+        uint8_t mem_km_cnt         = 0;
+        uint8_t mem_async_cnt      = 0;
+        uint8_t mem_tensor_cnt     = 0;
+        uint8_t mem_xnack_cnt      = 0;
+    };
+#pragma pack(pop)
+
+    static_assert(sizeof(pc_sample_extdata_v2) == (4 * sizeof(uint32_t) + 43),
+                  "PC sample blob layout changed; update its schema version");
+    static_assert(alignof(pc_sample_extdata_v2) == 1, "PC sample blob must remain byte-packed");
+    static_assert(std::is_standard_layout_v<pc_sample_extdata_v2>);
+    static_assert(std::is_trivially_copyable_v<pc_sample_extdata_v2>);
+
+    // v2 extends v1 without disturbing the shared prefix: the first sizeof(v1) bytes
+    // of a v2 blob are byte-identical to a v1 blob, so a v2 buffer truncated to
+    // sizeof(v1) is a valid v1 record.  A sample without gfx1250 fields is stored as
+    // v1; one that carries them is stored as v2.
+    static_assert(
+        offsetof(pc_sample_extdata_v2, sampling_lock_error) == sizeof(pc_sample_extdata_v1),
+        "pc_sample_extdata_v2 must append new fields after the full v1 prefix");
+
+    // Schema-version indices, ordered oldest-first; used to index blob_versions.
+    // Append new versions at the end.
+    enum pc_sample_extdata_version : size_t
+    {
+        PC_SAMPLE_EXTDATA_V1 = 0,  // hw_id + generic + arbiter-state snapshot
+        PC_SAMPLE_EXTDATA_V2,      // + sampling_lock_error + memory counters (gfx12+/gfx1250)
+        PC_SAMPLE_EXTDATA_VERSION_COUNT
+    };
+
+    // A registered schema version: its rowid (schema_id) and the number of bytes
+    // written for samples that use it.
+    struct registered_blob_version
+    {
+        uint64_t schema_id = 0;
+        size_t   byte_size = 0;
+    };
 
     // ---------------------------------------------------------------------------
     // blob_field_desc — describes one field inside a packed blob struct.
@@ -2291,234 +2389,322 @@ write_rocpd(
         std::vector<blob_field_desc> fields;
     };
 
-    // PC sampling extdata schema: hw_id (both methods) + arbiter-state snapshot
-    // (stochastic only; arbiter fields remain zero for host-trap samples).
-    const auto pc_sample_extdata_v1_schema =
-        blob_schema_desc{"pc_sample_extdata_v1",
+    // PC sampling extdata schema (v2): hw_id (both methods) + arbiter-state snapshot,
+    // sampling_lock_error, and memory counters (stochastic only; these fields remain
+    // zero for host-trap samples).  async/tensor/xnack memory counters are populated
+    // on gfx1250.
+    const auto pc_sample_extdata_v2_schema =
+        blob_schema_desc{"pc_sample_extdata_v2",
                          "rocpd_gpu_pc_sample",
                          "PC sampling arch-specific fields (packed)",
                          "little",
                          int64_t{1},
-                         static_cast<int64_t>(sizeof(pc_sample_extdata_v1)),
-                         int64_t{1},
+                         static_cast<int64_t>(sizeof(pc_sample_extdata_v2)),
+                         int64_t{2},
                          {
                              {"hw_id_chiplet",
-                              offsetof(pc_sample_extdata_v1, hw_id_chiplet),
+                              offsetof(pc_sample_extdata_v2, hw_id_chiplet),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "HW ID chiplet index"},
                              {"hw_id_wave_id",
-                              offsetof(pc_sample_extdata_v1, hw_id_wave_id),
+                              offsetof(pc_sample_extdata_v2, hw_id_wave_id),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "HW ID wave slot index"},
                              {"hw_id_simd_id",
-                              offsetof(pc_sample_extdata_v1, hw_id_simd_id),
+                              offsetof(pc_sample_extdata_v2, hw_id_simd_id),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "HW ID SIMD index"},
                              {"hw_id_pipe_id",
-                              offsetof(pc_sample_extdata_v1, hw_id_pipe_id),
+                              offsetof(pc_sample_extdata_v2, hw_id_pipe_id),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "HW ID pipe index"},
                              {"hw_id_cu_or_wgp_id",
-                              offsetof(pc_sample_extdata_v1, hw_id_cu_or_wgp_id),
+                              offsetof(pc_sample_extdata_v2, hw_id_cu_or_wgp_id),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "HW ID CU (GFX9) or WGP (GFX10+) index"},
                              {"hw_id_shader_array_id",
-                              offsetof(pc_sample_extdata_v1, hw_id_shader_array_id),
+                              offsetof(pc_sample_extdata_v2, hw_id_shader_array_id),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "HW ID shader array index"},
                              {"hw_id_shader_engine_id",
-                              offsetof(pc_sample_extdata_v1, hw_id_shader_engine_id),
+                              offsetof(pc_sample_extdata_v2, hw_id_shader_engine_id),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "HW ID shader engine index"},
                              {"hw_id_workgroup_id",
-                              offsetof(pc_sample_extdata_v1, hw_id_workgroup_id),
+                              offsetof(pc_sample_extdata_v2, hw_id_workgroup_id),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "HW ID workgroup index"},
                              {"hw_id_vm_id",
-                              offsetof(pc_sample_extdata_v1, hw_id_vm_id),
+                              offsetof(pc_sample_extdata_v2, hw_id_vm_id),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "HW ID virtual memory ID"},
                              {"hw_id_queue_id",
-                              offsetof(pc_sample_extdata_v1, hw_id_queue_id),
+                              offsetof(pc_sample_extdata_v2, hw_id_queue_id),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "HW ID queue ID"},
                              {"hw_id_microengine_id",
-                              offsetof(pc_sample_extdata_v1, hw_id_microengine_id),
+                              offsetof(pc_sample_extdata_v2, hw_id_microengine_id),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "HW ID microengine (ACE) index"},
                              {"wave_in_group",
-                              offsetof(pc_sample_extdata_v1, wave_in_group),
+                              offsetof(pc_sample_extdata_v2, wave_in_group),
                               sizeof(uint32_t),
                               "uint32_t",
                               false,
                               "Wave position within workgroup"},
                              {"workgroup_id_x",
-                              offsetof(pc_sample_extdata_v1, workgroup_id_x),
+                              offsetof(pc_sample_extdata_v2, workgroup_id_x),
                               sizeof(uint32_t),
                               "uint32_t",
                               false,
                               "Workgroup coordinate X"},
                              {"workgroup_id_y",
-                              offsetof(pc_sample_extdata_v1, workgroup_id_y),
+                              offsetof(pc_sample_extdata_v2, workgroup_id_y),
                               sizeof(uint32_t),
                               "uint32_t",
                               false,
                               "Workgroup coordinate Y"},
                              {"workgroup_id_z",
-                              offsetof(pc_sample_extdata_v1, workgroup_id_z),
+                              offsetof(pc_sample_extdata_v2, workgroup_id_z),
                               sizeof(uint32_t),
                               "uint32_t",
                               false,
                               "Workgroup coordinate Z"},
                              {"dual_issue_valu",
-                              offsetof(pc_sample_extdata_v1, dual_issue_valu),
+                              offsetof(pc_sample_extdata_v2, dual_issue_valu),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Dual-issue VALU (stochastic only)"},
                              {"arb_state_issue_valu",
-                              offsetof(pc_sample_extdata_v1, arb_state_issue_valu),
+                              offsetof(pc_sample_extdata_v2, arb_state_issue_valu),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Arbiter issued VALU instruction"},
                              {"arb_state_issue_matrix",
-                              offsetof(pc_sample_extdata_v1, arb_state_issue_matrix),
+                              offsetof(pc_sample_extdata_v2, arb_state_issue_matrix),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Arbiter issued matrix instruction"},
                              {"arb_state_issue_lds",
-                              offsetof(pc_sample_extdata_v1, arb_state_issue_lds),
+                              offsetof(pc_sample_extdata_v2, arb_state_issue_lds),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Arbiter issued LDS instruction"},
                              {"arb_state_issue_lds_direct",
-                              offsetof(pc_sample_extdata_v1, arb_state_issue_lds_direct),
+                              offsetof(pc_sample_extdata_v2, arb_state_issue_lds_direct),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Arbiter issued LDS direct instruction"},
                              {"arb_state_issue_scalar",
-                              offsetof(pc_sample_extdata_v1, arb_state_issue_scalar),
+                              offsetof(pc_sample_extdata_v2, arb_state_issue_scalar),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Arbiter issued scalar instruction"},
                              {"arb_state_issue_vmem_tex",
-                              offsetof(pc_sample_extdata_v1, arb_state_issue_vmem_tex),
+                              offsetof(pc_sample_extdata_v2, arb_state_issue_vmem_tex),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Arbiter issued VMEM/TEX instruction"},
                              {"arb_state_issue_flat",
-                              offsetof(pc_sample_extdata_v1, arb_state_issue_flat),
+                              offsetof(pc_sample_extdata_v2, arb_state_issue_flat),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Arbiter issued FLAT instruction"},
                              {"arb_state_issue_exp",
-                              offsetof(pc_sample_extdata_v1, arb_state_issue_exp),
+                              offsetof(pc_sample_extdata_v2, arb_state_issue_exp),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Arbiter issued export instruction"},
                              {"arb_state_issue_misc",
-                              offsetof(pc_sample_extdata_v1, arb_state_issue_misc),
+                              offsetof(pc_sample_extdata_v2, arb_state_issue_misc),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Arbiter issued misc instruction"},
                              {"arb_state_issue_brmsg",
-                              offsetof(pc_sample_extdata_v1, arb_state_issue_brmsg),
+                              offsetof(pc_sample_extdata_v2, arb_state_issue_brmsg),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Arbiter issued branch/message instruction"},
                              {"arb_state_stall_valu",
-                              offsetof(pc_sample_extdata_v1, arb_state_stall_valu),
+                              offsetof(pc_sample_extdata_v2, arb_state_stall_valu),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "VALU stall"},
                              {"arb_state_stall_matrix",
-                              offsetof(pc_sample_extdata_v1, arb_state_stall_matrix),
+                              offsetof(pc_sample_extdata_v2, arb_state_stall_matrix),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Matrix stall"},
                              {"arb_state_stall_lds",
-                              offsetof(pc_sample_extdata_v1, arb_state_stall_lds),
+                              offsetof(pc_sample_extdata_v2, arb_state_stall_lds),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "LDS stall"},
                              {"arb_state_stall_lds_direct",
-                              offsetof(pc_sample_extdata_v1, arb_state_stall_lds_direct),
+                              offsetof(pc_sample_extdata_v2, arb_state_stall_lds_direct),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "LDS direct stall"},
                              {"arb_state_stall_scalar",
-                              offsetof(pc_sample_extdata_v1, arb_state_stall_scalar),
+                              offsetof(pc_sample_extdata_v2, arb_state_stall_scalar),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Scalar stall"},
                              {"arb_state_stall_vmem_tex",
-                              offsetof(pc_sample_extdata_v1, arb_state_stall_vmem_tex),
+                              offsetof(pc_sample_extdata_v2, arb_state_stall_vmem_tex),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "VMEM/TEX stall"},
                              {"arb_state_stall_flat",
-                              offsetof(pc_sample_extdata_v1, arb_state_stall_flat),
+                              offsetof(pc_sample_extdata_v2, arb_state_stall_flat),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Flat stall"},
                              {"arb_state_stall_exp",
-                              offsetof(pc_sample_extdata_v1, arb_state_stall_exp),
+                              offsetof(pc_sample_extdata_v2, arb_state_stall_exp),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Export stall"},
                              {"arb_state_stall_misc",
-                              offsetof(pc_sample_extdata_v1, arb_state_stall_misc),
+                              offsetof(pc_sample_extdata_v2, arb_state_stall_misc),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Misc stall"},
                              {"arb_state_stall_brmsg",
-                              offsetof(pc_sample_extdata_v1, arb_state_stall_brmsg),
+                              offsetof(pc_sample_extdata_v2, arb_state_stall_brmsg),
                               sizeof(uint8_t),
                               "uint8_t",
                               false,
                               "Branch/message stall"},
+                             {"sampling_lock_error",
+                              offsetof(pc_sample_extdata_v2, sampling_lock_error),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Sampling lock error (stochastic; gfx1250)"},
+                             {"has_memory_counter",
+                              offsetof(pc_sample_extdata_v2, has_memory_counter),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Whether memory counters are valid for this sample"},
+                             {"mem_load_cnt",
+                              offsetof(pc_sample_extdata_v2, mem_load_cnt),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Outstanding VMEM load instructions"},
+                             {"mem_store_cnt",
+                              offsetof(pc_sample_extdata_v2, mem_store_cnt),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Outstanding VMEM store instructions"},
+                             {"mem_bvh_cnt",
+                              offsetof(pc_sample_extdata_v2, mem_bvh_cnt),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Outstanding VMEM BVH instructions"},
+                             {"mem_sample_cnt",
+                              offsetof(pc_sample_extdata_v2, mem_sample_cnt),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Outstanding VMEM sample instructions"},
+                             {"mem_ds_cnt",
+                              offsetof(pc_sample_extdata_v2, mem_ds_cnt),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Outstanding LDS instructions"},
+                             {"mem_km_cnt",
+                              offsetof(pc_sample_extdata_v2, mem_km_cnt),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Outstanding scalar memory instructions"},
+                             {"mem_async_cnt",
+                              offsetof(pc_sample_extdata_v2, mem_async_cnt),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Outstanding async instructions (gfx1250)"},
+                             {"mem_tensor_cnt",
+                              offsetof(pc_sample_extdata_v2, mem_tensor_cnt),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Outstanding tensor instructions (gfx1250)"},
+                             {"mem_xnack_cnt",
+                              offsetof(pc_sample_extdata_v2, mem_xnack_cnt),
+                              sizeof(uint8_t),
+                              "uint8_t",
+                              false,
+                              "Outstanding memory instructions not yet reported (gfx1250)"},
                          }};
+
+    // v1 schema: the shared prefix of v2 (hw_id + generic + arbiter-state).  The
+    // descriptors are exactly v2's leading fields -- identical offsets, sizes and
+    // types -- so derive them from v2's list up to the first v2-only field to keep
+    // the two layouts from drifting apart.
+    const auto pc_sample_extdata_v1_schema = [&]() {
+        const auto& _v2_fields = pc_sample_extdata_v2_schema.fields;
+        auto        _prefix_end =
+            std::find_if(_v2_fields.begin(), _v2_fields.end(), [](const blob_field_desc& _f) {
+                return _f.name == "sampling_lock_error";
+            });
+        return blob_schema_desc{"pc_sample_extdata_v1",
+                                "rocpd_gpu_pc_sample",
+                                "PC sampling arch-specific fields (packed, v1)",
+                                "little",
+                                int64_t{1},
+                                static_cast<int64_t>(sizeof(pc_sample_extdata_v1)),
+                                int64_t{1},
+                                std::vector<blob_field_desc>(_v2_fields.begin(), _prefix_end)};
+    }();
 
     // ---------------------------------------------------------------------------
     // Design note:
@@ -2597,8 +2783,9 @@ write_rocpd(
                                     this_pid,
                                     &dispatch_to_evt_id,
                                     &dispatch_to_agent_id,
-                                    &dispatch_to_thread_id](const auto& pc_sampling_gen,
-                                                            uint64_t    ext_schema_id) {
+                                    &dispatch_to_thread_id](
+                                       const auto&                                 pc_sampling_gen,
+                                       const std::vector<registered_blob_version>& blob_versions) {
         if(pc_sampling_gen.empty()) return;
 
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_gpu_pc_sample");
@@ -2631,9 +2818,12 @@ write_rocpd(
                 auto inst_type    = std::optional<int64_t>{};
                 auto stall_reason = std::optional<int64_t>{};
 
-                // Build the packed extdata blob from hw_id (always present) and
-                // arbiter-state snapshot (stochastic only).
-                auto extdata                  = pc_sample_extdata_v1{};
+                // Build the packed extdata blob from hw_id (always present) plus the
+                // arbiter-state snapshot and memory counters (stochastic only).  A sample
+                // uses the richer v2 layout only when it carries gfx1250 data (memory
+                // counters); otherwise it is written with the compact v1 layout.
+                auto   extdata                = pc_sample_extdata_v2{};
+                size_t version_idx            = PC_SAMPLE_EXTDATA_V1;
                 extdata.hw_id_chiplet         = static_cast<uint8_t>(record.hw_id.chiplet);
                 extdata.hw_id_wave_id         = static_cast<uint8_t>(record.hw_id.wave_id);
                 extdata.hw_id_simd_id         = static_cast<uint8_t>(record.hw_id.simd_id);
@@ -2684,12 +2874,36 @@ write_rocpd(
                     SET_ARB_FIELD(arb_state_stall_exp);
                     SET_ARB_FIELD(arb_state_stall_misc);
                     SET_ARB_FIELD(arb_state_stall_brmsg);
+                    SET_ARB_FIELD(sampling_lock_error);
 #undef SET_ARB_FIELD
+
+                    // Memory counters (gfx12+, with async/tensor/xnack on gfx1250).
+                    // Only meaningful when the sample reports has_memory_counter; its
+                    // presence is what selects the richer v2 blob layout.
+                    extdata.has_memory_counter =
+                        static_cast<uint8_t>(record.flags.has_memory_counter ? 1 : 0);
+                    if(record.flags.has_memory_counter)
+                    {
+                        version_idx            = PC_SAMPLE_EXTDATA_V2;
+                        const auto& _mc        = record.memory_counters;
+                        extdata.mem_load_cnt   = static_cast<uint8_t>(_mc.load_cnt);
+                        extdata.mem_store_cnt  = static_cast<uint8_t>(_mc.store_cnt);
+                        extdata.mem_bvh_cnt    = static_cast<uint8_t>(_mc.bvh_cnt);
+                        extdata.mem_sample_cnt = static_cast<uint8_t>(_mc.sample_cnt);
+                        extdata.mem_ds_cnt     = static_cast<uint8_t>(_mc.ds_cnt);
+                        extdata.mem_km_cnt     = static_cast<uint8_t>(_mc.km_cnt);
+                        extdata.mem_async_cnt  = static_cast<uint8_t>(_mc.async_cnt);
+                        extdata.mem_tensor_cnt = static_cast<uint8_t>(_mc.tensor_cnt);
+                        extdata.mem_xnack_cnt  = static_cast<uint8_t>(_mc.xnack_cnt);
+                    }
                 }
 
                 // Serialise the packed struct to raw bytes for rocpd_blob_event, reusing a
-                // pooled buffer to avoid a heap allocation per sample.
-                auto blob_bytes = db.acquire_blob_buffer(&extdata, sizeof(pc_sample_extdata_v1));
+                // pooled buffer to avoid a heap allocation per sample.  Older versions copy
+                // only their leading prefix of the struct; the trailing fields are omitted.
+                const auto& _ver           = blob_versions[version_idx];
+                const auto  blob_schema_id = _ver.schema_id;
+                auto        blob_bytes     = db.acquire_blob_buffer(&extdata, _ver.byte_size);
 
                 const auto sample_event_id = create_event(
                     db,
@@ -2705,7 +2919,7 @@ write_rocpd(
                         insert_value("nid", node_id),
                         insert_value("pid", this_pid),
                         insert_value("event_id", static_cast<int64_t>(sample_event_id)),
-                        insert_value("schema_id", static_cast<int64_t>(ext_schema_id)),
+                        insert_value("schema_id", static_cast<int64_t>(blob_schema_id)),
                         insert_blob_value("blob", std::move(blob_bytes)),
                     });
 
@@ -2792,24 +3006,35 @@ write_rocpd(
     insert_graph_launch_data(graph_launch_gen);
 
     {
-        // Register the blob schema once, then pass the resulting id to both sampling loops.
-        // The schema covers hw_id (both methods) and arbiter-state snapshot (stochastic only).
+        // Register every schema version, then hand the ids to both sampling loops.
+        // Each version is a byte-prefix of pc_sample_extdata; a sample is stored with
+        // the smallest version that still captures its data (see the insert loop).
         const bool has_pc_sampling =
             !pc_sampling_host_trap_gen.empty() || !pc_sampling_stochastic_gen.empty();
 
         if(has_pc_sampling)
         {
+            // Register each schema version and collect its {schema_id, byte_size} into a
+            // single vector indexed by pc_sample_extdata_version.  Passing this one vector
+            // (rather than one schema-id argument per version) keeps the interface stable
+            // as new versions are added.
+            //
             // register_blob_schema flushes the schema row and returns its (nonzero) rowid,
-            // or aborts via ROCP_FATAL_IF if the insert fails; it never returns 0 here.
-            const auto ext_schema_id = register_blob_schema(pc_sample_extdata_v1_schema);
+            // or aborts via ROCP_FATAL_IF; it never returns 0 here.
+            auto blob_versions = std::vector<registered_blob_version>{};
+            blob_versions.reserve(PC_SAMPLE_EXTDATA_VERSION_COUNT);
+            blob_versions.push_back(registered_blob_version{
+                register_blob_schema(pc_sample_extdata_v1_schema), sizeof(pc_sample_extdata_v1)});
+            blob_versions.push_back(registered_blob_version{
+                register_blob_schema(pc_sample_extdata_v2_schema), sizeof(pc_sample_extdata_v2)});
 
             if(cfg.complete_isa_decode)
                 ROCP_WARNING << "PC sampling instruction disassembly is enabled "
                                 "(--complete-isa-decode); the output database size "
                                 "may increase significantly.";
 
-            insert_pc_sampling_data(pc_sampling_host_trap_gen, ext_schema_id);
-            insert_pc_sampling_data(pc_sampling_stochastic_gen, ext_schema_id);
+            insert_pc_sampling_data(pc_sampling_host_trap_gen, blob_versions);
+            insert_pc_sampling_data(pc_sampling_stochastic_gen, blob_versions);
         }
     }
 
