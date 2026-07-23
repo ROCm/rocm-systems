@@ -2263,11 +2263,17 @@ pub enum AmdsmiGpuBlockT {
     AmdsmiGpuBlockMpio = 262144,
     AmdsmiGpuBlockReserved = 9223372036854775808,
 }
+impl AmdsmiClkLimitTypeT {
+    pub const ClkLimitMin: AmdsmiClkLimitTypeT = AmdsmiClkLimitTypeT::AmdsmiClkLimitMin;
+}
+impl AmdsmiClkLimitTypeT {
+    pub const ClkLimitMax: AmdsmiClkLimitTypeT = AmdsmiClkLimitTypeT::AmdsmiClkLimitMax;
+}
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum AmdsmiClkLimitTypeT {
-    ClkLimitMin = 0,
-    ClkLimitMax = 1,
+    AmdsmiClkLimitMin = 0,
+    AmdsmiClkLimitMax = 1,
 }
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]

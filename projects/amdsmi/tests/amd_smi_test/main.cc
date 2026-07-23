@@ -25,6 +25,7 @@
 
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "functional/api_support_read.h"
+#include "functional/clock_limit_read_write.h"
 #include "functional/computepartition_memallocmode_read_write.h"
 #include "functional/computepartition_read_write.h"
 #include "functional/cross_process_serialization.h"
@@ -183,6 +184,13 @@ TEST(amdsmitstReadWrite, TestFrequenciesReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestFrequenciesReadWrite tst;
+  RunGenericTest(&tst);
+}
+
+TEST(amdsmitstReadWrite, TestClockLimitReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestClockLimitReadWrite tst;
   RunGenericTest(&tst);
 }
 
