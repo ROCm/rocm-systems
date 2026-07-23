@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Preflight replay compatibility using HRR manifest metadata (PR #8680).
+"""Preflight replay compatibility using HRR manifest metadata.
 
 Cross-platform: works on Linux (--mode host|docker) and Windows (--mode host only).
 Docker replay on Windows is not supported; the script exits with an informative error.
