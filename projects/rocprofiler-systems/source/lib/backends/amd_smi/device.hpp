@@ -51,6 +51,7 @@ concept session_gpu_queries =
             T::TEMPERATURE_TYPE_EDGE
         } -> std::convertible_to<typename T::temperature_type_t>;
         { sess.get_gpu_asic_info(ph, aip) };
+        { sess.get_device_bdf(ph) } -> std::convertible_to<std::string>;
         { sess.get_metrics_info(ph) } -> std::convertible_to<typename T::gpu_metrics_t>;
         { sess.get_memory_usage(ph, mt, u64p) };
         { sess.get_temp_metric(ph, tt, tm) } -> std::convertible_to<std::int64_t>;
@@ -135,6 +136,12 @@ public:
         typename Backend::asic_info_t raw{};
         m_session->get_gpu_asic_info(m_handle, &raw);
         return { raw.market_name, raw.vendor_name };
+    }
+
+    // Canonical PCIe BDF ("domain:bus:device.function") of this device.
+    [[nodiscard]] std::string get_bdf() const
+    {
+        return m_session->get_device_bdf(m_handle);
     }
 
     [[nodiscard]] metrics get_metrics() const

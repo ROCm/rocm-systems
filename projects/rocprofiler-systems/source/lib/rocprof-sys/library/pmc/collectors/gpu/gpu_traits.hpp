@@ -4,6 +4,7 @@
 #pragma once
 
 #include "core/config.hpp"
+#include "core/gpu.hpp"
 #include "library/pmc/collectors/gpu/device.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/common/types.hpp"
@@ -12,6 +13,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <set>
+#include <string>
 #include <vector>
 
 namespace rocprofsys::pmc::collectors::gpu
@@ -155,7 +158,8 @@ struct gpu_traits
             return entries;
         }
 
-        auto devices = provider->template get_gpu_devices<device_t>();
+        auto       devices      = provider->template get_gpu_devices<device_t>();
+        const auto visible_bdfs = rocprofsys::gpu::get_visible_gpu_bdfs();
 
         for(auto& device : devices)
         {
@@ -164,6 +168,17 @@ struct gpu_traits
             bool should_include = (filter.mode == device_selection_mode::ALL) ||
                                   (filter.mode == device_selection_mode::SPECIFIC &&
                                    filter.indices.count(index) > 0);
+
+            if(should_include && restrict_visibility &&
+               !is_runtime_visible(device, visible_bdfs))
+            {
+                LOG_INFO("{} device [{}] (BDF {}) is not visible to the ROCm runtime "
+                         "(ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES); excluding from "
+                         "sampling",
+                         device_name, index,
+                         device->get_bdf().empty() ? "unknown" : device->get_bdf());
+                should_include = false;
+            }
 
             if(should_include && device->is_supported())
             {
@@ -174,6 +189,26 @@ struct gpu_traits
 
         warn_invalid_indices(filter, devices.size());
         return entries;
+    }
+
+    /**
+     * @brief Whether a device is visible to the ROCm runtime.
+     *
+     * Correlates the device's PCIe BDF against the set of runtime-visible BDFs. Devices
+     * whose BDF cannot be determined are treated as not visible
+     */
+    static bool is_runtime_visible(const device_ptr_t&          device,
+                                   const std::set<std::string>& visible_bdfs)
+    {
+        const auto& bdf = device->get_bdf();
+        if(bdf.empty())
+        {
+            LOG_WARNING("{} device [{}] has no PCIe BDF; cannot verify runtime "
+                        "visibility, excluding from sampling",
+                        device_name, device->get_index());
+            return false;
+        }
+        return visible_bdfs.count(bdf) > 0;
     }
 
     /**

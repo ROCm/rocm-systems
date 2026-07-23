@@ -102,6 +102,32 @@ TEST_F(DeviceBackendTest, get_gpu_asic_info_error_message_contains_function_name
         std::runtime_error);
 }
 
+// ── get_bdf ───────────────────────────────────────────────────────────────
+
+TEST_F(DeviceBackendTest, get_bdf_formats_canonical_string)
+{
+    testing::mock_bdf_t raw{};
+    raw.domain_number   = 0x0000;
+    raw.bus_number      = 0x03;
+    raw.device_number   = 0x00;
+    raw.function_number = 0x0;
+
+    EXPECT_CALL(*testing::g_mock_backend, get_gpu_device_bdf(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_EQ(sut.get_bdf(), "0000:03:00.0");
+}
+
+TEST_F(DeviceBackendTest, get_bdf_throws_on_backend_error)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_gpu_device_bdf(k_handle, _))
+        .WillOnce(Return(k_err));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_THROW(static_cast<void>(sut.get_bdf()), std::runtime_error);
+}
+
 // ── get_metrics — power ───────────────────────────────────────────────────
 
 TEST_F(DeviceBackendTest, get_metrics_maps_power_fields)

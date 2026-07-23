@@ -14,10 +14,12 @@
     }  // namespace ::tim::cereal
 
 #include "common/defines.h"
+#include "common/pci_bdf.hpp"
 #include "gpu.hpp"
 
 #include <timemory/manager.hpp>
 
+#include <set>
 #include <string>
 
 #include "core/agent_manager.hpp"
@@ -103,10 +105,19 @@ query_rocm_agents()
             cur_agent.node_id              = _agent->node_id;
             cur_agent.logical_node_id      = _agent->logical_node_id;
             cur_agent.logical_node_type_id = _agent->logical_node_type_id;
-            cur_agent.name                 = std::string(_agent->name);
-            cur_agent.model_name           = std::string(_agent->model_name);
-            cur_agent.vendor_name          = std::string(_agent->vendor_name);
-            cur_agent.product_name         = std::string(_agent->product_name);
+            cur_agent.location_id          = _agent->location_id;
+            cur_agent.domain               = _agent->domain;
+#if(ROCPROFILER_VERSION >= 600)
+            // runtime_visibility.hip honors both ROCR_VISIBLE_DEVICES and
+            // HIP_VISIBLE_DEVICES (hip visibility requires hsa visibility).
+            cur_agent.hip_visible = (_agent->runtime_visibility.hip != 0);
+#else
+            cur_agent.hip_visible = true;
+#endif
+            cur_agent.name         = std::string(_agent->name);
+            cur_agent.model_name   = std::string(_agent->model_name);
+            cur_agent.vendor_name  = std::string(_agent->vendor_name);
+            cur_agent.product_name = std::string(_agent->product_name);
 
             cur_agent.agent_info = agent_info::to_json_string(*_agent);
 
@@ -134,6 +145,24 @@ device_count()
 {
     static int _num_devices = query_rocm_agents();
     return _num_devices;
+}
+
+std::set<std::string>
+get_visible_gpu_bdfs()
+{
+    // Ensure the rocprofiler-sdk agents (and their runtime_visibility) are populated.
+    device_count();
+
+    std::set<std::string> _bdfs;
+    for(const auto& _agent :
+        get_agent_manager_instance().get_agents_by_type(agent_type::GPU))
+    {
+        if(!_agent) continue;
+        if(!_agent->hip_visible) continue;
+        _bdfs.insert(
+            common::format_pci_bdf_from_location_id(_agent->domain, _agent->location_id));
+    }
+    return _bdfs;
 }
 
 bool

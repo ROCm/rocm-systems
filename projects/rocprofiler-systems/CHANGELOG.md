@@ -45,6 +45,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+- `ROCPROFSYS_SAMPLING_GPUS` is now restricted by the GPUs the ROCm runtime exposes
+  via `ROCR_VISIBLE_DEVICES` / `HIP_VISIBLE_DEVICES`.
+
 - `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
 
 - Introduced the new `profiler-hub` writer backend for trace persistence, as a

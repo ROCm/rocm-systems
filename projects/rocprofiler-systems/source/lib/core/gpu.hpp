@@ -7,6 +7,9 @@
 
 #include <amd_smi/amdsmi.h>
 #include <cstdint>
+#include <set>
+#include <string>
+#include <vector>
 
 namespace rocprofsys
 {
@@ -67,6 +70,12 @@ private:
 
 int
 device_count();
+
+// Canonical PCIe BDF strings ("domain:bus:device.function") of the GPUs that the ROCm
+// runtime considers visible, per rocprofiler-sdk runtime_visibility (which honors
+// ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES / CUDA_VISIBLE_DEVICES)
+std::set<std::string>
+get_visible_gpu_bdfs();
 
 bool
 initialize_amdsmi();

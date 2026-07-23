@@ -9,6 +9,7 @@
 #include <concepts>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <spdlog/fmt/fmt.h>
 #include <stdexcept>
 #include <string>
@@ -20,6 +21,7 @@ namespace rocprofsys::pmc::collectors::gpu
 template <typename Backend>
 concept gpu_backend_contract = requires(const Backend backend) {
     { backend.get_gpu_asic_info() } -> std::same_as<asic_info>;
+    { backend.get_bdf() } -> std::same_as<std::string>;
     { backend.get_metrics() } -> std::same_as<metrics>;
     { backend.get_memory_usage() } -> std::same_as<std::uint64_t>;
     { backend.get_hotspot_temperature() } -> std::same_as<std::int64_t>;
@@ -61,6 +63,26 @@ public:
     [[nodiscard]] const std::string& get_vendor_name() const noexcept
     {
         return m_vendor_name;
+    }
+
+    // Canonical PCIe BDF ("domain:bus:device.function") of this device, queried lazily
+    // and cached. Used to correlate this AMD SMI device against runtime-visible
+    // rocprofiler-sdk agents (see gpu_traits::enumerate_devices). Returns an empty
+    // string if the backend cannot report a BDF.
+    [[nodiscard]] const std::string& get_bdf() const
+    {
+        if(!m_bdf.has_value())
+        {
+            try
+            {
+                m_bdf = m_backend->get_bdf();
+            } catch(const std::runtime_error& e)
+            {
+                LOG_DEBUG("GPU device [{}] BDF query failed: {}", m_index, e.what());
+                m_bdf = std::string{};
+            }
+        }
+        return *m_bdf;
     }
 
     [[nodiscard]] metrics get_metrics([[maybe_unused]] const enabled_metrics& enabled_cfg,
@@ -375,14 +397,15 @@ private:
         bool          has_prev        = false;
     };
 
-    std::shared_ptr<Backend> m_backend;
-    enabled_metrics          m_supported_metrics;
-    size_t                   m_index;
-    std::string              m_device_name;
-    std::string              m_product_name;
-    std::string              m_vendor_name;
-    bool                     m_is_supported = false;
-    sdma_state               m_sdma_state;
+    std::shared_ptr<Backend>           m_backend;
+    enabled_metrics                    m_supported_metrics;
+    size_t                             m_index;
+    std::string                        m_device_name;
+    std::string                        m_product_name;
+    std::string                        m_vendor_name;
+    mutable std::optional<std::string> m_bdf;
+    bool                               m_is_supported = false;
+    sdma_state                         m_sdma_state;
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu
