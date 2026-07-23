@@ -47,7 +47,7 @@ The preceding output shows that the TCC_MISS counter can be sampled.
 
 .. note::
    For proper functioning, SPM requires AMD GPU Driver version **6.19.14.31400000** or later.
-   Verify the loaded ``amdgpu`` kernel module version before using SPM.
+   Before using SPM, verify the loaded ``amdgpu`` kernel module version.
 
 To check the driver version, use:
 
