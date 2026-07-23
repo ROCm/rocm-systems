@@ -13,6 +13,12 @@ import pandas as pd
 
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
+from pc_sampling.code_object_analysis import (
+    load_code_object_disassemblies,
+)
+from pc_sampling.pc_sampling_analysis import (
+    load_aggregated_pc_sampling,
+)
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED
 from utils import schema, utils_analysis
@@ -47,10 +53,6 @@ from utils.metrics.noise_clamper import (
     to_noise_clamp,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.pc_sampling_analysis import (
-    InstructionLineRecord,
-    load_aggregated_pc_sampling,
-)
 from utils.roofline_calc import (
     SUPPORTED_DATATYPES,
     OpsSupport,
@@ -211,8 +213,9 @@ class db_analysis(OmniAnalyze_Base):
                     )
                 )
 
-            # Add pc sampling data
+            # Add pc sampling data, then the full code-object ISA
             self.add_pc_sampling_data(workload_path, workload_obj, kernel_objs)
+            self.add_code_object_isa(workload_path, workload_obj, kernel_objs)
 
             # Add metrics and values - iterate on values, create metrics as needed
             self.run_analysis_metrics(workload_path, workload_obj, kernel_objs)
@@ -405,57 +408,144 @@ class db_analysis(OmniAnalyze_Base):
             )
             Database.get_session().add(code_object_store)
             for line in code_object.instruction_lines:
-                self._add_instruction_line(line, code_object_store, kernel_objs)
+                kernel = kernel_objs.get(line.kernel_name)
+                if kernel is None:
+                    # Drop lines whose kernel was filtered out or never mapped.
+                    continue
+                instruction_line = orm.InstructionLine(
+                    code_object_offset=line.code_object_offset,
+                    comment=line.comment,
+                    instruction=line.instruction,
+                    code_object_store=code_object_store,
+                    kernel=kernel,
+                )
+                Database.get_session().add(instruction_line)
 
-    @staticmethod
-    def _add_instruction_line(
-        line: InstructionLineRecord,
-        code_object_store: orm.CodeObjectStore,
+                sample_state = orm.PCSampleState(
+                    total_count=line.total_count,
+                    issue_count=line.issue_count,
+                    stall_count=line.stall_count,
+                    instruction_line=instruction_line,
+                )
+                Database.get_session().add(sample_state)
+
+                for text, count in line.stall_reasons.items():
+                    Database.get_session().add(
+                        orm.PCSampleStallReason(
+                            pc_sample_state=sample_state,
+                            stall_reason_lookup=Database.get_or_create_type(
+                                orm.PCSampleStallReasonLookup, text
+                            ),
+                            count=count,
+                        )
+                    )
+                for text, count in line.inst_types.items():
+                    Database.get_session().add(
+                        orm.InstructionSample(
+                            pc_sample_state=sample_state,
+                            instruction_sample_lookup=Database.get_or_create_type(
+                                orm.InstructionSampleLookup, text
+                            ),
+                            count=count,
+                        )
+                    )
+
+    def add_code_object_isa(
+        self,
+        workload_path: str,
+        workload_obj: orm.Workload,
         kernel_objs: dict[str, orm.Kernel],
     ) -> None:
-        """Insert one instruction line, its sample state, and child counts."""
-        kernel = kernel_objs.get(line.kernel_name)
-        if kernel is None:
-            # Drop lines whose kernel was filtered out or never mapped.
-            return
+        """Add dispatched kernels' disassembly as instruction lines,
+        skipping any offset already present."""
+        tool_data = self._pc_sampling_tool_data_per_workload.get(workload_path)
+        # load_base is known only for the surviving ps_file pid, and
+        # code_object_id collides across pids, so scope ISA to that pid.
+        surviving_pid = (tool_data or {}).get("metadata", {}).get("pid")
+        load_base_by_id = {
+            code_object["code_object_id"]: code_object.get("load_base")
+            for code_object in (tool_data or {}).get("code_objects", [])
+        }
+        # The disassembly carries the mangled ELF symbol; kernel_objs is keyed by
+        # the demangled name. kernel_symbols bridges the two per code object.
+        kernel_by_symbol = {
+            (
+                symbol["code_object_id"],
+                symbol["kernel_name"].removesuffix(".kd"),
+            ): kernel
+            for symbol in (tool_data or {}).get("kernel_symbols", [])
+            if (kernel := kernel_objs.get(symbol["formatted_kernel_name"])) is not None
+        }
+        # A code object is worth storing only if one of its symbols was dispatched.
+        invoked_code_object_ids = {
+            code_object_id for code_object_id, _ in kernel_by_symbol
+        }
+        # Reuse an existing code object instead of creating a duplicate.
+        existing_code_objects = {
+            (store.pid, store.code_object_id): store
+            for store in workload_obj.code_object_stores
+        }
 
-        instruction_line = orm.InstructionLine(
-            code_object_offset=line.code_object_offset,
-            comment=line.comment,
-            instruction=line.instruction,
-            code_object_store=code_object_store,
-            kernel=kernel,
-        )
-        Database.get_session().add(instruction_line)
+        for pid, disassemblies in load_code_object_disassemblies(workload_path).items():
+            if pid != surviving_pid:
+                continue
+            for disassembly in disassemblies:
+                if disassembly.code_object_id not in invoked_code_object_ids:
+                    continue
 
-        sample_state = orm.PCSampleState(
-            total_count=line.total_count,
-            issue_count=line.issue_count,
-            stall_count=line.stall_count,
-            instruction_line=instruction_line,
-        )
-        Database.get_session().add(sample_state)
+                code_object_store = existing_code_objects.get((
+                    pid,
+                    disassembly.code_object_id,
+                ))
+                if code_object_store is None:
+                    code_object_store = orm.CodeObjectStore(
+                        pid=pid,
+                        code_object_id=disassembly.code_object_id,
+                        load_base=load_base_by_id.get(disassembly.code_object_id),
+                        workload=workload_obj,
+                    )
+                    Database.get_session().add(code_object_store)
+                    existing_code_objects[(pid, disassembly.code_object_id)] = (
+                        code_object_store
+                    )
 
-        for text, count in line.stall_reasons.items():
-            Database.get_session().add(
-                orm.PCSampleStallReason(
-                    pc_sample_state=sample_state,
-                    stall_reason_lookup=Database.get_or_create_type(
-                        orm.PCSampleStallReasonLookup, text
-                    ),
-                    count=count,
-                )
-            )
-        for text, count in line.inst_types.items():
-            Database.get_session().add(
-                orm.InstructionSample(
-                    pc_sample_state=sample_state,
-                    instruction_sample_lookup=Database.get_or_create_type(
-                        orm.InstructionSampleLookup, text
-                    ),
-                    count=count,
-                )
-            )
+                # The disassembly's own offset is into the ELF file, not the
+                # offset the PC-sampling rows use (measured from the code
+                # object's load address). Without that load address we can't
+                # derive it, so skip this ISA.
+                if code_object_store.load_base is None:
+                    console_debug(
+                        "Code object info: skipped adding ISA for code object "
+                        f"{disassembly.code_object_id} with no load_base"
+                    )
+                    continue
+
+                existing_offsets = {
+                    line.code_object_offset
+                    for line in code_object_store.instruction_lines
+                }
+                for instruction in disassembly.instructions:
+                    kernel = kernel_by_symbol.get((
+                        disassembly.code_object_id,
+                        instruction.kernel_name,
+                    ))
+                    if kernel is None:
+                        continue
+                    code_object_offset = (
+                        instruction.virtual_address - code_object_store.load_base
+                    )
+                    if code_object_offset in existing_offsets:
+                        continue
+                    existing_offsets.add(code_object_offset)
+                    Database.get_session().add(
+                        orm.InstructionLine(
+                            code_object_offset=code_object_offset,
+                            comment=instruction.comment,
+                            instruction=instruction.instruction,
+                            code_object_store=code_object_store,
+                            kernel=kernel,
+                        )
+                    )
 
     @staticmethod
     def evaluate(
