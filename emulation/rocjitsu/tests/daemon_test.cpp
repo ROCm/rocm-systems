@@ -131,6 +131,41 @@ const char *hip_rccl_bin() { return test_paths().hip_rccl_bin.c_str(); }
 
 const char *interposer_dup_bin() { return test_paths().interposer_dup_bin.c_str(); }
 
+TEST(RocjitsuCliDaemon, LaunchesApplicationAfterDaemonIsReady) {
+  const char *xdg = std::getenv("XDG_RUNTIME_DIR");
+  std::string tmp_dir = std::string(xdg ? xdg : "/tmp") + "/rocjitsu-launch-XXXXXX";
+  ASSERT_NE(mkdtemp(tmp_dir.data()), nullptr) << "mkdtemp failed: " << strerror(errno);
+  struct TempCleanup {
+    std::string path;
+    ~TempCleanup() {
+      std::error_code error;
+      std::filesystem::remove_all(path, error);
+    }
+  } cleanup{tmp_dir};
+  const std::string runtime_dir = tmp_dir + "/rocjitsu";
+  const std::string socket_path = runtime_dir + "/daemon.sock";
+
+  const pid_t launcher = fork();
+  ASSERT_GE(launcher, 0) << "fork failed: " << strerror(errno);
+  if (launcher == 0) {
+    setenv("XDG_RUNTIME_DIR", tmp_dir.c_str(), 1);
+    setenv("ROCJITSU_RUNTIME_DIR", runtime_dir.c_str(), 1);
+    execl(daemon_bin(), daemon_bin(), "--daemon", "--config", daemon_config(), "--",
+          hip_vector_add_bin(), "--gtest_filter=HipVectorAddTest.CorrectResult", nullptr);
+    _exit(127);
+  }
+
+  int status = 0;
+  ASSERT_EQ(waitpid(launcher, &status, 0), launcher);
+  EXPECT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0);
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (std::filesystem::exists(socket_path) && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  EXPECT_FALSE(std::filesystem::exists(socket_path));
+}
+
 class DaemonTest : public ::testing::Test {
 protected:
   void SetUp() override {
@@ -170,9 +205,12 @@ protected:
 
   void TearDown() override {
     if (daemon_pid_ > 0) {
-      kill(daemon_pid_, SIGKILL);
+      EXPECT_EQ(kill(daemon_pid_, SIGTERM), 0);
       int status = 0;
-      waitpid(daemon_pid_, &status, 0);
+      EXPECT_EQ(waitpid(daemon_pid_, &status, 0), daemon_pid_);
+      EXPECT_TRUE(WIFEXITED(status));
+      EXPECT_EQ(WEXITSTATUS(status), 0);
+      EXPECT_FALSE(std::filesystem::exists(sock_path_));
       daemon_pid_ = -1;
     }
     std::filesystem::remove_all(tmp_dir_);
@@ -281,6 +319,25 @@ TEST_F(DaemonTest, HipVectorAdd) {
   EXPECT_EQ(r.exit_code, 0) << r.output;
 }
 
+TEST_F(DaemonTest, AttachExecFailurePreservesDaemonSocket) {
+  const pid_t client = fork();
+  ASSERT_GE(client, 0) << "fork failed: " << strerror(errno);
+  if (client == 0) {
+    setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
+    setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
+    execl(daemon_bin(), daemon_bin(), "--attach", "--config", daemon_config(), "--",
+          "/does/not/exist", nullptr);
+    _exit(127);
+  }
+
+  int status = 0;
+  ASSERT_EQ(waitpid(client, &status, 0), client);
+  EXPECT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 1);
+  EXPECT_TRUE(std::filesystem::is_socket(sock_path_));
+  EXPECT_TRUE(daemon_ready(sock_path_));
+}
+
 // --- hip_memcpy_test ---
 
 TEST_F(DaemonTest, HipMemcpyRoundTripFloat) {
@@ -387,9 +444,12 @@ protected:
 
   void TearDown() override {
     if (daemon_pid_ > 0) {
-      kill(daemon_pid_, SIGKILL);
+      EXPECT_EQ(kill(daemon_pid_, SIGTERM), 0);
       int status = 0;
-      waitpid(daemon_pid_, &status, 0);
+      EXPECT_EQ(waitpid(daemon_pid_, &status, 0), daemon_pid_);
+      EXPECT_TRUE(WIFEXITED(status));
+      EXPECT_EQ(WEXITSTATUS(status), 0);
+      EXPECT_FALSE(std::filesystem::exists(sock_path_));
       daemon_pid_ = -1;
     }
     std::filesystem::remove_all(tmp_dir_);

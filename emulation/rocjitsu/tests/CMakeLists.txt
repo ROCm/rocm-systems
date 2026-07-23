@@ -336,6 +336,7 @@ add_executable(
     rvsim_test.cpp
     amdgpu_vm_test.cpp
     config_test.cpp
+    daemon_api_test.cpp
     matmul_test.cpp
     vector_add_test.cpp
     gfx1250_sim_test.cpp
@@ -375,6 +376,7 @@ add_executable(
     scalar_scc_test.cpp
     cdna3_predicate_mask_test.cpp
     decode_execute_benchmark.cpp
+    util_unique_handle_test.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
@@ -1976,7 +1978,9 @@ if(RJ_ENABLE_HIP_TESTS)
             rj_install_test_target(daemon_test)
         endif()
         set(RJ_DAEMON_TESTS
+            RocjitsuCliDaemon.LaunchesApplicationAfterDaemonIsReady
             DaemonTest.HipVectorAdd
+            DaemonTest.AttachExecFailurePreservesDaemonSocket
             DaemonTest.HipMemcpyRoundTripFloat
             DaemonTest.HipMemcpyRoundTripInt
             DaemonTest.HipMemcpyDeviceToDevice
