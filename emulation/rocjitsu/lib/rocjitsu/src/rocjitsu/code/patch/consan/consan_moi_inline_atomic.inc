@@ -771,6 +771,9 @@ struct SampledAtomicPreludeState {
                                                        uint16_t destination, uint16_t source,
                                                        rj_code_arch_t arch,
                                                        bool &loaded_private_state) {
+  assert(spill.slot_offsets.size() == spill.vgpr_count);
+  if (spill.slot_offsets.size() != spill.vgpr_count)
+    return false;
   const uint32_t spill_end = static_cast<uint32_t>(spill.vgpr_base) + spill.vgpr_count;
   if (source >= spill.vgpr_base && source < spill_end) {
     const uint16_t slot = static_cast<uint16_t>(source - spill.vgpr_base);
@@ -806,11 +809,6 @@ struct SampledAtomicPreludeState {
                                                       uint16_t saved_compare, uint16_t saved_result,
                                                       rj_code_arch_t arch,
                                                       std::vector<std::string> &errors) {
-  assert(spill.slot_offsets.size() == spill.vgpr_count);
-  if (spill.slot_offsets.size() != spill.vgpr_count) {
-    errors.emplace_back("ConSan MOI sampled atomic spill has incomplete slot metadata");
-    return false;
-  }
   bool loaded_private_state = false;
   if (!append_sampled_atomic_snapshot_word(words, spill, saved_compare, compare_vgpr, arch,
                                            loaded_private_state) ||
@@ -830,11 +828,6 @@ struct SampledAtomicPreludeState {
 append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprSpillSequence &spill,
                                        uint16_t source_address, uint16_t saved_address,
                                        rj_code_arch_t arch, std::vector<std::string> &errors) {
-  assert(spill.slot_offsets.size() == spill.vgpr_count);
-  if (spill.slot_offsets.size() != spill.vgpr_count) {
-    errors.emplace_back("ConSan MOI sampled atomic spill has incomplete slot metadata");
-    return false;
-  }
   bool loaded_private_state = false;
   if (!append_sampled_atomic_snapshot_word(words, spill, saved_address, source_address, arch,
                                            loaded_private_state) ||

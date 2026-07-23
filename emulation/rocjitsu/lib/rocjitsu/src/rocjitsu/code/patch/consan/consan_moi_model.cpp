@@ -2216,7 +2216,10 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
   if (!site.addr_vgpr || !site.data_vgpr || *site.raw_vaddr != *site.addr_vgpr)
     return reject(ConSanMoiAtomicAddressSupport::MissingAddressOperands);
 
-  const uint32_t flat_no_saddr = cdna_flat_encoding ? 0u : flat_no_saddr_encoding(arch);
+  const uint32_t flat_no_saddr =
+      cdna_flat_encoding
+          ? (site.mnemonic.starts_with("global_atomic") ? kCdnaGlobalNoSaddrEncoding : 0u)
+          : flat_no_saddr_encoding(arch);
   constexpr int32_t kSigned24Min = -(1 << 23);
   constexpr int32_t kSigned24Max = (1 << 23) - 1;
   const bool is_compare_exchange = consan_atomic_is_compare_exchange(site);
@@ -2371,7 +2374,7 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
     words.insert(words.end(), tag->begin(), tag->end());
     return words;
   }
-  if (!is_rdna4_family_arch(arch))
+  if (!is_rdna4_family_arch(arch) && !instrumentation::is_cdna_family_arch(arch))
     return std::nullopt;
   const bool buffer_resource = plan.kind == ConSanMoiAtomicAddressKind::BufferResourceMaterialized;
   const bool scalar_vector =

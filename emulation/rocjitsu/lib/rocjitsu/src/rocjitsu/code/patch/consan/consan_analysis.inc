@@ -1133,6 +1133,10 @@ atomic_address_space_hint(const Instruction &inst, const FlatPointerTracker &tra
   return static_cast<int32_t>(value << 8) >> 8;
 }
 
+[[nodiscard]] int32_t sign_extend_13(uint32_t value) {
+  return static_cast<int32_t>(value << 19) >> 19;
+}
+
 template <typename Raw> void fill_flat_like_atomic_raw(ConSanAtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_saddr = static_cast<uint32_t>(raw.saddr);
@@ -1652,7 +1656,8 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   site.size = static_cast<uint32_t>(inst.size());
   site.width_bits = lds_width_bits(mnemonic);
   if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-      mnemonic.starts_with("flat_atomic") && site.width_bits == 0u) {
+      (mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic")) &&
+      site.width_bits == 0u) {
     site.width_bits = 32u;
   }
   site.dst_vgpr = vgpr_index(inst.dst_operand(0));
@@ -1669,10 +1674,18 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       mnemonic.starts_with("flat_atomic") &&
       instruction_bytes.size() >= sizeof(cdna4::FlatMachineInst)) {
-    // CDNA3 and CDNA4 use an identical FLAT bit layout.
+    // CDNA3 and CDNA4 use identical FLAT bit layouts.
     cdna4::FlatMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
     fill_cdna_flat_atomic_raw(site, raw);
+  } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+             mnemonic.starts_with("global_atomic") &&
+             instruction_bytes.size() >= sizeof(cdna4::FlatGlblMachineInst)) {
+    // CDNA3 and CDNA4 also share VGLOBAL's signed 13-bit-offset layout.
+    cdna4::FlatGlblMachineInst raw{};
+    std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
+    fill_cdna_flat_atomic_raw(site, raw);
+    site.raw_ioffset = sign_extend_13(static_cast<uint32_t>(raw.offset));
   } else if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
     if (mnemonic.starts_with("ds_") && instruction_bytes.size() >= sizeof(rdna4::VdsMachineInst)) {
       rdna4::VdsMachineInst raw{};
@@ -1731,8 +1744,12 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   // Some decoder revisions expose VGLOBAL's scalar address only through the
   // raw instruction field. Normalize that equivalent register selector so
   // downstream address consumers do not depend on operand-list presentation.
+  const bool cdna_global_no_saddr =
+      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      mnemonic.starts_with("global_atomic") && site.raw_saddr &&
+      *site.raw_saddr == kCdnaGlobalNoSaddrEncoding;
   if (mnemonic.starts_with("global_atomic") && !site.saddr_sgpr && site.raw_saddr &&
-      *site.raw_saddr <= std::numeric_limits<uint16_t>::max()) {
+      !cdna_global_no_saddr && *site.raw_saddr <= std::numeric_limits<uint16_t>::max()) {
     site.saddr_sgpr = static_cast<uint16_t>(*site.raw_saddr);
   }
 

@@ -801,6 +801,7 @@ struct SampledAtomicScratchLayout {
   // outcome-evidence field occupies one VGPR. Wider support must also widen
   // append_sampled_atomic_cas_snapshot(), not only this reservation.
   static constexpr uint16_t kCasFieldWords = 1u;
+  static_assert(kCasFieldWords == 1u);
   static constexpr uint16_t kCasCompare = 4u;
   static constexpr uint16_t kCasResult = kCasCompare + kCasFieldWords;
   static constexpr uint16_t kOwner = kCasResult + kCasFieldWords;

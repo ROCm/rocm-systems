@@ -242,6 +242,8 @@ struct ConSanMoiAtomicAddressPlan {
 // Record/replay state is partitioned by workgroup. Within that state, use a
 // tagged 64-bit token for LDS so a byte offset cannot alias a global address.
 inline constexpr uint32_t kConSanMoiLdsAddressTokenTag = 0xffffffffu;
+// CDNA VGLOBAL encodes the vector-only `off` address form with SADDR=0x7f.
+inline constexpr uint32_t kCdnaGlobalNoSaddrEncoding = 0x7fu;
 
 [[nodiscard]] std::string_view
 consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSupport support);
