@@ -103,18 +103,17 @@ struct KernelDescriptorFacts {
   /// @brief Original .text-relative kernel entry decoded from the source descriptor.
   uint64_t entry_text_offset = 0;
 
-  /// @brief True when the source descriptor requests CP kernarg preloading.
+  /// @brief True when legacy preload firmware may enter 256 bytes after the descriptor entry.
   ///
-  /// @details AMDHSA uses kernarg_preload_spec_length != 0 to request that
-  /// compatible CP firmware copy dwords from the kernarg segment into User SGPRs
-  /// before entering the kernel. When this is enabled, compatible firmware starts
-  /// execution at KERNEL_CODE_ENTRY_BYTE_OFFSET + 256 while older/incompatible
-  /// firmware starts at KERNEL_CODE_ENTRY_BYTE_OFFSET. DBT must therefore treat
-  /// both source addresses as legal hardware entries for this kernel.
-  bool has_kernarg_preload = false;
+  /// @details CDNA3/CDNA4 use the legacy firmware compatibility scheme in which
+  /// a non-zero kernarg_preload_spec_length makes compatible firmware add 256
+  /// bytes to KERNEL_CODE_ENTRY_BYTE_OFFSET. GFX1250 also supports kernarg
+  /// preloading, but its descriptor entry is the single hardware entry and must
+  /// not be treated as the start of this compatibility window.
+  bool has_kernarg_preload_firmware_skip = false;
 
   /// @brief Source .text-relative entry used by compatible kernarg-preload firmware.
-  uint64_t kernarg_preload_entry_text_offset = 0;
+  uint64_t kernarg_preload_firmware_entry_text_offset = 0;
 };
 
 /// @brief Target descriptor resources plus source/target accounting facts.
@@ -343,7 +342,7 @@ struct KdTranslation : KernelDescriptorFacts, KernelResourcePlan, KernelEntryPla
   /// @brief False when resource or ABI translation cannot be represented safely.
   bool supported = true;
 
-  /// @brief True when DBT emitted a target trap stub instead of translating this kernel.
+  /// @brief True when DBT emitted a target `s_endpgm` stub instead of translating this kernel.
   bool skipped = false;
 
   /// @brief Structured warnings and errors produced while planning this descriptor.

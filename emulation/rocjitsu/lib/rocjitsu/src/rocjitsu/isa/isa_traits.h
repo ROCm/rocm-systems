@@ -99,7 +99,9 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
 /// VCC in the encoded wavefront allocation. That descriptor limit is larger
 /// than the ordinary scratch SGPR range exposed through CdnaIsaBase, so DBT
 /// must query the descriptor limit separately from semantic scratch limits.
-/// RDNA descriptors use the ordinary ISA SGPR maximum.
+/// RDNA and gfx1250 descriptors use the ordinary ISA SGPR maximum. gfx1250 is
+/// kept out of arch_is_rdna() because several of its descriptor and register
+/// allocation rules differ from generic RDNA despite sharing the GFX10+ ABI.
 [[nodiscard]] inline constexpr uint32_t arch_descriptor_sgpr_allocation_limit(rj_code_arch_t arch) {
   // Architectural descriptor SGPR-allocation ceilings. CDNA descriptors may name
   // up to 112 SGPRs; RDNA up to 106. These are fixed ISA facts (not the smaller
@@ -108,7 +110,7 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
   constexpr uint32_t kRdnaDescriptorSgprLimit = 106;
   if (arch_is_cdna(arch))
     return kCdnaDescriptorSgprLimit;
-  if (arch_is_rdna(arch))
+  if (arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250)
     return kRdnaDescriptorSgprLimit;
   return 0;
 }
@@ -133,7 +135,10 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
   case ROCJITSU_CODE_ARCH_RDNA4:
     return 64u * 1024u;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return 160u * 1024u;
+    // gfx1250 can allocate up to 320 KiB to one workgroup. This is distinct
+    // from the configurable LDS/vector-cache partition sizes reported for a
+    // TCP, which must not be used as the descriptor allocation ceiling.
+    return 320u * 1024u;
   default:
     return 0;
   }

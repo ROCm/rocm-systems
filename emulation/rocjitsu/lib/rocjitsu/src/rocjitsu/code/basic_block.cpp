@@ -14,6 +14,7 @@
 #include <optional>
 #include <set>
 #include <span>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -43,7 +44,11 @@ uint32_t first_word(const Instruction &inst) {
 }
 
 bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
-  if (inst.size() != sizeof(uint32_t) || inst.mnemonic() != "s_setpc_b64")
+  // gfx1250 renamed the scalar PC transfer without changing its role in the
+  // call/return CFG. Accept both spellings; the raw source operand remains in
+  // the low byte for the canonical one-word form.
+  const std::string_view mnemonic = inst.mnemonic();
+  if (inst.size() != sizeof(uint32_t) || (mnemonic != "s_setpc_b64" && mnemonic != "s_set_pc_i64"))
     return false;
   return static_cast<uint16_t>(word & 0xffu) == ssrc0;
 }
@@ -130,6 +135,19 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
     std::vector<std::unique_ptr<Instruction>> decoded;
 
     while (pc < inst_data_size) {
+      // The gfx1250 code objects used for offline translation place zero-filled
+      // alignment holes between function bodies. Zero is not a gfx1250
+      // instruction, so recognize that observed padding value before calling
+      // the decoder instead of using an InvalidInst exception as control flow.
+      // A later kernel-scope check still rejects any reachable block that falls
+      // through into one of these holes. Other invalid words remain hard decode
+      // failures rather than being silently classified as padding.
+      if (arch == ROCJITSU_CODE_ARCH_GFX1250 && inst_data[pc] == 0) {
+        ++pc;
+        byte_offset += sizeof(uint32_t);
+        continue;
+      }
+
       auto *raw_inst = decoder.decode(&inst_data[pc], byte_offset);
       std::unique_ptr<Instruction> inst(raw_inst);
       uint32_t inst_size_bytes = static_cast<uint32_t>(inst->size());
@@ -148,7 +166,7 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
     for (const auto &inst : decoded)
       decoded_insts.push_back(inst.get());
 
-    const uint64_t section_end = byte_offset;
+    const uint64_t section_end = sec->size();
     // Indirect target discovery belongs with block construction because
     // recovered branch targets must become leaders before instructions are
     // moved into final BasicBlock storage. The discovery pass first walks the
@@ -181,6 +199,12 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
       const auto &inst = *decoded[i];
       const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
 
+      // An undecodable run is a real CFG boundary. Without this leader the
+      // block size would collapse the gap and corrupt every following source
+      // offset during relocation.
+      if (i + 1 < decoded.size() && decoded[i + 1]->src_loc() != next_offset)
+        leaders.insert(decoded[i + 1]->src_loc());
+
       if (is_block_terminator(inst) && next_offset < section_end)
         leaders.insert(next_offset);
 
@@ -208,7 +232,12 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
         current->add_instruction(std::move(decoded[i]));
         ++i;
 
-        if (terminates || (i < decoded.size() && leaders.contains(next_offset)))
+        const bool decode_gap =
+            i >= decoded.size() ? next_offset < section_end : decoded[i]->src_loc() != next_offset;
+        if (decode_gap && !terminates)
+          current->falls_through_to_undecodable_text_ = true;
+
+        if (terminates || decode_gap || (i < decoded.size() && leaders.contains(next_offset)))
           break;
       }
       section_blocks.push_back(std::move(current));
