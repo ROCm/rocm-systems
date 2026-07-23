@@ -7,9 +7,10 @@
 #ifndef ROCJITSU_ISA_OPERAND_H_
 #define ROCJITSU_ISA_OPERAND_H_
 
+#include "rocjitsu/isa/arch/amdgpu/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
-#include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 
+#include <cassert>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -101,9 +102,52 @@ public:
   int size_bits() const { return size_bits_; }
 
   /// @brief Whether this operand references a VGPR or AccVGPR.
-  /// @details Classified at construction time by ISA-specific subclasses using
-  /// the auto-generated is_vgpr_operand_type() from operand_types.h.
+  /// @details A construction-time capability flag. Field-bearing operands are
+  /// classified by the ISA-specific subclass constructor using the generated
+  /// is_vgpr_operand_type(); fieldless operands get their value from
+  /// apply_fieldless_caps(). Accessors query the stored flag directly.
   [[nodiscard]] bool is_vgpr() const { return is_vgpr_; }
+
+  /// @brief Whether this operand yields a real value through the normal read /
+  /// SIMD accessors. A construction-time capability flag: true for field-bearing
+  /// operands and read-enabled fieldless operands. False for inert operands.
+  [[nodiscard]] bool reads_value() const { return reads_value_; }
+
+  /// @brief Whether this operand is a valid target for the normal write
+  /// accessors. A construction-time capability flag: true for field-bearing
+  /// operands and write-enabled fieldless operands. False for inert operands.
+  [[nodiscard]] bool is_writable() const { return writable_; }
+
+  /// @brief Whether this operand is fieldless
+  /// @details Fieldless operands (has no encoding field in MR ISA) are
+  /// constructed from a fixed canonical encoding value rather than a decoded
+  /// field. This stays a structural marker: it drives disassembly suppression
+  /// and ordinary to_register_ref() suppression, while runtime read/write/SIMD
+  /// behavior is driven by the capability flags above.
+  [[nodiscard]] bool is_fieldless() const { return fieldless_; }
+
+  /// @brief Mark this operand fieldless and apply its runtime capability
+  /// policy. Emitted by generated constructors in place of a bare fieldless
+  /// marker; the (reads_value, writable, is_vgpr) triple comes from the shared
+  /// fieldless operand policy table.
+  ///
+  /// @warning Construction-only. Call exactly once, from a constructor,
+  /// before the operand is observable by any reader. The capability flags are
+  /// read locklessly on the CU thread and are assumed immutable after
+  /// construction; mutating them on a live operand is a data race.
+  void apply_fieldless_caps(bool reads_value, bool writable, bool is_vgpr) {
+    assert(!fieldless_ && "apply_fieldless_caps must be called once, at construction");
+    // Mirror the FieldlessCaps.__post_init__ invariant: writable/is_vgpr imply
+    // reads_value. Otherwise the SIMD fast path (gated on reads_value via
+    // simd_capable/resolved_vgpr_offset) and the scalar write path would
+    // disagree for a writable-but-!reads_value operand.
+    assert((reads_value || (!writable && !is_vgpr)) &&
+           "fieldless caps: writable/is_vgpr require reads_value");
+    fieldless_ = true;
+    reads_value_ = reads_value;
+    writable_ = writable;
+    is_vgpr_ = is_vgpr;
+  }
 
   /// @brief Assign the GFX12 VGPR high-bank role for this operand.
   void set_vgpr_msb_role(amdgpu::VgprMsbRole role) { vgpr_msb_role_ = role; }
@@ -230,10 +274,29 @@ private:
   }
 
 public:
+  // These stay public: subclass constructors and decode/disassembly paths read
+  // and set size_bits_/encoding_value_/vgpr_msb_role_ directly. The capability
+  // flags below are protected instead because they are construction-only and
+  // read locklessly on the hot path, so only the class hierarchy may set them.
   int size_bits_ = 0;
   int encoding_value_ = 0;
-  bool is_vgpr_ = false;
   amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
+
+protected:
+  /// @brief Capability/role flags, set once at construction and never
+  /// mutated afterward. Subclass constructors set is_vgpr_; fieldless
+  /// operands get their (reads_value, writable, is_vgpr) triple from
+  /// apply_fieldless_caps(). Kept out of the public interface so only
+  /// construction can flip them: readers do lockless bool loads on the CU
+  /// thread and rely on the flags being immutable post-construction. Query
+  /// through is_vgpr() / reads_value() / is_writable() / is_fieldless().
+  ///
+  /// Defaults describe a normal field-bearing operand (readable, writable,
+  /// not fieldless).
+  bool is_vgpr_ = false;
+  bool reads_value_ = true;
+  bool writable_ = true;
+  bool fieldless_ = false;
 
 private:
   // Private SIMD fast-path backend for RegisterAccess.

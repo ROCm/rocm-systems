@@ -67,14 +67,16 @@ while (( $# )); do
 done
 
 corpus_test_status=0
+corpus_work_dir="$(pwd -P)"
+
 for target in "${targets[@]}"; do
   read -r name rocjitsu_config skip_tests_config <<< "${target}"
   echo "::group::(${name}) pytest"
 
   rocjitsu_config_path="${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}"
   skip_tests_config_path="${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}"
-  artifact_dir=".pytest-artifacts/${name}"
-  cache_dir=".pytest-cache/${name}"
+  artifact_dir="${corpus_work_dir}/.pytest-artifacts/${name}"
+  cache_dir="${corpus_work_dir}/.pytest-cache/${name}"
 
   pytest_cmd=(
     rocjitsu --config "${rocjitsu_config_path}" -- pytest tests/test_corpus.py
