@@ -245,8 +245,7 @@ TEST(ConSanMoi, Cdna4UnassociatedFenceIsNotApplicable) {
   ASSERT_TRUE(fence);
   std::vector<uint32_t> text_words(fence->begin(), fence->end());
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
-  const std::vector<uint8_t> bytes =
-      make_cdna4_lds_code_object(text_words, "unassociated_fence");
+  const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words, "unassociated_fence");
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_track_atomics = true;
 
@@ -1321,26 +1320,29 @@ TEST(ConSanMoi, AutoReportInventoryCountsAdmittedLogicalRangesBeforeAllocation) 
   }
 }
 
-TEST(ConSanMoi, Gfx1250AutoReportUsesExternalApertureForDescriptorOpaqueLds) {
+TEST(ConSanMoi, Gfx1250AutoReportUsesRuntimeApertureForDescriptorOpaqueLds) {
+  constexpr uint32_t kRuntimeLdsBytes = 96u * 1024u;
   constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   const std::array<uint32_t, 3> text_words = {store[0], store[1],
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "opaque_lds", /*vgpr_granulated=*/4);
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_max_workgroup_lds_bytes = kRuntimeLdsBytes;
 
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   const ConSanMoiAutoReportInventory inventory =
       inventory_consan_moi_auto_report(result, options, bytes);
-  EXPECT_EQ(inventory.inline_lds_bytes,
-            consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(inventory.inline_lds_bytes, kRuntimeLdsBytes);
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
   ASSERT_TRUE(plan.complete());
+  EXPECT_EQ(plan.layout.inline_exact_dispatch_bank_count,
+            consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes));
   EXPECT_EQ(plan.layout.exact_shadow_entry_capacity,
-            consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250) /
-                consan_moi_exact_shadow::granule_bytes * kConSanMoiInlineExactDispatchBankCount);
+            kRuntimeLdsBytes / consan_moi_exact_shadow::granule_bytes *
+                plan.layout.inline_exact_dispatch_bank_count);
 }
 
 TEST(ConSanMoi, Gfx1250AutoReportCoversFullApertureForDynamicLds) {
@@ -1367,9 +1369,12 @@ TEST(ConSanMoi, Gfx1250AutoReportCoversFullApertureForDynamicLds) {
             consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250));
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
   ASSERT_TRUE(plan.complete());
+  EXPECT_EQ(plan.layout.inline_exact_dispatch_bank_count,
+            consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes));
   EXPECT_EQ(plan.layout.exact_shadow_entry_capacity,
             consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250) /
-                consan_moi_exact_shadow::granule_bytes * kConSanMoiInlineExactDispatchBankCount);
+                consan_moi_exact_shadow::granule_bytes *
+                plan.layout.inline_exact_dispatch_bank_count);
 }
 
 TEST(ConSanMoi, AutoReportInventoryCoversFullLdsApertureForFlatGroupAccess) {
@@ -1399,9 +1404,11 @@ TEST(ConSanMoi, AutoReportInventoryCoversFullLdsApertureForFlatGroupAccess) {
                                             consan_moi_exact_shadow::granule_bytes);
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
   ASSERT_TRUE(plan.complete());
+  EXPECT_EQ(plan.layout.inline_exact_dispatch_bank_count,
+            consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes));
   EXPECT_EQ(plan.layout.exact_shadow_entry_capacity,
             kConSanMoiInlineShadowConservativeExactShadowEntries *
-                kConSanMoiInlineExactDispatchBankCount);
+                plan.layout.inline_exact_dispatch_bank_count);
 }
 
 TEST(ConSanMoi, OwnerEpochPrologueRedirectsKernelDescriptorEntry) {

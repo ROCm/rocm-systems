@@ -26,6 +26,39 @@ project(rocm_jit_suite VERSION 0.2.0)
 include(rj_version)
 include(rj_configure_target)
 
+# Offline ConSan planning uses the LDS aperture exposed by the simulator
+# configuration. Runtime callers can override this default through
+# ConSanOptions, while constexpr planners and offline tests retain the JSON as
+# their source of truth. Reconfigure when the JSON changes.
+set(_RJ_GFX1250_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/configs/gfx1250.json")
+set_property(
+    DIRECTORY
+    APPEND
+    PROPERTY CMAKE_CONFIGURE_DEPENDS "${_RJ_GFX1250_CONFIG}"
+)
+file(READ "${_RJ_GFX1250_CONFIG}" _RJ_GFX1250_CONFIG_JSON)
+string(
+    JSON _RJ_GFX1250_LDS_SIZE_KB
+    GET "${_RJ_GFX1250_CONFIG_JSON}"
+    vm
+    gpu
+    device
+    lds_size_kb
+)
+if(
+    NOT _RJ_GFX1250_LDS_SIZE_KB MATCHES "^[1-9][0-9]*$"
+    OR _RJ_GFX1250_LDS_SIZE_KB GREATER 4194303
+)
+    message(
+        FATAL_ERROR
+        "gfx1250.json must declare a positive uint32_t LDS size in KiB"
+    )
+endif()
+add_compile_definitions(ROCJITSU_GFX1250_LDS_SIZE_KB=${_RJ_GFX1250_LDS_SIZE_KB})
+unset(_RJ_GFX1250_CONFIG)
+unset(_RJ_GFX1250_CONFIG_JSON)
+unset(_RJ_GFX1250_LDS_SIZE_KB)
+
 # Generate compile_commands.json for clangd, clang-tidy, and other tooling that
 # needs the exact compiler invocations from the configured build tree.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -366,13 +399,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # process.
     # Production builds remain fully checked for unresolved symbols.
     if(
-        NOT
-        (
-            RJ_ENABLE_ASAN
-            OR RJ_ENABLE_UBSAN
-            OR RJ_ENABLE_TSAN
-            OR RJ_ENABLE_MSAN
-        )
+        NOT (RJ_ENABLE_ASAN OR RJ_ENABLE_UBSAN OR RJ_ENABLE_TSAN OR RJ_ENABLE_MSAN)
     )
         string(APPEND _rj_waitcheck_linker_options ",--no-undefined")
     endif()

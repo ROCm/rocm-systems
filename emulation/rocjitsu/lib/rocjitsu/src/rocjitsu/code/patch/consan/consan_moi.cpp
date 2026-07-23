@@ -626,11 +626,11 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     const bool descriptor_opaque_lds = inventory.access_range_count != 0u &&
                                        inventory.inline_lds_bytes < selected_native_lds_extent;
     if (selected_flat_candidate || selected_dynamic_lds_owner || descriptor_opaque_lds) {
-      const uint64_t external_lds_bytes =
+      const uint64_t external_lds_bytes = options.moi_max_workgroup_lds_bytes.value_or(
           result.arch_name == "gfx1250"
               ? consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250)
-              : static_cast<uint64_t>(kConSanMoiInlineShadowConservativeExactShadowEntries) *
-                    consan_moi_exact_shadow::granule_bytes;
+              : static_cast<uint32_t>(kConSanMoiInlineShadowConservativeExactShadowEntries *
+                                      consan_moi_exact_shadow::granule_bytes));
       inventory.inline_lds_bytes =
           std::max<uint64_t>(inventory.inline_lds_bytes, external_lds_bytes);
     }

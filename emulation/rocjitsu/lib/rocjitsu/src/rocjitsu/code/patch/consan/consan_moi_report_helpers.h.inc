@@ -426,6 +426,7 @@ consan_moi_inline_shadow_report_buffer_layout_for_bytes(
     uint64_t report_buffer_size,
     uint32_t requested_diagnostic_capacity = kConSanMoiInlineShadowDefaultDiagnosticCapacity) {
   ConSanMoiReportBufferLayout layout;
+  layout.inline_exact_dispatch_bank_count = kConSanMoiInlineMaximumDispatchBankCount;
   if (report_buffer_size < sizeof(ConSanMoiReportHeader) ||
       report_buffer_size > std::numeric_limits<size_t>::max())
     return layout;
@@ -506,6 +507,9 @@ consan_moi_report_layout_has_required_capacities(const ConSanMoiReportBufferLayo
            layout.sampled_pending_acquire_capacity != 0;
   if (engine == ConSanMoiEngine::InlineShadow)
     return layout.diagnostic_capacity != 0 && layout.exact_shadow_entry_capacity != 0 &&
+           layout.inline_exact_dispatch_bank_count != 0 &&
+           (layout.inline_exact_dispatch_bank_count &
+            (layout.inline_exact_dispatch_bank_count - 1u)) == 0u &&
            (!track_atomics || layout.inline_atomic_release_capacity != 0);
   return layout.access_record_capacity != 0 &&
          (!track_barriers || layout.barrier_record_capacity != 0) &&

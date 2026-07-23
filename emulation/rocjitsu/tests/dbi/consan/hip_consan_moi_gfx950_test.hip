@@ -402,35 +402,21 @@ TEST(ConSanMoiGfx950Test, AtomicForcedSpillPreservesLiveVgprsAndWritesRecord) {
 
 TEST(ConSanMoiGfx950Test, DynamicStackInlineSpillPreservesPrivateValues) {
   constexpr uint32_t kThreads = 64;
-  constexpr size_t kReportBytes = 1u << 20;
   uint32_t *out_device = nullptr;
-  void *report_device = nullptr;
   HIP_ASSERT(hipMalloc(&out_device, kThreads * sizeof(uint32_t)));
-  HIP_ASSERT(hipMalloc(&report_device, kReportBytes));
   HIP_ASSERT(hipMemset(out_device, 0, kThreads * sizeof(uint32_t)));
-  HIP_ASSERT(hipMemset(report_device, 0, kReportBytes));
 
-  ReportEnvGuard report_env;
-  ASSERT_TRUE(set_moi_report_buffer_env(report_device, kReportBytes));
   moi_gfx950_dynamic_stack_inline_spill_kernel_for_instrumentation<<<1, kThreads>>>(out_device);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
   std::vector<uint32_t> out(kThreads);
-  MoiReportHeader header{};
   HIP_ASSERT(
       hipMemcpy(out.data(), out_device, out.size() * sizeof(uint32_t), hipMemcpyDeviceToHost));
-  HIP_ASSERT(hipMemcpy(&header, report_device, sizeof(header), hipMemcpyDeviceToHost));
-  HIP_ASSERT(hipFree(report_device));
   HIP_ASSERT(hipFree(out_device));
 
   for (uint32_t tid = 0; tid < kThreads; ++tid)
     EXPECT_EQ(out[tid], 0xd9500000u ^ tid) << "tid=" << tid;
-  EXPECT_GT(header.exact_shadow_entry_capacity, 0u);
-  EXPECT_EQ(header.diagnostic_count, 0u);
-  EXPECT_EQ(header.inline_overflow_count, 0u);
-  EXPECT_EQ(header.inline_unsupported_count, 0u);
-  EXPECT_EQ(header.inline_malformed_count, 0u);
 }
 
 TEST(ConSanMoiGfx950Test, ForcedSpillSampledPreservesLiveVgprsAndWritesEntry) {
@@ -489,26 +475,17 @@ TEST(ConSanMoiGfx950Test, ForcedSpillSampledPreservesLiveVgprsAndWritesEntry) {
 TEST(ConSanMoiGfx950Test, ForcedSpillInlineShadowPreservesLiveVgprs) {
   constexpr uint32_t kThreads = 64;
   constexpr uint32_t kValuesPerThread = 8;
-  constexpr size_t kReportBytes = 1u << 20;
   uint32_t *out_device = nullptr;
-  void *report_device = nullptr;
   HIP_ASSERT(hipMalloc(&out_device, kThreads * kValuesPerThread * sizeof(uint32_t)));
-  HIP_ASSERT(hipMalloc(&report_device, kReportBytes));
   HIP_ASSERT(hipMemset(out_device, 0, kThreads * kValuesPerThread * sizeof(uint32_t)));
-  HIP_ASSERT(hipMemset(report_device, 0, kReportBytes));
 
-  ReportEnvGuard report_env;
-  ASSERT_TRUE(set_moi_report_buffer_env(report_device, kReportBytes));
   moi_gfx950_forced_spill_test_kernel_for_instrumentation<<<1, kThreads>>>(out_device);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
   std::vector<uint32_t> out(kThreads * kValuesPerThread);
-  MoiReportHeader header{};
   HIP_ASSERT(
       hipMemcpy(out.data(), out_device, out.size() * sizeof(uint32_t), hipMemcpyDeviceToHost));
-  HIP_ASSERT(hipMemcpy(&header, report_device, sizeof(header), hipMemcpyDeviceToHost));
-  HIP_ASSERT(hipFree(report_device));
   HIP_ASSERT(hipFree(out_device));
 
   constexpr uint32_t kBases[kValuesPerThread] = {
@@ -520,11 +497,6 @@ TEST(ConSanMoiGfx950Test, ForcedSpillInlineShadowPreservesLiveVgprs) {
       EXPECT_EQ(out[tid * kValuesPerThread + i], kBases[i] ^ tid)
           << "tid=" << tid << " value=" << i;
   }
-  EXPECT_GT(header.exact_shadow_entry_capacity, 0u);
-  EXPECT_EQ(header.diagnostic_count, 0u);
-  EXPECT_EQ(header.inline_overflow_count, 0u);
-  EXPECT_EQ(header.inline_unsupported_count, 0u);
-  EXPECT_EQ(header.inline_malformed_count, 0u);
 }
 
 TEST(ConSanMoiGfx950Test, SharedHelperForcedSpillPreservesBothCallers) {

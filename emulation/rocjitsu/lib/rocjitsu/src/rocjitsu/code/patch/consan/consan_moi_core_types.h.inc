@@ -42,9 +42,17 @@ consan_moi_prefer_generation_tagged_workgroup_shadow(uint32_t guest_lds_bytes,
 }
 
 [[nodiscard]] constexpr uint32_t consan_moi_max_workgroup_lds_bytes(rj_code_arch_t arch) {
-  // gfx1250 exposes up to 320 KiB of LDS to one workgroup. Earlier targets in
-  // the supported set retain the 64 KiB limit used by the original planner.
-  return arch == ROCJITSU_CODE_ARCH_GFX1250 ? 320u * 1024u : 64u * 1024u;
+  // gfx1250 follows the simulator configuration rather than duplicating a
+  // provisional architectural limit in ConSan. Earlier targets retain the
+  // 64 KiB limit used by the original planner.
+  return arch == ROCJITSU_CODE_ARCH_GFX1250
+             ? static_cast<uint32_t>(ROCJITSU_GFX1250_LDS_SIZE_KB) * 1024u
+             : 64u * 1024u;
+}
+
+[[nodiscard]] constexpr uint32_t consan_moi_max_workgroup_lds_bytes(const ConSanOptions &options,
+                                                                    rj_code_arch_t arch) {
+  return options.moi_max_workgroup_lds_bytes.value_or(consan_moi_max_workgroup_lds_bytes(arch));
 }
 
 /// One eight-byte shadow slot covers one four-byte guest-LDS granule. Keeping

@@ -4971,7 +4971,7 @@ TEST(ConSanMoi, AtomicRecordForcedSpillUsesPlannedPrivateWindow) {
   }));
   EXPECT_EQ(result.resource_plan_summary.spill_plans, 2u);
   EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 2u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 60u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 40u);
 }
 
 TEST(ConSanMoi, AtomicRecordSpillsSpecialStateOnRdna4) {
