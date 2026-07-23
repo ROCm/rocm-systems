@@ -20,6 +20,8 @@ consan_moi_inline_exact_dispatch_bank_count_for_lds(uint32_t max_lds_bytes) {
       (static_cast<uint64_t>(max_lds_bytes) + kGuestLdsGranuleBytes - 1u) / kGuestLdsGranuleBytes;
   const uint64_t exact_bytes_per_bank = lds_cell_count * sizeof(ConSanMoiInlineExactShadowSlot);
   const uint64_t exact_shadow_budget = kConSanMoiAutoReportBufferCeilingBytes / 2u;
+  if (exact_bytes_per_bank > exact_shadow_budget)
+    return 0u;
   uint32_t bank_count = 1u;
   while (bank_count < kMaximumDispatchBankCount &&
          exact_bytes_per_bank <= exact_shadow_budget / (bank_count * 2u)) {
@@ -42,6 +44,8 @@ inline constexpr uint32_t kConSanMoiInlineMaximumLdsBytes =
         : 64u * 1024u;
 inline constexpr uint32_t kConSanMoiInlineExactDispatchBankCount =
     consan_moi_inline_exact_dispatch_bank_count_for_lds(kConSanMoiInlineMaximumLdsBytes);
+static_assert(kConSanMoiInlineExactDispatchBankCount != 0u,
+              "the configured LDS aperture cannot fit one InlineShadow dispatch bank");
 static_assert((kConSanMoiInlineExactDispatchBankCount &
                (kConSanMoiInlineExactDispatchBankCount - 1u)) == 0u);
 

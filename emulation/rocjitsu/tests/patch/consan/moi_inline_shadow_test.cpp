@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "embedded_schema.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "rocjitsu/config/config_loader.h"
 
 namespace rocjitsu {
 namespace {
@@ -534,6 +536,28 @@ TEST(ConSanMoi, Gfx1250WorkgroupShadowUsesConfiguredAperture) {
   EXPECT_TRUE(layout->compact);
   EXPECT_TRUE(layout->lazy_initialization);
   EXPECT_FALSE(plan_consan_moi_compact_workgroup_shadow(kConfiguredLdsBytes, kConfiguredLdsBytes));
+}
+
+TEST(ConSanMoi, Gfx1250WorkgroupLdsMatchesSimulatorConfig) {
+  const auto loaded =
+      config::load_config(std::string(CONFIG_DIR) + "/gfx1250.json", rocjitsu::kEmbeddedSchema);
+
+  ASSERT_TRUE(loaded.device.present);
+  EXPECT_EQ(consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250),
+            loaded.device.lds_size_kb * 1024u);
+}
+
+TEST(ConSanMoi, InlineExactDispatchBankSelectionCoversFitBoundaries) {
+  constexpr uint64_t kExactShadowBudget = kConSanMoiAutoReportBufferCeilingBytes / 2u;
+  constexpr uint64_t kLargestFittingCellCount =
+      kExactShadowBudget / sizeof(ConSanMoiInlineExactShadowSlot);
+  constexpr uint32_t kLargestFittingLdsBytes = static_cast<uint32_t>(kLargestFittingCellCount * 4u);
+
+  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(4u), 256u);
+  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(64u * 1024u), 128u);
+  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(1024u * 1024u), 8u);
+  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(kLargestFittingLdsBytes), 1u);
+  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(kLargestFittingLdsBytes + 4u), 0u);
 }
 
 TEST(ConSanMoi, InlineExactDispatchBanksTrackConfiguredLdsAperture) {

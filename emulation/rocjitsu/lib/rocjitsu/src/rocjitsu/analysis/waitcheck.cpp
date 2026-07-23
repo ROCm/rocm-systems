@@ -4518,11 +4518,9 @@ private:
     const std::vector<size_t> producer_block_indices =
         cfg_block_indices_containing(event.section_offset);
     if (before_target && current_cfg_view_index_ && *current_cfg_view_index_ < cfg_views_.size() &&
-        std::ranges::any_of(
-            producer_block_indices,
-            [&](size_t producer_block_index) {
-              return cfg_block_dominates(producer_block_index, *current_cfg_view_index_);
-            })) {
+        std::ranges::any_of(producer_block_indices, [&](size_t producer_block_index) {
+          return cfg_block_dominates(producer_block_index, *current_cfg_view_index_);
+        })) {
       feasible_path_cache_[cache_key] = true;
       return true;
     }
