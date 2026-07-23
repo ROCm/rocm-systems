@@ -27,6 +27,10 @@
 #include "librocdxg.h"
 #include "wkmi.h"
 
+#ifndef REG_SZ
+#define REG_SZ 1ul  // Unicode nul terminated string (from winnt.h)
+#endif
+
 namespace {
 
 // Read a REG_SZ value from the adapter driver registry key.
@@ -38,8 +42,8 @@ static bool query_adapter_reg_str(D3DKMT_HANDLE adapter, const char* key_name,
     wchar_t                   output[kMaxOutputSize];
   } q = {};
   q.info.QueryType                = D3DDDI_QUERYREGISTRY_ADAPTERKEY;
-  q.info.QueryFlags.TranslatePath = FALSE;
-  q.info.ValueType                = CIREG_SZ;
+  q.info.QueryFlags.TranslatePath = 0;
+  q.info.ValueType                = REG_SZ;
   if (mbstowcs(q.info.ValueName, key_name, MAX_PATH) == static_cast<size_t>(-1))
     return false;
   D3DKMT_QUERYADAPTERINFO args = {};
@@ -525,4 +529,4 @@ HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_device_info(uint32_t node_id,
   return HSAKMT_STATUS_SUCCESS;
 }
 
-}  // extern C
+}  // extern "C"
