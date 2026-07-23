@@ -3270,6 +3270,8 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(
     return AMDSMI_STATUS_INVAL;
   }
 
+  *profile_config = {};
+
   // Initialize values
   amdsmi_status_t return_status = AMDSMI_STATUS_NOT_SUPPORTED;
   amdsmi_status_t status = AMDSMI_STATUS_NOT_SUPPORTED;
@@ -3455,6 +3457,9 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(
       rsmi_accelerator_partition_resource_type_t type =
           static_cast<rsmi_accelerator_partition_resource_type_t>(r);
       rsmi_accelerator_partition_resource_profile_t profile = {};
+      if (resource_index >= AMDSMI_MAX_CP_PROFILE_RESOURCES) {
+        break;
+      }
       profile_config->resource_profiles[resource_index].profile_index = 0;
       profile_config->resource_profiles[resource_index].resource_type = AMDSMI_ACCELERATOR_MAX;
       profile_config->resource_profiles[resource_index].partition_resource = 0;
