@@ -65,6 +65,8 @@ subtrees:
         title: Troubleshooting
       - file: troubleshooting/known-issues
         title: Known issues
+      - file: troubleshooting/limitations
+        title: Limitations
   - caption: About
     entries:
       - file: license.rst
