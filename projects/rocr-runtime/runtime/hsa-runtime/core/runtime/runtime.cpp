@@ -1780,7 +1780,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
 
   if ((importHandle.handle[6] & 0x80000000) != 0) {
     isFragment = true;
-    fragOffset = (importHandle.handle[6] & 0x1FF) * 4096;
+    fragOffset = (importHandle.handle[6] & 0x1FF) * os::PageSize();
     importHandle.handle[6] &= ~(0x80000000 | 0x1FF);
   }
 
