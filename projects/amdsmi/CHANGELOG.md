@@ -13,6 +13,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Field access simplifies from `fabric_info.fabric_version.v1.<field>` to `fabric_info.v1.<field>`, and `fabric_info.version` becomes `fabric_version`.
   - The change is ABI-preserving: field offsets and the overall structure size are unchanged. The Python `amdsmi_get_gpu_fabric_info()` dictionary keys are also unchanged.
 
+- **Restructured AMD SMI C++ tests into unit and functional suites**.  
+  - The `amdsmitst` source tree now separates unit tests from hardware-backed functional tests under `tests/amd_smi_test/unit/` and `tests/amd_smi_test/functional/`.
+  - GTest suite names were updated: `amdsmitstReadOnly` is now `GpuFunctionalReadOnly`, `amdsmitstReadWrite` is now `GpuFunctionalReadWrite`, and unit tests now use the `<Component>Unit` suite pattern, such as `GpuUnit` for GPU unit tests including dynamic metric tests formerly under `AmdSmiDynamicMetricTest`.
+  - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
+  - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and filter examples.
+
 ### Resolved Issues
 
 - **Fixed `amd-smi set --ptl-status` silently failing to change PTL state**.  
@@ -103,12 +109,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Navi devices were incorrectly displaying N/A for vcn_busy in their metrics output due to a difference in design. This API was added to allow users to properly obtain the vcn_busy metric from Navi and other similar devices.
 
 ### Changed
-
-- **Restructured AMD SMI C++ tests into unit and functional suites**.  
-  - The `amdsmitst` source tree now separates unit tests from hardware-backed functional tests under `tests/amd_smi_test/unit/` and `tests/amd_smi_test/functional/`.
-  - GTest suite names were updated: `amdsmitstReadOnly` is now `GpuFunctionalReadOnly`, `amdsmitstReadWrite` is now `GpuFunctionalReadWrite`, and unit tests now use the `<Component>Unit` suite pattern, such as `GpuUnit` for GPU unit tests including dynamic metric tests formerly under `AmdSmiDynamicMetricTest`.
-  - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
-  - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and filter examples.
 
 - **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.  
   - The `uclk_aid`, `socclks_mid`, and temperature `xcd` keys are now lowercase (`aid_<N>`, `mid_<N>`, `xcp_<N>`) in JSON and CSV output, matching the existing `xcp_<N>` usage keys; they were previously uppercase (`AID_<N>`, `MID_<N>`, `XCP_<N>`).
