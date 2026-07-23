@@ -46,8 +46,8 @@ bool resolve_config(const std::string &plugin_name, const char *schema_json,
                     const flexbuffers::Reference &user_cfg, std::string &out);
 
 /// @brief Test-friendly wrapper: resolve a user-config JSON string against a
-/// schema JSON string. An empty or unparseable @p user_cfg_json is treated as
-/// an empty config object.
+/// schema JSON string. An empty @p user_cfg_json is treated as an empty config
+/// object.
 ///
 /// @returns false on the same hard validation failures as resolve_config(), or
 ///          on an unparseable @p user_cfg_json.
