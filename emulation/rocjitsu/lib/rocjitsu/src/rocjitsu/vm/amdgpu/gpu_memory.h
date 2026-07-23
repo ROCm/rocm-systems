@@ -13,6 +13,7 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <functional>
 #include <format>
@@ -24,6 +25,7 @@
 #include <sys/uio.h>
 #include <unordered_map>
 #include <utility>
+#include <unistd.h>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -94,6 +96,14 @@ public:
   /// local-mode KFD clients can hold large PROT_NONE GPUVA reservations. Those
   /// accesses fall back to process_vm_readv/process_vm_writev instead.
   void set_passthrough(bool v) { passthrough_ = v; }
+
+  uint64_t client_memory_probe_count() const {
+    return client_memory_probe_count_.load(std::memory_order_relaxed);
+  }
+
+  void reset_client_memory_probe_count() {
+    client_memory_probe_count_.store(0, std::memory_order_relaxed);
+  }
 
   /// @brief Resolve a GPU VA to a host pointer via the given VMID's page table.
   uint8_t *resolve_host_ptr(uint64_t addr, uint32_t vmid = 0) const {
@@ -376,6 +386,10 @@ private:
     return vmid > 0 && !is_sparse_reservation(addr, len, vmid);
   }
 
+  void record_client_memory_probe() const {
+    client_memory_probe_count_.fetch_add(1, std::memory_order_relaxed);
+  }
+
   template <typename T>
   bool read_client_value(uint64_t addr, uint32_t vmid, T &val) const {
     if (!should_probe_client_memory(addr, sizeof(T), vmid))
@@ -396,9 +410,12 @@ private:
     pid_t pid = client_pid_for_vmid(vmid);
     if (pid <= 0)
       return nullptr;
+    if (pid != getpid())
+      return nullptr;
     uint8_t byte = 0;
     iovec local{&byte, 1};
     iovec remote{reinterpret_cast<void *>(addr), 1};
+    record_client_memory_probe();
     ssize_t rc = process_vm_readv(pid, &local, 1, &remote, 1, 0);
     if (rc != 1)
       return nullptr;
@@ -411,6 +428,7 @@ private:
       return false;
     iovec local{dst, len};
     iovec remote{reinterpret_cast<void *>(addr), len};
+    record_client_memory_probe();
     ssize_t rc = process_vm_readv(pid, &local, 1, &remote, 1, 0);
     if (rc != static_cast<ssize_t>(len)) {
       util::Logger::warn("process_vm_readv failed: addr=0x", std::hex, addr, " pid=", std::dec, pid,
@@ -426,6 +444,7 @@ private:
       return false;
     iovec local{const_cast<void *>(src), len};
     iovec remote{reinterpret_cast<void *>(addr), len};
+    record_client_memory_probe();
     ssize_t rc = process_vm_writev(pid, &local, 1, &remote, 1, 0);
     if (rc != static_cast<ssize_t>(len)) {
       util::Logger::warn("process_vm_writev failed: addr=0x", std::hex, addr, " pid=", std::dec,
@@ -438,6 +457,7 @@ private:
   simdojo::Port *cpl_ = nullptr;
   mutable std::shared_mutex vmid_mutex_;
   std::unordered_map<uint32_t, VmidEntry> vmid_table_;
+  mutable std::atomic<uint64_t> client_memory_probe_count_{0};
   bool passthrough_ = false;
 };
 

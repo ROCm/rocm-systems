@@ -36,6 +36,7 @@ RJ_DIAGNOSTIC_POP
 #include <vector>
 
 #include <sys/mman.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace {
@@ -52,7 +53,7 @@ struct TestVM {
   }
 };
 
-TestVM create_test_vm() {
+TestVM create_test_vm(bool daemon_mode = false) {
   TestVM t;
   t.loaded = rocjitsu::config::load_config(CONFIG_PATH.c_str(), rocjitsu::kEmbeddedSchema);
   auto *soc = t.loaded.soc();
@@ -64,7 +65,8 @@ TestVM create_test_vm() {
   auto root = t.loaded.take_root();
   auto *released_root = root.release();
   (void)released_root;
-  auto vm = std::make_unique<rocjitsu::VirtualMachine>(std::unique_ptr<rocjitsu::SoC>(soc));
+  auto vm =
+      std::make_unique<rocjitsu::VirtualMachine>(std::unique_ptr<rocjitsu::SoC>(soc), daemon_mode);
   vm->driver()->setup_topology(t.loaded.device, soc->num_xcds());
 
   t.engine->topology().set_root(std::move(vm));
@@ -75,6 +77,32 @@ TestVM create_test_vm() {
 
   return t;
 }
+
+struct ChildProcessGuard {
+  pid_t pid = -1;
+  int done_fd = -1;
+  bool waited = false;
+
+  ~ChildProcessGuard() {
+    if (pid <= 0 || waited)
+      return;
+    char done = 0;
+    if (done_fd >= 0)
+      (void)::write(done_fd, &done, 1);
+    int status = 0;
+    (void)::waitpid(pid, &status, 0);
+  }
+
+  int finish() {
+    char done = 0;
+    if (done_fd >= 0)
+      EXPECT_EQ(::write(done_fd, &done, 1), 1);
+    int status = 0;
+    EXPECT_EQ(::waitpid(pid, &status, 0), pid);
+    waited = true;
+    return status;
+  }
+};
 
 class SimulatedKfdTest : public ::testing::Test {
 protected:
@@ -121,6 +149,65 @@ TEST_F(SimulatedKfdTest, LocalOpenRegistersClientPidForMemoryFallback) {
   EXPECT_EQ(t.driver()->close(), 0);
 }
 
+TEST_F(SimulatedKfdTest, DaemonVmidMissDoesNotReturnClientIdentityPointer) {
+  constexpr uint32_t kClientValue = 0x5A17C0DEu;
+  constexpr uint32_t kUpdatedValue = 0x13579BDFu;
+  int ready_pipe[2];
+  int done_pipe[2];
+  ASSERT_EQ(::pipe(ready_pipe), 0);
+  ASSERT_EQ(::pipe(done_pipe), 0);
+
+  pid_t child = ::fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    (void)::close(ready_pipe[0]);
+    (void)::close(done_pipe[1]);
+    constexpr size_t kPageSize = 0x1000;
+    void *page = ::mmap(nullptr, kPageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
+                        -1, 0);
+    if (page == MAP_FAILED)
+      _exit(2);
+    *static_cast<uint32_t *>(page) = kClientValue;
+    uint64_t client_va = reinterpret_cast<uint64_t>(page);
+    if (::write(ready_pipe[1], &client_va, sizeof(client_va)) !=
+        static_cast<ssize_t>(sizeof(client_va)))
+      _exit(3);
+    char done = 0;
+    (void)::read(done_pipe[0], &done, 1);
+    (void)::munmap(page, kPageSize);
+    _exit(0);
+  }
+
+  ChildProcessGuard child_guard{child, done_pipe[1]};
+  (void)::close(ready_pipe[1]);
+  (void)::close(done_pipe[0]);
+
+  uint64_t client_va = 0;
+  ASSERT_EQ(::read(ready_pipe[0], &client_va, sizeof(client_va)),
+            static_cast<ssize_t>(sizeof(client_va)));
+  (void)::close(ready_pipe[0]);
+
+  auto t = create_test_vm(/*daemon_mode=*/true);
+  ASSERT_NE(t.driver(), nullptr);
+  auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(t.engine->topology().root());
+  ASSERT_NE(vm, nullptr);
+  auto *memory = vm->memory();
+  ASSERT_NE(memory, nullptr);
+
+  uint32_t process_id = t.driver()->open_process(child);
+  ASSERT_NE(process_id, 0u);
+
+  EXPECT_EQ(memory->resolve_host_ptr(client_va, process_id), nullptr);
+  EXPECT_EQ(memory->read32(client_va, process_id), kClientValue);
+  memory->write32(client_va, kUpdatedValue, process_id);
+  EXPECT_EQ(memory->read32(client_va, process_id), kUpdatedValue);
+
+  EXPECT_EQ(t.driver()->close(process_id), 0);
+  int status = child_guard.finish();
+  EXPECT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0);
+}
+
 TEST_F(SimulatedKfdTest, ProcessVmidProtNoneReservationUsesSparseFallback) {
   auto t = create_test_vm();
   ASSERT_NE(t.driver(), nullptr);
@@ -157,12 +244,14 @@ TEST_F(SimulatedKfdTest, ProcessVmidProtNoneReservationUsesSparseFallback) {
   EXPECT_EQ(map.n_success, 1u);
   EXPECT_TRUE(process->contains_sparse_reservation(alloc.va_addr, alloc.size));
 
+  memory->reset_client_memory_probe_count();
   for (uint32_t i = 0; i < 2048; ++i) {
     uint64_t addr = alloc.va_addr + static_cast<uint64_t>((i % 64) * sizeof(uint32_t));
     uint32_t expected = 0xA5A50000u + i;
     memory->write32(addr, expected, process_id);
     EXPECT_EQ(memory->read32(addr, process_id), expected);
   }
+  EXPECT_EQ(memory->client_memory_probe_count(), 0u);
 
   kfd_ioctl_unmap_memory_from_gpu_args unmap{};
   unmap.handle = alloc.handle;
@@ -244,6 +333,30 @@ TEST_F(SimulatedKfdTest, SparseReservationOverlapPrefersHostBackedPages) {
   }
 
   EXPECT_TRUE(proc.contains_sparse_reservation(kBaseVa, 2 * kPage));
+}
+
+TEST_F(SimulatedKfdTest, LargeSparseReservationClassifiesReservedRange) {
+  rocjitsu::KfdProcess proc(/*process_id=*/9);
+  constexpr uint64_t kBaseVa = 0x8000000000ULL;
+  constexpr uint64_t kLargeSparseSize = 1ULL << 40;
+  constexpr uint64_t kPage = rocjitsu::KfdProcess::kPageSize;
+
+  {
+    std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation sparse{};
+    sparse.handle = 1;
+    sparse.gpu_va = kBaseVa;
+    sparse.size = kLargeSparseSize;
+    sparse.host_ptr = nullptr;
+    proc.allocations_[sparse.handle] = sparse;
+    proc.mark_allocations_dirty();
+  }
+
+  EXPECT_TRUE(proc.contains_sparse_reservation(kBaseVa, kPage));
+  EXPECT_TRUE(proc.contains_sparse_reservation(kBaseVa + (kLargeSparseSize / 2), kPage));
+  EXPECT_TRUE(proc.contains_sparse_reservation(kBaseVa + kLargeSparseSize - kPage, kPage));
+  EXPECT_FALSE(proc.contains_sparse_reservation(kBaseVa - kPage, kPage));
+  EXPECT_FALSE(proc.contains_sparse_reservation(kBaseVa + kLargeSparseSize, kPage));
 }
 
 TEST_F(SimulatedKfdTest, GuestDiscoveryOpenIsReleasedOnLastClose) {

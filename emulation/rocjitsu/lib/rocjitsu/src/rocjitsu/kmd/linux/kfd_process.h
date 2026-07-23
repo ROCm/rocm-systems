@@ -15,13 +15,14 @@
 #include "rocjitsu/kmd/linux/events.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include <sys/types.h> // pid_t
@@ -260,18 +261,18 @@ public:
         sparse_reservation_index_epoch_ != allocation_state_epoch_) {
       rebuild_sparse_reservation_index_locked();
     }
-    uint64_t page = gpu_va >> kPageShift;
-    const uint64_t last_page = (gpu_va + span - 1) >> kPageShift;
-    while (true) {
-      auto it = sparse_reservation_pages_.find(page);
-      if (it == sparse_reservation_pages_.end())
+    uint64_t covered_until = gpu_va >> kPageShift;
+    const uint64_t end_page = ((gpu_va + span - 1) >> kPageShift) + 1;
+    auto it = std::upper_bound(sparse_reservation_ranges_.begin(),
+                               sparse_reservation_ranges_.end(), covered_until,
+                               [](uint64_t page, const SparseReservationRange &range) {
+                                 return page < range.end_page;
+                               });
+    while (covered_until < end_page) {
+      if (it == sparse_reservation_ranges_.end() || it->first_page > covered_until)
         return false;
-      const auto &state = it->second;
-      if (state.host_refcount != 0 || state.sparse_refcount == 0)
-        return false;
-      if (page == last_page)
-        break;
-      ++page;
+      covered_until = std::min(end_page, it->end_page);
+      ++it;
     }
     return true;
   }
@@ -329,31 +330,56 @@ public:
   mutable std::mutex debug_mutex_;
   DebugSession debug_session_;
 
-  struct ReservationPageState {
-    uint32_t sparse_refcount = 0;
-    uint32_t host_refcount = 0;
+  struct SparseReservationRange {
+    uint64_t first_page = 0;
+    uint64_t end_page = 0;
+  };
+
+  struct ReservationBoundaryDelta {
+    int64_t sparse_delta = 0;
+    int64_t host_delta = 0;
   };
 
   void rebuild_sparse_reservation_index_locked() const {
-    sparse_reservation_pages_.clear();
+    std::map<uint64_t, ReservationBoundaryDelta> boundaries;
     for (const auto &[handle, alloc] : allocations_) {
       (void)handle;
       if (alloc.size == 0 || alloc.gpu_va > UINT64_MAX - (alloc.size - 1))
         continue;
       const uint64_t first_page = alloc.gpu_va >> kPageShift;
-      const uint64_t last_page = (alloc.gpu_va + alloc.size - 1) >> kPageShift;
-      uint64_t page = first_page;
-      while (true) {
-        auto &state = sparse_reservation_pages_[page];
-        if (alloc.host_ptr)
-          ++state.host_refcount;
-        else
-          ++state.sparse_refcount;
-        if (page == last_page)
-          break;
-        ++page;
+      const uint64_t end_page = ((alloc.gpu_va + alloc.size - 1) >> kPageShift) + 1;
+      auto &start = boundaries[first_page];
+      auto &end = boundaries[end_page];
+      if (alloc.host_ptr) {
+        ++start.host_delta;
+        --end.host_delta;
+      } else {
+        ++start.sparse_delta;
+        --end.sparse_delta;
       }
     }
+
+    sparse_reservation_ranges_.clear();
+    int64_t sparse_refcount = 0;
+    int64_t host_refcount = 0;
+    uint64_t current_page = 0;
+    bool have_current = false;
+    for (const auto &[boundary_page, delta] : boundaries) {
+      if (have_current && current_page < boundary_page && sparse_refcount > 0 &&
+          host_refcount == 0) {
+        if (!sparse_reservation_ranges_.empty() &&
+            sparse_reservation_ranges_.back().end_page == current_page) {
+          sparse_reservation_ranges_.back().end_page = boundary_page;
+        } else {
+          sparse_reservation_ranges_.push_back({current_page, boundary_page});
+        }
+      }
+      sparse_refcount += delta.sparse_delta;
+      host_refcount += delta.host_delta;
+      current_page = boundary_page;
+      have_current = true;
+    }
+
     sparse_reservation_index_epoch_ = allocation_state_epoch_;
     sparse_reservation_index_valid_ = true;
   }
@@ -361,7 +387,7 @@ public:
   mutable uint64_t allocation_state_epoch_ = 0;
   mutable uint64_t sparse_reservation_index_epoch_ = 0;
   mutable bool sparse_reservation_index_valid_ = false;
-  mutable std::unordered_map<uint64_t, ReservationPageState> sparse_reservation_pages_;
+  mutable std::vector<SparseReservationRange> sparse_reservation_ranges_;
 };
 
 } // namespace rocjitsu
