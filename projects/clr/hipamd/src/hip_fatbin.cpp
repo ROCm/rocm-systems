@@ -758,60 +758,68 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
     return hipErrorInvalidValue;
   }
 
-  // Build architecture priority list from devices
-  // For each device, add native ISA first, then generic fallback.
-  // Reservation in the list is pessimistically assuming there is a generic fallback for each
-  // device.
-  std::vector<std::string> arch_list;
-  arch_list.reserve(devices.size() * 2);
+  // Add KPACK load objects for each device.
+  // For each device type, the KPACK load returns one code object
+  // selected from the architecture priority list by using devices
+  // isa-name or generic name.
+  // Code object needs to be loaded for each device in system separately because
+  // there can be different types of GPUs on the same system and code-object
+  // is GPU type specific. (gfx1201, gfx90a)
   for (auto device : devices) {
+    std::vector<std::string> arch_list;
+    // Architecture names
+    // 1) exact devices ISA name, examples:
+    //  - amdgcn-amd-amdhsa--gfx1100
+    //  - amdgcn-amd-amdhsa--gfx90a:sramecc+:xnack-
+    // 2) generic fallback name, examples:
+    //  - amdgcn-amd-amdhsa--gfx11-generic
+    //  - can also be empty string for some arch like gfx90a
+    arch_list.reserve(2);
     std::string device_name = device->devices()[0]->isa().isaName();
     arch_list.push_back(device_name);
 
-    // Add generic fallback
+    // Add generic fallback arch-name
     auto generic_name = TargetToGeneric(device_name);
     if (!generic_name.empty()) {
       arch_list.push_back(generic_name);
     }
-  }
 
-  // Convert to C-style array for kpack API
-  std::vector<const char*> arch_ptrs;
-  arch_ptrs.reserve(arch_list.size());
-  for (const auto& arch : arch_list) {
-    arch_ptrs.push_back(arch.c_str());
-  }
+    // Convert arch-list to C-style array for kpack API
+    std::vector<const char*> arch_ptrs;
+    arch_ptrs.reserve(arch_list.size());
+    for (const auto& arch : arch_list) {
+      arch_ptrs.push_back(arch.c_str());
+    }
 
-  // Load code object from kpack archive
-  void* code_object = nullptr;
-  size_t code_object_size = 0;
+    // Load device type specific code object from kpack archive
+    void* code_object = nullptr;
+    size_t code_object_size = 0;
 
-  // binary_path is used to resolve relative paths to kpack archives.
-  // bundle_index identifies which code object to load for multi-TU binaries.
-  // The kernel_name (used for TOC lookup) is embedded in the HIPK metadata.
-  kpack_error_t err =
-      kpack_load_code_object(getHipKpackCache(), params.metadata, fname_.c_str(),
-                             static_cast<uint32_t>(params.bundle_index),
-                             arch_ptrs.data(), arch_ptrs.size(), &code_object, &code_object_size);
+    // Binary_path is used to resolve relative paths to kpack archives.
+    // Bundle_index identifies which code object to load for multi-TU binaries.
+    // The kernel_name (used for TOC lookup) is embedded in the HIPK metadata.
+    kpack_error_t err =
+        kpack_load_code_object(getHipKpackCache(), params.metadata, fname_.c_str(),
+                               static_cast<uint32_t>(params.bundle_index), arch_ptrs.data(),
+                               arch_ptrs.size(), &code_object, &code_object_size);
 
-  if (err != KPACK_SUCCESS) {
-    LogPrintfError("kpack_load_code_object failed with error: %d", err);
-    return hipErrorInvalidImage;
-  }
+    if (err != KPACK_SUCCESS) {
+      LogPrintfError("kpack_load_code_object failed with error: %d; isa name: %s", err,
+                     device_name.c_str());
+      return hipErrorInvalidImage;
+    }
 
-  // Add code object to all devices. The kpack buffer isn't backed by a file
-  // on disk, so no fd is passed.
-  for (auto device : devices) {
+    // The kpack buffer isn't backed by a file on disk, so no fd is passed.
     hipError_t hip_err =
         AddDevProgram(device, code_object, code_object_size, amd::Os::FDescInit());
     if (hip_err != hipSuccess) {
       kpack_free_code_object(code_object);
       return hip_err;
     }
-  }
 
-  // Track allocation for cleanup in destructor
-  code_obj_allocations_.insert(code_object);
+    // Track allocation for cleanup in destructor
+    code_obj_allocations_.insert(code_object);
+  }
 
   return hipSuccess;
 #endif
