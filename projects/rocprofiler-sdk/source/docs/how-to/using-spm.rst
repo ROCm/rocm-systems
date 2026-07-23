@@ -46,7 +46,7 @@ The output lists if ``rocprofv3`` supports SPM
 The preceding output shows that the TCC_MISS counter can be sampled.
 
 .. note::
-   SPM requires AMD GPU Driver version **6.19.14.31400000** or newer to work correctly.
+   For proper functioning, SPM requires AMD GPU Driver version **6.19.14.31400000** or later.
    Verify the loaded ``amdgpu`` kernel module version before using SPM.
 
 To check the driver version, use:
