@@ -28,6 +28,7 @@ RJ_DIAGNOSTIC_POP
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cassert>
 #include <compare>
 #include <cstddef>
 #include <cstdint>

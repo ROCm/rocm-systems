@@ -120,13 +120,25 @@ struct MoiAppendedBodyOptions {
   bool wrap_embedded_guest_vgpr_bank = false;
 };
 
-[[nodiscard]] size_t
-moi_appended_body_vgpr_msb_transition_word_count(std::optional<uint16_t> gfx1250_vgpr_msb_mode,
+[[nodiscard]] constexpr size_t
+moi_appended_body_vgpr_msb_transition_word_count(rj_code_arch_t arch,
+                                                 std::optional<uint16_t> gfx1250_vgpr_msb_mode,
                                                  bool has_vgpr_spill, bool wraps_embedded_guest) {
-  if (gfx1250_vgpr_msb_mode.value_or(0u) == 0u)
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || gfx1250_vgpr_msb_mode.value_or(0u) == 0u)
     return 0u;
   return (has_vgpr_spill ? 4u : 2u) + (wraps_embedded_guest ? 2u : 0u);
 }
+
+static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_GFX1250,
+                                                               std::nullopt, false, false) == 0u);
+static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_GFX1250,
+                                                               uint16_t{4u}, false, false) == 2u);
+static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_GFX1250,
+                                                               uint16_t{4u}, true, false) == 4u);
+static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_GFX1250,
+                                                               uint16_t{4u}, true, true) == 6u);
+static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_CDNA4,
+                                                               uint16_t{4u}, true, true) == 0u);
 
 template <typename PlannedPatch>
 [[nodiscard]] std::optional<std::vector<uint32_t>>
@@ -167,17 +179,14 @@ assemble_moi_appended_body(const PlannedPatch &planned_patch, std::span<const ui
       return std::nullopt;
     }
   }
-  // Wrapped callers always embed the guest in the unsplit probe body. Validate
-  // that planning/emission contract defensively before doing iterator
-  // arithmetic, even though current callers establish it during planning.
-  if (options.wrap_embedded_guest_vgpr_bank &&
-      (!select_low_vgpr_bank || !guest_word || options.trailing_guest_word_count != 0u)) {
-    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
-                        " has an invalid embedded-guest VGPR-bank plan");
-    return std::nullopt;
-  }
+  // Wrapped callers always embed the guest in the unsplit probe body. Assert
+  // that internal planning contract and keep the release path iterator-safe
+  // if a future caller violates it.
+  const bool valid_embedded_guest_plan =
+      select_low_vgpr_bank && guest_word.has_value() && options.trailing_guest_word_count == 0u;
+  assert(!options.wrap_embedded_guest_vgpr_bank || valid_embedded_guest_plan);
   const bool wrap_embedded_guest =
-      select_low_vgpr_bank && options.wrap_embedded_guest_vgpr_bank && guest_word;
+      options.wrap_embedded_guest_vgpr_bank && valid_embedded_guest_plan;
   if (wrap_embedded_guest) {
     body.insert(body.end(), probe_words.begin(), probe_words.begin() + *guest_word);
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(

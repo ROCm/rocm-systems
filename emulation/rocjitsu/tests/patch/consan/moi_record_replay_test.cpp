@@ -3610,6 +3610,32 @@ TEST(ConSanMoi, Gfx1250RejectsExplicitPersistentStateInFlatScratch) {
   expect_special_alias_rejected(workgroup_options);
 }
 
+TEST(ConSanMoi, Gfx1250AcceptsConfiguredPersistentStateAboveFlatScratch) {
+  std::vector<uint32_t> text_words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+  };
+  text_words.resize(128u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_persistent_owner_sgpr = 104u;
+  options.moi_persistent_epoch_sgpr = 105u;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(64, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_explicit_state_above_flat_scratch"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("architectural special SGPR") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+}
+
 TEST(ConSanMoi, Cdna4AccvgprBoundaryRecordReplayUsesScalarEpochCoalescing) {
   const auto guest = build_cdna4_ds_store_b32(
       /*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);

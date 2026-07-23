@@ -636,8 +636,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                                candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
     const uint64_t vgpr_msb_bytes = use_indirect_appended
                                         ? moi_appended_body_vgpr_msb_transition_word_count(
-                                              candidate.gfx1250_vgpr_msb_mode, spill.has_value(),
-                                              wrap_embedded_guest_vgpr_bank) *
+                                              arch, candidate.gfx1250_vgpr_msb_mode,
+                                              spill.has_value(), wrap_embedded_guest_vgpr_bank) *
                                               sizeof(uint32_t)
                                         : 0u;
     const uint64_t patch_bytes =
@@ -1103,7 +1103,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           planned_patch.displaced_tail_words.size() * sizeof(uint32_t);
       const uint64_t vgpr_msb_bytes =
           moi_appended_body_vgpr_msb_transition_word_count(
-              planned_patch.gfx1250_vgpr_msb_mode, planned_patch.spill.has_value(),
+              arch, planned_patch.gfx1250_vgpr_msb_mode, planned_patch.spill.has_value(),
               planned_patch.wrap_embedded_guest_vgpr_bank) *
           sizeof(uint32_t);
       const uint64_t dense_gate_bytes =

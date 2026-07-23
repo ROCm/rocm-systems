@@ -1634,23 +1634,37 @@ inline_shadow_visible_evidence_sgpr(const ConSanOptions &options) {
                                (options.moi_dynamic_stack_spill ? 25u : 24u));
 }
 
+struct MoiArchitecturalSgprRange {
+  uint16_t base = kMaxSgprs;
+  uint16_t width = 0u;
+};
+
 struct MoiArchitecturalSgprLayout {
   uint16_t ordinary_limit = kMaxSgprs;
-  uint16_t flat_scratch_base = kMaxSgprs;
-  uint16_t flat_scratch_width = 0u;
+  MoiArchitecturalSgprRange flat_scratch;
+  MoiArchitecturalSgprRange xnack_mask;
+  MoiArchitecturalSgprRange vcc;
 };
 
 [[nodiscard]] constexpr MoiArchitecturalSgprLayout
 moi_architectural_sgpr_layout(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
-    // Encoded s102:s103 and s104:s105 name FLAT_SCRATCH and XNACK_MASK,
-    // respectively, so neither pair is ordinary allocatable storage.
-    return {.ordinary_limit = 102u, .flat_scratch_base = 102u, .flat_scratch_width = 2u};
+    return {
+        .ordinary_limit = 102u,
+        .flat_scratch = {.base = 102u, .width = 2u},
+        .xnack_mask = {.base = 104u, .width = 2u},
+        .vcc = {.base = 106u, .width = 2u},
+    };
   }
   if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
     // RDNA4 retains ordinary physical SGPRs through s105, but scalar
     // selectors s102:s103 alias FLAT_SCRATCH in persistent SALU state.
-    return {.ordinary_limit = kMaxSgprs, .flat_scratch_base = 102u, .flat_scratch_width = 2u};
+    return {
+        .ordinary_limit = kMaxSgprs,
+        .flat_scratch = {.base = 102u, .width = 2u},
+        .xnack_mask = {},
+        .vcc = {.base = 106u, .width = 2u},
+    };
   }
   return {};
 }
@@ -1665,8 +1679,8 @@ moi_architectural_sgpr_layout(rj_code_arch_t arch) {
   // gfx1250 short-lived scalar save windows may use the underlying physical
   // registers when no scratch operation is live. Persistent state cannot:
   // writing the aliased selectors would silently retarget later private spills.
-  return layout.flat_scratch_width != 0u &&
-         range_overlaps(base, width, layout.flat_scratch_base, layout.flat_scratch_width);
+  return layout.flat_scratch.width != 0u &&
+         range_overlaps(base, width, layout.flat_scratch.base, layout.flat_scratch.width);
 }
 
 [[nodiscard]] uint16_t moi_dispatch_state_sgpr_count(const ConSanOptions &options) {

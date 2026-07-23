@@ -271,8 +271,8 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPreserveGuestVgprMsbMode) {
       continue;
     const std::vector<uint32_t> words =
         text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
-    // The sampled body has one pair around its spill sequence and another
-    // around the embedded guest instruction.
+    // Four pairs cover the surrounding sampled trampoline, appended-body
+    // entry/exit, embedded guest, and appended spill restore.
     EXPECT_EQ(std::ranges::count(words, select_low), 4u);
     EXPECT_EQ(std::ranges::count(words, restore_guest), 4u);
     ASSERT_TRUE(patch.relocated_guest_instruction_offset);

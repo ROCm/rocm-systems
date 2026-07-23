@@ -528,10 +528,10 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     const bool wrap_embedded_guest_vgpr_bank =
         use_indirect_appended && options.moi_dynamic_access_records &&
         arch == ROCJITSU_CODE_ARCH_GFX1250 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
-    const uint64_t vgpr_msb_bytes =
-        moi_appended_body_vgpr_msb_transition_word_count(
-            candidate.gfx1250_vgpr_msb_mode, spill.has_value(), wrap_embedded_guest_vgpr_bank) *
-        sizeof(uint32_t);
+    const uint64_t vgpr_msb_bytes = moi_appended_body_vgpr_msb_transition_word_count(
+                                        arch, candidate.gfx1250_vgpr_msb_mode, spill.has_value(),
+                                        wrap_embedded_guest_vgpr_bank) *
+                                    sizeof(uint32_t);
     std::vector<uint32_t> displaced_tail_words;
     uint32_t displaced_original_size = candidate.size;
     bool entry_island_at_anchor = false;
