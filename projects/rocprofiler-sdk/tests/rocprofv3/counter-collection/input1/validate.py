@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,115 +22,235 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import sys
-import pytest
-import numpy as np
-import pandas as pd
+import math
 import re
+import sys
+from collections import Counter, defaultdict
+
+import pandas as pd
+import pytest
 
 kernel_list = sorted(
     ["addition_kernel", "subtract_kernel", "multiply_kernel", "divide_kernel"]
 )
+REQUESTED_COUNTER = "SQ_WAVES"
+INTERNAL_KERNEL_PATTERN = re.compile(r"__amd_rocclr_")
+
+# CSV uses six fixed decimals for values at least one and eight scientific decimals below
+# one. The relative tolerance covers summing dimension values at larger magnitudes.
+COUNTER_VALUE_ABS_TOLERANCE = 1.0e-6
+COUNTER_VALUE_REL_TOLERANCE = 1.0e-12
+
+# AQLProfile currently reports unreliable counter values for these architectures.
+VALUE_CHECK_SKIP_GFX = {
+    "gfx1101",
+    "gfx1102",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+}
 
 
-def unique(lst):
-    return list(set(lst))
+def _is_internal_kernel(kernel_name):
+    return INTERNAL_KERNEL_PATTERN.search(kernel_name) is not None
 
 
-def test_validate_counter_collection_pmc1(input_data: pd.DataFrame):
-    df = input_data
+def _integer_column(df, column):
+    values = pd.to_numeric(df[column], errors="coerce")
+    assert values.notna().all(), f"{column} contains a non-numeric value"
+    integer_values = values.astype("int64")
+    assert (values == integer_values).all(), f"{column} contains a non-integer value"
+    return integer_values
 
+
+def _normalize_csv_dispatches(df):
     assert not df.empty
-    df_agent_id = df["Agent_Id"].str.split(" ").str[-1]
-    assert (df_agent_id.astype(int).values >= 0).all()
-    assert (df["Queue_Id"].astype(int).values > 0).all()
-    assert (df["Process_Id"].astype(int).values > 0).all()
-    assert len(df["Kernel_Name"]) > 0
 
-    counter_collection_pmc1_kernel_list = [
-        x
-        for x in sorted(df["Kernel_Name"].unique().tolist())
-        if not re.search(r"__amd_rocclr_.*", x)
-    ]
+    agent_ids = pd.to_numeric(
+        df["Agent_Id"].astype(str).str.rsplit(" ", n=1).str[-1], errors="coerce"
+    )
+    assert agent_ids.notna().all()
+    assert (agent_ids >= 0).all()
+    assert (_integer_column(df, "Queue_Id") > 0).all()
+    assert (_integer_column(df, "Process_Id") > 0).all()
+    assert df["Kernel_Name"].notna().all()
+    assert df["Kernel_Name"].str.len().gt(0).all()
+    counter_values = pd.to_numeric(df["Counter_Value"], errors="coerce")
+    assert counter_values.notna().all()
 
-    assert kernel_list == counter_collection_pmc1_kernel_list
+    normalized = pd.DataFrame(
+        {
+            "dispatch_id": _integer_column(df, "Dispatch_Id"),
+            "kernel_id": _integer_column(df, "Kernel_Id"),
+            "kernel_name": df["Kernel_Name"],
+            "counter_name": df["Counter_Name"],
+            "counter_value": counter_values,
+        }
+    )
 
-    kernel_count = dict([[itr, 0] for itr in kernel_list])
-    assert len(kernel_count) == len(kernel_list)
-    for itr in df["Kernel_Name"]:
-        if re.search(r"__amd_rocclr_.*", itr):
-            continue
-        kernel_count[itr] += 1
-    kn_cnt = [itr for _, itr in kernel_count.items()]
-    assert min(kn_cnt) == max(kn_cnt) and len(unique(kn_cnt)) == 1
+    identities = []
+    for dispatch_id, rows in normalized.groupby("dispatch_id", sort=True):
+        kernel_identity = (
+            int(rows.iloc[0]["kernel_id"]),
+            rows.iloc[0]["kernel_name"],
+        )
+        observed_kernels = list(zip(rows["kernel_id"], rows["kernel_name"]))
+        assert all(
+            (int(kernel_id), kernel_name) == kernel_identity
+            for kernel_id, kernel_name in observed_kernels
+        ), f"dispatch {dispatch_id} contains mixed kernel identities"
 
-    assert len(df["Counter_Value"]) > 0
-    assert df["Counter_Name"].str.contains("SQ_WAVES").all()
-    assert (df["Counter_Value"].astype(int).values > 0).all()
+        counter_names = rows["counter_name"].tolist()
+        assert counter_names and all(
+            counter_name == REQUESTED_COUNTER for counter_name in counter_names
+        ), f"dispatch {dispatch_id} contains an unexpected counter: {counter_names}"
+        assert len(rows) == 1, (
+            f"dispatch {dispatch_id} contains duplicate "
+            f"{kernel_identity[1]}/{REQUESTED_COUNTER} records"
+        )
+        counter_value = float(rows.iloc[0]["counter_value"])
 
-    di_list = df["Dispatch_Id"].astype(int).values.tolist()
-    di_uniq = sorted(df["Dispatch_Id"].unique().tolist())
-    # make sure the dispatch ids are unique and ordered
-    di_expect = [idx + 1 for idx in range(len(di_list))]
-    assert di_expect == di_uniq
+        identities.append(
+            (
+                int(dispatch_id),
+                kernel_identity[0],
+                kernel_identity[1],
+                REQUESTED_COUNTER,
+                counter_value,
+            )
+        )
+
+    dispatch_ids = [identity[0] for identity in identities]
+    assert dispatch_ids == list(range(1, len(dispatch_ids) + 1))
+    return tuple(identities)
 
 
-def test_validate_counter_collection_pmc1_json(json_data):
+def _metadata_by_handle(entries):
+    return {int(entry["id"]["handle"]): entry for entry in entries}
+
+
+def _normalize_json_dispatches(json_data):
     data = json_data["rocprofiler-sdk-tool"]
     counter_collection_data = data["callback_records"]["counter_collection"]
-    dispatch_ids = []
-    # at present, AQLProfile has bugs when reporting the counters for below architectures
-    skip_gfx = ("gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1152", "gfx1153")
+    assert counter_collection_data
 
-    def get_kernel_name(kernel_id):
-        return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
+    agents = _metadata_by_handle(data["agents"])
+    counters = _metadata_by_handle(data["counters"])
+    dispatch_groups = defaultdict(list)
 
-    def get_agent(agent_id):
-        for agent in data["agents"]:
-            if agent["id"]["handle"] == agent_id["handle"]:
-                return agent
-        return None
+    for collection in counter_collection_data:
+        dispatch_data = collection["dispatch_data"]["dispatch_info"]
+        dispatch_id = int(dispatch_data["dispatch_id"])
+        agent_id = int(dispatch_data["agent_id"]["handle"])
+        queue_id = int(dispatch_data["queue_id"]["handle"])
+        kernel_id = int(dispatch_data["kernel_id"])
 
-    def get_counter(counter_id):
-        for counter in data["counters"]:
-            if counter["id"]["handle"] == counter_id["handle"]:
-                return counter
-        return None
+        assert dispatch_id > 0
+        assert agent_id > 0
+        assert queue_id > 0
+        assert agent_id in agents, f"dispatch {dispatch_id} references unknown agent"
 
-    for counter in counter_collection_data:
-        dispatch_data = counter["dispatch_data"]["dispatch_info"]
+        kernel_name = data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
+        assert kernel_name
 
-        assert dispatch_data["dispatch_id"] > 0
-        assert dispatch_data["agent_id"]["handle"] > 0
-        assert dispatch_data["queue_id"]["handle"] > 0
+        records = collection["records"]
+        assert records, f"dispatch {dispatch_id} has no counter records"
 
-        agent = get_agent(dispatch_data["agent_id"])
-        kernel_name = get_kernel_name(dispatch_data["kernel_id"])
+        counter_names = []
+        counter_values = []
+        for record in records:
+            counter_id = int(record["counter_id"]["handle"])
+            counter = counters.get(counter_id)
+            assert counter is not None, f"record references unknown counter: {record}"
+            counter_names.append(counter["name"])
+            counter_values.append(float(record["value"]))
 
-        assert agent is not None
-        assert len(kernel_name) > 0
+        dispatch_groups[dispatch_id].append(
+            {
+                "kernel_identity": (kernel_id, kernel_name),
+                "counter_names": counter_names,
+                "counter_value": math.fsum(counter_values),
+                "architecture": agents[agent_id]["name"],
+            }
+        )
 
-        dispatch_ids.append(dispatch_data["dispatch_id"])
-        if not re.search(r"__amd_rocclr_.*", kernel_name):
-            # Collect all SQ_WAVES values
-            sq_waves_values = []
-            for record in counter["records"]:
-                counter = get_counter(record["counter_id"])
-                assert counter is not None, f"record:\n\t{record}"
-                assert (
-                    counter["name"] == "SQ_WAVES"
-                ), f"record:\n\t{record}\ncounter:\n\t{counter}"
-                if agent["name"] not in skip_gfx:
-                    sq_waves_values.append(record["value"])
+    identities = []
+    for dispatch_id in sorted(dispatch_groups):
+        entries = dispatch_groups[dispatch_id]
+        kernel_identity = entries[0]["kernel_identity"]
+        assert all(
+            entry["kernel_identity"] == kernel_identity for entry in entries
+        ), f"dispatch {dispatch_id} contains mixed kernel identities"
 
-            # Check aggregate sum
-            if agent["name"] not in skip_gfx:
-                assert sum(sq_waves_values) > 0, "SQ_WAVES value is not > 0"
+        counter_names = [
+            counter_name for entry in entries for counter_name in entry["counter_names"]
+        ]
+        assert counter_names and all(
+            counter_name == REQUESTED_COUNTER for counter_name in counter_names
+        ), f"dispatch {dispatch_id} contains an unexpected counter: {counter_names}"
+        assert len(entries) == 1, (
+            f"dispatch {dispatch_id} contains duplicate "
+            f"{kernel_identity[1]}/{REQUESTED_COUNTER} records"
+        )
 
-    di_uniq = list(set(sorted(dispatch_ids)))
-    # make sure the dispatch ids are unique and ordered
-    di_expect = [idx + 1 for idx in range(len(dispatch_ids))]
-    assert di_expect == di_uniq
+        entry = entries[0]
+        if (
+            not _is_internal_kernel(kernel_identity[1])
+            and entry["architecture"] not in VALUE_CHECK_SKIP_GFX
+        ):
+            assert entry["counter_value"] > 0, f"dispatch {dispatch_id} has no SQ_WAVES"
+
+        identities.append(
+            (
+                dispatch_id,
+                kernel_identity[0],
+                kernel_identity[1],
+                REQUESTED_COUNTER,
+                entry["counter_value"],
+            )
+        )
+
+    dispatch_ids = [identity[0] for identity in identities]
+    assert dispatch_ids == list(range(1, len(dispatch_ids) + 1))
+    return tuple(identities)
+
+
+def test_validate_counter_collection_pmc1(
+    input_data: pd.DataFrame,
+    json_data,
+):
+    csv_identities = _normalize_csv_dispatches(input_data)
+    json_identities = _normalize_json_dispatches(json_data)
+
+    csv_structure = tuple(dispatch[:-1] for dispatch in csv_identities)
+    json_structure = tuple(dispatch[:-1] for dispatch in json_identities)
+    assert csv_structure == json_structure, (
+        "CSV and JSON dispatch/kernel/counter identities differ:\n"
+        f"CSV: {csv_structure}\nJSON: {json_structure}"
+    )
+
+    for csv_dispatch, json_dispatch in zip(csv_identities, json_identities):
+        identity = csv_dispatch[:-1]
+        csv_value = csv_dispatch[-1]
+        json_value = json_dispatch[-1]
+        assert csv_value == pytest.approx(
+            json_value,
+            rel=COUNTER_VALUE_REL_TOLERANCE,
+            abs=COUNTER_VALUE_ABS_TOLERANCE,
+        ), (
+            f"CSV and JSON counter values differ for {identity}: "
+            f"CSV={csv_value}, JSON sum={json_value}"
+        )
+
+    kernel_counts = Counter(
+        kernel_name
+        for _, _, kernel_name, _, _ in csv_identities
+        if not _is_internal_kernel(kernel_name)
+    )
+    assert sorted(kernel_counts) == kernel_list
+    counts = list(kernel_counts.values())
+    assert counts and min(counts) == max(counts)
 
 
 if __name__ == "__main__":
