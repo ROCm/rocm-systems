@@ -2258,7 +2258,12 @@ TEST(InstrumentorProbeSpill, Cdna4MultiKernelSpillFailsClosed) {
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
   ASSERT_TRUE(obj.is_valid());
   ASSERT_TRUE(probe_obj.is_valid());
-  ASSERT_EQ(obj.kernel_descriptors().size(), 2u);
+  const Section *text = obj.text_sections().front();
+  ASSERT_EQ(scan_kernel_descriptors(
+                {reinterpret_cast<const uint8_t *>(obj.image_data()), obj.image_size()},
+                text->sectionOffset(), text->size())
+                .size(),
+            2u);
 
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   InstrumentationPoint pt;
