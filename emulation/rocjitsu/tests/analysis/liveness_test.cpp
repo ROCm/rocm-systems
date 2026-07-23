@@ -511,6 +511,46 @@ TEST(CfgAnalysis, RecoveredIndirectBranchEdgeStartsAtConsumerBlock) {
   EXPECT_FALSE(has_predecessor(*fallthrough, consumer));
 }
 
+TEST(CfgAnalysis, RecoversMultipleSgprPairsFromOneBlockEntry) {
+  constexpr uint16_t kFirstPcSreg = 8;
+  constexpr uint16_t kSecondPcSreg = 20;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // Both PC builders reach both successor blocks. The two pending consumers
+  // exercise lookup of distinct keys in the same sorted block-entry fact set.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kFirstPcSreg, 0),                                // 0x00: first getpc.
+      pack_sop2(0, kFirstPcSreg, kFirstPcSreg, kLiteralOperand),       // 0x04: first add.
+      44,                                                              // 0x08: -> 0x30.
+      pack_sop2(4, kFirstPcSreg + 1, kFirstPcSreg + 1, kInlineInt0),   // 0x0c.
+      pack_sop1(0x1c, kSecondPcSreg, 0),                               // 0x10: second getpc.
+      pack_sop2(0, kSecondPcSreg, kSecondPcSreg, kLiteralOperand),     // 0x14: second add.
+      32,                                                              // 0x18: -> 0x34.
+      pack_sop2(4, kSecondPcSreg + 1, kSecondPcSreg + 1, kInlineInt0), // 0x1c.
+      pack_sopp(5, 1),                                                 // 0x20: -> 0x28.
+      pack_sop1(0x1d, 0, kFirstPcSreg),                                // 0x24: first consumer.
+      pack_sop1(0x1d, 0, kSecondPcSreg),                               // 0x28: second consumer.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                        // 0x2c.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                        // 0x30: first target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                        // 0x34: second target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *first_consumer = block_starting_at(blocks, 36);
+  auto *second_consumer = block_starting_at(blocks, 40);
+  ASSERT_NE(first_consumer, nullptr);
+  ASSERT_NE(second_consumer, nullptr);
+  ASSERT_EQ(first_consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(first_consumer->static_indirect_call_fixups()[0].source_target_offset, 48u);
+  ASSERT_EQ(second_consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(second_consumer->static_indirect_call_fixups()[0].source_target_offset, 52u);
+}
+
 TEST(CfgAnalysis, IncompleteFactConsumerIsFlaggedIncomplete) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint32_t kLiteralOperand = 255;
