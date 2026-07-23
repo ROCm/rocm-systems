@@ -1877,7 +1877,7 @@ if(RJ_ENABLE_HIP_TESTS)
         cmake_parse_arguments(
             ARG
             ""
-            "CONFIG;NAME;TIMEOUT"
+            "CONFIG;INSTALL_CONFIG;NAME;TIMEOUT"
             "ENVIRONMENT"
             ${ARGN}
         )
@@ -1887,7 +1887,14 @@ if(RJ_ENABLE_HIP_TESTS)
         if(NOT ARG_NAME)
             set(ARG_NAME ${TEST_CASE})
         endif()
-        get_filename_component(_install_config_name "${ARG_CONFIG}" NAME)
+        if(ARG_INSTALL_CONFIG)
+            set(_install_config "${ARG_INSTALL_CONFIG}")
+        else()
+            get_filename_component(_install_config_name "${ARG_CONFIG}" NAME)
+            set(_install_config
+                "\${RJ_INSTALLED_CONFIG_DIR}/${_install_config_name}"
+            )
+        endif()
         set(_install_env)
         foreach(_env_entry IN LISTS ARG_ENVIRONMENT)
             if(_env_entry MATCHES "^ROCJITSU_HIPKITTENS_KERNEL_DIR=")
@@ -1945,7 +1952,7 @@ if(RJ_ENABLE_HIP_TESTS)
             "-DTEST_EXECUTABLE=bin/${TEST_BIN}"
             "-DTEST_FILTER=${TEST_CASE}"
             "-DTEST_LAUNCHER=\${RJ_INSTALLED_BINDIR}/rocjitsu"
-            "-DTEST_CONFIG=\${RJ_INSTALLED_CONFIG_DIR}/${_install_config_name}"
+            "-DTEST_CONFIG=${_install_config}"
             "-P"
             "rj_run_filtered_gtest.cmake"
         )
@@ -2225,9 +2232,29 @@ if(RJ_ENABLE_HIP_TESTS)
             ${LOGGING_SINK_DIR}/config.json
             @ONLY
         )
+        set(RJ_TEST_SINK_DIR runtime/logging_test_output)
+        set(LOGGING_INSTALLED_CONFIG_DIR
+            ${CMAKE_CURRENT_BINARY_DIR}/install-configs
+        )
+        set(LOGGING_INSTALLED_CONFIG
+            ${LOGGING_INSTALLED_CONFIG_DIR}/logging.json
+        )
+        file(MAKE_DIRECTORY ${LOGGING_INSTALLED_CONFIG_DIR})
+        configure_file(
+            ${CMAKE_CURRENT_SOURCE_DIR}/logging/logging_test_config.json.in
+            ${LOGGING_INSTALLED_CONFIG}
+            @ONLY
+        )
+        if(RJ_INSTALL_TESTS)
+            install(
+                FILES ${LOGGING_INSTALLED_CONFIG}
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs/tests
+            )
+        endif()
         rj_add_hip_test_case(
             hip_logging_test "LoggingTest.dispatch_logged"
             CONFIG ${LOGGING_SINK_DIR}/config.json
+            INSTALL_CONFIG "\${RJ_INSTALLED_CONFIG_DIR}/tests/logging.json"
             TIMEOUT 30
             ENVIRONMENT
                 "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
@@ -2244,9 +2271,18 @@ if(RJ_ENABLE_HIP_TESTS)
         set(PROFILED_RUNTIME_DIR ${PROFILED_SINK_DIR}/runtime)
         file(MAKE_DIRECTORY ${PROFILED_SINK_DIR})
         file(MAKE_DIRECTORY ${PROFILED_RUNTIME_DIR})
+        if(RJ_INSTALL_TESTS)
+            install(
+                FILES
+                    ${CMAKE_CURRENT_SOURCE_DIR}/logging/profiled_test_config.json
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs/tests
+                RENAME profiled.json
+            )
+        endif()
         rj_add_hip_test_case(
             hip_profiled_plugin_test "ProfiledPluginTest.hook_profile_output"
             CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/logging/profiled_test_config.json
+            INSTALL_CONFIG "\${RJ_INSTALLED_CONFIG_DIR}/tests/profiled.json"
             TIMEOUT 30
             ENVIRONMENT
                 "ROCJITSU_RUNTIME_DIR=${PROFILED_RUNTIME_DIR}"
