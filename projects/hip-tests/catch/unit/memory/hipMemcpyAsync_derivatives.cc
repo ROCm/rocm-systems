@@ -68,12 +68,6 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoDAsync_Positive_Basic) {
 }
 
 HIP_TEST_CASE(Unit_hipMemcpyHtoDAsync_Positive_Synchronization_Behavior) {
-  // This behavior differs on NVIDIA and AMD, on AMD the hipMemcpy calls is synchronous with
-  // respect to the host
-#if HT_AMD
-  HIP_SKIP_TEST(
-      "EXSWCPHIPT-127 - MemcpyAsync from host to device memory behavior differs on AMD and Nvidia");
-#endif
   MemcpyHPinnedtoDSyncBehavior(
       [](void* dst, void* src, size_t count) {
         return hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst), src, count, nullptr);
