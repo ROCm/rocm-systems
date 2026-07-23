@@ -330,7 +330,9 @@ static doca_error_t create_cq(doca_gpu_t *gpu_dev, doca_dev_t *net_dev, struct i
                               enum doca_gpu_verbs_mem_reg_type mreg_type, uint32_t ncqes,
                               void **umem_dev_ptr, doca_verbs_umem_t **gpu_umem,
                               doca_verbs_uar_t *external_uar, bool cq_collapsed,
-                              bool enable_umem_cpu, doca_verbs_cq_t **verbs_cq,
+                              bool enable_umem_cpu,
+                              doca_verbs_comp_channel_t *comp_channel,
+                              doca_verbs_cq_t **verbs_cq,
                               struct doca_gpu_verbs_umem_hl *shared_cq_umem = NULL,
                               struct doca_gpu_verbs_umem_hl *shared_cq_dbr_umem = NULL) {
     doca_error_t status = DOCA_SUCCESS, tmp_status = DOCA_SUCCESS;
@@ -499,6 +501,20 @@ static doca_error_t create_cq(doca_gpu_t *gpu_dev, doca_dev_t *net_dev, struct i
         status = doca_verbs_cq_attr_set_external_uar(verbs_cq_attr, external_uar);
         if (status != DOCA_SUCCESS) {
             DOCA_LOG(LOG_ERR, "Failed to set doca verbs cq external uar");
+            goto destroy_resources;
+        }
+    }
+
+    if (comp_channel) {
+        status = doca_verbs_cq_attr_set_comp_channel(verbs_cq_attr, comp_channel);
+        if (status != DOCA_SUCCESS) {
+            DOCA_LOG(LOG_ERR, "Failed to set doca verbs cq comp_channel");
+            goto destroy_resources;
+        }
+
+        status = doca_verbs_cq_attr_set_st(verbs_cq_attr, DOCA_VERBS_CQ_ST_NO_ACTION);
+        if (status != DOCA_SUCCESS) {
+            DOCA_LOG(LOG_ERR, "Failed to set doca verbs cq st");
             goto destroy_resources;
         }
     }
@@ -1009,7 +1025,7 @@ doca_error_t doca_gpu_verbs_create_qp_hl(struct doca_gpu_verbs_qp_init_attr_hl *
         status = create_cq(qp_->gpu_dev, qp_init_attr->net_dev, qp_init_attr->ibpd,
                            qp_init_attr->mreg_type, qp_init_attr->sq_nwqe, &qp_->cq_sq_umem_gpu_ptr,
                            &qp_->cq_sq_umem, NULL, qp_init_attr->cq_collapsed, enable_cq_umem_cpu,
-                           &qp_->cq_sq, NULL, NULL);
+                           qp_init_attr->comp_channel, &qp_->cq_sq, NULL, NULL);
         if (status != DOCA_SUCCESS) {
             DOCA_LOG(LOG_ERR, "Failed to create doca verbs cq");
             goto exit_error;
@@ -1042,6 +1058,22 @@ doca_error_t doca_gpu_verbs_create_qp_hl(struct doca_gpu_verbs_qp_init_attr_hl *
     if (status != DOCA_SUCCESS) {
         DOCA_LOG(LOG_ERR, "Failed to create GPU verbs QP");
         return status;
+    }
+
+    if (qp_init_attr->comp_channel) {
+        status = doca_verbs_cq_set_cq_context(qp_->cq_sq, qp_->qp_gverbs);
+        if (status != DOCA_SUCCESS) {
+            DOCA_LOG(LOG_ERR, "Failed doca_verbs_cq_set_cq_context with %d", status);
+            goto exit_error;
+        }
+
+        status = doca_gpu_verbs_req_notify_cq(qp_->gpu_dev, qp_->cq_sq);
+        if (status != DOCA_SUCCESS) {
+            DOCA_LOG(LOG_ERR, "Failed doca_gpu_verbs_req_notify_cq with %d", status);
+            goto exit_error;
+        }
+
+        DOCA_LOG(LOG_INFO, "doca_verbs_cq_set_cq_context set with context %p", (void*)qp_->qp_gverbs);
     }
 
     *qp = qp_;
@@ -1144,7 +1176,8 @@ doca_error_t doca_gpu_verbs_create_qp_group_hl(struct doca_gpu_verbs_qp_init_att
                            qp_init_attr->mreg_type, qp_init_attr->sq_nwqe,
                            &qpg_->qp_main.cq_sq_umem_gpu_ptr, &qpg_->qp_main.cq_sq_umem,
                            qpg_->qp_main.external_uar, qp_init_attr->cq_collapsed,
-                           enable_cq_umem_cpu, &qpg_->qp_main.cq_sq, NULL, NULL);
+                           enable_cq_umem_cpu, qp_init_attr->comp_channel,
+                           &qpg_->qp_main.cq_sq, NULL, NULL);
         if (status != DOCA_SUCCESS) {
             DOCA_LOG(LOG_ERR, "Failed to create doca verbs cq");
             goto exit_error;
@@ -1172,6 +1205,22 @@ doca_error_t doca_gpu_verbs_create_qp_group_hl(struct doca_gpu_verbs_qp_init_att
         return status;
     }
 
+    if (qp_init_attr->comp_channel) {
+        status = doca_verbs_cq_set_cq_context(qpg_->qp_main.cq_sq, qpg_->qp_main.qp_gverbs);
+        if (status != DOCA_SUCCESS) {
+            DOCA_LOG(LOG_ERR, "Failed doca_verbs_cq_set_cq_context with %d", status);
+            goto exit_error;
+        }
+
+        status = doca_gpu_verbs_req_notify_cq(qpg_->qp_main.gpu_dev, qpg_->qp_main.cq_sq);
+        if (status != DOCA_SUCCESS) {
+            DOCA_LOG(LOG_ERR, "Failed doca_gpu_verbs_req_notify_cq with %d", status);
+            goto exit_error;
+        }
+
+        DOCA_LOG(LOG_INFO, "doca_verbs_cq_set_cq_context set with context %p", (void*)qpg_->qp_main.qp_gverbs);
+    }
+
     /********** Create companion QP **********/
 
     qpg_->qp_companion.gpu_dev = qp_init_attr->gpu_dev;
@@ -1186,7 +1235,8 @@ doca_error_t doca_gpu_verbs_create_qp_group_hl(struct doca_gpu_verbs_qp_init_att
                            qp_init_attr->mreg_type, qp_init_attr->sq_nwqe,
                            &qpg_->qp_companion.cq_sq_umem_gpu_ptr, &qpg_->qp_companion.cq_sq_umem,
                            qpg_->qp_companion.external_uar, qp_init_attr->cq_collapsed,
-                           enable_cq_umem_cpu, &qpg_->qp_companion.cq_sq, NULL, NULL);
+                           enable_cq_umem_cpu, qp_init_attr->comp_channel,
+                           &qpg_->qp_companion.cq_sq, NULL, NULL);
         if (status != DOCA_SUCCESS) {
             DOCA_LOG(LOG_ERR, "Failed to create doca verbs cq");
             goto exit_error;
@@ -1214,6 +1264,22 @@ doca_error_t doca_gpu_verbs_create_qp_group_hl(struct doca_gpu_verbs_qp_init_att
     if (status != DOCA_SUCCESS) {
         DOCA_LOG(LOG_ERR, "Failed to create GPU verbs QP");
         return status;
+    }
+
+    if (qp_init_attr->comp_channel) {
+        status = doca_verbs_cq_set_cq_context(qpg_->qp_companion.cq_sq, qpg_->qp_companion.qp_gverbs);
+        if (status != DOCA_SUCCESS) {
+            DOCA_LOG(LOG_ERR, "Failed doca_verbs_cq_set_cq_context with %d", status);
+            goto exit_error;
+        }
+
+        status = doca_gpu_verbs_req_notify_cq(qpg_->qp_companion.gpu_dev, qpg_->qp_companion.cq_sq);
+        if (status != DOCA_SUCCESS) {
+            DOCA_LOG(LOG_ERR, "Failed doca_gpu_verbs_req_notify_cq with %d", status);
+            goto exit_error;
+        }
+
+        DOCA_LOG(LOG_INFO, "doca_verbs_cq_set_cq_context set with context %p", (void*)qpg_->qp_companion.qp_gverbs);
     }
 
     *qpg = qpg_;
@@ -1402,6 +1468,7 @@ doca_error_t doca_gpu_verbs_create_qp_list_hl(struct doca_gpu_verbs_qp_init_attr
         status = create_cq(qp_->gpu_dev, qp_init_attr->net_dev, qp_init_attr->ibpd,
                            qp_init_attr->mreg_type, sq_nwqe, &qp_->cq_sq_umem_gpu_ptr,
                            &qp_->cq_sq_umem, NULL, qp_init_attr->cq_collapsed, enable_cq_umem_cpu,
+                           qp_init_attr->comp_channel,
                            &qp_->cq_sq, cq_umem, cq_dbr_umem);
         if (status != DOCA_SUCCESS) goto exit_error;
 
@@ -1420,6 +1487,22 @@ doca_error_t doca_gpu_verbs_create_qp_list_hl(struct doca_gpu_verbs_qp_init_attr
                                           qp_->qp_umem_gpu_ptr, qp_->cq_sq, qp_->send_dbr_mode_ext,
                                           cq_type, enable_data_direct, &qp_->qp_gverbs);
         if (status != DOCA_SUCCESS) goto exit_error;
+
+        if (qp_init_attr->comp_channel) {
+            status = doca_verbs_cq_set_cq_context(qp_->cq_sq, qp_->qp_gverbs);
+            if (status != DOCA_SUCCESS) {
+                DOCA_LOG(LOG_ERR, "Failed doca_verbs_cq_set_cq_context with %d", status);
+                goto exit_error;
+            }
+
+            status = doca_gpu_verbs_req_notify_cq(qp_->gpu_dev, qp_->cq_sq);
+            if (status != DOCA_SUCCESS) {
+                DOCA_LOG(LOG_ERR, "Failed doca_gpu_verbs_req_notify_cq with %d", status);
+                goto exit_error;
+            }
+
+            DOCA_LOG(LOG_INFO, "doca_verbs_cq_set_cq_context set with context %p", (void*)qp_->qp_gverbs);
+        }
     }
 
     list->cq_umem = cq_umem;
@@ -1605,7 +1688,9 @@ doca_error_t doca_gpu_verbs_create_qp_group_list_hl(
         status = create_cq(main_->gpu_dev, qp_init_attr->net_dev, qp_init_attr->ibpd,
                            qp_init_attr->mreg_type, sq_nwqe, &main_->cq_sq_umem_gpu_ptr,
                            &main_->cq_sq_umem, main_->external_uar, qp_init_attr->cq_collapsed,
-                           enable_cq_umem_cpu, &main_->cq_sq, cq_umem, cq_dbr_umem);
+                           qp_init_attr->enable_umem_cpu,
+                           qp_init_attr->comp_channel,
+                           &main_->cq_sq, cq_umem, cq_dbr_umem);
         if (status != DOCA_SUCCESS) goto exit_error;
 
         status = create_qp(main_->gpu_dev, qp_init_attr->net_dev, qp_init_attr->ibpd,
@@ -1622,6 +1707,22 @@ doca_error_t doca_gpu_verbs_create_qp_group_list_hl(
             main_->send_dbr_mode_ext, cq_type, enable_data_direct, &main_->qp_gverbs);
         if (status != DOCA_SUCCESS) goto exit_error;
 
+        if (qp_init_attr->comp_channel) {
+            status = doca_verbs_cq_set_cq_context(main_->cq_sq, main_->qp_gverbs);
+            if (status != DOCA_SUCCESS) {
+                DOCA_LOG(LOG_ERR, "Failed doca_verbs_cq_set_cq_context with %d", status);
+                goto exit_error;
+            }
+
+            status = doca_gpu_verbs_req_notify_cq(main_->gpu_dev, main_->cq_sq);
+            if (status != DOCA_SUCCESS) {
+                DOCA_LOG(LOG_ERR, "Failed doca_gpu_verbs_req_notify_cq with %d", status);
+                goto exit_error;
+            }
+
+            DOCA_LOG(LOG_INFO, "doca_verbs_cq_set_cq_context set with context %p", (void*)main_->qp_gverbs);
+        }
+
         comp_->gpu_dev = qp_init_attr->gpu_dev;
         comp_->send_dbr_mode_ext = qp_init_attr->send_dbr_mode_ext;
         comp_->nic_handler = resolved_nic_handler;
@@ -1630,7 +1731,9 @@ doca_error_t doca_gpu_verbs_create_qp_group_list_hl(
         status = create_cq(comp_->gpu_dev, qp_init_attr->net_dev, qp_init_attr->ibpd,
                            qp_init_attr->mreg_type, sq_nwqe, &comp_->cq_sq_umem_gpu_ptr,
                            &comp_->cq_sq_umem, comp_->external_uar, qp_init_attr->cq_collapsed,
-                           enable_cq_umem_cpu, &comp_->cq_sq, cq_umem, cq_dbr_umem);
+                           qp_init_attr->enable_umem_cpu,
+                           qp_init_attr->comp_channel,
+                           &comp_->cq_sq, cq_umem, cq_dbr_umem);
         if (status != DOCA_SUCCESS) goto exit_error;
 
         status = create_qp(comp_->gpu_dev, qp_init_attr->net_dev, qp_init_attr->ibpd,
@@ -1646,6 +1749,22 @@ doca_error_t doca_gpu_verbs_create_qp_group_list_hl(
             comp_->gpu_dev, comp_->qp, comp_->nic_handler, comp_->qp_umem_gpu_ptr, comp_->cq_sq,
             comp_->send_dbr_mode_ext, cq_type, enable_data_direct, &comp_->qp_gverbs);
         if (status != DOCA_SUCCESS) goto exit_error;
+
+        if (qp_init_attr->comp_channel) {
+            status = doca_verbs_cq_set_cq_context(comp_->cq_sq, comp_->qp_gverbs);
+            if (status != DOCA_SUCCESS) {
+                DOCA_LOG(LOG_ERR, "Failed doca_verbs_cq_set_cq_context with %d", status);
+                goto exit_error;
+            }
+
+            status = doca_gpu_verbs_req_notify_cq(comp_->gpu_dev, comp_->cq_sq);
+            if (status != DOCA_SUCCESS) {
+                DOCA_LOG(LOG_ERR, "Failed doca_gpu_verbs_req_notify_cq with %d", status);
+                goto exit_error;
+            }
+
+            DOCA_LOG(LOG_INFO, "doca_verbs_cq_set_cq_context set with context %p", (void*)comp_->qp_gverbs);
+        }
     }
 
     list->cq_umem = cq_umem;

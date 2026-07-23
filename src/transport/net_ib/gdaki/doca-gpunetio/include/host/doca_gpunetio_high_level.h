@@ -89,7 +89,8 @@ struct doca_gpu_verbs_qp_init_attr_hl {
     uint8_t reserved2[2];
     enum doca_verbs_qp_ordering_semantic ordering_semantic;
     uint32_t flags;
-    uint8_t reserved3[8];
+    doca_verbs_comp_channel_t *comp_channel;
+    uint8_t reserved3[4];
 } __attribute__((__aligned__(8))) __attribute__((__packed__));
 
 struct doca_gpu_verbs_qp_hl {

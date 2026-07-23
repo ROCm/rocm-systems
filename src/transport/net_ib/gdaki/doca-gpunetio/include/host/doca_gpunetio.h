@@ -104,7 +104,7 @@ struct doca_verbs_qp_t;
  */
 struct doca_gpu_verbs_qp {
     doca_gpu_t *gpu_dev;
-    struct doca_verbs_qp_t *qp;
+    doca_verbs_qp_t *qp;
     uint64_t *cpu_db;
     uint64_t sq_wqe_pi_last;
     uint64_t *sq_db;
@@ -125,7 +125,7 @@ struct doca_gpu_verbs_qp {
      */
     uint32_t free_flow_ring_db_threshold;
     enum doca_gpu_dev_verbs_cq_type cq_type;
-    struct doca_verbs_cq_t *cq_sq;
+    doca_verbs_cq_t *cq_sq;
     unsigned int refcount;
     bool enable_data_direct;
 };
@@ -143,7 +143,6 @@ struct doca_gpu_verbs_qp_error_info {
 };
 
 typedef void *doca_gpu_verbs_service_t;
-typedef void *doca_gpu_net_event_t;
 
 /**
  * @brief Create a DOCA GPUNETIO handler.
@@ -432,71 +431,6 @@ doca_error_t doca_gpu_verbs_destroy_service(doca_gpu_verbs_service_t service);
 doca_error_t doca_gpu_verbs_query_last_error(struct doca_gpu_verbs_qp *qp,
                                              struct doca_gpu_verbs_qp_error_info *error_info);
 
-/**
- * Create a nonblocking DEVX-backed async CQ error event object.
- *
- * @param [in] net_dev
- * DOCA Verbs Device instance.
- * @param [out] out_event
- * Pointer to the created event object.
- *
- * @return
- * DOCA_SUCCESS - in case of success.
- * doca_error code - in case of failure:
- * - DOCA_ERROR_INVALID_VALUE - received invalid input.
- * - DOCA_ERROR_NOT_SUPPORTED - DEVX not supported.
- */
-doca_error_t doca_gpu_net_event_create(struct doca_dev *net_dev, doca_gpu_net_event_t *out_event);
-
-/**
- * Subscribe high-level QPs to async SQ CQ error events.
- * In case of error, the event object will be degraded and the caller should destroy it to cleanup.
- *
- * @param [in] event
- * Event object.
- * @param [in] qps
- * QPs to subscribe.
- * @param [in] num_qps
- * Number of QPs to subscribe.
- *
- * @return
- * DOCA_SUCCESS - in case of success.
- * doca_error code - in case of failure:
- * - DOCA_ERROR_INVALID_VALUE - received invalid input.
- * - DOCA_ERROR_NOT_SUPPORTED - DEVX not supported.
- */
-doca_error_t doca_gpu_net_event_subscribe(doca_gpu_net_event_t event,
-                                          struct doca_gpu_verbs_qp *qps[], unsigned int num_qps);
-
-/**
- * Nonblocking poll for an async event.
- * If no event is pending this returns DOCA_SUCCESS.
- *
- * @param [in] event
- * Event object.
- * @param [out] out_qp
- * QP object.
- *
- * @return
- * DOCA_SUCCESS - in case of success.
- * doca_error code - in case of failure:
- * - DOCA_ERROR_INVALID_VALUE - received invalid input.
- * - DOCA_ERROR_NOT_SUPPORTED - DEVX not supported.
- */
-doca_error_t doca_gpu_net_event_get(doca_gpu_net_event_t event, struct doca_gpu_verbs_qp **out_qp);
-
-/**
- * Destroy an async CQ error event object.
- *
- * @param [in] event
- * Event object to destroy.
- *
- * @return
- * DOCA_SUCCESS - in case of success.
- * doca_error code - in case of failure:
- * - DOCA_ERROR_INVALID_VALUE - received invalid input.
- */
-doca_error_t doca_gpu_net_event_destroy(doca_gpu_net_event_t event);
 
 /**
  * Export multiple QPs to GPU.
@@ -593,6 +527,20 @@ doca_error_t doca_gpu_verbs_check_device_code_compatibility(uint32_t device_code
  * - DOCA_ERROR_NOT_SUPPORTED - if the library is not compatible with the host code version
  */
 doca_error_t doca_gpu_verbs_check_host_code_compatibility(uint32_t host_code_version);
+
+/**
+ * Request notification for upcoming GPUNetIO Verbs CQ completions
+ *
+ * @param [in] gpu_dev
+ * DOCA GPUNetIO handler.
+ * @param [in] verbs_cq
+ * Pointer to the verbs_cq instance.
+ *
+ * @return
+ * DOCA_SUCCESS - in case of success.
+ * doca_error code - in case of failure:
+ */
+doca_error_t doca_gpu_verbs_req_notify_cq(doca_gpu_t *gpu_dev, doca_verbs_cq_t *verbs_cq);
 
 #ifdef __cplusplus
 }

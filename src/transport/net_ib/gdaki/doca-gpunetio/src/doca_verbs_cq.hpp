@@ -34,9 +34,13 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <fcntl.h>
+#include <set>
 
 #include "host/doca_verbs.h"
 #include "doca_verbs_net_wrapper.h"
+
+enum { MLX5_EVENT_TYPE_CODING_COMPLETION_EVENTS = 0x0 };
 
 struct doca_verbs_cq_attr_open {
    public:
@@ -59,6 +63,7 @@ struct doca_verbs_cq_attr_open {
     doca_verbs_uar_t *external_uar{};
     enum doca_verbs_cq_overrun cq_overrun;
     uint8_t cq_collapsed;
+    doca_verbs_comp_channel_t *m_comp_channel;
 
     doca_verbs_cq_attr_open(doca_verbs_cq_attr_open const &) = delete;
     doca_verbs_cq_attr_open &operator=(doca_verbs_cq_attr_open const &) = delete;
@@ -154,6 +159,16 @@ struct doca_verbs_cq_open {
      */
     struct mlx5dv_devx_obj *get_cq_obj() const noexcept { return m_cq_obj; }
 
+    /**
+     * @brief Set CQ cq_context after CQ creation
+     */
+	void set_cq_context(void *cq_context) { m_cq_context = cq_context; }
+
+    /**
+     * @brief Get CQ cq_context after CQ creation
+     */
+	void *get_cq_context() { return m_cq_context; }
+
    private:
     struct mlx5dv_devx_obj *m_cq_obj{};
     struct mlx5dv_devx_umem *m_umem_obj{};
@@ -169,9 +184,43 @@ struct doca_verbs_cq_open {
     uint32_t m_cqn{};
     uint32_t *m_ci_dbr{};
     uint32_t *m_arm_dbr{};
+    void *m_cq_context{};
     struct doca_verbs_cq_attr_open m_cq_attr;
     struct doca_verbs_device_attr *m_verbs_device_attr{};
+    struct doca_verbs_comp_channel_open *m_comp_channel{};
 
     doca_verbs_cq_open(doca_verbs_cq_open const &) = delete;
     doca_verbs_cq_open &operator=(doca_verbs_cq_open const &) = delete;
+};
+
+enum { DOCA_MLX5_EVENT_TYPE_COMPLETION_EVENTS = 0x0 };
+
+/**
+ *  @brief This struct implements the doca verbs comp channel open source
+ */
+struct doca_verbs_comp_channel_open {
+   public:
+      /**
+       * @brief constructor
+       *
+       * @param [in] verbs_ctx
+       * ibv_context
+       *
+       */
+      doca_verbs_comp_channel_open(struct ibv_context *ibv_ctx);
+
+      /**
+       * @brief destructor
+       */
+      ~doca_verbs_comp_channel_open();
+
+      doca_error_t register_cq(struct doca_verbs_cq_open *cq);
+
+      doca_error_t get_cq_event(void **cq_context);
+   
+private:
+   struct ibv_context *ibv_ctx;
+   struct mlx5dv_devx_event_channel *channel{};
+   std::set<struct doca_verbs_cq_open *> cqs;
+   bool degraded{false};
 };

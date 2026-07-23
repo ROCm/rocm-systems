@@ -259,12 +259,12 @@ __device__ static __forceinline__ int doca_priv_gpu_dev_verbs_poll_cq_one_collap
  *
  * @param cq - Collapsed Completion Queue (CQ)
  * @param cons_index - Index of the Completion Queue (CQ) to be polled
- * @return On success, doca_gpu_dev_verbs_poll_cq_one_collapsed_at() returns 0. If the completion is
+ * @return On success, doca_gpu_dev_verbs_poll_one_cq_collapsed_at() returns 0. If the completion is
  * not available, returns EBUSY. If it is a completion with error, returns a negative value.
  */
 template <enum doca_gpu_dev_verbs_resource_sharing_mode resource_sharing_mode =
               DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU>
-__device__ static __forceinline__ int doca_gpu_dev_verbs_poll_cq_one_collapsed_at(
+__device__ static __forceinline__ int doca_gpu_dev_verbs_poll_one_cq_collapsed_at(
     struct doca_gpu_dev_verbs_cq *cq, uint64_t cons_index) {
     uint64_t new_cqe_ci = 0;
     int status = doca_priv_gpu_dev_verbs_poll_cq_one_collapsed_at<resource_sharing_mode>(
@@ -304,7 +304,7 @@ __device__ static __forceinline__ int doca_gpu_dev_verbs_poll_one_cq_at(
     } else if (mode == DOCA_GPUNETIO_VERBS_CQ_64B) {
         return doca_gpu_dev_verbs_poll_one_cq_device_at<resource_sharing_mode>(cq, cons_index);
     } else if (mode == DOCA_GPUNETIO_VERBS_CQ_64B_COLLAPSED) {
-        return doca_gpu_dev_verbs_poll_cq_one_collapsed_at<resource_sharing_mode>(cq, cons_index);
+        return doca_gpu_dev_verbs_poll_one_cq_collapsed_at<resource_sharing_mode>(cq, cons_index);
     }
     return EINVAL;
 }

@@ -858,6 +858,9 @@ __device__ static __forceinline__ void doca_priv_gpu_dev_verbs_get_wait(
     } else
         doca_gpu_dev_verbs_poll_cq_at<resource_sharing_mode, DOCA_GPUNETIO_VERBS_QP_SQ, cq_type>(
             qp, ticket);
+#if DOCA_GPUNETIO_VERBS_EXP_NIC_FENCE_ACQUIRE_CTA
+    doca_gpu_dev_verbs_fence_acquire<DOCA_GPUNETIO_VERBS_SYNC_SCOPE_SYS>();
+#endif
 }
 
 template <enum doca_gpu_dev_verbs_resource_sharing_mode resource_sharing_mode =

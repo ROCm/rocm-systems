@@ -164,7 +164,7 @@ doca_error_t doca_gpu_create(const char *gpu_bus_id, doca_gpu_t **gpu_dev) {
     res_cuda = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(
         cudaDeviceGetByPCIBusId(&gpu_dev_->open->cuda_dev, gpu_bus_id));
     if (res_cuda != cudaSuccess) {
-        DOCA_LOG(LOG_ERR, "Invalid GPU bus id provided (ret %d).", res_drv);
+        DOCA_LOG(LOG_ERR, "Invalid GPU bus id provided (ret %d).", res_cuda);
         goto exit_error;
     }
 
@@ -975,14 +975,14 @@ doca_error_t doca_gpu_verbs_export_qp(doca_gpu_t *gpu_dev, doca_verbs_qp_t *qp,
     doca_verbs_cq_get_wq(cq_sq, (void **)&(qp_cpu_->cq_sq.cqe_daddr), &(qp_cpu_->cq_sq.cqe_num),
                          &(qp_cpu_->cq_sq.cqe_size));
 
-    status = doca_verbs_cq_get_dbr_addr(cq_sq, &uar_db_reg, (uint32_t **)&(cq_dbrec), &arm_dbr);
+    status = doca_verbs_cq_get_dbr_db_addr(cq_sq, &uar_db_reg, (uint32_t **)&(cq_dbrec), &arm_dbr);
     if (status != DOCA_SUCCESS) {
         DOCA_LOG(LOG_ERR, "Failed to get CQ DBR address, error = %d", status);
         goto out;
     }
 
     qp_cpu_->cq_sq.dbrec = (__be32 *)cq_dbrec;
-    doca_verbs_cq_get_cqn(cq_sq, &qp_cpu_->cq_sq.cq_num);
+    doca_verbs_cq_get_cq_num(cq_sq, &qp_cpu_->cq_sq.cq_num);
     qp_cpu_->cq_sq.cqe_mask = (qp_cpu_->cq_sq.cqe_num - 1);
     qp_cpu_->cq_sq.cqe_ci = 0;
     qp_cpu_->cq_sq.cqe_rsvd = 0;
@@ -1621,4 +1621,96 @@ doca_error_t doca_gpu_verbs_check_host_code_compatibility(uint32_t host_code_ver
         (host_code_version > DOCA_GPUNETIO_VERSION))
         return DOCA_ERROR_NOT_SUPPORTED;
     return DOCA_SUCCESS;
+}
+
+doca_error_t doca_gpu_verbs_req_notify_cq(doca_gpu_t *gpu_dev, doca_verbs_cq_t *verbs_cq)
+{
+    doca_error_t status = DOCA_SUCCESS;
+    cudaError_t cuda_status;
+    cudaPointerAttributes attributes;
+    bool is_gpu_memory = false;
+    uint32_t *ci_dbr = nullptr;
+    uint32_t *arm_dbr = nullptr;
+    uint64_t *uar_db_reg = nullptr;
+    uint32_t cqn = 0;
+    __be32 dbr_val;
+    __be64 db_val;
+    cudaStream_t stream = nullptr;
+
+    if (gpu_dev == nullptr || verbs_cq == nullptr)
+        return DOCA_ERROR_INVALID_VALUE;
+
+    if (verbs_cq->type == DOCA_VERBS_SDK_LIB_TYPE_SDK) {
+        if (gpu_dev->type != DOCA_GPU_LIB_TYPE_SDK) {
+            DOCA_LOG(LOG_ERR, "Invalid DOCA GPUNetIO SDK handler provided.");
+            return DOCA_ERROR_INVALID_VALUE;
+        }
+
+        auto err = doca_gpu_sdk_wrapper_verbs_req_notify_cq(gpu_dev->sdk, verbs_cq->sdk);
+        if (err == DOCA_SDK_WRAPPER_SUCCESS) {
+            return DOCA_SUCCESS;
+        } else if (err == DOCA_SDK_WRAPPER_API_ERROR) {
+            DOCA_LOG(LOG_INFO, "DOCA SDK function returned an error", __func__);
+            return DOCA_ERROR_UNEXPECTED;
+        } else if (err == DOCA_SDK_WRAPPER_NOT_SUPPORTED) {
+            return DOCA_ERROR_NOT_SUPPORTED;
+        }
+    }
+
+    if (verbs_cq->open == nullptr) {
+        DOCA_LOG(LOG_ERR, "Invalid DOCA Verbs CQ open instance provided at %s line %d.", __func__, __LINE__);
+        return DOCA_ERROR_INVALID_VALUE;
+    }
+
+    cuda_status = cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking);
+    if (cuda_status != cudaSuccess) {
+        status = DOCA_ERROR_DRIVER;
+        goto out;
+    }
+
+    status = doca_verbs_cq_get_dbr_db_addr(verbs_cq, &uar_db_reg, &ci_dbr, &arm_dbr);
+    if (status) goto out;
+
+    status = doca_verbs_cq_get_cq_num(verbs_cq, &cqn);
+    if (status) goto out;
+
+    cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(
+        cudaPointerGetAttributes(&attributes, static_cast<const void *>(arm_dbr)));
+    if (cuda_status != cudaSuccess && cuda_status != cudaErrorInvalidValue) {
+        // cudaErrorInvalidValue is expected if the pointer was not allocated in, mapped by or
+        // registered with context supporting unified addressing. In this case, the pointer is
+        // not a device pointer.
+        DOCA_LOG(LOG_ERR, "Failed to get CUDA pointer attributes");
+        status = DOCA_ERROR_DRIVER;
+        goto out;
+    } else if (cuda_status == cudaSuccess && attributes.type == cudaMemoryTypeDevice)
+        is_gpu_memory = true;
+
+    dbr_val = htobe32(MLX5_CQ_DB_REQ_NOT_SOL);
+
+    if (is_gpu_memory) {
+        cudaError_t cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaMemcpyAsync(arm_dbr, &dbr_val, sizeof(dbr_val), cudaMemcpyHostToDevice, stream));
+        if (cuda_status != cudaSuccess) {
+            DOCA_LOG(LOG_ERR, "Failed to copy CQ arm DBR to GPU memory");
+            return DOCA_ERROR_DRIVER;
+        }
+
+        cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaStreamSynchronize(stream));
+        if (cuda_status != cudaSuccess) {
+            DOCA_LOG(LOG_ERR, "Failed to synchronize GPU CQ arm DBR write");
+            status = DOCA_ERROR_DRIVER;
+            goto out;
+        }
+    } else
+        *arm_dbr = dbr_val;
+
+    std::atomic_thread_fence(std::memory_order_release);
+
+    db_val = htobe64((static_cast<uint64_t>(MLX5_CQ_DB_REQ_NOT_SOL) << 32) | cqn);
+    *reinterpret_cast<volatile __be64 *>(uar_db_reg) = db_val;
+
+out:
+    cudaStreamDestroy(stream);
+
+    return status;
 }
