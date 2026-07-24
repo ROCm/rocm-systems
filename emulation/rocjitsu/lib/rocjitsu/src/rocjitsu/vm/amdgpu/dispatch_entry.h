@@ -55,6 +55,7 @@ struct DispatchEntry {
   uint32_t num_user_sgprs = 2;
   uint32_t kernel_code_properties = 0;
   uint16_t kernarg_preload = 0;
+  uint32_t initial_mode_raw = 0;
   uint64_t dispatch_ptr = 0;
   uint64_t queue_ptr = 0;
   uint32_t workgroup_id_offset = 0;
