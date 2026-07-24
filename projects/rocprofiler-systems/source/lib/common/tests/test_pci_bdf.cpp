@@ -52,3 +52,33 @@ TEST(pci_bdf_test, location_id_matches_component_form)
     EXPECT_EQ(format_pci_bdf(domain, bus, device, function),
               format_pci_bdf_from_location_id(domain, location_id));
 }
+
+// BDFID packing must match what `rocminfo` prints (decimal). e.g. 0000:03:00.0 => 768.
+TEST(pci_bdf_test, bdfid_packing)
+{
+    EXPECT_EQ(pci_bdfid(0x03, 0x00, 0x0), 0x0300U);  // rocminfo prints 768
+    EXPECT_EQ(pci_bdfid(0xC1, 0x00, 0x0), 0xC100U);
+    EXPECT_EQ(pci_bdfid(0x0A, 0x1F, 0x7), 0x0AFFU);
+}
+
+// Derive the rocminfo BDFID from the canonical string the profiler logs; the PCI domain
+// is intentionally ignored (rocminfo's BDFID excludes it).
+TEST(pci_bdf_test, bdfid_from_string)
+{
+    EXPECT_EQ(pci_bdfid_from_string("0000:03:00.0"), 0x0300U);  // 768
+    EXPECT_EQ(pci_bdfid_from_string("0000:5b:00.0"), 0x5B00U);  // 23296
+    EXPECT_EQ(pci_bdfid_from_string("0001:0a:1f.7"), 0x0AFFU);  // domain ignored
+    EXPECT_EQ(pci_bdfid_from_string(""), 0U);                   // malformed -> 0
+    EXPECT_EQ(pci_bdfid_from_string("not-a-bdf"), 0U);
+}
+
+// BDFID equals the low 16 bits of the KFD/rocprofiler-sdk location_id (same packing).
+TEST(pci_bdf_test, bdfid_matches_location_id)
+{
+    const std::uint32_t bus         = 0x0A;
+    const std::uint32_t device      = 0x1F;
+    const std::uint32_t function    = 0x7;
+    const std::uint32_t location_id = (bus << 8U) | (device << 3U) | function;
+
+    EXPECT_EQ(pci_bdfid(bus, device, function), static_cast<std::uint16_t>(location_id));
+}

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/pci_bdf.hpp"
 #include "core/config.hpp"
 #include "core/gpu.hpp"
 #include "library/pmc/collectors/gpu/device.hpp"
@@ -182,9 +183,10 @@ struct gpu_traits
                 }
                 else
                 {
-                    LOG_INFO("{} device [{}] (BDF {}) not visible to ROCm runtime; "
-                             "excluding from sampling",
-                             device_name, index, bdf);
+                    LOG_INFO("{} device [{}] (BDF {}, rocminfo BDFID {}) not visible to "
+                             "ROCm runtime; excluding from sampling",
+                             device_name, index, bdf,
+                             ::rocprofsys::common::pci_bdfid_from_string(bdf));
                 }
                 should_include = false;
             }
