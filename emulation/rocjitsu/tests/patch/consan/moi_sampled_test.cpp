@@ -3,7 +3,6 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
-#include "rocjitsu/code/patch/spill_manager.h"
 
 namespace rocjitsu {
 namespace {
@@ -1013,16 +1012,7 @@ TEST(ConSanMoi, SignExtendsCdnaVglobalOffsetAt13BitBoundaries) {
   EXPECT_EQ(sign_extend_13_bit_offset(0xffffe014u), 20);
 }
 
-TEST(ConSanMoi, DetectsIncompleteSampledAtomicSpillMetadata) {
-  VgprSpillSequence spill;
-  spill.vgpr_count = 2u;
-  spill.slot_offsets = {0u};
-  EXPECT_FALSE(spill.has_complete_slot_metadata());
-  spill.slot_offsets.push_back(sizeof(uint32_t));
-  EXPECT_TRUE(spill.has_complete_slot_metadata());
-}
-
-TEST(ConSanMoi, CdnaVglobalMaterializationAvoidsOffsetAsSignScratch) {
+TEST(ConSanMoi, CdnaVglobalMaterializationSelectsSafeSignScratch) {
   ConSanMoiAtomicAddressPlan plan;
   plan.kind = ConSanMoiAtomicAddressKind::VglobalMaterialized;
   plan.support = ConSanMoiAtomicAddressSupport::Supported;
@@ -1037,14 +1027,33 @@ TEST(ConSanMoi, CdnaVglobalMaterializationAvoidsOffsetAsSignScratch) {
   plan.resource_source = ConSanRegisterAllocationSource::SpillRequired;
   for (const SampledCdnaTarget &target : kSampledCdnaTargets) {
     SCOPED_TRACE(target.label);
-    const auto materialization = build_consan_moi_atomic_address_materialization(
-        plan, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, target.arch);
-    const auto signed_add = instrumentation::build_v_add_u64_signed_vgpr_offset(
-        plan.result_address_vgpr, plan.input_address_vgpr,
-        /*sign_vgpr=*/5u, target.arch);
-    ASSERT_TRUE(materialization && signed_add);
-    ASSERT_GE(materialization->size(), 4u + signed_add->size());
-    EXPECT_TRUE(std::equal(signed_add->begin(), signed_add->end(), materialization->begin() + 4u));
+    const auto expect_sign_scratch = [&](const ConSanMoiAtomicAddressPlan &candidate,
+                                         uint16_t sign_vgpr) {
+      const auto materialization = build_consan_moi_atomic_address_materialization(
+          candidate, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, target.arch);
+      const auto signed_add = instrumentation::build_v_add_u64_signed_vgpr_offset(
+          candidate.result_address_vgpr, candidate.input_address_vgpr, sign_vgpr, target.arch);
+      ASSERT_TRUE(materialization && signed_add);
+      ASSERT_GE(materialization->size(), 4u + signed_add->size());
+      EXPECT_TRUE(
+          std::equal(signed_add->begin(), signed_add->end(), materialization->begin() + 4u));
+    };
+
+    // The first scratch aliases the input, so materialization uses the next one.
+    expect_sign_scratch(plan, /*sign_vgpr=*/5u);
+
+    // A non-aliasing first scratch can be used directly.
+    ConSanMoiAtomicAddressPlan direct = plan;
+    direct.scratch_vgpr = 5u;
+    direct.result_address_vgpr = 8u;
+    expect_sign_scratch(direct, /*sign_vgpr=*/5u);
+
+    // Externally constructed plans must still provide two words before the pair.
+    ConSanMoiAtomicAddressPlan under_reserved = plan;
+    under_reserved.result_address_vgpr = 5u;
+    under_reserved.scratch_vgpr_count = 3u;
+    EXPECT_FALSE(build_consan_moi_atomic_address_materialization(
+        under_reserved, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, target.arch));
   }
 }
 

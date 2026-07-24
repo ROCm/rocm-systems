@@ -588,6 +588,15 @@ TEST(SpillManager, ConstructorOverLimitFailsAllAllocations) {
   EXPECT_FALSE(m.reserve(set));
 }
 
+TEST(SpillManager, VgprSequenceDetectsIncompleteSlotMetadata) {
+  VgprSpillSequence sequence;
+  sequence.vgpr_count = 2u;
+  sequence.slot_offsets = {0u};
+  EXPECT_FALSE(sequence.has_complete_slot_metadata());
+  sequence.slot_offsets.push_back(sizeof(uint32_t));
+  EXPECT_TRUE(sequence.has_complete_slot_metadata());
+}
+
 TEST(SpillManager, BuildsGfx1201VgprSaveRestoreSequence) {
   SpillManager manager(/*original_private_bytes=*/0, kMaxAddressFreeScratchPrivateBytes);
   const auto sequence = build_vgpr_spill_sequence(manager, /*vgpr_base=*/10, /*vgpr_count=*/3,

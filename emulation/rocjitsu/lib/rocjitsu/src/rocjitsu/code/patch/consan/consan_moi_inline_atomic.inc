@@ -766,6 +766,8 @@ struct SampledAtomicPreludeState {
   std::optional<uint16_t> cas_result_vgpr;
 };
 
+// Spill builders always produce complete metadata. Keep this check defensive
+// for internal callers that construct a sequence directly.
 [[nodiscard]] bool validate_sampled_atomic_spill_metadata(const VgprSpillSequence &spill,
                                                           std::vector<std::string> &errors) {
   if (spill.has_complete_slot_metadata())
@@ -774,6 +776,7 @@ struct SampledAtomicPreludeState {
   return false;
 }
 
+/// @pre @p spill has complete slot metadata.
 [[nodiscard]] bool append_sampled_atomic_snapshot_word(std::vector<uint32_t> &words,
                                                        const VgprSpillSequence &spill,
                                                        uint16_t destination, uint16_t source,

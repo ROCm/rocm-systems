@@ -2438,8 +2438,8 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
     std::optional<std::vector<uint32_t>> add_vaddr;
     if (instrumentation::is_cdna_family_arch(arch) &&
         plan.kind == ConSanMoiAtomicAddressKind::VglobalMaterialized) {
-      // The planner reserves at least three scratch words before the result
-      // pair. Keep a defensive check for externally constructed plans.
+      // The sign scratch needs two scratch words before the result pair. Keep
+      // a defensive check for externally constructed plans.
       if (plan.result_address_vgpr <= plan.scratch_vgpr + 1u)
         return std::nullopt;
       uint16_t sign_vgpr = plan.scratch_vgpr;
