@@ -269,11 +269,10 @@ endforeach()
 # otherwise get no transitive link requirements at all. Explicitly restore
 # the ones that are genuinely resolvable by real consumers.
 #
-# profiler-hub_queries is added below (BUILD_INTERFACE + INSTALL_INTERFACE):
-# unlike a SHARED library, a STATIC archive doesn't absorb its PRIVATE deps'
-# object code, so consumers need it linked explicitly. sqlite3 stays excluded
-# (separately-tracked follow-up); nlohmann_json is header-only, no link
-# symbols needed.
+# profiler-hub_queries and profiler-hub-sqlite3 are added below (BUILD_INTERFACE
+# + INSTALL_INTERFACE): unlike a SHARED library, a STATIC archive doesn't absorb
+# its PRIVATE deps' object code, so consumers need them linked explicitly.
+# nlohmann_json stays excluded: header-only, no link symbols needed.
 #
 # Each dependency added here must also get a matching find_dependency() call
 # in profiler-hub-config.cmake.in (accumulated below into
@@ -341,14 +340,20 @@ if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
     )
 endif()
 # Always in-tree; needs both interfaces since only one evaluates non-empty
-# depending on how profiler-hub-static ends up consumed.
+# depending on how profiler-hub-static ends up consumed. Same reasoning
+# applies to profiler-hub-sqlite3 (interface wrapper around the vendored,
+# -fvisibility=hidden sqlite3 archive + CMAKE_DL_LIBS): never propagated
+# either, previously masked only by accident when a consumer happens to link
+# its own separate sqlite3 for unrelated reasons.
 list(
     APPEND profiler_hub_static_iface_libs
     "$<BUILD_INTERFACE:profiler-hub_queries>"
+    "$<BUILD_INTERFACE:profiler-hub-sqlite3>"
 )
 list(
     APPEND profiler_hub_static_iface_libs
     "$<INSTALL_INTERFACE:profiler-hub::profiler-hub_queries>"
+    "$<INSTALL_INTERFACE:profiler-hub::profiler-hub-sqlite3>"
 )
 set_target_properties(
     profiler-hub-static
@@ -390,6 +395,15 @@ install(
 # installed-package consumers can resolve it.
 install(
     TARGETS profiler-hub_queries
+    EXPORT ${PACKAGE_NAME}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT profiler-hub
+)
+
+# Same reasoning as profiler-hub_queries. profiler-hub-sqlite3 (INTERFACE,
+# no files of its own) is exported alongside the real archive it wraps so
+# profiler-hub::profiler-hub-sqlite3 resolves for installed-package consumers.
+install(
+    TARGETS profiler-hub-sqlite3-static profiler-hub-sqlite3
     EXPORT ${PACKAGE_NAME}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT profiler-hub
 )
