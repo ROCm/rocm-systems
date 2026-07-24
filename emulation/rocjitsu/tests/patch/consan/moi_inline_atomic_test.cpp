@@ -2820,6 +2820,65 @@ TEST(ConSanMoi, InlineAtomicUsesIndirectIslandsForFarAppendedHelpers) {
   EXPECT_TRUE(patched.is_valid());
 }
 
+TEST(ConSanMoi, InlineAtomicDynamicStackSpillRejectsUnreservedFrameSaveSlot) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.helper_has_ordered_atomic = true;
+  fixture.first_continuation_uses_v1 = true;
+  fixture.second_continuation_live_sgprs = {0u};
+  std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  ASSERT_FALSE(bytes.empty());
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_EQ(original.text_sections().size(), 1u);
+  const auto *text_data =
+      reinterpret_cast<const uint8_t *>(original.text_sections().front()->data());
+  const uint64_t text_file_offset = static_cast<uint64_t>(text_data - bytes.data());
+  for (std::string_view owner_name : {"shared_owner_0", "shared_owner_1"}) {
+    const auto owner = std::ranges::find(original.kernels(), owner_name, &AmdGpuKernelInfo::name);
+    ASSERT_NE(owner, original.kernels().end());
+    uint32_t call = 0u;
+    std::memcpy(&call, bytes.data() + text_file_offset + owner->entry_text_offset, sizeof(call));
+    const int16_t moved_delta = static_cast<int16_t>(static_cast<uint16_t>(call & 0xffffu) - 1u);
+    const uint32_t moved_call = build_s_call_b64(/*return s[30:31]=*/30u, moved_delta, kArch);
+    const uint32_t nop = build_s_nop(0u, kArch);
+    std::memcpy(bytes.data() + text_file_offset + owner->entry_text_offset, &nop, sizeof(nop));
+    std::memcpy(bytes.data() + text_file_offset + owner->entry_text_offset + sizeof(uint32_t),
+                &moved_call, sizeof(moved_call));
+  }
+  constexpr std::array<std::string_view, 1> kAdditionalOwners = {"shared_owner_1"};
+  // Every owner of the shared atomic helper is dynamic. Atomic-only Inline
+  // reserves through +21, which cannot carry the dynamic frame base at +24.
+  append_kernel_metadata_note(bytes, "shared_owner_0", /*uses_dynamic_stack=*/true,
+                              /*sgpr_count=*/0u, std::nullopt, std::nullopt,
+                              /*has_dynamic_lds=*/false, kAdditionalOwners);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.force_vgpr_spill = true;
+  options.moi_track_atomics = true;
+  options.moi_track_barriers = false;
+  options.moi_inline_workgroup_shadow = false;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 2u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_FALSE(result.modified);
+  const auto plan = std::ranges::find_if(result.resource_plans, [](const auto &item) {
+    return item.site_kind == ConSanResourceSiteKind::Atomic;
+  });
+  ASSERT_NE(plan, result.resource_plans.end());
+  EXPECT_EQ(plan->source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
+                              &ConSanPatchInfo::kind),
+            result.patches.end());
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("no reserved frame-base save slot") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+}
+
 TEST(ConSanMoi, SampledAtomicAttachmentRejectsEveryCausalIdentityMismatch) {
   const ConSanMoiSampledAtomicAttachmentKey key{
       .generation = 0x1122334455667788ull,

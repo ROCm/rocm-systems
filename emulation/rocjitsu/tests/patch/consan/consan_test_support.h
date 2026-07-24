@@ -557,7 +557,7 @@ void append_kernel_metadata_note(
     std::vector<uint8_t> &image, std::string_view kernel_name, bool uses_dynamic_stack,
     uint8_t sgpr_count, std::optional<uint8_t> private_segment_fixed_size = std::nullopt,
     std::optional<std::array<uint8_t, 3>> required_workgroup_size = std::nullopt,
-    bool has_dynamic_lds = false) {
+    bool has_dynamic_lds = false, std::span<const std::string_view> additional_kernel_names = {}) {
   const auto append_string = [](std::vector<uint8_t> &bytes, std::string_view value) {
     ASSERT_LE(value.size(), 255u);
     if (value.size() <= 31u) {
@@ -572,32 +572,39 @@ void append_kernel_metadata_note(
   std::vector<uint8_t> payload;
   payload.push_back(0x81u); // root map(1)
   append_string(payload, "amdhsa.kernels");
-  payload.push_back(0x91u); // array(1)
-  payload.push_back(static_cast<uint8_t>(0x80u + 3u + (private_segment_fixed_size ? 1u : 0u) +
-                                         (required_workgroup_size ? 1u : 0u) +
-                                         (has_dynamic_lds ? 1u : 0u)));
-  append_string(payload, ".name");
-  append_string(payload, kernel_name);
-  append_string(payload, ".uses_dynamic_stack");
-  payload.push_back(uses_dynamic_stack ? 0xc3u : 0xc2u);
-  append_string(payload, ".sgpr_count");
-  payload.push_back(sgpr_count);
-  if (private_segment_fixed_size) {
-    append_string(payload, ".private_segment_fixed_size");
-    payload.push_back(*private_segment_fixed_size);
-  }
-  if (required_workgroup_size) {
-    append_string(payload, ".reqd_workgroup_size");
-    payload.push_back(0x93u); // array(3)
-    payload.insert(payload.end(), required_workgroup_size->begin(), required_workgroup_size->end());
-  }
-  if (has_dynamic_lds) {
-    append_string(payload, ".args");
-    payload.push_back(0x91u); // array(1)
-    payload.push_back(0x81u); // map(1)
-    append_string(payload, ".value_kind");
-    append_string(payload, "hidden_dynamic_lds_size");
-  }
+  ASSERT_LT(additional_kernel_names.size(), 15u);
+  payload.push_back(static_cast<uint8_t>(0x91u + additional_kernel_names.size()));
+  const auto append_kernel = [&](std::string_view name) {
+    payload.push_back(static_cast<uint8_t>(0x80u + 3u + (private_segment_fixed_size ? 1u : 0u) +
+                                           (required_workgroup_size ? 1u : 0u) +
+                                           (has_dynamic_lds ? 1u : 0u)));
+    append_string(payload, ".name");
+    append_string(payload, name);
+    append_string(payload, ".uses_dynamic_stack");
+    payload.push_back(uses_dynamic_stack ? 0xc3u : 0xc2u);
+    append_string(payload, ".sgpr_count");
+    payload.push_back(sgpr_count);
+    if (private_segment_fixed_size) {
+      append_string(payload, ".private_segment_fixed_size");
+      payload.push_back(*private_segment_fixed_size);
+    }
+    if (required_workgroup_size) {
+      append_string(payload, ".reqd_workgroup_size");
+      payload.push_back(0x93u); // array(3)
+      payload.insert(payload.end(), required_workgroup_size->begin(),
+                     required_workgroup_size->end());
+    }
+    if (has_dynamic_lds) {
+      append_string(payload, ".args");
+      payload.push_back(0x91u); // array(1)
+      payload.push_back(0x81u); // map(1)
+      append_string(payload, ".value_kind");
+      append_string(payload, "hidden_dynamic_lds_size");
+    }
+  };
+  append_kernel(kernel_name);
+  for (std::string_view name : additional_kernel_names)
+    append_kernel(name);
 
   Elf64_Ehdr header{};
   ASSERT_GE(image.size(), sizeof(header));
