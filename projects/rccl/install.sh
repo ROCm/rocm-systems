@@ -163,7 +163,7 @@ while true; do
          --prefix)                   install_library=true; install_prefix=${2};                                                        shift 2 ;;
     -q | --quiet-warnings)           quiet_warnings=true;                                                                              shift ;;
          --rocshmem)                 build_rocshmem_support=true;                                                                      shift ;;
-         --rocshmem-gin)             build_rocshmem_gin=true;                                                                         shift ;;
+         --rocshmem-gin)             build_rocshmem_gin=true;                                                                          shift ;;
          --run_tests_all)            run_tests=true; run_tests_all=true;                                                               shift ;;
     -r | --run_tests_quick)          run_tests=true;                                                                                   shift ;;
          --static)                   build_static=true;                                                                                shift ;;

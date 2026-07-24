@@ -57,7 +57,6 @@
 #ifndef NCCL_GIN_ANVIL_SDMA_ENABLE
 #if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM)
 #define NCCL_GIN_ANVIL_SDMA_ENABLE 1
-#warning "ANVIL_ENABLED=1"
 #else
 #define NCCL_GIN_ANVIL_SDMA_ENABLE 0
 #endif
