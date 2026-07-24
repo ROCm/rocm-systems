@@ -559,7 +559,10 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
           state, options, ConSanResourceSiteKind::Barrier, index, candidate.site.text_offset,
           candidate.kernel_descriptor_file_offset,
           /*scratch_count=*/options.moi_engine == ConSanMoiEngine::Sampled
-              ? (options.automatic_moi_private_epoch ? 9u : 7u)
+              ? (options.automatic_moi_private_epoch ||
+                         moi_uses_scalar_persistent_state(options)
+                     ? 9u
+                     : 7u)
           : options.moi_engine == ConSanMoiEngine::InlineShadow
               ? inline_shadow_barrier_scratch_count(options)
           : uses_coalesced_epoch ? 1u

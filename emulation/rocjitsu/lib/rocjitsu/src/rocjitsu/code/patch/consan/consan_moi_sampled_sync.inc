@@ -127,11 +127,13 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
     const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
     uint64_t return_text_offset, const MoiPrivateEpochLayout *private_layout,
     std::optional<uint16_t> gfx1250_vgpr_msb_mode, std::vector<std::string> &errors) {
+  const bool scalar_persistent = moi_uses_scalar_persistent_state(options);
   if (!options.scratch_vgpr || !options.moi_report_buffer_address || !options.moi_epoch_vgpr ||
       !options.moi_exec_save_sgpr || !options.moi_owner_vgpr ||
       options.moi_owner_source != ConSanMoiOwnerSource::WorkitemId ||
       !candidate.barrier.kernel_descriptor_file_offset ||
-      static_cast<uint32_t>(*options.scratch_vgpr) + 7u > kMaxVgprs || candidate.windows.empty() ||
+      static_cast<uint32_t>(*options.scratch_vgpr) + (scalar_persistent ? 9u : 7u) > kMaxVgprs ||
+      candidate.windows.empty() ||
       std::ranges::any_of(candidate.windows, [&](const SampledBarrierWindow &window) {
         return window.first_slot >= layout.sampled_sync_metadata_capacity ||
                window.bank_count == 0 ||
@@ -213,6 +215,12 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
                             words, bytes, *candidate.barrier.kernel_descriptor_file_offset, options,
                             *private_layout, arch, errors))
     return std::nullopt;
+  if (scalar_persistent) {
+    words.push_back(build_v_mov_b32_e32(*options.moi_owner_vgpr,
+                                       *options.moi_persistent_owner_sgpr, arch));
+    words.push_back(build_v_mov_b32_e32(*options.moi_epoch_vgpr,
+                                       *options.moi_persistent_epoch_sgpr, arch));
+  }
   if (!append_save_moi_special_state(words, options, arch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
     return std::nullopt;
@@ -570,6 +578,17 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   }
   words.insert(words.end(), advance_epoch->begin(), advance_epoch->end());
   words.push_back(*restore_after_advance);
+  if (scalar_persistent) {
+    const auto persist_epoch = instrumentation::build_v_readfirstlane_b32(
+        *options.moi_persistent_epoch_sgpr, *options.moi_epoch_vgpr, arch);
+    const auto delay = instrumentation::build_salu_dependency_delay(arch);
+    if (!persist_epoch || !delay) {
+      errors.emplace_back("ConSan MOI sampled barrier failed at scalar epoch persistence");
+      return std::nullopt;
+    }
+    words.push_back(*persist_epoch);
+    words.push_back(*delay);
+  }
   if (private_layout) {
     const auto store = instrumentation::build_private_store_b32(*options.moi_epoch_vgpr,
                                                                 private_layout->epoch_offset, arch);
@@ -933,7 +952,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       result.resource_plans.push_back(plan);
       barrier_plan_by_offset.emplace(site.text_offset, result.resource_plans.size() - 1u);
     }
-    const uint16_t scratch_count = options.automatic_moi_private_epoch ? 9u : 7u;
+    const uint16_t scratch_count =
+        options.automatic_moi_private_epoch || moi_uses_scalar_persistent_state(options) ? 9u : 7u;
     const auto resources = resolve_moi_scratch_plan(plan, options, scratch_count);
     if (!resources)
       continue;
@@ -1208,7 +1228,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
               "ConSan MOI sampled dense barrier lost its transient scalar assignment");
           return;
         }
-        if (planned.private_layout) {
+        if (planned.private_layout || moi_uses_scalar_persistent_state(candidate_options)) {
           candidate_options.moi_owner_vgpr = static_cast<uint16_t>(planned.resources.base + 7u);
           candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(planned.resources.base + 8u);
         } else if (!apply_moi_persistent_vgpr_assignment(
@@ -1386,7 +1406,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
           "ConSan MOI sampled barrier sync lost its transient scalar assignment");
       return;
     }
-    if (planned.private_layout) {
+    if (planned.private_layout || moi_uses_scalar_persistent_state(candidate_options)) {
       candidate_options.moi_owner_vgpr = static_cast<uint16_t>(planned.resources.base + 7u);
       candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(planned.resources.base + 8u);
     } else if (!apply_moi_persistent_vgpr_assignment(
@@ -1964,7 +1984,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           "ConSan MOI sampled atomic sync lost its transient scalar assignment");
       return;
     }
-    if (planned.private_layout) {
+    if (planned.private_layout || moi_uses_scalar_persistent_state(candidate_options)) {
       candidate_options.moi_owner_vgpr =
           static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kOwner);
       candidate_options.moi_epoch_vgpr =

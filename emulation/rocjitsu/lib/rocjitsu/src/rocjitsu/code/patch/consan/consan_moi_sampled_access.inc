@@ -575,11 +575,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         continue;
       }
     }
-    if (private_layout) {
+    if (private_layout || moi_uses_scalar_persistent_state(candidate_options)) {
       uint16_t state_vgpr = static_cast<uint16_t>(resources->base + resources->count);
-      if (private_layout->sample_sequence_offset)
+      if (private_layout && private_layout->sample_sequence_offset)
         candidate_options.moi_sample_sequence_vgpr = --state_vgpr;
-      if (private_layout->owner_offset)
+      if (!private_layout || private_layout->owner_offset)
         candidate_options.moi_owner_vgpr = --state_vgpr;
       candidate_options.moi_epoch_vgpr = --state_vgpr;
     }
@@ -1062,12 +1062,13 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         return;
       }
       candidate_options.scratch_vgpr = planned_patch.resources.base;
-      if (planned_patch.private_epoch_offset) {
+      if (planned_patch.private_epoch_offset ||
+          moi_uses_scalar_persistent_state(candidate_options)) {
         uint16_t state_vgpr =
             static_cast<uint16_t>(planned_patch.resources.base + planned_patch.resources.count);
         if (planned_patch.private_sample_sequence_offset)
           candidate_options.moi_sample_sequence_vgpr = --state_vgpr;
-        if (planned_patch.private_owner_offset)
+        if (!planned_patch.private_epoch_offset || planned_patch.private_owner_offset)
           candidate_options.moi_owner_vgpr = --state_vgpr;
         candidate_options.moi_epoch_vgpr = --state_vgpr;
       }
@@ -1352,12 +1353,13 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               return std::optional<std::vector<uint32_t>>{};
             }
             candidate_options.scratch_vgpr = planned_patch.resources.base;
-            if (planned_patch.private_epoch_offset) {
+            if (planned_patch.private_epoch_offset ||
+                moi_uses_scalar_persistent_state(candidate_options)) {
               uint16_t state_vgpr = static_cast<uint16_t>(planned_patch.resources.base +
                                                           planned_patch.resources.count);
               if (planned_patch.private_sample_sequence_offset)
                 candidate_options.moi_sample_sequence_vgpr = --state_vgpr;
-              if (planned_patch.private_owner_offset)
+              if (!planned_patch.private_epoch_offset || planned_patch.private_owner_offset)
                 candidate_options.moi_owner_vgpr = --state_vgpr;
               candidate_options.moi_epoch_vgpr = --state_vgpr;
             }

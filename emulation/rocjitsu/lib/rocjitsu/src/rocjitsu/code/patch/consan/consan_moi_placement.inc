@@ -782,6 +782,10 @@ candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
       std::max(spill_address_snapshot_count, flat_offset_address_count));
 }
 
+[[nodiscard]] bool moi_uses_scalar_persistent_state(const ConSanOptions &options) {
+  return options.moi_persistent_owner_sgpr && options.moi_persistent_epoch_sgpr;
+}
+
 [[nodiscard]] uint16_t direct_sampled_scratch_count(const ConSanOptions &options,
                                                     const ConSanMoiCandidate &candidate) {
   const uint16_t base_scratch_count = options.moi_sampled_check ? 7u : 5u;
@@ -792,7 +796,8 @@ candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
                                                                          : 0u) +
       (options.automatic_moi_private_epoch
            ? (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId ? 2u : 1u)
-           : 0u));
+           : moi_uses_scalar_persistent_state(options) ? 2u
+                                                       : 0u));
 }
 
 struct SampledAtomicScratchLayout {
@@ -3030,13 +3035,10 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
                      !plan.owner_descriptor_file_offsets.empty();
             });
       });
-  // Access-only Sampled objects select waves with the persistent dispatch
-  // counter. A per-workitem sequence is only needed when causal
-  // synchronization state is actually represented; owner/epoch still live
-  // across the guest and are handled below.
-  const bool needs_sample_sequence = options.moi_engine == ConSanMoiEngine::Sampled &&
-                                     options.moi_runtime_sample_stride > 1u &&
-                                     has_supported_sampled_sync;
+  // Runtime sampling is spatial: dispatch and workgroup identity select a
+  // bank, while the LDS cell selects an address. No per-workitem sequence is
+  // read by the emitted probes, so persistent Sampled state is only
+  // owner/epoch.
   const bool needs_inline_workgroup_key =
       options.moi_engine == ConSanMoiEngine::InlineShadow &&
       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
@@ -3103,8 +3105,7 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
   // The gfx1250 Inline local-shadow prologue uses three additional tail VGPRs
   // only while clearing with a 128-bit LDS store. They must lie above every
   // guest reference even though owner/epoch remain the only persistent values.
-  const uint32_t named_persistent_count = 2u + static_cast<uint32_t>(needs_sample_sequence) +
-                                          static_cast<uint32_t>(needs_workgroup_key);
+  const uint32_t named_persistent_count = 2u + static_cast<uint32_t>(needs_workgroup_key);
   const uint32_t persistent_count =
       options.moi_engine == ConSanMoiEngine::InlineShadow && arch == ROCJITSU_CODE_ARCH_GFX1250
           ? std::max<uint32_t>(named_persistent_count, 5u)
@@ -3139,12 +3140,10 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId && !has_dynamic_stack_owner) {
       options.moi_init_owner_epoch = true;
       options.automatic_moi_private_epoch = true;
-      options.automatic_moi_private_sample_sequence = needs_sample_sequence;
       result.moi_private_epoch_automatic = true;
       result.warnings.emplace_back(
-          "ConSan MOI selected entry-snapshotted private owner/epoch" +
-          std::string(needs_sample_sequence ? "/sample-sequence" : "") +
-          " state below a CDNA ordinary VGPR boundary for Sampled instrumentation");
+          "ConSan MOI selected entry-snapshotted private owner/epoch state below a CDNA ordinary "
+          "VGPR boundary for Sampled instrumentation");
       return true;
     }
     if (options.moi_engine == ConSanMoiEngine::RecordReplay && !options.force_private_epoch) {
@@ -3418,7 +3417,9 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
                                                     &ConSanKernelInfo::descriptor_file_offset);
               return kernel != result.kernels.end() && kernel->uses_dynamic_stack.value_or(false);
             });
-        if (options.moi_engine == ConSanMoiEngine::InlineShadow && has_dynamic_stack_owner) {
+        if ((options.moi_engine == ConSanMoiEngine::InlineShadow ||
+             options.moi_engine == ConSanMoiEngine::Sampled) &&
+            has_dynamic_stack_owner) {
           // Owner, epoch, and the optional workgroup key are uniform within a
           // wave. A fresh SGPR tail preserves them across arbitrary guest code
           // without changing ACCUM_OFFSET or consuming address-based private
@@ -3537,11 +3538,12 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
             result.moi_persistent_sgprs_automatic = true;
             result.resolved_moi_prologue_scratch_vgpr_assignments =
                 options.moi_prologue_scratch_vgpr_assignments;
-            result.warnings.emplace_back("ConSan MOI assigned persistent scalar owner/epoch" +
-                                         std::string(needs_workgroup_key ? "/workgroup-key" : "") +
-                                         " state s" + std::to_string(base) + ":s" +
-                                         std::to_string(base + scalar_count - 1u) +
-                                         " below a full CDNA ordinary VGPR bank");
+            result.warnings.emplace_back(
+                "ConSan MOI assigned persistent scalar owner/epoch" +
+                std::string(needs_workgroup_key ? "/workgroup-key" : "") + " state s" +
+                std::to_string(base) + ":s" + std::to_string(base + scalar_count - 1u) +
+                " below a full CDNA ordinary VGPR bank for " +
+                consan_moi_engine_name(options.moi_engine));
             return true;
           }
           result.outcome = ConSanTransformOutcome::Unsupported;
@@ -3572,8 +3574,6 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         assignment.owner_vgpr = static_cast<uint16_t>(component_base);
         assignment.epoch_vgpr = static_cast<uint16_t>(component_base + 1u);
         uint16_t next = static_cast<uint16_t>(component_base + 2u);
-        if (needs_sample_sequence)
-          assignment.sample_sequence_vgpr = next++;
         if (needs_workgroup_key)
           assignment.workgroup_key_vgpr = next++;
         options.moi_persistent_vgpr_assignments.push_back(assignment);
@@ -3742,7 +3742,6 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
   if (options.force_private_epoch || persistent_end > kMaxVgprs || prefer_private_epoch) {
     options.moi_init_owner_epoch = true;
     options.automatic_moi_private_epoch = true;
-    options.automatic_moi_private_sample_sequence = needs_sample_sequence;
     result.moi_private_epoch_automatic = true;
     result.warnings.emplace_back(
         std::string("ConSan MOI automatically selected derived-owner/private-"
@@ -3754,8 +3753,6 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
   options.moi_owner_vgpr = static_cast<uint16_t>(persistent_base);
   options.moi_epoch_vgpr = static_cast<uint16_t>(persistent_base + 1u);
   uint16_t next_persistent_vgpr = static_cast<uint16_t>(persistent_base + 2u);
-  if (needs_sample_sequence)
-    options.moi_sample_sequence_vgpr = next_persistent_vgpr++;
   if (needs_workgroup_key)
     options.moi_workgroup_key_vgpr = next_persistent_vgpr++;
   options.moi_init_owner_epoch = true;
@@ -3767,7 +3764,6 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
   result.moi_persistent_vgprs_automatic = true;
   result.warnings.emplace_back(
       "ConSan MOI automatically assigned persistent owner/epoch" +
-      std::string(needs_sample_sequence ? "/sample-sequence" : "") +
       std::string(needs_workgroup_key ? "/workgroup-key" : "") + " VGPRs v" +
       std::to_string(*options.moi_owner_vgpr) + ":v" + std::to_string(next_persistent_vgpr - 1u) +
       (would_grow_descriptor && has_dynamic_stack_owner
