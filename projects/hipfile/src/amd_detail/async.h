@@ -40,6 +40,7 @@ public:
     std::variant<const hoff_t, hoff_t *> file_offset;
     std::variant<const hoff_t, hoff_t *> buffer_offset;
     ssize_t *const                       bytes_transferred;
+    ssize_t                              bytes_transferred_internal;
 
     AsyncOp(const AsyncOp &)            = delete;
     AsyncOp &operator=(const AsyncOp &) = delete;
