@@ -2288,7 +2288,8 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
     }
     if(!config_match_found)
     {
-        ROCP_ERROR << "Given PC sampling configuration is not supported on any of the agents";
+        ROCP_ERROR << "Given PC sampling configuration is not supported on any of the agents."
+                   << "See supported configurations with 'rocprofv3-avail info --pc-sampling'";
         std::exit(EXIT_FAILURE);
     }
 }

@@ -13,6 +13,13 @@ import common
 import pandas as pd
 import pytest
 
+from pc_sampling.pc_sampling_analysis import (
+    aggregate_pc_sample_records,
+    detect_pc_sampling_method,
+    enrich_with_metadata,
+    load_aggregated_pc_sampling,
+    load_pc_sample_records,
+)
 from rocprof_compute_analyze.analysis_db import db_analysis
 from utils import schema
 from utils.file_io import (
@@ -28,18 +35,12 @@ from utils.parser import (
     load_table_data,
     nullify_unevaluated_metric_values,
 )
-from utils.pc_sampling_analysis import (
-    aggregate_pc_sample_records,
-    detect_pc_sampling_method,
-    enrich_with_metadata,
-    load_aggregated_pc_sampling,
-    load_pc_sample_records,
-)
 from utils.utils_common import is_only_pc_sampling
 
-PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI300A_A1"
+PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI300X_A1"
 
 PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
+INST_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_"
 
 
 # ── Helpers for building synthetic JSON / records ────────────
@@ -52,22 +53,23 @@ def make_record(
     dispatch_id: int,
     wave_issued: bool = True,
     stall_reason: str | None = None,
+    inst_type: str | None = None,
 ) -> dict:
     snapshot = {}
     if stall_reason is not None:
         snapshot["stall_reason"] = stall_reason
-    return {
-        "inst_index": inst_index,
-        "record": {
-            "pc": {
-                "code_object_id": code_object_id,
-                "code_object_offset": offset,
-            },
-            "dispatch_id": dispatch_id,
-            "wave_issued": wave_issued,
-            "snapshot": snapshot,
+    record = {
+        "pc": {
+            "code_object_id": code_object_id,
+            "code_object_offset": offset,
         },
+        "dispatch_id": dispatch_id,
+        "wave_issued": wave_issued,
+        "snapshot": snapshot,
     }
+    if inst_type is not None:
+        record["inst_type"] = inst_type
+    return {"inst_index": inst_index, "record": record}
 
 
 def make_host_trap_record(
@@ -126,6 +128,14 @@ def make_agent(handle: int, node_id: int, agent_type: int) -> dict:
     return {"id": {"handle": handle}, "type": agent_type, "node_id": node_id}
 
 
+def make_code_object(
+    code_object_id: int,
+    load_base: int = 0,
+) -> dict:
+    """A code_objects catalog entry carrying load_base."""
+    return {"code_object_id": code_object_id, "load_base": load_base}
+
+
 def make_tool_data(
     stochastic: list | None = None,
     host_trap: list | None = None,
@@ -134,9 +144,12 @@ def make_tool_data(
     kernel_symbols: list | None = None,
     kernel_dispatch: list | None = None,
     agents: list | None = None,
+    code_objects: list | None = None,
+    pid: int | None = None,
 ) -> dict:
     """Build a single ``rocprofiler-sdk-tool[0]`` dict for the analyze paths."""
     return {
+        "metadata": {"pid": pid},
         "buffer_records": {
             "pc_sample_stochastic": stochastic if stochastic is not None else [],
             "pc_sample_host_trap": host_trap if host_trap is not None else [],
@@ -150,6 +163,7 @@ def make_tool_data(
         },
         "kernel_symbols": kernel_symbols if kernel_symbols is not None else [],
         "agents": agents if agents is not None else [],
+        "code_objects": code_objects if code_objects is not None else [],
     }
 
 
@@ -472,24 +486,20 @@ def test_enrich_kernel_name_unmapped_is_none() -> None:
 
 
 def test_load_aggregated_pc_sampling_happy_path() -> None:
-    """The combined helper loads, aggregates and enriches in one call."""
+    """The helper loads, aggregates, enriches and returns the code-object tree."""
     tool_data = make_tool_data(
         stochastic=[make_record(5, 0x10, 0, dispatch_id=0, wave_issued=True)],
         instructions=["v_mov"],
         comments=["/s/a.cpp:1"],
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
+        code_objects=[make_code_object(5)],
     )
-    df = load_aggregated_pc_sampling(
-        tool_data,
-        group_by=["code_object_id", "code_object_offset"],
-        attach={"instruction", "source_line", "kernel_name"},
-    )
-    row = df.iloc[0]
-    assert row["count"] == 1
-    assert row["instruction"] == "v_mov"
-    assert row["source_line"] == "/s/a.cpp:1"
-    assert row["kernel_name"] == "vecCopy"
+    line = load_aggregated_pc_sampling(tool_data)[0].instruction_lines[0]
+    assert line.total_count == 1
+    assert line.instruction == "v_mov"
+    assert line.comment == "/s/a.cpp:1"
+    assert line.kernel_name == "vecCopy"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1201,7 +1211,7 @@ def test_build_agent_to_gpu_map_empty() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════
-# calc_pc_sampling_data
+# load_pc_sampling_tool_data / calc_dispatch_data
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -1277,89 +1287,71 @@ def test_load_non_mertrics_table_pc_sampling_empty_without_tool_data(
     assert workload.dfs[2101].empty
 
 
-def test_calc_pc_sampling_data_missing_file(
-    tmp_path: Path,
-) -> None:
-    """Workloads without ps_file_results.json are skipped, returning an empty map."""
-    instance = make_db_analysis(str(tmp_path))
-    assert instance.calc_pc_sampling_data({str(tmp_path): None}) == {}
+# ═══════════════════════════════════════════════════════════════
+# aggregate_pc_sample_records / load_aggregated_pc_sampling
+# ═══════════════════════════════════════════════════════════════
 
 
-@pytest.mark.parametrize("placement", ["stochastic", "host_trap", "mixed"])
-def test_calc_pc_sampling_data_aggregation(
-    tmp_path: Path,
-    placement: str,
-) -> None:
-    """Records group by (code_object_id, offset) with the documented schema."""
-    s0 = make_record(100, 0x10, 0, dispatch_id=0, wave_issued=True)
-    s1 = make_record(
-        100,
-        0x10,
-        0,
-        dispatch_id=1,
-        wave_issued=False,
-        stall_reason=f"{PREFIX}WAITCNT",
+def test_aggregate_adds_inst_type_dict() -> None:
+    """The shared aggregation carries a per-group inst_type count dict."""
+    tool_data = make_tool_data(
+        stochastic=[
+            make_record(5, 0x10, 0, dispatch_id=0, inst_type=f"{INST_PREFIX}VALU"),
+            make_record(5, 0x10, 0, dispatch_id=0, inst_type=f"{INST_PREFIX}VALU"),
+            make_record(5, 0x10, 0, dispatch_id=0, inst_type=f"{INST_PREFIX}FLAT"),
+        ],
     )
-    s2 = make_record(101, 0x20, 1, dispatch_id=2, wave_issued=True)
-    if placement == "stochastic":
-        kwargs = {"stochastic": [s0, s1, s2]}
-    elif placement == "host_trap":
-        kwargs = {"host_trap": [s0, s1, s2]}
-    else:
-        kwargs = {"stochastic": [s0, s1], "host_trap": [s2]}
-    write_results_json(
-        tmp_path / "ps_file_results.json",
-        instructions=["v_mov", "v_add"],
-        comments=["/s/a.cpp:1", "/s/a.cpp:2"],
+    records_df = load_pc_sample_records(tool_data)
+    aggregated = aggregate_pc_sample_records(
+        records_df, group_by=["code_object_id", "code_object_offset"]
+    )
+    assert aggregated.iloc[0]["inst_type"] == {"VALU": 2, "FLAT": 1}
+
+
+def test_normalize_missing_tool_data_returns_empty() -> None:
+    """An empty tool record yields no code-object records."""
+    assert load_aggregated_pc_sampling(make_tool_data()) == []
+
+
+def test_normalize_groups_by_code_object_with_catalog() -> None:
+    """Records group per code object carrying load_base."""
+    tool_data = make_tool_data(
+        stochastic=[
+            make_record(5, 0x10, 0, dispatch_id=0, inst_type=f"{INST_PREFIX}VALU"),
+            make_record(5, 0x20, 1, dispatch_id=1, inst_type=f"{INST_PREFIX}FLAT"),
+            make_record(6, 0x30, 2, dispatch_id=2, inst_type=f"{INST_PREFIX}VALU"),
+        ],
+        instructions=["v_mov", "v_add", "v_sub"],
+        comments=["/s/a.cpp:1", "/s/a.cpp:2", "/s/b.cpp:1"],
         kernel_symbols=[
-            make_kernel_symbol(100, 100, "vecCopy"),
-            make_kernel_symbol(101, 101, "vecAdd"),
+            make_kernel_symbol(100, 5, "vecCopy"),
+            make_kernel_symbol(101, 5, "vecAdd"),
+            make_kernel_symbol(102, 6, "vecSub"),
         ],
         kernel_dispatch=[
             make_dispatch(0, 100),
-            make_dispatch(1, 100),
-            make_dispatch(2, 101),
+            make_dispatch(1, 101),
+            make_dispatch(2, 102),
         ],
-        **kwargs,
+        code_objects=[
+            make_code_object(5, load_base=0x1000),
+            make_code_object(6, load_base=0x2000),
+        ],
     )
-    instance = make_db_analysis(str(tmp_path))
-    result = instance.calc_pc_sampling_data({
-        str(tmp_path): load_pc_sampling_results(str(tmp_path))
-    })
-
-    expected_columns = [
-        "offset",
-        "count",
-        "count_issued",
-        "count_stalled",
-        "stall_reason",
-        "instruction",
-        "source_line",
-        "kernel_name",
-    ]
-    assert str(tmp_path) in result
-    df = result[str(tmp_path)]
-    assert list(df.columns) == expected_columns
-    assert len(df) == 2
-    row_copy = df[df["offset"] == 0x10].iloc[0]
-    assert row_copy["count"] == 2
-    assert row_copy["kernel_name"] == "vecCopy"
-    row_add = df[df["offset"] == 0x20].iloc[0]
-    assert row_add["count"] == 1
-    assert row_add["kernel_name"] == "vecAdd"
+    records = {r.code_object_id: r for r in load_aggregated_pc_sampling(tool_data)}
+    assert records[5].load_base == 0x1000
+    assert len(records[5].instruction_lines) == 2
+    assert len(records[6].instruction_lines) == 1
 
 
-def test_calc_pc_sampling_data_shared_code_object_kernel_names(
-    tmp_path: Path,
-) -> None:
-    """Each offset in a shared code object gets its own kernel name."""
+def test_normalize_attributes_line_to_kernel_via_dispatch() -> None:
+    """Each offset in a shared code object is attributed to its dispatch kernel."""
     # code object 5 holds vecCopy (kernel 100) and vecAdd (kernel 101) at
     # distinct offsets; names resolve via kernel_id (dispatch correlation).
-    write_results_json(
-        tmp_path / "ps_file_results.json",
+    tool_data = make_tool_data(
         stochastic=[
-            make_record(5, 0x10, 0, dispatch_id=0, wave_issued=True),
-            make_record(5, 0x20, 1, dispatch_id=1, wave_issued=True),
+            make_record(5, 0x10, 0, dispatch_id=0, inst_type=f"{INST_PREFIX}VALU"),
+            make_record(5, 0x20, 1, dispatch_id=1, inst_type=f"{INST_PREFIX}FLAT"),
         ],
         instructions=["v_mov", "v_add"],
         comments=["/s/a.cpp:1", "/s/a.cpp:2"],
@@ -1368,14 +1360,66 @@ def test_calc_pc_sampling_data_shared_code_object_kernel_names(
             make_kernel_symbol(101, 5, "vecAdd"),
         ],
         kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 101)],
+        code_objects=[make_code_object(5)],
     )
-    instance = make_db_analysis(str(tmp_path))
-    df = instance.calc_pc_sampling_data({
-        str(tmp_path): load_pc_sampling_results(str(tmp_path))
-    })[str(tmp_path)]
-    by_offset = dict(zip(df["offset"], df["kernel_name"]))
+    lines = load_aggregated_pc_sampling(tool_data)[0].instruction_lines
+    by_offset = {line.code_object_offset: line.kernel_name for line in lines}
     assert by_offset[0x10] == "vecCopy"
     assert by_offset[0x20] == "vecAdd"
+
+
+def test_normalize_instruction_line_counts_and_dicts() -> None:
+    """A sampled line carries totals, issue/stall counts, and typed dicts."""
+    tool_data = make_tool_data(
+        stochastic=[
+            make_record(
+                5,
+                0x10,
+                0,
+                dispatch_id=0,
+                wave_issued=True,
+                inst_type=f"{INST_PREFIX}VALU",
+            ),
+            make_record(
+                5,
+                0x10,
+                0,
+                dispatch_id=0,
+                wave_issued=False,
+                stall_reason=f"{PREFIX}WAITCNT",
+                inst_type=f"{INST_PREFIX}VALU",
+            ),
+        ],
+        instructions=["v_mov"],
+        comments=["/s/a.cpp:1"],
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100)],
+        code_objects=[make_code_object(5)],
+    )
+    line = load_aggregated_pc_sampling(tool_data)[0].instruction_lines[0]
+    assert line.code_object_offset == 0x10
+    assert line.instruction == "v_mov"
+    assert line.total_count == 2
+    assert line.issue_count == 1
+    assert line.stall_count == 1
+    assert line.stall_reasons == {"WAITCNT": 1}
+    assert line.inst_types == {"VALU": 2}
+
+
+def test_normalize_host_trap_line_has_null_issue_stall() -> None:
+    """host_trap lines have no issue/stall info and no stall-reason dict."""
+    tool_data = make_tool_data(
+        host_trap=[make_host_trap_record(5, 0x10, 0, dispatch_id=0)],
+        instructions=["v_mov"],
+        comments=["/s/a.cpp:1"],
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        code_objects=[make_code_object(5)],
+    )
+    line = load_aggregated_pc_sampling(tool_data)[0].instruction_lines[0]
+    assert line.total_count == 1
+    assert line.issue_count is None
+    assert line.stall_count is None
+    assert line.stall_reasons == {}
 
 
 def test_load_pc_sampling_data_no_debug_info_source_line_na() -> None:
@@ -1396,39 +1440,18 @@ def test_load_pc_sampling_data_no_debug_info_source_line_na() -> None:
     assert (df["source_line"] == "N/A").all()
 
 
-def test_calc_pc_sampling_data_unmapped_kernel(
-    tmp_path: Path,
-) -> None:
+def test_normalize_unmapped_dispatch_yields_none_kernel() -> None:
     """A sample whose dispatch has no kernel mapping yields a None kernel_name."""
-    write_results_json(
-        tmp_path / "ps_file_results.json",
-        stochastic=[make_record(999, 0x10, 0, dispatch_id=0, wave_issued=True)],
+    tool_data = make_tool_data(
+        stochastic=[make_record(999, 0x10, 0, dispatch_id=0)],
         instructions=["v_mov"],
         comments=["/s/a.cpp:1"],
         kernel_symbols=[make_kernel_symbol(100, 100, "vecCopy")],
+        code_objects=[make_code_object(999)],
     )
-    instance = make_db_analysis(str(tmp_path))
-    df = instance.calc_pc_sampling_data({
-        str(tmp_path): load_pc_sampling_results(str(tmp_path))
-    })[str(tmp_path)]
-    assert df.iloc[0]["kernel_name"] is None
-
-
-def test_calc_pc_sampling_data_uses_provided_tool_data(tmp_path: Path) -> None:
-    """calc uses the provided tool_data map without reading the results json."""
-    tool_data = make_tool_data(
-        stochastic=[make_record(5, 0x10, 0, dispatch_id=0, wave_issued=True)],
-        instructions=["v_mov"],
-        comments=["/s/a.cpp:1"],
-        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
-        kernel_dispatch=[make_dispatch(0, 100)],
-    )
-    instance = make_db_analysis(str(tmp_path))
-    # No ps_file_results.json on disk: a populated result proves the map was used.
-    result = instance.calc_pc_sampling_data({str(tmp_path): tool_data})
-    assert str(tmp_path) in result
-    assert not result[str(tmp_path)].empty
-    assert result[str(tmp_path)].iloc[0]["kernel_name"] == "vecCopy"
+    record = load_aggregated_pc_sampling(tool_data)[0]
+    assert record.code_object_id == 999
+    assert record.instruction_lines[0].kernel_name is None
 
 
 def test_calc_dispatch_data_uses_provided_tool_data(tmp_path: Path) -> None:
@@ -1534,7 +1557,7 @@ def test_pc_sampling_analyze_db_output(
     binary_handler_analyze_rocprof_compute,
     monkeypatch,
 ) -> None:
-    """Analyze in db mode produces a populated pc sampling table."""
+    """Analyze in db mode records sampled rows and the dispatched kernels' ISA."""
     workload_dir = Path(common.setup_workload_dir(PC_SAMPLING_WORKLOAD)).resolve()
     db_name = "pc_sampling_db_test"
     db_path = workload_dir / f"{db_name}.db"
@@ -1557,12 +1580,54 @@ def test_pc_sampling_analyze_db_output(
         assert db_path.is_file()
         conn = sqlite3.connect(str(db_path))
         try:
-            row_count = conn.execute(
-                "SELECT COUNT(*) FROM compute_pcsampling"
+            counts = {
+                table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in (
+                    "compute_code_object_store",
+                    "compute_instruction_line",
+                    "compute_pc_sample_state",
+                    "compute_instruction_sample",
+                )
+            }
+            line_count = counts["compute_instruction_line"]
+            state_count = counts["compute_pc_sample_state"]
+            state_total = conn.execute(
+                "SELECT SUM(total_count) FROM compute_pc_sample_state"
+            ).fetchone()[0]
+            inst_sample_total = conn.execute(
+                "SELECT SUM(count) FROM compute_instruction_sample"
+            ).fetchone()[0]
+            # Only dispatched kernels' ISA is stored, so every line is attributed.
+            attributed = conn.execute(
+                "SELECT COUNT(*) FROM compute_instruction_line il "
+                "JOIN compute_kernel k ON il.kernel_uuid = k.kernel_uuid"
+            ).fetchone()[0]
+            unattributed = conn.execute(
+                "SELECT COUNT(*) FROM compute_instruction_line "
+                "WHERE kernel_uuid IS NULL"
+            ).fetchone()[0]
+            # The (code object, offset) pair is unique across all lines.
+            duplicate_offsets = conn.execute(
+                "SELECT COUNT(*) FROM ("
+                "SELECT code_object_uuid, code_object_offset "
+                "FROM compute_instruction_line "
+                "GROUP BY code_object_uuid, code_object_offset "
+                "HAVING COUNT(*) > 1)"
             ).fetchone()[0]
         finally:
             conn.close()
-        assert row_count > 0
+        assert counts["compute_code_object_store"] > 0
+        # Only sampled offsets carry a sample state; the dispatched kernels' full
+        # disassembly is added as extra lines, so lines outnumber states.
+        assert state_count > 0
+        assert line_count > state_count
+        # Un-dispatched ISA is never stored, so no line is left un-attributed.
+        assert attributed == line_count
+        assert unattributed == 0
+        # No duplicate ISA: sampled offsets are not re-inserted.
+        assert duplicate_offsets == 0
+        # inst_type is a per-sample class, so its counts sum to the sample total.
+        assert inst_sample_total == state_total
     finally:
         common.clean_output_dir(True, str(workload_dir))
 
