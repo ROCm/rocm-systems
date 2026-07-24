@@ -216,6 +216,9 @@ public:
 
   uint64_t cmdbuf_aql_frame_write_index;
   uint32_t cmdbuf_aql_frame_size;
+  // Worst-case PM4 size of a single translated AQL packet; used to flush a partially filled
+  // frame before merging a packet that would not fit, preventing command-buffer overflow.
+  uint32_t cmdbuf_aql_packet_max_size;
 
   uint64_t  *signal_addr_;
   bool platform_atomic_support_;

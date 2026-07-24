@@ -604,7 +604,14 @@ void WDDMDevice::InitCmdbufInfo(void) {
   // Add safety margin to account for alignment and future additions
   cmdbuf_aql_frame_size_ += 128;
 
-  cmdbuf_aql_frame_size_ = rocr::AlignUp(cmdbuf_aql_frame_size_, 0x10);
+  // Worst-case PM4 size of a single translated AQL packet (kernel dispatch / barrier /
+  // vendor-specific). The AQL->PM4 translator merges multiple signal-less packets into one frame
+  // (see ComputeQueue::SwitchAql2PM4), so the frame must be large enough to hold several packets;
+  // sizing it for a single packet caused a command-buffer overflow when back-to-back dispatches
+  // (e.g. per-layer copies of a layered array) merged into one frame.
+  cmdbuf_aql_packet_max_size_ = rocr::AlignUp(cmdbuf_aql_frame_size_, 0x10);
+
+  cmdbuf_aql_frame_size_ = cmdbuf_aql_packet_max_size_ * kAqlFrameMergeCapacity;
 
   cmdbuf_size_ = rocr::AlignUp(cmdbuf_aql_frame_num_ * cmdbuf_aql_frame_size_, 0x1000);
 }

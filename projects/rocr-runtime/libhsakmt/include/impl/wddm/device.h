@@ -214,6 +214,7 @@ public:
   uint32_t LdsBlocks(const hsa_kernel_dispatch_packet_t *pkt);
   uint32_t GetCmdbufSize(void) const { return cmdbuf_size_; }
   uint32_t GetAqlFrameSize(void) const { return cmdbuf_aql_frame_size_; }
+  uint32_t GetAqlPacketMaxSize(void) const { return cmdbuf_aql_packet_max_size_; }
   static uint32_t GetAqlFrameNum(void) { return cmdbuf_aql_frame_num_; }
 
   bool AllocUserQueueMemFromUMD(void) const {
@@ -278,6 +279,10 @@ private:
 
   uint32_t cmdbuf_size_;
   uint32_t cmdbuf_aql_frame_size_;
+  // Worst-case PM4 size of a single translated AQL packet; a frame holds up to
+  // kAqlFrameMergeCapacity of these to allow packet merging without overflowing.
+  uint32_t cmdbuf_aql_packet_max_size_;
+  static constexpr uint32_t kAqlFrameMergeCapacity = 16;
   static const uint32_t cmdbuf_aql_frame_num_;
   uint32_t node_id_;
   // device info

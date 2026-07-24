@@ -609,6 +609,7 @@ hsa_status_t ComputeQueue::Init(void) {
 
   ib_start_addr = cmdbuf_addr;
   cmdbuf_aql_frame_size = device->GetAqlFrameSize();
+  cmdbuf_aql_packet_max_size = device->GetAqlPacketMaxSize();
   platform_atomic_support_ = device->SupportPlatformAtomic();
 
   return ret;
@@ -975,6 +976,19 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
   header &= (1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1;
   hsa_kernel_dispatch_packet_t* aql_packet = (hsa_kernel_dispatch_packet_t*)packet;
   hsa_status_t ret;
+
+  // If the current frame already holds translated packets and merging one more could overflow it,
+  // submit the accumulated frame now and translate this packet into a fresh frame. The frame is
+  // sized to hold several worst-case packets (see WDDMDevice::InitCmdbufInfo), but bursts of
+  // signal-less dispatches (e.g. per-layer copies of a layered array) can accumulate beyond that;
+  // without this flush the post-build overflow check would fail the whole queue. Returning here
+  // leaves cmdbuf_aql_frame_write_index unchanged (it advances only inside the *AqlToPm4 builders),
+  // so the same packet is re-translated after EndSubmit() resets ib_size and advances the frame.
+  if (ib_size != 0 && header != HSA_PACKET_TYPE_INVALID &&
+      (ib_size + cmdbuf_aql_packet_max_size) > cmdbuf_aql_frame_size) {
+    ready_to_submit = true;
+    return HSA_STATUS_SUCCESS;
+  }
 
   switch (header) {
     case HSA_PACKET_TYPE_KERNEL_DISPATCH:
