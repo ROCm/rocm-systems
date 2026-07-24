@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
 
 namespace rocjitsu {
 namespace {
@@ -2820,37 +2821,97 @@ TEST(ConSanMoi, InlineAtomicUsesIndirectIslandsForFarAppendedHelpers) {
   EXPECT_TRUE(patched.is_valid());
 }
 
-TEST(ConSanMoi, InlineAtomicDynamicStackSpillRejectsUnreservedFrameSaveSlot) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+TEST(ConSanMoi, InlineAtomicLiteralDispatchIdCoversEveryAcquireReleaseComparison) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.helper_has_ordered_atomic = true;
+  fixture.helper_atomic_acquire_release = true;
+  fixture.second_continuation_live_sgprs = {0u};
+  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  ASSERT_FALSE(bytes.empty());
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.force_vgpr_spill = true;
+  options.moi_track_atomics = true;
+  options.moi_track_barriers = false;
+  options.moi_inline_workgroup_shadow = false;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.max_patches = 2u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("literal report dispatch ID") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_TRUE(patch->scratch_vgpr);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const uint16_t scratch = *patch->scratch_vgpr;
+  struct DispatchComparison {
+    uint16_t literal_temporary_offset;
+    uint16_t value_offset;
+    std::string_view label;
+  };
+  constexpr std::array kDispatchComparisons = {
+      // append_inline_atomic_acquire_import: version-transaction `temporary`
+      // at +4 compares the release-slot value loaded at +2.
+      DispatchComparison{4u, 2u, "release-slot acquire"},
+      // append_inline_acquired_epoch_token_publications: `hash` at +21
+      // compares the acquired-token value loaded at +19.
+      DispatchComparison{21u, 19u, "acquired-token publication"},
+      // append_inline_release_causal_snapshot_capture: `version_before` at
+      // +17 compares the token-table value loaded at +20.
+      DispatchComparison{17u, 20u, "causal-snapshot scan"},
+      // append_inline_versioned_release_transaction: `cas_new` at +5 compares
+      // the release-record value loaded through `temporary` at +4.
+      DispatchComparison{5u, 4u, "release-record verification"},
+  };
+  for (const DispatchComparison &comparison : kDispatchComparisons) {
+    SCOPED_TRACE(comparison.label);
+    for (const bool high_word : {false, true}) {
+      SCOPED_TRACE(high_word ? "high" : "low");
+      const uint16_t literal_temporary =
+          static_cast<uint16_t>(scratch + comparison.literal_temporary_offset);
+      const uint16_t value = static_cast<uint16_t>(scratch + comparison.value_offset);
+      const uint32_t literal = high_word
+                                   ? static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u)
+                                   : static_cast<uint32_t>(options.moi_report_dispatch_id);
+      const auto materialize = instrumentation::build_v_mov_b32_literal(literal_temporary, literal,
+                                                                        ROCJITSU_CODE_ARCH_RDNA4);
+      const auto compare = instrumentation::build_v_cmp_eq_u32_vcc(
+          vector_source_vgpr(literal_temporary), value, ROCJITSU_CODE_ARCH_RDNA4);
+      ASSERT_TRUE(materialize && compare);
+      std::vector<uint32_t> expected = *materialize;
+      expected.push_back(*compare);
+      EXPECT_TRUE(contains_subsequence(cave, expected));
+    }
+  }
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, InlineAtomicDynamicStackSpillPreservesEverySharedOwnerFrame) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.helper_has_ordered_atomic = true;
+  fixture.helper_atomic_acquire_release = true;
   fixture.first_continuation_uses_v1 = true;
   fixture.second_continuation_live_sgprs = {0u};
+  // Leave the seven-word in-place entry relay relocatable; the shared helper
+  // call begins immediately after it.
+  fixture.entry_nop_words = 7u;
   std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
   ASSERT_FALSE(bytes.empty());
-  AmdGpuCodeObject original(bytes.data(), bytes.size());
-  ASSERT_TRUE(original.is_valid());
-  ASSERT_EQ(original.text_sections().size(), 1u);
-  const auto *text_data =
-      reinterpret_cast<const uint8_t *>(original.text_sections().front()->data());
-  const uint64_t text_file_offset = static_cast<uint64_t>(text_data - bytes.data());
-  for (std::string_view owner_name : {"shared_owner_0", "shared_owner_1"}) {
-    const auto owner = std::ranges::find(original.kernels(), owner_name, &AmdGpuKernelInfo::name);
-    ASSERT_NE(owner, original.kernels().end());
-    uint32_t call = 0u;
-    std::memcpy(&call, bytes.data() + text_file_offset + owner->entry_text_offset, sizeof(call));
-    // s_call_b64 stores its signed dword delta in the low 16 bits. Moving the
-    // call one dword later makes the unchanged target one dword closer.
-    const int16_t moved_delta = static_cast<int16_t>(static_cast<uint16_t>(call & 0xffffu) - 1u);
-    const uint32_t moved_call = build_s_call_b64(/*return s[30:31]=*/30u, moved_delta, kArch);
-    const uint32_t nop = build_s_nop(0u, kArch);
-    std::memcpy(bytes.data() + text_file_offset + owner->entry_text_offset, &nop, sizeof(nop));
-    std::memcpy(bytes.data() + text_file_offset + owner->entry_text_offset + sizeof(uint32_t),
-                &moved_call, sizeof(moved_call));
-  }
   constexpr std::array<std::string_view, 1> kAdditionalOwners = {"shared_owner_1"};
-  // Every owner of the shared atomic helper is dynamic. Atomic-only Inline
-  // reserves through +21, which cannot carry the dynamic frame base at +24.
+  // Every owner of the shared atomic helper is dynamic.
   append_kernel_metadata_note(bytes, "shared_owner_0", /*uses_dynamic_stack=*/true,
                               /*sgpr_count=*/0u, std::nullopt, std::nullopt,
                               /*has_dynamic_lds=*/false, kAdditionalOwners);
@@ -2862,23 +2923,90 @@ TEST(ConSanMoi, InlineAtomicDynamicStackSpillRejectsUnreservedFrameSaveSlot) {
   options.moi_inline_workgroup_shadow = false;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_dispatch_id_sgpr = 80u;
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
   options.max_patches = 2u;
 
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_FALSE(result.modified);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  EXPECT_EQ(result.resolved_moi_dispatch_id_sgpr, options.moi_dispatch_id_sgpr);
   const auto plan = std::ranges::find_if(result.resource_plans, [](const auto &item) {
     return item.site_kind == ConSanResourceSiteKind::Atomic;
   });
   ASSERT_NE(plan, result.resource_plans.end());
   EXPECT_EQ(plan->source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(plan->owner_descriptor_file_offsets.size(), 2u);
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_TRUE(patch->scratch_vgpr);
+  EXPECT_GT(patch->spilled_vgpr_count, 0u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
+                               &ConSanPatchInfo::kind),
+            2u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  // Atomic-only Inline state normally ends at +21; dynamic spill extends the
+  // same window through the frame-base save slot at +24.
+  const uint16_t saved_frame_sgpr =
+      static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 24u);
+  EXPECT_NE(std::ranges::find(cave, build_s_mov_b32(saved_frame_sgpr, /*frame base=*/33u,
+                                                    ROCJITSU_CODE_ARCH_RDNA4)),
+            cave.end());
+  EXPECT_NE(std::ranges::find(cave, build_s_mov_b32(/*frame base=*/33u, /*stack top=*/32u,
+                                                    ROCJITSU_CODE_ARCH_RDNA4)),
+            cave.end());
+  EXPECT_NE(std::ranges::find(cave, build_s_mov_b32(/*stack top=*/32u, /*frame base=*/33u,
+                                                    ROCJITSU_CODE_ARCH_RDNA4)),
+            cave.end());
+  EXPECT_NE(std::ranges::find(cave, build_s_mov_b32(/*frame base=*/33u, saved_frame_sgpr,
+                                                    ROCJITSU_CODE_ARCH_RDNA4)),
+            cave.end());
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, InlineAtomicDynamicStackRejectsExplicitExecWindowWithoutFrameSlot) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.helper_has_ordered_atomic = true;
+  fixture.helper_atomic_acquire_release = true;
+  fixture.second_continuation_live_sgprs = {0u};
+  fixture.entry_nop_words = 7u;
+  std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  ASSERT_FALSE(bytes.empty());
+  constexpr std::array<std::string_view, 1> kAdditionalOwners = {"shared_owner_1"};
+  append_kernel_metadata_note(bytes, "shared_owner_0", /*uses_dynamic_stack=*/true,
+                              /*sgpr_count=*/0u, std::nullopt, std::nullopt,
+                              /*has_dynamic_lds=*/false, kAdditionalOwners);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.force_vgpr_spill = true;
+  options.moi_track_atomics = true;
+  options.moi_track_barriers = false;
+  options.moi_inline_workgroup_shadow = false;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_dispatch_id_sgpr = 80u;
+  // Atomic-only state normally permits s234:s255. The dynamic frame save at
+  // +24 makes that explicit window two registers too short.
+  options.moi_exec_save_sgpr = 234u;
+  options.max_patches = 2u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  EXPECT_FALSE(result.modified);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("aliases an architectural special SGPR") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                               &ConSanPatchInfo::kind),
             result.patches.end());
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("no reserved frame-base save slot") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
 }
 
 TEST(ConSanMoi, SampledAtomicAttachmentRejectsEveryCausalIdentityMismatch) {

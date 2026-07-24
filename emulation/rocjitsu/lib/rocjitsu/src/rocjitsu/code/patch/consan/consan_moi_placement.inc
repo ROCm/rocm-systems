@@ -666,6 +666,8 @@ cdna_sgpr_ranges_conflict_with_physical_vcc(std::span<const MoiSgprRange> ranges
   return candidate.width_bits > consan_moi_exact_shadow::granule_bytes * 8u ? 2u : 0u;
 }
 
+[[nodiscard]] uint16_t moi_exec_save_sgpr_count(const ConSanOptions &options, rj_code_arch_t arch);
+
 [[nodiscard]] bool validate_inline_shadow_exec_save_sgpr(const ConSanOptions &options,
                                                          rj_code_arch_t arch,
                                                          std::vector<std::string> &errors) {
@@ -683,8 +685,7 @@ cdna_sgpr_ranges_conflict_with_physical_vcc(std::span<const MoiSgprRange> ranges
   // dedicated +26:+27 pair.
   const uint16_t ordinary_sgpr_count =
       arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 102u : kMaxSgprs;
-  const uint16_t required_sgpr_count =
-      options.moi_inline_access_present ? kConSanMoiInlineExecSaveSgprCount : 22u;
+  const uint16_t required_sgpr_count = moi_exec_save_sgpr_count(options, arch);
   const uint16_t max_exec_save_sgpr =
       static_cast<uint16_t>(ordinary_sgpr_count - required_sgpr_count);
   if (*options.moi_exec_save_sgpr > max_exec_save_sgpr || *options.moi_exec_save_sgpr % 2u != 0u) {
@@ -1168,8 +1169,6 @@ struct MoiResourcePlanningState {
     valid = true;
   }
 };
-
-[[nodiscard]] uint16_t moi_exec_save_sgpr_count(const ConSanOptions &options, rj_code_arch_t arch);
 
 [[nodiscard]] bool moi_relocatable_host_preserves_transient_sgprs(
     const MoiResourcePlanningState &state, const ConSanOptions &options,
@@ -1656,8 +1655,15 @@ moi_dynamic_stack_exec_save_sgpr_count(ConSanMoiEngine engine) {
       return 0;
     // Access probes reserve every transient mask plus the dedicated
     // application EXEC pair. Atomic-only objects use masks through +21 and do
-    // not pay for access state they cannot execute.
-    return options.moi_inline_access_present ? kConSanMoiInlineExecSaveSgprCount : 22u;
+    // not pay for access state they cannot execute. Dynamic-stack spills still
+    // need the final frame-base save slot even in atomic-only objects.
+    const uint16_t engine_count =
+        options.moi_inline_access_present ? kConSanMoiInlineExecSaveSgprCount : 22u;
+    const uint16_t dynamic_stack_count =
+        options.moi_dynamic_stack_spill
+            ? moi_dynamic_stack_exec_save_sgpr_count(options.moi_engine).value_or(0u)
+            : 0u;
+    return std::max(engine_count, dynamic_stack_count);
   }
   if (options.moi_engine == ConSanMoiEngine::RecordReplay &&
       options.moi_record_replay_dense_barrier_router)

@@ -939,6 +939,7 @@ struct TwoKernelSharedFixtureOptions {
   bool unrelated_has_lds = false;
   bool unrelated_has_barrier = false;
   bool use_indirect_calls = false;
+  uint32_t entry_nop_words = 0;
   uint32_t group_bytes = 0;
 };
 
@@ -956,7 +957,7 @@ std::vector<uint8_t> make_two_kernel_shared_helper_code_object(
        options.helper_has_ordinary_memory || options.helper_has_ordered_atomic ||
        options.helper_atomic_acquire_release || options.helper_has_barrier ||
        options.unrelated_has_lds || options.unrelated_has_barrier || options.use_indirect_calls ||
-       options.group_bytes != 0u)) {
+       options.entry_nop_words != 0u || options.group_bytes != 0u)) {
     ADD_FAILURE() << "CDNA4 shared-helper fixture accepts only an architecture-specific helper, "
                      "VGPR counts, and private sizes";
     return {};
@@ -964,7 +965,9 @@ std::vector<uint8_t> make_two_kernel_shared_helper_code_object(
   constexpr uint16_t kReturnSgpr = 30;
   constexpr uint16_t kPcSgpr = 2;
   constexpr uint32_t kLiteralOperand = 255;
-  std::vector<uint32_t> first_kernel(options.use_indirect_calls ? 7u : 1u, 0);
+  const size_t entry_call_words = options.use_indirect_calls ? 7u : 1u;
+  std::vector<uint32_t> first_kernel(options.entry_nop_words + entry_call_words,
+                                     build_s_nop(0u, arch));
   if (options.first_continuation_uses_v1) {
     first_kernel.push_back(build_v_mov_b32_e32(/*vdst=*/1, vector_source_vgpr(1), arch));
   }
@@ -972,7 +975,8 @@ std::vector<uint8_t> make_two_kernel_shared_helper_code_object(
     first_kernel.push_back(build_s_mov_b32(/*sdst=*/0, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
   }
   first_kernel.push_back(build_s_endpgm(arch));
-  std::vector<uint32_t> second_kernel(options.use_indirect_calls ? 7u : 1u, 0);
+  std::vector<uint32_t> second_kernel(options.entry_nop_words + entry_call_words,
+                                      build_s_nop(0u, arch));
   for (uint16_t sgpr : options.second_continuation_live_sgprs) {
     second_kernel.push_back(build_s_mov_b32(/*sdst=*/105, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
   }
@@ -1033,22 +1037,25 @@ std::vector<uint8_t> make_two_kernel_shared_helper_code_object(
   const uint64_t helper_entry =
       (first_kernel.size() + second_kernel.size() + unrelated_kernel.size()) * sizeof(uint32_t);
   const auto encode_call = [&](std::vector<uint32_t> &kernel, uint64_t entry) {
+    const size_t call_index = options.entry_nop_words;
+    const uint64_t call_pc = entry + call_index * sizeof(uint32_t);
     if (!options.use_indirect_calls) {
-      kernel[0] = build_s_call_b64(
+      kernel[call_index] = build_s_call_b64(
           kReturnSgpr,
-          static_cast<int16_t>((helper_entry - (entry + sizeof(uint32_t))) / sizeof(uint32_t)),
+          static_cast<int16_t>((helper_entry - (call_pc + sizeof(uint32_t))) / sizeof(uint32_t)),
           arch);
       return;
     }
     const int64_t delta =
-        static_cast<int64_t>(helper_entry) - static_cast<int64_t>(entry + sizeof(uint32_t));
-    kernel[0] = pack_sop1(/*s_getpc_b64=*/0x47, kPcSgpr, 0);
-    kernel[1] = pack_sop1(/*s_sext_i32_i16=*/0x0f, kPcSgpr + 1, kPcSgpr + 1);
-    kernel[2] = pack_sop2(/*s_add_co_u32=*/0, kPcSgpr, kPcSgpr, kLiteralOperand);
-    kernel[3] = static_cast<uint32_t>(delta);
-    kernel[4] = pack_sop2(/*s_add_co_ci_u32=*/4, kPcSgpr + 1, kPcSgpr + 1, kLiteralOperand);
-    kernel[5] = static_cast<uint32_t>(delta >> 32);
-    kernel[6] = pack_sop1(/*s_swappc_b64=*/0x49, kReturnSgpr, kPcSgpr);
+        static_cast<int64_t>(helper_entry) - static_cast<int64_t>(call_pc + sizeof(uint32_t));
+    kernel[call_index] = pack_sop1(/*s_getpc_b64=*/0x47, kPcSgpr, 0);
+    kernel[call_index + 1u] = pack_sop1(/*s_sext_i32_i16=*/0x0f, kPcSgpr + 1, kPcSgpr + 1);
+    kernel[call_index + 2u] = pack_sop2(/*s_add_co_u32=*/0, kPcSgpr, kPcSgpr, kLiteralOperand);
+    kernel[call_index + 3u] = static_cast<uint32_t>(delta);
+    kernel[call_index + 4u] =
+        pack_sop2(/*s_add_co_ci_u32=*/4, kPcSgpr + 1, kPcSgpr + 1, kLiteralOperand);
+    kernel[call_index + 5u] = static_cast<uint32_t>(delta >> 32);
+    kernel[call_index + 6u] = pack_sop1(/*s_swappc_b64=*/0x49, kReturnSgpr, kPcSgpr);
   };
   encode_call(first_kernel, first_entry);
   encode_call(second_kernel, second_entry);

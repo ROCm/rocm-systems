@@ -806,6 +806,33 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
             cave_words.end());
 }
 
+TEST(ConSanMoi, Cdna4DynamicStackRejectsShortRecordReplayScalarSpillWindow) {
+  const auto guest = build_cdna4_ds_store_b32(
+      /*vaddr=*/0, /*vdata=*/0, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(guest);
+  std::vector<uint32_t> text_words(guest->begin(), guest->end());
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  constexpr uint32_t kCdna4Wave64AllVgprsGranulated = 31u;
+  const std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "dynamic_spill", kCdna4Wave64AllVgprsGranulated,
+                                 /*uses_dynamic_stack=*/true);
+  ConSanOptions options = moi_options();
+  options.force_vgpr_spill = true;
+  options.automatic_moi_record_replay_sgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  EXPECT_FALSE(result.modified);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("no reserved frame-base save slot") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+}
+
 TEST(ConSanMoi, Cdna3RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
   const auto guest = build_cdna3_ds_store_b32(/*vaddr=*/0, /*vdata=*/0, /*byte_offset=*/0, kArch);
