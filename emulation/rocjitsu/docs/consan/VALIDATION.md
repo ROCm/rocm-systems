@@ -56,6 +56,29 @@ reported by `manifest` and `doctor`; it does not require a generic
 gfx950, `hip-moi-build-gfx942-tests/` for gfx942, and
 `hip-moi-build-gfx1250-tests/` for gfx1250.
 
+### gfx942 hip-moi simulator smoke
+
+The six target-native gfx942 hip-moi executables have a compact simulator gate.
+This single command runs every suite and rejects a result unless all 14 tests
+are observed:
+
+```sh
+python3 \
+  "$CONSAN_VALIDATION_WORKSPACE_DIR/rocm-systems/emulation/rocjitsu/tests/dbi/consan/consan_gfx942_hip_moi_sim.py" \
+  --rocjitsu "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build/tools/rocjitsu/rocjitsu" \
+  --hip-moi-build "$CONSAN_VALIDATION_WORKSPACE_DIR/hip-moi-build-gfx942-tests"
+```
+
+To expose the same gate as six independently reported CTest entries, configure
+RocJITsu with
+`-DRJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR="$CONSAN_VALIDATION_WORKSPACE_DIR/hip-moi-build-gfx942-tests"`,
+then run:
+
+```sh
+ctest --test-dir "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build" \
+  -R '^ConSanGfx942HipMoiSim\.' --output-on-failure -j1
+```
+
 For compatibility with the original gfx1201 workspace, it also recognizes
 `rocjitsu-main-gpu-build/` as the rocJITsu build name. The hook must be at
 `lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so` inside that build.

@@ -4,6 +4,12 @@
 # ConSan's unit, fuzzing, and live-GPU test registration lives here so the
 # shared rocjitsu test manifest remains independent of ConSan's growth.
 
+set(RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR
+    ""
+    CACHE PATH
+    "Exact hip-moi-build-gfx942-tests directory for simulator CTest coverage"
+)
+
 function(rj_add_consan_unit_sources target)
     target_sources(
         ${target}
@@ -152,6 +158,67 @@ function(rj_add_consan_hip_case)
     if(_case_RUN_SERIAL)
         set_property(TEST "${_case_NAME}" PROPERTY RUN_SERIAL TRUE)
     endif()
+endfunction()
+
+function(rj_add_consan_gfx942_hip_moi_sim_case name suite)
+    set(_runner
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../dbi/consan/consan_gfx942_hip_moi_sim.py"
+    )
+    rj_add_test(
+        NAME "ConSanGfx942HipMoiSim.${name}"
+        COMMAND
+            "${_runner}"
+            --rocjitsu
+            "$<TARGET_FILE:rocjitsu_bin>"
+            --config
+            "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json"
+            --hip-moi-build
+            "${RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR}"
+            --suite
+            "${suite}"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        TIMEOUT 75
+        LABELS consan gfx942 hip-moi simulator
+    )
+    set_property(TEST "ConSanGfx942HipMoiSim.${name}" PROPERTY RUN_SERIAL TRUE)
+endfunction()
+
+function(rj_add_consan_gfx942_hip_moi_sim_tests)
+    if(NOT RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR)
+        return()
+    endif()
+    if(NOT IS_ABSOLUTE "${RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR}")
+        message(
+            FATAL_ERROR
+            "RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR must be absolute"
+        )
+    endif()
+    if(NOT IS_DIRECTORY "${RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR}")
+        message(
+            FATAL_ERROR
+            "RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR is not a directory: "
+            "${RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR}"
+        )
+    endif()
+    get_filename_component(
+        _build_dir_name
+        "${RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR}"
+        NAME
+    )
+    if(NOT _build_dir_name STREQUAL "hip-moi-build-gfx942-tests")
+        message(
+            FATAL_ERROR
+            "RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR must name "
+            "hip-moi-build-gfx942-tests"
+        )
+    endif()
+
+    rj_add_consan_gfx942_hip_moi_sim_case(JakubMatmul jakub-matmul)
+    rj_add_consan_gfx942_hip_moi_sim_case(MfmaAttention mfma-attention)
+    rj_add_consan_gfx942_hip_moi_sim_case(D128Block d128-block)
+    rj_add_consan_gfx942_hip_moi_sim_case(D128Pressure d128-pressure)
+    rj_add_consan_gfx942_hip_moi_sim_case(StreamKArrival streamk-arrival)
+    rj_add_consan_gfx942_hip_moi_sim_case(TreeAtomicOr tree-atomic-or)
 endfunction()
 
 set(RJ_CONSAN_LDS_CLEAN_TEST "ConSanLdsTest.PaddedCleanStoreCompletes")
@@ -680,6 +747,8 @@ function(rj_add_consan_fuzzers)
 endfunction()
 
 function(rj_add_consan_hip_tests)
+    rj_add_consan_gfx942_hip_moi_sim_tests()
+
     set(_rj_consan_include_dir
         "${CMAKE_CURRENT_SOURCE_DIR}/../lib/rocjitsu/src"
     )
