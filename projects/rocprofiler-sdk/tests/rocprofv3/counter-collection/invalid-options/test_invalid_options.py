@@ -85,9 +85,10 @@ def test_invalid_counter_collection_options_fail_before_application(
 
     result = subprocess.run(
         [rocprofv3, *tool_args, "--", *application],
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         check=False,
-        text=True,
+        universal_newlines=True,
         timeout=15,
     )
     output = result.stdout + result.stderr
