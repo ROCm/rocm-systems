@@ -221,13 +221,38 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     assert ': IsaOperand<Isa>(size_bits, opr_type, encoding_value)' in operand_cpp
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in operand_cpp
     assert 'uint32_t Operand::read_scalar' in operand_cpp
-    assert 'void Operand::require_execution_backend()' in operand_cpp
-    assert '!backend.simd_notify_read64_mut' in operand_cpp
+    assert 'current_isa_operand_backend()' in operand_cpp
+    assert (
+        'execution_backend_ ? execution_backend_->read_scalar : nullptr' in operand_cpp
+    )
     assert 'uint32_t Operand::read_scalar_exec' not in operand_cpp
     assert 'rocjitsu/vm/amdgpu/compute_unit.h' not in operand_cpp
     assert 'uint32_t Operand::read_scalar_exec' in operand_exec_cpp
-    assert 'Operand::execution_backend_registered_' in operand_exec_cpp
+    assert 'const void *Operand::full_execution_backend()' in operand_exec_cpp
+    assert 'bool Operand::full_execution_backend_complete()' in operand_exec_cpp
+    assert 'backend.simd_notify_read64_mut != nullptr' in operand_exec_cpp
+    assert 'execution_backend_registered_' not in operand_exec_cpp
     assert 'rocjitsu/vm/amdgpu/compute_unit.h' in operand_exec_cpp
+
+
+def test_gfx1250_instruction_execution_backend_is_dense_and_scoped(tmp_path):
+    generator = object.__new__(CodeGenerator)
+    generator.out_path = str(tmp_path)
+    generator.isa_spec = SimpleNamespace(arch_name='gfx1250', profile=Gfx1250Profile())
+    generator._split_execution_classes = ['FirstInstruction', 'SecondInstruction']
+
+    generator.gen_execution_backend()
+    backend_h = (tmp_path / 'gfx1250' / 'execution_backend.h').read_text()
+    backend_cpp = (tmp_path / 'gfx1250' / 'execution_backend_exec.cpp').read_text()
+
+    assert 'const IsaExecutionBackend &execution_backend();' in backend_h
+    assert 'std::array<Instruction::ExecuteFn, 2>' in backend_cpp
+    assert '&execute_with_backend<FirstInstruction>' in backend_cpp
+    assert '&execute_with_backend<SecondInstruction>' in backend_cpp
+    assert 'execute_impl may construct temporary operands' in backend_cpp
+    assert 'ScopedIsaExecutionBackend scope(&execution_backend());' in backend_cpp
+    assert '.operand_backend = Operand::full_execution_backend()' in backend_cpp
+    assert 'execute_registered_' not in backend_cpp
 
 
 def test_rdna4_operand_execution_backend_stays_in_common_source(tmp_path):
