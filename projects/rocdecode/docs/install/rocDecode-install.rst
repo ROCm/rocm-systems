@@ -14,6 +14,16 @@ see :ref:`ROCm Core SDK components <rocm:release-components>`.
 For advanced workflows, source builds, or custom configurations, see
 :doc:`./rocDecode-build-and-install`.
 
+.. note::
+   
+   To use the rocDecode samples and tutorials, the ``ROCM_PATH`` environment variable needs to point to the location of your ROCm installation:
+   
+   .. code:: shell
+
+      export ROCM_PATH=path_to_your_ROCm_installation
+
+   Set this variable after installation.
+
 .. _install-rocm:
 
 Install the ROCm Core SDK
