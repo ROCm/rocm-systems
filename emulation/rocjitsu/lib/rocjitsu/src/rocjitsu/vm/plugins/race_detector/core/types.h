@@ -67,6 +67,7 @@ struct RaceViolation {
   int lane;     ///< Lane within the wave, or -1 for scalar.
   bool isWrite; ///< True if the violating access was a write.
   Dim3d workgroupId;
+  EventId conflictingEvent; ///< Exact pending memory event that caused the violation.
 };
 
 /// Pending memory event data dispatched to WaveRaceState by the plugin adapter.

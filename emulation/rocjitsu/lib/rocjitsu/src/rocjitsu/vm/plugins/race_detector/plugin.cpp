@@ -32,31 +32,8 @@ void warn_cluster_peer_writes_ignored_once() {
 
 // Declared in plugin.h (used by formatTrace tests in execution_plugin_test.cpp).
 std::optional<MarkedPc> findConflict(const RaceViolation &v, RaceDetector &detector) {
-  auto make = [&](auto eid) -> MarkedPc {
-    return {detector.events().pc(eid), detector.events().waveId(eid).value, -1};
-  };
-  if (v.space == RaceViolation::Space::VGPR) {
-    auto &wrs = detector.getWaveRaceState(v.wave);
-    for (auto eid : wrs.getVgprMemoryEvents(v.index))
-      if (isToVgpr(detector.events().type(eid)))
-        return make(eid);
-  } else if (v.space == RaceViolation::Space::SGPR) {
-    auto &wrs = detector.getWaveRaceState(v.wave);
-    for (auto eid : wrs.getWaveMemoryEvents()) {
-      if (!isToSgpr(detector.events().type(eid)))
-        continue;
-      for (uint32_t r : detector.events().registers(eid))
-        if (static_cast<int>(r) == v.index)
-          return make(eid);
-    }
-  } else {
-    assert(v.space == RaceViolation::Space::LDS && "unexpected RaceViolation space (expected LDS)");
-    const auto &events = v.isWrite ? detector.getLdsReadEvents() : detector.getLdsWriteEvents();
-    for (auto eid : events)
-      if (detector.events().ldsIntervals(eid).contains(v.index))
-        return make(eid);
-  }
-  return std::nullopt;
+  EventId eventId = v.conflictingEvent;
+  return MarkedPc{detector.events().pc(eventId), detector.events().waveId(eventId).value, -1};
 }
 
 // Format a race trace showing the instruction stream between the memory

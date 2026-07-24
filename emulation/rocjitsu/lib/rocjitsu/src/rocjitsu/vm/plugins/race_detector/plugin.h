@@ -43,8 +43,7 @@ template <typename T, size_t N> struct RingBuffer {
   size_t size() const { return len; }
 };
 
-/// Find the memory instruction whose outstanding result conflicts with the
-/// racy read described by @p v, returning its PC and wave.
+/// Return the memory instruction recorded as the exact conflict for @p v.
 std::optional<MarkedPc> findConflict(const RaceViolation &v, RaceDetector &detector);
 
 /// Format a trace with ==> markers and wave/lane annotations.
