@@ -97,7 +97,8 @@ __global__ void ReduceWaveTest(int loop, int skip, long long int *start_time,
     if (i == skip && t_id % wf_size == 0) {
       start_time[flat_wf_id] = wall_clock64();
     }
-    wave_reduce<T1, T2>(ctx, teams[flat_wf_id], r_buf, s_buf, num_elems);
+    if (wf_id == 0)
+      wave_reduce<T1, T2>(ctx, teams[flat_wf_id], r_buf, s_buf, num_elems);
     __syncthreads();
   }
 

@@ -42,13 +42,13 @@ class ProfiledExecutionPluginGroup : public ExecutionPluginGroup {
 public:
   ProfiledExecutionPluginGroup() : start_time_(Clock::now()) {}
 
-  void onInit() {
+  void onInit() override {
     if (auto *s = build_composite_sink("profile.log"))
       sink_ = s;
     ExecutionPluginGroup::onInit();
   }
 
-  void onShutdown() {
+  void onShutdown() override {
     if (prof_before_exec_.count > 0)
       print_profile_summary();
     ExecutionPluginGroup::onShutdown();
