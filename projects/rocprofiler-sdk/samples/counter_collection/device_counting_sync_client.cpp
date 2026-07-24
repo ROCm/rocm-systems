@@ -380,7 +380,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     sampler = std::make_shared<counter_sampler>(agents[0].id);
 
     sampler_thread = new std::thread{[output_stream]() {
-        size_t                                    count = 1;
+        size_t                                    count              = 1;
+        bool                                      dimensions_written = false;
         std::vector<rocprofiler_counter_record_t> records;
         while(sampler && exit_toggle().load() == false)
         {
@@ -401,7 +402,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                     *output_stream << "\tCounter: " << record.id << " Name: " << recname
                                    << " Value: " << record.counter_value
                                    << " User data: " << record.user_data.value << "\n";
-                    if(count == 1)
+                    if(!dimensions_written)
                     {
                         if(!sampler) break;
                         auto dims = sampler->get_record_dimensions(record);
@@ -411,6 +412,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                         }
                     }
                 }
+                if(!records.empty()) dimensions_written = true;
             }
             count++;
             std::this_thread::sleep_for(std::chrono::milliseconds(50));

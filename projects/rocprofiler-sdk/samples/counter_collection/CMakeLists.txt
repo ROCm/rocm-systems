@@ -270,15 +270,15 @@ set_tests_properties(
                "${IS_THREAD_SANITIZER}")
 
 if(BUILD_TESTING)
-    configure_file(validate.py validate.py COPYONLY)
+    configure_file(test_device_counting.py test_device_counting.py COPYONLY)
 
     if(ROCPROFILER_SAMPLE_PYTEST_EXECUTABLE)
         set(counter-collection-device-profiling-validator
             "${ROCPROFILER_SAMPLE_PYTEST_EXECUTABLE}" -x -v
-            "${CMAKE_CURRENT_BINARY_DIR}/validate.py")
+            "${CMAKE_CURRENT_BINARY_DIR}/test_device_counting.py")
     else()
         set(counter-collection-device-profiling-validator
-            "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_BINARY_DIR}/validate.py")
+            "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_BINARY_DIR}/test_device_counting.py")
     endif()
 
     add_test(NAME counter-collection-device-profiling-validate
