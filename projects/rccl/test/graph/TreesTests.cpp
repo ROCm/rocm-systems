@@ -203,8 +203,13 @@ TEST(BtreeTest, EightRanks_ParentChildConsistency) {
 }
 
 // Applies the same structural checks as the 4/8-rank consistency tests above to
-// an arbitrary rank count, so non-power-of-2 sizes get the same coverage.
+// an arbitrary rank count, so non-power-of-2 and large sizes get the same
+// coverage. Individual mismatches are reported only up to kMaxReported so that a
+// regression at a large rank count produces a readable failure rather than
+// thousands of lines; the final count assertion still reflects every mismatch.
 static void ExpectBtreeConsistent(int nranks) {
+    constexpr int kMaxReported = 10;
+
     struct NodeInfo { int u, d0, d1, pct; };
     std::vector<NodeInfo> info(nranks);
 
@@ -217,22 +222,70 @@ static void ExpectBtreeConsistent(int nranks) {
     // Rank 0 is the root of the btree and therefore has no parent.
     EXPECT_EQ(info[0].u, -1) << "nranks=" << nranks;
 
+    // Every non-root rank is listed as a child by the parent it points at.
+    int linkErrors = 0;
     for (int r = 1; r < nranks; r++) {
         int parent = info[r].u;
         ASSERT_GE(parent, 0) << "nranks=" << nranks << " rank " << r << " has no parent";
         ASSERT_LT(parent, nranks) << "nranks=" << nranks << " rank " << r;
-        bool found = (info[parent].d0 == r || info[parent].d1 == r);
-        EXPECT_TRUE(found) << "nranks=" << nranks << " rank " << r
-                           << " not found as child of rank " << parent;
-    }
-
-    // Children, when present, must be in range.
-    for (int r = 0; r < nranks; r++) {
-        for (int child : {info[r].d0, info[r].d1}) {
-            EXPECT_TRUE(child == -1 || (child >= 0 && child < nranks))
-                << "nranks=" << nranks << " rank " << r << " child=" << child;
+        if (info[parent].d0 != r && info[parent].d1 != r) {
+            if (linkErrors < kMaxReported) {
+                ADD_FAILURE() << "nranks=" << nranks << " rank " << r
+                              << " not found as child of rank " << parent;
+            }
+            linkErrors++;
         }
     }
+    EXPECT_EQ(linkErrors, 0) << "nranks=" << nranks << ": " << linkErrors
+                             << " rank(s) not listed as a child of their parent";
+
+    // Children, when present, must be in range.
+    int rangeErrors = 0;
+    for (int r = 0; r < nranks; r++) {
+        for (int child : {info[r].d0, info[r].d1}) {
+            if (child == -1 || (child >= 0 && child < nranks)) continue;
+            if (rangeErrors < kMaxReported) {
+                ADD_FAILURE() << "nranks=" << nranks << " rank " << r << " child=" << child
+                              << " out of range";
+            }
+            rangeErrors++;
+        }
+    }
+    EXPECT_EQ(rangeErrors, 0) << "nranks=" << nranks << ": " << rangeErrors
+                              << " out-of-range child link(s)";
+
+    // The links must form a single tree spanning every rank: walking down from
+    // the root must reach each rank exactly once (no orphans, no cycles, no rank
+    // claimed by two parents). Descending-only linkage checks cannot catch a
+    // disconnected forest, which is the failure mode that matters at large
+    // rank counts where the tree cannot be inspected by hand.
+    std::vector<int> visits(nranks, 0);
+    std::vector<int> stack;
+    stack.push_back(0);
+    while (!stack.empty()) {
+        int r = stack.back();
+        stack.pop_back();
+        if (r == -1) continue;
+        ASSERT_GE(r, 0) << "nranks=" << nranks;
+        ASSERT_LT(r, nranks) << "nranks=" << nranks;
+        // Guard against cycles so the walk cannot loop forever.
+        if (++visits[r] > 1) continue;
+        stack.push_back(info[r].d0);
+        stack.push_back(info[r].d1);
+    }
+
+    int unreached = 0, repeated = 0;
+    for (int r = 0; r < nranks; r++) {
+        if (visits[r] == 0 && ++unreached <= kMaxReported) {
+            ADD_FAILURE() << "nranks=" << nranks << " rank " << r << " unreachable from root";
+        } else if (visits[r] > 1 && ++repeated <= kMaxReported) {
+            ADD_FAILURE() << "nranks=" << nranks << " rank " << r << " reached "
+                          << visits[r] << " times";
+        }
+    }
+    EXPECT_EQ(unreached, 0) << "nranks=" << nranks << ": " << unreached << " unreachable rank(s)";
+    EXPECT_EQ(repeated, 0) << "nranks=" << nranks << ": " << repeated
+                           << " rank(s) reached more than once";
 }
 
 TEST(BtreeTest, FiveRanks_ParentChildConsistency) {
@@ -241,6 +294,21 @@ TEST(BtreeTest, FiveRanks_ParentChildConsistency) {
 
 TEST(BtreeTest, SixRanks_ParentChildConsistency) {
     ExpectBtreeConsistent(6);
+}
+
+// Large rank counts, around the 1000 mark. ncclGetBtree derives parent/child
+// links from bit manipulation of the rank index, so the interesting cases are
+// clustered around a power-of-2 boundary: 1024 exercises the exact-power-of-2
+// path, 1023/1025 the sizes either side of it where the down1 clamping loop
+// runs, and 1000 an ordinary non-power-of-2 count.
+TEST(BtreeTest, ThousandRanks_ParentChildConsistency) {
+    ExpectBtreeConsistent(1000);
+}
+
+TEST(BtreeTest, PowerOfTwoBoundaryRanks_ParentChildConsistency) {
+    ExpectBtreeConsistent(1023);
+    ExpectBtreeConsistent(1024);
+    ExpectBtreeConsistent(1025);
 }
 
 // ---------------------------------------------------------------------------
