@@ -266,7 +266,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   const bool supports_dynamic_stack_spill =
       effective_options.moi_engine == ConSanMoiEngine::InlineShadow ||
       ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-       effective_options.moi_engine == ConSanMoiEngine::RecordReplay);
+       (effective_options.moi_engine == ConSanMoiEngine::RecordReplay ||
+        effective_options.moi_engine == ConSanMoiEngine::Sampled));
   effective_options.moi_dynamic_stack_spill =
       supports_dynamic_stack_spill &&
       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {

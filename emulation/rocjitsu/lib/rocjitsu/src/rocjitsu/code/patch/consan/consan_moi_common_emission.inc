@@ -322,7 +322,8 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
     const bool supported_engine =
         options.moi_engine == ConSanMoiEngine::InlineShadow ||
         ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-         options.moi_engine == ConSanMoiEngine::RecordReplay);
+         (options.moi_engine == ConSanMoiEngine::RecordReplay ||
+          options.moi_engine == ConSanMoiEngine::Sampled));
     if (!supported_engine || !options.moi_dynamic_stack_spill || !options.moi_exec_save_sgpr) {
       warnings.emplace_back("ConSan MOI dynamic-stack spill has no supported scalar-state layout");
       return std::nullopt;
@@ -335,9 +336,10 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
       return std::nullopt;
     }
     const uint16_t saved_scc_sgpr = special_state->scc_save_sgpr;
-    const uint16_t saved_frame_base_sgpr =
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr +
-                              (options.moi_engine == ConSanMoiEngine::InlineShadow ? 24u : 5u));
+    const uint16_t saved_frame_base_sgpr = static_cast<uint16_t>(
+        *options.moi_exec_save_sgpr + (options.moi_engine == ConSanMoiEngine::InlineShadow ? 24u
+                                       : options.moi_engine == ConSanMoiEngine::Sampled    ? 8u
+                                                                                           : 5u));
     auto spill = build_dynamic_stack_vgpr_spill_sequence(
         resources.base, resources.count, kDynamicStackTopSgpr, kDynamicFrameBaseSgpr,
         saved_frame_base_sgpr, saved_scc_sgpr, arch);

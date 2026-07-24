@@ -238,13 +238,22 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
       return std::nullopt;
     }
     if (window.first_slot != 0u) {
-      const auto absolute_slot =
-          instrumentation::build_v_add_u32_literal(bank_vgpr, window.first_slot, bank_vgpr, arch);
+      // CDNA4 materializes a literal in the destination before adding the
+      // source VGPR, so an in-place literal add would destroy the bank index.
+      // Use the already-dead value temporary and copy the absolute slot back.
+      const uint16_t absolute_slot_vgpr =
+          arch == ROCJITSU_CODE_ARCH_CDNA4 ? value : bank_vgpr;
+      const auto absolute_slot = instrumentation::build_v_add_u32_literal(
+          absolute_slot_vgpr, window.first_slot, bank_vgpr, arch);
       if (!absolute_slot) {
         errors.emplace_back("ConSan MOI sampled barrier failed at absolute slot materialization");
         return std::nullopt;
       }
       words.insert(words.end(), absolute_slot->begin(), absolute_slot->end());
+      if (absolute_slot_vgpr != bank_vgpr) {
+        words.push_back(build_v_mov_b32_e32(bank_vgpr, vector_source_vgpr(absolute_slot_vgpr),
+                                           arch));
+      }
     }
     if (!append_sampled_indexed_address(words, first_window_address,
                                         sizeof(ConSanMoiSampledCausalWindow), bank_vgpr, base,
@@ -1193,9 +1202,20 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         const ConSanBarrierSite &site = planned.candidate.barrier.site;
         ConSanOptions candidate_options = options;
         candidate_options.scratch_vgpr = planned.resources.base;
+        if (!apply_moi_transient_sgpr_assignment(
+                candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+          result.errors.emplace_back(
+              "ConSan MOI sampled dense barrier lost its transient scalar assignment");
+          return;
+        }
         if (planned.private_layout) {
           candidate_options.moi_owner_vgpr = static_cast<uint16_t>(planned.resources.base + 7u);
           candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(planned.resources.base + 8u);
+        } else if (!apply_moi_persistent_vgpr_assignment(
+                       candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+          result.errors.emplace_back(
+              "ConSan MOI sampled dense barrier lost its persistent VGPR assignment");
+          return;
         }
         const uint64_t body_offset = new_text.size();
         const auto vgpr_msb_mode = gfx1250_vgpr_msb_mode_at(
@@ -1360,9 +1380,20 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     const uint64_t cave_offset = new_text.size();
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
+    if (!apply_moi_transient_sgpr_assignment(
+            candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+      result.errors.emplace_back(
+          "ConSan MOI sampled barrier sync lost its transient scalar assignment");
+      return;
+    }
     if (planned.private_layout) {
       candidate_options.moi_owner_vgpr = static_cast<uint16_t>(planned.resources.base + 7u);
       candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(planned.resources.base + 8u);
+    } else if (!apply_moi_persistent_vgpr_assignment(
+                   candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+      result.errors.emplace_back(
+          "ConSan MOI sampled barrier sync lost its persistent VGPR assignment");
+      return;
     }
     auto cave_words = build_sampled_barrier_sync_cave_words(
         bytes, planned.candidate, candidate_options, planned.spill ? &*planned.spill : nullptr,
@@ -1927,11 +1958,22 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     const uint64_t cave_offset = placement_planner.appended_end();
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
+    if (!apply_moi_transient_sgpr_assignment(
+            candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+      result.errors.emplace_back(
+          "ConSan MOI sampled atomic sync lost its transient scalar assignment");
+      return;
+    }
     if (planned.private_layout) {
       candidate_options.moi_owner_vgpr =
           static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kOwner);
       candidate_options.moi_epoch_vgpr =
           static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kEpoch);
+    } else if (!apply_moi_persistent_vgpr_assignment(
+                   candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+      result.errors.emplace_back(
+          "ConSan MOI sampled atomic sync lost its persistent VGPR assignment");
+      return;
     }
     uint32_t guest_instruction_offset = 0;
     auto cave_words =

@@ -350,8 +350,8 @@ struct ConSanOptions {
   /// Internal proof marker set only when the automatic EXEC-save window lies
   /// above every guest-referenced SGPR and can retain cross-site wave state.
   bool moi_exec_save_sgprs_persistent = false;
-  /// Internal marker set when an Inline access probe needs the final scalar
-  /// save slot for a site-local dynamic-stack spill frame.
+  /// Internal marker set when a probe needs the final scalar save slot for a
+  /// site-local dynamic-stack spill frame.
   bool moi_dynamic_stack_spill = false;
   /// Internal marker set after inventory proves that Inline will emit at
   /// least one ordinary access probe. Atomic-only objects need fewer

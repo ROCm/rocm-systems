@@ -1471,11 +1471,13 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
         std::ranges::all_of(owners, [](const MoiKernelResourceContext *owner) {
           return owner->kernel->uses_dynamic_stack.value_or(false);
         });
-    const bool supported_cdna_record_replay =
+    const bool supported_cdna_dynamic_spill =
         (state.arch == ROCJITSU_CODE_ARCH_CDNA3 || state.arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-        options.moi_engine == ConSanMoiEngine::RecordReplay && every_owner_dynamic;
+        (options.moi_engine == ConSanMoiEngine::RecordReplay ||
+         options.moi_engine == ConSanMoiEngine::Sampled) &&
+        every_owner_dynamic;
     if (has_dynamic_owner && options.moi_engine != ConSanMoiEngine::InlineShadow &&
-        !supported_cdna_record_replay) {
+        !supported_cdna_dynamic_spill) {
       plan.source = ConSanRegisterAllocationSource::Unsupported;
       plan.reason = ConSanRegisterPlanReason::DynamicStack;
       plan.scratch_vgpr.reset();
@@ -1618,8 +1620,12 @@ void apply_test_container_filter(std::vector<Candidate> &candidates, const ConSa
     // gfx1250 dense access streams additionally reserve an aligned temporary
     // call-return pair through +7. The body returns with its ordinary
     // indirect-PC pair, so the probe may reuse that temporary after dispatch.
+    // A CDNA dynamic-stack spill keeps the displaced frame base at +8.
     return options.moi_report_buffer_address
-               ? (arch == ROCJITSU_CODE_ARCH_GFX1250 ? 8u : (options.moi_track_atomics ? 8u : 7u))
+               ? (options.moi_dynamic_stack_spill ? 9u
+                                                  : (arch == ROCJITSU_CODE_ARCH_GFX1250
+                                                         ? 8u
+                                                         : (options.moi_track_atomics ? 8u : 7u)))
                : 0u;
   if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
     if (!options.moi_report_buffer_address)
