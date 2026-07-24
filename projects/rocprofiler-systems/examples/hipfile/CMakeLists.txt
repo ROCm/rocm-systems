@@ -84,24 +84,18 @@ endif()
 
 find_package(Threads REQUIRED)
 
-if(HIP_FOUND AND Threads_FOUND)
-    add_executable(hipfile-trace hipfile_trace.cpp)
-    target_compile_definitions(hipfile-trace PRIVATE __HIP_PLATFORM_AMD__)
-    target_link_libraries(
-        hipfile-trace
-        PRIVATE hip::host ${hipfile_TARGET} Threads::Threads
-    )
-    target_compile_options(hipfile-trace PRIVATE ${_FLAGS})
+add_executable(hipfile-trace hipfile_trace.cpp)
+target_compile_definitions(hipfile-trace PRIVATE __HIP_PLATFORM_AMD__)
+target_link_libraries(
+    hipfile-trace
+    PRIVATE hip::host ${hipfile_TARGET} Threads::Threads
+)
+target_compile_options(hipfile-trace PRIVATE ${_FLAGS})
 
-    if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET hipfile-trace)
-        install(
-            TARGETS hipfile-trace
-            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
-            COMPONENT rocprofiler-systems-examples
-        )
-    endif()
-else()
-    message(
-        "-- ERROR!: ${PROJECT_NAME} excluded! please install all the dependencies and try again!"
+if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET hipfile-trace)
+    install(
+        TARGETS hipfile-trace
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+        COMPONENT rocprofiler-systems-examples
     )
 endif()
