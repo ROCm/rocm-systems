@@ -26,6 +26,7 @@ import ctypes
 import json
 import os
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -65,6 +66,29 @@ SPM_CONFIG_KEYS = ("type", "minimum_interval", "maximum_interval")
 SUCCESS_PREFIX = "Following input counters can be collected together on GPU"
 GPU_RE = re.compile(r"(?m)^[ \t]*GPU[ \t]*:[ \t]*(\d+)[ \t]*$")
 FIELD_RE = re.compile(r"^\s*([A-Za-z][A-Za-z0-9_]*)\s*:\s*(.*?)\s*$")
+SANITIZED_ENVIRONMENT_VARIABLES = (
+    "MPI_LOCALNRANKS",
+    "MPI_LOCALRANKID",
+    "MPI_NRANKS",
+    "MPI_RANK",
+    "MPI_RANKID",
+    "MPI_SIZE",
+    "MV2_COMM_WORLD_RANK",
+    "MV2_COMM_WORLD_SIZE",
+    "OMPI_COMM_WORLD_RANK",
+    "OMPI_COMM_WORLD_SIZE",
+    "PBS_NODENUM",
+    "PBS_O_TASKNUM",
+    "PMI_RANK",
+    "PMI_SIZE",
+    "ROCPROFILER_CI",
+    "ROCPROF_MPI_RANKS",
+    "ROCPROF_MPI_RANK_VAR",
+    "ROCPROF_MPI_SIZE_VAR",
+    "SLURM_JOB_ID",
+    "SLURM_NTASKS",
+    "SLURM_PROCID",
+)
 
 Device = namedtuple(
     "Device",
@@ -142,12 +166,16 @@ class Commands:
             env=child_environment,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            start_new_session=True,
             universal_newlines=True,
         )
         try:
             stdout, stderr = process.communicate(timeout=60)
         except subprocess.TimeoutExpired:
-            process.kill()
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except OSError:
+                process.kill()
             process.communicate()
             raise
         result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
@@ -178,7 +206,7 @@ def _with_paths(environment, key, *paths):
 def commands(request):
     root = Path(request.config.getoption("--rocm-path"))
     environment = os.environ.copy()
-    for key in (
+    for key in SANITIZED_ENVIRONMENT_VARIABLES + (
         "ROCPROF_OUTPUT_FILE_NAME",
         "ROCPROF_OUTPUT_LIST_AVAIL_FILE",
         "ROCPROF_OUTPUT_PATH",
@@ -694,3 +722,21 @@ def test_rocprofv3_nested_failure_is_clean(commands, tmp_path):
     assert result.returncode == 1
     assert "rocprofv3-avail exited with status 1" in result.stderr
     assert "Traceback" not in combined
+
+
+def test_rocprofv3_incompatible_list_avail_library_is_clean(commands):
+    list_avail_library = Path(commands.environment["ROCPROF_LIST_AVAIL_TOOL_LIBRARY"])
+    incompatible_library = list_avail_library.parent.parent / "librocprofiler-sdk.so"
+    assert incompatible_library.is_file()
+
+    environment = {"ROCPROF_LIST_AVAIL_TOOL_LIBRARY": str(incompatible_library)}
+
+    nested_result = commands.run_rocprofv3(
+        "--list-avail",
+        check=False,
+        environment=environment,
+    )
+    nested_output = nested_result.stdout + nested_result.stderr
+    assert nested_result.returncode == 1
+    assert "rocprofv3-avail exited with status 1" in nested_result.stderr
+    assert "Traceback" not in nested_output
