@@ -40,6 +40,34 @@
         "NCCL_DEBUG": "INFO"
       }
     },
+    "net_device_count_mismatch": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "description": "AICOMRCCL-1213: per-rank Net device-count mismatch handling (localNetDeviceCount AllGather + NCCL_IGNORE_NET_MISMATCH abort). The test forces the socket net and a different NCCL_SOCKET_IFNAME per rank so ncclNet->devices() differs across ranks; rank 0 gates the verdict. Each mode runs in its own process (NCCL_PARAM is cached per process).",
+      "tests": [
+        {
+          "name": "NetDeviceCountMismatch_Ignore",
+          "description": "NCCL_IGNORE_NET_MISMATCH=1 (default): mismatch detected and tolerated, init succeeds on all ranks",
+          "test_filter": "CommNetMismatchMPITest.NetDeviceCountMismatch",
+          "env_variables": {
+            "NCCL_IGNORE_NET_MISMATCH": "1"
+          }
+        },
+        {
+          "name": "NetDeviceCountMismatch_Abort",
+          "description": "NCCL_IGNORE_NET_MISMATCH=0: mismatch detected, rank 0 fails init with ncclSystemError",
+          "test_filter": "CommNetMismatchMPITest.NetDeviceCountMismatch",
+          "env_variables": {
+            "NCCL_IGNORE_NET_MISMATCH": "0"
+          }
+        }
+      ]
+    },
     "shm_comprehensive": {
       "extends": "default",
       "is_gtest": true,
@@ -3242,6 +3270,12 @@
     }
   },
   "test_suites": [
+    {
+      "name": "NET - Device Count Mismatch (AICOMRCCL-1213)",
+      "description": "Per-rank Net device-count mismatch detection and NCCL_IGNORE_NET_MISMATCH abort (single node, 2 ranks)",
+      "config": "net_device_count_mismatch",
+      "enabled": true
+    },
     {
       "name": "SHM Tests - Complete Suite",
       "description": "All shared memory transport tests (single node)",
