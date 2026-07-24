@@ -685,8 +685,6 @@ TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
   EXPECT_EQ(std::string_view(high->mnemonic()), "v_add_co_ci_u32");
   EXPECT_EQ((*address_add)[0], 0xd7006a08u);
   EXPECT_EQ((*address_add)[1], 0x0202110au);
-  // LLVM canonically fills the unused low-add source with inline zero.
-  EXPECT_EQ(((*address_add)[1] >> 18u) & 0x1ffu, scalar_positive_inline_u32(0));
 
   const auto readfirstlane =
       build_v_readfirstlane_b32(/*sdst=*/78, /*vsrc=*/90, ROCJITSU_CODE_ARCH_GFX1250);
@@ -775,8 +773,6 @@ TEST(InstructionBuilder, BuildGfx1250SignedI24AddPinsInlineAndLiteralBoundaries)
     ASSERT_TRUE(words);
     EXPECT_EQ(*words, test_case.expected);
     EXPECT_EQ((*words)[1] & 0x1ffu, test_case.low_source);
-    // LLVM canonically fills the unused low-add source with inline zero.
-    EXPECT_EQ(((*words)[1] >> 18u) & 0x1ffu, scalar_positive_inline_u32(0));
     EXPECT_EQ((*words)[5] & 0x1ffu, test_case.high_source);
 
     std::unique_ptr<Instruction> low(decoder->decode(words->data()));
