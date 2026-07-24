@@ -362,6 +362,7 @@ endfunction()
 # shared manifest. The included file only defines registration helpers; calls
 # remain near the generic facilities they extend.
 include(consan/CMakeLists.txt)
+rj_add_consan_gfx942_hip_moi_sim_tests()
 
 # --- Unit / integration test suite ---
 

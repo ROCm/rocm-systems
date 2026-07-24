@@ -409,6 +409,18 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("rdna4", native_spellings.lower())
         self.assertNotIn("cdna4", native_spellings.lower())
 
+    def test_public_workload_path_accessor_uses_target_registry(self) -> None:
+        self.assertEqual(
+            validation.resolved_workload_relative_path(
+                "gfx942",
+                "d128-pressure",
+            ),
+            (
+                "hip-moi-build-gfx942-tests/tests/"
+                "hip_moi_instrumented_cdna3_d128_attention_pressure_test"
+            ),
+        )
+
     def test_gfx942_doctor_checks_resolved_cdna3_executables(self) -> None:
         expected_paths = {
             "d128-block": (

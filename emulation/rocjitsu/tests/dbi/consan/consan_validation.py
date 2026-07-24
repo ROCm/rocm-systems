@@ -1129,6 +1129,12 @@ def _resolved_workload(target: str, workload: Workload) -> Workload:
     return replace(workload, **override)
 
 
+def resolved_workload_relative_path(target: str, workload_id: str) -> str:
+    """Return the target-resolved path owned by the workload registry."""
+    workload = _workload_for_target(target, workload_id)
+    return _resolved_workload(target, workload).relative_path
+
+
 def _fault_families(target: str, workload: Workload) -> tuple[str, ...]:
     return _target_fault_families(target, _resolved_workload(target, workload))
 

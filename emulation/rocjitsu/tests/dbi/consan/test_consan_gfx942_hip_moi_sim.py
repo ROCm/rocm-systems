@@ -161,6 +161,53 @@ class Gfx942HipMoiSimulatorTest(unittest.TestCase):
         self.assertEqual(run.call_count, 6)
         self.assertIn("total: 14/14 tests", output.getvalue())
 
+    def test_single_suite_count_mismatch_fails_the_ctest_entry(self) -> None:
+        suite = simulator.SUITE_BY_ID["d128-pressure"]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            rocjitsu = root / "rocjitsu"
+            config = root / "gfx942.json"
+            build = root / simulator.BUILD_DIR_NAME
+            executable = build / simulator._executable_suffix(suite)
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            rocjitsu.touch()
+            config.touch()
+            completed = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="[  PASSED  ] 3 tests.\n",
+                stderr="",
+            )
+            output = io.StringIO()
+            with (
+                mock.patch.object(
+                    simulator.subprocess,
+                    "run",
+                    return_value=completed,
+                ) as run,
+                contextlib.redirect_stdout(output),
+            ):
+                result = simulator.main(
+                    [
+                        "--rocjitsu",
+                        str(rocjitsu),
+                        "--config",
+                        str(config),
+                        "--hip-moi-build",
+                        str(build),
+                        "--suite",
+                        suite.id,
+                    ]
+                )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(run.call_count, 1)
+        self.assertIn(
+            "FAIL d128-pressure: expected 4 tests, observed 3",
+            output.getvalue(),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

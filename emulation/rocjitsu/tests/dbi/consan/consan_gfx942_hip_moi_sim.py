@@ -48,11 +48,12 @@ SUITE_BY_ID = {suite.id: suite for suite in SUITES}
 
 
 def _executable_suffix(suite: Suite) -> Path:
-    workload = consan_validation._resolved_workload(
-        TARGET,
-        consan_validation._workload_for_target(TARGET, suite.workload_id),
+    relative_path = Path(
+        consan_validation.resolved_workload_relative_path(
+            TARGET,
+            suite.workload_id,
+        )
     )
-    relative_path = Path(workload.relative_path)
     try:
         return relative_path.relative_to(BUILD_DIR_NAME)
     except ValueError as error:

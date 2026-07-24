@@ -747,8 +747,6 @@ function(rj_add_consan_fuzzers)
 endfunction()
 
 function(rj_add_consan_hip_tests)
-    rj_add_consan_gfx942_hip_moi_sim_tests()
-
     set(_rj_consan_include_dir
         "${CMAKE_CURRENT_SOURCE_DIR}/../lib/rocjitsu/src"
     )
