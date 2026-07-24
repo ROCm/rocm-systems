@@ -211,6 +211,22 @@ class CodeGenerator:
         # _fieldless_canonical_value).
         self._fieldless_canon_cache: dict[str, int] | None = None
         self._emitter = _SemanticEmitter(isa_spec, semantics)
+        # Split profiles assign a dense, generation-local ID to every concrete
+        # instruction class. The matching immutable callback table is emitted
+        # after all instruction classes have been generated.
+        self._split_execution_classes: list[str] = []
+
+    def _split_execute_expr(self, class_name: str) -> str:
+        """Return the model constructor expression for one split instruction."""
+        if not self.isa_spec.profile.split_execution_sources:
+            return f'make_exec_fn<{class_name}>()'
+        classes = getattr(self, '_split_execution_classes', None)
+        if classes is None:
+            classes = []
+            self._split_execution_classes = classes
+        instruction_id = len(classes)
+        classes.append(class_name)
+        return f'selected_exec_fn({instruction_id})'
 
     def _supports_simm64_literal_operands(self) -> bool:
         return 'OPR_SIMM64' in self.isa_spec.operand_types
@@ -909,8 +925,81 @@ class CodeGenerator:
         # template here preserves one-step regeneration for VOPD-capable profiles.
         self.gen_vopd()
         self.gen_insts()
+        self.gen_execution_backend()
         self.gen_decoder()
         self.gen_test_encodings()
+
+    def gen_execution_backend(self) -> None:
+        """Emit one immutable execution descriptor for a split ISA profile."""
+        if not self.isa_spec.profile.split_execution_sources:
+            return
+
+        arch = self.isa_spec.arch_name
+        header = textwrap.dedent(f'''\
+            {CppFile._prologue_comment()}
+            #pragma once
+
+            #include "rocjitsu/isa/arch/amdgpu/{arch}/isa.h"
+            #include "rocjitsu/isa/execution_backend.h"
+
+            namespace rocjitsu {{
+            namespace {arch} {{
+
+            const IsaExecutionBackend &execution_backend();
+
+            }} // namespace {arch}
+            }} // namespace rocjitsu
+            ''')
+        entries = ''.join(
+            f'    &execute_with_backend<{class_name}>,\n'
+            for class_name in self._split_execution_classes
+        )
+        source = textwrap.dedent(f'''\
+            {CppFile._prologue_comment()}
+            #include "rocjitsu/isa/arch/amdgpu/{arch}/execution_backend.h"
+            #include "rocjitsu/isa/arch/amdgpu/{arch}/insts.h"
+            #include "rocjitsu/isa/arch/amdgpu/{arch}/operand.h"
+
+            #include <array>
+
+            namespace rocjitsu {{
+            namespace {arch} {{
+            namespace {{
+
+            template <typename Derived>
+            void execute_with_backend(Instruction &instruction, void *context) {{
+              // execute_impl may construct temporary operands (for example,
+              // indexed SOP1/VOP1 sources). Re-enter the ISA scope so those
+              // operands capture the same backend as decode-time operands.
+              ScopedIsaExecutionBackend scope(&execution_backend());
+              static_cast<Derived &>(instruction).execute_impl(
+                  *static_cast<Isa::Context *>(context));
+            }}
+
+            constexpr std::array<Instruction::ExecuteFn, {len(self._split_execution_classes)}>
+                kInstructionCallbacks{{{{
+            {entries}    }}}};
+
+            }} // namespace
+
+            const IsaExecutionBackend &execution_backend() {{
+              static const IsaExecutionBackend backend{{
+                  .instruction_callbacks = kInstructionCallbacks.data(),
+                  .instruction_callback_count = kInstructionCallbacks.size(),
+                  .operand_backend = Operand::full_execution_backend(),
+              }};
+              return backend;
+            }}
+
+            }} // namespace {arch}
+            }} // namespace rocjitsu
+            ''')
+        arch_dir = os.path.join(self.out_path, arch)
+        os.makedirs(arch_dir, exist_ok=True)
+        with open(os.path.join(arch_dir, 'execution_backend.h'), 'w') as f:
+            f.write(header)
+        with open(os.path.join(arch_dir, 'execution_backend_exec.cpp'), 'w') as f:
+            f.write(source)
 
     def _supports_generated_vopd(self) -> bool:
         return self.isa_spec.profile.has_vopd
@@ -929,11 +1018,9 @@ class CodeGenerator:
         arch = self.isa_spec.arch_name
         has_vopd3 = self.isa_spec.profile.has_vopd3
         if self.isa_spec.profile.split_execution_sources:
-            vopd_exec_fn = 'registered_exec_fn<Vopd>()'
-            vopd_registration_decl = 'static const bool execute_registered_;\n'
-            vopd_registration_def = (
-                'const bool Vopd::execute_registered_ = register_exec_fn<Vopd>();'
-            )
+            vopd_exec_fn = self._split_execute_expr('Vopd')
+            vopd_registration_decl = ''
+            vopd_registration_def = ''
         else:
             vopd_exec_fn = 'make_exec_fn<Vopd>()'
             vopd_registration_decl = ''
@@ -3137,16 +3224,15 @@ class CodeGenerator:
               Operand scale_src1;
               OpEncoding scale_inst_;
               std::array<uint32_t, 4> raw_words_{};
-              static const bool execute_registered_;
             };
             ''')
 
-    @staticmethod
-    def _emit_gfx1250_scaled_wmma_vop3px2_impls() -> _ImplOutputs:
+    def _emit_gfx1250_scaled_wmma_vop3px2_impls(self) -> _ImplOutputs:
+        exec_fn = self._split_execute_expr('VWmmaScaleF32Vop3px2')
         model = textwrap.dedent('''\
             VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
                 : Vop3p(gfx1250_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
-                        registered_exec_fn<VWmmaScaleF32Vop3px2>()),
+                        @EXEC_FN@),
                   vdst(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->vdst),
                   src0(gfx1250_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,
@@ -3212,12 +3298,9 @@ class CodeGenerator:
               if (scale_inst_.pad_14)
                 out += " matrix_b_reuse";
             }
-            ''')
+            ''').replace('@EXEC_FN@', exec_fn)
 
         execution = textwrap.dedent('''\
-            const bool VWmmaScaleF32Vop3px2::execute_registered_ =
-                register_exec_fn<VWmmaScaleF32Vop3px2>();
-
             void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
               auto &cu = wf.cu();
               uint32_t vb = wf.vgpr_alloc().base;
@@ -6614,10 +6697,6 @@ class CodeGenerator:
                     public_members.append(
                         cgen.Statement('void execute_impl(amdgpu::Wavefront &wf)')
                     )
-                    if profile.split_execution_sources:
-                        private_members.append(
-                            cgen.Statement('static const bool execute_registered_')
-                        )
                     # A sub-dword (< 32-bit) destination writes only part of its
                     # 32-bit register lane, so the old value survives and the
                     # register is also a read. Surface these partial defs as
@@ -6685,7 +6764,7 @@ class CodeGenerator:
                     full_mnemonic = inst.mnemonic + (rule.suffix or '')
                     exec_fn_expr = f'make_exec_fn<{inst.fmt_name}>()'
                     if profile.split_execution_sources:
-                        exec_fn_expr = f'registered_exec_fn<{inst.fmt_name}>()'
+                        exec_fn_expr = self._split_execute_expr(inst.fmt_name)
                     init_list_parts = [
                         f'{inst.fmt_true_enc_name}("{full_mnemonic}", '
                         f'reinterpret_cast<const OpEncoding*>(inst), '
@@ -7760,11 +7839,6 @@ class CodeGenerator:
                                 f'{_pd_body}'
                                 f'}}'
                             )
-                        )
-                    if profile.split_execution_sources:
-                        exec_impl = cgen.Line(
-                            f'const bool {inst.fmt_name}::execute_registered_ = '
-                            f'register_exec_fn<{inst.fmt_name}>();\n\n{exec_impl}'
                         )
                     execution_impls = [exec_impl]
                     if not profile.split_execution_sources:
@@ -9375,13 +9449,20 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         )
         operand_base_decl = 'class Operand : public AmdgpuIsaOperand<Isa> {\n'
         operand_base_init = 'AmdgpuIsaOperand<Isa>'
+        execution_backend_ctor_init = ''
         if self.isa_spec.profile.split_execution_sources:
             operand_base_decl = 'class Operand : public IsaOperand<Isa> {\n'
             operand_base_init = 'IsaOperand<Isa>'
             execution_backend_public_decl = (
-                '  /// @brief Verify that full-simulator operand callbacks are registered.\n'
-                '  /// @throws std::logic_error if execution TUs are absent from this image.\n'
-                '  static void require_execution_backend();\n'
+                '  /// @brief Return the immutable full-simulator operand table.\n'
+                '  static const void *full_execution_backend();\n'
+                '  /// @brief Validate that every full-simulator operand callback is present.\n'
+                '  static bool full_execution_backend_complete();\n'
+            )
+            execution_backend_ctor_init = (
+                ',\n'
+                '      execution_backend_(static_cast<const ExecutionBackend *>(\n'
+                '          current_isa_operand_backend()))'
             )
             execution_decls += (
                 '  std::optional<uint32_t> simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const override;\n'
@@ -9417,8 +9498,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '    void (Operand::*simd_notify_read64)(const amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;\n'
                 '    void (Operand::*simd_notify_read64_mut)(amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;\n'
                 '  };\n'
-                '  static ExecutionBackend &execution_backend();\n'
-                '  static const bool execution_backend_registered_;\n'
+                '  const ExecutionBackend *execution_backend_ = nullptr;\n'
                 '  bool simd_capable_exec() const;\n'
                 '  void read_lane_chunk_exec(const amdgpu::Wavefront &, uint32_t, uint32_t, uint32_t *) const;\n'
                 '  void write_lane_chunk_exec(amdgpu::Wavefront &, uint32_t, uint32_t, const uint32_t *, uint64_t) const;\n'
@@ -9500,6 +9580,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 cgen.Line(
                     f'Operand::Operand({operand_ctor_args})\n'
                     f'    : {operand_base_init}(size_bits, opr_type, encoding_value)'
+                    f'{execution_backend_ctor_init}'
                     f'{operand_ctor_init} {{\n'
                     '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
                     '}'
@@ -9508,7 +9589,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 cgen.Line(
                     'Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
                     '                 uint16_t literal16_display_value, bool has_literal16_display)\n'
-                    f'    : {operand_base_init}(size_bits, opr_type, encoding_value),\n'
+                    f'    : {operand_base_init}(size_bits, opr_type, encoding_value)'
+                    f'{execution_backend_ctor_init},\n'
                     '      literal16_display_value_(literal16_display_value),\n'
                     '      has_literal16_display_(has_literal16_display) {\n'
                     '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
@@ -9516,7 +9598,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 ),
                 cgen.Line(
                     'Operand::Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64)\n'
-                    f'    : {operand_base_init}(size_bits, opr_type, static_cast<int>(literal64_value)),\n'
+                    f'    : {operand_base_init}(size_bits, opr_type, static_cast<int>(literal64_value))'
+                    f'{execution_backend_ctor_init},\n'
                     '      literal64_value_(literal64_value), has_literal64_(is_literal64) {\n'
                     '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
                     '}'
@@ -9529,165 +9612,166 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
         if self.isa_spec.profile.split_execution_sources:
             class_impl.model.append(cgen.Line(textwrap.dedent('''\
-                    Operand::ExecutionBackend &Operand::execution_backend() {
-                      static ExecutionBackend backend;
-                      return backend;
-                    }
-
-                    void Operand::require_execution_backend() {
-                      const auto &backend = execution_backend();
-                      if (!backend.simd_capable || !backend.read_lane_chunk ||
-                          !backend.write_lane_chunk || !backend.read_scalar ||
-                          !backend.read_lane || !backend.write_scalar ||
-                          !backend.write_lane || !backend.read_lane64 ||
-                          !backend.write_lane64 || !backend.read_scalar64 ||
-                          !backend.write_scalar64 || !backend.simd_vgpr_base ||
-                          !backend.simd_vgpr_storage || !backend.simd_vgpr_storage_mut ||
-                          !backend.simd_vgpr_storage64 || !backend.simd_vgpr_storage64_mut ||
-                          !backend.simd_notify_read || !backend.simd_notify_read_mut ||
-                          !backend.simd_notify_read64 || !backend.simd_notify_read64_mut)
-                        throw std::logic_error("operand execution backend is not linked");
-                    }
-
                     bool Operand::simd_capable() const {
-                      auto fn = execution_backend().simd_capable;
-                      return fn ? (this->*fn)() : false;
+                      decltype(ExecutionBackend::simd_capable) callback =
+                          execution_backend_ ? execution_backend_->simd_capable : nullptr;
+                      return callback ? (this->*callback)() : false;
                     }
 
                     void Operand::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base,
                                                   uint32_t count, uint32_t *out) const {
-                      auto fn = execution_backend().read_lane_chunk;
-                      if (!fn)
+                      decltype(ExecutionBackend::read_lane_chunk) callback =
+                          execution_backend_ ? execution_backend_->read_lane_chunk : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      (this->*fn)(wf, lane_base, count, out);
+                      (this->*callback)(wf, lane_base, count, out);
                     }
 
                     void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base,
                                                    uint32_t count, const uint32_t *vals,
                                                    uint64_t mask) const {
-                      auto fn = execution_backend().write_lane_chunk;
-                      if (!fn)
+                      decltype(ExecutionBackend::write_lane_chunk) callback =
+                          execution_backend_ ? execution_backend_->write_lane_chunk : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      (this->*fn)(wf, lane_base, count, vals, mask);
+                      (this->*callback)(wf, lane_base, count, vals, mask);
                     }
 
                     uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
-                      auto fn = execution_backend().read_scalar;
-                      if (!fn)
+                      decltype(ExecutionBackend::read_scalar) callback =
+                          execution_backend_ ? execution_backend_->read_scalar : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      return (this->*fn)(wf);
+                      return (this->*callback)(wf);
                     }
 
                     uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
-                      auto fn = execution_backend().read_lane;
-                      if (!fn)
+                      decltype(ExecutionBackend::read_lane) callback =
+                          execution_backend_ ? execution_backend_->read_lane : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      return (this->*fn)(wf, lane);
+                      return (this->*callback)(wf, lane);
                     }
 
                     void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {
-                      auto fn = execution_backend().write_scalar;
-                      if (!fn)
+                      decltype(ExecutionBackend::write_scalar) callback =
+                          execution_backend_ ? execution_backend_->write_scalar : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      (this->*fn)(wf, val);
+                      (this->*callback)(wf, val);
                     }
 
                     void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane,
                                              uint32_t val) const {
-                      auto fn = execution_backend().write_lane;
-                      if (!fn)
+                      decltype(ExecutionBackend::write_lane) callback =
+                          execution_backend_ ? execution_backend_->write_lane : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      (this->*fn)(wf, lane, val);
+                      (this->*callback)(wf, lane, val);
                     }
 
                     uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf,
                                                   uint32_t lane) const {
-                      auto fn = execution_backend().read_lane64;
-                      if (!fn)
+                      decltype(ExecutionBackend::read_lane64) callback =
+                          execution_backend_ ? execution_backend_->read_lane64 : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      return (this->*fn)(wf, lane);
+                      return (this->*callback)(wf, lane);
                     }
 
                     void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane,
                                                uint64_t val) const {
-                      auto fn = execution_backend().write_lane64;
-                      if (!fn)
+                      decltype(ExecutionBackend::write_lane64) callback =
+                          execution_backend_ ? execution_backend_->write_lane64 : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      (this->*fn)(wf, lane, val);
+                      (this->*callback)(wf, lane, val);
                     }
 
                     uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
-                      auto fn = execution_backend().read_scalar64;
-                      if (!fn)
+                      decltype(ExecutionBackend::read_scalar64) callback =
+                          execution_backend_ ? execution_backend_->read_scalar64 : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      return (this->*fn)(wf);
+                      return (this->*callback)(wf);
                     }
 
                     void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {
-                      auto fn = execution_backend().write_scalar64;
-                      if (!fn)
+                      decltype(ExecutionBackend::write_scalar64) callback =
+                          execution_backend_ ? execution_backend_->write_scalar64 : nullptr;
+                      if (!callback)
                         throw std::logic_error("operand execution backend is not linked");
-                      (this->*fn)(wf, val);
+                      (this->*callback)(wf, val);
                     }
 
                     std::optional<uint32_t>
                     Operand::simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const {
-                      auto fn = execution_backend().simd_vgpr_base;
-                      return fn ? (this->*fn)(wf) : std::nullopt;
+                      decltype(ExecutionBackend::simd_vgpr_base) callback =
+                          execution_backend_ ? execution_backend_->simd_vgpr_base : nullptr;
+                      return callback ? (this->*callback)(wf) : std::nullopt;
                     }
 
                     const amdgpu::VgprStorage *
                     Operand::simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
-                      auto fn = execution_backend().simd_vgpr_storage;
-                      return fn ? (this->*fn)(wf) : nullptr;
+                      decltype(ExecutionBackend::simd_vgpr_storage) callback =
+                          execution_backend_ ? execution_backend_->simd_vgpr_storage : nullptr;
+                      return callback ? (this->*callback)(wf) : nullptr;
                     }
 
                     amdgpu::VgprStorage *
                     Operand::simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const {
-                      auto fn = execution_backend().simd_vgpr_storage_mut;
-                      return fn ? (this->*fn)(wf) : nullptr;
+                      decltype(ExecutionBackend::simd_vgpr_storage_mut) callback =
+                          execution_backend_ ? execution_backend_->simd_vgpr_storage_mut : nullptr;
+                      return callback ? (this->*callback)(wf) : nullptr;
                     }
 
                     amdgpu::ConstVgprStoragePair64
                     Operand::simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const {
-                      auto fn = execution_backend().simd_vgpr_storage64;
-                      return fn ? (this->*fn)(wf)
-                                : amdgpu::ConstVgprStoragePair64{nullptr, nullptr};
+                      decltype(ExecutionBackend::simd_vgpr_storage64) callback =
+                          execution_backend_ ? execution_backend_->simd_vgpr_storage64 : nullptr;
+                      return callback ? (this->*callback)(wf)
+                                      : amdgpu::ConstVgprStoragePair64{nullptr, nullptr};
                     }
 
                     amdgpu::VgprStoragePair64
                     Operand::simd_vgpr_storage64_mut_impl(amdgpu::Wavefront &wf) const {
-                      auto fn = execution_backend().simd_vgpr_storage64_mut;
-                      return fn ? (this->*fn)(wf)
-                                : amdgpu::VgprStoragePair64{nullptr, nullptr};
+                      decltype(ExecutionBackend::simd_vgpr_storage64_mut) callback =
+                          execution_backend_ ? execution_backend_->simd_vgpr_storage64_mut : nullptr;
+                      return callback ? (this->*callback)(wf)
+                                      : amdgpu::VgprStoragePair64{nullptr, nullptr};
                     }
 
                     void Operand::simd_notify_read_impl(const amdgpu::Wavefront &wf,
                                                         uint64_t lane_mask,
                                                         uint8_t byte_mask) const {
-                      if (auto fn = execution_backend().simd_notify_read)
-                        (this->*fn)(wf, lane_mask, byte_mask);
+                      if (decltype(ExecutionBackend::simd_notify_read) callback =
+                              execution_backend_ ? execution_backend_->simd_notify_read : nullptr)
+                        (this->*callback)(wf, lane_mask, byte_mask);
                     }
 
                     void Operand::simd_notify_read_mut_impl(amdgpu::Wavefront &wf,
                                                             uint64_t lane_mask,
                                                             uint8_t byte_mask) const {
-                      if (auto fn = execution_backend().simd_notify_read_mut)
-                        (this->*fn)(wf, lane_mask, byte_mask);
+                      if (decltype(ExecutionBackend::simd_notify_read_mut) callback =
+                              execution_backend_ ? execution_backend_->simd_notify_read_mut : nullptr)
+                        (this->*callback)(wf, lane_mask, byte_mask);
                     }
 
                     void Operand::simd_notify_read64_impl(const amdgpu::Wavefront &wf,
                                                           uint64_t lane_mask,
                                                           uint8_t byte_mask) const {
-                      if (auto fn = execution_backend().simd_notify_read64)
-                        (this->*fn)(wf, lane_mask, byte_mask);
+                      if (decltype(ExecutionBackend::simd_notify_read64) callback =
+                              execution_backend_ ? execution_backend_->simd_notify_read64 : nullptr)
+                        (this->*callback)(wf, lane_mask, byte_mask);
                     }
 
                     void Operand::simd_notify_read64_mut_impl(amdgpu::Wavefront &wf,
                                                               uint64_t lane_mask,
                                                               uint8_t byte_mask) const {
-                      if (auto fn = execution_backend().simd_notify_read64_mut)
-                        (this->*fn)(wf, lane_mask, byte_mask);
+                      if (decltype(ExecutionBackend::simd_notify_read64_mut) callback =
+                              execution_backend_ ? execution_backend_->simd_notify_read64_mut
+                                                 : nullptr)
+                        (this->*callback)(wf, lane_mask, byte_mask);
                     }
                     ''')))
 
@@ -10540,8 +10624,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                   }
                 }
 
-                const bool Operand::execution_backend_registered_ = [] {
-                  execution_backend() = ExecutionBackend{
+                const void *Operand::full_execution_backend() {
+                  static const ExecutionBackend backend{
                       &Operand::simd_capable_exec,
                       &Operand::read_lane_chunk_exec,
                       &Operand::write_lane_chunk_exec,
@@ -10563,24 +10647,55 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                       &Operand::simd_notify_read64_exec,
                       &Operand::simd_notify_read64_mut_exec,
                   };
-                  return true;
-                }();
+                  return &backend;
+                }
+
+                bool Operand::full_execution_backend_complete() {
+                  const auto is_complete = [](const ExecutionBackend &backend) {
+                    return backend.simd_capable != nullptr &&
+                           backend.read_lane_chunk != nullptr &&
+                           backend.write_lane_chunk != nullptr &&
+                           backend.read_scalar != nullptr &&
+                           backend.read_lane != nullptr &&
+                           backend.write_scalar != nullptr &&
+                           backend.write_lane != nullptr &&
+                           backend.read_lane64 != nullptr &&
+                           backend.write_lane64 != nullptr &&
+                           backend.read_scalar64 != nullptr &&
+                           backend.write_scalar64 != nullptr &&
+                           backend.simd_vgpr_base != nullptr &&
+                           backend.simd_vgpr_storage != nullptr &&
+                           backend.simd_vgpr_storage_mut != nullptr &&
+                           backend.simd_vgpr_storage64 != nullptr &&
+                           backend.simd_vgpr_storage64_mut != nullptr &&
+                           backend.simd_notify_read != nullptr &&
+                           backend.simd_notify_read_mut != nullptr &&
+                           backend.simd_notify_read64 != nullptr &&
+                           backend.simd_notify_read64_mut != nullptr;
+                  };
+                  return is_complete(*static_cast<const ExecutionBackend *>(
+                      full_execution_backend()));
+                }
                 ''')
             resolve_code = cgen.Line(execution_code)
         class_impl.execution_target(
             self.isa_spec.profile.split_execution_sources
         ).append(resolve_code)
 
+        operand_header_includes = [
+            (f'rocjitsu/isa/arch/amdgpu/{arch}/isa.h', False),
+            (f'rocjitsu/isa/arch/amdgpu/{arch}/operand_types.h', False),
+            ('rocjitsu/isa/operand.h', False),
+            ('string', True),
+        ]
+        if self.isa_spec.profile.split_execution_sources:
+            operand_header_includes.append(('rocjitsu/isa/execution_backend.h', False))
+
         header_file = CppFile(
             'operand',
             self.out_path,
             True,
-            [
-                (f'rocjitsu/isa/arch/amdgpu/{arch}/isa.h', False),
-                (f'rocjitsu/isa/arch/amdgpu/{arch}/operand_types.h', False),
-                ('rocjitsu/isa/operand.h', False),
-                ('string', True),
-            ],
+            operand_header_includes,
             [],
             class_def,
             arch,

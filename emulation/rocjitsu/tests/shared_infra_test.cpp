@@ -21,6 +21,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
@@ -3099,10 +3100,12 @@ TEST(DppPermuteTest, Cdna4GeneratedVop1Dpp64PreservesMaskedDestination) {
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVop1DppWriteMaskHonorsBoundCtrl) {
+  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
   wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl<Gfx1250DppTraits>();
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVop1Dpp64PreservesMaskedDestination) {
+  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
   generated_vop1_dpp64_preserves_masked_destination<Gfx1250DppTraits>();
 }
 
@@ -3115,6 +3118,7 @@ TEST(DppPermuteTest, RdnaGeneratedVop1Dpp16FetchInactiveUsesFi) {
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVop1Dpp16FetchInactiveUsesFi) {
+  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
   wave32_generated_vop1_dpp16_fetch_inactive_uses_fi<Gfx1250DppTraits>();
 }
 
@@ -3127,6 +3131,7 @@ TEST(DppPermuteTest, RdnaGeneratedVop1Dpp16FiZeroPrecedesBoundCtrl) {
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVop1Dpp16FiZeroPrecedesBoundCtrl) {
+  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
   wave32_generated_vop1_dpp16_fi_zero_precedes_bound_ctrl<Gfx1250DppTraits>();
 }
 
@@ -3147,6 +3152,7 @@ TEST(DppPermuteTest, RdnaGeneratedVop1Dpp8FetchInactiveUsesFi) {
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVop1Dpp8FetchInactiveUsesFi) {
+  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
   wave32_generated_vop1_dpp8_fetch_inactive_uses_fi<Gfx1250DppTraits>();
 }
 
@@ -3157,6 +3163,7 @@ TEST(DppPermuteTest, RdnaGeneratedVopcDppWriteMaskHonorsBoundCtrl) {
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVopcDppWriteMaskHonorsBoundCtrl) {
+  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
   wave32_generated_vopc_dpp_write_mask_honors_bound_ctrl<Gfx1250DppTraits>();
 }
 
@@ -3167,10 +3174,12 @@ TEST(DppPermuteTest, RdnaGeneratedVcmpxDppWave32WriteMaskPreservesExec) {
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVcmpxDppWave32WriteMaskPreservesExec) {
+  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
   wave32_generated_vcmpx_dpp_write_mask_preserves_exec<Gfx1250DppTraits>();
 }
 
 TEST(ExecMaskTest, RdnaGeneratedVcmpxWave32PreservesExecHi) {
+  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
   wave32_generated_vcmpx_preserves_exec_hi<Rdna1DppTraits>();
   wave32_generated_vcmpx_preserves_exec_hi<Rdna2DppTraits>();
   wave32_generated_vcmpx_preserves_exec_hi<Rdna3DppTraits>();
@@ -3614,6 +3623,7 @@ TEST(RdnaAddrCalcTest, Rdna4Saddr7cCoversGlobalFlatAndScratch) {
 }
 
 TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
+  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
   amdgpu::GpuMemory mem("gfx1250_flat_private_mem");
   amdgpu::L2Cache l2("gfx1250_flat_private_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
