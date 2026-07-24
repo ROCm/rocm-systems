@@ -6,6 +6,11 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ## rocm_smi_lib for ROCm 7.2.0
 
+### Changed
+
+- **Added `ROCM_SMI_DISABLE` build gate**.
+  - Setting `ROCM_SMI_DISABLE=True` (environment or CMake cache variable) skips building and installing rocm-smi-lib entirely. Composite builds such as TheRock use this to drop the deprecated library from the ROCm stack. Use [AMD SMI](https://github.com/ROCm/amdsmi) instead.
+
 ### Added
 
 - **Added runtime power management detection and device wake support**.  

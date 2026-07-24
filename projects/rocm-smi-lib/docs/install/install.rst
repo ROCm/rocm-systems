@@ -61,6 +61,22 @@ After the ROCm SMI library git repository is cloned to a local Linux machine, us
 
 The built library will appear in the `build` folder.
 
+Disabling the build
+===================
+
+Because ROCm SMI is deprecated, its build can be skipped entirely. Set
+``ROCM_SMI_DISABLE=True`` as either an environment variable or a CMake cache
+variable and the project configures to a no-op, building and installing nothing.
+Composite builds such as TheRock use this to drop ROCm SMI from the ROCm stack.
+
+.. code-block:: shell
+
+    # As an environment variable
+    ROCM_SMI_DISABLE=True cmake ..
+
+    # Or as a CMake cache variable
+    cmake .. -DROCM_SMI_DISABLE=True
+
 To build the rpm and deb packages follow the above steps with:
 
 .. code-block:: shell
