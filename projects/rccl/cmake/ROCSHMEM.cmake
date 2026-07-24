@@ -108,10 +108,12 @@ function(add_rocshmem_targets)
     endif()
 
     # -----------------------------------------------------------------
-    # Path 2: Build from source (ENABLE_ROCSHMEM only)
-    # ENABLE_ROCSHMEM_GIN only needs source headers, not a built library.
+    # Path 2: Build from source when no pre-built install is available.
+    # Both ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN need the built headers
+    # (rocshmem_config.h) and device bitcode; ENABLE_ROCSHMEM additionally
+    # links librocshmem.a into librccl.so.
     # -----------------------------------------------------------------
-    if(ENABLE_ROCSHMEM)
+    if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
         set(_rccl_root           "${CMAKE_SOURCE_DIR}")
         set(ROCSHMEM_INSTALL_DIR "${_rccl_root}/ext/rocshmem")
         message(STATUS "rocSHMEM: building from ${ROCSHMEM_SOURCE_DIR}")
@@ -131,7 +133,7 @@ function(add_rocshmem_targets)
             CONFIGURE_COMMAND   ""
             BUILD_COMMAND
                 ${CMAKE_COMMAND} -E make_directory build
-                && ${CMAKE_COMMAND} -E chdir build bash -lc "../scripts/build_configs/gda_bnxt -DUSE_EXTERNAL_MPI=OFF -DUSE_IPC=ON -DBUILD_EXAMPLES=OFF "
+                && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/all_backends -DUSE_EXTERNAL_MPI=OFF -DBUILD_EXAMPLES=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_PYTHON_TESTS=OFF -DBUILD_CTESTS=OFF -DUSE_SDMA=ON -DGPU_TARGETS=${GPU_TARGETS} ${ROCSHMEM_CMAKE_OPTIONS} "
                 && ${CMAKE_COMMAND} -E chdir build ${CMAKE_COMMAND}
                     -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                     -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
