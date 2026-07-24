@@ -286,6 +286,7 @@
  * - gfx1100 (Plum Bonito)
  * - gfx1101 (Wheat Nas)
  * - gfx1102 (Hotpink Bonefish)
+ * - gfx1103 (Pink Sardine)
  * - gfx1150
  * - gfx1151
  * - gfx1200
@@ -362,13 +363,13 @@
  *    gfx1031, and gfx1032.
  *
  * 9. The library does not support debugging programs that use cooperative
- *    groups or CU masking for gfx1100, gfx1101, and gfx11102.  A restriction
- *    will be reported when attaching to a process that has already created
+ *    groups or CU masking for gfx1100, gfx1101, gfx1102, and gfx1103.  A
+ *    restriction will be reported when attaching to a process that has already
  *    cooperative group queues or CU masked queues.  Any attempt by the
  *    process to create a cooperative queue or CU masked queue when attached
  *    will fail.
  *
- * 10. On gfx1100, gfx1101 and gfx1102, the library cannot debug a program
+ * 10. On gfx1100, gfx1101, gfx1102, and gfx1103, the library cannot debug a program
  *     past a "s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)" instruction.  If an
  *     exception is delivered to a wave in an attached process after the
  *     wave has executed this instruction, the wave is killed.
