@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/builders/spill_builders.h"
 
 #include <array>
 #include <cstring>

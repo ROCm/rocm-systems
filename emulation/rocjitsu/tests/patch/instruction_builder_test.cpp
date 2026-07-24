@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
 
 #include <gtest/gtest.h>
