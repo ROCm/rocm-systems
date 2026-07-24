@@ -24,9 +24,7 @@
 
 using namespace simdojo;
 
-// ============================================================================
 // Test Helper Components
-// ============================================================================
 
 namespace {
 
@@ -197,9 +195,7 @@ PartitionID partition_by_name_suffix(Component *comp) {
 
 } // namespace
 
-// ============================================================================
 // Area 5: PacingController Unit Tests
-// ============================================================================
 
 TEST(PacingControllerTest, DisabledIsNoop) {
   PacingController pc;
@@ -340,9 +336,7 @@ TEST(PacingControllerTest, TokenBucketAbsorbsBursts) {
   EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count(), 5);
 }
 
-// ============================================================================
 // Area 6: Spinlock Unit Tests
-// ============================================================================
 
 TEST(SpinlockTest, BasicLockUnlock) {
   util::Spinlock lock;
@@ -419,9 +413,7 @@ TEST(SpinlockTest, CrossPartitionQueueEmptyDrain) {
   EXPECT_TRUE(queue.empty());
 }
 
-// ============================================================================
 // Area 4: Termination Tests
-// ============================================================================
 
 TEST(TerminationTest, QuiescenceDetection) {
   SimulationEngine engine({.num_threads = 1});
@@ -498,9 +490,7 @@ TEST(TerminationTest, StepModeConsistency) {
   EXPECT_EQ(engine.last_exit().reason, ExitReason::COMPLETED);
 }
 
-// ============================================================================
 // Area 1: LBTS Correctness Tests
-// ============================================================================
 
 TEST(LBTSTest, TwoPartitionPingPong) {
   SimulationEngine engine({.max_ticks = 1000, .num_threads = 2});
@@ -560,9 +550,7 @@ TEST(LBTSTest, TimestampAdvancesEnableProgress) {
   EXPECT_EQ(cb->received[0].first, 21u);
 }
 
-// ============================================================================
 // Area 2: Cross-Partition Communication Tests
-// ============================================================================
 
 TEST(CrossPartitionTest, MessageDelivery) {
   // max_ticks must be past last arrival: 20 msgs at ticks 1,11,...,191 + latency 100 = 291.
@@ -605,9 +593,7 @@ TEST(CrossPartitionTest, LinkLatencyAdded) {
   EXPECT_EQ(cons->received[0].first, 142u); // 100 + 42.
 }
 
-// ============================================================================
 // Area 3: Async Event Causality Tests
-// ============================================================================
 
 TEST(AsyncCausalityTest, ScheduleEventNowProducesReasonableTimestamp) {
   // Single-threaded, no pacing: schedule_event_now should use GVT (current_time_).
@@ -635,9 +621,7 @@ TEST(AsyncCausalityTest, ScheduleEventNowProducesReasonableTimestamp) {
   EXPECT_GE(injected_tick.load(), before);
 }
 
-// ============================================================================
 // Area 7: Stress / Integration Tests
-// ============================================================================
 
 TEST(StressTest, FourPartitionRingStress) {
   constexpr uint32_t LAPS = 10;
@@ -724,9 +708,7 @@ TEST(StressTest, AsyncInjectionDuringActiveSimulation) {
   EXPECT_GT(async_processed.load(), 0u);
 }
 
-// ============================================================================
 // Cache VMID-tagging invariants
-// ============================================================================
 //
 // The memory hierarchy tags every line by (vmid, addr) so two processes that
 // alias the same guest VA do not share a cached line. These tests exercise that

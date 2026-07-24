@@ -9,8 +9,7 @@
 /// SimulatedKfd owns a process table mapping fds to KfdProcess instances,
 /// and delegates per-process ioctl operations through here.
 
-#ifndef ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
-#define ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
+#pragma once
 
 #include "rocjitsu/kmd/linux/events.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
@@ -259,5 +258,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_KFD_PROCESS_H_

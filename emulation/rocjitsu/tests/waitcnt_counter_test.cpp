@@ -12,9 +12,7 @@ namespace {
 
 using namespace rocjitsu::amdgpu;
 
-// ---------------------------------------------------------------------------
 // WaitCounters — increment and decrement
-// ---------------------------------------------------------------------------
 
 TEST(WaitCounterTest, IncrementVmcnt) {
   WaitCounters c;
@@ -116,9 +114,7 @@ TEST(WaitCounterTest, SaturationAtMax) {
   EXPECT_EQ(c.vmcnt, WaitCounters::VMCNT_MAX);
 }
 
-// ---------------------------------------------------------------------------
 // WaitTarget — satisfaction checks
-// ---------------------------------------------------------------------------
 
 TEST(WaitTargetTest, DefaultSatisfied) {
   WaitTarget target;

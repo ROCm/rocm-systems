@@ -18,9 +18,7 @@ namespace {
 
 using namespace rocjitsu::amdgpu::transcendental;
 
-// ---------------------------------------------------------------------------
 // Special-case tests (±0, ±Inf, NaN, denormals)
-// ---------------------------------------------------------------------------
 
 TEST(TranscendentalTest, RcpF32SpecialCases) {
   EXPECT_EQ(rcp_f32(0.0f), std::numeric_limits<float>::infinity());
@@ -87,9 +85,7 @@ TEST(TranscendentalTest, SqrtF64SpecialCases) {
   EXPECT_DOUBLE_EQ(sqrt_f64(4.0), 2.0);
 }
 
-// ---------------------------------------------------------------------------
 // ULP accuracy tests (pseudorandom inputs)
-// ---------------------------------------------------------------------------
 
 TEST(TranscendentalTest, RcpF32Ulp) {
   std::mt19937 rng(42);

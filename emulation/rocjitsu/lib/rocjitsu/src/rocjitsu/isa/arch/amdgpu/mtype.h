@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_MTYPE_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_MTYPE_H_
+#pragma once
 
 #include <cstdint>
 
@@ -29,5 +28,3 @@ inline constexpr Mtype effective_mtype(Mtype instruction_mtype, Mtype pte_mtype)
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_MTYPE_H_

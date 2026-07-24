@@ -1,8 +1,7 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef UTIL_INTRUSIVE_LIST_H_
-#define UTIL_INTRUSIVE_LIST_H_
+#pragma once
 
 #include "util/meta_programming.h"
 
@@ -188,5 +187,3 @@ private:
 };
 
 } // namespace util
-
-#endif // UTIL_INTRUSIVE_LIST_H_

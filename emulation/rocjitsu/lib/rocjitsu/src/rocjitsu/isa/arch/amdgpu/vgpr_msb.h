@@ -4,8 +4,7 @@
 /// @file vgpr_msb.h
 /// @brief AMDGPU VGPR high-bank mode helpers shared by model and execution code.
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_VGPR_MSB_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_VGPR_MSB_H_
+#pragma once
 
 #include <cstdint>
 
@@ -39,5 +38,3 @@ constexpr uint8_t mode_layout_to_set_vgpr_msb(uint8_t value) {
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_VGPR_MSB_H_

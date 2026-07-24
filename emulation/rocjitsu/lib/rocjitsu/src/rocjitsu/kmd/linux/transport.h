@@ -4,8 +4,7 @@
 /// @file transport.h
 /// @brief Abstract RPC transport for daemon ↔ client communication.
 
-#ifndef ROCJITSU_KMD_LINUX_TRANSPORT_H_
-#define ROCJITSU_KMD_LINUX_TRANSPORT_H_
+#pragma once
 
 #include <cstddef>
 #include <memory>
@@ -52,5 +51,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_TRANSPORT_H_

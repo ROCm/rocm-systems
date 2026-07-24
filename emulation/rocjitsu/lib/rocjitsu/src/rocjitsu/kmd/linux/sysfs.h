@@ -4,8 +4,7 @@
 /// @file sysfs.h
 /// @brief Generates a sysfs-compatible KFD topology directory for ROCR discovery.
 
-#ifndef ROCJITSU_KMD_LINUX_SYSFS_H_
-#define ROCJITSU_KMD_LINUX_SYSFS_H_
+#pragma once
 
 #include "rocjitsu/config/kfd_device_config.h"
 
@@ -138,5 +137,3 @@ private:
 Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc);
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_SYSFS_H_

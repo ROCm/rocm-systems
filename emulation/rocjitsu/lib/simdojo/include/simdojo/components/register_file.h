@@ -4,8 +4,7 @@
 /// @file register_file.h
 /// @brief Physical register file with block-granularity allocation tracking.
 
-#ifndef SIMDOJO_COMPONENTS_REGISTER_FILE_H_
-#define SIMDOJO_COMPONENTS_REGISTER_FILE_H_
+#pragma once
 
 #include "simdojo/sim/component.h"
 
@@ -124,5 +123,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_COMPONENTS_REGISTER_FILE_H_

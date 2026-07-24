@@ -15,8 +15,7 @@
 /// which is the ABI both sides agree on, so the high values are shifted by
 /// @c HSA_DBG_WATCH_ADDR_MASK_HI_BIT_SHIFT to land in the high field.
 
-#ifndef ROCJITSU_KMD_LINUX_KFD_TOPOLOGY_H_
-#define ROCJITSU_KMD_LINUX_KFD_TOPOLOGY_H_
+#pragma once
 
 #include "rocjitsu/base/rj_compiler.h"
 
@@ -50,5 +49,3 @@ inline constexpr uint64_t kWatchAddrMaskHiBit = 29ull << HSA_DBG_WATCH_ADDR_MASK
 inline constexpr uint64_t kWatchAddrMaskHiBitGfx943 = 30ull << HSA_DBG_WATCH_ADDR_MASK_HI_BIT_SHIFT;
 
 } // namespace rocjitsu::kmd
-
-#endif // ROCJITSU_KMD_LINUX_KFD_TOPOLOGY_H_

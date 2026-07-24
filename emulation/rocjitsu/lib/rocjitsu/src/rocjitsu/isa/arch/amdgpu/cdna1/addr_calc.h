@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA1_ADDR_CALC_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_CDNA1_ADDR_CALC_H_
+#pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/cdna1/machine_insts.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
@@ -33,5 +32,3 @@ void ds_calculate_addresses(const DsMachineInst &inst, amdgpu::Wavefront &wf,
 
 } // namespace cdna1
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_CDNA1_ADDR_CALC_H_

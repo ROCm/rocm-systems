@@ -33,9 +33,7 @@
 namespace rocjitsu {
 namespace {
 
-//==============================================================================
 // Synthetic Instruction subclass for fast validator unit tests.
-//==============================================================================
 
 class TestInstruction : public Instruction {
 public:
@@ -54,9 +52,7 @@ private:
 
 std::vector<uint8_t> dummy_text(size_t size = 16) { return std::vector<uint8_t>(size, 0xCC); }
 
-//==============================================================================
 // Section 1: validate_anchor (synthetic)
-//==============================================================================
 
 TEST(Validator, AcceptsFourByteRelocatable) {
   static constexpr uint32_t kRaw = 0xDEADBEEFu;
@@ -296,12 +292,10 @@ TEST(Validator, RejectsNegativeInstructionSize) {
   EXPECT_NE(err.find("size must be 4 or 8"), std::string::npos) << "error was: " << err;
 }
 
-//==============================================================================
 // Section 1b: validate_inline_nop_plan
 //
 // This guardrail used to live in TrampolineBuilder. It now lives at the
 // orchestrator boundary so the builder stays generic. Tests moved with it.
-//==============================================================================
 
 TEST(InlineNopGuardrail, RejectsNonCanonicalBody) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
@@ -361,9 +355,7 @@ TEST(InlineNopGuardrail, RejectsNonCanonicalBody) {
   }
 }
 
-//==============================================================================
 // Section 2: make_trampoline_plan
-//==============================================================================
 
 TEST(MakeTrampolinePlan, FillsCanonicalBodyAndCopiesSiteFields) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
@@ -391,9 +383,7 @@ TEST(MakeTrampolinePlan, FillsCanonicalBodyAndCopiesSiteFields) {
   EXPECT_TRUE(plan.emit_original);
 }
 
-//==============================================================================
 // Section 3: Instrumentor integration tests (minimal in-memory gfx950 ELF)
-//==============================================================================
 
 // NOTE: helpers below are intentionally duplicated from
 //   tests/dbt/translate_test.cpp::add_elf_name
@@ -833,7 +823,6 @@ TEST(Instrumentor, UnsupportedArchReportsErrorInsteadOfCrashing) {
   ASSERT_FALSE(patched.errors.empty());
 }
 
-//==============================================================================
 // Section 4: Instrumentor::patch end-to-end
 //
 // The synthetic ELF places .text at file offset 0x100 with two s_nop 0
@@ -844,7 +833,6 @@ TEST(Instrumentor, UnsupportedArchReportsErrorInsteadOfCrashing) {
 //   forward_simm16     = (8 - (4 + 4)) / 4 = 0
 //   return_branch_pc   = 8 + 4 + 4 = 16
 //   return_simm16      = (8 - (16 + 4)) / 4 = -3
-//==============================================================================
 
 TEST(InstrumentorPatch, EmitsValidElfWithExpectedPatchSummary) {
   auto image = make_gfx950_elf_with_two_nops();
@@ -1060,12 +1048,10 @@ TEST(InstrumentorPatch, BranchRangeOverflowPropagatesAsFatalError) {
       << "diagnostic must identify the forward branch; got: " << result.errors.front();
 }
 
-//==============================================================================
 // Section 5: Patched ELF shape (reparse)
 //
 // Builds, instruments, and reparses once via TEST_F SetUp. Each test then
 // asserts one structural property of the emitted ELF.
-//==============================================================================
 
 class InstrumentorPatchElfShape : public ::testing::Test {
 protected:
@@ -1189,14 +1175,12 @@ TEST_F(InstrumentorPatchElfShape, TrampolineCaveContentsMatchExpectedWordsMultip
   }
 }
 
-//==============================================================================
 // Section 6: Patched code decoded back through the real Decoder
 //
 // Verifies that the bytes the orchestrator emits are recognized by the
 // decoder as the instructions we intended, with the expected flags and
 // branch-offset signs. Complements Section 5, which only checks
 // byte-equality against the builder's output.
-//==============================================================================
 
 class InstrumentorPatchDecoded : public ::testing::Test {
 protected:
@@ -1476,14 +1460,12 @@ TEST_F(InstrumentorPatchDecoded, BranchesMultipleLandAtTheirIntendedTargets) {
   }
 }
 
-//==============================================================================
 // Spill formula and policy (orchestrator-owned).
 //
 // These exercise the live/clobber arithmetic and the current no-spill policy
 // with explicitly-constructed register sets. The builder-envelope clobbers
 // (link pair, target pair) are passed in directly here; their dead-register
 // selection is deferred.
-//==============================================================================
 
 RegisterSet make_sgpr_set(std::initializer_list<uint16_t> indices) {
   RegisterSet set;
@@ -1589,7 +1571,6 @@ TEST(InstrumentorSpill, BuilderPlanFeedsSpillFormula) {
   EXPECT_FALSE(check_spill_policy(spill_hit, SpillPolicy::NoSpillsSupported, &err));
 }
 
-//==============================================================================
 // Section 7: Instrumentor probe-call patch end-to-end
 //
 // Patches a 2-nop target with a call to a probe exported from a separate code
@@ -1598,7 +1579,6 @@ TEST(InstrumentorSpill, BuilderPlanFeedsSpillFormula) {
 //   probe_target_offset = cave_start    = text_size = 8
 //   trampoline_offset   = 8 + 4 (body)  = 12
 //   anchor at offset 4, return_target   = 4 + 4 = 8
-//==============================================================================
 
 // s_setpc_b64 s[30:31] (GFX9 family): a minimal self-contained probe body that
 // returns through the link pair, so build_probe_callable accepts it.

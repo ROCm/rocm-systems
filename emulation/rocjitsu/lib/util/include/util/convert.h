@@ -1,8 +1,7 @@
 // Copyright (c) 2025 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef UTIL_CONVERT_H_
-#define UTIL_CONVERT_H_
+#pragma once
 
 namespace util {
 
@@ -14,5 +13,3 @@ namespace util {
 template <typename To, typename From> To convert(From from) { return reinterpret_cast<To>(from); }
 
 } // namespace util
-
-#endif // UTIL_CONVERT_H_

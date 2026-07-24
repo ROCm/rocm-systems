@@ -39,6 +39,7 @@
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
+#include <csignal>
 #include <cstdarg>
 #include <cstddef>
 #include <cstdio>
@@ -55,7 +56,6 @@
 #include <optional>
 #include <set>
 #include <shared_mutex>
-#include <signal.h>
 #include <span>
 #include <string>
 #include <string_view>

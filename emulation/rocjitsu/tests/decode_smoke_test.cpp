@@ -909,7 +909,6 @@ TEST(FunctionalSchedulingTest, SleepVarYieldsBeforeQuantumExpires) {
   expect_sleep_yields_before_quantum_expires(ROCJITSU_CODE_ARCH_RDNA4, kSleepVar);
 }
 
-// ---------------------------------------------------------------------------
 // MUBUF lds modifier test: verify that buffer_load_dword with the lds bit set
 // (bit 16 of dword 0) produces a disassembly string containing " lds".
 //
@@ -920,7 +919,6 @@ TEST(FunctionalSchedulingTest, SleepVarYieldsBeforeQuantumExpires) {
 //
 // buffer_load_dword without lds: {0xE0500000, 0x00000000}
 // buffer_load_dword with    lds: {0xE0510000, 0x00000000}  (bit 16 set)
-// ---------------------------------------------------------------------------
 
 struct MubufLdsCase {
   rj_code_arch_t arch;

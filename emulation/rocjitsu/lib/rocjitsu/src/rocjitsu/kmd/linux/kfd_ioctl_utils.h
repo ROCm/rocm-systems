@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_KMD_LINUX_KFD_IOCTL_UTILS_H_
-#define ROCJITSU_KMD_LINUX_KFD_IOCTL_UTILS_H_
+#pragma once
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -62,5 +61,3 @@ inline bool validate_ioctl_arg_size(unsigned long request, const void *arg, size
 }
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_KFD_IOCTL_UTILS_H_

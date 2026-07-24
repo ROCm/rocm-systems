@@ -4,8 +4,7 @@
 /// @file rj_compiler.h
 /// @brief Compiler-specific macros for the rocjitsu C API.
 
-#ifndef ROCJITSU_BASE_RJ_COMPILER_H_
-#define ROCJITSU_BASE_RJ_COMPILER_H_
+#pragma once
 
 /// @brief Marks a symbol for export from the shared library.
 #if defined(_WIN32) || defined(__CYGWIN__)
@@ -52,5 +51,3 @@
 #else
 static_assert(false, "Unsupported compiler: define RJ_DIAGNOSTIC macros for your toolchain");
 #endif
-
-#endif // ROCJITSU_BASE_RJ_COMPILER_H_

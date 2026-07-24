@@ -4,8 +4,7 @@
 /// @file linux_kfd.h
 /// @brief Linux-specific KFD driver interface used by the syscall interposer.
 
-#ifndef ROCJITSU_KMD_LINUX_LINUX_KFD_H_
-#define ROCJITSU_KMD_LINUX_LINUX_KFD_H_
+#pragma once
 
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/driver.h"
@@ -170,5 +169,3 @@ protected:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_LINUX_KFD_H_

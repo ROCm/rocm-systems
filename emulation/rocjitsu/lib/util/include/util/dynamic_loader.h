@@ -4,8 +4,7 @@
 /// @file dynamic_loader.h
 /// @brief Typed wrappers for runtime symbol resolution.
 
-#ifndef UTIL_DYNAMIC_LOADER_H_
-#define UTIL_DYNAMIC_LOADER_H_
+#pragma once
 
 #include <string>
 #include <type_traits>
@@ -102,5 +101,3 @@ T lookup_symbol([[maybe_unused]] Handle handle, const char *name) {
 }
 
 } // namespace util
-
-#endif // UTIL_DYNAMIC_LOADER_H_

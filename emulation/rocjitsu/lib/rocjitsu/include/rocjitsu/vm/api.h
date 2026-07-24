@@ -3,9 +3,6 @@
 
 /// @defgroup vm Virtual Machine API
 
-#ifndef ROCJITSU_VM_API_H_
-#define ROCJITSU_VM_API_H_
+#pragma once
 
 #include "rocjitsu/vm/rj_vm.h"
-
-#endif // ROCJITSU_VM_API_H_

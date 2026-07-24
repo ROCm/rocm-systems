@@ -13,8 +13,7 @@
 /// eliminate malloc/free from hot paths. Thread-safety: NOT thread-safe.
 /// Use one pool per thread.
 
-#ifndef UTIL_ARENA_ALLOC_H_
-#define UTIL_ARENA_ALLOC_H_
+#pragma once
 
 #include <cassert>
 #include <cstddef>
@@ -105,5 +104,3 @@ private:
 };
 
 } // namespace util
-
-#endif // UTIL_ARENA_ALLOC_H_

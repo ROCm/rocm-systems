@@ -4,8 +4,7 @@
 /// @file functional.h
 /// @brief CRTP mixin for functional (untimed) simulation components.
 
-#ifndef SIMDOJO_SIM_FUNCTIONAL_H_
-#define SIMDOJO_SIM_FUNCTIONAL_H_
+#pragma once
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/event_queue.h"
@@ -78,5 +77,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_SIM_FUNCTIONAL_H_

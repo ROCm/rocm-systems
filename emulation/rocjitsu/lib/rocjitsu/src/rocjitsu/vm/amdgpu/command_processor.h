@@ -1,8 +1,7 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_COMMAND_PROCESSOR_H_
-#define ROCJITSU_VM_AMDGPU_COMMAND_PROCESSOR_H_
+#pragma once
 
 /// @file command_processor.h
 /// @brief Command processor (CP) component.
@@ -399,5 +398,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_COMMAND_PROCESSOR_H_

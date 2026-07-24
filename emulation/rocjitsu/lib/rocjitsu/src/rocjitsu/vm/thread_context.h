@@ -4,8 +4,7 @@
 /// @file thread_context.h
 /// @brief Base class for per-thread execution context.
 
-#ifndef ROCJITSU_VM_THREAD_CONTEXT_H_
-#define ROCJITSU_VM_THREAD_CONTEXT_H_
+#pragma once
 
 #include <cstdint>
 
@@ -26,5 +25,3 @@ public:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_THREAD_CONTEXT_H_

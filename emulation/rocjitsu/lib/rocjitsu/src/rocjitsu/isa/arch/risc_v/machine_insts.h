@@ -1,8 +1,7 @@
 // Copyright (c) 2025 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_RISC_V_MACHINE_INSTS_H_
-#define ROCJITSU_ISA_ARCH_RISC_V_MACHINE_INSTS_H_
+#pragma once
 
 #include <cstdint>
 
@@ -77,5 +76,3 @@ struct R4TypeMachineInst {
 } // namespace detail
 } // namespace risc_v
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_RISC_V_MACHINE_INSTS_H_

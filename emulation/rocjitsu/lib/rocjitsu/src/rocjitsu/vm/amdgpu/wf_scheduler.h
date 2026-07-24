@@ -4,8 +4,7 @@
 /// @file wf_scheduler.h
 /// @brief Pluggable wavefront scheduler for the compute unit.
 
-#ifndef ROCJITSU_VM_AMDGPU_WF_SCHEDULER_H_
-#define ROCJITSU_VM_AMDGPU_WF_SCHEDULER_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
@@ -61,5 +60,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_WF_SCHEDULER_H_

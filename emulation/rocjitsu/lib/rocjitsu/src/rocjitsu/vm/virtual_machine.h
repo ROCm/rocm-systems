@@ -4,8 +4,7 @@
 /// @file virtual_machine.h
 /// @brief AMDGPU virtual machine modeling a complete SoC hierarchy.
 
-#ifndef ROCJITSU_VM_VIRTUAL_MACHINE_H_
-#define ROCJITSU_VM_VIRTUAL_MACHINE_H_
+#pragma once
 
 #include "rocjitsu/vm/soc.h"
 
@@ -68,5 +67,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_VIRTUAL_MACHINE_H_

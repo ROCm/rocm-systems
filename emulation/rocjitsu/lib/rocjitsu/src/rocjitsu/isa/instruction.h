@@ -4,8 +4,7 @@
 /// @file instruction.h
 /// @brief Abstract instruction representation with operands, flags, and dynamic state.
 
-#ifndef ROCJITSU_ISA_INSTRUCTION_H_
-#define ROCJITSU_ISA_INSTRUCTION_H_
+#pragma once
 
 #include "rocjitsu/isa/operand.h"
 #include "util/intrusive_list.h"
@@ -361,5 +360,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_INSTRUCTION_H_

@@ -13,17 +13,14 @@
 /// Verified identical across: CDNA1, CDNA2, CDNA3, CDNA4, RDNA1, RDNA2,
 /// RDNA3, RDNA3.5, RDNA4.
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MACHINE_INSTS_SCALAR_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MACHINE_INSTS_SCALAR_H_
+#pragma once
 
 #include <cstdint>
 
 namespace rocjitsu {
 namespace amdgpu {
 
-// ---------------------------------------------------------------------------
 // Base scalar encodings (single 32-bit word)
-// ---------------------------------------------------------------------------
 
 struct Sop1MachineInst {
   uint32_t ssrc0 : 8;
@@ -60,9 +57,7 @@ struct Sop2MachineInst {
   uint32_t encoding : 2;
 };
 
-// ---------------------------------------------------------------------------
 // Scalar literal-constant variants (base word + 32-bit immediate)
-// ---------------------------------------------------------------------------
 
 struct Sop1InstLiteralMachineInst {
   uint32_t ssrc0 : 8;
@@ -99,5 +94,3 @@ struct SopkInstLiteralMachineInst {
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MACHINE_INSTS_SCALAR_H_

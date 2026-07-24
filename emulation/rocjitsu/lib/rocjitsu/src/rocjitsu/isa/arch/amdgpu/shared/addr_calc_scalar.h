@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_ADDR_CALC_SCALAR_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_ADDR_CALC_SCALAR_H_
+#pragma once
 
 /// @file Shared address calculation for SMEM and DS instructions.
 ///
@@ -92,5 +91,3 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
 } // namespace addr_calc
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_ADDR_CALC_SCALAR_H_

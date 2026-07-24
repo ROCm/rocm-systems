@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef UTIL_DATA_TYPES_H_
-#define UTIL_DATA_TYPES_H_
+#pragma once
 
 #include <array>
 #include <bit>
@@ -1382,5 +1381,3 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {
 inline uint32_t prng_advance(uint32_t seed) { return (seed << 1) ^ ((seed >> 31) ? 197u : 0u); }
 
 } // namespace util
-
-#endif // UTIL_DATA_TYPES_H_

@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_ADDR_CALC_BUFFER_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_ADDR_CALC_BUFFER_H_
+#pragma once
 
 /// @file Shared address calculation for MUBUF and MTBUF (buffer) instructions.
 ///
@@ -221,5 +220,3 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
 } // namespace addr_calc
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_ADDR_CALC_BUFFER_H_

@@ -4,8 +4,7 @@
 /// @file unique_handle.h
 /// @brief Move-only ownership for platform handles and handle-like resources.
 
-#ifndef UTIL_UNIQUE_HANDLE_H_
-#define UTIL_UNIQUE_HANDLE_H_
+#pragma once
 
 #include <utility>
 
@@ -102,5 +101,3 @@ struct NativeHandleTraits {
 using UniqueHandle = BasicUniqueHandle<detail::NativeHandleTraits>;
 
 } // namespace util
-
-#endif // UTIL_UNIQUE_HANDLE_H_

@@ -4,8 +4,7 @@
 /// @file xcd.h
 /// @brief Accelerator Complex Die (XCD) containing shader engines and a command processor.
 
-#ifndef ROCJITSU_VM_AMDGPU_XCD_H_
-#define ROCJITSU_VM_AMDGPU_XCD_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -115,5 +114,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_XCD_H_

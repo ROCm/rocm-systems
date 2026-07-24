@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_HBM_CONTROLLER_H_
-#define ROCJITSU_VM_AMDGPU_HBM_CONTROLLER_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "simdojo/sim/component.h"
@@ -106,5 +105,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_HBM_CONTROLLER_H_

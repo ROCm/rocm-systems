@@ -4,8 +4,7 @@
 /// @file checkpoint.h
 /// @brief Simulation checkpoint save and restore via FlatBuffers.
 
-#ifndef ROCJITSU_CONFIG_CHECKPOINT_H_
-#define ROCJITSU_CONFIG_CHECKPOINT_H_
+#pragma once
 
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/soc.h"
@@ -42,5 +41,3 @@ LoadedConfig restore_checkpoint(const std::string &path);
 
 } // namespace config
 } // namespace rocjitsu
-
-#endif // ROCJITSU_CONFIG_CHECKPOINT_H_

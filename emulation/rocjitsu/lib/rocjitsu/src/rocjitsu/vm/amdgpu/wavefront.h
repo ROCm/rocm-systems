@@ -4,8 +4,7 @@
 /// @file wavefront.h
 /// @brief AMDGPU wavefront execution state and ISA-parameterized wavefront.
 
-#ifndef ROCJITSU_VM_AMDGPU_WAVEFRONT_H_
-#define ROCJITSU_VM_AMDGPU_WAVEFRONT_H_
+#pragma once
 
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/isa/arch/amdgpu/vgpr_msb.h"
@@ -619,5 +618,3 @@ public:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_WAVEFRONT_H_

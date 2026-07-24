@@ -4,8 +4,7 @@
 /// @file instruction_list.h
 /// @brief Type alias for an intrusive list of instructions within a basic block.
 
-#ifndef ROCJITSU_CODE_INSTRUCTION_LIST_H_
-#define ROCJITSU_CODE_INSTRUCTION_LIST_H_
+#pragma once
 
 #include "rocjitsu/isa/instruction.h"
 #include "util/intrusive_list.h"
@@ -18,5 +17,3 @@ class BasicBlock;
 using InstructionList = util::IntrusiveList<Instruction, util::IListParent<BasicBlock>>;
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_CODE_INSTRUCTION_LIST_H_

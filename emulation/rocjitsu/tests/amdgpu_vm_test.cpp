@@ -1786,9 +1786,7 @@ TEST_P(IsaTest, BranchLoop) {
 INSTANTIATE_TEST_SUITE_P(Cdna, IsaTest, ::testing::Values("cdna3", "cdna4"),
                          [](const auto &info) { return info.param; });
 
-// ---------------------------------------------------------------------------
 // MFMA accumulation unit tests
-// ---------------------------------------------------------------------------
 
 TEST_P(IsaTest, MfmaF16Accumulation) {
   VmFixture f(arch());
@@ -2006,9 +2004,7 @@ TEST(MfmaF64Cdna4Test, GeneratedInstructionUsesBlgpNegModifier) {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Atomic stress tests
-// ---------------------------------------------------------------------------
 
 // Dispatches multiple wavefronts that all atomically add 1 to LDS[0].
 // If atomics are truly atomic, the final value must equal the total number

@@ -4,8 +4,7 @@
 /// @file guest_kfd.h
 /// @brief KFD discovery driver that appends one synthetic DBT guest GPU.
 
-#ifndef ROCJITSU_KMD_LINUX_GUEST_KFD_H_
-#define ROCJITSU_KMD_LINUX_GUEST_KFD_H_
+#pragma once
 
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
@@ -182,5 +181,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_GUEST_KFD_H_

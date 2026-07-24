@@ -1,8 +1,7 @@
 // Copyright (c) 2025 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef UTIL_BITFIELD_H_
-#define UTIL_BITFIELD_H_
+#pragma once
 
 #include "util/bit.h"
 #include "util/meta_programming.h"
@@ -351,5 +350,3 @@ std::ostream &operator<<(std::ostream &os, const BitfieldMember<size, f, l, M> &
 }
 
 } // namespace util
-
-#endif // UTIL_BITFIELD_H_

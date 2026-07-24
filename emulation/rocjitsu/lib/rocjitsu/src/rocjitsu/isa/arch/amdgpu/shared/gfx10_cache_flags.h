@@ -18,8 +18,7 @@
 /// |  1  |  1  |  0 | UC    | Bypass L1, L2 coherent              |
 /// |  x  |  x  |  1 | NT    | Non-temporal (evict soon)           |
 
-#ifndef ROCJITSU_ISA_AMDGPU_SHARED_GFX10_CACHE_FLAGS_H_
-#define ROCJITSU_ISA_AMDGPU_SHARED_GFX10_CACHE_FLAGS_H_
+#pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/mtype.h"
 
@@ -42,5 +41,3 @@ namespace amdgpu {
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_AMDGPU_SHARED_GFX10_CACHE_FLAGS_H_

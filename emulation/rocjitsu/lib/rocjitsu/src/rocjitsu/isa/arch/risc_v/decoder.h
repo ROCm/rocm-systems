@@ -1,8 +1,7 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_RISC_V_DECODER_H_
-#define ROCJITSU_ISA_RISC_V_DECODER_H_
+#pragma once
 
 #include "rocjitsu/isa/instruction.h"
 
@@ -19,10 +18,8 @@ public:
   static std::unique_ptr<Instruction> decode(uint32_t instr);
 
 private:
-  // =========================================================================
   // Dispatch template: extracts bit-field from instr, indexes into subtable,
   // calls the function pointer found there. Returns nullptr for null entries.
-  // =========================================================================
   template <const DecodeFn *table, unsigned shift, unsigned num_bits>
   static std::unique_ptr<Instruction> decode_field(uint32_t instr) {
     uint32_t idx = (instr >> shift) & ((1u << num_bits) - 1);
@@ -30,9 +27,7 @@ private:
     return fn ? fn(instr) : nullptr;
   }
 
-  // =========================================================================
   // Decode stub declarations
-  // =========================================================================
 
   // Special
   static std::unique_ptr<Instruction> illegal_decode(uint32_t instr);
@@ -219,9 +214,7 @@ private:
   static std::unique_ptr<Instruction> vendor2_ext_decode(uint32_t instr);
   static std::unique_ptr<Instruction> vendor3_ext_decode(uint32_t instr);
 
-  // =========================================================================
   // Decode tables (static, const, directly initialized in .cpp)
-  // =========================================================================
 
   // Level 0: opcode[6:2] (32 entries)
   static const DecodeFn opcode_table_[32];
@@ -306,5 +299,3 @@ private:
 
 } // namespace risc_v
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_RISC_V_DECODER_H_

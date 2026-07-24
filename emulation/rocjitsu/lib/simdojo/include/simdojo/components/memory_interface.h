@@ -4,8 +4,7 @@
 /// @file memory_interface.h
 /// @brief Abstract byte-addressed memory controller interface.
 
-#ifndef SIMDOJO_COMPONENTS_MEMORY_INTERFACE_H_
-#define SIMDOJO_COMPONENTS_MEMORY_INTERFACE_H_
+#pragma once
 
 #include <cstdint>
 
@@ -35,5 +34,3 @@ public:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_COMPONENTS_MEMORY_INTERFACE_H_

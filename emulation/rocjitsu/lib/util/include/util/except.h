@@ -1,8 +1,7 @@
 // Copyright (c) 2025 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef UTIL_EXCEPT_H_
-#define UTIL_EXCEPT_H_
+#pragma once
 
 #include <exception>
 #include <string>
@@ -40,5 +39,3 @@ public:
 };
 
 } // namespace util
-
-#endif // UTIL_EXCEPT_H_

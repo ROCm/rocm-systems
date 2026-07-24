@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_KMD_LINUX_EVENTS_H_
-#define ROCJITSU_KMD_LINUX_EVENTS_H_
+#pragma once
 
 /// @file events.h
 /// @brief KFD event subsystem for the simulated driver.
@@ -124,5 +123,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_EVENTS_H_

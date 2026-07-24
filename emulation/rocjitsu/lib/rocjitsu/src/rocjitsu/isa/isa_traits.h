@@ -4,8 +4,7 @@
 /// @file isa_traits.h
 /// @brief Compile-time ISA trait mapping and GPU ISA concept.
 
-#ifndef ROCJITSU_ISA_ISA_TRAITS_H_
-#define ROCJITSU_ISA_ISA_TRAITS_H_
+#pragma once
 
 #include "rocjitsu/base/api.h"
 
@@ -145,5 +144,3 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
 }
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ISA_TRAITS_H_

@@ -1,8 +1,7 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef UTIL_SIMD_H_
-#define UTIL_SIMD_H_
+#pragma once
 
 #include "util/bit.h"
 
@@ -60,44 +59,50 @@ bool force_scalar();
 #if __has_include(<experimental/simd>)
 namespace stdx = std::experimental;
 
-template <class T> using native = stdx::native_simd<T>;
+template <typename T> using native = stdx::native_simd<T>;
 
 /// Native-SIMD width measured in 32-bit lanes. Convenience constant.
-template <class T> constexpr std::size_t native_width_v = native<T>::size();
+template <typename T> constexpr std::size_t native_width_v = native<T>::size();
 #else
 // Fallback definitions so `if constexpr (has_stdx_simd)` discarded
 // branches compile out even in non-template callers (e.g. gtest TEST
 // bodies), where the discarded branch is still fully type-checked and
 // odr-used. They are never executed: the constexpr condition is `false`
 // and callers skip the SIMD path first.
-template <class T> struct native {
+template <typename T> struct native {
   static constexpr std::size_t size() { return 1; }
   constexpr T operator[](std::size_t) const { return T{}; }
 };
-template <class T> constexpr std::size_t native_width_v = native<T>::size();
-template <class T> native<T> load(const uint32_t *) { return {}; }
-template <class T> native<T> broadcast(uint32_t) { return {}; }
-template <class T> void masked_store(uint32_t *, native<T>, uint64_t) {}
-template <class T> void blit_to_buffer(uint32_t (&)[native<T>::size()], native<T>) {}
-template <class T> native<T> load64(const uint32_t *, const uint32_t *) { return {}; }
-template <class T> native<T> broadcast64(uint64_t) { return {}; }
-template <class T> void masked_store64(uint32_t *, uint32_t *, native<T>, uint64_t) {}
-template <class T, class Fn> native<T> map_native_scalar(native<T>, native<T>, Fn) { return {}; }
-template <class T, class Fn> native<T> map_native_scalar(native<T>, native<T>, native<T>, Fn) {
+template <typename T> constexpr std::size_t native_width_v = native<T>::size();
+template <typename T> native<T> load(const uint32_t *) { return {}; }
+template <typename T> native<T> broadcast(uint32_t) { return {}; }
+template <typename T> void masked_store(uint32_t *, native<T>, uint64_t) {}
+template <typename T> void blit_to_buffer(uint32_t (&)[native<T>::size()], native<T>) {}
+template <typename T> native<T> load64(const uint32_t *, const uint32_t *) { return {}; }
+template <typename T> native<T> broadcast64(uint64_t) { return {}; }
+template <typename T> void masked_store64(uint32_t *, uint32_t *, native<T>, uint64_t) {}
+template <typename T, typename Fn> native<T> map_native_scalar(native<T>, native<T>, Fn) {
   return {};
 }
-template <class To, class From, class Fn> native<To> map_native_convert_scalar(native<From>, Fn) {
+template <typename T, typename Fn>
+native<T> map_native_scalar(native<T>, native<T>, native<T>, Fn) {
   return {};
 }
-template <class T, class Fn> native<T> map_native64_scalar(native<T>, Fn) { return {}; }
-template <class T, class Fn> native<T> map_native64_scalar(native<T>, native<T>, Fn) { return {}; }
-template <class T> struct narrow32 {
+template <typename To, typename From, typename Fn>
+native<To> map_native_convert_scalar(native<From>, Fn) {
+  return {};
+}
+template <typename T, typename Fn> native<T> map_native64_scalar(native<T>, Fn) { return {}; }
+template <typename T, typename Fn> native<T> map_native64_scalar(native<T>, native<T>, Fn) {
+  return {};
+}
+template <typename T> struct narrow32 {
   static constexpr std::size_t size() { return 1; }
   constexpr T operator[](std::size_t) const { return T{}; }
 };
-template <class T> narrow32<T> load_narrow(const uint32_t *) { return {}; }
-template <class T> narrow32<T> broadcast_narrow(uint32_t) { return {}; }
-template <class T> void masked_store_narrow(uint32_t *, narrow32<T>, uint64_t) {}
+template <typename T> narrow32<T> load_narrow(const uint32_t *) { return {}; }
+template <typename T> narrow32<T> broadcast_narrow(uint32_t) { return {}; }
+template <typename T> void masked_store_narrow(uint32_t *, narrow32<T>, uint64_t) {}
 #endif
 
 /// Native-SIMD width for 64-bit lane types (e.g. native<uint64_t>/<double>),
@@ -107,7 +112,7 @@ template <class T> void masked_store_narrow(uint32_t *, narrow32<T>, uint64_t) {
 inline constexpr std::size_t native_width64 = native<uint64_t>::size();
 
 #if __has_include(<experimental/simd>)
-template <class T, class Fn> native<T> map_native64_scalar(native<T> v, Fn fn) {
+template <typename T, typename Fn> native<T> map_native64_scalar(native<T> v, Fn fn) {
   static_assert(sizeof(T) == sizeof(uint64_t));
   constexpr std::size_t W = native<T>::size();
   alignas(native<T>) T in[W];
@@ -118,7 +123,7 @@ template <class T, class Fn> native<T> map_native64_scalar(native<T> v, Fn fn) {
   return native<T>(out, stdx::vector_aligned);
 }
 
-template <class T, class Fn> native<T> map_native_scalar(native<T> a, native<T> b, Fn fn) {
+template <typename T, typename Fn> native<T> map_native_scalar(native<T> a, native<T> b, Fn fn) {
   static_assert(sizeof(T) == sizeof(uint32_t));
   constexpr std::size_t W = native<T>::size();
   alignas(native<T>) T in_a[W];
@@ -131,7 +136,7 @@ template <class T, class Fn> native<T> map_native_scalar(native<T> a, native<T> 
   return native<T>(out, stdx::vector_aligned);
 }
 
-template <class T, class Fn>
+template <typename T, typename Fn>
 native<T> map_native_scalar(native<T> a, native<T> b, native<T> c, Fn fn) {
   static_assert(sizeof(T) == sizeof(uint32_t));
   constexpr std::size_t W = native<T>::size();
@@ -147,7 +152,7 @@ native<T> map_native_scalar(native<T> a, native<T> b, native<T> c, Fn fn) {
   return native<T>(out, stdx::vector_aligned);
 }
 
-template <class To, class From, class Fn>
+template <typename To, typename From, typename Fn>
 native<To> map_native_convert_scalar(native<From> v, Fn fn) {
   static_assert(sizeof(To) == sizeof(uint32_t));
   static_assert(sizeof(From) == sizeof(uint32_t));
@@ -161,7 +166,7 @@ native<To> map_native_convert_scalar(native<From> v, Fn fn) {
   return native<To>(out, stdx::vector_aligned);
 }
 
-template <class T, class Fn> native<T> map_native64_scalar(native<T> a, native<T> b, Fn fn) {
+template <typename T, typename Fn> native<T> map_native64_scalar(native<T> a, native<T> b, Fn fn) {
   static_assert(sizeof(T) == sizeof(uint64_t));
   constexpr std::size_t W = native<T>::size();
   alignas(native<T>) T in_a[W];
@@ -176,7 +181,7 @@ template <class T, class Fn> native<T> map_native64_scalar(native<T> a, native<T
 
 /// Load `native<T>` from contiguous uint32_t storage. T must be a
 /// 32-bit trivially-copyable type.
-template <class T> native<T> load(const uint32_t *p) {
+template <typename T> native<T> load(const uint32_t *p) {
   using Bits = stdx::native_simd<uint32_t>;
   using Val = native<T>;
   static_assert(sizeof(T) == sizeof(uint32_t));
@@ -190,7 +195,7 @@ template <class T> native<T> load(const uint32_t *p) {
 
 /// Broadcast `broadcast_bits` (bit-cast to T) to every lane of
 /// `native<T>`. T must be a 32-bit trivially-copyable type.
-template <class T> native<T> broadcast(uint32_t broadcast_bits) {
+template <typename T> native<T> broadcast(uint32_t broadcast_bits) {
   using Val = native<T>;
   static_assert(sizeof(T) == sizeof(uint32_t));
   if constexpr (std::is_same_v<T, uint32_t>)
@@ -202,7 +207,7 @@ template <class T> native<T> broadcast(uint32_t broadcast_bits) {
 /// Store `v` into contiguous uint32_t storage at `dst`, blending in only
 /// the lanes whose bit is set in `mask`. If `mask` covers the full SIMD
 /// width, falls through to a straight contiguous store.
-template <class T> void masked_store(uint32_t *dst, native<T> v, uint64_t mask) {
+template <typename T> void masked_store(uint32_t *dst, native<T> v, uint64_t mask) {
   using Bits = stdx::native_simd<uint32_t>;
   using Val = native<T>;
   static_assert(sizeof(T) == sizeof(uint32_t));
@@ -229,7 +234,7 @@ template <class T> void masked_store(uint32_t *dst, native<T> v, uint64_t mask) 
 /// Same as masked_store, but writes to a caller-supplied uint32_t buffer
 /// instead of contiguous lane storage. For operands whose dst is not a
 /// contiguous VGPR (rocjitsu falls back to write_lane_chunk in that case).
-template <class T> void blit_to_buffer(uint32_t (&buf)[native<T>::size()], native<T> v) {
+template <typename T> void blit_to_buffer(uint32_t (&buf)[native<T>::size()], native<T> v) {
   using Bits = stdx::native_simd<uint32_t>;
   Bits bits = [&] {
     if constexpr (std::is_same_v<T, uint32_t>)
@@ -247,7 +252,7 @@ template <class T> void blit_to_buffer(uint32_t (&buf)[native<T>::size()], nativ
 /// `Operand::read_lane64`. `native_width64` lanes are combined; this is a scalar
 /// gather (the two arrays are not a single contiguous 64-bit load) chosen for
 /// bit-exactness over raw throughput.
-template <class T> native<T> load64(const uint32_t *lo, const uint32_t *hi) {
+template <typename T> native<T> load64(const uint32_t *lo, const uint32_t *hi) {
   static_assert(sizeof(T) == sizeof(uint64_t));
   using U64 = stdx::native_simd<uint64_t>;
   static_assert(sizeof(native<T>) == sizeof(U64));
@@ -265,7 +270,7 @@ template <class T> native<T> load64(const uint32_t *lo, const uint32_t *hi) {
 /// Broadcast `broadcast_bits` (bit-cast to T) to every lane of `native<T>` for a
 /// 64-bit lane type. The companion of `broadcast` for the f64/i64 path; used when
 /// a source operand resolves to a scalar/immediate rather than per-lane storage.
-template <class T> native<T> broadcast64(uint64_t broadcast_bits) {
+template <typename T> native<T> broadcast64(uint64_t broadcast_bits) {
   static_assert(sizeof(T) == sizeof(uint64_t));
   using Val = native<T>;
   if constexpr (std::is_same_v<T, uint64_t>)
@@ -279,7 +284,7 @@ template <class T> native<T> broadcast64(uint64_t broadcast_bits) {
 /// 64-bit value is split back into lo (low 32) and hi (high 32), mirroring
 /// `Operand::write_lane64`. No full-mask contiguous fast path: lo/hi are
 /// separate registers, so the store is always a per-lane scatter.
-template <class T> void masked_store64(uint32_t *lo, uint32_t *hi, native<T> v, uint64_t mask) {
+template <typename T> void masked_store64(uint32_t *lo, uint32_t *hi, native<T> v, uint64_t mask) {
   static_assert(sizeof(T) == sizeof(uint64_t));
   using U64 = stdx::native_simd<uint64_t>;
   static_assert(sizeof(native<T>) == sizeof(U64));
@@ -305,14 +310,14 @@ template <class T> void masked_store64(uint32_t *lo, uint32_t *hi, native<T> v, 
 /// of 32-bit lanes, so the 32-bit side is a `fixed_size_simd` of that width — a
 /// direct `static_simd_cast` bridges it to/from `native<double>` (also
 /// `native_width64`-wide) with no bit_cast.
-template <class T> using narrow32 = stdx::fixed_size_simd<T, native_width64>;
+template <typename T> using narrow32 = stdx::fixed_size_simd<T, native_width64>;
 
 /// Load `narrow32<T>` (native_width64 lanes of a 32-bit type) from contiguous
 /// uint32_t storage. The 32-bit-source counterpart of `load` for the cvt glue.
 /// `fixed_size_simd` is not trivially copyable (so `std::bit_cast` of the whole
 /// vector is ill-formed, unlike `native_simd`); the bit reinterpretation is done
 /// per lane through the trivially-copyable scalar `T`.
-template <class T> narrow32<T> load_narrow(const uint32_t *p) {
+template <typename T> narrow32<T> load_narrow(const uint32_t *p) {
   static_assert(sizeof(T) == sizeof(uint32_t));
   if constexpr (std::is_same_v<T, uint32_t>) {
     return narrow32<uint32_t>(p, stdx::element_aligned);
@@ -327,7 +332,7 @@ template <class T> narrow32<T> load_narrow(const uint32_t *p) {
 /// Broadcast `broadcast_bits` (bit-cast to T) to every lane of `narrow32<T>`.
 /// Companion of `broadcast` for the narrow (8-wide) cvt path; used when a source
 /// operand resolves to a scalar/immediate rather than per-lane storage.
-template <class T> narrow32<T> broadcast_narrow(uint32_t broadcast_bits) {
+template <typename T> narrow32<T> broadcast_narrow(uint32_t broadcast_bits) {
   static_assert(sizeof(T) == sizeof(uint32_t));
   if constexpr (std::is_same_v<T, uint32_t>)
     return narrow32<T>(broadcast_bits);
@@ -339,7 +344,7 @@ template <class T> narrow32<T> broadcast_narrow(uint32_t broadcast_bits) {
 /// storage at `dst`, blending in only the lanes whose bit is set in `mask`. The
 /// 32-bit-dst counterpart of `masked_store` for the f64-src cvt glue, which
 /// writes only `native_width64` 32-bit lanes per chunk.
-template <class T> void masked_store_narrow(uint32_t *dst, narrow32<T> v, uint64_t mask) {
+template <typename T> void masked_store_narrow(uint32_t *dst, narrow32<T> v, uint64_t mask) {
   static_assert(sizeof(T) == sizeof(uint32_t));
   constexpr std::size_t W = native_width64;
   const uint64_t full = util::mask<uint64_t>(static_cast<int>(W));
@@ -548,7 +553,7 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
 ///     intrinsic produced (IEEE-754 round-to-integer keeps the operand sign on
 ///     a zero result, so this is exactly the sign of the *input*).
 /// Bit-identical to the scalar reference at every native width.
-template <class Float, bool QuietNan, class Round>
+template <typename Float, bool QuietNan, typename Round>
 native<Float> round_fixup_simd(native<Float> a, Round round) {
   using F = native<Float>;
   using U = std::conditional_t<sizeof(Float) == 4, native<uint32_t>, native<uint64_t>>;
@@ -651,13 +656,13 @@ inline native<double> rndne_simd(native<double> a) {
 /// this is an idempotent no-op left to the compiler. (std::nearbyint already
 /// quiets under glibc, so rndne needs no fixup.)
 #if defined(__GNUC__) && !defined(__clang__)
-template <class F> inline F quiet_snan_scalar(F a, F r) {
+template <typename F> inline F quiet_snan_scalar(F a, F r) {
   using U = std::conditional_t<sizeof(F) == 4, uint32_t, uint64_t>;
   constexpr U kQuiet = U(1) << (sizeof(F) == 4 ? 22 : 51);
   return std::isnan(a) ? std::bit_cast<F>(std::bit_cast<U>(a) | kQuiet) : r;
 }
 #else
-template <class F> inline F quiet_snan_scalar(F /*a*/, F r) { return r; }
+template <typename F> inline F quiet_snan_scalar(F /*a*/, F r) { return r; }
 #endif
 inline float floor_scalar(float a) { return quiet_snan_scalar(a, std::floor(a)); }
 inline double floor_scalar(double a) { return quiet_snan_scalar(a, std::floor(a)); }
@@ -1187,7 +1192,7 @@ inline native<uint32_t> mul_hi_i32_simd(native<uint32_t> a, native<uint32_t> b) 
 #if !__has_include(<experimental/simd>)
 // Fallback stub for non-template gtest callers (e.g. UtilSimd.FlushDenormF32),
 // whose discarded `if constexpr (has_stdx_simd)` branch is still type-checked.
-template <class T> native<T> flush_denorm_f32_simd(native<T>) { return {}; }
+template <typename T> native<T> flush_denorm_f32_simd(native<T>) { return {}; }
 inline native<float> trunc_simd(native<float>) { return {}; }
 inline native<float> ceil_simd(native<float>) { return {}; }
 inline native<float> floor_simd(native<float>) { return {}; }
@@ -1201,5 +1206,3 @@ inline native<uint32_t> mul_hi_i32_simd(native<uint32_t>, native<uint32_t>) { re
 #endif
 
 } // namespace util
-
-#endif // UTIL_SIMD_H_

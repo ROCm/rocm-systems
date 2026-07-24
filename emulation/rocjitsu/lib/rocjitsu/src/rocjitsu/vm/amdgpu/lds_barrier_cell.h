@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_LDS_BARRIER_CELL_H_
-#define ROCJITSU_VM_AMDGPU_LDS_BARRIER_CELL_H_
+#pragma once
 
 #include <cstdint>
 
@@ -87,5 +86,3 @@ inline bool lds_barrier_cell_phase_parity(uint64_t state) {
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_LDS_BARRIER_CELL_H_

@@ -4,8 +4,7 @@
 /// @file compute_unit.h
 /// @brief AMDGPU compute unit hierarchy: ComputeUnitCore, ExecComputeUnit, and IsaExecComputeUnit.
 
-#ifndef ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_
-#define ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_
+#pragma once
 
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
@@ -857,5 +856,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_

@@ -4,8 +4,7 @@
 /// @file rj_code.h
 /// @brief C API for instruction decoding, executables, code objects, and basic blocks.
 
-#ifndef ROCJITSU_CODE_RJ_CODE_H_
-#define ROCJITSU_CODE_RJ_CODE_H_
+#pragma once
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/base/rj_status.h"
@@ -390,5 +389,3 @@ typedef struct rj_code_dbt_options_t {
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
-#endif // ROCJITSU_CODE_RJ_CODE_H_

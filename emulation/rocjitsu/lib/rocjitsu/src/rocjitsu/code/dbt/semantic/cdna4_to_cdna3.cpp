@@ -420,9 +420,7 @@ void emit_cdna3_mfma_to_vgpr(std::vector<uint32_t> &words, uint16_t op,
   return ExpandResult::failed(std::string(inst.mnemonic()) + ": " + problem, std::move(work));
 }
 
-// -----------------------------------------------------------------------------
 // V_BITOP3 expansions.
-// -----------------------------------------------------------------------------
 
 /// @brief Convert the 3-input truth table into algebraic-normal-form coefficients.
 /// @details Truth-table bit index is {S0[i], S1[i], S2[i]}: bit 2 is S0, bit 1
@@ -695,9 +693,7 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
   return ExpandResult::success(std::move(words));
 }
 
-// -----------------------------------------------------------------------------
 // V_PERMLANE*_SWAP expansions.
-// -----------------------------------------------------------------------------
 
 ExpandResult lower_permlane_swap_b32_cdna4_to_cdna3(const Instruction &inst,
                                                     const LivenessAnalysis &liveness,
@@ -998,9 +994,7 @@ ExpandResult lower_cvt_f32_bf16_vop1_cdna4_to_cdna3(const Instruction &inst, uin
   return ExpandResult::success(std::move(words));
 }
 
-// -----------------------------------------------------------------------------
 // V_DOT2_F32_BF16 expansion.
-// -----------------------------------------------------------------------------
 
 void emit_cdna3_bf16_half_as_f32(std::vector<uint32_t> &words, uint8_t dst, uint16_t src,
                                  bool high_half, bool negate) {
@@ -1119,9 +1113,7 @@ ExpandResult lower_dot2_f32_bf16_cdna4_to_cdna3(const Instruction &inst,
   return ExpandResult::success(std::move(words));
 }
 
-// -----------------------------------------------------------------------------
 // Wide-K MFMA expansions.
-// -----------------------------------------------------------------------------
 
 enum class WideKMfmaShape {
   F32_16x16x32_F16,
@@ -1286,9 +1278,7 @@ ExpandResult lower_wide_k_mfma_cdna4_to_cdna3(const Instruction &inst,
   return ExpandResult::success(std::move(words));
 }
 
-// -----------------------------------------------------------------------------
 // DS transpose expansions.
-// -----------------------------------------------------------------------------
 
 void emit_cdna3_b16_transpose_halfword(std::vector<uint32_t> &words, uint8_t halfword_dst,
                                        uint8_t gather_tmp, uint8_t lane_byte_addr, uint8_t raw_lo,

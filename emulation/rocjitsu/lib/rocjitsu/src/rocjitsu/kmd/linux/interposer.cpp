@@ -62,7 +62,6 @@ RJ_DIAGNOSTIC_POP
 #include <mutex>
 #include <optional>
 #include <pthread.h>
-#include <signal.h>
 #include <sstream>
 #include <string>
 #include <string_view>

@@ -23,8 +23,7 @@
 /// |   3   |  0  | UC    | System scope, bypass caches           |
 /// |   x   |  1  | NT    | Non-temporal hint                     |
 
-#ifndef ROCJITSU_ISA_AMDGPU_SHARED_GFX12_CACHE_FLAGS_H_
-#define ROCJITSU_ISA_AMDGPU_SHARED_GFX12_CACHE_FLAGS_H_
+#pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 
@@ -53,5 +52,3 @@ inline constexpr uint8_t GFX12_TH_ATOMIC_RETURN = 1;
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_AMDGPU_SHARED_GFX12_CACHE_FLAGS_H_

@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA4_ISA_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_CDNA4_ISA_H_
+#pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand_types.h"
@@ -55,5 +54,3 @@ template <> struct IsaTrait<ROCJITSU_CODE_ARCH_CDNA4> {
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_CDNA4_ISA_H_

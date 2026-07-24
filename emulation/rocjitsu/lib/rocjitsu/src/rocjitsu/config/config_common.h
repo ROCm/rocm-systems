@@ -4,8 +4,7 @@
 /// @file config_common.h
 /// @brief Shared FlatBuffers config parsing helpers.
 
-#ifndef ROCJITSU_CONFIG_CONFIG_COMMON_H_
-#define ROCJITSU_CONFIG_CONFIG_COMMON_H_
+#pragma once
 
 #include "rocjitsu/config/kfd_device_config.h"
 
@@ -110,5 +109,3 @@ inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device) {
 
 } // namespace config
 } // namespace rocjitsu
-
-#endif // ROCJITSU_CONFIG_CONFIG_COMMON_H_

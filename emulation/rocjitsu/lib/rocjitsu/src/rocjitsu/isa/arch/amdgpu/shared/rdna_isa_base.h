@@ -26,8 +26,7 @@
 /// ENABLE_WAVEFRONT_SIZE32=0 in the kernel descriptor (`WF_SIZE_MAX = 64`);
 /// target-specific `isa.h` files can shadow `WF_SIZE_MAX` when needed.
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_RDNA_ISA_BASE_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_RDNA_ISA_BASE_H_
+#pragma once
 
 #include <cstdint>
 
@@ -61,5 +60,3 @@ struct RdnaIsaBase {
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_RDNA_ISA_BASE_H_

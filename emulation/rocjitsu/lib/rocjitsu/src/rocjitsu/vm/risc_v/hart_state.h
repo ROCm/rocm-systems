@@ -1,8 +1,7 @@
 // Copyright (c) 2025 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_RISC_V_HART_STATE_H_
-#define ROCJITSU_VM_RISC_V_HART_STATE_H_
+#pragma once
 
 #include "rocjitsu/vm/thread_context.h"
 
@@ -65,5 +64,3 @@ inline uint32_t unbox(uint64_t d) {
 
 } // namespace risc_v
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_RISC_V_HART_STATE_H_

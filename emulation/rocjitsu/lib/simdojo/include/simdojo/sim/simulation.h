@@ -4,8 +4,7 @@
 /// @file simulation.h
 /// @brief SimulationEngine and PartitionContext for single- and multi-threaded PDES execution.
 
-#ifndef SIMDOJO_SIM_SIMULATION_H_
-#define SIMDOJO_SIM_SIMULATION_H_
+#pragma once
 
 #include "simdojo/sim/event_queue.h"
 #include "simdojo/sim/pacing_controller.h"
@@ -393,5 +392,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_SIM_SIMULATION_H_

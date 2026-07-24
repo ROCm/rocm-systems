@@ -4,8 +4,7 @@
 /// @file exec_mode.h
 /// @brief Execution mode enum and ExecBase alias for compile-time mode selection.
 
-#ifndef SIMDOJO_SIM_EXEC_MODE_H_
-#define SIMDOJO_SIM_EXEC_MODE_H_
+#pragma once
 
 #include <cstdint>
 #include <type_traits>
@@ -39,5 +38,3 @@ template <ExecMode Mode, typename Base>
 using ExecBase = std::conditional_t<Mode == ExecMode::FUNCTIONAL, Functional<Base>, Clocked<Base>>;
 
 } // namespace simdojo
-
-#endif // SIMDOJO_SIM_EXEC_MODE_H_

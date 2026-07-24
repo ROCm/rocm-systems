@@ -4,8 +4,7 @@
 /// @file soc.h
 /// @brief System-on-Chip container with XCDs, I/O Dies, and shared GPU memory.
 
-#ifndef ROCJITSU_VM_SOC_H_
-#define ROCJITSU_VM_SOC_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
@@ -179,5 +178,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_SOC_H_

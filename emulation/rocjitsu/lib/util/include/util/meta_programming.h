@@ -1,8 +1,7 @@
 // Copyright (c) 2025, Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef UTIL_META_PROGRAMMING_H_
-#define UTIL_META_PROGRAMMING_H_
+#pragma once
 
 #include <concepts>
 #include <type_traits>
@@ -75,5 +74,3 @@ struct GetOption<TagT, TagT<T>, Options...> : GetOption<TagT, Options...> {
 template <typename T> inline constexpr bool always_false_v = false;
 
 } // namespace util
-
-#endif // UTIL_META_PROGRAMMING_H_

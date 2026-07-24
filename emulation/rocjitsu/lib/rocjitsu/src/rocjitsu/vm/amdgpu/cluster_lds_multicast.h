@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_CLUSTER_LDS_MULTICAST_H_
-#define ROCJITSU_VM_AMDGPU_CLUSTER_LDS_MULTICAST_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
@@ -108,5 +107,3 @@ public:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_CLUSTER_LDS_MULTICAST_H_

@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_TESTS_KERNELS_MULTIKERNEL_INDIRECT_BRANCH_COMMON_H_
-#define ROCJITSU_TESTS_KERNELS_MULTIKERNEL_INDIRECT_BRANCH_COMMON_H_
+#pragma once
 
 #include <hip/hip_runtime.h>
 
@@ -49,5 +48,3 @@ multikernel_indirect_branch_shared_block(unsigned value, unsigned salt) {
                "s_branch 2f\n"                                                                     \
                "2:\n" ::                                                                           \
                    : "memory")
-
-#endif // ROCJITSU_TESTS_KERNELS_MULTIKERNEL_INDIRECT_BRANCH_COMMON_H_

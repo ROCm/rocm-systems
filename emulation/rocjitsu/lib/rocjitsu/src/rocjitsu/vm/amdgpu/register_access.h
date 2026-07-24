@@ -20,8 +20,7 @@
 /// register storage for tasks such as memory completion, but instruction
 /// emulators should use this facade for operand and physical register access.
 
-#ifndef ROCJITSU_VM_AMDGPU_REGISTER_ACCESS_H_
-#define ROCJITSU_VM_AMDGPU_REGISTER_ACCESS_H_
+#pragma once
 
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -927,5 +926,3 @@ private:
 };
 
 } // namespace rocjitsu::amdgpu
-
-#endif // ROCJITSU_VM_AMDGPU_REGISTER_ACCESS_H_

@@ -4,8 +4,7 @@
 /// @file sparse_memory.h
 /// @brief Sparse page-table memory model with on-demand page allocation.
 
-#ifndef SIMDOJO_COMPONENTS_SPARSE_MEMORY_H_
-#define SIMDOJO_COMPONENTS_SPARSE_MEMORY_H_
+#pragma once
 
 #include "simdojo/sim/component.h"
 
@@ -238,5 +237,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_COMPONENTS_SPARSE_MEMORY_H_

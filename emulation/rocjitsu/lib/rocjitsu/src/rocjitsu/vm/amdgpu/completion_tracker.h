@@ -1,8 +1,7 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_COMPLETION_TRACKER_H_
-#define ROCJITSU_VM_AMDGPU_COMPLETION_TRACKER_H_
+#pragma once
 
 /// @file completion_tracker.h
 /// @brief EOP-like completion tracking: per-dispatch WG retirement and
@@ -66,5 +65,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_COMPLETION_TRACKER_H_

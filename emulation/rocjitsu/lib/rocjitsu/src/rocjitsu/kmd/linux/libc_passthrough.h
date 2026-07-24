@@ -4,8 +4,7 @@
 /// @file libc_passthrough.h
 /// @brief Resolved libc entry points used to bypass rocjitsu interposer wrappers.
 
-#ifndef ROCJITSU_KMD_LINUX_LIBC_PASSTHROUGH_H_
-#define ROCJITSU_KMD_LINUX_LIBC_PASSTHROUGH_H_
+#pragma once
 
 #include <cstddef>
 #include <cstdio>
@@ -64,5 +63,3 @@ private:
 LibcPassthrough &libc_passthrough();
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_LIBC_PASSTHROUGH_H_

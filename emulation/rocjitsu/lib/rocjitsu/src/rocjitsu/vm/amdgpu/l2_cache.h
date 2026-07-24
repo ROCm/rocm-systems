@@ -4,8 +4,7 @@
 /// @file l2_cache.h
 /// @brief L2 cache component shared per XCD.
 
-#ifndef ROCJITSU_VM_AMDGPU_L2_CACHE_H_
-#define ROCJITSU_VM_AMDGPU_L2_CACHE_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "simdojo/components/cache.h"
@@ -217,5 +216,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_L2_CACHE_H_

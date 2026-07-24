@@ -4,8 +4,7 @@
 /// @file decoder.h
 /// @brief Instruction decoder with optional pool-backed allocation.
 
-#ifndef ROCJITSU_ISA_DECODER_H_
-#define ROCJITSU_ISA_DECODER_H_
+#pragma once
 
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/code/rj_code.h"
@@ -85,5 +84,3 @@ public:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_DECODER_H_

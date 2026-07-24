@@ -53,9 +53,7 @@ constexpr uint16_t kScalarOperandTtmpBase = 108;
 constexpr uint16_t kTtmpRdna4GridYz = 7;
 constexpr uint16_t kTtmpRdna4GridX = 9;
 
-// -----------------------------------------------------------------------------
 // ISA-family helpers.
-// -----------------------------------------------------------------------------
 
 [[nodiscard]] bool arch_supports_wave_size(rj_code_arch_t arch, uint32_t wf) {
   switch (arch) {
@@ -179,9 +177,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   return static_cast<uint8_t>(arch_default_wave_size(host_arch));
 }
 
-// -----------------------------------------------------------------------------
 // ELF kernel-descriptor discovery.
-// -----------------------------------------------------------------------------
 
 [[nodiscard]] std::optional<std::string>
 kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t strtab_size) {
@@ -298,9 +294,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   }
 }
 
-// -----------------------------------------------------------------------------
 // Kernel descriptor field helpers.
-// -----------------------------------------------------------------------------
 
 [[nodiscard]] uint8_t kernel_wavefront_size(rj_code_arch_t guest_arch, const KD &desc) {
   // CDNA kernels are Wave64 in the code objects currently translated here.
@@ -509,9 +503,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   return static_cast<uint16_t>(kScalarOperandTtmpBase + ttmp);
 }
 
-// -----------------------------------------------------------------------------
 // Kernel-entry prologue construction.
-// -----------------------------------------------------------------------------
 
 void append_salu_write(std::vector<uint32_t> &words, uint32_t word, rj_code_arch_t host_arch) {
   words.push_back(word);
@@ -582,9 +574,7 @@ build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_ar
   return words;
 }
 
-// -----------------------------------------------------------------------------
 // Descriptor translation.
-// -----------------------------------------------------------------------------
 
 void append_descriptor_error(KdTranslation &result, std::string message) {
   result.diagnostics.push_back({.severity = DiagnosticSeverity::Error,

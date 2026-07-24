@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_HSA_CLOCK_H_
-#define ROCJITSU_VM_AMDGPU_HSA_CLOCK_H_
+#pragma once
 
 /// @file hsa_clock.h
 /// @brief Shared synthetic HSA system-clock timestamp helper.
@@ -25,5 +24,3 @@ inline uint64_t hsa_system_timestamp() {
 }
 
 } // namespace rocjitsu::amdgpu
-
-#endif // ROCJITSU_VM_AMDGPU_HSA_CLOCK_H_

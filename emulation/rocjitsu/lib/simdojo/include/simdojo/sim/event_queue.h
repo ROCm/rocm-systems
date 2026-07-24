@@ -4,8 +4,7 @@
 /// @file event_queue.h
 /// @brief Event descriptors, priority queues, and cross-partition queues for the simulation engine.
 
-#ifndef SIMDOJO_SIM_EVENT_QUEUE_H_
-#define SIMDOJO_SIM_EVENT_QUEUE_H_
+#pragma once
 
 #include "simdojo/sim/message.h"
 #include "simdojo/sim/sim_types.h"
@@ -220,5 +219,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_SIM_EVENT_QUEUE_H_

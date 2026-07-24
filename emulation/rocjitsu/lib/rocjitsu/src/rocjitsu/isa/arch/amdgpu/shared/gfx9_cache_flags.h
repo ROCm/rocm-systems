@@ -13,8 +13,7 @@
 /// |  0  | RW    | L1+L2 cached, write-back, not coherent      |
 /// |  1  | CC    | Coherent — L1 write-through, L2 write-back  |
 
-#ifndef ROCJITSU_ISA_AMDGPU_SHARED_GFX9_CACHE_FLAGS_H_
-#define ROCJITSU_ISA_AMDGPU_SHARED_GFX9_CACHE_FLAGS_H_
+#pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/mtype.h"
 
@@ -30,5 +29,3 @@ namespace amdgpu {
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_AMDGPU_SHARED_GFX9_CACHE_FLAGS_H_

@@ -4,8 +4,7 @@
 /// @file sim_types.h
 /// @brief Core type aliases, constants, and enumerations for the simulation framework.
 
-#ifndef SIMDOJO_SIM_TYPES_H_
-#define SIMDOJO_SIM_TYPES_H_
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -66,5 +65,3 @@ public:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_SIM_TYPES_H_

@@ -4,8 +4,7 @@
 /// @file gpu_memory.h
 /// @brief AMDGPU VRAM memory with per-process VMID-based page table resolution.
 
-#ifndef ROCJITSU_VM_AMDGPU_GPU_MEMORY_H_
-#define ROCJITSU_VM_AMDGPU_GPU_MEMORY_H_
+#pragma once
 
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "simdojo/components/sparse_memory.h"
@@ -381,5 +380,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_GPU_MEMORY_H_

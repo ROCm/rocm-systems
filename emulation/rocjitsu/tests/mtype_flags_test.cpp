@@ -16,16 +16,12 @@ namespace {
 
 using namespace rocjitsu::amdgpu;
 
-// ---------------------------------------------------------------------------
 // GFX9 (CDNA1/2) — GLC only
-// ---------------------------------------------------------------------------
 
 TEST(MtypeFlagsTest, Gfx9GlcOff) { EXPECT_EQ(mtype_from_flags_gfx9(false), Mtype::RW); }
 TEST(MtypeFlagsTest, Gfx9GlcOn) { EXPECT_EQ(mtype_from_flags_gfx9(true), Mtype::CC); }
 
-// ---------------------------------------------------------------------------
 // GFX940 (CDNA3/4) — SC0/SC1 + NT
-// ---------------------------------------------------------------------------
 
 TEST(MtypeFlagsTest, Gfx940WaveScope) {
   EXPECT_EQ(mtype_from_flags_gfx940(false, false, false), Mtype::RW);
@@ -51,9 +47,7 @@ TEST(MtypeFlagsTest, Gfx940NtOverridesScope) {
   EXPECT_EQ(mtype_from_flags_gfx940(true, true, true), Mtype::NT);
 }
 
-// ---------------------------------------------------------------------------
 // GFX10 (RDNA1/2) — GLC + DLC + SLC
-// ---------------------------------------------------------------------------
 
 TEST(MtypeFlagsTest, Gfx10AllOff) {
   EXPECT_EQ(mtype_from_flags_gfx10(false, false, false), Mtype::RW);
@@ -79,9 +73,7 @@ TEST(MtypeFlagsTest, Gfx10SlcOverrides) {
   EXPECT_EQ(mtype_from_flags_gfx10(true, true, true), Mtype::NT);
 }
 
-// ---------------------------------------------------------------------------
 // GFX11 (RDNA3/3.5) — GLC→SC0, SLC→SC1, DLC→NT
-// ---------------------------------------------------------------------------
 
 TEST(MtypeFlagsTest, Gfx11CuScope) {
   EXPECT_EQ(mtype_from_flags_gfx11(false, false, false), Mtype::RW);
@@ -106,9 +98,7 @@ TEST(MtypeFlagsTest, Gfx11NtOverridesScope) {
   EXPECT_EQ(mtype_from_flags_gfx11(true, true, true), Mtype::NT);
 }
 
-// ---------------------------------------------------------------------------
 // GFX12 (RDNA4) — SCOPE + TH
-// ---------------------------------------------------------------------------
 
 TEST(MtypeFlagsTest, Gfx12CuScope) { EXPECT_EQ(mtype_from_flags_gfx12(0, 0), Mtype::RW); }
 
@@ -126,9 +116,7 @@ TEST(MtypeFlagsTest, Gfx12NtOverridesScope) {
   EXPECT_EQ(mtype_from_flags_gfx12(3, GFX12_TH_NT), Mtype::NT);
 }
 
-// ---------------------------------------------------------------------------
 // Shared helper: mtype_from_scope_nt
-// ---------------------------------------------------------------------------
 
 TEST(MtypeFlagsTest, ScopeNtHelper) {
   EXPECT_EQ(mtype_from_scope_nt(0, false), Mtype::RW);

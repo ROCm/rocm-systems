@@ -1076,9 +1076,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   return dispatched;
 }
 
-// ---------------------------------------------------------------------------
 // Completion notification from CU
-// ---------------------------------------------------------------------------
 
 void CommandProcessor::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id) {
   util::Logger::cp(
@@ -1901,9 +1899,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
   }
 }
 
-// ---------------------------------------------------------------------------
 // SDMA packet processor
-// ---------------------------------------------------------------------------
 
 /// @brief Resolve a GPU VA to a daemon-accessible host pointer.
 /// @details In daemon mode, the GPU VA belongs to the client process and cannot

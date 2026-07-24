@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_ACCVGPR_LAYOUT_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_ACCVGPR_LAYOUT_H_
+#pragma once
 
 #include <cstdint>
 
@@ -15,5 +14,3 @@ constexpr uint32_t ACC_VGPR_OFFSET = 256;
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_ACCVGPR_LAYOUT_H_

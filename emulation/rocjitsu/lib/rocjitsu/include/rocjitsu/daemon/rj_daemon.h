@@ -4,8 +4,7 @@
 /// @file rj_daemon.h
 /// @brief Public C API for hosting a RocJitsu VM over the daemon RPC transport.
 
-#ifndef ROCJITSU_DAEMON_RJ_DAEMON_H_
-#define ROCJITSU_DAEMON_RJ_DAEMON_H_
+#pragma once
 
 #include <stdint.h>
 
@@ -82,5 +81,3 @@ RJ_API_EXPORT rj_daemon_status_t rj_daemon_status(const rj_daemon_t *daemon);
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
-#endif // ROCJITSU_DAEMON_RJ_DAEMON_H_

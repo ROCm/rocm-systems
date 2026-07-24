@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_WORKGROUP_KEY_H_
-#define ROCJITSU_VM_AMDGPU_WORKGROUP_KEY_H_
+#pragma once
 
 #include <cstdint>
 
@@ -15,5 +14,3 @@ inline constexpr uint64_t wg_key(uint32_t dispatch_id, uint32_t wg_id) {
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_WORKGROUP_KEY_H_

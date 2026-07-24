@@ -4,8 +4,7 @@
 /// @file kfd_device_config.h
 /// @brief KFD device identity shared by VM simulation and DBT guest discovery.
 
-#ifndef ROCJITSU_CONFIG_KFD_DEVICE_CONFIG_H_
-#define ROCJITSU_CONFIG_KFD_DEVICE_CONFIG_H_
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -62,5 +61,3 @@ struct KfdDeviceConfig {
 };
 
 } // namespace rocjitsu::config
-
-#endif // ROCJITSU_CONFIG_KFD_DEVICE_CONFIG_H_

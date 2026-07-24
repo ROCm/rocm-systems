@@ -172,9 +172,7 @@ void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target)
   rj_code_object_release(obj);
 }
 
-//==============================================================================
 // Machine flag -> target_id (one test per supported target)
-//==============================================================================
 
 TEST(GfxCodeObjectTargets, LoadsGfx90aFromMachineFlags) {
   expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX90A, ROCJITSU_CODE_TARGET_GFX90A);
@@ -212,10 +210,8 @@ TEST(GfxCodeObjectTargets, UnknownMachineFlagMapsToInvalid) {
   EXPECT_EQ(obj.target_id(), ROCJITSU_CODE_TARGET_INVALID);
 }
 
-//==============================================================================
 // C API path (rj_code_executable_create + ... + basic_block_list_create)
 // exercises create_decoder_for_target for each supported target.
-//==============================================================================
 
 TEST(GfxCodeObjectTargets, CApiAcceptsGfx90aForBasicBlockList) {
   expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX90A, ROCJITSU_CODE_TARGET_GFX90A);

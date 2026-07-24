@@ -4,8 +4,7 @@
 /// @file dbt_translate.h
 /// @brief Internal entry point for the rj_dbt_translate CLI and tests.
 
-#ifndef ROCJITSU_TOOLS_DBT_TRANSLATE_H_
-#define ROCJITSU_TOOLS_DBT_TRANSLATE_H_
+#pragma once
 
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/processor_revision.h"
@@ -114,5 +113,3 @@ struct TranslateOutput {
 [[nodiscard]] ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &options);
 
 } // namespace rocjitsu::tools
-
-#endif // ROCJITSU_TOOLS_DBT_TRANSLATE_H_

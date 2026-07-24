@@ -7,7 +7,6 @@
 ///        TrampolineBuilder and CodeObjectPatcher.
 ///
 /// Mental model
-/// ------------
 /// The Instrumentor is the central hub. Callers queue InstrumentationPoints
 /// (the requests). On patch(), the orchestrator runs a multi-stage pipeline:
 ///
@@ -226,7 +225,6 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 [[nodiscard]] bool validate_inline_nop_plan(const TrampolinePlan &plan,
                                             std::string *error_out = nullptr);
 
-//==============================================================================
 // Spill formula and policy (orchestrator-owned).
 //
 // The probe-call spill set is the live registers an instrumentation envelope
@@ -243,7 +241,6 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 // plain RegisterSet so the formula and v0 policy are testable now. Combining the
 // two and applying policy is the Instrumentor's job, so it lives here rather
 // than in the callee-only probe_clobber unit.
-//==============================================================================
 
 /// @brief What the builder will do about registers that are simultaneously live
 ///        at the anchor and clobbered by instrumentation.

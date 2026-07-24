@@ -22,17 +22,14 @@
 ///
 /// Verified identical across: CDNA1, CDNA2, CDNA3, CDNA4.
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MACHINE_INSTS_CDNA_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MACHINE_INSTS_CDNA_H_
+#pragma once
 
 #include <cstdint>
 
 namespace rocjitsu {
 namespace amdgpu {
 
-// ---------------------------------------------------------------------------
 // SMEM — Scalar memory (identical across all 4 CDNA ISAs)
-// ---------------------------------------------------------------------------
 
 struct SmemMachineInst {
   uint32_t sbase : 6;
@@ -49,9 +46,7 @@ struct SmemMachineInst {
   uint32_t soffset : 7;
 };
 
-// ---------------------------------------------------------------------------
 // VOP1 / VOP2 / VOPC — Vector ALU base encodings
-// ---------------------------------------------------------------------------
 
 struct Vop1MachineInst {
   uint32_t src0 : 9;
@@ -75,9 +70,7 @@ struct Vop2MachineInst {
   uint32_t encoding : 1;
 };
 
-// ---------------------------------------------------------------------------
 // VOP3 / VOP3 with SDST — Vector ALU 64-bit encodings
-// ---------------------------------------------------------------------------
 
 struct Vop3MachineInst {
   uint32_t vdst : 8;
@@ -106,9 +99,7 @@ struct Vop3SdstEncMachineInst {
   uint32_t neg : 3;
 };
 
-// ---------------------------------------------------------------------------
 // DPP variants (GFX9 — single DPP format, no DPP8/DPP16 split)
-// ---------------------------------------------------------------------------
 
 struct Vop1VopDppMachineInst {
   uint32_t src0 : 9;
@@ -145,9 +136,7 @@ struct Vop2VopDppMachineInst {
   uint32_t row_mask : 4;
 };
 
-// ---------------------------------------------------------------------------
 // SDWA variants (GFX9 — Sub-Dword Addressing)
-// ---------------------------------------------------------------------------
 
 struct Vop1VopSdwaMachineInst {
   uint32_t src0 : 9;
@@ -243,9 +232,7 @@ struct VopcVopSdwaSdstEncMachineInst {
   uint32_t s1 : 1;
 };
 
-// ---------------------------------------------------------------------------
 // Vector literal-constant variants (base word + 32-bit immediate)
-// ---------------------------------------------------------------------------
 
 struct Vop1InstLiteralMachineInst {
   uint32_t src0 : 9;
@@ -274,5 +261,3 @@ struct VopcInstLiteralMachineInst {
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MACHINE_INSTS_CDNA_H_

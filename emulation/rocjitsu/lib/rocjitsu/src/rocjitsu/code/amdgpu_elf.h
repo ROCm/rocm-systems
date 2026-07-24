@@ -1,8 +1,7 @@
 // Copyright (c) 2025 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_CODE_AMDGPU_ELF_H_
-#define ROCJITSU_CODE_AMDGPU_ELF_H_
+#pragma once
 
 #include "rocjitsu/code/rj_code.h"
 
@@ -321,5 +320,3 @@ struct Elf64_Rela {
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_CODE_AMDGPU_ELF_H_

@@ -4,8 +4,7 @@
 /// @file clocked.h
 /// @brief CRTP mixin for clock-driven simulation components.
 
-#ifndef SIMDOJO_SIM_CLOCKED_H_
-#define SIMDOJO_SIM_CLOCKED_H_
+#pragma once
 
 #include "simdojo/sim/clock_domain.h"
 #include "simdojo/sim/component.h"
@@ -95,5 +94,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_SIM_CLOCKED_H_

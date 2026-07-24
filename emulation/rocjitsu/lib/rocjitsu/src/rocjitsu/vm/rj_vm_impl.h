@@ -4,8 +4,7 @@
 /// @file rj_vm_impl.h
 /// @brief Private definition of rj_vm_t. Internal to the library.
 
-#ifndef ROCJITSU_VM_RJ_VM_IMPL_H_
-#define ROCJITSU_VM_RJ_VM_IMPL_H_
+#pragma once
 
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/refcount.h"
@@ -24,5 +23,3 @@ struct rj_vm_t : rocjitsu::RefCounted {
   rocjitsu::VirtualMachine *vm = nullptr;
   std::atomic<bool> plugin_group_active{false};
 };
-
-#endif // ROCJITSU_VM_RJ_VM_IMPL_H_

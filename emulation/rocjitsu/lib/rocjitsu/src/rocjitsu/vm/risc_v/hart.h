@@ -1,8 +1,7 @@
 // Copyright (c) 2025 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_RISC_V_HART_H_
-#define ROCJITSU_VM_RISC_V_HART_H_
+#pragma once
 
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/risc_v/hart_state.h"
@@ -63,5 +62,3 @@ private:
 
 } // namespace risc_v
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_RISC_V_HART_H_

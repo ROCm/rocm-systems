@@ -4,8 +4,7 @@
 /// @file message.h
 /// @brief Message types and queues for inter-component communication over links.
 
-#ifndef SIMDOJO_SIM_MESSAGE_H_
-#define SIMDOJO_SIM_MESSAGE_H_
+#pragma once
 
 #include "simdojo/sim/sim_types.h"
 
@@ -172,5 +171,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_SIM_MESSAGE_H_

@@ -4,8 +4,7 @@
 /// @file gfx1250_b0_to_a0.h
 /// @brief gfx1250 B0-to-A0 errata legalization classification.
 
-#ifndef ROCJITSU_CODE_DBT_LEGALIZATION_GFX1250_B0_TO_A0_H_
-#define ROCJITSU_CODE_DBT_LEGALIZATION_GFX1250_B0_TO_A0_H_
+#pragma once
 
 namespace rocjitsu {
 
@@ -28,5 +27,3 @@ struct InstructionLegalization;
 [[nodiscard]] const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &inst);
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_CODE_DBT_LEGALIZATION_GFX1250_B0_TO_A0_H_

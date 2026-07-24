@@ -4,8 +4,7 @@
 /// @file operand.h
 /// @brief Instruction operand base class with register read/write interface.
 
-#ifndef ROCJITSU_ISA_OPERAND_H_
-#define ROCJITSU_ISA_OPERAND_H_
+#pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
@@ -574,5 +573,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_OPERAND_H_

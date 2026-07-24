@@ -4,8 +4,7 @@
 /// @file dbt_guest_config.h
 /// @brief DBT guest-GPU configuration shared by the launcher, KMD interposer, and HSA hook.
 
-#ifndef ROCJITSU_CONFIG_DBT_GUEST_CONFIG_H_
-#define ROCJITSU_CONFIG_DBT_GUEST_CONFIG_H_
+#pragma once
 
 #include "rocjitsu/config/kfd_device_config.h"
 
@@ -106,5 +105,3 @@ DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path);
 std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config();
 
 } // namespace rocjitsu::config
-
-#endif // ROCJITSU_CONFIG_DBT_GUEST_CONFIG_H_

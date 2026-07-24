@@ -11,8 +11,7 @@
 // primitives in util/simd.h. The generic util layer never depends on
 // rocjitsu; only this direction is permitted.
 
-#ifndef ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
-#define ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
+#pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/operand.h"
@@ -4249,5 +4248,3 @@ template <bool Vop3, typename Inst>
 #define ROCJITSU_TRY_SIMD_DOTC_F16(...)                                                            \
   if (::rocjitsu::amdgpu::try_execute_dotc_f16_simd<__VA_ARGS__>(inst, wf))                        \
   return
-
-#endif // ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_

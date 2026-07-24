@@ -4,8 +4,7 @@
 /// @file basic_block.h
 /// @brief Basic block representation for decoded instruction sequences.
 
-#ifndef ROCJITSU_CODE_BASIC_BLOCK_H_
-#define ROCJITSU_CODE_BASIC_BLOCK_H_
+#pragma once
 
 #include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/instruction_list.h"
@@ -161,5 +160,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_CODE_BASIC_BLOCK_H_

@@ -4,8 +4,7 @@
 /// @file instruction_encoding.h
 /// @brief Lightweight AMDGPU instruction-encoding helpers.
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_INSTRUCTION_ENCODING_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_INSTRUCTION_ENCODING_H_
+#pragma once
 
 #include <cstdint>
 
@@ -96,5 +95,3 @@ template <typename MachineInst> inline uint32_t vop3_opsel(const MachineInst &in
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_INSTRUCTION_ENCODING_H_

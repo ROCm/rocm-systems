@@ -1,8 +1,7 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_RISC_V_MEMORY_H_
-#define ROCJITSU_VM_RISC_V_MEMORY_H_
+#pragma once
 
 #include "simdojo/components/sparse_memory.h"
 
@@ -23,5 +22,3 @@ public:
 
 } // namespace risc_v
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_RISC_V_MEMORY_H_

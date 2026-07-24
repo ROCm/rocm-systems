@@ -9,8 +9,7 @@
 /// emulates the AMD KFD ioctl interface. Platform-specific interposer libraries
 /// route open/close/ioctl/mmap calls to a concrete Driver implementation.
 
-#ifndef ROCJITSU_VM_DRIVER_H_
-#define ROCJITSU_VM_DRIVER_H_
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -52,5 +51,3 @@ public:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_DRIVER_H_

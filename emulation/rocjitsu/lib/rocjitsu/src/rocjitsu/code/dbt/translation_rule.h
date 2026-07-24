@@ -301,9 +301,7 @@ struct ExpandResult {
   }
 };
 
-// ---------------------------------------------------------------------------
 // Tier 1: Instruction Descriptor
-// ---------------------------------------------------------------------------
 
 /// @brief Flags describing instruction properties relevant to translation.
 enum InstructionProperty : uint32_t {
@@ -354,9 +352,7 @@ struct InstructionDescriptor {
   RegEffect reg_effect;   ///< Register read/write/clobber effects.
 };
 
-// ---------------------------------------------------------------------------
 // Tier 2: Translation Rule
-// ---------------------------------------------------------------------------
 
 /// @brief Describes a single field transformation within a FieldRemap rule.
 ///
@@ -431,9 +427,7 @@ struct TranslationRule {
   }
 };
 
-// ---------------------------------------------------------------------------
 // Tier 3: Lane Layout Descriptor
-// ---------------------------------------------------------------------------
 
 /// @brief Describes how a matrix instruction distributes data across
 /// wavefront lanes and VGPRs.

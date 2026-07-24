@@ -4,8 +4,7 @@
 /// @file tool_result.h
 /// @brief Small result type shared by internal rocjitsu tool entry points.
 
-#ifndef ROCJITSU_TOOLS_TOOL_RESULT_H_
-#define ROCJITSU_TOOLS_TOOL_RESULT_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -31,5 +30,3 @@ template <typename T> struct ToolResult {
 };
 
 } // namespace rocjitsu::tools
-
-#endif // ROCJITSU_TOOLS_TOOL_RESULT_H_

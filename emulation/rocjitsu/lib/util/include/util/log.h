@@ -1,8 +1,7 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef UTIL_LOG_H_
-#define UTIL_LOG_H_
+#pragma once
 
 #include <concepts>
 #include <format>
@@ -221,5 +220,3 @@ private:
 };
 
 } // namespace util
-
-#endif // UTIL_LOG_H_

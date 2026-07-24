@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_ADDR_CALC_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_ADDR_CALC_H_
+#pragma once
 
 /// @file Address calculation helpers for gfx1250 memory instructions.
 
@@ -45,5 +44,3 @@ inline amdgpu::Mtype mtype_from_bits(bool sc0, bool sc1) {
 }
 
 } // namespace rocjitsu::gfx1250
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_ADDR_CALC_H_

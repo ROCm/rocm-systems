@@ -4,8 +4,7 @@
 /// @file clock_domain.h
 /// @brief Clock domain definition for shared frequency, period, and phase among components.
 
-#ifndef SIMDOJO_SIM_CLOCK_DOMAIN_H_
-#define SIMDOJO_SIM_CLOCK_DOMAIN_H_
+#pragma once
 
 #include "simdojo/sim/sim_types.h"
 
@@ -77,5 +76,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_SIM_CLOCK_DOMAIN_H_

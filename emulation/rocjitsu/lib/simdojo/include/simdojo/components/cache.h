@@ -4,8 +4,7 @@
 /// @file cache.h
 /// @brief Set-associative cache data structure with LRU replacement and MOESI coherence tags.
 
-#ifndef SIMDOJO_COMPONENTS_CACHE_H_
-#define SIMDOJO_COMPONENTS_CACHE_H_
+#pragma once
 
 #include "util/bit.h"
 
@@ -388,5 +387,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_COMPONENTS_CACHE_H_

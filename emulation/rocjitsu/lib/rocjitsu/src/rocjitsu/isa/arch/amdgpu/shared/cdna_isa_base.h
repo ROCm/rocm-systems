@@ -16,8 +16,7 @@
 /// (4 bits).  CDNA4, while GFX11-generation hardware, retains the single
 /// monolithic S_WAITCNT instruction from the GFX9 encoding family.
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_CDNA_ISA_BASE_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_CDNA_ISA_BASE_H_
+#pragma once
 
 #include "util/bitfield.h"
 
@@ -104,5 +103,3 @@ struct CdnaIsaBase {
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_CDNA_ISA_BASE_H_

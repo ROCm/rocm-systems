@@ -4,8 +4,7 @@
 /// @file refcount.h
 /// @brief Thread-safe reference-counting mixin for opaque C API handles.
 
-#ifndef ROCJITSU_REFCOUNT_H_
-#define ROCJITSU_REFCOUNT_H_
+#pragma once
 
 #include <atomic>
 #include <cassert>
@@ -75,5 +74,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_REFCOUNT_H_

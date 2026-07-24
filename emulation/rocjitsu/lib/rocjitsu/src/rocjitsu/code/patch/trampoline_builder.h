@@ -51,7 +51,6 @@ struct TrampolinePlan {
   std::vector<InlineAsmItem> after_items;
   bool emit_original = true;
 
-  //----------------------------------------------------------------------------
   // Probe-call resources (filled by plan_probe_call(); left at defaults for the
   // inlined nop).
   //
@@ -61,7 +60,6 @@ struct TrampolinePlan {
   // so it must not re-pick registers or recount words. Folded into
   // TrampolinePlan for now since this is the builder's one input;
   // lift back out into a dedicated resource-plan type if it grows unwieldy.
-  //----------------------------------------------------------------------------
   bool is_probe_call = false;     ///< True once plan_probe_call() populated these.
   uint16_t link_pair_base = 30;   ///< Return-link pair, derived from the probe cc.
   uint16_t target_pair_base = 0;  ///< Dead even SGPR pair holding the probe address.

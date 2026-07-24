@@ -1,8 +1,7 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_DISPATCH_ENTRY_H_
-#define ROCJITSU_VM_AMDGPU_DISPATCH_ENTRY_H_
+#pragma once
 
 /// @file dispatch_entry.h
 /// @brief Per-dispatch tracking entry for the command processor pipeline.
@@ -271,5 +270,3 @@ struct HwQueueState {
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_DISPATCH_ENTRY_H_

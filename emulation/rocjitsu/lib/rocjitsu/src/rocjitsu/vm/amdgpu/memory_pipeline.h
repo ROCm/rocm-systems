@@ -4,8 +4,7 @@
 /// @file memory_pipeline.h
 /// @brief Memory pipelines for scalar, global, and local memory operations.
 
-#ifndef ROCJITSU_VM_AMDGPU_MEMORY_PIPELINE_H_
-#define ROCJITSU_VM_AMDGPU_MEMORY_PIPELINE_H_
+#pragma once
 
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -161,5 +160,3 @@ protected:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_MEMORY_PIPELINE_H_

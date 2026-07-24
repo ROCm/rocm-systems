@@ -264,7 +264,7 @@ TEST(UtilSimd, ForceScalar_ImmutableProcessWide) {
 // random bit patterns (covering NaN/Inf/denormal/negative) and fail loudly if
 // any lane diverges, blocking a divergent toolchain at CI time. If one fails,
 // drop the corresponding row from SIMD_VOP1_UNARY rather than ship wrong math.
-template <class ScalarFn, class VectorFn>
+template <typename ScalarFn, typename VectorFn>
 void expect_simd_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
   using V = util::native<float>;
   constexpr std::size_t W = util::native_width_v<float>;
@@ -386,7 +386,7 @@ TEST(UtilSimd, FmaF64_VectorMatchesScalar_BitExact) {
 // Sweeps full-range random 64-bit patterns, skipping lanes whose result is NaN
 // (accepted payload divergence). If a finite/Inf lane diverges, drop the
 // corresponding SIMD_VOP1_UNARY_F64 row.
-template <class ScalarFn, class VectorFn>
+template <typename ScalarFn, typename VectorFn>
 void expect_f64_unary_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
   using V = util::native<double>;
   constexpr std::size_t W = util::native_width64;
@@ -463,7 +463,7 @@ TEST(UtilSimd, SqrtF64_VectorMatchesScalar_BitExact) {
 // and a signed-zero tie (scalar std::fmax/fmin returns the first operand, the
 // packed vmaxps/vminps the second — a -0 vs +0 sign difference, numerically
 // equal). If any OTHER lane diverges, drop the float min/max rows.
-template <class ScalarFn, class VectorFn>
+template <typename ScalarFn, typename VectorFn>
 void expect_minmax_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
   using V = util::native<float>;
   constexpr std::size_t W = util::native_width_v<float>;

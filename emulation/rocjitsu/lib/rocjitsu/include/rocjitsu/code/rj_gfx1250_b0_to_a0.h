@@ -4,8 +4,7 @@
 /// @file rj_gfx1250_b0_to_a0.h
 /// @brief Fixed-profile gfx1250 B0-to-A0 code-object translation API.
 
-#ifndef ROCJITSU_CODE_RJ_GFX1250_B0_TO_A0_H_
-#define ROCJITSU_CODE_RJ_GFX1250_B0_TO_A0_H_
+#pragma once
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/base/rj_status.h"
@@ -47,5 +46,3 @@ RJ_API_EXPORT void rj_gfx1250_b0_to_a0_free(void *translated_elf);
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
-#endif // ROCJITSU_CODE_RJ_GFX1250_B0_TO_A0_H_

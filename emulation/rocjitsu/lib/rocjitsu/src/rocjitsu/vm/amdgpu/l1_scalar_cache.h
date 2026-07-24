@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_L1_SCALAR_CACHE_H_
-#define ROCJITSU_VM_AMDGPU_L1_SCALAR_CACHE_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "simdojo/components/cache.h"
@@ -74,5 +73,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_L1_SCALAR_CACHE_H_

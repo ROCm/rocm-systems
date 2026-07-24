@@ -1,8 +1,7 @@
 // Copyright (c) 2025 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_RISC_V_OPERAND_TYPES_H_
-#define ROCJITSU_ISA_ARCH_RISC_V_OPERAND_TYPES_H_
+#pragma once
 
 namespace rocjitsu {
 namespace risc_v {
@@ -18,5 +17,3 @@ enum class OperandType {
 } // namespace detail
 } // namespace risc_v
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_RISC_V_OPERAND_TYPES_H_

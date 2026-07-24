@@ -16,8 +16,7 @@
 /// |  1  |  1  |  0 | UC    | SYSTEM   |
 /// |  x  |  x  |  1 | NT    | (any)    |
 
-#ifndef ROCJITSU_ISA_AMDGPU_SHARED_GFX940_CACHE_FLAGS_H_
-#define ROCJITSU_ISA_AMDGPU_SHARED_GFX940_CACHE_FLAGS_H_
+#pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/mtype.h"
 
@@ -52,5 +51,3 @@ namespace amdgpu {
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_AMDGPU_SHARED_GFX940_CACHE_FLAGS_H_

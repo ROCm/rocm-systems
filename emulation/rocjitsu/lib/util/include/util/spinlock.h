@@ -4,8 +4,7 @@
 /// @file spinlock.h
 /// @brief TTAS (test-and-test-and-set) spinlock for low-contention critical sections.
 
-#ifndef UTIL_SPINLOCK_H_
-#define UTIL_SPINLOCK_H_
+#pragma once
 
 #include <atomic>
 
@@ -84,5 +83,3 @@ private:
 };
 
 } // namespace util
-
-#endif // UTIL_SPINLOCK_H_

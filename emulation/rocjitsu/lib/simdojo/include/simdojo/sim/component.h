@@ -5,8 +5,7 @@
 /// @brief Simulation compound graph: Node, Component, CompositeComponent, Port, Link, and
 /// QueuedLink.
 
-#ifndef SIMDOJO_SIM_COMPONENT_H_
-#define SIMDOJO_SIM_COMPONENT_H_
+#pragma once
 
 #include "simdojo/sim/event_queue.h"
 #include "simdojo/sim/exec_mode.h"
@@ -461,5 +460,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_SIM_COMPONENT_H_

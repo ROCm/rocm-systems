@@ -10,8 +10,7 @@
 /// for large offsets, anti-windup on the integral term, and seqlock-protected
 /// timestamp translation for external threads.
 
-#ifndef SIMDOJO_SIM_PACING_CONTROLLER_H_
-#define SIMDOJO_SIM_PACING_CONTROLLER_H_
+#pragma once
 
 #include "simdojo/sim/sim_types.h"
 
@@ -263,5 +262,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_SIM_PACING_CONTROLLER_H_

@@ -4,8 +4,7 @@
 /// @file instruction_compute_unit_view.h
 /// @brief Instruction-facing compute-unit service view.
 
-#ifndef ROCJITSU_VM_AMDGPU_INSTRUCTION_COMPUTE_UNIT_VIEW_H_
-#define ROCJITSU_VM_AMDGPU_INSTRUCTION_COMPUTE_UNIT_VIEW_H_
+#pragma once
 
 #include "rocjitsu/code/rj_code.h"
 #include "simdojo/sim/sim_types.h"
@@ -79,5 +78,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_INSTRUCTION_COMPUTE_UNIT_VIEW_H_

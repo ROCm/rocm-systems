@@ -1,8 +1,7 @@
 // Copyright (c) 2025 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef UTIL_BIT_H_
-#define UTIL_BIT_H_
+#pragma once
 
 #include "util/meta_programming.h"
 
@@ -300,5 +299,3 @@ constexpr inline bool is_aligned(T val, T alignment) {
 }
 
 } // namespace util
-
-#endif // UTIL_BIT_H_

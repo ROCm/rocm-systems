@@ -90,9 +90,7 @@ namespace {
 
 using namespace rocjitsu;
 
-// ---------------------------------------------------------------------------
 // Concept and trait verification (compile-time)
-// ---------------------------------------------------------------------------
 
 /*
  * \NPI new ISA family: add GpuIsa<<isa>::Isa> plus the relevant trait \
@@ -235,9 +233,7 @@ TEST(UtilBitTest, IsAlignedChecksPowerOfTwoAlignment) {
   EXPECT_FALSE(util::is_aligned<uint64_t>(0x1003u, 4u));
 }
 
-// ---------------------------------------------------------------------------
 // MFMA register layout tests
-// ---------------------------------------------------------------------------
 
 TEST(MfmaExecTest, InputLocF16_4x4x4) {
   // v_mfma_f32_4x4x4f16:
@@ -697,9 +693,7 @@ TEST(MfmaExecTest, ResolveAccAccVgpr) {
   EXPECT_EQ(result, 100u + amdgpu::ACC_VGPR_OFFSET + 2u);
 }
 
-// ---------------------------------------------------------------------------
 // L2 cache tests
-// ---------------------------------------------------------------------------
 
 TEST(L2CacheTest, UcStoreInvalidatesResidentLineBeforeAtomicRmw) {
   amdgpu::GpuMemory mem("test_mem");
@@ -1406,9 +1400,7 @@ TEST(L1VectorCacheTest, NonTemporalWriteInvalidatesResidentLine) {
   EXPECT_EQ(value, kNewValue);
 }
 
-// ---------------------------------------------------------------------------
 // CU factory tests — verify all 9 ISAs can be instantiated
-// ---------------------------------------------------------------------------
 
 class CuFactoryTest : public ::testing::TestWithParam<rj_code_arch_t> {};
 
@@ -1509,9 +1501,7 @@ INSTANTIATE_TEST_SUITE_P(AllIsas, CuFactoryTest,
                                            ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
                                            ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4));
 
-// ---------------------------------------------------------------------------
 // DPP permutation tests
-// ---------------------------------------------------------------------------
 
 TEST(DppPermuteTest, QuadPerm) {
   using namespace amdgpu::dpp;
@@ -2801,9 +2791,7 @@ TEST(DppPermuteTest, Rdna2VopcDppThrowsUnsupported) {
   unsupported_rdna_vopc_dpp_throws<Rdna2DppTraits>();
 }
 
-// ---------------------------------------------------------------------------
 // SDWA tests
-// ---------------------------------------------------------------------------
 
 TEST(SdwaTest, SrcSelect) {
   using namespace amdgpu::sdwa;
@@ -2838,9 +2826,7 @@ TEST(SdwaTest, DstMerge) {
   EXPECT_EQ(merged, 0x12345678u);
 }
 
-// ---------------------------------------------------------------------------
 // Scratch address calculation tests
-// ---------------------------------------------------------------------------
 
 TEST(ScratchAddrCalcTest, FlatScratchUsesWavefrontBase) {
   // Verify that FLAT with seg==1 (SCRATCH) computes:

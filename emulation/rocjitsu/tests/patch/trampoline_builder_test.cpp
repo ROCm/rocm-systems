@@ -32,12 +32,10 @@ uint64_t resolve_sopp_target(uint64_t branch_pc, uint32_t branch_word) {
   return branch_pc + 4 + static_cast<int64_t>(decode_sopp_simm16(branch_word)) * 4;
 }
 
-//==============================================================================
 // Permanent contract: byte layout, branch math, arch honoring
 //
 // These tests describe what TrampolineBuilder::build() must always produce
 // from a valid plan.
-//==============================================================================
 
 TEST(TrampolineBuilder, Emits4ByteRelocationAnchorPatch) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
@@ -320,12 +318,10 @@ TEST(TrampolineBuilder, ReturnSimm16AtNegativeLimitSucceeds) {
 // generic and accepts any well-formed plan; milestone-scoped restrictions
 // are the orchestrator's responsibility.
 
-//==============================================================================
 // Probe-call resource planning (plan_probe_call)
 //
 // Resource selection only: which envelope registers, how many envelope words.
 // No layout, no bytes. Exercised here on synthetic RegisterSets.
-//==============================================================================
 
 // The only verified convention today; its link pair is s[30:31].
 constexpr ProbeCallingConvention kNoArgsCc = ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31;
@@ -482,13 +478,11 @@ TEST(TrampolineBuilderPlan, UnknownCcFails) {
   EXPECT_FALSE(plan.is_probe_call);
 }
 
-//==============================================================================
 // Probe-call emission (emit_probe_call)
 //
 // Plans, then lowers, a probe call and checks the emitted trampoline words:
 // the target-address materialization, the call through the cc-derived link
 // pair, the single relocated original, and the return branch.
-//==============================================================================
 
 // SOP1 field decoders (matching pack_sop1 in instruction_builder.h).
 uint16_t decode_sop1_op(uint32_t word) { return static_cast<uint16_t>((word >> 8) & 0xFFu); }

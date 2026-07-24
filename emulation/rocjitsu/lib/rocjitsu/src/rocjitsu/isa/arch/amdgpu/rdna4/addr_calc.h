@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_RDNA4_ADDR_CALC_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_RDNA4_ADDR_CALC_H_
+#pragma once
 
 /// @file Address calculation stubs for RDNA4 memory instructions.
 ///
@@ -58,5 +57,3 @@ inline amdgpu::Mtype mtype_from_bits(bool sc0, bool sc1) {
 
 } // namespace rdna4
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_RDNA4_ADDR_CALC_H_

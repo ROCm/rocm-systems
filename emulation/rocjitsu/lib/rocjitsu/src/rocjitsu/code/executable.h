@@ -4,8 +4,7 @@
 /// @file executable.h
 /// @brief Loader for x86 HIP fat binaries and standalone device ELFs.
 
-#ifndef ROCJITSU_CODE_EXECUTABLE_H_
-#define ROCJITSU_CODE_EXECUTABLE_H_
+#pragma once
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/code_object.h"
@@ -84,5 +83,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_CODE_EXECUTABLE_H_

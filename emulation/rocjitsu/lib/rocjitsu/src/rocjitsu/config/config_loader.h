@@ -4,8 +4,7 @@
 /// @file config_loader.h
 /// @brief Configuration loading from JSON via FlatBuffers schema.
 
-#ifndef ROCJITSU_CONFIG_CONFIG_LOADER_H_
-#define ROCJITSU_CONFIG_CONFIG_LOADER_H_
+#pragma once
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/dbt_guest_config.h"
@@ -102,5 +101,3 @@ LoadedConfig load_config_from_string(const std::string &json, const std::string 
 
 } // namespace config
 } // namespace rocjitsu
-
-#endif // ROCJITSU_CONFIG_CONFIG_LOADER_H_

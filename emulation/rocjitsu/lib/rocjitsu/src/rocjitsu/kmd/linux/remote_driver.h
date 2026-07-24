@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_KMD_LINUX_REMOTE_DRIVER_H_
-#define ROCJITSU_KMD_LINUX_REMOTE_DRIVER_H_
+#pragma once
 
 /// @file remote_driver.h
 /// @brief Client-side RPC stub that forwards KFD ioctls to the rocjitsu daemon.
@@ -151,5 +150,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_REMOTE_DRIVER_H_

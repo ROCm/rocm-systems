@@ -4,8 +4,7 @@
 /// @file spill_manager.h
 /// @brief Per-kernel scratch reservation for DBI spill/fill slots.
 
-#ifndef ROCJITSU_CODE_PATCH_SPILL_MANAGER_H_
-#define ROCJITSU_CODE_PATCH_SPILL_MANAGER_H_
+#pragma once
 
 #include "rocjitsu/isa/register_set.h"
 #include "util/bit.h"
@@ -144,5 +143,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_CODE_PATCH_SPILL_MANAGER_H_

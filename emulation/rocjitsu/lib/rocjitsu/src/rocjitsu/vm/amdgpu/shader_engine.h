@@ -4,8 +4,7 @@
 /// @file shader_engine.h
 /// @brief Shader engine containing an array of compute units.
 
-#ifndef ROCJITSU_VM_AMDGPU_SHADER_ENGINE_H_
-#define ROCJITSU_VM_AMDGPU_SHADER_ENGINE_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
@@ -92,5 +91,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_SHADER_ENGINE_H_

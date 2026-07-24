@@ -4,8 +4,7 @@
 /// @file vector_reg.h
 /// @brief Fixed-width SIMD vector register type with elementwise arithmetic.
 
-#ifndef SIMDOJO_COMPONENTS_VECTOR_REG_H_
-#define SIMDOJO_COMPONENTS_VECTOR_REG_H_
+#pragma once
 
 #include "util/bit.h"
 #include "util/meta_programming.h"
@@ -234,5 +233,3 @@ VectorReg<NUM_ELEMS, VecElem> operator*(Scalar s, const VectorReg<NUM_ELEMS, Vec
 }
 
 } // namespace simdojo
-
-#endif // SIMDOJO_COMPONENTS_VECTOR_REG_H_

@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_CODE_FILE_IO_H_
-#define ROCJITSU_CODE_FILE_IO_H_
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -25,5 +24,3 @@ template <typename T> bool read_value(const char *data, size_t size, size_t &off
 }
 
 } // namespace rocjitsu::detail
-
-#endif // ROCJITSU_CODE_FILE_IO_H_

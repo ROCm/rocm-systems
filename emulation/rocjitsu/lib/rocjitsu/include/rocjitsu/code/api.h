@@ -3,9 +3,6 @@
 
 /// @defgroup code Code object API.
 
-#ifndef ROCJITSU_CODE_API_H_
-#define ROCJITSU_CODE_API_H_
+#pragma once
 
 #include "rocjitsu/code/rj_code.h"
-
-#endif // ROCJITSU_CODE_API_H_

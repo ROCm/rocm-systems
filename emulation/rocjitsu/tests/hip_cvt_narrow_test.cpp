@@ -183,29 +183,29 @@ __global__ void k_scalef32_pk32_f32_bf6(const unsigned *in, float *out, float sc
 
 // ---- Device memory helpers ----
 
-template <class T> static T *alloc_dev(size_t n) {
+template <typename T> static T *alloc_dev(size_t n) {
   T *d = nullptr;
   (void)hipMalloc(&d, n * sizeof(T));
   return d;
 }
 
-template <class T> static T read_dev(const T *d) {
+template <typename T> static T read_dev(const T *d) {
   T h;
   (void)hipMemcpy(&h, d, sizeof(T), hipMemcpyDeviceToHost);
   return h;
 }
 
-template <class T> static void write_dev(T *d, const T &val) {
+template <typename T> static void write_dev(T *d, const T &val) {
   (void)hipMemcpy(d, &val, sizeof(T), hipMemcpyHostToDevice);
 }
 
-template <class T> static std::vector<T> read_dev_vec(const T *d, size_t n) {
+template <typename T> static std::vector<T> read_dev_vec(const T *d, size_t n) {
   std::vector<T> h(n);
   (void)hipMemcpy(h.data(), d, n * sizeof(T), hipMemcpyDeviceToHost);
   return h;
 }
 
-template <class T> static T *to_dev(const std::vector<T> &h) {
+template <typename T> static T *to_dev(const std::vector<T> &h) {
   T *d = alloc_dev<T>(h.size());
   (void)hipMemcpy(d, h.data(), h.size() * sizeof(T), hipMemcpyHostToDevice);
   return d;

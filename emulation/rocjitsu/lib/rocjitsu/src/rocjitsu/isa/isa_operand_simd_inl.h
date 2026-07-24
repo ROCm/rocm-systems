@@ -8,8 +8,7 @@
 /// lightweight `operand.h` so analysis-only translation units avoid the
 /// heavy Wavefront / ComputeUnit headers.
 
-#ifndef ROCJITSU_ISA_ISA_OPERAND_SIMD_INL_H_
-#define ROCJITSU_ISA_ISA_OPERAND_SIMD_INL_H_
+#pragma once
 
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -236,5 +235,3 @@ AmdgpuIsaOperand<Isa>::simd_vgpr_storage64_mut_impl(amdgpu::Wavefront &wf) const
 }
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ISA_OPERAND_SIMD_INL_H_

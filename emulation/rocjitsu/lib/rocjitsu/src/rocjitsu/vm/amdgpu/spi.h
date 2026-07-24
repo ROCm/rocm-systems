@@ -10,8 +10,7 @@
 /// AQL queue) and selects the oldest ready WG from the least recently used queue
 /// for dispatch. All wavefronts of a workgroup land on the same CU.
 
-#ifndef ROCJITSU_VM_AMDGPU_SPI_H_
-#define ROCJITSU_VM_AMDGPU_SPI_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -267,5 +266,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_SPI_H_

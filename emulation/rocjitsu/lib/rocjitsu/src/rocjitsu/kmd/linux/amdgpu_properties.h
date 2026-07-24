@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_KMD_LINUX_AMDGPU_PROPERTIES_H_
-#define ROCJITSU_KMD_LINUX_AMDGPU_PROPERTIES_H_
+#pragma once
 
 #include "rocjitsu/code/rj_code.h"
 
@@ -194,5 +193,3 @@ constexpr uint32_t drm_cu_active_number(uint32_t kfd_array_count, uint32_t cu_pe
 }
 
 } // namespace rocjitsu::kmd
-
-#endif // ROCJITSU_KMD_LINUX_AMDGPU_PROPERTIES_H_

@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_MEMORY_SIDE_CACHE_H_
-#define ROCJITSU_VM_AMDGPU_MEMORY_SIDE_CACHE_H_
+#pragma once
 
 #include "simdojo/components/cache.h"
 #include "simdojo/sim/component.h"
@@ -117,5 +116,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_MEMORY_SIDE_CACHE_H_

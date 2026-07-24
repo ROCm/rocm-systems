@@ -12,8 +12,7 @@
 /// into sub-dword positions of the destination. Available on GFX9 (CDNA)
 /// and RDNA1/2; removed in RDNA3+.
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_DPP_SDWA_OPS_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_DPP_SDWA_OPS_H_
+#pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/operand.h"
@@ -405,5 +404,3 @@ inline uint32_t sdwa_clamp_f32(uint32_t result) {
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_DPP_SDWA_OPS_H_

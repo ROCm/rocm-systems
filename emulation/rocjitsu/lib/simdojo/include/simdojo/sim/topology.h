@@ -4,8 +4,7 @@
 /// @file topology.h
 /// @brief Simulation topology, adjacency graph, partitioning, and clock domain management.
 
-#ifndef SIMDOJO_SIM_TOPOLOGY_H_
-#define SIMDOJO_SIM_TOPOLOGY_H_
+#pragma once
 
 #include "simdojo/sim/clock_domain.h"
 #include "simdojo/sim/component.h"
@@ -228,5 +227,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_SIM_TOPOLOGY_H_

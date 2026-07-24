@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_RDNA4_MMA_EXEC_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_RDNA4_MMA_EXEC_H_
+#pragma once
 
 /// @file WMMA execution stubs for rdna4 (reuses shared MFMA register math).
 ///
@@ -25,5 +24,3 @@ inline uint32_t resolve_acc(uint32_t vb, uint32_t dst, int src2_ev, uint32_t &co
 
 } // namespace rdna4
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_RDNA4_MMA_EXEC_H_

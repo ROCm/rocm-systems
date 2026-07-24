@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_KMD_LINUX_RPC_H_
-#define ROCJITSU_KMD_LINUX_RPC_H_
+#pragma once
 
 /// @file rpc.h
 /// @brief RPC format for the rocjitsu daemon ↔ client Unix socket protocol.
@@ -289,5 +288,3 @@ inline std::string rpc_invocation_config_file_path(pid_t pid) {
 }
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_RPC_H_

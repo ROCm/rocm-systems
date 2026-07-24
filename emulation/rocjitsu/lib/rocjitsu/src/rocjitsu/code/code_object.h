@@ -4,8 +4,7 @@
 /// @file code_object.h
 /// @brief Base classes for ELF headers, sections, and code objects.
 
-#ifndef ROCJITSU_CODE_CODE_OBJECT_H_
-#define ROCJITSU_CODE_CODE_OBJECT_H_
+#pragma once
 
 #include <algorithm>
 #include <cstddef>
@@ -193,5 +192,3 @@ protected:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_CODE_CODE_OBJECT_H_

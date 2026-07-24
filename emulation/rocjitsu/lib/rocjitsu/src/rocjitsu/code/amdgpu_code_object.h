@@ -4,8 +4,7 @@
 /// @file amdgpu_code_object.h
 /// @brief AMD GPU HSA ELF code object representation.
 
-#ifndef ROCJITSU_CODE_AMDGPU_CODE_OBJECT_H_
-#define ROCJITSU_CODE_AMDGPU_CODE_OBJECT_H_
+#pragma once
 
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/rj_code.h"
@@ -84,5 +83,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_CODE_AMDGPU_CODE_OBJECT_H_

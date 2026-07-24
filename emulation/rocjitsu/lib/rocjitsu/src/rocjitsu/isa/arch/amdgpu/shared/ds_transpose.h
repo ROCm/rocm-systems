@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_AMDGPU_SHARED_DS_TRANSPOSE_H_
-#define ROCJITSU_ISA_AMDGPU_SHARED_DS_TRANSPOSE_H_
+#pragma once
 
 /// @file ds_transpose.h
 /// @brief Cross-lane transpose logic for transpose-load instructions.
@@ -251,5 +250,3 @@ inline void transpose_response(VectorMemState &d) {
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_AMDGPU_SHARED_DS_TRANSPOSE_H_

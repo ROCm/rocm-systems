@@ -4,8 +4,7 @@
 /// @file rj_status.h
 /// @brief Status codes returned by the rocjitsu C API.
 
-#ifndef ROCJITSU_BASE_RJ_STATUS_H_
-#define ROCJITSU_BASE_RJ_STATUS_H_
+#pragma once
 
 #ifdef __cplusplus
 extern "C" {
@@ -35,5 +34,3 @@ typedef enum rj_status_e {
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
-#endif // ROCJITSU_BASE_RJ_STATUS_H_

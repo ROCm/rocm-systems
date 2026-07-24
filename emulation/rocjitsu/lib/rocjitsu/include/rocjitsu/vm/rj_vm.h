@@ -4,8 +4,7 @@
 /// @file rj_vm.h
 /// @brief Public C API for creating and running a rocjitsu virtual machine.
 
-#ifndef ROCJITSU_VM_RJ_VM_H_
-#define ROCJITSU_VM_RJ_VM_H_
+#pragma once
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/base/rj_status.h"
@@ -342,5 +341,3 @@ RJ_API_EXPORT void rj_vm_request_exit(rj_vm_t *vm, const char *reason);
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
-#endif // ROCJITSU_VM_RJ_VM_H_

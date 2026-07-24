@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MMA_EXEC_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MMA_EXEC_H_
+#pragma once
 
 /// @file Shared Matrix Multiply-Accumulate (MMA) register mapping and execution.
 ///
@@ -561,9 +560,7 @@ inline InputLoc swmmac_b_input_loc(uint32_t wave_size, uint32_t N, uint32_t K, u
   throw util::UnimplementedInst("unsupported gfx12 wave64 SWMMAC B layout");
 }
 
-// ---------------------------------------------------------------------------
 // Lane permutation for cbsz/abid (A broadcast) and blgp (B permutation)
-// ---------------------------------------------------------------------------
 
 /// @brief Permute the A-matrix lane based on cbsz and abid fields.
 ///
@@ -611,9 +608,7 @@ inline uint32_t permute_b_lane(uint32_t lane, uint32_t blgp) {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Element extraction functions
-// ---------------------------------------------------------------------------
 
 inline uint32_t packed_mask(uint32_t bits) { return bits >= 32 ? UINT32_MAX : ((1u << bits) - 1u); }
 
@@ -915,9 +910,7 @@ template <typename Run> bool dispatch_matrix_fmt_pair(uint32_t a_fmt, uint32_t b
   }
 }
 
-// ---------------------------------------------------------------------------
 // Execution kernels
-// ---------------------------------------------------------------------------
 
 /// Shared SIMD core for the MFMA/WMMA/SWMMAC executors. For every (row,col),
 /// Cbuf[row*stride+col] += sum_k Abuf[row*K+k] * Bbuf[k*stride+col], run as
@@ -3620,13 +3613,11 @@ inline void exec_f64(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, u
   }
 }
 
-// ---------------------------------------------------------------------------
 // SMFMAC (Sparse Matrix FMA) helpers and execution functions.
 //
 // Structured 2:4 sparsity: A is half-density (2 of every 4 K positions are
 // nonzero). A per-lane index register selects which 2-of-4 positions are live.
 // Each 4-bit nibble in the index encodes two 2-bit position selectors (p0, p1).
-// ---------------------------------------------------------------------------
 
 struct SmfmacReadFp8Ocp {
   float operator()(auto &cu, uint32_t base, uint32_t byte_idx, uint32_t lane) const {
@@ -4454,5 +4445,3 @@ void exec_i32_mfma_i8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MMA_EXEC_H_
