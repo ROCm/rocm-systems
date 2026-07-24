@@ -1166,6 +1166,19 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
   return blocks;
 }
 
+[[nodiscard]] std::vector<uint8_t>
+explicit_external_entries(const std::vector<AnalysisBlock> &blocks,
+                          std::span<const uint64_t> extra_leaders) {
+  std::vector<uint8_t> entries(blocks.size(), 0);
+  if (!entries.empty())
+    entries[0] = 1;
+  for (size_t block_index = 1; block_index < blocks.size(); ++block_index) {
+    if (std::ranges::find(extra_leaders, blocks[block_index].offset) != extra_leaders.end())
+      entries[block_index] = 1;
+  }
+  return entries;
+}
+
 void set_kill_transfer(AnalysisBlock &block, uint16_t pair_lo) {
   // KILL is weaker than SET for the same block: if the final state proves a
   // concrete builder, earlier dirty writes in the block should not downgrade it.
@@ -1508,7 +1521,8 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
 
 [[nodiscard]] std::vector<LatticeFacts>
 run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
-                   std::span<const PendingConsumer> pending_consumers) {
+                   std::span<const PendingConsumer> pending_consumers,
+                   std::span<const uint64_t> extra_leaders) {
   // Phase 3: compute block-entry facts to a fixed point.
   //
   // entry[B] = JOIN(exit[P]) for every predecessor P of B.
@@ -1522,6 +1536,7 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
     for (size_t successor : blocks[block_index].successors)
       predecessors[successor].push_back(block_index);
   }
+  const std::vector<uint8_t> external_entries = explicit_external_entries(blocks, extra_leaders);
 
   // Dataflow results are consumed only by pending cross-block branches. A pair
   // that is built or killed somewhere but never reaches such a consumer cannot
@@ -1541,9 +1556,10 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
   // kernel-entry SGPRs. This distinction matters for loops: the first worklist
   // visit can see a builder entry edge plus an as-yet-unvisited backedge.
   // Treating that backedge as unconstrained permanently poisons an otherwise
-  // dominated PC builder (the RCCL call-loop shape). Blocks with no
-  // predecessors remain conservative analysis roots because they may be
-  // externally entered.
+  // dominated PC builder (the RCCL call-loop shape). Section entry and every
+  // caller-provided kernel entry are nevertheless external roots even when
+  // they have structural predecessors. Blocks with no predecessors remain
+  // conservative analysis roots because they may also be externally entered.
   std::vector<bool> reachable(blocks.size(), false);
   // Keep key presence separate from the sparse fact vectors. The dataflow
   // join needs the union of predecessor keys on every worklist visit; caching
@@ -1565,7 +1581,7 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
     LatticeFacts new_entry;
     std::bitset<REGISTER_SET_MAX_SGPRS> mentioned_pairs;
     const bool new_reachable =
-        block_index == 0 || predecessors[block_index].empty() ||
+        external_entries[block_index] != 0 || predecessors[block_index].empty() ||
         std::ranges::any_of(predecessors[block_index],
                             [&](size_t predecessor) { return reachable[predecessor]; });
     if (new_reachable && !predecessors[block_index].empty()) {
@@ -1627,10 +1643,10 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
             join_lattice_value(joined, *entry);
           }
         }
-        // Block zero is always an external entry, even if a loop backedge gives
-        // it structural predecessors. The external path carries an
-        // unconstrained SGPR pair and must participate in the join.
-        if (block_index == 0)
+        // Every explicit kernel entry has an external path carrying an
+        // unconstrained SGPR pair, even if it also has structural
+        // predecessors. That path must participate in the join.
+        if (external_entries[block_index] != 0)
           joined.incomplete = true;
         new_entry.append(pair_lo, std::move(joined));
       }
@@ -1766,7 +1782,8 @@ struct VectorLaneFlowState {
 }
 
 void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
-                                     std::vector<IndirectCallFixup> &recovered) {
+                                     std::vector<IndirectCallFixup> &recovered,
+                                     std::span<const uint64_t> extra_leaders) {
   // gfx1250 device functions sometimes keep a small static call set in one
   // VGPR: getpc-built low/high halves are written to fixed lanes, then read
   // back into an SGPR pair before swappc. Track only fixed-lane
@@ -1792,9 +1809,10 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
   if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
     return;
 
-  const std::vector<AnalysisBlock> blocks = build_analysis_blocks(ctx, {});
+  const std::vector<AnalysisBlock> blocks = build_analysis_blocks(ctx, extra_leaders);
   if (blocks.empty())
     return;
+  const std::vector<uint8_t> external_entries = explicit_external_entries(blocks, extra_leaders);
 
   const auto changes_vgpr_msb_bank = [](std::string_view mnemonic) {
     return mnemonic == "s_set_vgpr_msb" || mnemonic == "s_setreg_b32" ||
@@ -1995,15 +2013,16 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
         new_entry.vgpr_msb_imm = std::nullopt;
     }
 
-    // A block with no direct predecessors is a possible kernel/device-function
-    // entry. Block zero is also always an external entry, even when a loop
-    // backedge gives it structural predecessors. Meet that external state with
-    // any reachable backedge: it contributes no lane stash and guarantees bank
-    // zero only for the first text block.
-    if (predecessors[block_index].empty() || block_index == 0) {
+    // A block with no direct predecessors is a possible device-function entry.
+    // Section entry and every caller-provided kernel entry are explicit
+    // external entries even when they have structural predecessors. Meet the
+    // corresponding external state with any reachable predecessor: it
+    // contributes no lane stash, and explicit kernel entries begin in bank
+    // zero according to the entry contract.
+    if (predecessors[block_index].empty() || external_entries[block_index] != 0) {
       new_reachable = true;
       VectorLaneFlowState external_entry;
-      if (block_index == 0)
+      if (external_entries[block_index] != 0)
         external_entry.vgpr_msb_imm = uint8_t{0};
       if (!have_predecessor_state) {
         new_entry = std::move(external_entry);
@@ -2155,7 +2174,7 @@ discover_indirect_branch_edges(std::span<const Instruction *const> insts,
     return recovered;
 
   AnalysisContext ctx = build_context(insts, text, arch);
-  recover_vector_lane_stashed_pcs(ctx, recovered);
+  recover_vector_lane_stashed_pcs(ctx, recovered, extra_leaders);
   std::vector<uint64_t> leaders(extra_leaders.begin(), extra_leaders.end());
 
   for (size_t iteration = 0; iteration < kMaxIndirectDiscoveryIterations; ++iteration) {
@@ -2172,7 +2191,7 @@ discover_indirect_branch_edges(std::span<const Instruction *const> insts,
 
     size_t unresolved_consumers = 0;
     if (!pending_consumers.empty()) {
-      const auto entry_facts = run_block_dataflow(blocks, pending_consumers);
+      const auto entry_facts = run_block_dataflow(blocks, pending_consumers, extra_leaders);
       unresolved_consumers = classify_pending_consumers(ctx, blocks, entry_facts, pending_consumers,
                                                         iteration_recovered);
     }

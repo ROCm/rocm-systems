@@ -300,7 +300,7 @@ Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exe
       has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||
       has_lit_0_and_has_lit_1_and_has_lit_2())
     size_ += sizeof(MachineInst);
-  if (has_dpp8() || has_dpp16())
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     size_ += sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
@@ -370,7 +370,7 @@ Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn 
       has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||
       has_lit_0_and_has_lit_1_and_has_lit_2())
     size_ += sizeof(MachineInst);
-  if (has_dpp8() || has_dpp16())
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     size_ += sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
@@ -523,7 +523,7 @@ Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst
       has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||
       has_lit_0_and_has_lit_1_and_has_lit_2())
     size_ += sizeof(MachineInst);
-  if (has_dpp8() || has_dpp16())
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     size_ += sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();

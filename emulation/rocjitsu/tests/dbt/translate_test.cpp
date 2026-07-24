@@ -110,8 +110,9 @@ namespace {
 
 uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
-  names.insert(names.end(), name.begin(), name.end());
-  names.push_back('\0');
+  names.resize(names.size() + name.size() + 1);
+  if (!name.empty())
+    std::memcpy(names.data() + offset, name.data(), name.size());
   return offset;
 }
 
@@ -9486,9 +9487,11 @@ TEST(BinaryTranslatorE2E, Gfx1250SplitsScale16Fp4AcrossMAndKForA0) {
                                                                 .src1 = 256 + 32,
                                                                 .src2 = 256 + 48,
                                                                 .neg = 7});
+  constexpr auto overwrite_masked_a =
+      gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 128, .vdst = 0});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
-      {scale16[0], scale16[1], matrix[0], matrix[1], kGfx1250SEndpgm});
+      {scale16[0], scale16[1], matrix[0], matrix[1], overwrite_masked_a[0], kGfx1250SEndpgm});
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
 
   rocjitsu::BinaryTranslator translator(
@@ -9524,6 +9527,8 @@ TEST(BinaryTranslatorE2E, Gfx1250SplitsScale16Fp4AcrossMAndKForA0) {
     const uint16_t destination = static_cast<uint16_t>(96u + m_half * 8u);
     EXPECT_EQ(replacement.op, gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p);
     EXPECT_EQ(replacement.vdst, destination);
+    EXPECT_EQ(replacement.src0, 256u)
+        << "the dead v0 range should be selected as unspilled masked-A scratch";
     EXPECT_EQ(replacement.src1, 256u + 32u);
     EXPECT_EQ(replacement.src2, accumulate ? 256u + destination : 256u + 48u + m_half * 8u);
     EXPECT_EQ(replacement.opsel, 4u);
@@ -9538,6 +9543,13 @@ TEST(BinaryTranslatorE2E, Gfx1250SplitsScale16Fp4AcrossMAndKForA0) {
   EXPECT_NE(scale_a_sources[0], scale_a_sources[1]);
   EXPECT_EQ(scale_a_sources[0], scale_a_sources[2]);
   EXPECT_EQ(scale_a_sources[1], scale_a_sources[3]);
+
+  // The following source VALU defines the selected unspilled scratch range.
+  // Keep it outside the final FP4 WMMA's one-slot input-read window.
+  const uint32_t v_nop = gfx1250::build_vop1(gfx1250::kVNopVop1)[0];
+  ASSERT_LT(pass_offsets.back() + 5, word_count);
+  EXPECT_EQ(words[pass_offsets.back() + 4], v_nop);
+  EXPECT_EQ(words[pass_offsets.back() + 5], overwrite_masked_a[0]);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250Scale16Fp4AdjustsUpperCAndDestinationBanks) {
@@ -9691,6 +9703,11 @@ TEST(BinaryTranslatorE2E, Gfx1250ConvertsScale16F8f6f4ToRegularScaleForA0) {
   EXPECT_EQ(target_words[pass_offsets[0] + 5], v_nop);
   EXPECT_EQ(target_words[pass_offsets[0] + 6], v_nop);
   EXPECT_NE(target_words[pass_offsets[0] + 7], v_nop);
+  ASSERT_LT(pass_offsets[1] + 7, target_word_count);
+  EXPECT_EQ(target_words[pass_offsets[1] + 4], v_nop);
+  EXPECT_EQ(target_words[pass_offsets[1] + 5], v_nop);
+  EXPECT_EQ(target_words[pass_offsets[1] + 6], v_nop);
+  EXPECT_NE(target_words[pass_offsets[1] + 7], v_nop);
 
   // The FP8 matrix-A format takes the lane-mask K-selection path: each pass
   // isolates its own K=16 half by cndmask'ing matrix-A lanes against a lane

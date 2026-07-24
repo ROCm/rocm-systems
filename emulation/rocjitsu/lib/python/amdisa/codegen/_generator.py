@@ -1994,10 +1994,14 @@ class CodeGenerator:
             if not inst_enc.insts:
                 continue
             dpp_struct, dpp8_struct = self._vop_dpp_struct_names(inst_enc.enc_name)
-            owns_dpp_extension = (
-                dpp_struct is not None
-                and self._supports_dpp_for_encoding(inst_enc.enc_name)
-            ) or dpp8_struct is not None
+            dpp_extension_conditions = []
+            if dpp_struct is not None and self._supports_dpp_for_encoding(
+                inst_enc.enc_name
+            ):
+                dpp_extension_conditions.append('inst_.src0 == amdgpu::SRC_DPP')
+            if dpp8_struct is not None:
+                dpp_extension_conditions.append('amdgpu::dpp::is_src_dpp8(inst_.src0)')
+            owns_dpp_extension = bool(dpp_extension_conditions)
             # Compact VOP1/VOP2/VOPC encodings already account for DPP through
             # !default_encoding(). VOP3-family base encodings are 64 bits, so
             # their DPP control DWORD must be counted explicitly.
@@ -2135,8 +2139,9 @@ class CodeGenerator:
             else:
                 size_line += extension_size_line
             if needs_explicit_dpp_size:
+                dpp_extension_condition = ' || '.join(dpp_extension_conditions)
                 size_line += (
-                    ' if (has_dpp8() || has_dpp16())' ' size_ += sizeof(MachineInst);'
+                    f' if ({dpp_extension_condition})' ' size_ += sizeof(MachineInst);'
                 )
             if inst_enc.has_implied_literal_ops:
                 size_line += (

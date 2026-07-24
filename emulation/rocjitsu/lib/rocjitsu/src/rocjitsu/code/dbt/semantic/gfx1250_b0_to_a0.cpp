@@ -878,12 +878,12 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
         append_words(words, gfx1250::build_vop1(gfx1250::kVNopVop1));
     }
   }
-  if (matrix_scratch.lease->spilled) {
-    // Do not let the restore loads overwrite the final WMMA input in its
-    // co-execution window.
-    for (int slot = 0; slot < wmma_valu_hazard_slots; ++slot)
-      append_words(words, gfx1250::build_vop1(gfx1250::kVNopVop1));
-  }
+  // The allocator proves only that an unspilled range is dead before the
+  // source WMMA. A following source VALU may therefore define masked-A even
+  // when no spill restore is needed. Keep every subsequent VALU, including
+  // restoration loads, outside the final WMMA input-read window.
+  for (int slot = 0; slot < wmma_valu_hazard_slots; ++slot)
+    append_words(words, gfx1250::build_vop1(gfx1250::kVNopVop1));
   append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
   if (!append_gfx1250_scratch_preservation(words, *matrix_scratch.lease, true)) {
     return ExpandResult::failed(

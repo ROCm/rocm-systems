@@ -716,6 +716,39 @@ TEST(CfgAnalysis, SeedsTextEntryWithLoopBackedgeForCrossBlockPcBuilder) {
   EXPECT_FALSE(consumer->static_indirect_call_fixups()[0].source_incomplete);
 }
 
+TEST(CfgAnalysis, ExplicitKernelEntryMakesIncomingPcBuilderIncomplete) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // Entry A builds a static target and branches into entry B. B is also a
+  // separately launchable kernel, so its externally supplied s[8:9] value is
+  // unconstrained and must participate in the join with A's concrete builder.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x00: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x04: s_add_u32.
+      24,                                                  // 0x08: 0x04 + 24 = 0x1c.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c: s_addc_u32.
+      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4),         // 0x10 -> entry B at 0x18.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x14: skipped.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x18: entry B setpc.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x1c: A's target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 1> extra_leaders{24};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+
+  auto *consumer = block_starting_at(blocks, 24);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 28u);
+  EXPECT_TRUE(consumer->static_indirect_call_fixups()[0].source_incomplete)
+      << "an independently launchable entry must include unconstrained external SGPR state";
+}
+
 TEST(CfgAnalysis, RocrAbortTrapStopsTemporaryPcBuilderCfg) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint32_t kLiteralOperand = 255;
@@ -1350,6 +1383,47 @@ TEST(CfgAnalysis, Gfx1250SeedsTextEntryWithLoopBackedgeForLaneStash) {
   ASSERT_NE(consumer, nullptr);
   ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
   EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 64u);
+}
+
+TEST(CfgAnalysis, Gfx1250ExplicitKernelEntryClearsIncomingLaneStash) {
+  constexpr auto getpc = gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1, {.sdst = 0});
+  constexpr auto branch = gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = 1});
+  constexpr auto call = gfx1250::build_sop1(gfx1250::kSSwapPcI64Sop1, {.ssrc0 = 0, .sdst = 30});
+
+  // Entry A stashes a target and branches into entry B. B is independently
+  // launchable, so its external path has no proven v44 lane contents even
+  // though A's internal predecessor carries a complete stash.
+  std::vector<uint32_t> words = {
+      getpc[0], // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      64u,
+      0u, // 0x04: target 0x04 + 64 = 0x44.
+      0xD761002Cu,
+      0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x18: v_writelane_b32 v44, s1, 1.
+      branch[0],   // 0x20: -> independently launchable entry B at 0x28.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), // 0x24: skipped.
+      0xD7600000u,
+      0x0201012Cu, // 0x28: entry B reads v44 lane 0.
+      0xD7600001u,
+      0x0201032Cu,                                // 0x30: reads v44 lane 1.
+      call[0],                                    // 0x38: must remain dynamic.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: continuation.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), // 0x40: padding.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x44: A's target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 1> extra_leaders{40};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, extra_leaders);
+
+  size_t total_fixups = 0;
+  for (const auto &block : blocks)
+    total_fixups += block->static_indirect_call_fixups().size();
+  EXPECT_EQ(total_fixups, 0u);
 }
 
 TEST(CfgAnalysis, Gfx1250A0UsesLowByteOfWorkaroundAnnotatedVgprMsb) {
