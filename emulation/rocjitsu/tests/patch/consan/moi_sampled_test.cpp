@@ -2032,64 +2032,82 @@ TEST(ConSanMoi, CdnaSampledSynchronizationSpillsThroughDynamicStackFrame) {
   }
 }
 
-TEST(ConSanMoi, Cdna4SampledBarrierCopiesNonzeroAbsoluteSlotThroughTemporary) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
-  const auto first_access =
-      build_cdna4_ds_store_b32(/*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, kArch);
-  const auto second_access =
-      build_cdna4_ds_store_b32(/*vaddr=*/4, /*vdata=*/5, /*byte_offset=*/4, kArch);
-  const auto barrier = build_cdna4_s_barrier(kArch);
-  ASSERT_TRUE(first_access && second_access && barrier);
+TEST(ConSanMoi, CdnaSampledBarrierMaterializesNonzeroAbsoluteSlot) {
+  for (const SampledTarget &target : kSampledCdnaTargets) {
+    SCOPED_TRACE(target.label);
+    const auto first_access =
+        target.arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? build_cdna3_ds_store_b32(/*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, target.arch)
+            : build_cdna4_ds_store_b32(/*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, target.arch);
+    const auto second_access =
+        target.arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? build_cdna3_ds_store_b32(/*vaddr=*/4, /*vdata=*/5, /*byte_offset=*/4, target.arch)
+            : build_cdna4_ds_store_b32(/*vaddr=*/4, /*vdata=*/5, /*byte_offset=*/4, target.arch);
+    const auto barrier = target.arch == ROCJITSU_CODE_ARCH_CDNA3
+                             ? build_cdna3_s_barrier(target.arch)
+                             : build_cdna4_s_barrier(target.arch);
+    ASSERT_TRUE(first_access && second_access && barrier);
 
-  std::vector<uint32_t> text_words(540u, build_s_nop(0, kArch));
-  std::copy(first_access->begin(), first_access->end(), text_words.begin() + 1u);
-  std::copy(second_access->begin(), second_access->end(), text_words.begin() + 4u);
-  text_words[400] = *barrier;
-  text_words.back() = build_s_endpgm(kArch);
+    std::vector<uint32_t> text_words(540u, build_s_nop(0, target.arch));
+    std::copy(first_access->begin(), first_access->end(), text_words.begin() + 1u);
+    std::copy(second_access->begin(), second_access->end(), text_words.begin() + 4u);
+    text_words[400] = *barrier;
+    text_words.back() = build_s_endpgm(target.arch);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
-  options.moi_runtime_sample_stride = 2u;
-  options.moi_report_buffer_address = 0x123456780000ull;
-  options.moi_report_buffer_size = direct_sampled_report_bytes(4);
-  options.moi_track_barriers = true;
-  options.moi_track_atomics = false;
-  options.max_patches = 3u;
+    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    options.moi_runtime_sample_stride = 2u;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = direct_sampled_report_bytes(4);
+    options.moi_track_barriers = true;
+    options.moi_track_atomics = false;
+    options.max_patches = 3u;
 
-  const ConSanResult result =
-      try_patch_consan(make_cdna4_lds_code_object(text_words, "sampled_nonzero_slot"), options);
+    const std::vector<uint8_t> bytes =
+        target.arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? make_cdna3_lds_code_object(text_words, "sampled_nonzero_slot")
+            : make_cdna4_lds_code_object(text_words, "sampled_nonzero_slot");
+    const ConSanResult result = try_patch_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  std::vector<const ConSanPatchInfo *> accesses;
-  for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
-        patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore) {
-      accesses.push_back(&patch);
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    std::vector<const ConSanPatchInfo *> accesses;
+    for (const ConSanPatchInfo &patch : result.patches) {
+      if (patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+          patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore) {
+        accesses.push_back(&patch);
+      }
     }
-  }
-  ASSERT_EQ(accesses.size(), 2u);
-  std::ranges::sort(accesses, {}, &ConSanPatchInfo::sampled_first_slot);
-  EXPECT_EQ(accesses.front()->sampled_first_slot, 0u);
-  ASSERT_GT(accesses.back()->sampled_first_slot, 0u);
-  const auto barrier_patch = std::ranges::find(
-      result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
-  ASSERT_NE(barrier_patch, result.patches.end());
-  ASSERT_TRUE(barrier_patch->scratch_vgpr);
+    ASSERT_EQ(accesses.size(), 2u);
+    std::ranges::sort(accesses, {}, &ConSanPatchInfo::sampled_first_slot);
+    EXPECT_EQ(accesses.front()->sampled_first_slot, 0u);
+    ASSERT_GT(accesses.back()->sampled_first_slot, 0u);
+    const auto barrier_patch = std::ranges::find(
+        result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
+    ASSERT_NE(barrier_patch, result.patches.end());
+    ASSERT_TRUE(barrier_patch->scratch_vgpr);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
-  ASSERT_TRUE(patched.is_valid());
-  const std::vector<uint32_t> cave = text_words_at_offset(patched, barrier_patch->trampoline_offset,
-                                                          barrier_patch->trampoline_size);
-  const uint16_t scratch_base = *barrier_patch->scratch_vgpr;
-  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_base + 2u);
-  const uint16_t bank_vgpr = static_cast<uint16_t>(scratch_base + 6u);
-  const auto absolute_slot = instrumentation::build_v_add_u32_literal(
-      value_vgpr, accesses.back()->sampled_first_slot, bank_vgpr, kArch);
-  ASSERT_TRUE(absolute_slot);
-  std::vector<uint32_t> expected = *absolute_slot;
-  expected.push_back(build_v_mov_b32_e32(bank_vgpr, vector_source_vgpr(value_vgpr), kArch));
-  EXPECT_TRUE(contains_subsequence(cave, expected));
-  EXPECT_TRUE(result.final_validation_passed);
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    const std::vector<uint32_t> cave = text_words_at_offset(
+        patched, barrier_patch->trampoline_offset, barrier_patch->trampoline_size);
+    const uint16_t scratch_base = *barrier_patch->scratch_vgpr;
+    const uint16_t value_vgpr = static_cast<uint16_t>(scratch_base + 2u);
+    const uint16_t bank_vgpr = static_cast<uint16_t>(scratch_base + 6u);
+    // CDNA4 cannot alias the literal-add destination and source, so it uses
+    // the dead value temporary and copies back; CDNA3 writes the bank in place.
+    const uint16_t absolute_slot_vgpr =
+        target.arch == ROCJITSU_CODE_ARCH_CDNA4 ? value_vgpr : bank_vgpr;
+    const auto absolute_slot = instrumentation::build_v_add_u32_literal(
+        absolute_slot_vgpr, accesses.back()->sampled_first_slot, bank_vgpr, target.arch);
+    ASSERT_TRUE(absolute_slot);
+    std::vector<uint32_t> expected = *absolute_slot;
+    if (absolute_slot_vgpr != bank_vgpr) {
+      expected.push_back(
+          build_v_mov_b32_e32(bank_vgpr, vector_source_vgpr(value_vgpr), target.arch));
+    }
+    EXPECT_TRUE(contains_subsequence(cave, expected));
+    EXPECT_TRUE(result.final_validation_passed);
+  }
 }
 
 TEST(ConSanMoi, CdnaSampledUsesPerOwnerPersistentTuplesAcrossAccvgprBoundaries) {

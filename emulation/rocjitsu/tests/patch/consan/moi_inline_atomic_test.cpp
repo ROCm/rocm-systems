@@ -2839,6 +2839,8 @@ TEST(ConSanMoi, InlineAtomicDynamicStackSpillRejectsUnreservedFrameSaveSlot) {
     ASSERT_NE(owner, original.kernels().end());
     uint32_t call = 0u;
     std::memcpy(&call, bytes.data() + text_file_offset + owner->entry_text_offset, sizeof(call));
+    // s_call_b64 stores its signed dword delta in the low 16 bits. Moving the
+    // call one dword later makes the unchanged target one dword closer.
     const int16_t moved_delta = static_cast<int16_t>(static_cast<uint16_t>(call & 0xffffu) - 1u);
     const uint32_t moved_call = build_s_call_b64(/*return s[30:31]=*/30u, moved_delta, kArch);
     const uint32_t nop = build_s_nop(0u, kArch);
