@@ -2493,6 +2493,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   const uint16_t temporary_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 6u);
   const uint16_t address_vgpr = address_plan.result_address_vgpr;
   const bool is_compare_exchange = consan_atomic_is_compare_exchange(candidate.site);
+  const bool claims_release_predecessor = instrumentation::is_admitted_arch(arch);
 
   std::vector<uint32_t> words;
   words.reserve(
@@ -2551,7 +2552,9 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
             inline_atomic_release_capacity, snapshot_table_base, inline_causal_snapshot_capacity,
             token_table_base, inline_acquired_token_capacity,
             /*emit_guest_instruction=*/true,
-            /*import_claimed_predecessor=*/true,
+            // A release RMW extends every predecessor's release sequence. Keep
+            // the claimed predecessor until its causal frontier is imported.
+            /*import_claimed_predecessor=*/claims_release_predecessor,
             /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors)) {
       errors.emplace_back(
           "ConSan MOI inline release could not emit a versioned causal transaction");
@@ -2580,8 +2583,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   // slot retains the predecessor payload across the guest, acquire import,
   // causal snapshot, and successor commit.
   const bool claimed_acquire_release =
-      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-       is_rdna4_family_arch(arch)) &&
+      claims_release_predecessor &&
       candidate.event_kind == ConSanMoiAtomicEventKind::AcquireRelease && !is_compare_exchange;
   if (claimed_acquire_release) {
     if (!append_inline_versioned_release_transaction(
