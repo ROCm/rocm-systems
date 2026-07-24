@@ -292,6 +292,7 @@ TEST(WaveDebugTest, IllegalInstructionStopsWaveUnderDebugger) {
   uint32_t illegal_count = 0;
   fx.cu->set_illegal_inst_handler([&](amdgpu::Wavefront &wave) {
     ++illegal_count;
+    wave.set_fatal_exception_pending(true);
     wave.set_debug_halted(true);
     return true;
   });
@@ -300,7 +301,10 @@ TEST(WaveDebugTest, IllegalInstructionStopsWaveUnderDebugger) {
   fx.cu->step();
   EXPECT_EQ(illegal_count, 1u);
   EXPECT_TRUE(wave->debug_halted());
+  EXPECT_TRUE(wave->fatal_exception_pending());
   EXPECT_EQ(wave->pc, kKernelAddr);
+  wave->reset();
+  EXPECT_FALSE(wave->fatal_exception_pending());
 }
 
 TEST(WaveDebugTest, IllegalInstructionWithoutDebuggerHalts) {
