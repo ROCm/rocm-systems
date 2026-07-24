@@ -1218,6 +1218,25 @@ void clear_virtual_lds_dispatch_queues();
     true, hsa_amd_queue_intercept_create_fn, rj_amd_queue_intercept_create,                        \
     hsa_amd_queue_intercept_create_fn_t)
 
+/// @brief Return true when auto-A0 mode installs the patch entry named @p name.
+///
+/// @details Auto-A0 is a narrow overlay on real A0 silicon: it presents a B0
+/// identity, captures source bytes, and translates at load. It must NOT inherit
+/// the simulation manifest's queue/signal/memory/profiling/executable-symbol/
+/// virtual-LDS surface, which exists to remap a synthetic guest agent onto a
+/// distinct host and has no meaning when the presented agent IS the execution
+/// agent. This allowlist is the auto-A0 patch set; simulation installs the whole
+/// manifest. Entry names come from RJ_HSA_PATCH_ENTRIES.
+[[nodiscard]] constexpr bool auto_a0_patches(std::string_view name) {
+  return name == "shut_down" ||                        // forwarding shutdown (no suppress)
+         name == "agent_get_info" ||                   // B0 presentation overlay
+         name == "create_from_file" ||                 // source-byte capture
+         name == "create_from_memory" ||               // source-byte capture
+         name == "system_get_major_extension_table" || // vendor-reader capture wrap
+         name == "destroy" ||                          // reader lifetime bookkeeping
+         name == "load_agent_code_object";             // translate at load
+}
+
 /// @brief Process-local HSA API table patch state for the rocjitsu DBT tool.
 ///
 /// @details Tool chaining depends on saving the function pointers that are
@@ -1264,8 +1283,14 @@ public:
       return false;
     }
 
+    // Simulation installs the whole manifest; auto-A0 installs only its narrow
+    // presentation/load/capture/shutdown set (auto_a0_patches). Every entry is
+    // still saved above, so layer() getters return the real originals in both
+    // modes; only what is written into the live table differs.
+    const bool install_all = config_->mode == HookMode::kSimulation;
 #define RJ_INSTALL_PATCH(name, table_ptr, present, patch_if_original, field, wrapper, type)        \
-  if ((present) && (!(patch_if_original) || original_##name##_ != nullptr))                        \
+  if ((present) && (!(patch_if_original) || original_##name##_ != nullptr) &&                      \
+      (install_all || auto_a0_patches(#name)))                                                     \
     (table_ptr)->field = wrapper;
     RJ_HSA_PATCH_ENTRIES(RJ_INSTALL_PATCH)
 #undef RJ_INSTALL_PATCH

@@ -1488,6 +1488,50 @@ TEST(HsaHooksUnitTest, DoesNotPresentB0RevisionInSimulationMode) {
   EXPECT_EQ(query_asic_revision(api, kGfx1250Agent), 0u);
 }
 
+// Auto-A0 installs a narrow manifest: presentation/load/capture/shutdown are
+// patched, but the simulation-only remap surface (queue/signal) is left as the
+// runtime's own entries.
+TEST(HsaHooksUnitTest, AutoA0InstallsNarrowManifest) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+
+  // Patched in auto-A0.
+  EXPECT_NE(api.core.hsa_agent_get_info_fn, fake_agent_get_info);
+  EXPECT_NE(api.core.hsa_executable_load_agent_code_object_fn,
+            fake_executable_load_agent_code_object);
+  EXPECT_NE(api.core.hsa_system_get_major_extension_table_fn,
+            fake_system_get_major_extension_table);
+  EXPECT_NE(api.core.hsa_shut_down_fn, fake_shut_down);
+  // NOT patched in auto-A0 (simulation-only surface).
+  EXPECT_EQ(api.core.hsa_queue_create_fn, fake_queue_create);
+  EXPECT_EQ(api.core.hsa_signal_store_relaxed_fn, fake_signal_store_relaxed);
+  OnUnload();
+}
+
+// Simulation installs the full manifest, including the queue/signal surface that
+// auto-A0 omits.
+TEST(HsaHooksUnitTest, SimulationInstallsFullManifest) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  write_runtime_config_path(); // simulation mode
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  EXPECT_NE(api.core.hsa_queue_create_fn, fake_queue_create);
+  EXPECT_NE(api.core.hsa_signal_store_relaxed_fn, fake_signal_store_relaxed);
+  EXPECT_NE(api.core.hsa_agent_get_info_fn, fake_agent_get_info);
+}
+
 // Register a code object image and return its reader handle.
 hsa_code_object_reader_t register_code_object(FakeApiTable &api,
                                               const std::vector<uint8_t> &image) {
