@@ -188,10 +188,6 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["d128-block"]["overhead_filter"],
             ("HipMoiCdna4D128AttentionBlock." "SampledFastContextMatchesHostReference"),
         )
-        for workload_id in ("streamk-arrival", "tree-atomic-or"):
-            streamk = workloads[workload_id]
-            self.assertEqual(streamk["clean_filter"], streamk["overhead_filter"])
-            self.assertNotIn("*", streamk["clean_filter"])
         self.assertEqual(
             workloads["jakub-attention"]["relative_path"],
             "hip-moi-build/tests/hip_moi_reference_cdna4_jakub_matmul",
@@ -227,10 +223,6 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["wmma-attention"]["clean_filter"],
             "HipMoiGfx1250WmmaAttentionBlock.*",
         )
-        for workload_id in ("streamk-arrival", "tree-atomic-or"):
-            streamk = workloads[workload_id]
-            self.assertEqual(streamk["clean_filter"], streamk["overhead_filter"])
-            self.assertNotIn("*", streamk["clean_filter"])
         self.assertEqual(
             workloads["d128-block"]["fault_filter"],
             (
@@ -245,6 +237,43 @@ class ConSanValidationTest(unittest.TestCase):
                 "hip_moi_reference_gfx1250_jakub_matmul"
             ),
         )
+
+    def test_streamk_filters_pin_exact_ordering_oracles_and_fault_fallback(
+        self,
+    ) -> None:
+        expected_filters = {
+            "gfx950": {
+                "streamk-arrival": (
+                    "HipMoiCdna4MfmaStreamKArrivalCounter."
+                    "AcqRelFetchAddOrdersMfmaPartials"
+                ),
+                "tree-atomic-or": (
+                    "HipMoiCdna4MfmaStreamKTreeAtomicOr."
+                    "AcqRelBitmaskOrdersMfmaPartials"
+                ),
+            },
+            "gfx1250": {
+                "streamk-arrival": (
+                    "HipMoiGfx1250WmmaStreamKArrivalCounter."
+                    "AcqRelFetchAddOrdersWmmaPartials"
+                ),
+                "tree-atomic-or": (
+                    "HipMoiGfx1250WmmaStreamKTreeAtomicOr."
+                    "AcqRelBitmaskOrdersWmmaPartials"
+                ),
+            },
+        }
+        for target, expected_by_workload in expected_filters.items():
+            workloads = {
+                workload["id"]: workload
+                for workload in validation._manifest(target)["workloads"]
+            }
+            for workload_id, expected_filter in expected_by_workload.items():
+                with self.subTest(target=target, workload=workload_id):
+                    streamk = workloads[workload_id]
+                    self.assertEqual(streamk["clean_filter"], expected_filter)
+                    self.assertEqual(streamk["overhead_filter"], expected_filter)
+                    self.assertIsNone(streamk["fault_filter"])
 
     def test_gfx1250_doctor_checks_target_native_executables(self) -> None:
         with temporary_root() as workspace:
