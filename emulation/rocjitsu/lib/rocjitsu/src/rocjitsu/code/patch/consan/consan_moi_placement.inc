@@ -1186,6 +1186,11 @@ struct MoiResourcePlanningState {
 [[nodiscard]] std::optional<std::vector<const MoiKernelResourceContext *>>
 resolve_moi_scalar_owner_contexts(const MoiResourcePlanningState &state,
                                   std::span<const uint64_t> owners) {
+  // The callers place state only for a nonempty, fully resolved owner set.
+  // Empty owners and any planning inconsistency therefore share the explicit
+  // fail-closed nullopt contract. Owners and contexts come from the same
+  // parsed ConSanResult, so descriptor-resolution failure is an internal
+  // consistency guard rather than a separately inducible code-object state.
   if (!state.valid || owners.empty())
     return std::nullopt;
   std::vector<const MoiKernelResourceContext *> contexts;
@@ -3191,6 +3196,9 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
       const auto resolved_contexts = resolve_moi_scalar_owner_contexts(scalar_state, scalar_owners);
       const std::vector<const MoiKernelResourceContext *> scalar_contexts =
           resolved_contexts.value_or(std::vector<const MoiKernelResourceContext *>{});
+      // Per-context allocation floors and VCC checks are intentionally
+      // stricter than the former plan-min scan. Resolution failure leaves the
+      // candidate range empty so placement fails closed.
       const uint32_t first = resolved_contexts ? moi_scalar_persistent_tail_floor(scalar_contexts)
                                                : moi_ordinary_sgpr_limit(arch);
       const auto unavailable = [&](uint16_t base) {

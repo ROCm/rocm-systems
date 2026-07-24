@@ -9,6 +9,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
@@ -51,6 +52,20 @@ RJ_DIAGNOSTIC_POP
 #include <vector>
 
 namespace rocjitsu {
+
+bool consan_detail::validate_scalar_state_temporaries(const ConSanOptions &options,
+                                                      std::string_view consumer,
+                                                      std::vector<std::string> &errors) {
+  if (!moi_uses_scalar_persistent_state(options) ||
+      (options.moi_owner_vgpr && options.moi_epoch_vgpr)) {
+    return true;
+  }
+  errors.emplace_back("ConSan MOI " + std::string(consumer) +
+                      " has no scalar-state VGPR temporaries (owner=" +
+                      std::string(options.moi_owner_vgpr ? "set" : "unset") +
+                      ", epoch=" + std::string(options.moi_epoch_vgpr ? "set" : "unset") + ")");
+  return false;
+}
 
 #include "rocjitsu/code/patch/consan/consan_moi_candidates.inc"
 

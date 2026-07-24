@@ -2403,7 +2403,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     words.push_back(*wait);
   }
   if (moi_uses_scalar_persistent_state(options)) {
-    if (!validate_consan_moi_scalar_state_temporaries(options, "sampled probe", errors))
+    if (!consan_detail::validate_scalar_state_temporaries(options, "sampled probe", errors))
       return std::nullopt;
     words.push_back(
         build_v_mov_b32_e32(*options.moi_owner_vgpr, *options.moi_persistent_owner_sgpr, arch));

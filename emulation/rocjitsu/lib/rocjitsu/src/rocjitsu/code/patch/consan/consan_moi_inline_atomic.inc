@@ -980,7 +980,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                             *private_layout, arch, errors))
     return false;
   if (moi_uses_scalar_persistent_state(options)) {
-    if (!validate_consan_moi_scalar_state_temporaries(options, "sampled atomic prelude", errors))
+    if (!consan_detail::validate_scalar_state_temporaries(options, "sampled atomic prelude",
+                                                          errors))
       return false;
     words.push_back(
         build_v_mov_b32_e32(*options.moi_owner_vgpr, *options.moi_persistent_owner_sgpr, arch));

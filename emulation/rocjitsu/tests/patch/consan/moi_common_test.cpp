@@ -2,11 +2,20 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 
 namespace rocjitsu {
 namespace {
 
 TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
+  {
+    ConSanOptions disabled;
+    std::vector<std::string> errors;
+    EXPECT_TRUE(
+        consan_detail::validate_scalar_state_temporaries(disabled, "test consumer", errors));
+    EXPECT_TRUE(errors.empty());
+  }
+
   for (uint32_t present_mask = 0u; present_mask < 3u; ++present_mask) {
     SCOPED_TRACE(present_mask);
     ConSanOptions options;
@@ -18,7 +27,8 @@ TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
       options.moi_epoch_vgpr = 7u;
     std::vector<std::string> errors;
 
-    EXPECT_FALSE(validate_consan_moi_scalar_state_temporaries(options, "test consumer", errors));
+    EXPECT_FALSE(
+        consan_detail::validate_scalar_state_temporaries(options, "test consumer", errors));
     ASSERT_EQ(errors.size(), 1u);
     EXPECT_NE(errors.front().find("test consumer has no scalar-state VGPR temporaries"),
               std::string::npos);
@@ -30,7 +40,7 @@ TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
   valid.moi_owner_vgpr = 6u;
   valid.moi_epoch_vgpr = 7u;
   std::vector<std::string> errors;
-  EXPECT_TRUE(validate_consan_moi_scalar_state_temporaries(valid, "test consumer", errors));
+  EXPECT_TRUE(consan_detail::validate_scalar_state_temporaries(valid, "test consumer", errors));
   EXPECT_TRUE(errors.empty());
 }
 
@@ -467,8 +477,10 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
                               /*has_dynamic_lds=*/false, kAdditionalOwners);
 
   // The per-owner context path is shared by the Sampled/Inline dynamic-stack
-  // fallback and Record/Replay's scalar tail. The InlineShadow companion
-  // below covers that engine's scalar entry and emission path.
+  // fallback and Record/Replay's scalar tail. InlineShadow's scalar entry and
+  // emission path is covered by
+  // Cdna4InlineScalarPersistencePlansEntryScratchForEveryComponent in
+  // moi_inline_shadow_test.cpp.
   for (ConSanMoiEngine engine : {ConSanMoiEngine::Sampled, ConSanMoiEngine::RecordReplay}) {
     SCOPED_TRACE(testing::PrintToString(engine));
     ConSanOptions options = moi_options(engine);
