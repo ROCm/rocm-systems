@@ -146,6 +146,20 @@ if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.s
   exit 1
 fi
 
+# Locate the in-tree RCCL CMake package config. rccl-tests' find_package(RCCL)
+# otherwise resolves roc::rccl to the nightly ROCm (its toolchain prepends
+# ${ROCM_PATH} to CMAKE_PREFIX_PATH), so tests compile against nightly
+# nccl_device.h (stale rocshmem::QueuePair::atomic_add) and link nightly librccl
+# (missing rocshmem_gin_* factory symbols). Pin RCCL_DIR to force THIS build.
+rccl_cfg="$(ls "${rccl_prefix}"/lib*/cmake/rccl/*[Cc]onfig.cmake 2>/dev/null | head -n1)"
+if [[ -z "${rccl_cfg}" ]]; then
+  echo "ERROR: no RCCL cmake config under ${rccl_prefix}/lib*/cmake/rccl" >&2
+  ls -laR "${rccl_prefix}"/lib*/cmake 2>/dev/null >&2 || true
+  exit 1
+fi
+rccl_cmake_dir="$(dirname "${rccl_cfg}")"
+echo "    in-tree RCCL cmake config: ${rccl_cmake_dir}"
+
 # 5) rccl-tests (DEVICE_API + ROCSHMEM). allreduce fails to build; -k keeps going
 # so alltoall_perf still lands (matches the Dockerfile's `make -k || true`).
 echo "==> [5/6] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM)"
@@ -165,12 +179,24 @@ else
   echo "    (alltoall_perf whole-archive pattern not found; skipping)"
 fi
 
+# Drop the hard-coded ${ROCM_PATH}/include from the GIN factory test's include
+# list so its device headers (nccl_device/.../queue_pair_device.h) resolve to the
+# in-tree RCCL source, not the nightly ROCm copy. hipcc still adds ${ROCM_PATH}
+# implicitly, so HIP/ROCm headers remain available.
+if grep -qE '^[[:space:]]*\$\{ROCM_PATH\}/include[[:space:]]*$' "${tlib}" 2>/dev/null; then
+  sed -i '/^[[:space:]]*${ROCM_PATH}\/include[[:space:]]*$/d' "${tlib}"
+  echo "    patched gin factory test: dropped nightly ROCM_PATH/include precedence"
+else
+  echo "    (gin factory test ROCM_PATH/include pattern not found; skipping)"
+fi
+
 rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
 (
   cd "${rccl_tests_build}"
   cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON \
     -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM=ON \
     -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}" \
+    -DRCCL_DIR="${rccl_cmake_dir}" \
     -DCMAKE_PREFIX_PATH="${rccl_prefix};${MPI_HOME}" \
     -DGPU_TARGETS="${gpu_targets}" \
     "${rccl_tests_src}"
