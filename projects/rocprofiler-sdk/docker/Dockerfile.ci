@@ -18,7 +18,7 @@ ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:/usr/lib64/openmpi/bin:/opt/rocm/bi
 ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/llvm/lib:${LD_LIBRARY_PATH:-}
 
 # Debian/Ubuntu
-RUN set-euo pipefail; \
+RUN set -euo pipefail; \
     if [ -f /etc/debian_version ]; then \
         apt-get update && \
         apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common cmake g++-11 g++-12 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev && \
