@@ -407,8 +407,11 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     if (fdesc != amd::Os::FDescInit()) amd::Os::CloseFileHandle(fdesc);
   });
 
+  // Readable bytes from image_ to the end of its mapping; used to bound the ELF
+  // parse on the in-memory path (e.g. hipModuleLoadData) where no length is given.
+  size_t image_region_bound = 0;
   if (image_ != nullptr) {
-    if (!amd::Os::FindFileNameFromAddress(image_, &fname_, &foffset_)) {
+    if (!amd::Os::FindFileNameFromAddress(image_, &fname_, &foffset_, &image_region_bound)) {
       fname_ = std::string("");
       foffset_ = 0;
     }
@@ -436,8 +439,20 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   // It better be elf if its neither compressed nor uncompressed
   if (!is_compressed && !is_uncompressed) {
     if (IsCodeObjectElf(image_)) {
-      // Load the binary directly
-      auto elf_size = amd::Elf::getElfSize(image_);
+      // Use the exact file size when known, else the mapping bound derived above.
+      size_t buf_size = image_size_ != 0 ? image_size_ : image_region_bound;
+      if (buf_size == 0) {
+        LogError("Cannot determine bounds of in-memory code object");
+        return hipErrorInvalidImage;
+      }
+      auto elf_size = amd::Elf::getElfSize(image_, buf_size);
+      // If we got 0, validation has failed.
+      if (elf_size == 0) {
+        LogPrintfError(
+            "Invalid ELF code object: failed size/bounds validation, image_size is: %zu",
+            buf_size);
+        return hipErrorInvalidImage;
+      }
       for (auto* device : devices) {
         if (hipSuccess != AddDevProgram(device, image_, elf_size, fdesc))
           return hipErrorInvalidImage;

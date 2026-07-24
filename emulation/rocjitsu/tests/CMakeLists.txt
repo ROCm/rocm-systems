@@ -419,6 +419,7 @@ add_executable(
     instruction_execution_harness_test.cpp
     scalar_scc_test.cpp
     cdna3_predicate_mask_test.cpp
+    scoped_temp_test.cpp
     decode_execute_benchmark.cpp
     util_unique_handle_test.cpp
     util_simd_test.cpp
@@ -513,6 +514,7 @@ target_link_libraries(
         Threads::Threads
         GTest::gtest_main
 )
+target_include_directories(rocjitsu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 rj_configure_target(rocjitsu_tests TEST)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(
@@ -680,6 +682,7 @@ add_executable(
 target_include_directories(
     rj_dbt_translate_smoke_test
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
 )
@@ -966,6 +969,7 @@ target_compile_definitions(
 target_include_directories(
     hsa_hooks_unit_test
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
         ${CMAKE_SOURCE_DIR}/lib/util/include
