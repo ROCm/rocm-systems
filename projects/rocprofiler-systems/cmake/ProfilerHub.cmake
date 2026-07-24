@@ -26,7 +26,7 @@ set(ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR
 )
 
 option(ROCPROFSYS_PROFILER_HUB_ENABLE_LOGGING "Enable profiler-hub logging" OFF)
-option(ROCPROFSYS_PROFILER_HUB_LINK_STATIC "Link profiler-hub statically" OFF)
+option(ROCPROFSYS_PROFILER_HUB_LINK_STATIC "Link profiler-hub statically" ON)
 
 # ------------------------------------------------------------------------------
 # Resolution order:
