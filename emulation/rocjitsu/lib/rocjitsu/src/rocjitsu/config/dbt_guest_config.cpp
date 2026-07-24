@@ -240,8 +240,12 @@ std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
   if (!handoff)
     return std::nullopt;
   DbtGuestConfig config = load_dbt_guest_config_from_file(handoff->config_path);
-  if (handoff->resolved_gpu_id)
+  if (handoff->resolved_gpu_id) {
     apply_resolved_dbt_host_gpu_id(config, *handoff->resolved_gpu_id, "runtime config handoff");
+  } else if (config.enabled && config.host.gpu_id == 0) {
+    throw std::runtime_error("runtime config handoff must contain a resolved KFD gpu_id for "
+                             "automatic DBT host selection");
+  }
   return config;
 }
 

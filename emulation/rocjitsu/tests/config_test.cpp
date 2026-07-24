@@ -676,6 +676,44 @@ TEST(ConfigLoaderTest, LoadsDbtRuntimeConfigHandoffFromInvocationDirectory) {
   EXPECT_EQ(loaded->host.gpu_id, 28851u);
 }
 
+TEST(ConfigLoaderTest, RejectsPathOnlyHandoffForAutomaticDbtHost) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-automatic-");
+  const auto config_file = write_temp_config(R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942"
+        }
+      })");
+  {
+    std::ofstream handoff(std::filesystem::path(runtime.path()) / "config_path");
+    handoff << config_file.path() << '\n';
+  }
+  ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_runtime_config(), std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, AllowsPathOnlyHandoffWithoutAutomaticDbtHost) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-path-only-");
+  ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
+
+  for (const std::string_view dbt_guest : {
+           R"("dbt_guest": {"enabled": true, "host_gpu_id": 28851})",
+           R"("dbt_guest": {"enabled": false})",
+       }) {
+    const auto config_file = write_temp_config("{" + std::string(dbt_guest) + "}");
+    {
+      std::ofstream handoff(std::filesystem::path(runtime.path()) / "config_path");
+      handoff << config_file.path() << '\n';
+    }
+
+    const auto loaded = config::load_dbt_guest_config_from_runtime_config();
+    ASSERT_TRUE(loaded);
+    EXPECT_EQ(loaded->host.gpu_id, dbt_guest.find("28851") == std::string_view::npos ? 0u : 28851u);
+  }
+}
+
 TEST(ConfigLoaderTest, RejectsEmptyDbtExecutionBackend) {
   const auto file = write_temp_config(R"({
         "dbt_guest": {
