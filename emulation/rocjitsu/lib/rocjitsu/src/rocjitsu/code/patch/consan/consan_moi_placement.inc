@@ -1611,6 +1611,19 @@ void apply_test_container_filter(std::vector<Candidate> &candidates, const ConSa
   });
 }
 
+[[nodiscard]] constexpr std::optional<uint16_t>
+moi_dynamic_stack_frame_save_sgpr_offset(ConSanMoiEngine engine) {
+  switch (engine) {
+  case ConSanMoiEngine::InlineShadow:
+    return 24u;
+  case ConSanMoiEngine::RecordReplay:
+    return 5u;
+  case ConSanMoiEngine::Sampled:
+    return 8u;
+  }
+  return std::nullopt;
+}
+
 [[nodiscard]] uint16_t moi_exec_save_sgpr_count(const ConSanOptions &options, rj_code_arch_t arch) {
   if (options.moi_engine == ConSanMoiEngine::Sampled)
     // Claim selection and optional wave sampling predicate on VCC. A winning
@@ -1620,9 +1633,10 @@ void apply_test_container_filter(std::vector<Candidate> &candidates, const ConSa
     // gfx1250 dense access streams additionally reserve an aligned temporary
     // call-return pair through +7. The body returns with its ordinary
     // indirect-PC pair, so the probe may reuse that temporary after dispatch.
-    // A CDNA dynamic-stack spill keeps the displaced frame base at +8.
     return options.moi_report_buffer_address
-               ? (options.moi_dynamic_stack_spill ? 9u
+               ? (options.moi_dynamic_stack_spill
+                      ? static_cast<uint16_t>(
+                            *moi_dynamic_stack_frame_save_sgpr_offset(options.moi_engine) + 1u)
                                                   : (arch == ROCJITSU_CODE_ARCH_GFX1250
                                                          ? 8u
                                                          : (options.moi_track_atomics ? 8u : 7u)))
@@ -1644,7 +1658,8 @@ void apply_test_container_filter(std::vector<Candidate> &candidates, const ConSa
       options.moi_engine == ConSanMoiEngine::RecordReplay && options.moi_dynamic_stack_spill)
     // Preserve the compiler frame base in addition to EXEC, VCC, and SCC.
     // The dynamic spill setup reuses the ordinary SCC-save slot.
-    return 6u;
+    return static_cast<uint16_t>(
+        *moi_dynamic_stack_frame_save_sgpr_offset(options.moi_engine) + 1u);
   // One EXEC-save pair, one VCC-save pair, and one SCC snapshot. Barrier-dense
   // RDNA-family objects additionally reserve a dispatch key and an aligned
   // call-return pair for the relocated router.

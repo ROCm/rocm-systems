@@ -2047,6 +2047,39 @@ TEST(ConSanMoi, CdnaSampledUsesPerOwnerPersistentTuplesAcrossAccvgprBoundaries) 
                              ? build_cdna3_s_barrier(target.arch)
                              : build_cdna4_s_barrier(target.arch);
     ASSERT_TRUE(probe_access && helper_access && barrier);
+    std::vector<uint32_t> atomic_ordering;
+    uint32_t wait_word = 0u;
+    if (target.arch == ROCJITSU_CODE_ARCH_CDNA3) {
+      const auto release = cdna3::build_mubuf(cdna3::kBufferWbl2Mubuf, {.sc1 = 1});
+      const auto acquire = build_cdna3_buffer_inv_sc1(target.arch);
+      const auto atomic = instrumentation::build_flat_atomic_add_u32(
+          /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true,
+          /*scope=*/2, target.arch);
+      const auto wait = build_cdna3_s_wait_vmcnt_lgkmcnt0(target.arch);
+      ASSERT_TRUE(acquire && atomic && wait);
+      atomic_ordering.assign(release.begin(), release.end());
+      wait_word = *wait;
+      atomic_ordering.push_back(wait_word);
+      atomic_ordering.insert(atomic_ordering.end(), atomic->begin(), atomic->end());
+      atomic_ordering.push_back(wait_word);
+      atomic_ordering.insert(atomic_ordering.end(), acquire->begin(), acquire->end());
+    } else {
+      const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+      const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});
+      const auto atomic = instrumentation::build_flat_atomic_add_u32(
+          /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true,
+          /*scope=*/2, target.arch);
+      const auto wait = build_cdna4_s_wait_flat0(target.arch);
+      ASSERT_TRUE(atomic && wait);
+      atomic_ordering.assign(release.begin(), release.end());
+      wait_word = *wait;
+      atomic_ordering.push_back(wait_word);
+      atomic_ordering.insert(atomic_ordering.end(), atomic->begin(), atomic->end());
+      atomic_ordering.push_back(wait_word);
+      atomic_ordering.insert(atomic_ordering.end(), acquire.begin(), acquire.end());
+    }
+    const size_t atomic_word_in_ordering =
+        std::ranges::find(atomic_ordering, wait_word) - atomic_ordering.begin() + 1u;
 
     std::vector<uint32_t> probe_words(320u, build_s_nop(0, target.arch));
     std::copy(probe_access->begin(), probe_access->end(), probe_words.begin() + 1u);
@@ -2054,6 +2087,9 @@ TEST(ConSanMoi, CdnaSampledUsesPerOwnerPersistentTuplesAcrossAccvgprBoundaries) 
     probe_words.back() = build_s_endpgm(target.arch);
     std::vector<uint32_t> helper_words(320u, build_s_nop(0, target.arch));
     std::copy(helper_access->begin(), helper_access->end(), helper_words.begin() + 1u);
+    constexpr size_t kAtomicOrderingWord = 40u;
+    std::copy(atomic_ordering.begin(), atomic_ordering.end(),
+              helper_words.begin() + kAtomicOrderingWord);
     helper_words[200] = *barrier;
     helper_words.back() = build_s_endpgm(target.arch);
 
@@ -2094,8 +2130,8 @@ TEST(ConSanMoi, CdnaSampledUsesPerOwnerPersistentTuplesAcrossAccvgprBoundaries) 
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = direct_sampled_report_bytes(4);
     options.moi_track_barriers = true;
-    options.moi_track_atomics = false;
-    options.max_patches = 6u;
+    options.moi_track_atomics = true;
+    options.max_patches = 8u;
 
     const ConSanResult result = try_patch_consan(bytes, options);
 
@@ -2127,7 +2163,50 @@ TEST(ConSanMoi, CdnaSampledUsesPerOwnerPersistentTuplesAcrossAccvgprBoundaries) 
               2u);
     EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                  &ConSanPatchInfo::kind),
-              2u);
+              3u);
+    const auto helper_access_patch =
+        std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+          return patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore &&
+                 std::ranges::find(patch.owner_descriptor_file_offsets,
+                                   helper_kernel->descriptor_file_offset) !=
+                     patch.owner_descriptor_file_offsets.end();
+        });
+    const auto helper_barrier_patch =
+        std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+          return patch.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata &&
+                 patch.anchor_offset == helper_kernel->entry_text_offset + 200u * sizeof(uint32_t);
+        });
+    const uint64_t helper_atomic_offset =
+        helper_kernel->entry_text_offset +
+        (kAtomicOrderingWord + atomic_word_in_ordering) * sizeof(uint32_t);
+    const auto helper_atomic_patch =
+        std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+          return patch.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata &&
+                 patch.anchor_offset == helper_atomic_offset;
+        });
+    ASSERT_NE(helper_access_patch, result.patches.end());
+    ASSERT_NE(helper_barrier_patch, result.patches.end());
+    ASSERT_NE(helper_atomic_patch, result.patches.end());
+    ASSERT_GT(helper_access_patch->sampled_first_slot, 0u);
+    ASSERT_TRUE(helper_barrier_patch->scratch_vgpr);
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    const std::vector<uint32_t> barrier_cave = text_words_at_offset(
+        patched, helper_barrier_patch->trampoline_offset, helper_barrier_patch->trampoline_size);
+    const uint16_t scratch_base = *helper_barrier_patch->scratch_vgpr;
+    const uint16_t value_vgpr = static_cast<uint16_t>(scratch_base + 2u);
+    const uint16_t bank_vgpr = static_cast<uint16_t>(scratch_base + 6u);
+    const uint16_t absolute_slot_vgpr =
+        target.arch == ROCJITSU_CODE_ARCH_CDNA4 ? value_vgpr : bank_vgpr;
+    const auto absolute_slot = instrumentation::build_v_add_u32_literal(
+        absolute_slot_vgpr, helper_access_patch->sampled_first_slot, bank_vgpr, target.arch);
+    ASSERT_TRUE(absolute_slot);
+    std::vector<uint32_t> expected_absolute_slot = *absolute_slot;
+    if (absolute_slot_vgpr != bank_vgpr) {
+      expected_absolute_slot.push_back(
+          build_v_mov_b32_e32(bank_vgpr, vector_source_vgpr(absolute_slot_vgpr), target.arch));
+    }
+    EXPECT_TRUE(contains_subsequence(barrier_cave, expected_absolute_slot));
     EXPECT_TRUE(result.final_validation_passed);
   }
 }

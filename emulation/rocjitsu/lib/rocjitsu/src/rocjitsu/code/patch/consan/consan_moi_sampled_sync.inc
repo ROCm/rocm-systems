@@ -238,9 +238,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
       return std::nullopt;
     }
     if (window.first_slot != 0u) {
-      // CDNA4 materializes a literal in the destination before adding the
-      // source VGPR, so an in-place literal add would destroy the bank index.
-      // Use the already-dead value temporary and copy the absolute slot back.
+      // CDNA4's literal-add builder rejects destination/source aliasing because
+      // it materializes the literal in the destination first. Use the
+      // already-dead value temporary and copy the absolute slot back.
       const uint16_t absolute_slot_vgpr =
           arch == ROCJITSU_CODE_ARCH_CDNA4 ? value : bank_vgpr;
       const auto absolute_slot = instrumentation::build_v_add_u32_literal(
