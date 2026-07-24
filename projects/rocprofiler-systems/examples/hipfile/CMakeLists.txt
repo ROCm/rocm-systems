@@ -88,10 +88,7 @@ find_package(Threads REQUIRED)
 
 add_executable(hipfile-trace hipfile_trace.cpp)
 target_compile_definitions(hipfile-trace PRIVATE __HIP_PLATFORM_AMD__)
-target_link_libraries(
-    hipfile-trace
-    PRIVATE hip::host ${hipfile_TARGET} Threads::Threads
-)
+target_link_libraries(hipfile-trace PRIVATE hip::host ${hipfile_TARGET} Threads::Threads)
 target_compile_options(hipfile-trace PRIVATE ${_FLAGS})
 
 if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET hipfile-trace)
