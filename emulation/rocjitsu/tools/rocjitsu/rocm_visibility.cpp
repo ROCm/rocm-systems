@@ -58,7 +58,7 @@ std::vector<VisibleGpu> filter_rocr_visible_gpus(const std::vector<VisibleGpu> &
                    [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
 
     std::optional<size_t> index;
-    if (token.starts_with("GPU-") && token != "GPU-XX") {
+    if (token.size() >= 5 && token.size() <= 20 && token.starts_with("GPU-") && token != "GPU-XX") {
       for (size_t candidate = 0; candidate < gpus.size(); ++candidate) {
         if (gpus[candidate].unique_id == 0 ||
             !gpu_uuid(gpus[candidate].unique_id).starts_with(token))
@@ -112,7 +112,8 @@ std::vector<VisibleGpu> filter_client_visible_gpus(const std::vector<VisibleGpu>
     const char *begin = token.data();
     const char *end = begin + token.size();
     auto [ptr, error] = std::from_chars(begin, end, index);
-    if (error != std::errc{} || ptr != end || index >= gpus.size())
+    if (error != std::errc{} || ptr != end || token != std::to_string(index) ||
+        index >= gpus.size())
       return filtered;
     if (std::none_of(filtered.begin(), filtered.end(),
                      [&](const VisibleGpu &gpu) { return gpu.gpu_id == gpus[index].gpu_id; }))
