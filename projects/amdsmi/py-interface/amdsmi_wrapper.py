@@ -3820,7 +3820,7 @@ struct_amdsmi_fabric_info_v1_t._fields_ = [
 ]
 
 amdsmi_fabric_info_v1_t = struct_amdsmi_fabric_info_v1_t
-class struct_amdsmi_fabric_info_ver_t(Structure):
+class struct_amdsmi_fabric_info_t(Structure):
     pass
 
 class union_fabric_info_(Union):
@@ -3830,22 +3830,12 @@ class union_fabric_info_(Union):
     ('v1', amdsmi_fabric_info_v1_t),
      ]
 
-struct_amdsmi_fabric_info_ver_t._pack_ = 1 # source:False
-struct_amdsmi_fabric_info_ver_t._layout_ = 'ms'
-struct_amdsmi_fabric_info_ver_t._fields_ = [
-    ('version', ctypes.c_uint32),
-    ('fabric_version', union_fabric_info_),
-]
-
-amdsmi_fabric_info_ver_t = struct_amdsmi_fabric_info_ver_t
-class struct_amdsmi_fabric_info_t(Structure):
-    pass
-
 struct_amdsmi_fabric_info_t._pack_ = 1 # source:False
 struct_amdsmi_fabric_info_t._layout_ = 'ms'
 struct_amdsmi_fabric_info_t._fields_ = [
     ('bdf', amdsmi_bdf_t),
-    ('info', amdsmi_fabric_info_ver_t),
+    ('fabric_version', ctypes.c_uint32),
+    ('fabric_info', union_fabric_info_),
     ('reserved', ctypes.c_uint32 * 15),
     ('PADDING_0', ctypes.c_ubyte * 4),
 ]
@@ -5240,8 +5230,8 @@ __all__ = \
     'amdsmi_event_type_t', 'amdsmi_evt_notification_data_t',
     'amdsmi_evt_notification_type_t',
     'amdsmi_fabric_accelerator_vpod_state_t', 'amdsmi_fabric_info_t',
-    'amdsmi_fabric_info_v1_t', 'amdsmi_fabric_info_ver_t',
-    'amdsmi_fabric_label_t', 'amdsmi_fabric_npa_address_mode_t',
+    'amdsmi_fabric_info_v1_t', 'amdsmi_fabric_label_t',
+    'amdsmi_fabric_npa_address_mode_t',
     'amdsmi_fabric_size_constants_t',
     'amdsmi_fabric_telem_id_to_string',
     'amdsmi_fabric_telemetry_category_mask_t',
@@ -5471,7 +5461,7 @@ __all__ = \
     'struct_amdsmi_enumeration_info_t', 'struct_amdsmi_error_count_t',
     'struct_amdsmi_evt_notification_data_t',
     'struct_amdsmi_fabric_info_t', 'struct_amdsmi_fabric_info_v1_t',
-    'struct_amdsmi_fabric_info_ver_t', 'struct_amdsmi_fabric_label_t',
+    'struct_amdsmi_fabric_label_t',
     'struct_amdsmi_fabric_telemetry_dataset_t',
     'struct_amdsmi_fabric_telemetry_instance_t',
     'struct_amdsmi_fabric_telemetry_item_t',
