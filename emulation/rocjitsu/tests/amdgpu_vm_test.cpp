@@ -8,6 +8,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
@@ -15,6 +16,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -128,7 +130,8 @@ struct VmFixture {
   uint64_t write_kernel(uint64_t addr, const void *code, size_t code_size, uint32_t sgprs = 104,
                         uint32_t vgprs = 256, uint32_t user_sgprs = 2,
                         uint32_t group_segment_fixed_size = 0, bool wgp_mode = false,
-                        uint32_t enable_vgpr_workitem_id = 0) {
+                        uint32_t enable_vgpr_workitem_id = 0,
+                        uint32_t extra_compute_pgm_rsrc1 = 0) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
@@ -141,6 +144,7 @@ struct VmFixture {
     kd.group_segment_fixed_size = group_segment_fixed_size;
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
                     enable_vgpr_workitem_id);
+    kd.compute_pgm_rsrc1 |= extra_compute_pgm_rsrc1;
 
     mem()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem()->load_image(static_cast<const uint8_t *>(code), code_size,
@@ -334,6 +338,63 @@ TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
     ASSERT_GE(snap->snapshots().size(), 1u);
     for (const auto &wf : snap->snapshots())
       EXPECT_EQ(wf.lds_size_bytes, kWgpLdsBytes);
+  }
+}
+
+TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
+  using namespace rocr::llvm::amdhsa;
+
+  uint32_t rsrc1 = 0;
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_32, FLOAT_ROUND_MODE_ZERO);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_16_64, FLOAT_ROUND_MODE_PLUS_INFINITY);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_32, FLOAT_DENORM_MODE_FLUSH_SRC);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_16_64, FLOAT_DENORM_MODE_FLUSH_NONE);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 1);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 1);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_DEBUG_MODE, 1);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FP16_OVFL, 1);
+
+  const uint32_t common_mode =
+      (FLOAT_ROUND_MODE_ZERO << 0) | (FLOAT_ROUND_MODE_PLUS_INFINITY << 2) |
+      (FLOAT_DENORM_MODE_FLUSH_SRC << 4) | (FLOAT_DENORM_MODE_FLUSH_NONE << 6) |
+      amdgpu::Wavefront::FP16_OVFL_BIT;
+
+  struct ModeInitCase {
+    const char *arch;
+    uint32_t endpgm;
+    uint32_t expected_mode;
+  };
+
+  constexpr uint32_t kGfx9Endpgm = SOPP_S_ENDPGM;
+  constexpr uint32_t kGfx11Endpgm = 0xBFB00000u;
+  const ModeInitCase cases[] = {
+      {"cdna1", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"cdna2", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"cdna3", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"cdna4", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"rdna1", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"rdna2", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"rdna3", kGfx11Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"rdna3_5", kGfx11Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"rdna4", kGfx11Endpgm, common_mode},
+      {"gfx1250", kGfx11Endpgm, common_mode},
+  };
+
+  for (const ModeInitCase &mode_case : cases) {
+    SCOPED_TRACE(mode_case.arch);
+    const uint32_t code[] = {mode_case.endpgm};
+    VmFixture f(mode_case.arch, 1, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+    auto *snap = f.capture_halts();
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0,
+                                 /*wgp_mode=*/false, /*enable_vgpr_workitem_id=*/0,
+                                 /*extra_compute_pgm_rsrc1=*/rsrc1);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(ko, 64, 64);
+
+    EXPECT_NO_THROW(f.engine->run());
+    ASSERT_GE(snap->snapshots().size(), 1u);
+    for (const auto &wf : snap->snapshots())
+      EXPECT_EQ(wf.mode_raw, mode_case.expected_mode);
   }
 }
 
@@ -1318,6 +1379,12 @@ constexpr uint32_t vop1(uint32_t op, uint32_t vdst, uint32_t src0) {
 }
 constexpr uint32_t v_mov_b32(uint32_t vdst, uint32_t src0) { return vop1(1, vdst, src0); }
 
+constexpr std::array<uint32_t, 2> vop3_cdna(uint32_t op, uint32_t vdst, uint32_t src0,
+                                            uint32_t src1, uint32_t src2 = 0, uint32_t opsel = 0) {
+  return {vdst | ((opsel & 0xFu) << 11) | ((op & 0x3FFu) << 16) | (0x34u << 26),
+          (src0 & 0x1FFu) | ((src1 & 0x1FFu) << 9) | ((src2 & 0x1FFu) << 18)};
+}
+
 // VOP2: encoding[31]=0, op[30:25], vdst[24:17], vsrc1[16:9], src0[8:0]
 constexpr uint32_t vop2(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t vsrc1) {
   return (op << 25) | (vdst << 17) | (vsrc1 << 9) | src0;
@@ -1367,6 +1434,43 @@ constexpr uint32_t S_WAITCNT_0 = sopp(12, 0);
 constexpr uint32_t S_ENDPGM = sopp(1, 0);
 
 } // namespace enc
+
+TEST(AqlDispatchTest, Fp16OvflDescriptorControlsFp8ConversionResult) {
+  using namespace rocr::llvm::amdhsa;
+  using namespace enc;
+
+  auto run_case = [](bool fp16_ovfl, uint32_t expected_v2) {
+    uint32_t rsrc1 = 0;
+    const uint32_t fp16_ovfl_bit = fp16_ovfl ? 1u : 0u;
+    AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FP16_OVFL, fp16_ovfl_bit);
+
+    const auto cvt_pk_fp8 = vop3_cdna(cdna4::kVCvtPkFp8F32Vop3, 2, VGPR_SRC(5), VGPR_SRC(6));
+    const uint32_t code[] = {
+        s_mov_b32(SGPR(5), 255), std::bit_cast<uint32_t>(500.0f),
+        s_mov_b32(SGPR(6), 255), std::bit_cast<uint32_t>(500.0f),
+        v_mov_b32(5, SGPR(5)),   v_mov_b32(6, SGPR(6)),
+        cvt_pk_fp8[0], // v_cvt_pk_fp8_f32 v2.l, v5, v6
+        cvt_pk_fp8[1],           S_ENDPGM,
+    };
+
+    VmFixture f("cdna4");
+    auto *snap = f.capture_halts();
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0,
+                                 /*wgp_mode=*/false, /*enable_vgpr_workitem_id=*/0,
+                                 /*extra_compute_pgm_rsrc1=*/rsrc1);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(ko, 64, 64);
+
+    ASSERT_NO_THROW(f.engine->run());
+    ASSERT_EQ(snap->snapshots().size(), 1u);
+    EXPECT_EQ((snap->snapshots().front().mode_raw & amdgpu::Wavefront::FP16_OVFL_BIT) != 0,
+              fp16_ovfl);
+    EXPECT_EQ(snap->snapshots().front().vgpr(2, 0), expected_v2);
+  };
+
+  run_case(false, 0x00007F7Fu);
+  run_case(true, 0x00007E7Eu);
+}
 
 TEST(RdnaDispatchTest, WgpModeRoutesDsWritesThroughSiblingLdsPool) {
   constexpr uint32_t kPerCuLdsBytes = 64 * 1024;
