@@ -122,6 +122,8 @@ jobs:
           done
 
       - name: Upload Package Artifact
+        # Not consumed by any downstream job; kept so a reviewer can download
+        # the built .deb/.rpm from a PR run for manual testing.
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
