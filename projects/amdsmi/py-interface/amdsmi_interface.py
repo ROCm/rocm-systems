@@ -6392,16 +6392,8 @@ def amdsmi_get_gpu_ecc_count(
 
 
 def amdsmi_get_gpu_ecc_enabled(processor_handle: processor_handle_t) -> int:
-    """Deprecated: use amdsmi_get_gpu_ecc_supported() instead."""
-
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    warnings.warn(
-        "amdsmi_get_gpu_ecc_enabled() is deprecated, use amdsmi_get_gpu_ecc_supported() instead",
-        DeprecationWarning,
-        stacklevel=2,
-    )
 
     blocks = amdsmi_get_gpu_ecc_supported(processor_handle)
     return blocks

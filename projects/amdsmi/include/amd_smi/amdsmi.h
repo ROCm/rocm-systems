@@ -5880,8 +5880,6 @@ amdsmi_status_t amdsmi_get_gpu_ecc_count(amdsmi_processor_handle processor_handl
  *  documentation)](https://docs.kernel.org/gpu/amdgpu/ras.html#ras-error-count-sysfs-interface)
  *  to learn how these error counts are accessed.
  *
- *  @deprecated ::amdsmi_get_gpu_ecc_supported() should be used
- *
  *  @ingroup tagECCInfo
  *
  *  @platform{gpu_bm_linux} @platform{host}
