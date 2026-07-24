@@ -2164,6 +2164,19 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
           }
         }
         break;
+      case hipWriteBuffer:
+        // H2D: src is plain host memory (srcMemory == nullptr), dst is the only
+        // device-side memory. dev_id_ otherwise defaults to the device that was
+        // current when the node was recorded, which can differ from the device
+        // that actually owns dst (e.g. hipSetDevice() called between the
+        // hipMalloc and the node's creation) -- override it to dst's real device.
+        dev_id_ = dstMemory->GetDeviceById()->index();
+        break;
+      case hipReadBuffer:
+        // D2H: dst is plain host memory (dstMemory == nullptr), src is the only
+        // device-side memory. Same rationale as hipWriteBuffer above, mirrored.
+        dev_id_ = srcMemory->GetDeviceById()->index();
+        break;
       default:
         break;
     }
