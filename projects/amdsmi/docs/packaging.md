@@ -62,6 +62,14 @@ the wheel:
 | rpm + pip `--user` wheel (RHEL) | wheel in `~/.local/.../site-packages` (precedes system) | No — rpm removes only its own files |
 | deb/rpm + venv wheel | wheel in the venv (isolated) | No — separate tree |
 
+The precedence above is the default `sys.path` ordering between install
+locations. A global `PYTHONPATH` overrides it: Python searches `PYTHONPATH`
+entries before any install location, so `import amdsmi` resolves there
+regardless of where the wheel or package installed. Some ROCm container images
+set `PYTHONPATH=/opt/rocm/share/amd_smi`, which makes the `share/amd_smi` copy
+win over a pip wheel in that environment. Unset `PYTHONPATH` (or point it at the
+copy you want) to restore the install-location precedence.
+
 ## Support matrix
 
 Legend: ✅ supported and tested · 🟡 supported, pick one recommended · ⛔ unsupported.
