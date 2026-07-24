@@ -5,8 +5,6 @@
 
 #include "common/defines.h"
 #include "common/delimit.hpp"
-#include "common/env_vars.hpp"
-#include "common/environment.hpp"
 #include <spdlog/fmt/fmt.h>
 
 #include <cstdint>
@@ -84,13 +82,9 @@ get_origin(const std::string&,
 inline bool
 exists(const std::string& _fname) ROCPROFSYS_INTERNAL_API;
 
-template <typename RetT = std::string>
-inline RetT
-get_default_lib_search_paths() ROCPROFSYS_INTERNAL_API;
-
 inline std::string
 find_path(const std::string& _path, int _verbose,
-          const std::string& _search_paths = {}) ROCPROFSYS_INTERNAL_API;
+          const std::string& _search_paths) ROCPROFSYS_INTERNAL_API;
 
 [[nodiscard]] inline std::string
 parent_path(std::string_view fpath, std::uint16_t levels = 1) ROCPROFSYS_INTERNAL_API;
@@ -103,6 +97,9 @@ is_text_file(const std::string& filename) ROCPROFSYS_INTERNAL_API;
 
 [[nodiscard]] inline std::string
 read_symlink(const std::string& path) ROCPROFSYS_INTERNAL_API;
+
+[[nodiscard]] inline bool
+is_directory(std::string_view path) ROCPROFSYS_INTERNAL_API;
 
 inline std::string
 get_rocprofsys_root() ROCPROFSYS_INTERNAL_API;
@@ -170,29 +167,12 @@ exists(const std::string& _fname)
     return false;
 }
 
-template <typename RetT>
-RetT
-get_default_lib_search_paths()
-{
-    auto _paths = fmt::format("{}:{}:{}:{}:.", get_env(env_vars::PATH, ""),
-                              get_env("LD_LIBRARY_PATH", ""), get_env("LIBRARY_PATH", ""),
-                              get_env("PWD", ""));
-    if constexpr(std::is_same<RetT, std::string>::value)
-        return _paths;
-    else
-        return delimit(_paths, ":");
-}
-
 std::string
 find_path(const std::string& _path, int _verbose, const std::string& _search_paths)
 {
     if(exists(_path) && !_path.empty() && _path.at(0) == '/') return _path;
 
     auto _paths = delimit(_search_paths, ":");
-    if(_paths.empty())
-    {
-        _paths = get_default_lib_search_paths<std::vector<std::string>>();
-    }
 
     constexpr int _verbose_lvl = 2;
     for(const auto& itr : _paths)
@@ -268,6 +248,23 @@ read_symlink(const std::string& path)
     std::error_code error;
     auto            target = std::filesystem::read_symlink(path, error);
     return (error) ? path : target.string();
+}
+
+/**
+ * @brief Check whether a path exists and is a directory.
+ *
+ * Follows symbolic links: a symlink that points at a directory returns true.
+ * Never throws; any filesystem error (missing path, broken symlink,
+ * permission failure) yields false.
+ *
+ * @param path Filesystem path to test.
+ * @return true if @p path resolves to a directory, false otherwise.
+ */
+[[nodiscard]] bool
+is_directory(std::string_view path)
+{
+    std::error_code unused_error_code;
+    return std::filesystem::is_directory(path, unused_error_code);
 }
 
 /**
