@@ -87,7 +87,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_USE_OMPT": "domains.parallel.runtimes.openmp",
     "ROCPROFSYS_USE_KOKKOSP": "domains.parallel.runtimes.kokkos",
     "ROCPROFSYS_USE_RCCLP": "domains.parallel.runtimes.rccl",
-    "ROCPROFSYS_USE_SHMEM": "domains.parallel.runtimes.shmem",
+    "ROCPROFSYS_USE_OPENSHMEM": "domains.parallel.runtimes.shmem",
     "ROCPROFSYS_USE_UCX": "domains.parallel.runtimes.ucx",
     # --- Output ---
     "ROCPROFSYS_OUTPUT_PATH": "output.path",

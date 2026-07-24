@@ -301,6 +301,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "sampling_duration",
         "no_tmp_files",
         "rccl",
+        "rocshmem",
         "roctx",
         "time_window",
         "transpose",
