@@ -2727,7 +2727,8 @@ def _explain_contract(
     workloads = []
     script = str(Path(__file__).resolve())
     for workload_id in workload_ids:
-        workload = _effective_workload(target, WORKLOAD_BY_ID[workload_id])
+        workload = WORKLOAD_BY_ID[workload_id]
+        effective_workload = _effective_workload(target, workload)
         output_root = Path("$ARTIFACT_ROOT") / workload.id
         commands = {}
         for phase in ("clean", "overhead"):
@@ -2805,7 +2806,7 @@ def _explain_contract(
             )
         workloads.append(
             {
-                **asdict(workload),
+                **asdict(effective_workload),
                 "commands": commands,
                 "profiles": profile_audits,
                 "faults": [
@@ -3388,7 +3389,9 @@ def main(argv: list[str] | None = None) -> int:
         workspace = _workspace_from_environment()
         if args.command == "explain":
             workload_ids = (
-                tuple(WORKLOAD_BY_ID) if args.workload == "all" else (args.workload,)
+                tuple(workload.id for workload in _workloads_for_target(target))
+                if args.workload == "all"
+                else (args.workload,)
             )
             profiles = PROFILE_IDS if args.profile == "all" else (args.profile,)
             result = _explain_contract(

@@ -171,6 +171,30 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("pytorch-tdm-descriptor-add", text)
         self.assertNotIn("tensile-sk-mxf8gemm-explicit", text)
 
+    def test_explain_all_matches_the_target_manifest_workload_set(self) -> None:
+        with temporary_root() as workspace:
+            output = io.StringIO()
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {validation.WORKSPACE_ENV: str(workspace)},
+                    clear=False,
+                ),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(
+                    validation.main(["--target", "gfx942", "explain", "--json"]),
+                    0,
+                )
+        explained = json.loads(output.getvalue())
+        self.assertEqual(
+            [workload["id"] for workload in explained["workloads"]],
+            [
+                workload["id"]
+                for workload in validation._manifest("gfx942")["workloads"]
+            ],
+        )
+
     def test_gfx950_manifest_resolves_cdna4_native_workloads(self) -> None:
         manifest = validation._manifest("gfx950")
         workloads = {workload["id"]: workload for workload in manifest["workloads"]}
