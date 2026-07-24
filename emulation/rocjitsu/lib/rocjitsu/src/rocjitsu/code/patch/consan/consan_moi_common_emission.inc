@@ -36,6 +36,87 @@ common_moi_private_owner_shift(std::span<const uint8_t> image,
   return common_shift;
 }
 
+[[nodiscard]] std::optional<uint32_t>
+common_moi_private_owner_offset(const ConSanResult &result, const ResolvedMoiScratchPlan &resources,
+                                std::vector<std::string> &warnings) {
+  std::optional<uint32_t> common_offset;
+  for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
+    const auto owner_patch =
+        std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+          return patch.persistent_owner_private_offset &&
+                 std::ranges::find(patch.owner_descriptor_file_offsets, descriptor_offset) !=
+                     patch.owner_descriptor_file_offsets.end();
+        });
+    if (owner_patch == result.patches.end()) {
+      warnings.emplace_back(
+          "ConSan MOI private owner has no captured state for an owning kernel descriptor");
+      return std::nullopt;
+    }
+    if (common_offset && *common_offset != *owner_patch->persistent_owner_private_offset) {
+      warnings.emplace_back("ConSan MOI shared private owner has incompatible state offsets");
+      return std::nullopt;
+    }
+    common_offset = owner_patch->persistent_owner_private_offset;
+  }
+  if (!common_offset)
+    warnings.emplace_back("ConSan MOI private owner requires an owning kernel descriptor");
+  return common_offset;
+}
+
+struct MoiRecordOwnerDerivation {
+  uint16_t vgpr = 0;
+  std::vector<uint32_t> words;
+};
+
+[[nodiscard]] std::optional<MoiRecordOwnerDerivation> build_moi_record_owner_derivation(
+    std::span<const uint8_t> bytes, std::optional<uint64_t> descriptor_file_offset,
+    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
+    uint16_t value_vgpr, rj_code_arch_t arch, std::string_view consumer,
+    std::vector<std::string> &errors) {
+  if (private_owner_offset.has_value() != private_owner_shift.has_value()) {
+    errors.emplace_back("ConSan MOI " + std::string(consumer) +
+                        " has an incomplete private owner plan");
+    return std::nullopt;
+  }
+  std::optional<uint16_t> owner_shift = private_owner_shift;
+  if (!owner_shift) {
+    if (!descriptor_file_offset) {
+      errors.emplace_back("ConSan MOI " + std::string(consumer) +
+                          " requires an owning kernel descriptor");
+      return std::nullopt;
+    }
+    owner_shift = moi_descriptor_owner_shift(bytes, *descriptor_file_offset, errors);
+    if (!owner_shift)
+      return std::nullopt;
+  }
+
+  MoiRecordOwnerDerivation derivation{.vgpr = value_vgpr, .words = {}};
+  if (private_owner_offset) {
+    // Guest code may repurpose v0 after kernel entry, so reload the raw
+    // workitem ID captured by the private-state prologue before deriving the wave owner.
+    const auto owner_load =
+        instrumentation::build_private_load_b32(value_vgpr, *private_owner_offset, arch);
+    const auto owner_wait = instrumentation::build_s_wait_private_load0(arch);
+    if (!owner_load || !owner_wait) {
+      errors.emplace_back("ConSan MOI " + std::string(consumer) +
+                          " could not load its captured entry owner");
+      return std::nullopt;
+    }
+    derivation.words.insert(derivation.words.end(), owner_load->begin(), owner_load->end());
+    derivation.words.push_back(*owner_wait);
+  }
+  const uint16_t owner_source = private_owner_offset ? value_vgpr : kRdna4WorkitemIdX;
+  const auto owner_init = instrumentation::build_v_lshrrev_b32(
+      value_vgpr, scalar_positive_inline_u32(*owner_shift), owner_source, arch);
+  if (!owner_init) {
+    errors.emplace_back("ConSan MOI " + std::string(consumer) +
+                        " could not encode owner derivation");
+    return std::nullopt;
+  }
+  derivation.words.push_back(*owner_init);
+  return derivation;
+}
+
 [[nodiscard]] bool same_workgroup_source(const ConSanMoiWorkgroupSource &lhs,
                                          const ConSanMoiWorkgroupSource &rhs) {
   return lhs.scalar_src == rhs.scalar_src && lhs.shift_right_16 == rhs.shift_right_16 &&
@@ -711,8 +792,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
             "ConSan MOI first-light probe could not load its persistent workitem-id owner");
         return std::nullopt;
       }
-      derived_owner_words.insert(derived_owner_words.end(), owner_load->begin(),
-                                 owner_load->end());
+      derived_owner_words.insert(derived_owner_words.end(), owner_load->begin(), owner_load->end());
       derived_owner_words.push_back(*owner_wait);
       derived_owner_words.push_back(*owner_init);
     } else {

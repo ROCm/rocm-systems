@@ -438,15 +438,13 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         auto [cached, inserted] =
             private_layout_by_descriptor.try_emplace(descriptor, std::nullopt);
         if (inserted) {
-          cached->second = build_moi_private_epoch_layout(
-              result, *resources, arch, result.warnings,
-              /*include_owner=*/persist_workitem_owner);
+          cached->second = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
+                                                          /*include_owner=*/persist_workitem_owner);
         }
         private_layout = cached->second;
       } else {
-        private_layout = build_moi_private_epoch_layout(
-            result, *resources, arch, result.warnings,
-            /*include_owner=*/persist_workitem_owner);
+        private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
+                                                        /*include_owner=*/persist_workitem_owner);
       }
       if (private_layout && private_layout->owner_offset)
         private_owner_shift = common_moi_private_owner_shift(bytes, *resources, result.warnings);

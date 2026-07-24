@@ -1317,6 +1317,74 @@ TEST(ConSanMoi, Cdna3PrivateEpochRecordReplayLoadsEntryOwner) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Gfx1250PrivateEpochAtomicAndFenceRecordsLoadEntryOwner) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr auto guest = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
+  const auto atomic = build_gfx1250_flat_atomic_add_u32(
+      /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true, /*scope=*/2, kArch);
+  ASSERT_TRUE(atomic);
+  std::vector<uint32_t> text_words(320, build_s_nop(0, kArch));
+  text_words[0] = build_v_mov_b32_e32(/*vdst=*/0, vector_source_vgpr(8), kArch);
+  size_t cursor = 1u;
+  std::ranges::copy(guest, text_words.begin() + cursor);
+  cursor += guest.size();
+  const std::array<uint32_t, 3> release = {0xEE0B0000u, 0x00000000u, 0x00000000u}; // global_wb
+  std::ranges::copy(release, text_words.begin() + cursor);
+  cursor += release.size();
+  std::ranges::copy(*atomic, text_words.begin() + cursor);
+  text_words.back() = build_s_endpgm(kArch);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_dynamic_access_records = true;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.moi_init_owner_epoch = true;
+  options.force_private_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0, 0, 8, 8);
+
+  const ConSanResult result =
+      try_patch_consan(make_gfx1250_code_object(text_words, "private_sync_entry_owner"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.moi_private_epoch_automatic);
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  const auto atomic_patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord, &ConSanPatchInfo::kind);
+  const auto fence_patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiFenceRecord, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_NE(atomic_patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_NE(fence_patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(access->persistent_owner_private_offset);
+  EXPECT_EQ(atomic_patch->persistent_owner_private_offset, access->persistent_owner_private_offset);
+  EXPECT_EQ(fence_patch->persistent_owner_private_offset, access->persistent_owner_private_offset);
+  ASSERT_TRUE(atomic_patch->scratch_vgpr);
+  ASSERT_TRUE(fence_patch->scratch_vgpr);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto expect_captured_owner = [&](const ConSanPatchInfo &patch, uint16_t owner_vgpr) {
+    const std::vector<uint32_t> words =
+        text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+    const auto load = instrumentation::build_private_load_b32(
+        owner_vgpr, *patch.persistent_owner_private_offset, kArch);
+    const auto captured = instrumentation::build_v_lshrrev_b32(
+        owner_vgpr, scalar_positive_inline_u32(5u), owner_vgpr, kArch);
+    const auto live = instrumentation::build_v_lshrrev_b32(
+        owner_vgpr, scalar_positive_inline_u32(5u), /*workitem_id_x=*/0u, kArch);
+    ASSERT_TRUE(load && captured && live);
+    EXPECT_TRUE(contains_subsequence(words, *load));
+    EXPECT_NE(std::ranges::find(words, *captured), words.end());
+    EXPECT_EQ(std::ranges::find(words, *live), words.end());
+  };
+  expect_captured_owner(*atomic_patch, static_cast<uint16_t>(*atomic_patch->scratch_vgpr + 4u));
+  expect_captured_owner(*fence_patch, static_cast<uint16_t>(*fence_patch->scratch_vgpr + 2u));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Cdna4FirstLightProbeDescriptorGrowthUsesEightVgprGranules) {
   const auto guest = build_cdna4_ds_store_b32(
       /*vaddr=*/6, /*vdata=*/7, /*byte_offset=*/4, ROCJITSU_CODE_ARCH_CDNA4);

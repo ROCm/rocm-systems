@@ -2094,6 +2094,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     rj_code_arch_t arch, uint32_t record_index, uint32_t record_capacity_or_count,
     size_t fence_records_offset, uint64_t cave_text_offset, uint64_t return_text_offset,
     std::optional<uint16_t> call_return_sgpr, std::span<const uint32_t> displaced_tail_words,
+    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
     std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI fence record patch requires RJ_CONSAN_TMP_VGPR");
@@ -2121,28 +2122,18 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   }
 
   std::optional<uint16_t> derived_owner_vgpr;
-  std::optional<uint32_t> derived_owner_word;
+  std::vector<uint32_t> derived_owner_words;
   if (!options.moi_owner_vgpr && !options.moi_persistent_owner_sgpr) {
-    if (!candidate.kernel_descriptor_file_offset) {
-      errors.emplace_back(
-          "ConSan MOI fence record patch requires RJ_CONSAN_MOI_OWNER_VGPR for functions");
-      return std::nullopt;
-    }
-    const auto owner_shift =
-        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
-    if (!owner_shift)
-      return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(
         *options.scratch_vgpr +
         (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 5u : 2u));
-    const auto owner_init = instrumentation::build_v_lshrrev_b32(
-        value_vgpr, scalar_positive_inline_u32(*owner_shift), kRdna4WorkitemIdX, arch);
-    if (!owner_init) {
-      errors.emplace_back("ConSan MOI fence record patch could not encode owner derivation");
+    const auto owner = build_moi_record_owner_derivation(
+        bytes, candidate.kernel_descriptor_file_offset, private_owner_offset, private_owner_shift,
+        value_vgpr, arch, "fence record patch", errors);
+    if (!owner)
       return std::nullopt;
-    }
-    derived_owner_vgpr = value_vgpr;
-    derived_owner_word = *owner_init;
+    derived_owner_vgpr = owner->vgpr;
+    derived_owner_words = owner->words;
   }
 
   const auto persistent_workgroup_sources =
@@ -2190,8 +2181,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     }
     words.insert(words.end(), address_words->begin(), address_words->end());
   }
-  if (derived_owner_word && arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
-    words.push_back(*derived_owner_word);
+  if (!derived_owner_words.empty() && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
+      arch != ROCJITSU_CODE_ARCH_CDNA4) {
+    words.insert(words.end(), derived_owner_words.begin(), derived_owner_words.end());
+  }
   for (uint64_t offset = 0; offset < candidate.fence.size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
     std::memcpy(&word, bytes.data() + candidate.fence.file_offset + offset, sizeof(word));
@@ -2265,8 +2258,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     words.insert(words.end(), mov_capacity->begin(), mov_capacity->end());
     words.push_back(*slot_in_capacity);
     std::vector<uint32_t> record_words;
-    if (derived_owner_word)
-      record_words.push_back(*derived_owner_word);
+    record_words.insert(record_words.end(), derived_owner_words.begin(), derived_owner_words.end());
     if ((derived_owner_vgpr &&
          !append_dynamic_fence_store_u32_vgpr(
              record_words, record_base + offsetof(ConSanMoiFenceRecord, owner_id),

@@ -277,7 +277,7 @@ function(rj_add_consan_common_sim_cases)
         TIMEOUT 60
         RUN_SERIAL
         PASS_REGEX "site=access.*source=spill reason=none"
-        FAIL_REGEX "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT requested"
+        FAIL_REGEX "RJ_CONSAN_MOI_REQUIRE_(RECORDS|REPLAY_CONFLICT) requested"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=record-replay"

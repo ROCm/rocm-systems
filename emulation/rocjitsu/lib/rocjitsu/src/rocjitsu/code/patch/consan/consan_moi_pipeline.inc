@@ -57,6 +57,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     ConSanMoiAtomicAddressPlan address_plan;
     std::optional<VgprSpillSequence> spill;
     std::optional<InlineSgprSpillSequence> scalar_spill;
+    std::optional<uint32_t> private_owner_offset;
+    std::optional<uint16_t> private_owner_shift;
   };
   std::vector<PlannedFenceRecord> selected;
   MoiResourcePlanningState resource_state(bytes, arch, options, result);
@@ -174,10 +176,22 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       if (!candidate.kernel_descriptor_file_offset)
         continue;
     }
+    std::optional<uint32_t> private_owner_offset;
+    std::optional<uint16_t> private_owner_shift;
+    if (candidate_options.automatic_moi_private_epoch &&
+        candidate_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId &&
+        !candidate_options.moi_owner_vgpr && !candidate_options.moi_persistent_owner_sgpr) {
+      private_owner_offset =
+          common_moi_private_owner_offset(result, active_resources, result.warnings);
+      private_owner_shift =
+          common_moi_private_owner_shift(bytes, active_resources, result.warnings);
+      if (!private_owner_offset || !private_owner_shift)
+        continue;
+    }
     note_descriptor_requirements(descriptor_requirements, active_resources);
     note_moi_sgpr_requirements(scalar_requirements, active_resources, candidate_options, arch);
     selected.push_back({std::move(candidate), active_resources, address_plan, std::move(spill),
-                        std::move(scalar_spill)});
+                        std::move(scalar_spill), private_owner_offset, private_owner_shift});
   }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan MOI fence record patch found no patchable fences");
@@ -326,7 +340,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
             ? layout.fence_record_capacity
             : record_count,
         layout.fence_records_offset, cave_text_offset, return_text_offset, std::nullopt,
-        displaced_tail_words, result.errors);
+        displaced_tail_words, planned.private_owner_offset, planned.private_owner_shift,
+        result.errors);
     if (!cave_words)
       return;
     std::optional<DenseFenceRelay> dense_relay;
@@ -347,7 +362,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
                 : record_count,
             layout.fence_records_offset, cave_text_offset, return_text_offset,
             static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u),
-            /*displaced_tail_words=*/{}, result.errors);
+            /*displaced_tail_words=*/{}, planned.private_owner_offset, planned.private_owner_shift,
+            result.errors);
         if (!cave_words)
           return;
       }
@@ -514,6 +530,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.scratch_vgpr = planned.resources.base;
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
+    info.persistent_owner_private_offset = planned.private_owner_offset;
     if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;
       info.required_private_segment_size = planned.spill->total_private_bytes;
@@ -559,8 +576,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
           state, options, ConSanResourceSiteKind::Barrier, index, candidate.site.text_offset,
           candidate.kernel_descriptor_file_offset,
           /*scratch_count=*/options.moi_engine == ConSanMoiEngine::Sampled
-              ? (options.automatic_moi_private_epoch ||
-                         moi_uses_scalar_persistent_state(options)
+              ? (options.automatic_moi_private_epoch || moi_uses_scalar_persistent_state(options)
                      ? 9u
                      : 7u)
           : options.moi_engine == ConSanMoiEngine::InlineShadow
@@ -1068,10 +1084,9 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
         if (apply_moi_transient_sgpr_assignment(owner_options, plan.owner_descriptor_file_offsets))
           continue;
       }
-      const bool conflicts_with_cdna_vcc =
-          instrumentation::is_cdna_family_arch(state.arch) &&
-          cdna_sgpr_window_conflicts_with_physical_vcc(exec_base, exec_count,
-                                                       plan.current_sgpr_count);
+      const bool conflicts_with_cdna_vcc = instrumentation::is_cdna_family_arch(state.arch) &&
+                                           cdna_sgpr_window_conflicts_with_physical_vcc(
+                                               exec_base, exec_count, plan.current_sgpr_count);
       if (!plan.owner_descriptor_file_offsets.empty() &&
           (plan.max_referenced_sgpr_count > exec_base || conflicts_with_cdna_vcc)) {
         plan.source = ConSanRegisterAllocationSource::Unsupported;

@@ -72,6 +72,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     ConSanMoiAtomicAddressPlan address_plan;
     std::optional<VgprSpillSequence> spill;
     std::optional<InlineSgprSpillSequence> scalar_spill;
+    std::optional<uint32_t> private_owner_offset;
+    std::optional<uint16_t> private_owner_shift;
   };
   std::vector<PlannedAtomicRecord> selected_candidates;
   selected_candidates.reserve(max_candidates);
@@ -163,6 +165,16 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
           "ConSan MOI atomic record patch found no common transient SGPR assignment");
       continue;
     }
+    std::optional<uint32_t> private_owner_offset;
+    std::optional<uint16_t> private_owner_shift;
+    if (candidate_options.automatic_moi_private_epoch &&
+        candidate_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId &&
+        !candidate_options.moi_owner_vgpr && !candidate_options.moi_persistent_owner_sgpr) {
+      private_owner_offset = common_moi_private_owner_offset(result, *resources, result.warnings);
+      private_owner_shift = common_moi_private_owner_shift(bytes, *resources, result.warnings);
+      if (!private_owner_offset || !private_owner_shift)
+        continue;
+    }
     std::optional<InlineSgprSpillSequence> scalar_spill;
     if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
       scalar_spill = build_inline_sgpr_spill_sequence(
@@ -172,7 +184,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
         continue;
     }
     selected_candidates.push_back({std::move(planned_candidate), *resources, address_plan,
-                                   std::move(spill), std::move(scalar_spill)});
+                                   std::move(spill), std::move(scalar_spill), private_owner_offset,
+                                   private_owner_shift});
   }
   // Do not prune a release based on module-local absence of an acquire. Real
   // applications can split producers and consumers across code objects, and
@@ -243,7 +256,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
         planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
         layout.atomic_record_capacity, layout.atomic_records_offset, cave_text_offset,
-        return_text_offset, guest_instruction_offset, result.errors);
+        return_text_offset, planned.private_owner_offset, planned.private_owner_shift,
+        guest_instruction_offset, result.errors);
     if (!cave_words)
       return;
 
@@ -312,6 +326,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     info.relocated_guest_instruction_offset = cave_text_offset + guest_instruction_offset;
     info.scratch_vgpr = planned.resources.base;
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
+    info.persistent_owner_private_offset = planned.private_owner_offset;
     if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;
       info.required_private_segment_size = planned.spill->total_private_bytes;

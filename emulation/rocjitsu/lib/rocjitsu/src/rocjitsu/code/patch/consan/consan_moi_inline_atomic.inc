@@ -387,6 +387,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
     rj_code_arch_t arch, uint32_t record_index, uint32_t atomic_record_capacity,
     size_t atomic_records_offset, uint64_t cave_text_offset, uint64_t return_text_offset,
+    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
     uint32_t &guest_instruction_offset, std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI atomic record patch requires RJ_CONSAN_TMP_VGPR");
@@ -415,26 +416,16 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 
   (void)record_index;
   std::optional<uint16_t> derived_owner_vgpr;
-  std::optional<uint32_t> derived_owner_word;
+  std::vector<uint32_t> derived_owner_words;
   if (!options.moi_owner_vgpr && !options.moi_persistent_owner_sgpr) {
-    if (!candidate.kernel_descriptor_file_offset) {
-      errors.emplace_back(
-          "ConSan MOI atomic record patch requires RJ_CONSAN_MOI_OWNER_VGPR for function atomics");
-      return std::nullopt;
-    }
-    const auto owner_shift =
-        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
-    if (!owner_shift)
-      return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
-    const auto owner_init = instrumentation::build_v_lshrrev_b32(
-        value_vgpr, scalar_positive_inline_u32(*owner_shift), kRdna4WorkitemIdX, arch);
-    if (!owner_init) {
-      errors.emplace_back("ConSan MOI atomic record patch could not encode owner derivation");
+    const auto owner = build_moi_record_owner_derivation(
+        bytes, candidate.kernel_descriptor_file_offset, private_owner_offset, private_owner_shift,
+        value_vgpr, arch, "atomic record patch", errors);
+    if (!owner)
       return std::nullopt;
-    }
-    derived_owner_vgpr = value_vgpr;
-    derived_owner_word = *owner_init;
+    derived_owner_vgpr = owner->vgpr;
+    derived_owner_words = owner->words;
   }
 
   const auto persistent_workgroup_sources =
@@ -609,8 +600,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       return std::nullopt;
     }
   }
-  if (derived_owner_word)
-    record_words.push_back(*derived_owner_word);
+  record_words.insert(record_words.end(), derived_owner_words.begin(), derived_owner_words.end());
   // Probe-local owner derivation uses the record-emitter temporary. Preserve
   // it before reserving the event index, which reuses that VGPR.
   if ((derived_owner_vgpr &&
