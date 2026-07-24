@@ -26,7 +26,6 @@
 
 #include "hsa/hsa_api_trace_minimal.h"
 #include "rocjitsu/code/amdgpu_elf.h"
-#include "rocjitsu/code/dbt/dbt_provenance.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
@@ -890,8 +889,9 @@ rocjitsu::Elf64_Ehdr make_amdgpu_elf_header(uint32_t mach) {
 }
 
 // Build a minimal, AmdGpuCodeObject-valid gfx1250 ELF carrying a single named
-// PROGBITS section with @p section_bytes. Used to exercise the load path's
-// provenance-note handling without depending on the full translator.
+// PROGBITS section with @p section_bytes. Used to construct objects that carry an
+// arbitrary (e.g. retired/forged) metadata section without depending on any
+// producer that would legitimately emit it.
 std::vector<uint8_t> make_gfx1250_elf_with_section(std::string_view section_name,
                                                    std::span<const uint8_t> section_bytes) {
   std::string shstr(1, '\0');
@@ -1848,11 +1848,13 @@ TEST(HsaHooksUnitTest, AutoA0SnapshotRetainedUntilExecutableDestroy) {
   OnUnload();
 }
 
-// Idempotence: a gfx1250 object on the A0 agent that already carries a matching
-// B0->A0 provenance note is a previously-translated artifact. It is loaded
-// without re-translation -- from an authoritative hook-owned snapshot (a
-// different reader) whose bytes equal the source, not re-translated.
-TEST(HsaHooksUnitTest, AutoA0LoadsObjectWithMatchingProvenanceUnchanged) {
+// Regression for the removed provenance-note bypass: a gfx1250 object on the A0
+// agent carrying the retired ".rocjitsu.dbt_provenance" section with a matching
+// legacy B0->A0 payload must NOT be forwarded unchanged. Such a note was a
+// forgeable "already translated, load as-is" credential; the object must now go
+// through translation like any other gfx1250 object (and here, being a
+// non-dispatchable header-only ELF, fail closed) -- never reach the loader raw.
+TEST(HsaHooksUnitTest, AutoA0DoesNotHonorRetiredProvenanceSection) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
   reset_queue_fakes();
@@ -1864,74 +1866,21 @@ TEST(HsaHooksUnitTest, AutoA0LoadsObjectWithMatchingProvenanceUnchanged) {
   g_fake_gfx1250_asic_revision = 0;
   g_fake_load_agent_calls = 0;
 
-  const auto note = rocjitsu::serialize_dbt_provenance(
-      {.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0,
-       .output_revision = rocjitsu::ProcessorRevision::Gfx1250A0});
-  const auto image = make_gfx1250_elf_with_section(rocjitsu::kDbtProvenanceSectionName, note);
+  // The retired section name and a byte-for-byte valid legacy payload: magic
+  // "RJPROV1\0", wire version 1, input revision 2 (Gfx1250B0), output revision 1
+  // (Gfx1250A0), reserved 0 -- exactly what the deleted classifier matched.
+  static constexpr std::string_view kRetiredSectionName = ".rocjitsu.dbt_provenance";
+  const std::array<uint8_t, 24> legacy_note = {'R', 'J', 'P', 'R', 'O', 'V', '1', '\0', // magic
+                                               1,   0,   0,   0,  // version = 1
+                                               2,   0,   0,   0,  // input_revision = Gfx1250B0
+                                               1,   0,   0,   0,  // output_revision = Gfx1250A0
+                                               0,   0,   0,   0}; // reserved
+  const auto image = make_gfx1250_elf_with_section(kRetiredSectionName, legacy_note);
   hsa_code_object_reader_t reader = register_code_object(api, image);
 
-  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
-                                                              reader, nullptr, nullptr),
-            HSA_STATUS_SUCCESS);
-  // Loaded without re-translation, but from the snapshot: a hook-owned reader
-  // (not the caller's) whose bytes are byte-identical to the source image.
-  EXPECT_EQ(g_fake_load_agent_calls, 1);
-  EXPECT_NE(g_last_load_reader.handle, reader.handle);
-  EXPECT_EQ(g_last_load_bytes, image);
-  OnUnload();
-}
-
-// A gfx1250 object on the A0 agent carrying a malformed provenance note is
-// something the hook cannot reason about -- fail closed (no load, no forward).
-TEST(HsaHooksUnitTest, AutoA0RefusesObjectWithMalformedProvenance) {
-  reset_pool_blocker(false);
-  reset_agent_blocker(false);
-  reset_queue_fakes();
-  OnUnload();
-  clear_runtime_config_path(); // auto-A0 mode
-
-  FakeApiTable api;
-  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
-  g_fake_gfx1250_asic_revision = 0;
-  g_fake_load_agent_calls = 0;
-
-  // A valid note with its version field corrupted so parse rejects it.
-  auto note = rocjitsu::serialize_dbt_provenance(
-      {.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0,
-       .output_revision = rocjitsu::ProcessorRevision::Gfx1250A0});
-  const uint32_t bad_version = 999;
-  std::memcpy(note.data() + 8, &bad_version, sizeof(bad_version));
-  const auto image = make_gfx1250_elf_with_section(rocjitsu::kDbtProvenanceSectionName, note);
-  hsa_code_object_reader_t reader = register_code_object(api, image);
-
-  EXPECT_NE(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
-                                                              reader, nullptr, nullptr),
-            HSA_STATUS_SUCCESS);
-  EXPECT_EQ(g_fake_load_agent_calls, 0);
-  OnUnload();
-}
-
-// A gfx1250 object on the A0 agent carrying a provenance note that records the
-// wrong direction (A0->B0 instead of the expected B0->A0) is refused: it is
-// neither a fresh B0 object nor a matching prior translation.
-TEST(HsaHooksUnitTest, AutoA0RefusesObjectWithWrongDirectionProvenance) {
-  reset_pool_blocker(false);
-  reset_agent_blocker(false);
-  reset_queue_fakes();
-  OnUnload();
-  clear_runtime_config_path(); // auto-A0 mode
-
-  FakeApiTable api;
-  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
-  g_fake_gfx1250_asic_revision = 0;
-  g_fake_load_agent_calls = 0;
-
-  const auto note = rocjitsu::serialize_dbt_provenance(
-      {.input_revision = rocjitsu::ProcessorRevision::Gfx1250A0,
-       .output_revision = rocjitsu::ProcessorRevision::Gfx1250B0}); // reversed
-  const auto image = make_gfx1250_elf_with_section(rocjitsu::kDbtProvenanceSectionName, note);
-  hsa_code_object_reader_t reader = register_code_object(api, image);
-
+  // No bypass: the object is translated like any gfx1250 input. This header-only
+  // ELF is not dispatchable, so translation fails closed -- and crucially the
+  // loader is never handed the original (untranslated) object.
   EXPECT_NE(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
                                                               reader, nullptr, nullptr),
             HSA_STATUS_SUCCESS);
