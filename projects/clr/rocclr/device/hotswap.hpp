@@ -29,6 +29,13 @@ namespace amd {
 namespace hotswap {
 
 inline bool Enabled() {
+#if defined(ROCM_TRANSLATOR_NONE)
+  // The NONE translator build compiles out COMGR hotswap: every hotswap decision
+  // funnels through this predicate, so a constant false keeps the baseline
+  // ISA-compat path with no source-bundle forwarding, independent of any
+  // environment variable.
+  return false;
+#else
   const char* disable = std::getenv("HSA_HOTSWAP_DISABLE");
   if (disable == nullptr || disable[0] == '\0') {
     return true;
@@ -39,6 +46,7 @@ inline bool Enabled() {
                  [](unsigned char c) { return std::tolower(c); });
   return value == "0" || value == "off" || value == "false" ||
          value == "no" || value == "n" || value == "f";
+#endif
 }
 
 // Allowlist of (source -> device) gfx pairs native HotSwap handles; only these

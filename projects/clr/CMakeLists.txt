@@ -8,8 +8,10 @@ project(clr)
 ##########
 # Defaults
 ##########
-if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
-    OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+if(
+    CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
+    OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC"
+)
     add_compile_options("/wd4267" "/wd4244" "/wd4996")
     # Enable parallel compilation on MSVC.
     if(DEFINED ENV{CMAKE_BUILD_PARALLEL_LEVEL})
@@ -17,29 +19,63 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
     endif()
     string(REPLACE "/GR" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     string(REPLACE "/W3" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_compile_options(/MTd)
         add_compile_options(-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH)
     else()
-        if (AMD_COMPUTE_WIN)
+        if(AMD_COMPUTE_WIN)
             add_compile_options(/MT)
         endif()
     endif()
-    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         # Unlike when targeting MSFT's MSVC, when targeting clang-cl,
         # CMake does not add these automatically.  Add them ourselves.
         add_compile_options("/DWIN32" "/D_WINDOWS" "/EHsc")
     endif()
 endif()
 
-if (AMD_COMPUTE_WIN)
-    set(AMD_LIBELF_PATH "${AMD_COMPUTE_WIN}/hsail-compiler/lib/loaders/elf/utils/libelf")
+if(AMD_COMPUTE_WIN)
+    set(AMD_LIBELF_PATH
+        "${AMD_COMPUTE_WIN}/hsail-compiler/lib/loaders/elf/utils/libelf"
+    )
     set(AMD_SC_PATH "${AMD_COMPUTE_WIN}/sc")
-    message("Public Compute Windows build path: ${AMD_COMPUTE_WIN}, SC: ${AMD_SC_PATH}, LibElf: ${AMD_LIBELF_PATH}")
+    message(
+        "Public Compute Windows build path: ${AMD_COMPUTE_WIN}, SC: ${AMD_SC_PATH}, LibElf: ${AMD_LIBELF_PATH}"
+    )
 endif()
 
 option(CLR_BUILD_HIP "Build HIP" OFF)
 option(CLR_BUILD_OCL "Build OCL" OFF)
+
+# Code-object translator selection (must match the ROCr build). Selects which,
+# if any, same-ISA code-object retargeting translator the CLR side offers to the
+# loader:
+#   COMGR - existing COMGR hotswap: forward source-ISA bundles + admit the
+#           supported foreign source->target pair (default; today's behavior)
+#   NONE  - baseline ISA-compat rejection, no source-bundle forwarding
+# The choice is build-time and cross-project because the public HSA load ABI
+# cannot express "already translated"; two translators must never both process
+# one load. ROCM_TRANSLATOR_COMGR / ROCM_TRANSLATOR_NONE is applied as a compile
+# definition to every CLR target that consults amd::hotswap.
+if(NOT DEFINED ROCM_CODE_OBJECT_TRANSLATOR)
+    set(ROCM_CODE_OBJECT_TRANSLATOR
+        "COMGR"
+        CACHE STRING
+        "Code-object translator: COMGR or NONE"
+    )
+endif()
+set_property(CACHE ROCM_CODE_OBJECT_TRANSLATOR PROPERTY STRINGS COMGR NONE)
+if(ROCM_CODE_OBJECT_TRANSLATOR STREQUAL "COMGR")
+    set(ROCM_TRANSLATOR_COMPILE_DEF ROCM_TRANSLATOR_COMGR=1)
+elseif(ROCM_CODE_OBJECT_TRANSLATOR STREQUAL "NONE")
+    set(ROCM_TRANSLATOR_COMPILE_DEF ROCM_TRANSLATOR_NONE=1)
+else()
+    message(
+        FATAL_ERROR
+        "ROCM_CODE_OBJECT_TRANSLATOR must be COMGR or NONE, got "
+        "'${ROCM_CODE_OBJECT_TRANSLATOR}'"
+    )
+endif()
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
@@ -51,15 +87,27 @@ endif()
 #############
 
 if(NOT DEFINED ROCM_PATH)
-  if(DEFINED ENV{ROCM_PATH})
-    set(ROCM_PATH "$ENV{ROCM_PATH}" CACHE STRING "ROCm installation directory.")
-  elseif(CMAKE_PREFIX_PATH)
-    list(GET CMAKE_PREFIX_PATH 0 _first_prefix_path)
-    set(ROCM_PATH "${_first_prefix_path}" CACHE STRING "ROCm installation directory.")
-    unset(_first_prefix_path)
-  else()
-    set(ROCM_PATH "${CMAKE_INSTALL_PREFIX}" CACHE STRING "ROCm installation directory.")
-  endif()
+    if(DEFINED ENV{ROCM_PATH})
+        set(ROCM_PATH
+            "$ENV{ROCM_PATH}"
+            CACHE STRING
+            "ROCm installation directory."
+        )
+    elseif(CMAKE_PREFIX_PATH)
+        list(GET CMAKE_PREFIX_PATH 0 _first_prefix_path)
+        set(ROCM_PATH
+            "${_first_prefix_path}"
+            CACHE STRING
+            "ROCm installation directory."
+        )
+        unset(_first_prefix_path)
+    else()
+        set(ROCM_PATH
+            "${CMAKE_INSTALL_PREFIX}"
+            CACHE STRING
+            "ROCm installation directory."
+        )
+    endif()
 endif()
 message(STATUS "ROCM_PATH: ${ROCM_PATH}")
 
@@ -67,35 +115,46 @@ message(STATUS "ROCM_PATH: ${ROCM_PATH}")
 # for compatibility: users are advised to pass HIP_PLATFORM explicitly.
 # Sets the HIP_PLATFORM variable in the parent scope.
 function(_hip_clr_auto_detect_hip_platform)
-    if (UNIX)
-      set(HIPCC_EXECUTABLE "hipcc")
-      set(HIPCONFIG_EXECUTABLE "hipconfig")
+    if(UNIX)
+        set(HIPCC_EXECUTABLE "hipcc")
+        set(HIPCONFIG_EXECUTABLE "hipconfig")
     else()
-      set(HIPCC_EXECUTABLE "hipcc.exe")
-      set(HIPCONFIG_EXECUTABLE "hipconfig.exe")
+        set(HIPCC_EXECUTABLE "hipcc.exe")
+        set(HIPCONFIG_EXECUTABLE "hipconfig.exe")
     endif()
 
     # Set default HIPCC_BIN_DIR to ${ROCM_PATH}/bin
     if(NOT DEFINED HIPCC_BIN_DIR AND UNIX)
         set(HIPCC_BIN_DIR "${ROCM_PATH}/bin")
     endif()
-    message(STATUS "Auto-detect HIP_PLATFORM from HIPCC Binary Directory: ${HIPCC_BIN_DIR}")
+    message(
+        STATUS
+        "Auto-detect HIP_PLATFORM from HIPCC Binary Directory: ${HIPCC_BIN_DIR}"
+    )
 
     if(NOT EXISTS ${HIPCC_BIN_DIR}/${HIPCONFIG_EXECUTABLE})
-        message(FATAL_ERROR "Please pass hipcc/build or hipcc/bin using -DHIPCC_BIN_DIR.")
+        message(
+            FATAL_ERROR
+            "Please pass hipcc/build or hipcc/bin using -DHIPCC_BIN_DIR."
+        )
     endif()
 
     # Determine HIP_PLATFORM
     if(NOT DEFINED HIP_PLATFORM)
         if(NOT DEFINED ENV{HIP_PLATFORM})
-            execute_process(COMMAND ${HIPCC_BIN_DIR}/${HIPCONFIG_EXECUTABLE} --platform
+            execute_process(
+                COMMAND ${HIPCC_BIN_DIR}/${HIPCONFIG_EXECUTABLE} --platform
                 OUTPUT_VARIABLE _detected_hip_platform
                 RESULT_VARIABLE result
-                OUTPUT_STRIP_TRAILING_WHITESPACE)
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+            )
 
-	    if(result AND NOT result EQUAL 0)
-                message(FATAL_ERROR "Failure trying to auto-detect HIP_PLATFORM via command: ${HIPCC_BIN_DIR}/${HIPCONFIG_EXECUTABLE} --platform: ${result}")
-	    endif()
+            if(result AND NOT result EQUAL 0)
+                message(
+                    FATAL_ERROR
+                    "Failure trying to auto-detect HIP_PLATFORM via command: ${HIPCC_BIN_DIR}/${HIPCONFIG_EXECUTABLE} --platform: ${result}"
+                )
+            endif()
 
             set(HIP_PLATFORM "${_detected_hip_platform}" PARENT_SCOPE)
         else()
@@ -106,7 +165,10 @@ endfunction()
 if(CLR_BUILD_HIP)
     message(STATUS "HIP Common Directory: ${HIP_COMMON_DIR}")
     if(NOT DEFINED HIP_COMMON_DIR)
-        message(FATAL_ERROR "Please pass HIP using -DHIP_COMMON_DIR. HIP_COMMON_DIR is incorrect")
+        message(
+            FATAL_ERROR
+            "Please pass HIP using -DHIP_COMMON_DIR. HIP_COMMON_DIR is incorrect"
+        )
     endif()
     if(NOT DEFINED HIP_PLATFORM)
         _hip_clr_auto_detect_hip_platform()
@@ -115,14 +177,17 @@ endif()
 
 if(CLR_BUILD_HIP)
     option(BUILD_SHARED_LIBS "Build the shared library" ON)
-    if (NOT BUILD_SHARED_LIBS)
+    if(NOT BUILD_SHARED_LIBS)
         add_compile_definitions(BUILD_STATIC_LIBS)
     endif()
 endif()
 if((CLR_BUILD_HIP AND HIP_PLATFORM STREQUAL "amd") OR CLR_BUILD_OCL)
     add_subdirectory(rocclr)
 elseif(HIP_PLATFORM STREQUAL "amd")
-    message(FATAL_ERROR "Please enable building of one or more of the below runtimes:\n- HIP (-DCLR_BUILD_HIP=ON)\n- OpenCL (-DCLR_BUILD_OCL-ON)")
+    message(
+        FATAL_ERROR
+        "Please enable building of one or more of the below runtimes:\n- HIP (-DCLR_BUILD_HIP=ON)\n- OpenCL (-DCLR_BUILD_OCL-ON)"
+    )
 endif()
 if(CLR_BUILD_HIP)
     add_subdirectory(hipamd)
@@ -137,7 +202,18 @@ endif()
 # Target: clangformat
 find_program(CLANGFORMAT_EXE clang-format PATHS "${ROCM_PATH}/lib/llvm/bin")
 if(CLANGFORMAT_EXE)
-    file(GLOB_RECURSE FORMAT_SOURCE_FILE_LIST *.cpp *.hpp *.hh *.h *.cc *.c)
-    add_custom_target(clangformat COMMAND ${CLANGFORMAT_EXE} -style=file -i ${FORMAT_SOURCE_FILE_LIST}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    file(
+        GLOB_RECURSE FORMAT_SOURCE_FILE_LIST
+        *.cpp
+        *.hpp
+        *.hh
+        *.h
+        *.cc
+        *.c
+    )
+    add_custom_target(
+        clangformat
+        COMMAND ${CLANGFORMAT_EXE} -style=file -i ${FORMAT_SOURCE_FILE_LIST}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
 endif()
