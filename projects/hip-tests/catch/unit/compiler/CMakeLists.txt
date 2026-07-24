@@ -32,6 +32,11 @@ if(HIP_PLATFORM MATCHES "amd")
     --offload-arch=gfx11-generic
     --offload-arch=gfx12-generic)
 
+  # ASAN requires xnack+ support; remove incompatible generic architectures
+  if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+    list(FILTER OFFLOAD_ARCH_GENERIC_STR INCLUDE REGEX "xnack\\+")
+  endif()
+
   set(DISABLE_GENERIC_TARGET_ONLY)
 
   # Build hipSquareGenericTargetOnly to cover generic targets only
