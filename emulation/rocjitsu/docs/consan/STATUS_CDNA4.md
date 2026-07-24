@@ -147,27 +147,31 @@ validation case rather than a tuning sweep:
 The checked-in runner executes `tensilelite-client` through
 `gfx950_cdna4.json`, parses every numeric CSV result row, requires every
 validation field to be `PASSED`, and rejects missing or non-gfx950 code
-objects.  Fresh default-tool runs complete in about 5.7 seconds.  The runner
-and negative-oracle suite pass 15/15.  The maintained corpus gate
-`python -m pytest -q tests` passes 86/86 with the required IREE tools on
-`PATH`; bare repository-root collection is not the gate.
+objects.  At corpus revision `0db836e7bd8c`, fresh default-tool runs complete
+in about 5.0 seconds.  The runner and negative-oracle suite pass 21/21.  The
+maintained corpus gate `python -m pytest -q tests` passes 92/92 with the
+required IREE tools on `PATH`; bare repository-root collection is not the
+gate.
 
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Current evidence |
 |---|---|---|---|---|---|---|
-| P0 | `gfx950_sk_sgemm_streamk` | 🟨 Clean qualification passes; fault bundle pending | 🟥 Strict load rejection: persistent state placement | 🟥 Strict load rejection: transient state placement | 🟥 Strict load rejection: transient and barrier state placement | All runs used the standard profiles and a 120-second bound.  Exact profile results and retained artifact roots are summarized below. |
+| P0 | `gfx950_sk_sgemm_streamk` | 🟨 Clean qualification passes; fault bundle pending (`bd-1w9.9.9`) | 🟥 Strict load rejection: persistent state placement | 🟥 Strict load rejection: transient state placement | 🟥 Strict load rejection: transient and barrier state placement | All runs used the standard profiles and a 120-second bound.  Every retained log records the driver working directory, exact shell-quoted invocation, timeout, hook, and `RJ_*` profile settings. |
 
 This row is the executable denominator selected from the larger gfx950 YAML
 survey.  Static YAML features alone do not promote or expand that denominator.
 The baseline and SuperCollider runs both pass the exact numeric oracle and
-target-native gfx950 ELF checks.  Their paired elapsed times are 5.704 and
-6.301 seconds, respectively (1.10x).  SuperCollider discovers, selects, and
-patches all 82 LDS accesses, reports no unsupported or resource-failed sites,
-and finishes with marker zero, no mismatch, and complete report cleanup.
-Fault detection, containment, and post-fault health evidence is not yet
-retained, so the row is yellow rather than green.  The paired artifacts are:
+target-native gfx950 ELF checks.  Their paired host-dominated end-to-end
+elapsed times are 5.024 and 5.601 seconds, respectively (1.11x); this is not a
+kernel-overhead measurement.  SuperCollider discovers, selects, and patches
+all 82 LDS accesses, reports no unsupported or resource-failed sites, and
+finishes with marker zero, no mismatch, and complete report cleanup.  Fault
+detection, containment, and post-fault health evidence is not yet retained, so
+the row is yellow rather than green and that bundle remains tracked by
+`bd-1w9.9.9`.  Artifact paths in this section are relative to the workspace
+root, and the paired artifacts are:
 
-- `.pytest-artifacts/consan-gfx950-tensile-paired-baseline-20260724`;
-- `.pytest-artifacts/consan-gfx950-tensile-paired-supercollider-20260724`.
+- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-paired-baseline-provenance-20260724`;
+- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-paired-supercollider-provenance-20260724`.
 
 The three MOI profiles fail closed before the numeric oracle executes:
 
@@ -176,21 +180,21 @@ The three MOI profiles fail closed before the numeric oracle executes:
   place a fresh EXEC-save window or persistent scalar owner/epoch state below
   the CDNA AccVGPR boundary.  Strict policy rejects the load with exit code 92.
   The retained artifact root is
-  `.pytest-artifacts/consan-gfx950-tensile-record-replay-log2-20260724`;
+  `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-record-replay-provenance-20260724`;
   implementation is tracked by `bd-1w9.9.6`.
 - Sampled plans 106,448 bytes and 656 banks/watchpoints and assigns persistent
   owner/epoch state to `v44:v45`.  It cannot place the EXEC-save window or
   owner-local transient scalar state, so all 82 accesses and 11 barriers fail
   placement/lowering with zero patches.  Strict policy rejects the load with
   exit code 92.  The artifact root is
-  `.pytest-artifacts/consan-gfx950-tensile-sampled-20260724`.
+  `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-sampled-provenance-20260724`.
 - Inline Shadow plans 12,598,640 bytes, including 8,192 inline-LDS bytes,
   524,288 exact shadow entries, and 64 release/snapshot/token records.  It
   assigns persistent owner/epoch/workgroup-key state to `v44:v46`, but cannot
   place the EXEC-save/transient state or a compatible barrier epoch.  All 82
   accesses and 11 barriers fail placement/lowering with zero patches, and
   strict policy rejects the load with exit code 92.  The artifact root is
-  `.pytest-artifacts/consan-gfx950-tensile-inline-shadow-20260724`.
+  `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-inline-shadow-provenance-20260724`.
 
 The shared Sampled/Inline placement work is tracked by `bd-1w9.9.7`.  Every
 instrumented profile also reports one preflight scalar-load wait hazard in the
