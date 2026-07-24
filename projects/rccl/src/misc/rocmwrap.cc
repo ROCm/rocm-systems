@@ -55,6 +55,72 @@ static int ncclGetKernelVersionCode() {
   return KERNEL_VERSION_CODE(major, minor);
 }
 
+// Runtime probe: run the cuMem VMM cycle + register.cc pointer queries once; some ROCm builds advertise cuMem but reject the ops at runtime. Returns 1 if all succeed, 0 otherwise; never fatal.
+static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
+  size_t granularity = 0;
+  CUmemGenericAllocationHandle handle = 0;
+  CUdeviceptr ptr = 0;
+  CUmemAllocationProp prop = {};
+  CUmemAccessDesc accessDesc = {};
+  int ok = 0;
+  bool created = false, reserved = false, mapped = false;
+
+  prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+  prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  prop.location.id = devOrdinal;
+  prop.requestedHandleTypes = ncclCuMemHandleType;
+
+  // Smallest legal allocation: one granularity unit.
+  if (CUPFN(cuMemGetAllocationGranularity(&granularity, &prop,
+            CU_MEM_ALLOC_GRANULARITY_MINIMUM)) != hipSuccess || granularity == 0)
+    goto done;
+
+  if (CUPFN(cuMemCreate(&handle, granularity, &prop, 0)) != hipSuccess)
+    goto done;                       // 7.0.2.2-without-backport fails here
+  created = true;
+
+  if (CUPFN(cuMemAddressReserve(&ptr, granularity, granularity, 0, 0)) != hipSuccess)
+    goto cleanup;
+  reserved = true;
+
+  if (CUPFN(cuMemMap(ptr, granularity, 0, handle, 0)) != hipSuccess)
+    goto cleanup;
+  mapped = true;
+
+  accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  accessDesc.location.id = devOrdinal;
+  accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+  if (CUPFN(cuMemSetAccess(ptr, granularity, &accessDesc, 1)) != hipSuccess)
+    goto cleanup;
+
+  // register.cc queries: LEGACY_IPC is the op 7.0.2.2 rejects even though alloc/map above succeed.
+  {
+    CUdeviceptr base = 0;
+    size_t baseSize = 0;
+    CUmemorytype memType;
+    int legacyIpcCap = 0;
+    if (CUPFN(cuMemGetAddressRange(&base, &baseSize, ptr)) != hipSuccess)
+      goto cleanup;
+    if (CUPFN(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, ptr)) != hipSuccess)
+      goto cleanup;
+    if (CUPFN(cuPointerGetAttribute((void*)&legacyIpcCap,
+              CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, base)) != hipSuccess)
+      goto cleanup;
+  }
+
+  ok = 1;
+
+cleanup:
+  if (mapped)   CUCHECKIGNORE(cuMemUnmap(ptr, granularity));
+  if (reserved) CUCHECKIGNORE(cuMemAddressFree(ptr, granularity));
+  if (created)  CUCHECKIGNORE(cuMemRelease(handle));
+  (void)hipGetLastError();           // clear any sticky error from the probe
+done:
+  if (!ok)
+    INFO(NCCL_INIT, "cuMem functional probe failed on device %d; disabling cuMem", devOrdinal);
+  return ok;
+}
+
 // Determine whether CUMEM & VMM RDMA is supported on this platform
 int ncclIsCuMemSupported() {
   CUdevice currentDev;
@@ -87,6 +153,10 @@ int ncclIsCuMemSupported() {
     WARN("cuMem support requires VMM RDMA support");
     supported = 0;
   }
+
+  // Cheap gates passed — confirm the driver actually implements the VMM path at runtime.
+  if (supported && !ncclCuMemFunctionalProbe(currentDev, cudaDev))
+    supported = 0;
 
   return supported;
 error:
