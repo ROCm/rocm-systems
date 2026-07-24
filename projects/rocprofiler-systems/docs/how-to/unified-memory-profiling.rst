@@ -153,9 +153,9 @@ is also written without a PID suffix as ``perfetto-trace.proto``.
 
 .. note::
 
-   The rocpd database output is optional. When rocpd output is enabled (for
-   example, by including ``rocpd`` in ``--output-format``), the output directory
-   also contains ``rocpd-<pid>.db``.
+  The ``rocpd`` database output is optional. When ``rocpd`` output is enabled (for
+  example, by including ``rocpd`` in ``--output-format``), the output directory
+  also contains ``rocpd-<pid>.db``.
 
 Sample text output
 ==================

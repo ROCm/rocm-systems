@@ -264,9 +264,9 @@ extern "C" void __hipOnError(const void *err_info);
   }
 
 // Helper: invalidate all capturing streams on the current device and return an error.
-// Per CUDA semantics verified on NVIDIA hardware: invalidation is device-scoped, not
-// thread-scoped or mode-scoped. A sync API invalidates all captures on the same device,
-// regardless of which thread they belong to or what capture mode they use.
+// Invalidation is device-scoped, not thread-scoped or mode-scoped. A sync API invalidates
+// all captures on the same device, regardless of which thread they belong to or what
+// capture mode they use.
 #define INVALIDATE_DEVICE_CAPTURING_AND_RETURN(err)                                                \
   {                                                                                                \
     int _devId = hip::ihipGetDevice();                                                             \

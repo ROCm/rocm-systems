@@ -11,8 +11,8 @@
  *
  * Device-scoped invalidation tests for stream capture.
  *
- * These tests verify that HIP's stream capture invalidation semantics match CUDA's
- * device-scoped behavior, as verified on NVIDIA hardware (RTX PRO 4000 Blackwell).
+ * These tests verify that HIP's stream capture invalidation follows
+ * device-scoped behavior.
  *
  * Key principle: Invalidation is DEVICE-SCOPED, not thread-scoped or mode-scoped.
  *   - Sync APIs invalidate ALL captures on the SAME device (any thread, any mode)
@@ -44,7 +44,7 @@ constexpr int kN = 256;
  * Thread A: ThreadLocal capture on GPU 0
  * Thread B: hipMemcpy on GPU 0 (same device)
  *
- * Expected (per CUDA Test 10): Thread A's capture is INVALIDATED despite being ThreadLocal mode.
+ * Expected: Thread A's capture is INVALIDATED despite being ThreadLocal mode.
  * Device-scoped invalidation means same-device sync APIs invalidate ALL captures on that device.
  */
 TEST_CASE("ThreadLocal_SameDevice_SyncInvalidates", "[graph][capture][multithreaded]") {
@@ -123,7 +123,7 @@ TEST_CASE("ThreadLocal_SameDevice_SyncInvalidates", "[graph][capture][multithrea
  * Thread A: Global capture on GPU 0
  * Thread B: hipMemcpy on GPU 0 (same device)
  *
- * Expected (per CUDA Test 9): Thread A's capture is INVALIDATED.
+ * Expected: Thread A's capture is INVALIDATED.
  * Same-device sync APIs invalidate ALL captures, regardless of mode.
  */
 TEST_CASE("Global_SameDevice_SyncInvalidates", "[graph][capture][multithreaded]") {
@@ -267,7 +267,7 @@ TEST_CASE("Relaxed_SameDevice_SyncInvalidates", "[graph][capture][multithreaded]
  * Thread A: Global capture on GPU 0
  * Thread B: hipMemcpy on GPU 1 (different device)
  *
- * Expected (per CUDA Tests 2-4): Thread A's capture is NOT invalidated.
+ * Expected: Thread A's capture is NOT invalidated.
  * Different-device sync APIs do not trigger cross-device invalidation.
  */
 TEST_CASE("Global_DifferentDevice_SyncDoesNotInvalidate",
@@ -275,7 +275,7 @@ TEST_CASE("Global_DifferentDevice_SyncDoesNotInvalidate",
   const int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
     HipTest::HIP_SKIP_TEST(
-        "Global_DifferentDevice_SyncDoesNotInvalidate requires at least 2 GPUs — skipping.");
+        "Global_DifferentDevice_SyncDoesNotInvalidate requires at least 2 GPUs - skipping.");
     return;
   }
 
@@ -353,7 +353,7 @@ TEST_CASE("Global_DifferentDevice_SyncDoesNotInvalidate",
  * Thread A: ThreadLocal capture on GPU 0
  * Thread B: hipMemcpy on GPU 1 (different device)
  *
- * Expected (per CUDA Test 1): Thread A's capture is NOT invalidated.
+ * Expected: Thread A's capture is NOT invalidated.
  * This is the original ROCM-1945 scenario that was fixed.
  */
 TEST_CASE("ThreadLocal_DifferentDevice_SyncDoesNotInvalidate",
@@ -361,7 +361,7 @@ TEST_CASE("ThreadLocal_DifferentDevice_SyncDoesNotInvalidate",
   const int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
     HipTest::HIP_SKIP_TEST(
-        "ThreadLocal_DifferentDevice_SyncDoesNotInvalidate requires at least 2 GPUs — skipping.");
+        "ThreadLocal_DifferentDevice_SyncDoesNotInvalidate requires at least 2 GPUs - skipping.");
     return;
   }
 
@@ -434,14 +434,14 @@ TEST_CASE("ThreadLocal_DifferentDevice_SyncDoesNotInvalidate",
  * Thread A: Relaxed capture on GPU 0
  * Thread B: hipMemcpy on GPU 1 (different device)
  *
- * Expected (per CUDA Test 5): Thread A's capture is NOT invalidated.
+ * Expected: Thread A's capture is NOT invalidated.
  */
 TEST_CASE("Relaxed_DifferentDevice_SyncDoesNotInvalidate",
           "[graph][capture][multithreaded][multi_device]") {
   const int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
     HipTest::HIP_SKIP_TEST(
-        "Relaxed_DifferentDevice_SyncDoesNotInvalidate requires at least 2 GPUs — skipping.");
+        "Relaxed_DifferentDevice_SyncDoesNotInvalidate requires at least 2 GPUs - skipping.");
     return;
   }
 
@@ -525,7 +525,7 @@ TEST_CASE("ThreadLocal_GraphLaunch_DifferentDevice",
   const int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
     HipTest::HIP_SKIP_TEST(
-        "ThreadLocal_GraphLaunch_DifferentDevice requires at least 2 GPUs — skipping.");
+        "ThreadLocal_GraphLaunch_DifferentDevice requires at least 2 GPUs - skipping.");
     return;
   }
 

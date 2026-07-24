@@ -33,6 +33,7 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unistd.h>
 
 namespace {
 
@@ -963,6 +964,30 @@ TEST(CApiTest, CreateAndDestroyFromString) {
   EXPECT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(handle, nullptr);
   rj_vm_destroy(handle);
+}
+
+TEST(CApiTest, PluginLifecycleDispatchesProfiledShutdownThroughBaseGroup) {
+  const auto sink_dir = std::filesystem::temp_directory_path() /
+                        ("rocjitsu_plugin_lifecycle_" + std::to_string(getpid()));
+  std::filesystem::remove_all(sink_dir);
+  std::filesystem::create_directories(sink_dir);
+
+  rj_vm_t *handle = nullptr;
+  ASSERT_EQ(
+      rj_vm_create((CONFIG_DIR_PATH + "/gfx950_cdna4.json").c_str(), RJ_VM_MODE_DEFAULT, &handle),
+      ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(handle, nullptr);
+
+  const std::string plugin_config = std::format(
+      R"({{"profiled":true,"sinks":{{"types":["file"],"dir":"{}"}}}})", sink_dir.string());
+  ASSERT_EQ(rj_vm_load_plugins(handle, plugin_config.c_str(), nullptr), ROCJITSU_STATUS_SUCCESS);
+  rj_vm_destroy(handle);
+
+  std::ifstream profile(sink_dir / "profile.log");
+  const std::string output{std::istreambuf_iterator<char>(profile),
+                           std::istreambuf_iterator<char>()};
+  EXPECT_NE(output.find("total emulation time"), std::string::npos) << output;
+  std::filesystem::remove_all(sink_dir);
 }
 
 TEST(CApiTest, InvalidArguments) {
