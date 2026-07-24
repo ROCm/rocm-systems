@@ -87,11 +87,10 @@ inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
   if (mnemonic.starts_with("v_cvt_f32_fp8"))
     return true;
 
-  // These eight K=128 FP8/BF8 forms and the standalone 32x16 FP4 WMMA exist on B0
-  // but have no proven A0 lowering yet, so they are classified to fail closed
-  // rather than being copied through. Match the closed family precisely: ordinary
-  // K=128 F8F6F4 is the A0 replacement for another workaround and is not in this
-  // set.
+  // The eight K=128 FP8/BF8 forms and the standalone 32x16 FP4 WMMA exist on B0
+  // but not A0, so they require semantic expansion. The f32 K=128 family has an
+  // exact neutral regular-Scale lowering; f16 and standalone 32x16 FP4 still fail
+  // closed in their semantic rules.
   const bool is_k128_fp8_bf8 = (mnemonic.starts_with("v_wmma_f16_16x16x128_") ||
                                 mnemonic.starts_with("v_wmma_f32_16x16x128_")) &&
                                (mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||
@@ -100,15 +99,15 @@ inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
     return true;
 
   // Scale16 and regular Scale have separate mandatory encoding/scale-source
-  // workarounds. Keep them fail-closed until their semantic rules land.
+  // workarounds, including B0-only M=32 forms. Their semantic rules provide the
+  // A0 M/K splits and fail closed when operand ranges cannot be preserved.
   if (mnemonic.starts_with("v_wmma_scale"))
     return true;
 
   // K=64 FP8/BF8 WMMA and K=128 F8F6F4 are present on A0 and retain their
-  // architectural encodings. They must stay on the ordinary copy path: the
-  // B0-only K=128 FP8/BF8 lowering above emits the former, and the B0-only
-  // 32x16 FP4 lowering emits the latter. This matches the gfx1250 A0/B0
-  // behavior and the required WMMA split.
+  // architectural encodings. They must stay on the ordinary copy path. The
+  // neutral regular-Scale K=128 lowering and the B0-only 32x16 FP4 lowering use
+  // K=128 F8F6F4 as their A0 matrix base.
   //
   // FP8/BF8 SWMMAC remains unsupported and fails closed.
   const auto ends_with_fp8_bf8_pair = [&] {
