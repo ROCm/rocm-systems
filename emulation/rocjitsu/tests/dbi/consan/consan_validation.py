@@ -2367,9 +2367,9 @@ def _fault_inventory_environment(family: str) -> dict[str, str]:
 
 
 def _inventory(args: argparse.Namespace) -> int:
-    workspace = _workspace_from_environment()
     target = _target(args)
     workload = _workload_for_target(target, args.workload)
+    workspace = _workspace_from_environment()
     if not _doctor(workspace, target, (workload.id,))["ok"]:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
     root = args.artifact_root.resolve() / workload.id / "inventory"
@@ -3043,9 +3043,9 @@ def _fault_acceptance(result: dict, policy: dict) -> tuple[bool, list[str]]:
 
 
 def _fault(args: argparse.Namespace) -> int:
-    workspace = _workspace_from_environment()
     target = _target(args)
     workload = _workload_for_target(target, args.workload)
+    workspace = _workspace_from_environment()
     if not _doctor(workspace, target, (workload.id,))["ok"]:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
     if not args.allow_destructive:
@@ -3231,9 +3231,9 @@ def _fault(args: argparse.Namespace) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
-    workspace = _workspace_from_environment()
     target = _target(args)
     workload = _workload_for_target(target, args.workload)
+    workspace = _workspace_from_environment()
     timeout = args.timeout if args.timeout is not None else workload.run_timeout_seconds
     doctor = _doctor(workspace, target, (workload.id,))
     if not doctor["ok"]:

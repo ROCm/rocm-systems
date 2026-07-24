@@ -272,6 +272,61 @@ class ConSanValidationTest(unittest.TestCase):
             error.getvalue(),
         )
 
+    def test_direct_handlers_report_target_exclusion_before_workspace(self) -> None:
+        cases = (
+            (
+                validation._run,
+                [
+                    "--target",
+                    "gfx942",
+                    "run",
+                    "--workload",
+                    "pytorch-rdna4-compiled-softmax",
+                    "--phase",
+                    "clean",
+                    "--artifact-root",
+                    "/unused",
+                ],
+            ),
+            (
+                validation._inventory,
+                [
+                    "--target",
+                    "gfx942",
+                    "inventory",
+                    "--workload",
+                    "pytorch-rdna4-compiled-softmax",
+                    "--artifact-root",
+                    "/unused",
+                ],
+            ),
+            (
+                validation._fault,
+                [
+                    "--target",
+                    "gfx942",
+                    "fault",
+                    "--workload",
+                    "pytorch-rdna4-compiled-softmax",
+                    "--spec",
+                    "/unused/fault.json",
+                    "--fault",
+                    "fault-0",
+                    "--artifact-root",
+                    "/unused",
+                ],
+            ),
+        )
+        with mock.patch.dict(os.environ, {}, clear=True):
+            for handler, argv in cases:
+                with self.subTest(command=argv[2]):
+                    with self.assertRaisesRegex(
+                        validation.ValidationError,
+                        "gfx942 manifest excludes workload: "
+                        "pytorch-rdna4-compiled-softmax",
+                    ):
+                        handler(validation._parse_args(argv))
+
     def test_gfx950_manifest_resolves_cdna4_native_workloads(self) -> None:
         manifest = validation._manifest("gfx950")
         workloads = {workload["id"]: workload for workload in manifest["workloads"]}
