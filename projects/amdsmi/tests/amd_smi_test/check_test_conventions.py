@@ -29,6 +29,9 @@ DOC = "projects/amdsmi/docs/conceptual/test-design.md"
 
 TIERS = ("unit", "functional")  # top-level test-type directories
 COMPONENTS = ("gpu", "cpu", "nic", "ifoe", "system")  # allowed component dirs
+# Functional tests group into per-feature leaf dirs (<component>/<feature>/),
+# except these flat components which have no sub-features (component == feature).
+FLAT_COMPONENTS = ("system",)
 TEST_SUFFIX = "_test.cc"
 
 # A GTest suite name is <Component><Type>[<Operation>]:
@@ -117,6 +120,16 @@ def _check_layout_and_naming(tier: str, component: str | None, path: Path) -> It
         )
     elif component not in COMPONENTS:
         yield (f"{_rel(path)}: unknown component '{component}'; expected one of {list(COMPONENTS)}")
+    elif tier == "functional" and component not in FLAT_COMPONENTS:
+        # Functional tests group into per-feature leaf dirs, e.g.
+        # functional/gpu/clock/frequencies_read_test.cc — parts are
+        # (component, feature, file), so a missing feature leaf means len < 3.
+        depth = len(path.relative_to(TEST_ROOT / tier).parts)
+        if depth < 3:
+            yield (
+                f"{_rel(path)}: functional test must live under "
+                f"{tier}/{component}/<feature>/..., not directly in {tier}/{component}/"
+            )
     if not path.name.endswith(TEST_SUFFIX):
         yield (
             f"{_rel(path)}: must be named '<feature>_<operation>{TEST_SUFFIX}' "
