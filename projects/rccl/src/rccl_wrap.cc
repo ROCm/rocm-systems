@@ -538,10 +538,6 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
     return false;
   }
 
-  // Direct AllGather incompatible with UBR
-  if (ncclParamLocalRegister()) {
-    return false;
-  }
 
   if (rcclUseAinic()) {
     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on AINIC. ");

@@ -986,6 +986,42 @@
         }
       ]
     },
+    "ubr_direct_allgather": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_LEGACY_CUDA_REGISTER": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_DirectAllGather_UbrSizeSweep",
+          "description": "Registered Direct AllGather across the LL<->SIMPLE boundary (intra-node IPC path)",
+          "test_filter": "UBR_DirectAllGather.UbrSizeSweep"
+        },
+        {
+          "name": "UBR_DirectAllGather_BaselineVsUbrEquivalence",
+          "description": "Before/after equivalence: unregistered (allowUB=false) then registered (allowUB=true) AllGather",
+          "test_filter": "UBR_DirectAllGather.BaselineVsUbrEquivalence"
+        },
+        {
+          "name": "UBR_DirectAllGather_UbrSizeSweep_MultiNode",
+          "description": "Registered Direct AllGather size sweep across nodes (net/DMA-buf registration path)",
+          "test_filter": "UBR_DirectAllGather.UbrSizeSweep_MultiNode",
+          "num_ranks": 16,
+          "num_nodes": 2,
+          "num_gpus": 8
+        }
+      ]
+    },
     "ubr_concurrent_reg_hang": {
       "extends": "default",
       "is_gtest": true,
@@ -3291,6 +3327,12 @@
       "name": "UBR Tests - Multi Node",
       "description": "User Buffer Registration tests on multi-node (requires 2+ nodes)",
       "config": "ubr_multi_node",
+      "enabled": true
+    },
+    {
+      "name": "UBR Direct AllGather - Default Under UBR",
+      "description": "Direct AllGather running by default under UBR (NCCL_LOCAL_REGISTER=1): size sweep across LL/SIMPLE boundary, before/after (unregistered vs registered) equivalence, and a multi-node net-path sweep. Validates removal of the blanket Direct AllGather disable and per-op allowUB gating.",
+      "config": "ubr_direct_allgather",
       "enabled": true
     },
     {
