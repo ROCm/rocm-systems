@@ -46,6 +46,15 @@ repos:
         name: clang-format (C/C++/ObjC)
         entry: clang-format -i -style=file
         files: '\.(c|cpp|cc|h|hpp|m|mm)$'
+        exclude: ^emulation/rocjitsu/
+
+  - repo: local
+    hooks:
+      - id: rocjitsu-stylist
+        name: rocjitsu stylist
+        entry: emulation/rocjitsu/scripts/stylist.py
+        language: system
+        files: ^emulation/rocjitsu/.*\.(c|cc|cpp|h|hh|hpp)$
 
   # gersemi: CMake formatter (replaces cmake-format and cmake-lint)
   - repo: https://github.com/BlankSpruce/gersemi

@@ -152,6 +152,19 @@ Foo foo = static_cast<Foo>(bar); // OK but could use auto instead to avoid repet
 
 ## Formatting
 
+The rocjitsu stylist enforces the locally decidable subset of this guide. Run
+it before committing:
+
+```bash
+scripts/stylist.py --check
+```
+
+Use `--strict` to additionally require complete Doxygen `@brief` and `@details`
+documentation on owned public header APIs. Existing semantic findings are
+tracked by a counted baseline; new findings fail both normal and strict checks.
+See `scripts/stylist.md` for the exact rules, exemptions, and baseline
+maintenance workflow.
+
 - The repo uses pre-commit hooks : clang-format (C++), black (Python), and
   gersemi (CMake). The config lives at the repo root
   (`rocm-systems/.pre-commit-config.yaml`). Install once, then run before every
