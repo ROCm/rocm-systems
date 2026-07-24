@@ -98,7 +98,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Optimized
 
-- **Avoided redundant KFD topology discovery in `amdsmi_get_gpu_process_list()`**.  
+- **Optimized `amdsmi_get_gpu_process_list()` to skip redundant KFD topology discovery**.  
   - The per-process KFD lookup rebuilt the entire KFD node topology (an expensive sysfs walk) on every call just to translate the device BDF into its KFD GPU id.
   - The caller already knows this value, so it is now passed through to `gpuvsmi_get_pid_info()`, eliminating one full topology discovery per process per refresh. Falls back to the original discovery path when the id is unavailable.
 

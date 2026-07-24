@@ -68,10 +68,8 @@ amdsmi_status_t gpuvsmi_pid_is_gpu(const std::string& path, const char* bdf) {
   return AMDSMI_STATUS_NOT_FOUND;
 }
 
-// Determine via kfd whether pid uses specified gpu. The caller usually already
-// knows this device's KFD gpu id; pass it in to avoid rebuilding the entire KFD
-// topology (an expensive sysfs walk) just to translate bdf -> kfd gpu id. Pass
-// UINT64_MAX (or 0) to fall back to topology discovery.
+// See fdinfo.h for the full contract. The fast path uses `known_kfd_gpu_id`;
+// the sentinels 0 and UINT64_MAX force the topology-discovery fallback below.
 amdsmi_status_t gpu_is_in_kfd_pid(const amdsmi_bdf_t& bdf, long pid, uint64_t known_kfd_gpu_id) {
   uint64_t target_gid = known_kfd_gpu_id;
 

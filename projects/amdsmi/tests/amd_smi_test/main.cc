@@ -59,7 +59,7 @@
 #include "functional/power_read.h"
 #include "functional/power_read_write.h"
 #include "functional/process_info_read.h"
-#include "functional/process_list_read_test.h"
+#include "functional/process_list_read.h"
 #include "functional/sys_info_read.h"
 #include "functional/temp_read.h"
 #include "functional/version_read.h"

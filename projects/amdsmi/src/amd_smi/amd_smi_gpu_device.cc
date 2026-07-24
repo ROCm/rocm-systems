@@ -278,11 +278,27 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
    * This function retrieves the process information given in rsmi_proc_info_t
    * and populates the amdsmi_proc_info_t structure.
    */
+  // This device's KFD gpu id is stable for the whole process sweep, so resolve
+  // it once and reuse it for every process instead of recomputing it per
+  // process. It is forwarded to gpuvsmi_get_pid_info() so the per-process KFD
+  // lookup can skip rebuilding the entire KFD topology just to translate the
+  // BDF into this id.
+  const uint64_t kfd_gpu_id = get_kfd_gpu_id();
+  if (kfd_gpu_id == 0 || kfd_gpu_id == UINT64_MAX) {
+    // Without a cached id every per-process lookup falls back to a full KFD
+    // topology discovery (an expensive sysfs walk). Surface it once per device
+    // per sweep so the slow path is observable rather than silently degrading.
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__
+       << " | KFD gpu id unavailable for this device; per-process lookups will "
+          "fall back to full KFD topology discovery.";
+    LOG_WARN(ss);
+  }
+
   auto get_process_info = [&](const rsmi_process_info_t& rsmi_proc_info,
                               amdsmi_proc_info_t& amdsmi_proc_info) {
-    // amdsmi_proc_info_t gets populated with /proc information from gpuvsmi_get_pid_info().
-    // Pass this device's KFD gpu id so it need not rebuild the KFD topology to derive it.
-    uint64_t kfd_gpu_id = get_kfd_gpu_id();
+    // Pass this device's cached KFD gpu id (resolved once above) so the
+    // per-process lookup need not rebuild the KFD topology to derive it.
     auto status_code =
         gpuvsmi_get_pid_info(get_bdf(), rsmi_proc_info.process_id, amdsmi_proc_info, kfd_gpu_id);
     // If we cannot get the info from sysfs, save the minimum info

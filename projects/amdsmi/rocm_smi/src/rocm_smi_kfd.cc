@@ -32,13 +32,17 @@
 #include <atomic>
 #include <cassert>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -540,6 +544,50 @@ int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t*
   return 0;
 }
 
+// Return the KFD proc-root "pid:<pid>-id:<n>" alternate-context directories that
+// belong to `pid`, as full paths.
+//
+// These directories are a rarely-populated alternate layout for multi-context
+// processes. Each per-PID lookup used to re-open and re-scan the entire KFD proc
+// root to find them, which made a sweep over P processes O(P^2). Instead we scan
+// the root at most once per short window, build a shared pid -> {dirs} index, and
+// answer each lookup from it. Callers are serialized only for the brief rebuild.
+static std::vector<std::string> KfdAltContextRootDirsForPid(long pid) {
+  static std::mutex mtx;
+  static std::unordered_map<long, std::vector<std::string>> index;
+  static std::chrono::steady_clock::time_point built{};
+  static bool valid = false;
+  // Long enough that one process-list sweep reuses a single scan; short enough
+  // that newly created contexts are picked up promptly.
+  constexpr std::chrono::milliseconds kTtl{500};
+
+  std::lock_guard<std::mutex> lock(mtx);
+  auto now = std::chrono::steady_clock::now();
+  if (!valid || (now - built) > kTtl) {
+    index.clear();
+    DIR* proc_root = opendir(kKFDProcPathRoot);
+    if (proc_root) {
+      struct dirent* entry;
+      while ((entry = readdir(proc_root)) != nullptr) {
+        if (entry->d_name[0] == '.') continue;
+        // Match exactly "pid:<owner>-id:<n>" and bucket the full path by <owner>.
+        if (strncmp(entry->d_name, "pid:", 4) != 0) continue;
+        char* end = nullptr;
+        long owner = strtol(entry->d_name + 4, &end, 10);
+        if (end == entry->d_name + 4) continue;      // no digits after "pid:"
+        if (strncmp(end, "-id:", 4) != 0) continue;  // require "pid:<owner>-id:"
+        index[owner].push_back(std::string(kKFDProcPathRoot) + "/" + entry->d_name);
+      }
+      closedir(proc_root);
+    }
+    built = now;
+    valid = true;
+  }
+  auto it = index.find(pid);
+  if (it == index.end()) return {};
+  return it->second;
+}
+
 int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out) {
   if (!out) return EINVAL;
   out->clear();
@@ -592,27 +640,17 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out) {
   }
 
   // Also check for "pid:PID-id:X" format directories at the parent level
-  // This is another format used for multi-context processes
-  std::string pid_prefix = "pid:" + std::to_string(pid) + "-id:";
-  DIR* proc_root = opendir(kKFDProcPathRoot);
-  if (proc_root) {
-    struct dirent* root_entry;
-    while ((root_entry = readdir(proc_root))) {
-      if (root_entry->d_name[0] == '.') continue;
-      std::string entry_name = root_entry->d_name;
-      if (entry_name.find(pid_prefix) == 0) {
-        // Found a pid:PID-id:X directory for this process
-        std::string alternate_path = std::string(kKFDProcPathRoot) + "/" + entry_name;
-        extract_gpu_ids_from_dir(alternate_path);
+  // (another format used for multi-context processes). Resolved from a cached
+  // single scan of the KFD proc root so a sweep over many PIDs does not re-scan
+  // the whole root once per PID.
+  for (const auto& alternate_path : KfdAltContextRootDirsForPid(pid)) {
+    extract_gpu_ids_from_dir(alternate_path);
 
-        // Also check for context_xxxx in this alternate path
-        std::vector<std::string> alt_context_paths = GetSecondaryContextPaths(alternate_path);
-        for (const auto& alt_context_path : alt_context_paths) {
-          extract_gpu_ids_from_dir(alt_context_path);
-        }
-      }
+    // Also check for context_xxxx in this alternate path
+    std::vector<std::string> alt_context_paths = GetSecondaryContextPaths(alternate_path);
+    for (const auto& alt_context_path : alt_context_paths) {
+      extract_gpu_ids_from_dir(alt_context_path);
     }
-    closedir(proc_root);
   }
 
   return 0;
@@ -699,35 +737,23 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
   }
 
   // Also check for "pid:PID-id:X" format directories at the parent level
-  // This is another format used for multi-context processes
-  std::string pid_prefix = "pid:" + std::to_string(pid) + "-id:";
-  DIR* proc_root = opendir(kKFDProcPathRoot);
-  if (proc_root) {
-    struct dirent* root_entry;
-    while ((root_entry = readdir(proc_root))) {
-      if (root_entry->d_name[0] == '.') continue;
-      std::string entry_name = root_entry->d_name;
-      if (entry_name.find(pid_prefix) == 0) {
-        // Found a pid:PID-id:X directory for this process
-        std::string alternate_path = std::string(kKFDProcPathRoot) + "/" + entry_name;
-        err = read_gpus_from_queues(alternate_path);
-        if (err != 0 && err != ESRCH) {
-          closedir(proc_root);
-          return err;
-        }
+  // (another format used for multi-context processes). Resolved from a cached
+  // single scan of the KFD proc root so a sweep over many PIDs does not re-scan
+  // the whole root once per PID.
+  for (const auto& alternate_path : KfdAltContextRootDirsForPid(pid)) {
+    err = read_gpus_from_queues(alternate_path);
+    if (err != 0 && err != ESRCH) {
+      return err;
+    }
 
-        // Also check for context_xxxx in this alternate path
-        std::vector<std::string> alt_context_paths = GetSecondaryContextPaths(alternate_path);
-        for (const auto& alt_context_path : alt_context_paths) {
-          err = read_gpus_from_queues(alt_context_path);
-          if (err != 0 && err != ESRCH) {
-            closedir(proc_root);
-            return err;
-          }
-        }
+    // Also check for context_xxxx in this alternate path
+    std::vector<std::string> alt_context_paths = GetSecondaryContextPaths(alternate_path);
+    for (const auto& alt_context_path : alt_context_paths) {
+      err = read_gpus_from_queues(alt_context_path);
+      if (err != 0 && err != ESRCH) {
+        return err;
       }
     }
-    closedir(proc_root);
   }
 
   // if no queues were present, fallback to grab KFD GPU IDs from parent dir names
@@ -818,27 +844,17 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
   }
 
   // Also check for "pid:PID-id:X" format directories at the parent level
-  // This is another format used for multi-context processes
-  std::string pid_prefix = "pid:" + std::to_string(pid) + "-id:";
-  DIR* proc_root = opendir(kKFDProcPathRoot);
-  if (proc_root) {
-    struct dirent* root_entry;
-    while ((root_entry = readdir(proc_root))) {
-      if (root_entry->d_name[0] == '.') continue;
-      std::string entry_name = root_entry->d_name;
-      if (entry_name.find(pid_prefix) == 0) {
-        // Found a pid:PID-id:X directory for this process
-        std::string alternate_path = std::string(kKFDProcPathRoot) + "/" + entry_name;
-        metric_paths.push_back(alternate_path);
+  // (another format used for multi-context processes). Resolved from a cached
+  // single scan of the KFD proc root so a sweep over many PIDs does not re-scan
+  // the whole root once per PID.
+  for (const auto& alternate_path : KfdAltContextRootDirsForPid(pid)) {
+    metric_paths.push_back(alternate_path);
 
-        // Also check for context_xxxx in this alternate path
-        std::vector<std::string> alt_context_paths = GetSecondaryContextPaths(alternate_path);
-        for (const auto& alt_context_path : alt_context_paths) {
-          metric_paths.push_back(alt_context_path);
-        }
-      }
+    // Also check for context_xxxx in this alternate path
+    std::vector<std::string> alt_context_paths = GetSecondaryContextPaths(alternate_path);
+    for (const auto& alt_context_path : alt_context_paths) {
+      metric_paths.push_back(alt_context_path);
     }
-    closedir(proc_root);
   }
 
   for (const auto& gpu_id : *gpu_set) {
