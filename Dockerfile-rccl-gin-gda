@@ -30,8 +30,9 @@ RUN mkdir --parents --mode=0755 /etc/apt/keyrings \
  && wget https://repo.amd.com/rocm/packages/gpg/rocm.gpg -O - | gpg --dearmor | tee /etc/apt/keyrings/amdrocm.gpg > /dev/null \
  && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages-multi-arch/ubuntu2404 stable main" > /etc/apt/sources.list.d/rocm.list
 RUN apt-get update \
- && apt-get install -y amdrocm-core7.14-gfx1250 amdrocm-core7.14-gfx950 amdrocm-core7.14-gfx942 amdrocm-core-dev7.14 amdrocm-developer-tools7.14 amdrocm-runtime-dev \
- && ln -s /opt/rocm/core/.info /opt/rocm/.info
+# CUMEM broken on 7.14, we'll need to jump to 7.15 directly
+# && apt-get install -y amdrocm-core7.14-gfx1250 amdrocm-core7.14-gfx950 amdrocm-core7.14-gfx942 amdrocm-core-dev7.14 amdrocm-developer-tools7.14 amdrocm-runtime-dev7.14 \
+ && apt-get install -y amdrocm-core7.13-gfx950 amdrocm-core7.13-gfx942 amdrocm-core-dev7.13 amdrocm-developer-tools7.13 amdrocm-runtime-dev7.13
 
 ## install dependencies
 RUN apt-get update \
