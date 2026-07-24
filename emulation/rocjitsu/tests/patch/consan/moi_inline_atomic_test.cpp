@@ -91,6 +91,61 @@ TEST(ConSanMoi, Cdna4InlineAtomicAcquireReleaseEmitsNativeTransaction) {
   EXPECT_GE(std::count(cave_words.begin(), cave_words.end(), *wait), 1);
 }
 
+TEST(ConSanMoi, Cdna4InlineAtomicReleaseCarriesClaimedPredecessor) {
+  const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+  const auto atomic = build_cdna4_flat_atomic_add_u32(
+      /*vaddr=*/2, /*vsrc=*/4, /*vdst=*/0, /*return_old_value=*/false,
+      /*scope=*/2, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto wait = build_cdna4_s_wait_flat0(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(atomic && wait);
+  std::vector<uint32_t> text_words;
+  text_words.insert(text_words.end(), release.begin(), release.end());
+  text_words.push_back(*wait);
+  text_words.insert(text_words.end(), atomic->begin(), atomic->end());
+  text_words.resize(800, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  const std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "atomic_release_sequence");
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 1;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
+                               << " errors=" << testing::PrintToString(result.errors)
+                               << " dispositions="
+                               << testing::PrintToString(result.site_dispositions)
+                               << " resources=" << testing::PrintToString(result.resource_plans);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_TRUE(result.final_validation_passed);
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave_words =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const auto release_claim_and_commit = build_cdna4_flat_atomic_cmpswap_b32(
+      /*vaddr=*/8, /*vsrc=*/12, /*vdst=*/12, /*return_old_value=*/true,
+      /*scope=*/2, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto acquired_token_transaction = build_cdna4_flat_atomic_cmpswap_b32(
+      /*vaddr=*/8, /*vsrc=*/26, /*vdst=*/26, /*return_old_value=*/true,
+      /*scope=*/2, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(release_claim_and_commit && acquired_token_transaction);
+  EXPECT_EQ(count_subsequence(cave_words, *atomic), 1u);
+  EXPECT_EQ(count_subsequence(cave_words, *release_claim_and_commit), 2u);
+  EXPECT_EQ(count_subsequence(cave_words, *acquired_token_transaction), 15u);
+}
+
 TEST(ConSanMoi, SharedHelperInlineAtomicSpillUsesAutomaticStateAcrossOwners) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.helper_has_ordered_atomic = true;

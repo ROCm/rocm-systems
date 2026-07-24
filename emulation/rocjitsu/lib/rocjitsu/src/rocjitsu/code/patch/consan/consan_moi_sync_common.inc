@@ -2551,7 +2551,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
             inline_atomic_release_capacity, snapshot_table_base, inline_causal_snapshot_capacity,
             token_table_base, inline_acquired_token_capacity,
             /*emit_guest_instruction=*/true,
-            /*import_claimed_predecessor=*/is_rdna4_family_arch(arch),
+            /*import_claimed_predecessor=*/true,
             /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors)) {
       errors.emplace_back(
           "ConSan MOI inline release could not emit a versioned causal transaction");
