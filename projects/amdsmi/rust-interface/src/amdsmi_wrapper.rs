@@ -4482,48 +4482,36 @@ const _: () = {
 };
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct AmdsmiFabricInfoVerT {
-    pub version: u32,
-    pub fabric_version: AmdsmiFabricInfoVerTFabricInfo,
+pub struct AmdsmiFabricInfoT {
+    pub bdf: AmdsmiBdfT,
+    pub fabric_version: u32,
+    pub fabric_info: AmdsmiFabricInfoTFabricInfo,
+    pub reserved: [u32; 15usize],
 }
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub union AmdsmiFabricInfoVerTFabricInfo {
+pub union AmdsmiFabricInfoTFabricInfo {
     pub v1: AmdsmiFabricInfoV1T,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiFabricInfoVerTFabricInfo"]
-        [::std::mem::size_of::<AmdsmiFabricInfoVerTFabricInfo>() - 244usize];
-    ["Alignment of AmdsmiFabricInfoVerTFabricInfo"]
-        [::std::mem::align_of::<AmdsmiFabricInfoVerTFabricInfo>() - 4usize];
-    ["Offset of field: AmdsmiFabricInfoVerTFabricInfo::v1"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoVerTFabricInfo, v1) - 0usize];
+    ["Size of AmdsmiFabricInfoTFabricInfo"]
+        [::std::mem::size_of::<AmdsmiFabricInfoTFabricInfo>() - 244usize];
+    ["Alignment of AmdsmiFabricInfoTFabricInfo"]
+        [::std::mem::align_of::<AmdsmiFabricInfoTFabricInfo>() - 4usize];
+    ["Offset of field: AmdsmiFabricInfoTFabricInfo::v1"]
+        [::std::mem::offset_of!(AmdsmiFabricInfoTFabricInfo, v1) - 0usize];
 };
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of AmdsmiFabricInfoVerT"][::std::mem::size_of::<AmdsmiFabricInfoVerT>() - 248usize];
-    ["Alignment of AmdsmiFabricInfoVerT"][::std::mem::align_of::<AmdsmiFabricInfoVerT>() - 4usize];
-    ["Offset of field: AmdsmiFabricInfoVerT::version"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoVerT, version) - 0usize];
-    ["Offset of field: AmdsmiFabricInfoVerT::fabric_version"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoVerT, fabric_version) - 4usize];
-};
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct AmdsmiFabricInfoT {
-    pub bdf: AmdsmiBdfT,
-    pub info: AmdsmiFabricInfoVerT,
-    pub reserved: [u32; 15usize],
-}
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of AmdsmiFabricInfoT"][::std::mem::size_of::<AmdsmiFabricInfoT>() - 320usize];
     ["Alignment of AmdsmiFabricInfoT"][::std::mem::align_of::<AmdsmiFabricInfoT>() - 8usize];
     ["Offset of field: AmdsmiFabricInfoT::bdf"]
         [::std::mem::offset_of!(AmdsmiFabricInfoT, bdf) - 0usize];
-    ["Offset of field: AmdsmiFabricInfoT::info"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoT, info) - 8usize];
+    ["Offset of field: AmdsmiFabricInfoT::fabric_version"]
+        [::std::mem::offset_of!(AmdsmiFabricInfoT, fabric_version) - 8usize];
+    ["Offset of field: AmdsmiFabricInfoT::fabric_info"]
+        [::std::mem::offset_of!(AmdsmiFabricInfoT, fabric_info) - 12usize];
     ["Offset of field: AmdsmiFabricInfoT::reserved"]
         [::std::mem::offset_of!(AmdsmiFabricInfoT, reserved) - 256usize];
 };

@@ -5785,22 +5785,18 @@ typedef struct {
   amdsmi_fabric_accelerator_vpod_state_t accel_state;  //!< Accelerator vPoD State
 } amdsmi_fabric_info_v1_t;
 
-typedef struct {
-  uint32_t version;
-  union fabric_info_ {
-    amdsmi_fabric_info_v1_t v1;
-  } fabric_version;
-} amdsmi_fabric_info_ver_t;
-
 /**
  * @brief Fabric device information structure
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
-  amdsmi_bdf_t bdf;               //!< BDF (Bus, Device, Function) of the Fabric device
-  amdsmi_fabric_info_ver_t info;  //!< Fabric information structure (version 1)
-  uint32_t reserved[15];          //!< Reserved for future use
+  amdsmi_bdf_t bdf;  //!< BDF (Bus, Device, Function) of the Fabric device
+  uint32_t fabric_version;
+  union fabric_info_ {
+    amdsmi_fabric_info_v1_t v1;
+  } fabric_info;
+  uint32_t reserved[15];  //!< Reserved for future use
 } amdsmi_fabric_info_t;
 
 /**

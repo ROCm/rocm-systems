@@ -168,6 +168,7 @@ declare -A TEST_NUMBERS=(
   ["alltoall_wave"]="151"
   ["fcollect_wave"]="152"
   ["reduce_wave"]="153"
+  ["teamreducescatterwave"]="154"
 )
 
 # Detect which runtime to use
@@ -821,6 +822,9 @@ TestColl() {
     ExecTest  "alltoall_wave"    2       1            $WAVE_SIZE        512
     ExecTest  "fcollect_wave"    2       1            $WAVE_SIZE        32768
     ExecTest  "reduce_wave"      2       1            $WAVE_SIZE        32768
+    ExecTest  "teamreducescatterwave" 2      1            $WAVE_SIZE   32768
+    ExecTest  "teamreducescatterwave" 4      1            $WAVE_SIZE   32768
+    ExecTest  "teamreducescatterwave" 8      1            $WAVE_SIZE   32768
   else echo "Skip:   *_wave (AIROCSHMEM-409: wave tests not supported on RO)"; fi
 }
 

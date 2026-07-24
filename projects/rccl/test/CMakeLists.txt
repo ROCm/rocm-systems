@@ -352,6 +352,7 @@ if(BUILD_TESTS)
       TransportTests.cpp
       TimeoutTests.cpp
       mem_manager/MemManagerTests.cpp
+      graph/SearchTests.cpp
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
       graph/TopoTests.cpp
@@ -361,6 +362,15 @@ if(BUILD_TESTS)
     )
 
     add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
+
+    # SearchTests.cpp #includes the hipify-generated copy of src/graph/search.cc
+    # directly (via #include SEARCH_CC_PATH) so it can exercise search.cc's
+    # internal symbols in the same TU. Pass the absolute path as a source-scoped
+    # define; the hipify step is ordered ahead of the test via the add_dependencies
+    # / link to the rccl target that the common foreach below applies.
+    set_source_files_properties(graph/SearchTests.cpp PROPERTIES
+      COMPILE_DEFINITIONS
+        "SEARCH_CC_PATH=\"${PROJECT_BINARY_DIR}/hipify/src/graph/search.cc\"")
 
     # TopoEnvPolicyTests and NetDevsPolicyP2pNetTests load a topology XML fixture
     # from the source tree (tools/topo_expl/models). Expose the test source dir

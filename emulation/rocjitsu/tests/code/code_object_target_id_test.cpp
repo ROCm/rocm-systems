@@ -19,16 +19,13 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/code/rj_code.h"
+#include "scoped_temp.h"
 
 #include <gtest/gtest.h>
-
-#include <unistd.h>
 
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -134,20 +131,11 @@ void expect_machine_flag_maps_to_target(uint32_t mach_flag, rj_code_target_id_t 
 void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target) {
   auto image = make_minimal_amdgpu_elf(mach_flag);
 
-  // PID-suffix the tmp filename so concurrent ctest runs and stale leftovers
-  // from prior crashed runs don't collide.
-  const std::filesystem::path tmp =
-      std::filesystem::temp_directory_path() /
-      ("rj_code_object_target_id_test_" + std::to_string(getpid()) + ".co");
-  {
-    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-    ASSERT_TRUE(out.is_open()) << "could not open " << tmp;
-    out.write(reinterpret_cast<const char *>(image.data()),
-              static_cast<std::streamsize>(image.size()));
-  }
+  test::ScopedTempFile file("rj-code-object-target-id-");
+  file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
 
   rj_code_executable_t *exec = nullptr;
-  ASSERT_EQ(rj_code_executable_create(tmp.c_str(), &exec), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(rj_code_executable_create(file.path().c_str(), &exec), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(exec, nullptr);
 
   ASSERT_GT(rj_code_executable_num_code_objects(exec, target), 0u)
@@ -182,9 +170,6 @@ void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target)
   rj_code_basic_block_release(block);
   rj_code_object_destroy(obj);
   rj_code_object_release(obj);
-
-  std::error_code ec;
-  std::filesystem::remove(tmp, ec); // best-effort
 }
 
 //==============================================================================
