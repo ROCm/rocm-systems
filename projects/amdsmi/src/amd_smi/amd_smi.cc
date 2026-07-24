@@ -3961,7 +3961,6 @@ amdsmi_status_t amdsmi_get_gpu_ecc_count(amdsmi_processor_handle processor_handl
                       reinterpret_cast<rsmi_error_count_t*>(ec));
 }
 
-// Deprecated API, use amdsmi_get_gpu_ecc_supported() instead
 amdsmi_status_t amdsmi_get_gpu_ecc_enabled(amdsmi_processor_handle processor_handle,
                                            uint64_t* enabled_blocks) {
   amdsmi_status_t ret = amdsmi_get_gpu_ecc_supported(processor_handle, enabled_blocks);
