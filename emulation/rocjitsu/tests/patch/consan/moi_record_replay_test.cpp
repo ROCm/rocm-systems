@@ -1419,6 +1419,7 @@ TEST(ConSanMoi, Gfx1250PrivateOwnerSpillsBeginAfterCapturedState) {
   ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(access->persistent_owner_private_offset);
   ASSERT_TRUE(access->persistent_private_state_end);
+  ASSERT_GT(*access->persistent_private_state_end, 0u);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   for (ConSanPatchKind kind :
@@ -1498,6 +1499,7 @@ TEST(ConSanMoi, Gfx1250PrivateOwnerScalarSpillsBeginAfterCapturedState) {
       result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(access->persistent_private_state_end);
+  ASSERT_GT(*access->persistent_private_state_end, 0u);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   for (ConSanPatchKind kind :

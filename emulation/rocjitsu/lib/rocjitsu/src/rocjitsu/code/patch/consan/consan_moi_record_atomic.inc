@@ -164,6 +164,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
         continue;
     }
     std::optional<uint32_t> private_layout_base;
+    // Keep this as a separate assignment: GCC 13 otherwise diagnoses the
+    // equivalent conditional optional construction as maybe-uninitialized.
     if (private_owner)
       private_layout_base = private_owner->private_state_end;
     std::optional<VgprSpillSequence> spill;
