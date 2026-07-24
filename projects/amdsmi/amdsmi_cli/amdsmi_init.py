@@ -29,13 +29,16 @@ import sys
 import threading
 from pathlib import Path
 
-# Resolve the amdsmi module from this installation's share/amd_smi copy first,
-# and only fall back to whatever the interpreter's site-packages provides.
-# This restores the priority from #3082: on a host with multiple ROCm versions
-# installed, `amd-smi` must load the amdsmi library that shipped with it, not a
-# different version's copy that happens to be first on sys.path. The share copy
-# only exists in the TheRock/system share layout, so when it is absent (e.g. a
-# pip-only install) the plain site-packages import below still works.
+# CLI module resolution order (distinct from `import amdsmi` in a user script):
+#   1. this installation's share/amd_smi copy -- the modules the CLI shipped
+#      with, always preferred so `amd-smi` uses its own version even on a host
+#      with multiple ROCm installs or a pip-installed amdsmi (restores #3082).
+#   2. a pip install -- fallback when the share copy is absent; the natural
+#      import below finds it (pip's site-packages precedes the system copy on
+#      sys.path).
+#   3. the system site-packages -- last resort.
+# A pip install is meant for Python scripting, not for changing CLI behavior,
+# so it must not override the shipped modules; the fallbacks are safety nets.
 _share_candidates = []
 _rocm = os.environ.get("ROCM_PATH") or os.environ.get("ROCM_HOME")
 if _rocm:

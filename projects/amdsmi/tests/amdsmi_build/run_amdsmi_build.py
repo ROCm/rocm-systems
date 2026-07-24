@@ -966,23 +966,32 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
         log_dir=cfg.log_dir,
     )
 
-    # Check install location -- the wheel must land under site-packages
-    # or dist-packages; the system DEB/RPM also installs to dist-packages,
-    # so a coexisting system module is fine (whichever sys.path entry wins
-    # is whichever is searched first by the active python).
+    # Prove the pip install takes priority over any coexisting system copy.
+    # For Python scripting the deliberately pip-installed module must win: a
+    # user who `pip install`s amdsmi wants that version, not the system one.
+    # `pip show` reports where pip put the wheel; assert `import amdsmi`
+    # actually resolves there (and not to the /opt/rocm system share copy),
+    # otherwise a system module is shadowing the pip install. Accepting "any
+    # valid path" (the old check) would pass even when the system copy wins.
+    priority_check = (
+        "import os, subprocess, amdsmi\n"
+        "out = subprocess.check_output(['python3', '-m', 'pip', 'show', 'amdsmi'], text=True)\n"
+        "loc = next((l.split(':', 1)[1].strip() for l in out.splitlines() "
+        "if l.startswith('Location:')), '')\n"
+        "loc = os.path.realpath(loc)\n"
+        "p = os.path.realpath(amdsmi.__file__)\n"
+        "print('pip install location: ' + loc)\n"
+        "print('amdsmi imported from : ' + p)\n"
+        "assert loc and p.startswith(loc), "
+        "'a system copy shadowed the pip install: import resolved to ' + p\n"
+        "assert '/opt/rocm/' not in p, "
+        "'the /opt/rocm system copy shadowed the pip install: ' + p\n"
+        "print('PASS: pip install takes priority for scripting')\n"
+    )
     run_command(
-        [
-            "python3",
-            "-c",
-            (
-                "import amdsmi; p = amdsmi.__file__; "
-                "print('amdsmi imported from: ' + p); "
-                "ok = 'site-packages' in p or 'dist-packages' in p or '/opt/rocm/' in p; "
-                "assert ok, 'Unexpected install location: ' + p; "
-                "print('PASS: Wheel correctly installed')"
-            ),
-        ],
-        name="wheel-location-check",
+        ["python3", "-c", priority_check],
+        name="wheel-priority-check",
+        cwd=Path("/tmp"),
         retries=1,
         log_dir=cfg.log_dir,
     )
