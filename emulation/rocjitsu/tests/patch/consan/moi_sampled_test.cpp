@@ -1062,9 +1062,9 @@ TEST(ConSanMoi, CdnaVglobalMaterializationSelectsSafeSignScratch) {
 }
 
 TEST(ConSanMoi, AddressMaterializationRejectsMalformedScratchWindows) {
-  // gfx1250 has no VglobalMaterialized recipe.
-  constexpr std::array<SampledTarget, 3> kMaterializationTargets = {{
+  constexpr std::array<SampledTarget, 4> kMaterializationTargets = {{
       {ROCJITSU_CODE_ARCH_RDNA4, "gfx1201/rdna4"},
+      {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250"},
       {ROCJITSU_CODE_ARCH_CDNA3, "gfx942/cdna3"},
       {ROCJITSU_CODE_ARCH_CDNA4, "gfx950/cdna4"},
   }};
