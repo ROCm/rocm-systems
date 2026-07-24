@@ -3956,12 +3956,93 @@ hsa_status_t HSA_API rj_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
   return HSA_STATUS_SUCCESS;
 }
 
+/// @brief Eagerly translate a gfx1250 B0 code object to A0 and load it.
+///
+/// @details The auto-A0 load path. Unlike simulation there is no guest/host
+/// agent split: the presented B0 agent IS the real A0 execution agent, so the
+/// translated object loads on the same @p agent. Translation direction (B0->A0)
+/// comes from the auto-A0 config revisions, matching the sim path's use of
+/// BinaryTranslator. Fails closed: a load with no captured bytes, an invalid
+/// object, a failed translation, or a skipped kernel returns an HSA error rather
+/// than loading untranslated B0 on A0.
+[[nodiscard]] hsa_status_t
+load_translated_for_auto_a0(const HookConfig &config, hsa_executable_t executable,
+                            hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
+                            const char *options, hsa_loaded_code_object_t *loaded_code_object,
+                            decltype(hsa_executable_load_agent_code_object) *original_load) {
+  CodeObjectReaderRegistry::ReaderBytes reader_bytes =
+      CodeObjectReaderRegistry::instance().lookup(code_object_reader);
+  if (!reader_bytes) {
+    // Without the source image there is nothing to translate; fail rather than
+    // load an untranslated B0 object on A0.
+    log_message(kLogInfo, "auto-A0: no captured bytes for reader=%llu",
+                static_cast<unsigned long long>(code_object_reader.handle));
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
+  }
+
+  const DetectedElfTarget source = detect_target_from_elf(reader_bytes.bytes, reader_bytes.size);
+  if (source.arch != ROCJITSU_CODE_ARCH_GFX1250) {
+    // A non-gfx1250 object on the A0 agent is not ours to translate; forward it.
+    return original_load(executable, agent, code_object_reader, options, loaded_code_object);
+  }
+
+  BinaryTranslatorOptions translator_options;
+  translator_options.skip_failed_kernels = true;
+  translator_options.input_revision = config.guest_revision; // B0
+  translator_options.output_revision = config.host_revision; // A0
+
+  AmdGpuCodeObject source_object(reader_bytes.bytes, reader_bytes.size);
+  if (!source_object.is_valid()) {
+    log_message(kLogInfo, "auto-A0: source bytes are not a valid AMDGPU code object");
+    return HSA_STATUS_ERROR;
+  }
+
+  BinaryTranslator translator(source.arch, config.target.arch, config.target.mach,
+                              translator_options);
+  rocjitsu::TranslatedCodeObject translated = translator.translate(source_object);
+  print_diagnostics(stderr, translated.diagnostics, config.log_level > kLogDisabled);
+  if (translated.elf_bytes.empty() || has_error_diagnostic(translated.diagnostics)) {
+    log_message(kLogInfo, "auto-A0: translation failed; refusing original code object");
+    return HSA_STATUS_ERROR;
+  }
+  // A skipped kernel is redirected to an s_endpgm stub that would complete
+  // normally without producing outputs, so a dispatch would silently succeed
+  // with garbage. Refuse the whole load rather than hand back such an object.
+  if (has_skipped_kernel(translated.diagnostics)) {
+    log_message(kLogInfo, "auto-A0: code object has an untranslatable kernel; refusing the load");
+    return HSA_STATUS_ERROR;
+  }
+
+  hsa_code_object_reader_t translated_reader{};
+  hsa_status_t status =
+      create_translated_reader(std::move(translated.elf_bytes), &translated_reader);
+  if (status != HSA_STATUS_SUCCESS) {
+    log_message(kLogInfo, "auto-A0: failed to create translated reader: %d",
+                static_cast<int>(status));
+    return status;
+  }
+
+  status = original_load(executable, agent, translated_reader, options, loaded_code_object);
+  log_message(kLogVerbose, "auto-A0: translated load agent=%llu status=%d",
+              static_cast<unsigned long long>(agent.handle), static_cast<int>(status));
+  CodeObjectReaderRegistry::instance().remove(translated_reader);
+  if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
+    (void)original_destroy(translated_reader);
+  return status;
+}
+
 hsa_status_t HSA_API rj_executable_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
     const char *options, hsa_loaded_code_object_t *loaded_code_object) {
   auto *original_load = layer().load_agent_code_object();
   if (original_load == nullptr)
     return HSA_STATUS_ERROR;
+
+  if (auto config = layer().config();
+      config && config->mode == HookMode::kAutoA0 && agent_is_gfx1250_a0(agent)) {
+    return load_translated_for_auto_a0(*config, executable, agent, code_object_reader, options,
+                                       loaded_code_object, original_load);
+  }
 
   auto config = layer().config();
   if (!config) {

@@ -1447,6 +1447,68 @@ TEST(HsaHooksUnitTest, DoesNotPresentB0RevisionInSimulationMode) {
   EXPECT_EQ(query_asic_revision(api, kGfx1250Agent), 0u);
 }
 
+// Register a code object image and return its reader handle.
+hsa_code_object_reader_t register_code_object(FakeApiTable &api,
+                                              const std::vector<uint8_t> &image) {
+  hsa_code_object_reader_t reader{};
+  EXPECT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(image.data(), image.size(), &reader),
+      HSA_STATUS_SUCCESS);
+  return reader;
+}
+
+// In auto-A0 mode, a load on the A0 gfx1250 agent whose bytes were never
+// captured is refused (fail-closed): the hook will not forward an untranslated
+// B0 object to the loader.
+TEST(HsaHooksUnitTest, AutoA0LoadWithoutCapturedBytesFailsClosed) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_fake_gfx1250_asic_revision = 0;
+  g_fake_load_agent_calls = 0;
+
+  // A reader that was never registered through create_from_memory has no bytes.
+  hsa_code_object_reader_t unknown_reader{0xBEEF};
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
+                                                              unknown_reader, nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER);
+  EXPECT_EQ(g_fake_load_agent_calls, 0);
+  OnUnload();
+}
+
+// In auto-A0 mode a non-gfx1250 object on the A0 agent is not ours to translate
+// and is forwarded to the loader unchanged (same reader, one load call).
+TEST(HsaHooksUnitTest, AutoA0ForwardsNonGfx1250Object) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_fake_gfx1250_asic_revision = 0;
+  g_fake_load_agent_calls = 0;
+
+  const auto header = make_amdgpu_elf_header(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942);
+  std::vector<uint8_t> image(reinterpret_cast<const uint8_t *>(&header),
+                             reinterpret_cast<const uint8_t *>(&header) + sizeof(header));
+  hsa_code_object_reader_t reader = register_code_object(api, image);
+
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  // Forwarded verbatim: the loader saw the original reader, not a translated one.
+  EXPECT_EQ(g_fake_load_agent_calls, 1);
+  EXPECT_EQ(g_last_load_reader.handle, reader.handle);
+  OnUnload();
+}
+
 TEST(HsaHooksUnitTest, VirtualLdsSymbolInfoReportsNormalDescriptorUntilPacketFallback) {
   using rocr::llvm::amdhsa::kernel_descriptor_t;
 
