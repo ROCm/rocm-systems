@@ -97,10 +97,10 @@ python -m amdisa \
     gfx1250:$GFX1250_MRISA/amdgpu_isa_gfx1250.xml \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
-
-find lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu lib/rocjitsu/src/rocjitsu/code/dbt/generated \
-  \( -name '*.h' -o -name '*.cpp' \) -exec clang-format -i {} +
 ```
+
+The generator runs `scripts/stylist.py` on its output directories before
+returning, so generated C++ follows the same style policy as hand-written code.
 
 ## Regenerating ISA files only
 
@@ -119,9 +119,6 @@ python -m amdisa \
     gfx1250:$GFX1250_MRISA/amdgpu_isa_gfx1250.xml \
   --gen-isas \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu
-
-find lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu -name '*.cpp' -o -name '*.h' \
-  | xargs clang-format -i
 ```
 
 ## Regenerating DBT files only
@@ -141,9 +138,6 @@ python -m amdisa \
     gfx1250:$GFX1250_MRISA/amdgpu_isa_gfx1250.xml \
   --gen-dbt \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
-
-find lib/rocjitsu/src/rocjitsu/code/dbt/generated -name '*.cpp' -o -name '*.h' \
-  | xargs clang-format -i
 ```
 
 ## Workflow
@@ -153,5 +147,5 @@ When modifying ISA semantics or adding instruction support:
 1. Edit `lib/python/amdisa/codegen/_generator.py` (never the generated
    C++ files)
 2. Regenerate with `--multi` as shown above
-3. Format the generated files with `clang-format`
+3. Verify generated files with `scripts/stylist.py --check`
 4. Stage ALL generated files before committing

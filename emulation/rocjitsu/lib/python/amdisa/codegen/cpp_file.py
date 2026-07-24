@@ -70,21 +70,14 @@ class CppFile:
 
         if self.is_header:
             self.file_name += '.h'
-            include_guard_components = [s.upper() for s in self.name.split('_')]
-            self.include_guard = (
-                f'ROCJITSU_ISA_ARCH_AMDGPU_{self.arch_name.upper()}_'
-                + '_'.join(include_guard_components)
-                + '_H_'
-            )
         else:
             self.file_name += '.cpp'
 
     def gen_prologue(self, f: TextIO) -> None:
-        """Write copyright, include guard, includes, and namespace opener."""
+        """Write copyright, header pragma, includes, and namespace opener."""
         f.write(CppFile._prologue_comment())
         if self.is_header:
-            f.write(f'#ifndef {self.include_guard}\n')
-            f.write(f'#define {self.include_guard}\n\n')
+            f.write('#pragma once\n\n')
         f.writelines([f'{cgen.Include(x[0], x[1])}\n' for x in self.includes])
         f.write('\n')
         f.write('namespace rocjitsu {\n')
@@ -103,7 +96,6 @@ class CppFile:
         else:
             f.writelines([f'{e}\n\n' for e in self.src_code])
         f.write(f'}} // namespace {self.arch_name}\n}}' f' // namespace rocjitsu\n')
-        f.write(f'\n#endif // {self.include_guard}\n')
 
     def gen_cpp(self, f: TextIO) -> None:
         """Write source file body and closing namespaces."""

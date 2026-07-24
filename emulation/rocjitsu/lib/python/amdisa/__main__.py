@@ -5,6 +5,7 @@
 
 import argparse
 from pathlib import Path
+import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import xml.etree.ElementTree as elem_tree
@@ -53,6 +54,23 @@ _PROFILES = {
     'rdna4': Rdna4Profile,
     'gfx1250': Gfx1250Profile,
 }
+
+
+def _run_stylist(*output_paths: str | None) -> None:
+    """Apply rocjitsu style to generated output directories."""
+    selected_paths = [path for path in output_paths if path]
+    if not selected_paths:
+        return
+    project_root = Path(__file__).resolve().parents[3]
+    stylist = project_root / 'scripts/stylist.py'
+    try:
+        subprocess.run([str(stylist), '--format-only', *selected_paths], check=True)
+    except FileNotFoundError as error:
+        raise RuntimeError(f'rocjitsu stylist not found at {stylist}') from error
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(
+            f'rocjitsu stylist failed with exit code {error.returncode}'
+        ) from error
 
 
 def _collect_shared_execute_body_variants(specs, plan):
@@ -281,13 +299,25 @@ def main() -> None:
     arg_parser.add_argument(
         '--dbt-output',
         metavar='DIR',
-        help='Output directory for DBT tables (defaults to --isa-output).',
+        help='Output directory for DBT tables (required with --gen-dbt).',
     )
     args = arg_parser.parse_args()
+
+    if args.gen_isas and not args.isa_output:
+        arg_parser.error('--isa-output is required for ISA generation')
+    if args.multi and args.gen_dbt and not args.dbt_output:
+        arg_parser.error('--dbt-output is required for multi-ISA DBT generation')
 
     # Multi-ISA mode.
     if args.multi:
         _run_multi(args)
+        try:
+            _run_stylist(
+                args.isa_output if args.gen_isas else None,
+                args.dbt_output if args.gen_dbt else None,
+            )
+        except RuntimeError as error:
+            arg_parser.exit(2, f'{arg_parser.prog}: error: {error}\n')
         return
 
     if not args.isafile:
@@ -302,6 +332,10 @@ def main() -> None:
     if args.gen_isas:
         code_gen = CodeGenerator(isa, args.isa_output, semantics, config=config)
         code_gen.gen_all()
+        try:
+            _run_stylist(args.isa_output)
+        except RuntimeError as error:
+            arg_parser.exit(2, f'{arg_parser.prog}: error: {error}\n')
 
 
 if __name__ == '__main__':

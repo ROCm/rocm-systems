@@ -60,6 +60,8 @@ def test_opcode_header_qualifies_ambiguous_mnemonics_and_masks_raw_opcodes(tmp_p
     generator.gen_opcode_constants()
     output = (tmp_path / 'testisa' / 'opcodes.h').read_text()
 
+    assert '#pragma once' in output
+    assert '#ifndef' not in output
     assert 'inline constexpr uint16_t kVMovB32Vop1 = 1;' in output
     assert 'inline constexpr uint16_t kVMovB32Vop3 = 321;' in output
     assert 'inline constexpr uint16_t kVMovB32 =' not in output
@@ -149,6 +151,8 @@ def test_instruction_builder_fixes_format_bits_and_exposes_data_fields(tmp_path)
     generator.gen_instruction_builders()
     output = (tmp_path / 'testisa' / 'builders.h').read_text()
 
+    assert '#pragma once' in output
+    assert '#ifndef' not in output
     assert 'struct Vop3BuilderFields {' in output
     assert 'uint8_t vdst = 0;' in output
     assert 'uint16_t src0 = 0;' in output
