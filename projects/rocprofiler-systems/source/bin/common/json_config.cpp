@@ -336,7 +336,7 @@ resolve_schema_config(const nlohmann::json& config)
                 if(runtimes.contains("shmem") && runtimes["shmem"].contains("enabled") &&
                    runtimes["shmem"]["enabled"].get<bool>())
                 {
-                    result[std::string{ env_vars::USE_SHMEM }] = "true";
+                    result[std::string{ env_vars::USE_OPENSHMEM }] = "true";
                 }
                 if(runtimes.contains("ucx") && runtimes["ucx"].contains("enabled") &&
                    runtimes["ucx"]["enabled"].get<bool>())
@@ -827,7 +827,7 @@ export_domain_parallel(nlohmann::json&                           config,
         { env_vars::USE_OMPT, "openmp" },
         { env_vars::USE_KOKKOSP, "kokkos" },
         { env_vars::USE_RCCLP, "rccl" },
-        { env_vars::USE_SHMEM, "shmem" },
+        { env_vars::USE_OPENSHMEM, "shmem" },
         { env_vars::USE_UCX, "ucx" },
     } };
 
