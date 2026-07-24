@@ -190,6 +190,11 @@ TEST(RingsTest, TwoRingsFromRank0) {
     const int nrings = 2;
     // Ring 0: 0→1→2→3→0 (linear)
     // Ring 1: 0→2→1→3→0 (different order)
+    //
+    // Layout convention: next/prev (and the rings output) are ring-major, i.e.
+    // indexed [ring * nranks + rank], so each ring occupies a contiguous block
+    // of nranks entries. This matches how ncclBuildRings indexes its input in
+    // src/graph/rings.cc (next[r * nranks + current]).
     std::vector<int> next(nrings * nranks), prev(nrings * nranks);
 
     // Ring 0 (forward)
@@ -228,6 +233,11 @@ TEST(RingsTest, TwoRingsFromRank0) {
 // ---------------------------------------------------------------------------
 // Error: broken ring (doesn't loop back to start)
 // ---------------------------------------------------------------------------
+// Rejecting a malformed ring is documented, defined behavior rather than
+// undefined: ncclBuildRings in src/graph/rings.cc explicitly validates that the
+// walk loops back to the starting rank and that every rank was visited, and
+// returns ncclInternalError (after a WARN) when either check fails. This test
+// exercises that contract.
 TEST(RingsTest, BrokenRingReturnsError) {
     const int nranks = 4;
     const int nrings = 1;
