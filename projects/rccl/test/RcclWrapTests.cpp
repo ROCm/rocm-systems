@@ -1545,7 +1545,6 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
     TEST_INFO("=== Process-Isolated rcclUseHierarchicalAllGather Tests Completed ===");
 }
 
-<<<<<<< HEAD
 // ===========================================================================
 // CE AllReduce graph latch state machine (rccl_wrap.cc). Regression coverage
 // for the capture-vs-eager ordering bug: the latch must stay set for the
@@ -1642,7 +1641,6 @@ TEST(RcclCeGraphLatch, NeverLatchedAllowsCeAllReduceByDefault)
     EXPECT_TRUE(rcclCeAllReduceAllowed(&comm));
 }
 
-=======
 #ifdef ENABLE_WARP_SPEED
 
 // ---------------------------------------------------------------------------
@@ -1992,5 +1990,4 @@ TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble)
 
 #endif // ENABLE_WARP_SPEED
 
->>>>>>> develop
 } // namespace RcclUnitTesting
