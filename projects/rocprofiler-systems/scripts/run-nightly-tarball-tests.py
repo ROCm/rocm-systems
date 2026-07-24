@@ -38,9 +38,39 @@ Typical usage on a GPU test machine:
     python3 run-nightly-tarball-tests.py --rocm-version 7.15.0a20260717
     python3 run-nightly-tarball-tests.py --pytest-args "-m gpu -k transpose"
 
+Validate freshly-built binaries instead of the tarball's shipped ones (QA-style
+build-from-source + test; uses the tarball only for ROCm runtime/toolchain):
+
+    python3 run-nightly-tarball-tests.py --build-from-source
+
+Air-gapped cluster (compute nodes have no network) - two phases sharing one
+--work-dir on a shared filesystem:
+
+    # Phase 1, on a networked node (e.g. the login node): fetch everything.
+    python3 run-nightly-tarball-tests.py --work-dir /scratch/$USER/rocm-test \
+        --variant auto --prepare-only
+
+    # Phase 2, on the air-gapped GPU compute node: no network, build + run tests.
+    python3 run-nightly-tarball-tests.py --work-dir /scratch/$USER/rocm-test \
+        --offline --tier standard
+
 Each run writes a detailed log, a summary log (with per-step timings, test counts,
 failed-test names, and the rocprof-sys version under test), and, on failure, a
 failures log listing each failing test with its output.
+
+Environment variables:
+    The script inherits your shell environment and forwards it to every git, build
+    and pytest subprocess, so you can pre-set knobs before invoking it, e.g.:
+      - http_proxy / https_proxy   : honored by the download, git and pip
+      - PIP_INDEX_URL / PIP_NO_INDEX / PIP_FIND_LINKS : mirrored / offline pip
+      - CC / CXX                   : compilers for the example/source builds
+      - ROCPROFSYS_* / CMAKE_* / MAKEFLAGS : forwarded to the build/tests
+    The script manages a few variables and will override yours:
+      ROCM_PATH, ROCPROFSYS_CI, ROCPROFSYS_INSTALL_DIR / ROCPROFSYS_BUILD_DIR, and
+      TMPDIR/TMP/TEMP (redirected into <work-dir>/tmp during tests).
+    PATH and LD_LIBRARY_PATH are PREPENDED with the tarball's directories (your
+    existing entries are preserved). ROCPROFSYS_TMPDIR and GIT_HTTP_LOW_SPEED_* are
+    only set when you have not already set them.
 
 Run ``--help`` for the full list of options.
 """
@@ -53,6 +83,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tarfile
@@ -104,6 +135,22 @@ QUICK_KEYWORDS = [
     "avail",
     "presets",
     "roctx",
+]
+
+# Marker (label) categories excluded from the standard/quick tiers. Mirrors
+# tests/test_categories.yaml::_common_therock_labels_exclude. Applied as a pytest
+# marker expression "not X and not Y ...". We deliberately do NOT filter on the
+# 'gpu' marker, so CPU-only install-mode tests (cli_help, config, presets, ...)
+# are also validated against the tarball binaries.
+LABEL_EXCLUDES = [
+    "annotate",
+    "mpi",
+    "julia",
+    "attach",
+    "lulesh",
+    "network",
+    "overflow",
+    "thread_limit",
 ]
 
 # Map a detected GPU arch (gfxNNNN) to the smallest matching TheRock tarball
@@ -389,27 +436,24 @@ def download_file(url: str, dest: Path) -> None:
     tmp = dest.with_suffix(dest.suffix + ".part")
     wget = shutil.which("wget")
     curl = shutil.which("curl")
-    interactive = sys.stdout.isatty()
     if wget:
-        # Avoid the noisy default "dot" meter. On a TTY show a single in-place
-        # updating bar; in non-interactive logs stay quiet (one line at the end).
-        progress = (
-            ["-q", "--show-progress", "--progress=bar:force:noscroll"]
-            if interactive
-            else ["-nv"]
-        )
-        cmd = [wget, "--continue", "--tries=3", *progress, "-O", str(tmp), url]
+        # Live in-place progress bar (nicer than the default "dot" meter). Under a
+        # non-TTY log (cron/sbatch) this bar is redrawn via carriage returns, so the
+        # captured output is a single messy '\r'-laden line - acceptable trade-off.
+        cmd = [
+            wget, "--continue", "--tries=3",
+            "-q", "--show-progress", "--progress=bar:force:noscroll",
+            "-O", str(tmp), url,
+        ]
     elif curl:
         # curl's default meter already updates in place (no per-line spam).
         cmd = [curl, "-fL", "--retry", "3", "-C", "-", "-o", str(tmp), url]
     else:
-        log("wget/curl not found; falling back to urllib (no resume).")
-        with urllib.request.urlopen(url, timeout=120) as resp, open(
-            tmp, "wb"
-        ) as fh:  # noqa: S310
-            shutil.copyfileobj(resp, fh)
-        tmp.rename(dest)
-        return
+        die(
+            "neither 'wget' nor 'curl' is available to download the tarball. "
+            "Install one, or pre-stage the tarball with --prepare-only on a "
+            "networked node and run with --offline."
+        )
 
     # Run the downloader with inherited stdio so its in-place progress bar renders
     # live on the console, instead of teeing every progress line into the logs.
@@ -432,31 +476,9 @@ def extract_tarball(tarball: Path, rocm_dir: Path) -> None:
         run([tar, "-xf", str(tarball), "-C", str(rocm_dir)])
     else:
         with tarfile.open(tarball) as tf:
-            try:
-                # PEP 706 'data' filter (Python 3.8.17+/3.9.17+/3.10.12+/3.12+)
-                # blocks path traversal, absolute paths and unsafe links.
-                tf.extractall(rocm_dir, filter="data")  # noqa: S202
-            except TypeError:
-                _safe_extractall(tf, rocm_dir)
-
-
-def _within(base: Path, target: str) -> bool:
-    base_r = os.path.realpath(base)
-    target_r = os.path.realpath(target)
-    return target_r == base_r or target_r.startswith(base_r + os.sep)
-
-
-def _safe_extractall(tf: tarfile.TarFile, dest: Path) -> None:
-    """Path-traversal-safe extraction fallback for old Python without PEP 706."""
-    for member in tf.getmembers():
-        member_path = os.path.join(str(dest), member.name)
-        if not _within(dest, member_path):
-            die(f"unsafe path in archive (path traversal blocked): {member.name}")
-        if member.issym() or member.islnk():
-            link_target = os.path.join(os.path.dirname(member_path), member.linkname)
-            if not _within(dest, link_target):
-                die(f"unsafe link in archive blocked: {member.name} -> {member.linkname}")
-    tf.extractall(dest)  # noqa: S202
+            # PEP 706 'data' filter (Python 3.8.17+/3.9.17+/3.10.12+/3.12+) blocks
+            # path traversal, absolute paths and unsafe links.
+            tf.extractall(rocm_dir, filter="data")  # noqa: S202
 
 
 # marker file recording which tarball is currently extracted into rocm_dir
@@ -473,18 +495,15 @@ def set_rocm_tarball(workdir: Path, filename: str) -> None:
     _rocm_marker(workdir).write_text(filename + "\n")
 
 
-def cleanup_old_tarballs(workdir: Path, keep: str | None) -> None:
-    """Delete downloaded dist tarballs to save space.
+def cleanup_downloaded_tarballs(workdir: Path) -> None:
+    """Delete downloaded dist tarballs (and .part files) to reclaim disk space.
 
-    Pass ``keep=None`` to remove every downloaded archive (used after a successful
-    extraction, since the extracted ``rocm/`` tree is all we need), or a filename
-    to preserve just that one.
+    Called after a successful extraction, since the extracted ``rocm/`` tree is all
+    we need going forward.
     """
-    preserve = {keep, f"{keep}.part"} if keep else set()
     for tb in workdir.glob("therock-dist-*.tar.gz*"):
-        if tb.name not in preserve:
-            log(f"Removing extracted tarball to reclaim space: {tb.name}")
-            tb.unlink(missing_ok=True)
+        log(f"Removing extracted tarball to reclaim space: {tb.name}")
+        tb.unlink(missing_ok=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -496,6 +515,11 @@ def make_rocm_env(base_env: dict, rocm_dir: Path) -> dict:
     env = dict(base_env)
     env["ROCM_PATH"] = str(rocm_dir)
     env["ROCPROFSYS_CI"] = "ON"
+
+    # Make git abort quickly instead of hanging forever when a compute node has no
+    # egress (the common cluster case). Abort if <1 KB/s for 30s.
+    env.setdefault("GIT_HTTP_LOW_SPEED_LIMIT", "1000")
+    env.setdefault("GIT_HTTP_LOW_SPEED_TIME", "30")
 
     bins = [str(rocm_dir / "bin"), str(rocm_dir / "llvm" / "bin")]
     libs = [
@@ -658,10 +682,10 @@ def preflight(args, workdir: Path, rocm_dir: Path) -> list[str]:
     archs = detect_gpu_archs(rocm_dir if rocm_present else None, det_env)
     if archs:
         log(f"GPU     : {', '.join(archs)}")
-    elif not args.skip_tests:
+    elif not args.skip_tests and not args.prepare_only:
         log(
-            "WARNING: no GPU detected via rocminfo. The default test selection is "
-            "GPU-only ('-m gpu') and will mostly fail/skip. Continue anyway..."
+            "WARNING: no GPU detected via rocminfo. Most GPU tests will "
+            "fail/skip. Continue anyway..."
         )
     return archs
 
@@ -684,6 +708,37 @@ def report_under_test(rocm_dir: Path, env: dict, facts: dict) -> None:
     log(f"rocprof-sys version : {version}")
 
 
+def capture_rocm_sanity(rocm_dir: Path, env: dict, out_path: Path, facts: dict) -> None:
+    """Write a ROCm environment sanity report (tool versions, GPU info) to a file."""
+    checks = [
+        ("hipcc --version", [str(rocm_dir / "bin" / "hipcc"), "--version"]),
+        ("rocm-smi --showproductname", [str(rocm_dir / "bin" / "rocm-smi"),
+                                        "--showproductname"]),
+        ("amd-smi version", [str(rocm_dir / "bin" / "amd-smi"), "version"]),
+        ("rocminfo", [str(rocm_dir / "bin" / "rocminfo")]),
+    ]
+    lines = [f"ROCm sanity report ({rocm_dir})", "=" * 60]
+    for title, cmd in checks:
+        lines.append(f"\n### {title}")
+        if not Path(cmd[0]).exists():
+            lines.append(f"(skipped: {cmd[0]} not found)")
+            continue
+        try:
+            r = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=60, env=env
+            )
+            out = (r.stdout or "") + (r.stderr or "")
+            # rocminfo is long - keep only the first ~120 lines
+            if title == "rocminfo":
+                out = "\n".join(out.splitlines()[:120])
+            lines.append(out.rstrip())
+        except Exception as exc:  # noqa: BLE001
+            lines.append(f"(error: {exc})")
+    out_path.write_text("\n".join(lines) + "\n")
+    facts["rocm_sanity_log"] = str(out_path)
+    log(f"ROCm sanity report -> {out_path}")
+
+
 # --------------------------------------------------------------------------- #
 # Steps
 # --------------------------------------------------------------------------- #
@@ -697,14 +752,58 @@ def _git_rev(repo_dir: Path) -> str:
     ).stdout.strip()
 
 
-def sync_source(workdir: Path, branch: str, env: dict) -> tuple[Path, bool]:
+def _update_submodules(repo_dir: Path, env: dict) -> None:
+    """Init/update the project's git submodules (needed for --build-from-source)."""
+    log("Updating git submodules for projects/rocprofiler-systems (recursive)...")
+    # Path-limited first (faster; avoids other monorepo projects), then fall back.
+    rc = run(
+        ["git", "-C", str(repo_dir), "submodule", "update", "--init", "--recursive",
+         "--", PROJECT_SUBDIR],
+        env=env, check=False,
+    )
+    if rc != 0:
+        run(["git", "-C", str(repo_dir), "submodule", "update", "--init", "--recursive"],
+            env=env)
+
+
+def sync_source(
+    workdir: Path,
+    branch: str,
+    env: dict,
+    no_fetch: bool = False,
+    submodules: bool = False,
+) -> tuple[Path, bool]:
     """Sparse-clone (or update) rocm-systems.
 
     Returns ``(source_dir, source_changed)`` where ``source_changed`` is True when
     a fresh clone happened or the branch HEAD moved since the last run.
+
+    When ``no_fetch`` is set (offline mode), an existing checkout is reused as-is
+    with no network access; if none exists the run aborts with guidance. When
+    ``submodules`` is set (source builds), submodules are initialized (online) or
+    verified present (offline).
     """
     repo_dir = workdir / "rocm-systems"
     src_dir = repo_dir / PROJECT_SUBDIR
+
+    if no_fetch:
+        if not (src_dir / "CMakeLists.txt").is_file():
+            die(
+                "offline mode (--offline) but no source checkout at "
+                f"{src_dir}.\n"
+                "       Run once with --prepare-only on a networked node (e.g. the "
+                "login node) first."
+            )
+        rev = _git_rev(repo_dir)
+        log(f"Offline: reusing existing checkout at {rev[:10]} (no fetch).")
+        if submodules and not (src_dir / "external").is_dir():
+            die(
+                "offline --build-from-source but submodules are not present at "
+                f"{src_dir / 'external'}.\n"
+                "       Run --prepare-only --build-from-source on a networked node "
+                "first."
+            )
+        return src_dir, False
 
     if (src_dir / "CMakeLists.txt").is_file():
         old_rev = _git_rev(repo_dir)
@@ -718,6 +817,8 @@ def sync_source(workdir: Path, branch: str, env: dict) -> tuple[Path, bool]:
             log(f"Source updated: {old_rev[:10]} -> {new_rev[:10]}")
         else:
             log(f"Source already up to date at {new_rev[:10]}")
+        if submodules:
+            _update_submodules(repo_dir, env)
         return src_dir, changed
 
     run(
@@ -738,14 +839,33 @@ def sync_source(workdir: Path, branch: str, env: dict) -> tuple[Path, bool]:
     if not (src_dir / "CMakeLists.txt").is_file():
         die(f"sparse checkout did not produce expected source at {src_dir}")
 
+    if submodules:
+        _update_submodules(repo_dir, env)
+
     log(f"Checked out {branch} @ {_git_rev(repo_dir)[:10]}")
     return src_dir, True
 
 
-def make_venv(workdir: Path, src_dir: Path) -> Path:
-    """Create a venv and install requirements.txt. Returns the venv python path."""
+def make_venv(workdir: Path, src_dir: Path, skip_install: bool = False) -> Path:
+    """Create a venv and install requirements.txt. Returns the venv python path.
+
+    When ``skip_install`` is set (offline mode), an existing venv is reused without
+    any pip network access; if none exists the run aborts with guidance.
+    """
     venv_dir = workdir / "venv"
     py = venv_dir / "bin" / "python"
+
+    if skip_install:
+        if not py.exists():
+            die(
+                "offline mode (--offline) but no venv at "
+                f"{venv_dir}.\n"
+                "       Run once with --prepare-only on a networked node (e.g. the "
+                "login node) first."
+            )
+        log(f"Offline: reusing existing venv at {venv_dir} (no pip install).")
+        return py
+
     if not py.exists():
         run([sys.executable, "-m", "venv", "--system-site-packages", str(venv_dir)])
     run([str(py), "-m", "pip", "install", "--upgrade", "pip", "wheel"], quiet=True)
@@ -775,6 +895,20 @@ def make_venv(workdir: Path, src_dir: Path) -> Path:
     return py
 
 
+def capture_pip_freeze(venv_py: Path, out_path: Path, facts: dict) -> None:
+    """Record the exact resolved venv package versions (reproducibility manifest)."""
+    try:
+        r = subprocess.run(
+            [str(venv_py), "-m", "pip", "freeze"],
+            capture_output=True, text=True, timeout=120,
+        )
+        out_path.write_text(r.stdout)
+        facts["pip_freeze_log"] = str(out_path)
+        log(f"pip freeze -> {out_path}")
+    except Exception as exc:  # noqa: BLE001
+        log(f"WARNING: could not capture pip freeze: {exc}")
+
+
 def install_system_deps() -> None:
     """Best-effort install of build/runtime system packages (needs sudo/root)."""
     apt = shutil.which("apt-get")
@@ -788,6 +922,57 @@ def install_system_deps() -> None:
     pkgs = ["build-essential", "cmake", "libopenmpi-dev", "git"]
     run(prefix + [apt, "update"], check=False)
     run(prefix + [apt, "install", "-y", *pkgs], check=False)
+
+
+def build_from_source(
+    src_dir: Path,
+    workdir: Path,
+    rocm_dir: Path,
+    env: dict,
+    venv_py: Path,
+    jobs: int,
+    use_mpi: bool,
+) -> Path:
+    """Configure + build the full rocprofiler-systems project from source.
+
+    Builds the rocprof-sys binaries, examples and test suite in-tree (like CI/QA),
+    using the ROCm runtime + toolchain from the extracted tarball. Returns the
+    build directory (its binaries are validated in pytest 'build mode').
+    """
+    build_dir = workdir / "build-from-source"
+    cmake = shutil.which("cmake") or "cmake"
+
+    # The in-build pytest CTest-generation step needs pytest + python from our venv,
+    # so put the venv on PATH and point CMake's Python discovery at it.
+    build_env = dict(env)
+    build_env["PATH"] = os.pathsep.join(
+        [str(venv_py.parent), build_env.get("PATH", "")]
+    ).rstrip(os.pathsep)
+
+    cfg = [
+        cmake,
+        "-S", str(src_dir),
+        "-B", str(build_dir),
+        "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+        f"-DCMAKE_PREFIX_PATH={rocm_dir}",
+        f"-DCMAKE_INSTALL_PREFIX={workdir / 'install-from-source'}",
+        f"-DPython3_EXECUTABLE={venv_py}",
+        "-DROCPROFSYS_BUILD_DYNINST=ON",
+        "-DROCPROFSYS_BUILD_TBB=ON",
+        "-DROCPROFSYS_BUILD_ELFUTILS=ON",
+        "-DROCPROFSYS_BUILD_LIBIBERTY=ON",
+        "-DROCPROFSYS_BUILD_CI=ON",
+        "-DROCPROFSYS_BUILD_EXAMPLES=ON",
+        "-DROCPROFSYS_BUILD_TESTING=ON",
+        "-DROCPROFSYS_USE_PYTHON=ON",
+        "-DROCPROFSYS_MAX_THREADS=64",
+        f"-DROCPROFSYS_USE_MPI={'ON' if use_mpi else 'OFF'}",
+    ]
+    log("Configuring full source build (this pulls/builds dyninst, elfutils, etc.)")
+    run(cfg, env=build_env)
+    log(f"Building rocprofiler-systems from source with {jobs} jobs (can take ~1-2h)")
+    run([cmake, "--build", str(build_dir), "--parallel", str(jobs)], env=build_env)
+    return build_dir
 
 
 def build_examples(
@@ -909,15 +1094,23 @@ def _build_capchk(tests_src: Path, tests_dst: Path, env: dict) -> None:
 
 
 def tier_selection_args(tier: str) -> list[str]:
-    """Return the pytest -m/-k selection args for a named tier."""
+    """Return the pytest -m/-k selection args for a named tier.
+
+    No 'gpu' marker filter is applied, so CPU-only install-mode tests (CLI help,
+    config, presets, ...) run alongside the GPU tests. Known-problematic marker
+    categories are excluded via ``-m "not ..."`` and known-flaky test names via
+    ``-k "not (...)"`` (see LABEL_EXCLUDES / DEFAULT_DESELECT_KEYWORDS).
+    """
     deselect = " or ".join(DEFAULT_DESELECT_KEYWORDS)
+    label_excl = " and ".join(f"not {m}" for m in LABEL_EXCLUDES)
     if tier == "quick":
         include = " or ".join(QUICK_KEYWORDS)
-        return ["-m", "gpu", "-k", f"({include}) and not ({deselect})"]
+        return ["-m", label_excl, "-k", f"({include}) and not ({deselect})"]
     if tier == "full":
-        return ["-m", "gpu"]
-    # standard (default)
-    return ["-m", "gpu", "-k", f"not ({deselect})"]
+        # everything that can run; only known-flaky test names are excluded
+        return ["-k", f"not ({deselect})"]
+    # standard (default): label-category excludes + known-flaky name excludes
+    return ["-m", label_excl, "-k", f"not ({deselect})"]
 
 
 def run_tests(
@@ -929,14 +1122,31 @@ def run_tests(
     tier: str,
     reruns: int,
     reruns_delay: int,
+    rerun_failed: int,
     workdir: Path,
-) -> int:
-    """Run the pytest suite in install mode against the tarball binaries."""
+    facts: dict,
+    mode: str = "install",
+    test_root: Path | None = None,
+) -> tuple[int, Path]:
+    """Run the pytest suite against either the tarball binaries or a source build.
+
+    ``mode`` is 'install' (test the tarball's shipped binaries; ``test_root`` is the
+    ROCm prefix) or 'build' (test freshly-built binaries; ``test_root`` is the build
+    dir). ROCm runtime always comes from ``rocm_dir``.
+
+    Returns ``(returncode, final_junit_path)`` where the final JUnit reflects the
+    last (re)run, so callers report counts/failures from the final state.
+    """
     test_env = dict(env)
-    # install mode: point the suite at the tarball prefix (bin/rocprof-sys-*).
-    test_env["ROCPROFSYS_INSTALL_DIR"] = str(rocm_dir)
     test_env["ROCM_PATH"] = str(rocm_dir)
     test_env.setdefault("ROCPROFSYS_CI", "ON")
+    root = str(test_root or rocm_dir)
+    if mode == "build":
+        # build mode: conftest discovers the build-tree binaries via this var.
+        test_env["ROCPROFSYS_BUILD_DIR"] = root
+    else:
+        # install mode: point the suite at the tarball prefix (bin/rocprof-sys-*).
+        test_env["ROCPROFSYS_INSTALL_DIR"] = root
 
     # Use a private temp dir inside the work dir. This keeps per-test output out
     # of the shared /tmp AND avoids the perfetto trace_processor collision: its
@@ -953,34 +1163,44 @@ def run_tests(
         stale.unlink(missing_ok=True)
     log(f"Test TMPDIR: {tmpdir}")
 
-    cmd = [
-        str(venv_py),
-        "-m",
-        "pytest",
-        str(pytest_dir),
-        "-p",
-        "no:cacheprovider",
-        "-v",
-        "-rA",  # summary of all outcomes at the end (also lands in the log)
-    ]
-    if extra_pytest_args:
-        cmd += extra_pytest_args.split()
+    base = [str(venv_py), "-m", "pytest", str(pytest_dir), "-v", "-rA"]
+    # A separate failed-rerun pass (--rerun-failed) needs pytest's last-failed
+    # cache, so only disable the cache provider when that feature is off.
+    if rerun_failed > 0:
+        base += ["-o", f"cache_dir={workdir / '.pytest_cache'}"]
     else:
-        cmd += tier_selection_args(tier)
+        base += ["-p", "no:cacheprovider"]
 
+    selection = extra_pytest_args.split() if extra_pytest_args else tier_selection_args(tier)
     if reruns > 0:
-        cmd += ["--reruns", str(reruns), "--reruns-delay", str(reruns_delay)]
+        selection += ["--reruns", str(reruns), "--reruns-delay", str(reruns_delay)]
 
     junit = workdir / "pytest-results.xml"
-    cmd += [f"--junitxml={junit}"]
-
     log(
-        f"Test selection: {'(custom) ' + extra_pytest_args if extra_pytest_args else 'tier=' + tier}"
+        "Test selection: "
+        + ("(custom) " + extra_pytest_args if extra_pytest_args else "tier=" + tier)
         + (f", reruns={reruns}" if reruns > 0 else "")
+        + (f", rerun-failed={rerun_failed}" if rerun_failed > 0 else "")
     )
     log(f"JUnit results -> {junit}")
+    cmd = base + selection + [f"--junitxml={junit}"]
     rc = run([str(c) for c in cmd], cwd=str(pytest_dir), env=test_env, check=False)
-    return rc
+
+    final_junit = junit
+    # Rerun only the failed tests, up to N times, each into its own JUnit artifact.
+    for attempt in range(1, rerun_failed + 1):
+        if rc == 0:
+            break
+        rerun_junit = workdir / f"pytest-rerun-{attempt}.xml"
+        step(f"Re-running failed tests (attempt {attempt}/{rerun_failed})")
+        cmd = base + ["--last-failed", f"--junitxml={rerun_junit}"]
+        rc = run([str(c) for c in cmd], cwd=str(pytest_dir), env=test_env, check=False)
+        final_junit = rerun_junit
+        facts["rerun_failed_attempts"] = attempt
+        if rc == 0:
+            log(f"All previously-failed tests passed on rerun attempt {attempt} (flaky).")
+
+    return rc, final_junit
 
 
 def collect_failed_tests(junit: Path) -> list[tuple[str, str, str]]:
@@ -1113,9 +1333,11 @@ def parse_args(argv=None):
         "--tier",
         default="standard",
         choices=("quick", "standard", "full"),
-        help="Test tier to run (default: standard). 'quick' is a fast smoke subset "
-        "(~min), 'standard' is the full GPU suite minus known-flaky tests, "
-        "'full' runs everything GPU. Ignored when --pytest-args is given.",
+        help="Test tier to run (default: standard). 'quick' is a fast smoke subset, "
+        "'standard' runs the suite minus known-flaky tests and excluded label "
+        "categories (mpi, network, ...), 'full' runs everything that can run. "
+        "GPU and CPU-only install-mode tests are both included. Ignored when "
+        "--pytest-args is given.",
     )
     p.add_argument(
         "--reruns",
@@ -1129,6 +1351,14 @@ def parse_args(argv=None):
         type=int,
         default=5,
         help="Seconds to wait between reruns (default: 5).",
+    )
+    p.add_argument(
+        "--rerun-failed",
+        type=int,
+        default=0,
+        help="After the main run, re-run only the failed tests up to N times, each "
+        "into its own JUnit artifact (pytest-rerun-<n>.xml). Distinguishes flaky "
+        "tests from hard failures (default: 0).",
     )
     p.add_argument(
         "--min-free-gb",
@@ -1160,11 +1390,41 @@ def parse_args(argv=None):
         action="store_true",
         help="Do everything except run the pytest suite.",
     )
+    p.add_argument(
+        "--build-from-source",
+        action="store_true",
+        help="Instead of testing the tarball's shipped binaries, build the full "
+        "rocprofiler-systems from source (using the tarball for ROCm runtime + "
+        "toolchain) and validate the freshly-built build-tree binaries. Pulls "
+        "submodules and takes ~1-2h. Mirrors the QA build+CTest flow.",
+    )
+    # ---- offline / two-phase (air-gapped compute node) workflow ----------- #
+    p.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Phase 1 (run on a networked node, e.g. the login node): download + "
+        "extract the tarball, clone the source, and create the venv, then STOP "
+        "before building/testing. Nothing GPU-specific is done.",
+    )
+    p.add_argument(
+        "--offline",
+        action="store_true",
+        help="Phase 2 (run on an air-gapped GPU compute node): do no network I/O at "
+        "all (no tarball download, no git fetch, no pip). Reuses the "
+        "tarball/source/venv staged by an earlier --prepare-only run.",
+    )
     return p.parse_args(argv)
 
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+
+    # --offline is the single air-gapped switch: it drives the internal "reuse the
+    # already-staged tarball/source/venv without any network access" behavior.
+    args.skip_clone = args.offline
+    args.skip_pip = args.offline
+    if args.offline:
+        args.skip_download = True
 
     if args.work_dir:
         workdir = Path(args.work_dir).resolve()
@@ -1186,6 +1446,7 @@ def main(argv=None) -> int:
         {
             "started": started.isoformat(timespec="seconds"),
             "command": " ".join(sys.argv),
+            "host": socket.gethostname(),
             "work_dir": str(workdir),
             "rocm_prefix": str(rocm_dir),
             "variant": args.variant,
@@ -1193,6 +1454,20 @@ def main(argv=None) -> int:
             "detailed_log": str(detail_log),
         }
     )
+    # scheduler / GPU-visibility context (useful on clusters); only record what's set
+    sched = {
+        k: os.environ[k]
+        for k in (
+            "SLURM_JOB_ID",
+            "SLURM_JOB_NODELIST",
+            "SLURM_JOB_GPUS",
+            "ROCR_VISIBLE_DEVICES",
+            "HIP_VISIBLE_DEVICES",
+        )
+        if os.environ.get(k)
+    }
+    if sched:
+        facts["scheduler"] = "; ".join(f"{k}={v}" for k, v in sched.items())
 
     log(f"Working directory: {workdir}")
     log(f"ROCm prefix (ROCM_PATH): {rocm_dir}")
@@ -1208,10 +1483,20 @@ def main(argv=None) -> int:
     if args.reruns > 0:
         facts["reruns"] = args.reruns
 
+    facts["mode"] = (
+        "prepare-only" if args.prepare_only else ("offline" if args.offline else "normal")
+    )
+
     # ---- 1. Resolve + download + extract the nightly ROCm tarball ---------- #
     step("Download + extract nightly ROCm tarball")
     rocm_updated = False
     current = current_rocm_tarball(workdir)
+    if args.skip_download and not (rocm_dir / "bin").is_dir():
+        die(
+            "--skip-download/--offline was given but there is no extracted ROCm "
+            f"tree at {rocm_dir}.\n"
+            "       Run once with --prepare-only on a networked node first."
+        )
     if args.skip_download and (rocm_dir / "bin").is_dir():
         log(f"--skip-download: reusing existing ROCm tree ({current or 'unknown'}).")
         facts["tarball"] = current or "unknown"
@@ -1235,7 +1520,7 @@ def main(argv=None) -> int:
             set_rocm_tarball(workdir, filename)
             # the archive is now extracted into rocm_dir; drop every downloaded
             # tarball (including this one) to reclaim the multi-GB of disk space.
-            cleanup_old_tarballs(workdir, keep=None)
+            cleanup_downloaded_tarballs(workdir)
             rocm_updated = True
     facts["rocm_updated"] = rocm_updated
 
@@ -1257,82 +1542,142 @@ def main(argv=None) -> int:
 
     env = make_rocm_env(os.environ.copy(), rocm_dir)
     report_under_test(rocm_dir, env, facts)
+    capture_rocm_sanity(
+        rocm_dir, env, workdir / f"rocm-sanity-{run_stamp}.log", facts
+    )
+
+    facts["validation"] = (
+        "build-from-source" if args.build_from_source else "tarball-install"
+    )
 
     # ---- 2. Sparse-clone / update develop --------------------------------- #
     step("Sparse-clone / update rocm-systems (projects/rocprofiler-systems)")
-    src_dir, source_changed = sync_source(workdir, args.branch, env)
-    facts["git_revision"] = _git_rev(workdir / "rocm-systems") or "unknown"
+    src_dir, source_changed = sync_source(
+        workdir,
+        args.branch,
+        env,
+        no_fetch=args.skip_clone,
+        submodules=args.build_from_source,
+    )
+    repo_dir = workdir / "rocm-systems"
+    facts["git_revision"] = _git_rev(repo_dir) or "unknown"
+    facts["git_subject"] = (
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "log", "-1", "--format=%s"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        or "unknown"
+    )
     facts["source_changed"] = source_changed
 
     # ---- 3. Required installations for the tests -------------------------- #
     step("Install test dependencies")
     if args.install_system_deps:
         install_system_deps()
-    venv_py = make_venv(workdir, src_dir)
+    venv_py = make_venv(workdir, src_dir, skip_install=args.skip_pip)
+    capture_pip_freeze(venv_py, workdir / f"pip-freeze-{run_stamp}.txt", facts)
 
-    # ---- 4. Build examples + stage tests into the ROCm prefix ------------- #
-    step("Build examples + stage test suite into the ROCm prefix")
-    disable_examples = [e.strip() for e in args.disable_examples.split(",") if e.strip()]
-    facts["disabled_examples"] = ", ".join(disable_examples) or "(none)"
+    # ---- Phase 1 stop: prepared for a later offline compute-node run ------ #
+    if args.prepare_only:
+        step("Prepare-only complete (--prepare-only)")
+        log("Network prep done. The tarball, source, and venv are staged under:")
+        log(f"  {workdir}")
+        log("Now run the tests on the (air-gapped) GPU compute node with:")
+        log(f"  python3 {Path(sys.argv[0]).name} --work-dir {workdir} --offline "
+            f"--tier {args.tier}")
+        facts["result"] = "PREPARED (--prepare-only)"
+        write_summary(summary_log, facts)
+        return 0
 
-    pytest_dir = rocm_dir / "share" / "rocprofiler-systems" / "tests" / "pytest"
-    examples_out = rocm_dir / "share" / "rocprofiler-systems" / "examples"
-    examples_present = examples_out.is_dir() and any(examples_out.iterdir())
-
-    # Rebuild only when the inputs changed: fresh/updated ROCm tree (examples were
-    # installed into the tree that was just replaced), updated source, missing
-    # example artifacts, or an explicit --force-rebuild.
-    need_build = (
-        args.force_rebuild or rocm_updated or source_changed or not examples_present
-    )
-    if need_build:
-        reasons = []
-        if args.force_rebuild:
-            reasons.append("--force-rebuild")
-        if rocm_updated:
-            reasons.append("rocm updated")
-        if source_changed:
-            reasons.append("source changed")
-        if not examples_present:
-            reasons.append("examples missing")
-        log("Building examples (" + ", ".join(reasons) + ")")
-        build_examples(
-            src_dir,
-            workdir,
-            rocm_dir,
-            env,
-            args.jobs,
+    # ---- 4. Build (source or examples) + prepare the test tree ------------ #
+    if args.build_from_source:
+        step("Build rocprofiler-systems from source")
+        build_dir = build_from_source(
+            src_dir, workdir, rocm_dir, env, venv_py, args.jobs,
             args.build_mpi_examples,
-            disable_examples,
         )
+        pytest_dir = build_dir / "share" / "rocprofiler-systems" / "tests" / "pytest"
+        if not (pytest_dir / "conftest.py").is_file():
+            die(f"source build did not produce a pytest tree at {pytest_dir}")
+        test_mode = "build"
+        test_root = build_dir
+        facts["build_dir"] = str(build_dir)
+        # report the freshly-built rocprof-sys version (that's what's under test)
+        built_avail = build_dir / "bin" / "rocprof-sys-avail"
+        if built_avail.exists():
+            facts["rocprofsys_version"] = _tool_version(str(built_avail), env)
+        log(f"Testing build-tree binaries in: {build_dir / 'bin'}")
     else:
-        log(f"Examples up to date ({facts['git_revision'][:10]}); skipping rebuild.")
+        step("Build examples + stage test suite into the ROCm prefix")
+        disable_examples = [
+            e.strip() for e in args.disable_examples.split(",") if e.strip()
+        ]
+        facts["disabled_examples"] = ", ".join(disable_examples) or "(none)"
 
-    # Staging the pytest tree is cheap; refresh it whenever we rebuilt, the ROCm
-    # tree changed, or the suite isn't staged yet.
-    if need_build or not (pytest_dir / "conftest.py").is_file():
-        pytest_dir = stage_tests(src_dir, rocm_dir, env)
-    else:
-        log("Test suite already staged; skipping.")
+        pytest_dir = rocm_dir / "share" / "rocprofiler-systems" / "tests" / "pytest"
+        examples_out = rocm_dir / "share" / "rocprofiler-systems" / "examples"
+        examples_present = examples_out.is_dir() and any(examples_out.iterdir())
 
-    facts["examples_rebuilt"] = need_build
-    facts["examples_installed"] = (
-        len(list(examples_out.glob("*"))) if examples_out.is_dir() else 0
-    )
+        # Rebuild only when the inputs changed: fresh/updated ROCm tree (examples
+        # were installed into the tree that was just replaced), updated source,
+        # missing example artifacts, or an explicit --force-rebuild.
+        need_build = (
+            args.force_rebuild or rocm_updated or source_changed or not examples_present
+        )
+        if need_build:
+            reasons = []
+            if args.force_rebuild:
+                reasons.append("--force-rebuild")
+            if rocm_updated:
+                reasons.append("rocm updated")
+            if source_changed:
+                reasons.append("source changed")
+            if not examples_present:
+                reasons.append("examples missing")
+            log("Building examples (" + ", ".join(reasons) + ")")
+            build_examples(
+                src_dir,
+                workdir,
+                rocm_dir,
+                env,
+                args.jobs,
+                args.build_mpi_examples,
+                disable_examples,
+            )
+        else:
+            log(f"Examples up to date ({facts['git_revision'][:10]}); skipping rebuild.")
 
-    # ---- 5. Run the tests against the tarball binaries ------------------- #
+        # Staging the pytest tree is cheap; refresh it whenever we rebuilt, the ROCm
+        # tree changed, or the suite isn't staged yet.
+        if need_build or not (pytest_dir / "conftest.py").is_file():
+            pytest_dir = stage_tests(src_dir, rocm_dir, env)
+        else:
+            log("Test suite already staged; skipping.")
+
+        test_mode = "install"
+        test_root = rocm_dir
+        facts["examples_rebuilt"] = need_build
+        facts["examples_installed"] = (
+            len(list(examples_out.glob("*"))) if examples_out.is_dir() else 0
+        )
+
+    # ---- 5. Run the tests ------------------------------------------------- #
     if args.skip_tests:
         step("Skipping test execution (--skip-tests)")
-        log(f"Everything is staged under: {rocm_dir}")
+        var = "ROCPROFSYS_BUILD_DIR" if test_mode == "build" else "ROCPROFSYS_INSTALL_DIR"
+        log(f"Everything is staged under: {test_root}")
         log("To run manually:")
-        log(f"  ROCPROFSYS_INSTALL_DIR={rocm_dir} ROCM_PATH={rocm_dir} \\")
-        log(f"  {venv_py} -m pytest {pytest_dir} -m gpu -v")
+        log(f"  {var}={test_root} ROCM_PATH={rocm_dir} \\")
+        log(f"  {venv_py} -m pytest {pytest_dir} -v")
         facts["result"] = "SKIPPED (--skip-tests)"
         write_summary(summary_log, facts)
         return 0
 
-    step("Run pytest suite in install mode (against tarball rocprof-sys binaries)")
-    rc = run_tests(
+    step(
+        f"Run pytest suite in {test_mode} mode "
+        f"({'build-tree' if test_mode == 'build' else 'tarball'} rocprof-sys binaries)"
+    )
+    rc, junit = run_tests(
         venv_py,
         pytest_dir,
         rocm_dir,
@@ -1341,10 +1686,13 @@ def main(argv=None) -> int:
         args.tier,
         args.reruns,
         args.reruns_delay,
+        args.rerun_failed,
         workdir,
+        facts,
+        mode=test_mode,
+        test_root=test_root,
     )
 
-    junit = workdir / "pytest-results.xml"
     counts = parse_junit(junit)
     facts["pytest_exit"] = rc
     facts["result"] = "PASS" if rc == 0 else "FAIL"
@@ -1373,6 +1721,8 @@ def write_summary(summary_log: Path, facts: dict) -> None:
     facts["finished"] = _dt.datetime.now().isoformat(timespec="seconds")
     order = [
         "result",
+        "mode",
+        "validation",
         "error",
         "pytest_exit",
         "tests_total",
@@ -1383,8 +1733,11 @@ def write_summary(summary_log: Path, facts: dict) -> None:
         "duration_sec",
         "tier",
         "reruns",
+        "rerun_failed_attempts",
         "variant",
         "gpu_arch",
+        "host",
+        "scheduler",
         "tarball",
         "rocm_version",
         "rocprofsys_version",
@@ -1394,13 +1747,17 @@ def write_summary(summary_log: Path, facts: dict) -> None:
         "tarball_url",
         "branch",
         "git_revision",
+        "git_subject",
         "source_changed",
         "examples_rebuilt",
         "examples_installed",
         "disabled_examples",
+        "build_dir",
         "work_dir",
         "rocm_prefix",
         "detailed_log",
+        "rocm_sanity_log",
+        "pip_freeze_log",
         "failures_log",
         "started",
         "finished",
@@ -1409,7 +1766,7 @@ def write_summary(summary_log: Path, facts: dict) -> None:
     lines = ["rocprof-sys nightly tarball test - SUMMARY", "=" * 44]
     for key in order:
         if key in facts:
-            lines.append(f"{key:20s}: {facts[key]}")
+            lines.append(f"{key:22s}: {facts[key]}")
 
     failed_tests = facts.get("_failed_tests") or []
     if failed_tests:
@@ -1434,6 +1791,104 @@ def write_summary(summary_log: Path, facts: dict) -> None:
 
     _emit("\n" + text)
     _emit(f"\n[nightly-test] Summary written to: {summary_log}")
+
+    # Gap 8: human-readable Markdown result. Gap 7: archive logs + latest pointers.
+    write_result_md(summary_log, facts)
+    archive_logs(summary_log, facts)
+
+
+def write_result_md(summary_log: Path, facts: dict) -> None:
+    """Write a Markdown RESULT file (mirrors the QA RESULT_*.md) next to the logs."""
+    workdir = summary_log.parent
+    stamp = summary_log.stem.replace("summary-", "")
+    md = workdir / f"RESULT-{stamp}.md"
+
+    def g(key, default="-"):
+        return facts.get(key, default)
+
+    lines = [
+        "# rocprofiler-systems tarball validation",
+        "",
+        f"- Result: **{g('result')}**",
+        f"- Mode: {g('mode')}",
+        f"- Finished (UTC-local): {g('finished')}",
+        f"- Host: {g('host')}",
+        f"- Scheduler: {g('scheduler')}",
+        f"- Work dir: {g('work_dir')}",
+        "",
+        "## Under test",
+        f"- Tarball: {g('tarball')}",
+        f"- ROCm version: {g('rocm_version')}",
+        f"- rocprof-sys version: {g('rocprofsys_version')}",
+        f"- SHA-256 verified: {g('sha256_verified')}",
+        f"- Source branch: {g('branch')}",
+        f"- Source commit: {g('git_revision')}  {g('git_subject', '')}",
+        "",
+        "## Test results",
+        f"- pytest exit: {g('pytest_exit')}",
+        f"- total / passed / failed / errors / skipped: "
+        f"{g('tests_total')} / {g('passed')} / {g('failed')} / "
+        f"{g('errors')} / {g('skipped')}",
+        f"- tier: {g('tier')}",
+        f"- reruns (inline): {g('reruns', 0)}",
+        f"- failed-rerun attempts: {g('rerun_failed_attempts', 0)}",
+    ]
+    failed_tests = facts.get("_failed_tests") or []
+    if failed_tests:
+        lines += ["", "## Failed tests"]
+        lines += [f"- {t}" for t in failed_tests[:100]]
+        if len(failed_tests) > 100:
+            lines.append(f"- ... and {len(failed_tests) - 100} more")
+
+    if _STEP_TIMES:
+        lines += ["", "## Stage timings"]
+        lines += [f"- {title}: {_fmt_dur(dur)}" for title, dur in _STEP_TIMES]
+
+    lines += [
+        "",
+        "## Logs",
+        f"- Detailed: {g('detailed_log')}",
+        f"- Summary: {summary_log}",
+        f"- ROCm sanity: {g('rocm_sanity_log')}",
+        f"- pip freeze: {g('pip_freeze_log')}",
+        f"- Failures: {g('failures_log')}",
+    ]
+    md.write_text("\n".join(lines) + "\n")
+    facts["result_md"] = str(md)
+    log(f"RESULT written to: {md}")
+
+
+def archive_logs(summary_log: Path, facts: dict) -> None:
+    """Bundle this run's log artifacts into a tar.gz and update 'latest' pointers."""
+    workdir = summary_log.parent
+    stamp = summary_log.stem.replace("summary-", "")
+    members = [
+        workdir / f"detailed-{stamp}.log",
+        workdir / f"summary-{stamp}.log",
+        workdir / f"RESULT-{stamp}.md",
+        workdir / f"rocm-sanity-{stamp}.log",
+        workdir / f"pip-freeze-{stamp}.txt",
+        workdir / f"failures-{stamp}.log",
+        workdir / "pytest-results.xml",
+    ] + sorted(workdir.glob("pytest-rerun-*.xml"))
+
+    archive = workdir / f"logs-{stamp}.tar.gz"
+    try:
+        with tarfile.open(archive, "w:gz") as tf:
+            for m in members:
+                if m.is_file():
+                    tf.add(m, arcname=m.name)
+    except Exception as exc:  # noqa: BLE001
+        log(f"WARNING: could not create log archive: {exc}")
+        return
+
+    # 'latest' pointers so automation/QA can find the newest run at a fixed path.
+    (workdir / "latest-summary.txt").write_text(str(summary_log) + "\n")
+    (workdir / "latest-archive.txt").write_text(str(archive) + "\n")
+    if facts.get("result_md"):
+        (workdir / "latest-result.txt").write_text(str(facts["result_md"]) + "\n")
+    facts["log_archive"] = str(archive)
+    log(f"Log archive: {archive}")
 
 
 if __name__ == "__main__":
