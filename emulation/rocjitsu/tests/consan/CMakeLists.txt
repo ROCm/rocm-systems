@@ -170,7 +170,6 @@ function(
     target_name
     target
     build_dir
-    config
     name
     suite
 )
@@ -186,8 +185,6 @@ function(
             "${target}"
             --rocjitsu
             "$<TARGET_FILE:rocjitsu_bin>"
-            --config
-            "${CMAKE_SOURCE_DIR}/configs/${config}"
             --hip-moi-build
             "${build_dir}"
             --suite
@@ -205,7 +202,6 @@ function(
     target
     option_name
     build_dir
-    config
 )
     if(NOT build_dir)
         return()
@@ -229,7 +225,6 @@ function(
         "${target_name}"
         "${target}"
         "${build_dir}"
-        "${config}"
         JakubMatmul
         jakub-matmul
     )
@@ -237,7 +232,6 @@ function(
         "${target_name}"
         "${target}"
         "${build_dir}"
-        "${config}"
         MfmaAttention
         mfma-attention
     )
@@ -245,7 +239,6 @@ function(
         "${target_name}"
         "${target}"
         "${build_dir}"
-        "${config}"
         D128Block
         d128-block
     )
@@ -253,7 +246,6 @@ function(
         "${target_name}"
         "${target}"
         "${build_dir}"
-        "${config}"
         D128Pressure
         d128-pressure
     )
@@ -261,7 +253,6 @@ function(
         "${target_name}"
         "${target}"
         "${build_dir}"
-        "${config}"
         StreamKArrival
         streamk-arrival
     )
@@ -269,7 +260,6 @@ function(
         "${target_name}"
         "${target}"
         "${build_dir}"
-        "${config}"
         TreeAtomicOr
         tree-atomic-or
     )

@@ -370,15 +370,12 @@ rj_add_consan_cdna_hip_moi_sim_tests(
     gfx942
     RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR
     "${RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR}"
-    gfx942_cdna3_kmd.json
 )
 rj_add_consan_cdna_hip_moi_sim_tests(
     Gfx950
     gfx950
     RJ_CONSAN_GFX950_HIP_MOI_BUILD_DIR
     "${RJ_CONSAN_GFX950_HIP_MOI_BUILD_DIR}"
-    # Keep the smoke gate bounded; the gfx950 KMD config has max_ticks=0.
-    gfx950_cdna4.json
 )
 
 # --- Unit / integration test suite ---
