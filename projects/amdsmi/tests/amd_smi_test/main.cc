@@ -22,6 +22,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdlib>
+#include <unistd.h>
 
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "functional/gpu/clock/frequencies_read.h"
@@ -267,6 +268,9 @@ TEST(GpuFunctionalReadOnly, TestMemPageInfoRead) {
 }
 
 TEST(SystemFunctionalReadOnly, TestMutualExclusion) {
+  // Cross-process device mutex doesn't apply to the DXG backend on WSL.
+  if (access("/dev/dxg", F_OK) == 0)
+    GTEST_SKIP() << "Skipped on WSL: cross-process mutex not applicable to DXG backend";
   TestMutualExclusion tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();
@@ -321,6 +325,9 @@ TEST(SystemFunctionalReadOnly, TestKfdAtforkRead) {
 }
 
 TEST(IfoeFunctionalReadOnly, TestFabricRead) {
+  // Fabric/UALoE sysfs is not available on WSL.
+  if (access("/dev/dxg", F_OK) == 0)
+    GTEST_SKIP() << "Skipped on WSL: UALoE/fabric sysfs not available on DXG backend";
   TestFabricRead tst;
   RunGenericTest(&tst);
 }
@@ -331,6 +338,9 @@ TEST(IfoeFunctionalReadOnly, TestIfoeInfoRead) {
 }
 
 TEST(SystemFunctionalReadOnly, TestCrossProcessSerialization) {
+  // Cross-process device mutex doesn't apply to the DXG backend on WSL.
+  if (access("/dev/dxg", F_OK) == 0)
+    GTEST_SKIP() << "Skipped on WSL: cross-process mutex not applicable to DXG backend";
   TestCrossProcessSerialization tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();

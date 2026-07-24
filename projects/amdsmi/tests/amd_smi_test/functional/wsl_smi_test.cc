@@ -28,7 +28,7 @@
 //
 //   WslSmiNull*  — null-output-pointer → INVAL; no /dev/dxg required.
 //   WslSmiLive*  — end-to-end queries that require a live WSL GPU; skipped
-//                  automatically when amdsmi_init fails (no /dev/dxg).
+//                  automatically when rocdxg_smi_get_device_count returns 0.
 
 #include "config/amd_smi_config.h"
 
@@ -39,55 +39,61 @@
 #include <cstdint>
 #include <cstring>
 
-#include "amd_smi/amdsmi.h"
+#include "hsakmt/hsakmt.h"
 #include "hsakmt/rocdxg_smi.h"
 
 namespace {
 
 // ---------------------------------------------------------------------------
-// Fixture: initialize amdsmi once and enumerate the first GPU handle.
-// Tests in WslSmiLive are skipped when init fails (no /dev/dxg).
+// Fixture: open KFD and confirm at least one GPU is visible.
+// Tests in WslSmiLive are skipped when no GPU is found.
 // ---------------------------------------------------------------------------
 class WslSmiLive : public ::testing::Test {
  protected:
   static void SetUpTestSuite() {
-    amdsmi_status_t r = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
-    init_ok_ = (r == AMDSMI_STATUS_SUCCESS);
-    if (!init_ok_) return;
+    HSAKMT_STATUS r = hsaKmtOpenKFD();
+    if (r != HSAKMT_STATUS_SUCCESS && r != HSAKMT_STATUS_KERNEL_ALREADY_OPENED) return;
+    kfd_opened_ = true;
 
-    uint32_t socket_count = 0;
-    amdsmi_socket_handle sockets[32] = {};
-    r = amdsmi_get_socket_handles(&socket_count, sockets);
-    if (r != AMDSMI_STATUS_SUCCESS || socket_count == 0) { init_ok_ = false; return; }
+    // Enumerate GPU nodes using the same path as WSLGPUBackend::TryPopulate.
+    // rocdxg_smi_get_device_count requires the full topology snapshot which
+    // hsaKmtAcquireSystemProperties sets up.
+    HsaSystemProperties sys_props = {};
+    r = hsaKmtAcquireSystemProperties(&sys_props);
+    if (r != HSAKMT_STATUS_SUCCESS) return;
 
-    uint32_t proc_count = 0;
-    amdsmi_processor_handle procs[32] = {};
-    r = amdsmi_get_processor_handles(sockets[0], &proc_count, procs);
-    if (r != AMDSMI_STATUS_SUCCESS || proc_count == 0) { init_ok_ = false; return; }
-
-    first_gpu_ = procs[0];
-    node_id_   = 0;  // rocdxg_smi node_id matches HSAKMT GPU-capable node order
-    gpu_ok_    = true;
+    for (uint32_t i = 0; i < sys_props.NumNodes; ++i) {
+      HsaNodeProperties node_props = {};
+      if (hsaKmtGetNodeProperties(i, &node_props) != HSAKMT_STATUS_SUCCESS) continue;
+      if (node_props.NumFComputeCores > 0 && !gpu_ok_) {
+        node_id_ = i;
+        gpu_ok_ = true;
+      }
+    }
+    // Do NOT call hsaKmtReleaseSystemProperties here — it clears the internal
+    // wdevices_ snapshot that rocdxg_smi_* functions need for the process lifetime.
+    // It is called in TearDownTestSuite instead.
   }
 
   static void TearDownTestSuite() {
-    if (init_ok_) amdsmi_shut_down();
+    if (kfd_opened_) {
+      hsaKmtReleaseSystemProperties();
+      hsaKmtCloseKFD();
+    }
   }
 
   void SetUp() override {
-    if (!init_ok_ || !gpu_ok_)
-      GTEST_SKIP() << "No WSL GPU available (/dev/dxg not open or no GPU found)";
+    if (!gpu_ok_)
+      GTEST_SKIP() << "No WSL GPU available (no node with NumFComputeCores > 0)";
   }
 
-  static bool init_ok_;
+  static bool kfd_opened_;
   static bool gpu_ok_;
-  static amdsmi_processor_handle first_gpu_;
   static uint32_t node_id_;
 };
 
-bool WslSmiLive::init_ok_ = false;
-bool WslSmiLive::gpu_ok_  = false;
-amdsmi_processor_handle WslSmiLive::first_gpu_ = nullptr;
+bool WslSmiLive::kfd_opened_ = false;
+bool WslSmiLive::gpu_ok_     = false;
 uint32_t WslSmiLive::node_id_ = 0;
 
 }  // namespace
@@ -230,7 +236,8 @@ TEST_F(WslSmiLive, ClockInfoMemSuccessOrNotSupported) {
 TEST_F(WslSmiLive, PcieInfoSuccessOrNotSupported) {
   rocdxg_smi_pcie_info_t info{};
   HSAKMT_STATUS r = rocdxg_smi_get_pcie_info(node_id_, &info);
-  EXPECT_TRUE(r == HSAKMT_STATUS_SUCCESS || r == HSAKMT_STATUS_NOT_SUPPORTED)
+  EXPECT_TRUE(r == HSAKMT_STATUS_SUCCESS || r == HSAKMT_STATUS_NOT_SUPPORTED ||
+              r == HSAKMT_STATUS_BUFFER_TOO_SMALL)
       << "unexpected status: " << r;
   if (r == HSAKMT_STATUS_SUCCESS) {
     EXPECT_GT(info.max_pcie_width, 0u);

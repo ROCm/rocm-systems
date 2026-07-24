@@ -460,22 +460,20 @@ amdsmi_status_t WSLGPUBackend::GetTempMetric(amdsmi_temperature_type_t sensor_ty
 
 amdsmi_status_t WSLGPUBackend::GetVoltMetric(amdsmi_voltage_type_t sensor_type,
                                               amdsmi_voltage_metric_t metric, int64_t* voltage) {
-  if (voltage == nullptr) return AMDSMI_STATUS_INVAL;
 #ifdef AMDSMI_HAS_ROCDXG_SMI
+  // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
   if (metric != AMDSMI_VOLT_CURRENT) return AMDSMI_STATUS_NOT_SUPPORTED;
+  if (sensor_type != AMDSMI_VOLT_TYPE_VDDGFX) return AMDSMI_STATUS_NOT_SUPPORTED;
+  if (voltage == nullptr) return AMDSMI_STATUS_INVAL;
   rocdxg_smi_power_info_t power = {};
   HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_power_info(node_id_, &power);
   if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
-  switch (sensor_type) {
-    case AMDSMI_VOLT_TYPE_VDDGFX:
-      *voltage = power.gfx_voltage;
-      return AMDSMI_STATUS_SUCCESS;
-    default:
-      return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
+  *voltage = power.gfx_voltage;
+  return AMDSMI_STATUS_SUCCESS;
 #else
   (void)sensor_type;
   (void)metric;
+  (void)voltage;
   return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 }
@@ -652,6 +650,10 @@ amdsmi_status_t WSLGPUBackend::GetFwInfo(amdsmi_fw_info_t* info) {
 #else
   return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
+}
+
+amdsmi_status_t WSLGPUBackend::GetFanRpms(uint32_t /* sensor_ind */, int64_t* /* speed */) {
+  return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t WSLGPUBackend::GetFanSpeed(uint32_t /* sensor_ind */, int64_t* speed) {

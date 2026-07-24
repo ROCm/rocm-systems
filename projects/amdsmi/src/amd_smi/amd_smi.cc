@@ -2209,6 +2209,13 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
 amdsmi_status_t amdsmi_get_gpu_fan_rpms(amdsmi_processor_handle processor_handle,
                                         uint32_t sensor_ind, int64_t* speed) {
+#ifdef ENABLE_WSL_BACKEND
+  AMDSMI_CHECK_INIT();
+  amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+  amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  if (auto* b = gpu_device->backend()) return b->GetFanRpms(sensor_ind, speed);
+#endif
   return rsmi_wrapper(rsmi_dev_fan_rpms_get, processor_handle, 0, sensor_ind, speed);
 }
 
@@ -4309,15 +4316,15 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
     amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
     if (r != AMDSMI_STATUS_SUCCESS) return r;
     if (auto* b = gpu_device->backend()) {
+      // Check feature support before nullptr so NOT_SUPPORTED takes priority over INVAL.
       amdsmi_clk_info_t clk_info = {};
       amdsmi_status_t ret = b->GetClockInfo(clk_type, &clk_info);
       if (ret != AMDSMI_STATUS_SUCCESS) return ret;
-      if (f != nullptr) {
-        std::memset(f, 0, sizeof(*f));
-        f->num_supported = 1;
-        f->current = 0;
-        f->frequency[0] = static_cast<uint64_t>(clk_info.clk) * 1000000ULL;
-      }
+      if (f == nullptr) return AMDSMI_STATUS_INVAL;
+      std::memset(f, 0, sizeof(*f));
+      f->num_supported = 1;
+      f->current = 0;
+      f->frequency[0] = static_cast<uint64_t>(clk_info.clk) * 1000000ULL;
       return AMDSMI_STATUS_SUCCESS;
     }
   }

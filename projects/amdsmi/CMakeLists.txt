@@ -113,8 +113,7 @@ option(BUILD_TESTS "Build test suite" OFF)
 option(ENABLE_ASAN_PACKAGING "" OFF)
 
 # WSL/WDDM GPU backend. Default OFF so native builds and CI are unchanged. When
-# ON, the WSL intercept hooks and mock backend are compiled in but stay inert
-# until activated at runtime via the AMDSMI_WSL_MODE environment variable.
+# ON, the WSL intercept hooks and mock backend are compiled
 option(ENABLE_WSL_BACKEND "Build the experimental WSL (WDDM/dxg) GPU backend" OFF)
 set(AMDSMI_ENABLE_WSL_BACKEND ${ENABLE_WSL_BACKEND})
 

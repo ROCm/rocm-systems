@@ -20,114 +20,46 @@
  * THE SOFTWARE.
  */
 
-// Unit tests for the WSL backend seam. The whole file is a no-op unless the
-// backend was compiled in (ENABLE_WSL_BACKEND=ON), so it links cleanly in native
-// builds and exercises the mock backend + activation logic when enabled.
+// Unit tests for WSLGPUBackend activation and detection logic.
+// No-op unless the WSL backend was compiled in (ENABLE_WSL_BACKEND=ON).
 
 #include "config/amd_smi_config.h"
 
-#if defined(AMDSMI_ENABLE_WSL_BACKEND)
+#if defined(ENABLE_WSL_BACKEND)
 
 #include <gtest/gtest.h>
 
-#include <cstdlib>
-#include <cstring>
+#include <set>
+#include <unistd.h>
+#include <vector>
 
 #include "amd_smi/amdsmi.h"
-#include "amd_smi/impl/amd_smi_wsl_backend.h"
+#include "amd_smi/impl/amd_smi_processor.h"
+#include "amd_smi/impl/amd_smi_socket.h"
+#include "amd_smi/impl/amd_smi_wsl_device.h"
 
-using amd::smi::AMDSmiWslBackend;
+using amd::smi::AMDSmiProcessor;
+using amd::smi::AMDSmiSocket;
+using amd::smi::WSLGPUBackend;
 
-namespace {
+// IsActive() is false before any TryPopulate() call.
+TEST(WslBackendActivation, InactiveByDefault) {
+  EXPECT_FALSE(WSLGPUBackend::IsActive());
+}
 
-// RAII guard so a test's AMDSMI_WSL_MODE change never leaks into other tests.
-// Safe with compute_active() (uncached); do not use to influence active(), whose
-// result is cached in a process-lifetime static on first call.
-class ScopedWslModeEnv {
- public:
-  explicit ScopedWslModeEnv(const char* value) {
-    const char* prev = std::getenv("AMDSMI_WSL_MODE");
-    had_prev_ = prev != nullptr;
-    if (had_prev_) {
-      prev_ = prev;
-    }
-    if (value == nullptr) {
-      ::unsetenv("AMDSMI_WSL_MODE");
-    } else {
-      ::setenv("AMDSMI_WSL_MODE", value, 1);
-    }
+// TryPopulate() on a machine without /dev/dxg returns NOT_SUPPORTED.
+// Skipped on real WSL machines where /dev/dxg is present.
+TEST(WslBackendActivation, TryPopulateWithoutDxg) {
+  if (access("/dev/dxg", F_OK) == 0) {
+    GTEST_SKIP() << "/dev/dxg present — skipped on WSL machines";
   }
-  ~ScopedWslModeEnv() {
-    if (had_prev_) {
-      ::setenv("AMDSMI_WSL_MODE", prev_.c_str(), 1);
-    } else {
-      ::unsetenv("AMDSMI_WSL_MODE");
-    }
-  }
-
- private:
-  bool had_prev_ = false;
-  std::string prev_;
-};
-
-}  // namespace
-
-// compute_active() is the uncached decision; it reflects the env var on each
-// call, which is why it (not active()) is used for these assertions.
-TEST(WslBackendActivation, OffWhenUnset) {
-  ScopedWslModeEnv env(nullptr);
-  EXPECT_FALSE(AMDSmiWslBackend::compute_active());
+  std::vector<AMDSmiSocket*> sockets;
+  std::set<AMDSmiProcessor*> processors;
+  amdsmi_status_t r = WSLGPUBackend::TryPopulate(sockets, processors);
+  EXPECT_EQ(r, AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_TRUE(sockets.empty());
+  EXPECT_TRUE(processors.empty());
+  EXPECT_FALSE(WSLGPUBackend::IsActive());
 }
 
-TEST(WslBackendActivation, OnWhenExplicitlyEnabled) {
-  ScopedWslModeEnv env("1");
-  EXPECT_TRUE(AMDSmiWslBackend::compute_active());
-}
-
-TEST(WslBackendActivation, OffForNonOneValues) {
-  for (const char* v : {"0", "true", "yes", ""}) {
-    ScopedWslModeEnv env(v);
-    EXPECT_FALSE(AMDSmiWslBackend::compute_active()) << "value=" << v;
-  }
-}
-
-TEST(WslBackendMock, AsicInfoReturnsSyntheticData) {
-  amdsmi_asic_info_t info{};
-  EXPECT_EQ(AMDSmiWslBackend::instance().get_gpu_asic_info(nullptr, &info), AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(info.vendor_id, 0x1002u);
-  EXPECT_NE(std::strstr(info.market_name, "mock"), nullptr);
-}
-
-TEST(WslBackendMock, PowerInfoReturnsSyntheticData) {
-  amdsmi_power_info_t info{};
-  EXPECT_EQ(AMDSmiWslBackend::instance().get_power_info(nullptr, &info), AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(info.current_socket_power, 42u);
-}
-
-TEST(WslBackendMock, BoardInfoReturnsSyntheticData) {
-  amdsmi_board_info_t info{};
-  EXPECT_EQ(AMDSmiWslBackend::instance().get_gpu_board_info(nullptr, &info), AMDSMI_STATUS_SUCCESS);
-  EXPECT_NE(std::strstr(info.product_name, "mock"), nullptr);
-}
-
-TEST(WslBackendMock, TempCurrentSupportedOthersNot) {
-  int64_t temp = -1;
-  EXPECT_EQ(AMDSmiWslBackend::instance().get_temp_metric(nullptr, AMDSMI_TEMPERATURE_TYPE_EDGE,
-                                                         AMDSMI_TEMP_CURRENT, &temp),
-            AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(temp, 47);
-  EXPECT_EQ(AMDSmiWslBackend::instance().get_temp_metric(nullptr, AMDSMI_TEMPERATURE_TYPE_EDGE,
-                                                         AMDSMI_TEMP_MAX, &temp),
-            AMDSMI_STATUS_NOT_SUPPORTED);
-}
-
-TEST(WslBackendMock, NullOutputPointerReturnsInval) {
-  EXPECT_EQ(AMDSmiWslBackend::instance().get_power_info(nullptr, nullptr), AMDSMI_STATUS_INVAL);
-  EXPECT_EQ(AMDSmiWslBackend::instance().get_gpu_asic_info(nullptr, nullptr), AMDSMI_STATUS_INVAL);
-  EXPECT_EQ(AMDSmiWslBackend::instance().get_gpu_board_info(nullptr, nullptr), AMDSMI_STATUS_INVAL);
-  EXPECT_EQ(AMDSmiWslBackend::instance().get_temp_metric(nullptr, AMDSMI_TEMPERATURE_TYPE_EDGE,
-                                                         AMDSMI_TEMP_CURRENT, nullptr),
-            AMDSMI_STATUS_INVAL);
-}
-
-#endif  // AMDSMI_ENABLE_WSL_BACKEND
+#endif  // ENABLE_WSL_BACKEND
