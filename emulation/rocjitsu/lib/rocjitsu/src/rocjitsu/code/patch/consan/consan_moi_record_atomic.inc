@@ -163,8 +163,9 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
       if (!private_owner)
         continue;
     }
-    const std::optional<uint32_t> private_layout_base =
-        private_owner ? std::optional<uint32_t>(private_owner->private_state_end) : std::nullopt;
+    std::optional<uint32_t> private_layout_base;
+    if (private_owner)
+      private_layout_base = private_owner->private_state_end;
     std::optional<VgprSpillSequence> spill;
     if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
       spill = build_moi_spill_sequence(result, *resources, options, spill_managers, arch,

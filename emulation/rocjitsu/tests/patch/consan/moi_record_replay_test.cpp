@@ -1454,6 +1454,78 @@ TEST(ConSanMoi, Gfx1250PrivateOwnerSpillsBeginAfterCapturedState) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Gfx1250PrivateOwnerScalarSpillsBeginAfterCapturedState) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr uint32_t kAccessCount = 9u;
+  const auto atomic = build_gfx1250_flat_atomic_add_u32(
+      /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true, /*scope=*/2, kArch);
+  ASSERT_TRUE(atomic);
+  std::vector<uint32_t> text_words;
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+  const std::array<uint32_t, 3> release = {0xEE0B0000u, 0x00000000u, 0x00000000u}; // global_wb
+  text_words.insert(text_words.end(), release.begin(), release.end());
+  text_words.insert(text_words.end(), atomic->begin(), atomic->end());
+  const std::array<uint16_t, 4> dead_router_sgprs = {0u, 1u, 4u, 6u};
+  for (uint16_t sgpr = 0; sgpr < 106u; ++sgpr) {
+    if (std::ranges::find(dead_router_sgprs, sgpr) == dead_router_sgprs.end())
+      text_words.push_back(build_s_mov_b32(/*sdst=*/20u, sgpr, kArch));
+  }
+  text_words.push_back(build_s_endpgm(kArch));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_dynamic_access_records = true;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.moi_init_owner_epoch = true;
+  options.force_private_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size =
+      consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0, 0, 1, 1);
+  options.max_patches = 32u;
+
+  const ConSanResult result =
+      try_patch_consan(make_gfx1250_code_object(text_words, "private_owner_scalar_spill"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().spill_backed);
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(access->persistent_private_state_end);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  for (ConSanPatchKind kind :
+       {ConSanPatchKind::TrampolineMoiAtomicRecord, ConSanPatchKind::TrampolineMoiFenceRecord}) {
+    SCOPED_TRACE(testing::PrintToString(kind));
+    const auto patch = std::ranges::find(result.patches, kind, &ConSanPatchInfo::kind);
+    ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(patch->scratch_vgpr);
+    EXPECT_EQ(patch->persistent_private_state_end, access->persistent_private_state_end);
+    EXPECT_GT(patch->required_private_segment_size, *access->persistent_private_state_end);
+    const std::vector<uint32_t> cave =
+        text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+    bool found_scalar_spill_after_persistent_state = false;
+    for (uint32_t offset = 0; offset < patch->required_private_segment_size;
+         offset += sizeof(uint32_t)) {
+      const auto spill =
+          instrumentation::build_private_store_b32(*patch->scratch_vgpr, offset, kArch);
+      ASSERT_TRUE(spill);
+      if (offset < *access->persistent_private_state_end)
+        EXPECT_FALSE(contains_subsequence(cave, *spill));
+      else
+        found_scalar_spill_after_persistent_state |= contains_subsequence(cave, *spill);
+    }
+    EXPECT_TRUE(found_scalar_spill_after_persistent_state);
+  }
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Gfx1250PrivateOwnerFallbackRetainsAtomicRecord) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
   constexpr auto guest = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
