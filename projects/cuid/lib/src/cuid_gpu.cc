@@ -72,6 +72,32 @@ static std::string resolve_render_node(const std::string &card_path) {
   return card_path;
 }
 
+// Callers from /sys/class/drm enumeration pass paths of the form
+// "/sys/class/drm/<card>/device" and expect the trailing "/device" component
+// to be stripped so that lookups under render_node still work (the resolver
+// re-appends "/device/..." itself). Other callers (e.g. the GIM enumeration
+// path which passes "/sys/bus/pci/devices/<bdf>") must not be trimmed --
+// doing so would collapse every device to the parent directory and corrupt
+// the CUID-file identifier.
+std::string CuidGpu::normalize_render_node(const std::string &device_path) {
+  std::string full_device_node = device_path;
+  const std::string kDeviceSuffix = "/device";
+  if (full_device_node.size() > kDeviceSuffix.size() &&
+      full_device_node.compare(full_device_node.size() - kDeviceSuffix.size(),
+                               kDeviceSuffix.size(), kDeviceSuffix) == 0) {
+    full_device_node.resize(full_device_node.size() - kDeviceSuffix.size());
+  }
+
+  // If discovered via card entry, try to resolve the associated renderD node.
+  if (full_device_node.find("/card") != std::string::npos) {
+    std::string render_node = resolve_render_node(full_device_node);
+    if (render_node != full_device_node) {
+      full_device_node = render_node;
+    }
+  }
+  return full_device_node;
+}
+
 amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
   // Track BDFs we've already added so the GIM enumeration below doesn't
   // create duplicates of GPUs that are also visible via /sys/class/drm.
@@ -248,29 +274,7 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
   // Determine the device node path. We prefer the renderD node for backward
   // compatibility (CUID files may reference renderD paths). If no renderD node
   // exists (e.g., GIM driver), the card path is used instead.
-  //
-  // Callers from /sys/class/drm enumeration pass paths of the form
-  // "/sys/class/drm/<card>/device" and expect the trailing "/device"
-  // component to be stripped so that lookups under render_node still work
-  // (the resolver re-appends "/device/..." itself). Other callers (e.g. the
-  // GIM enumeration path which passes "/sys/bus/pci/devices/<bdf>") must
-  // not be trimmed -- doing so would collapse every device to the parent
-  // directory and corrupt the CUID-file identifier.
-  std::string full_device_node = device_path;
-  const std::string kDeviceSuffix = "/device";
-  if (full_device_node.size() > kDeviceSuffix.size() &&
-      full_device_node.compare(full_device_node.size() - kDeviceSuffix.size(),
-                               kDeviceSuffix.size(), kDeviceSuffix) == 0) {
-    full_device_node.resize(full_device_node.size() - kDeviceSuffix.size());
-  }
-
-  // If discovered via card entry, try to resolve the associated renderD node
-  if (full_device_node.find("/card") != std::string::npos) {
-    std::string render_node = resolve_render_node(full_device_node);
-    if (render_node != full_device_node) {
-      full_device_node = render_node;
-    }
-  }
+  std::string full_device_node = normalize_render_node(device_path);
 
   info.header.device_type = AMDCUID_DEVICE_TYPE_GPU;
   info.bdf = bdf;

@@ -23,7 +23,9 @@
 #include "test_common.h"
 
 // Unit tests (no root or device required)
+#include "unit/cuid_gpu_test.h"
 #include "unit/file_lock_test.h"
+#include "unit/gim_util_test.h"
 #include "unit/id_string_test.h"
 #include "unit/status_string_test.h"
 #include "unit/utilities_test.h"
@@ -120,6 +122,26 @@ TEST(cuidtstUnprivileged, DeviceQuery) {
 
 TEST(cuidtstUnprivileged, DeviceRefresh) {
   TestDeviceRefresh tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, GimClientAvailability) {
+  TestGimClientAvailability tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, GimParseAsicSerial) {
+  TestGimParseAsicSerial tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, GimFormatBdf) {
+  TestGimFormatBdf tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, CuidGpuRenderNode) {
+  TestCuidGpuRenderNode tst;
   RunGenericTest(&tst);
 }
 

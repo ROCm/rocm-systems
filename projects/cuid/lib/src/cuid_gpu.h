@@ -63,6 +63,13 @@ public:
   discover_single(amdcuid_gpu_info *gpu_info, const std::string &device_path,
                   cuid::gim::GimClient *gim_client = nullptr);
 
+  // Derive the render_node from an enumeration `device_path`. Strips a
+  // trailing "/device" (as passed by /sys/class/drm enumeration) and, for
+  // card paths, resolves the associated renderD node when one exists. Paths
+  // that are neither (e.g. the GIM "/sys/bus/pci/devices/<bdf>" form) are
+  // returned verbatim. Exposed for testing.
+  static std::string normalize_render_node(const std::string &device_path);
+
   // Virtual accessor overrides
   amdcuid_status_t get_vendor_id(uint16_t &vendor_id) const override;
   amdcuid_status_t get_device_id(uint16_t &device_id) const override;
