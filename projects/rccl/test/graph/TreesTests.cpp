@@ -32,8 +32,13 @@ namespace RcclUnitTesting {
 // ncclGetBtree
 // ---------------------------------------------------------------------------
 
-// Header signature: ncclGetBtree(nranks, rank, up, down0, down1, parentChildType)
-// Note: "down0" is the left child (rank - lowbit), "down1" is the right child
+// These tests follow the parameter meaning from the ncclGetBtree *definition*
+// in src/graph/trees.cc: after (nranks, rank) the outputs are
+// (up, down0, down1, parentChildType), where down0 is the left child
+// (rank - lowbit) and down1 is the right child (rank + lowbit).
+// Note: the declaration in src/include/trees.h names these two child pointers
+// in the opposite order (u0, d1, d0); the parameters are positional pointers, so
+// behavior is governed by the definition above, which is what we assert against.
 
 TEST(BtreeTest, SingleRank) {
     int u = 0, d0 = 0, d1 = 0, pct = 0;
@@ -274,13 +279,22 @@ static void ExpectBtreeConsistent(int nranks) {
         stack.push_back(info[r].d1);
     }
 
+    // Count every mismatch, but only emit the first kMaxReported messages of
+    // each kind so a large-nranks regression stays readable. The counts below
+    // are unconditional; the message cap does not affect them.
     int unreached = 0, repeated = 0;
     for (int r = 0; r < nranks; r++) {
-        if (visits[r] == 0 && ++unreached <= kMaxReported) {
-            ADD_FAILURE() << "nranks=" << nranks << " rank " << r << " unreachable from root";
-        } else if (visits[r] > 1 && ++repeated <= kMaxReported) {
-            ADD_FAILURE() << "nranks=" << nranks << " rank " << r << " reached "
-                          << visits[r] << " times";
+        if (visits[r] == 0) {
+            unreached++;
+            if (unreached <= kMaxReported) {
+                ADD_FAILURE() << "nranks=" << nranks << " rank " << r << " unreachable from root";
+            }
+        } else if (visits[r] > 1) {
+            repeated++;
+            if (repeated <= kMaxReported) {
+                ADD_FAILURE() << "nranks=" << nranks << " rank " << r << " reached "
+                              << visits[r] << " times";
+            }
         }
     }
     EXPECT_EQ(unreached, 0) << "nranks=" << nranks << ": " << unreached << " unreachable rank(s)";
