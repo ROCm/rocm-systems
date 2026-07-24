@@ -1037,7 +1037,8 @@ write_rocpd(
     const generator<tool_spm_counter_record_t>& /** spm_collection_gen*/,
     const generator<rocprofiler_buffer_tracing_ompt_record_t>&             ompt_gen,
     const generator<rocprofiler_buffer_tracing_hip_graph_record_t>&        graph_launch_gen,
-    const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>& rocshmem_api_gen)
+    const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>& rocshmem_api_gen,
+    const generator<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>&  hipfile_api_gen)
 {
     static auto get_simple_timer = [](std::string_view label) {
         return common::simple_timer{fmt::format("SQLite3 generation :: {:24}", label)};
@@ -2105,6 +2106,7 @@ write_rocpd(
         insert_api_data(ompt_gen);
         insert_api_data(rocdecode_api_gen);
         insert_api_data(rocshmem_api_gen);
+        insert_api_data(hipfile_api_gen);
     }
 
     insert_kernel_dispatch_data(dispatch_to_evt_id);
