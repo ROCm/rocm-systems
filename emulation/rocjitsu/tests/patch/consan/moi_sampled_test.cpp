@@ -1438,6 +1438,8 @@ TEST(ConSanMoi, Cdna4SampledAtomicMaterializesAddressWithDynamicScalarState) {
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> cave =
       text_words_at_offset(patched, atomic_patch->trampoline_offset, atomic_patch->trampoline_size);
+  // Keep these public emitted-code checks synchronized with the private
+  // SampledAtomicScratchLayout::kOwner and ::kEpoch constants.
   constexpr uint16_t kAtomicOwnerScratchOffset = 6u;
   constexpr uint16_t kAtomicEpochScratchOffset = 7u;
   EXPECT_NE(std::ranges::find(
@@ -2049,7 +2051,8 @@ TEST(ConSanMoi, CdnaSampledSynchronizationSpillsThroughDynamicStackFrame) {
       // above the guest's v10:v11 operands.
       AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 2u);
       // Forty SGPRs leave low statically unnamed holes that s_movrel can
-      // nonetheless address. The scalar-persistent pair must start at s40.
+      // nonetheless address. The scalar-persistent pair must start at s40 or
+      // later.
       AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                       kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 4u);
     });

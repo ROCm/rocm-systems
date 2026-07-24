@@ -980,8 +980,11 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                             *private_layout, arch, errors))
     return false;
   if (moi_uses_scalar_persistent_state(options)) {
-    // Scalar-persistent placement always reserves these two site-local
-    // temporaries before emission.
+    if (!options.moi_owner_vgpr || !options.moi_epoch_vgpr) {
+      errors.emplace_back(
+          "ConSan MOI sampled atomic prelude has no scalar-state VGPR temporaries");
+      return false;
+    }
     assert(options.moi_owner_vgpr && options.moi_epoch_vgpr);
     words.push_back(build_v_mov_b32_e32(*options.moi_owner_vgpr,
                                        *options.moi_persistent_owner_sgpr, arch));

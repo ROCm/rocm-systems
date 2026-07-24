@@ -957,9 +957,9 @@ std::vector<uint8_t> make_two_kernel_shared_helper_code_object(
        options.helper_has_ordinary_memory || options.helper_has_ordered_atomic ||
        options.helper_atomic_acquire_release || options.helper_has_barrier ||
        options.unrelated_has_lds || options.unrelated_has_barrier || options.use_indirect_calls ||
-       options.entry_nop_words != 0u || options.group_bytes != 0u)) {
+       options.group_bytes != 0u)) {
     ADD_FAILURE() << "CDNA4 shared-helper fixture accepts only an architecture-specific helper, "
-                     "VGPR counts, and private sizes";
+                     "VGPR counts, private sizes, and an entry NOP prefix";
     return {};
   }
   constexpr uint16_t kReturnSgpr = 30;

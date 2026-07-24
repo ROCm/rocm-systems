@@ -2064,6 +2064,7 @@ TEST(ConSanMoi, Cdna4InlineScalarPersistencePlansEntryScratchForEveryComponent) 
   probe_words[1] =
       build_v_mov_b32_e32(/*vdst=*/0, vector_source_vgpr(255), ROCJITSU_CODE_ARCH_CDNA4);
   std::copy(guest->begin(), guest->end(), probe_words.begin() + 2u);
+  probe_words[8] = 0xBE802A02u; // s_movrels_b32 s0, s2
   probe_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   std::vector<uint32_t> helper_words(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
   std::copy(guest->begin(), guest->end(), helper_words.begin() + 1u);
@@ -2079,6 +2080,8 @@ TEST(ConSanMoi, Cdna4InlineScalarPersistencePlansEntryScratchForEveryComponent) 
     // This component therefore needs scalar persistent state without moving
     // the compiler's ordinary/accumulator boundary.
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 4u);
   });
   mutate_kernel_descriptor(bytes, "lds_helper", [](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 4u);
@@ -2104,6 +2107,8 @@ TEST(ConSanMoi, Cdna4InlineScalarPersistencePlansEntryScratchForEveryComponent) 
   EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
   EXPECT_FALSE(result.moi_private_epoch_automatic);
   EXPECT_TRUE(result.resolved_moi_persistent_vgpr_assignments.empty());
+  ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
+  EXPECT_GE(*result.resolved_moi_persistent_owner_sgpr, 40u);
   EXPECT_EQ(result.resolved_moi_prologue_scratch_vgpr_assignments.size(), 2u);
   // The full-bank owner drives the code-object-wide scalar choice but its
   // forced-spill access is filtered during the rebuilt resource plan.  The

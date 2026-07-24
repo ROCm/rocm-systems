@@ -3430,20 +3430,42 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
                 scalar_owners.push_back(descriptor_offset);
             }
           }
-          // This pair crosses arbitrary guest code. Start beyond both every
-          // statically named operand and every owner's original allocation:
+          MoiResourcePlanningState state(bytes, arch, options, result);
+          if (!state.valid) {
+            result.outcome = ConSanTransformOutcome::Unsupported;
+            result.warnings.emplace_back(
+                "ConSan MOI could not analyze entry-local VGPR scratch for scalar persistent "
+                "state");
+            return false;
+          }
+          std::vector<const MoiKernelResourceContext *> scalar_contexts;
+          scalar_contexts.reserve(scalar_owners.size());
+          for (uint64_t descriptor_offset : scalar_owners) {
+            const auto context = std::ranges::find_if(
+                state.contexts, [&](const MoiKernelResourceContext &candidate) {
+                  return candidate.kernel != nullptr &&
+                         candidate.kernel->descriptor_file_offset == descriptor_offset;
+                });
+            if (context == state.contexts.end() || context->kernel == nullptr ||
+                !context->descriptor_valid) {
+              result.outcome = ConSanTransformOutcome::Unsupported;
+              result.warnings.emplace_back(
+                  "ConSan MOI could not resolve a scalar-state owner descriptor");
+              return false;
+            }
+            scalar_contexts.push_back(&*context);
+          }
+          // This pair crosses arbitrary guest code. Start beyond both the
+          // statically named operands and every owner's original allocation:
           // scalar-relative s_movrel access is valid only within that original
           // allocation, so descriptor growth cannot expose the new tuple to
           // the guest. The candidate filter below separately preserves the
           // physical-VCC location before and after that growth.
           uint32_t first = 0u;
-          for (const ConSanCandidateResourcePlan &scalar_plan : result.resource_plans) {
-            if (scalar_plan.source == ConSanRegisterAllocationSource::Unsupported ||
-                scalar_plan.owner_descriptor_file_offsets.empty())
-              continue;
+          for (const MoiKernelResourceContext *context : scalar_contexts) {
             first = std::max<uint32_t>(
-                first, std::max<uint16_t>(scalar_plan.max_referenced_sgpr_count,
-                                          scalar_plan.current_sgpr_count));
+                first, std::max<uint16_t>(context->max_referenced_sgpr_count,
+                                          context->current_sgpr_count));
           }
           const uint16_t scalar_limit = moi_ordinary_sgpr_limit(arch);
           const auto unavailable = [&](uint16_t base) {
@@ -3458,25 +3480,15 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
                 range_overlaps(base, scalar_count, 32u, 2u))
               return true;
             return instrumentation::is_cdna_family_arch(arch) &&
-                   std::ranges::any_of(result.resource_plans,
-                                       [&](const ConSanCandidateResourcePlan &scalar_plan) {
-                                         if (scalar_plan.owner_descriptor_file_offsets.empty())
-                                           return false;
+                   std::ranges::any_of(
+                       scalar_contexts, [&](const MoiKernelResourceContext *context) {
                                          return cdna_sgpr_window_conflicts_with_physical_vcc(
-                                             base, scalar_count, scalar_plan.current_sgpr_count);
+                                             base, scalar_count, context->current_sgpr_count);
                                        });
           };
           for (uint32_t base = first; base + scalar_count <= scalar_limit; ++base) {
             if (unavailable(static_cast<uint16_t>(base)))
               continue;
-            MoiResourcePlanningState state(bytes, arch, options, result);
-            if (!state.valid) {
-              result.outcome = ConSanTransformOutcome::Unsupported;
-              result.warnings.emplace_back(
-                  "ConSan MOI could not analyze entry-local VGPR scratch for scalar persistent "
-                  "state");
-              return false;
-            }
             std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch;
             for (uint64_t descriptor_offset : scalar_owners) {
               const auto context = std::ranges::find_if(

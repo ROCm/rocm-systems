@@ -411,6 +411,58 @@ TEST(ConSanMoi, SharedHelperPlanUsesCommonDeadWindowAcrossTwoOwners) {
   EXPECT_EQ(plan.scratch_vgpr_count, 3u);
 }
 
+TEST(ConSanMoi, Cdna4SampledScalarStateClearsEverySharedOwnerAllocation) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto access =
+      build_cdna4_ds_store_b32(/*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, kArch);
+  ASSERT_TRUE(access);
+  std::vector<uint32_t> helper(access->begin(), access->end());
+  helper.push_back(0xBE802A02u); // s_movrels_b32 s0, s2
+
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.first_vgpr_granulated = 3u;
+  fixture.second_vgpr_granulated = 3u;
+  fixture.entry_nop_words = 1u;
+  std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture, kArch, helper);
+  ASSERT_FALSE(bytes.empty());
+  mutate_kernel_descriptor(bytes, "shared_owner_0", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 4u);
+  });
+  mutate_kernel_descriptor(bytes, "shared_owner_1", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 9u);
+  });
+  constexpr std::array<std::string_view, 1> kAdditionalOwners = {"shared_owner_1"};
+  append_kernel_metadata_note(bytes, "shared_owner_0", /*uses_dynamic_stack=*/true,
+                              /*sgpr_count=*/0u, std::nullopt, std::nullopt,
+                              /*has_dynamic_lds=*/false, kAdditionalOwners);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.force_vgpr_spill = true;
+  options.moi_runtime_sample_stride = 2u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
+  ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
+  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
+  EXPECT_GE(*result.resolved_moi_persistent_owner_sgpr, 80u);
+  const auto access_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.phase == ConSanPatchPhase::Instrumentation &&
+           patch.owner_descriptor_file_offsets.size() == 2u;
+  });
+  ASSERT_NE(access_patch, result.patches.end());
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, SharedHelperAtomicUsesCommonOwnerResourcePlan) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.helper_has_ordered_atomic = true;
