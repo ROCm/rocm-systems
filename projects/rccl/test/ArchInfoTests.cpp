@@ -6,7 +6,6 @@
 
 #include "archinfo.h"
 #include <gtest/gtest.h>
-#include <cstring>
 
 namespace RcclUnitTesting {
 
