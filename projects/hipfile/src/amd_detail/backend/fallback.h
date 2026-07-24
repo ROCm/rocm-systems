@@ -52,6 +52,5 @@ protected:
 
 extern "C" {
 void async_io_bind_params(void *userargs);
-void async_io_cleanup(void *userargs);
 void async_io_cpu_copy(void *userargs);
 }

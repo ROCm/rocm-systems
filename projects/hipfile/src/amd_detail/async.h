@@ -71,3 +71,7 @@ private:
     bool                                                 is_finished;
 };
 }
+
+extern "C" {
+void async_io_cleanup(void *userargs);
+}
