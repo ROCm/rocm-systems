@@ -49,6 +49,9 @@ jobs:
           echo "Changed files:"
           git diff --name-only HEAD^
 
+          # Scheduled and manual runs always execute the full CI pipeline.
+          # PR/push runs only trigger CI when files under projects/rccl/
+          # have changed, to avoid burning GPU runner time on unrelated commits.
           if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "run_linux_ci=true" >> "$GITHUB_OUTPUT"
             echo "Scheduled/manual run — always run CI"

@@ -6,6 +6,7 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -15,14 +16,21 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
+#include <cerrno>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 
 using namespace rocjitsu;
 
 namespace {
+
+void shutdown_plugin_group(rj_vm_t *vm) {
+  if (vm && vm->soc && vm->plugin_group_active.exchange(false, std::memory_order_acq_rel))
+    vm->soc->plugin_group().onShutdown();
+}
 
 rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, rj_vm_t **handle) {
   if (!loaded.soc())
@@ -64,11 +72,21 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     auto vm_ptr = std::make_unique<VirtualMachine>(std::move(socs), std::move(gpu_ids), daemon);
     s->vm = vm_ptr.get();
     s->engine->topology().set_root(std::move(vm_ptr));
+
+    auto prefix_specs = [](std::vector<simdojo::LinkSpec> &specs, const std::string &pfx) {
+      for (auto &ls : specs) {
+        ls.src = pfx + ls.src;
+        ls.dst = pfx + ls.dst;
+      }
+    };
+    prefix_specs(loaded.build_result.link_specs, "gpu0.");
     loaded.wire_links(s->engine->topology());
     s->soc->wire_backing(s->engine->topology());
-    for (auto &eb : loaded.extra_gpu_builds) {
+    for (size_t i = 0; i < loaded.extra_gpu_builds.size(); ++i) {
+      auto &eb = loaded.extra_gpu_builds[i];
+      prefix_specs(eb.link_specs, "gpu" + std::to_string(i + 1) + ".");
       s->engine->topology().wire_links(eb.link_specs, loaded.exec_mode);
-      auto *extra_soc = dynamic_cast<SoC *>(s->vm->soc());
+      auto *extra_soc = s->vm->soc(static_cast<uint32_t>(i + 1));
       if (extra_soc)
         extra_soc->wire_backing(s->engine->topology());
     }
@@ -81,7 +99,7 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     loaded.wire_links(s->engine->topology());
     s->soc->wire_backing(s->engine->topology());
   }
-  s->engine->build();
+  s->engine->create();
 
   if (serve) {
     s->engine->register_as_primary();
@@ -161,6 +179,24 @@ rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode, rj_vm_
   }
 }
 
+rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char *plugin_dir) {
+  if (!vm || !config_json)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  if (!vm->soc)
+    return ROCJITSU_STATUS_ERROR;
+  try {
+    auto group = PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "",
+                                                      vm->engine_config);
+    shutdown_plugin_group(vm);
+    vm->soc->set_plugin_group(group);
+    group->onInit();
+    vm->plugin_group_active.store(true, std::memory_order_release);
+    return ROCJITSU_STATUS_SUCCESS;
+  } catch (const std::exception &) {
+    return ROCJITSU_STATUS_ERROR;
+  }
+}
+
 void rj_vm_retain(rj_vm_t *vm) {
   if (vm)
     vm->retain();
@@ -176,6 +212,7 @@ void rj_vm_release(rj_vm_t *vm) {
 void rj_vm_destroy(rj_vm_t *vm) {
   if (!vm)
     return;
+  shutdown_plugin_group(vm);
   if (vm->destroy())
     delete vm;
 }
@@ -204,6 +241,7 @@ rj_status_t rj_vm_run(rj_vm_t *vm, uint64_t *ticks_executed) {
     *ticks_executed = exit.tick;
 
   vm->engine->shutdown();
+  shutdown_plugin_group(vm);
   return (exit.code == 0) ? ROCJITSU_STATUS_SUCCESS : ROCJITSU_STATUS_ERROR;
 }
 
@@ -333,6 +371,13 @@ rj_status_t rj_vm_device_close(rj_vm_t *vm, uint32_t process_id) {
   return ROCJITSU_STATUS_SUCCESS;
 }
 
+rj_status_t rj_vm_close_all_devices(rj_vm_t *vm) {
+  if (!vm || !vm->vm || !vm->vm->driver())
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  vm->vm->driver()->close_all_processes();
+  return ROCJITSU_STATUS_SUCCESS;
+}
+
 rj_status_t rj_vm_device_map(rj_vm_t *vm, rj_vm_map_t *map) {
   if (!vm || !map || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
@@ -350,6 +395,10 @@ rj_status_t rj_vm_device_map_as(rj_vm_t *vm, uint32_t process_id, rj_vm_map_t *m
   auto *result = vm->vm->driver()->mmap(
       process_id, reinterpret_cast<void *>(map->addr), static_cast<size_t>(map->length),
       static_cast<int>(map->prot), static_cast<int>(map->flags), static_cast<off_t>(map->offset));
+  // Capture errno HERE, immediately after the driver mmap, before any bookkeeping
+  // syscall on the way back out can clobber it. Callers (the daemon RPC path) relay
+  // this to the client rather than reading their own errno across the API boundary.
+  map->map_errno = (result == MAP_FAILED) ? errno : 0;
   map->mapped_addr = reinterpret_cast<uint64_t>(result);
   return ROCJITSU_STATUS_SUCCESS;
 }

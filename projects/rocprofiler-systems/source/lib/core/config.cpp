@@ -7,6 +7,7 @@
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
+#include "common/path.hpp"
 #include "common/static_object.hpp"
 #include "constraint.hpp"
 #include "gpu.hpp"
@@ -663,9 +664,13 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_UCX, "Enable support for UCX functions",
                               false, "ucx", "backend", "parallelism");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_SHMEM,
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_OPENSHMEM,
                               "Enable support for OpenSHMEM functions", false, "shmem",
                               "backend", "parallelism");
+
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_SHMEM,
+                              "[DEPRECATED] Renamed to ROCPROFSYS_USE_OPENSHMEM", false,
+                              "shmem", "backend", "parallelism", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(
         bool, env_vars::USE_RCCLP,
@@ -1372,7 +1377,7 @@ configure_settings(bool _init)
     auto _cmd_env = rocprofsys::get_env<std::string>(env_vars::COMMAND_LINE, "");
     if(!_cmd_env.empty()) _cmd = rocprofsys::delimit(_cmd_env, " ");
     auto _exe          = (_cmd.empty()) ? "exe" : _cmd.front();
-    get_exe_realpath() = filepath::realpath(_exe, nullptr, false);
+    get_exe_realpath() = path::realpath(_exe);
     auto _pos          = _exe.find_last_of('/');
     if(_pos < _exe.length() - 1) _exe = _exe.substr(_pos + 1);
     get_exe_name() = _exe;
@@ -1490,6 +1495,8 @@ configure_settings(bool _init)
                               std::string{ env_vars::LOG_LEVEL });
     handle_deprecated_setting(std::string{ env_vars::TRACE_LEGACY },
                               std::string{ env_vars::TRACE });
+    handle_deprecated_setting(std::string{ env_vars::USE_SHMEM },
+                              std::string{ env_vars::USE_OPENSHMEM });
 
     scope::get_fields()[scope::flat::value]     = _config->get_flat_profile();
     scope::get_fields()[scope::timeline::value] = _config->get_timeline_profile();
@@ -2131,8 +2138,7 @@ get_exe_realpath()
 {
     static std::string _v = []() {
         auto _cmd_line = tim::read_command_line(process::get_id());
-        if(!_cmd_line.empty())
-            return filepath::realpath(_cmd_line.front(), nullptr, false);
+        if(!_cmd_line.empty()) return path::realpath(_cmd_line.front());
         return std::string{};
     }();
     return _v;
@@ -2345,7 +2351,7 @@ get_use_ucx()
 bool&
 get_use_shmem()
 {
-    static auto _v = get_config()->find(std::string{ env_vars::USE_SHMEM });
+    static auto _v = get_config()->find(std::string{ env_vars::USE_OPENSHMEM });
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
@@ -3021,7 +3027,7 @@ std::string
 get_ump_absolute_path()
 {
     auto ensure_dir = [](std::string path) {
-        if(!path.empty() && !tim::filepath::direxists(path))
+        if(!path.empty() && !path::is_directory(path))
         {
             tim::filepath::makedir(path);
         }
@@ -3076,7 +3082,7 @@ get_ump_absolute_path()
         (get_use_rocpd() && !get_caching_perfetto())
             ? get_database_absolute_path("rocpd", std::to_string(process::get_id()))
             : get_perfetto_output_filename();
-    return tim::filepath::dirname(source);
+    return path::parent_path(source);
 }
 
 bool&

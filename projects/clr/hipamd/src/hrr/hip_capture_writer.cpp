@@ -24,6 +24,7 @@
 
 #include "hip_capture_writer.h"
 #include "hip_capture.h"
+#include "hip_capture_metadata.h"
 
 #include "os/os.hpp"           // amd::Os::timeNanos()
 #include "utils/debug.hpp"     // LogPrintfError, LogPrintfWarning, LogPrintfInfo
@@ -157,6 +158,8 @@ static constexpr size_t   kBufCap           = 256u * 1024u;
 static constexpr uint64_t kCheckpointEvents = 4096;
 // Path buffers are filled at open() so the signal path never touches std::string.
 static constexpr size_t   kPathMax          = 4096;
+static constexpr size_t   kMetadataJsonMax  = 128u * 1024u;
+static constexpr size_t   kEmergencyManifestMax = kMetadataJsonMax + 1024u;
 
 static std::mutex   g_file_mu;
 static int          g_events_fd = -1;
@@ -168,6 +171,8 @@ static std::string  g_output_dir;
 static char         g_manifest_path[kPathMax] = {0};
 static uint64_t     g_pid = 0;
 static uint64_t     g_parent_pid = 0;
+static char         g_metadata_json[kMetadataJsonMax] = {0};
+static size_t       g_metadata_json_len = 0;
 
 // App-managed write buffer for events.bin (protected by g_file_mu).
 static uint8_t  g_buf[kBufCap];
@@ -268,6 +273,13 @@ static void ensure_dir(const std::string& path) {
 }
 
 static bool atomic_write_file(const std::string& path, const void* data, size_t len);
+
+static bool is_json_object_fragment(const std::string& json) {
+  const auto begin = json.find_first_not_of(" \t\r\n");
+  if (begin == std::string::npos || json[begin] != '{') return false;
+  const auto end = json.find_last_not_of(" \t\r\n");
+  return end != std::string::npos && json[end] == '}';
+}
 
 // ---------------------------------------------------------------------------
 // manifest writers
@@ -481,13 +493,19 @@ static void write_manifest_stdio(const char* output_dir, bool complete) {
           "  \"parent_pid\": %llu,\n"
           "  \"complete\": %s,\n"
           "  \"event_count\": %llu,\n"
-          "  \"blob_count\": %llu\n"
-          "}\n",
+          "  \"blob_count\": %llu",
           static_cast<unsigned long long>(g_pid),
           static_cast<unsigned long long>(g_parent_pid),
           complete ? "true" : "false",
           static_cast<unsigned long long>(g_event_count.load()),
           static_cast<unsigned long long>(g_blob_count.load()));
+  if (g_metadata_json_len > 0) {
+    fprintf(mf, ",\n  \"metadata\": %.*s\n",
+            static_cast<int>(g_metadata_json_len), g_metadata_json);
+  } else {
+    fprintf(mf, "\n");
+  }
+  fprintf(mf, "}\n");
   fclose(mf);
 }
 
@@ -557,7 +575,8 @@ static void update_root_manifest() {
     const std::string name = ent.path().filename().string();
     if (name.rfind("pid-", 0) != 0) continue;
     ProcessManifestEntry entry{};
-    if (read_process_manifest((ent.path() / "manifest.json").string(), &entry))
+    const std::string manifest_path = (ent.path() / "manifest.json").string();
+    if (read_process_manifest(manifest_path, &entry))
       entries.push_back(entry);
   }
 
@@ -827,7 +846,7 @@ void emergency_finalize(bool clean_shutdown) {
   bool complete = clean_shutdown && locked;
   int mfd = HRR_OPEN(g_manifest_path);
   if (mfd < 0) return;
-  char buf[256];
+  char buf[kEmergencyManifestMax];
   size_t p = 0;
   p = append_lit(buf, p,
                  "{\n"
@@ -841,6 +860,15 @@ void emergency_finalize(bool clean_shutdown) {
   p += u64_to_dec(g_event_count.load(), buf + p);
   p = append_lit(buf, p, ",\n  \"blob_count\": ");
   p += u64_to_dec(g_blob_count.load(), buf + p);
+  // g_metadata_json is written once during HRR init before event capture starts.
+  // The crash path reads it lock-free to avoid taking g_file_mu from an exception callback.
+  static constexpr const char* kMetadataFieldPrefix = ",\n  \"metadata\": ";
+  if (g_metadata_json_len > 0 &&
+      p + strlen(kMetadataFieldPrefix) + g_metadata_json_len + sizeof("\n}\n") < sizeof(buf)) {
+    p = append_lit(buf, p, kMetadataFieldPrefix);
+    memcpy(buf + p, g_metadata_json, g_metadata_json_len);
+    p += g_metadata_json_len;
+  }
   p = append_lit(buf, p, "\n}\n");
   write_all_fd(mfd, buf, p);
   HRR_FSYNC(mfd);
@@ -993,6 +1021,16 @@ Hash128 write_code_object(const void* image, size_t image_size) {
 bool     is_open()      { std::lock_guard<std::mutex> lk(g_file_mu); return g_events_fd >= 0; }
 uint64_t event_count()  { return g_event_count.load(); }
 uint64_t blob_count()   { return g_blob_count.load(); }
+
+void set_capture_metadata_json(const std::string& metadata_json) {
+  if (!is_json_object_fragment(metadata_json)) return;
+  if (metadata_json.size() >= kMetadataJsonMax) return;
+  std::lock_guard<std::mutex> lk(g_file_mu);
+  const size_t n = metadata_json.size();
+  memcpy(g_metadata_json, metadata_json.data(), n);
+  g_metadata_json[n] = '\0';
+  g_metadata_json_len = n;
+}
 
 }  // namespace writer
 }  // namespace hrr_cap

@@ -2,11 +2,15 @@
 
 ## rocprofsys Package
 
-This package contains the code infrastructure required to run pytests. It contains 6 main components:
+This package contains the code infrastructure required to run pytests. It contains 7 main components:
+
+### cache.py
+
+A persistent, cross-process cache for expensive test-setup probes. CTest spawns many short-lived pytest processes; without caching, each would re-run the same `rocminfo` / `amd-smi` / `mpicc` / `ldd` / `python --version` subprocesses. `cache.py` stores probe results in a single per-build-tree JSON file so each probe runs once per CTest session. See [Caching Expensive Probes](#caching-expensive-probes) for how (and when) to use it.
 
 ### capabilities.py
 
-Contains functions that allow pytests to discover what the current system supports. Everything here is lazy-initialized for performance. This contains information on the system that is not required for every test. Should only be accessed through an instance of a `RocprofsysConfig` (see `config.py`).
+Contains functions that allow pytests to discover what the current system supports. Everything here is lazy-initialized and, where the value is session-constant, cached across processes (see [Caching Expensive Probes](#caching-expensive-probes)). This contains information on the system that is not required for every test. Should only be accessed through an instance of a `RocprofsysConfig` (see `config.py`).
 
 ### config.py
 
@@ -27,6 +31,33 @@ Contains classes corresponding to each type of test. For example, a runtime inst
 ### validators.py
 
 Contains wrappers for the validation scripts and other helper functions that can be used during a test. They return a `ValidationResult` which can be used to determine if a test has failed or passed. In practice, the `assert_` fixtures in `conftest.py` wrap these validators and should be used instead.
+
+## Caching Expensive Probes
+
+`cache.py` exists for one reason: **CTest runs each test in its own short-lived pytest process**, so any value computed by shelling out to a subprocess would otherwise be recomputed hundreds of times. The `rocprofiler-systems-pytest-config` setup fixture regenerates the cache once at the start of a `ctest` run (writing every value to a shared JSON file under `/tmp/$USER/`), the cleanup fixture deletes it at the end, and every test process in between reads the values back instead of re-probing.
+
+> **Rule of thumb:** if your code launches a **subprocess** (or does an expensive filesystem scan) to compute a value that is constant for the whole build tree, cache it here. In-process memoization alone (`functools.lru_cache` / `cached_property`) does not help across CTest's many single-test processes — the persistent cache is what makes the probe run once per *session* instead of once per *process*.
+
+### The API
+
+Two decorators, both in `cache.py`:
+
+| Decorator | Use for | Keyed on |
+| --- | --- | --- |
+| `persistent_cache("ns.name")` | a function/method you **call** | namespace + call args |
+| `persistent_cached_property` | a computed **attribute** (`obj.x`) | class + attribute name |
+
+- **System capabilities (most common):** add the probe as a `persistent_cached_property` on `SystemCapabilities` (`capabilities.py`). Config setup introspects the class and warms it automatically, so a new capability needs no extra wiring.
+- **Standalone functions:** decorate with `@persistent_cache("ns.name")`; arguments become part of the key. For an instance method that also takes arguments, add `method=True` so `self` is dropped from the key (e.g. `target_support_mpi(target_path)`).
+- **Return types:** `None`/`bool`/`int`/`float`/`str`/`Path`/`tuple`/`set`/`list`/`dict`, and any dataclass whose fields are (recursively) those, serialize automatically. Supply `to_cache`/`from_cache` only for something exotic — a non-dataclass that isn't JSON-native.
+
+### When NOT to persist
+
+A `persistent_cached_property` key ignores per-process inputs, so never use it for a value that varies with a CLI flag or other per-process state (e.g. `--python-versions`) — one process's result would leak into another. Pass such inputs as function arguments (so they enter the key) or don't cache. See `supported_python_versions` in `capabilities.py`.
+
+### Safety
+
+Reads and I/O are **fail-open**: a corrupt/stale entry or an I/O error just recomputes, so the cache can't break a test for environmental reasons. But an unserializable value raises `SerializationError`, surfacing the bug at config-setup instead of silently re-probing in every process. Set `ROCPROFSYS_DISABLE_TEST_CACHE=1` to disable caching entirely.
 
 ## conftest.py
 

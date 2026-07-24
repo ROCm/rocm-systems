@@ -16,6 +16,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added experimental Triton support to ML API tracing. Profile with `--experimental --triton-trace` to emit a ROCTX marker per Triton/Inductor kernel launch attributed to the user call site, and analyze with `--experimental --list-triton-operators` or `--experimental --triton-operator <pattern>` to list or filter Triton operators independently of Torch.
 
+* Added support for GPU metrics on gfx1153 hardware.
+
 ### Changed
 
 * Split Python version requirements by mode. Profile mode now runs on Python 3.8+ (standard library only). Analyze mode requires Python 3.9+ and exits with a clear message on older interpreters instead of failing with an import error.
@@ -43,6 +45,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * The Dual VALU (VOPD) instruction mix metric is now reported for gfx115x in the WGP panel.
 
 * Fixed multi-user roofline benchmarking on shared systems: the per-GPU lock file under `/tmp/rocprof-compute-benchmark/` is now created world-readable/writable (0666) so any user can acquire it, regardless of which user created it first or the active umask. Stale unreadable lock files left by older versions in a sticky `/tmp` cannot be repaired automatically and must be removed manually by their owner or an administrator.
+
+* Fixed CDNA memory chart CLI output to show the numbered `3. Memory Chart` header without repeating the default per-kernel normalization label.
 
 ### Upcoming changes
 

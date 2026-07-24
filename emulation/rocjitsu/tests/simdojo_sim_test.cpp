@@ -181,7 +181,7 @@ private:
 void build_with_manual_partitions(SimulationEngine &engine, uint32_t num_partitions,
                                   std::function<PartitionID(Component *)> assigner) {
   engine.topology().partition_manual(num_partitions, std::move(assigner));
-  engine.build();
+  engine.create();
 }
 
 /// Helper: partition by component name suffix digit (e.g., "a0" → 0, "b1" → 1).
@@ -428,7 +428,7 @@ TEST(TerminationTest, QuiescenceDetection) {
   auto root = std::make_unique<CompositeComponent>("root");
   root->add_child(std::make_unique<CounterComponent>("c0", 10));
   engine.topology().set_root(std::move(root));
-  engine.build();
+  engine.create();
   auto exit = engine.run();
 
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
@@ -443,7 +443,7 @@ TEST(TerminationTest, AllPrimaryDoneTrigger) {
   engine.topology().set_root(std::move(root));
   engine.topology().add_link(static_cast<ProducerComponent *>(p)->out_port(),
                              static_cast<ConsumerComponent *>(c)->in_port(), 1);
-  engine.build();
+  engine.create();
   auto exit = engine.run();
 
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
@@ -456,7 +456,7 @@ TEST(TerminationTest, MaxTicksSentinel) {
   auto root = std::make_unique<CompositeComponent>("root");
   root->add_child(std::make_unique<InfiniteComponent>("inf0"));
   engine.topology().set_root(std::move(root));
-  engine.build();
+  engine.create();
   auto exit = engine.run();
 
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
@@ -470,7 +470,7 @@ TEST(TerminationTest, RequestExitWakesAllPartitions) {
   for (int i = 0; i < 4; ++i)
     root->add_child(std::make_unique<InfiniteComponent>("inf" + std::to_string(i)));
   engine.topology().set_root(std::move(root));
-  engine.build();
+  engine.create();
 
   // Run in background, request exit after 50ms.
   std::thread runner([&]() { engine.run(); });
@@ -489,7 +489,7 @@ TEST(TerminationTest, StepModeConsistency) {
   auto root = std::make_unique<CompositeComponent>("root");
   auto *c = root->add_child(std::make_unique<CounterComponent>("c0", 10));
   engine.topology().set_root(std::move(root));
-  engine.build();
+  engine.create();
 
   while (engine.step())
     ;
@@ -615,7 +615,7 @@ TEST(AsyncCausalityTest, ScheduleEventNowProducesReasonableTimestamp) {
   auto root = std::make_unique<CompositeComponent>("root");
   auto *c = root->add_child(std::make_unique<CounterComponent>("c0", 5));
   engine.topology().set_root(std::move(root));
-  engine.build();
+  engine.create();
 
   // Run a few steps to advance time.
   for (int i = 0; i < 3; ++i)
@@ -707,7 +707,7 @@ TEST(StressTest, AsyncInjectionDuringActiveSimulation) {
   root->add_child(std::make_unique<InfiniteComponent>("inf0"));
   root->add_child(std::make_unique<InfiniteComponent>("inf1"));
   engine.topology().set_root(std::move(root));
-  engine.build();
+  engine.create();
 
   std::atomic<uint32_t> async_processed{0};
   auto *target = engine.topology().partitions()[0].components[0];

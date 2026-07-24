@@ -62,7 +62,8 @@ jobs:
             enable_asan: 0
             enable_ubsan: 0
             enable_tsan: 0
-            enable_msan: 0
+            enable_expensive_checks: 0
+            sanitizer_runtime: STATIC
           - name: asan-ubsan
             allow_failure: true
             test_regex: ''
@@ -70,7 +71,17 @@ jobs:
             enable_asan: 1
             enable_ubsan: 1
             enable_tsan: 0
-            enable_msan: 0
+            enable_expensive_checks: 1
+            sanitizer_runtime: SHARED
+          - name: tsan
+            allow_failure: true
+            test_regex: ''
+            build_type: RelWithDebInfo
+            enable_asan: 0
+            enable_ubsan: 0
+            enable_tsan: 1
+            enable_expensive_checks: 1
+            sanitizer_runtime: SHARED
           - name: asan-ubsan-gcc
             allow_failure: true
             test_regex: ''
@@ -78,20 +89,22 @@ jobs:
             enable_asan: 1
             enable_ubsan: 1
             enable_tsan: 0
-            enable_msan: 0
+            enable_expensive_checks: 1
+            sanitizer_runtime: SHARED
             c_compiler: gcc
             cxx_compiler: g++
           - name: tsan-sparse-memory
             allow_failure: false
+            run_static_asan_launch: true
             # The simulator-wide stress tests exceed TSan's fixed 128-lock
-            # deadlock-tracker capacity; keep the race gate on this change's
-            # concurrent SparseMemory surface.
-            test_regex: '^SparseMemory(Threading)?Test\.'
+            # deadlock-tracker capacity; keep the race gate focused on the
+            # concurrent memory surfaces hardened by this change.
+            test_regex: '^(SparseMemory(Threading)?Test|GpuMemoryThreadingTest|L2CacheThreadingTest)\.'
             build_type: RelWithDebInfo
             enable_asan: 0
             enable_ubsan: 0
             enable_tsan: 1
-            enable_msan: 0
+            sanitizer_runtime: STATIC
 
     steps:
       - name: Install base dependencies
@@ -102,6 +115,7 @@ jobs:
             ca-certificates \
             cmake \
             git \
+            libclang-rt-dev \
             libdrm-dev \
             ninja-build \
             clang
@@ -159,13 +173,22 @@ jobs:
             "DaemonTest\.HipMemcpyRoundTripInt"
             "DaemonTest\.HipMemcpyDeviceToDevice"
             "DaemonTest\.TwoIndependentClients"
+            "DaemonTest\.LoggingPlugin"
             "BfeRegressionTest\.ThreadIdxY"
             "LoggingTest\.dispatch_logged"
             "ProfiledPluginTest\.hook_profile_output"
             "CvtNarrow\.AllTests"
-            "Interposer.*Test\..*"
-            "GuestKfd.*\..*"
             "RaceTest\..*"
+          )
+          # https://github.com/ROCm/rocm-systems/issues/8922
+          TSAN_EXCLUDED_TESTS=(
+            "${ASAN_UBSAN_EXCLUDED_TESTS[@]}"
+            "MatmulStressTest\.TiledAllCU"
+            "MatmulStressTest\.MfmaAllCUs"
+            "VectorAddStressTest\.AllCUsGoldenReference"
+            "Gfx1250SimulationTest\.*"
+            "Gfx1250ExecutionTest\.*"
+            "InterposerDupTest.SerializedReopenUnderContentionStaysRoutable"
           )
 
           CMAKE_CONFIG_FLAGS=()
@@ -175,6 +198,9 @@ jobs:
               -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g"
               -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -g"
             )
+          fi
+          if [[ "${{ matrix.enable_tsan }}" == "1" ]]; then
+            EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${TSAN_EXCLUDED_TESTS[*]}")"
           fi
           if [[ -n "${{ matrix.c_compiler }}" ]]; then
             CMAKE_CONFIG_FLAGS+=(-DCMAKE_C_COMPILER="${{ matrix.c_compiler }}")
@@ -196,7 +222,8 @@ jobs:
             -DRJ_ENABLE_ASAN=${{ matrix.enable_asan }} \
             -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
-            -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }}
+            -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }} \
+            -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
 
           # Set a conservative number of workers to avoid OOM and excessive system load.
           WORKERS="$(( ($(nproc) + 1) / 2 ))"
@@ -214,6 +241,29 @@ jobs:
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
+
+      - name: Test static ASan launcher preload
+        if: matrix.run_static_asan_launch
+        working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
+        shell: bash
+        run: |
+          STATIC_ASAN_BUILD_DIR="${ROCJITSU_BUILD_DIR}-asan-static-launch-preload"
+          CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
+          ROCM_PATH="$(rocm-sdk path --root)" \
+            cmake -B "${STATIC_ASAN_BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_FLAGS="${CXXFLAGS}" \
+            -DRJ_ENABLE_ASAN=1 \
+            -DRJ_ENABLE_UBSAN=0 \
+            -DRJ_ENABLE_TSAN=0 \
+            -DRJ_ENABLE_EXPENSIVE_CHECKS=0 \
+            -DRJ_SANITIZER_RUNTIME=STATIC
+
+          cmake --build "${STATIC_ASAN_BUILD_DIR}" \
+            --target launch_preload_test
+          ctest --test-dir "${STATIC_ASAN_BUILD_DIR}" \
+            -R '^LaunchPreloadTest\.' \
+            --output-on-failure
 
       - name: Install corpus test dependencies
         if: matrix.name == 'release'

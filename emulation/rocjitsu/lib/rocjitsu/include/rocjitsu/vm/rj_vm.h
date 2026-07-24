@@ -58,7 +58,7 @@ typedef struct rj_vm_cmd_t {
   void *buf;                 ///< Command arguments buffer (with inlined arrays).
   size_t buf_size;           ///< Total size of the arguments buffer.
   int32_t result;            ///< [out] Return code (0 on success, negative errno on failure).
-  rj_handle_t shared_handle; ///< [out] Backing handle for shareable allocations, or -1.
+  rj_handle_t shared_handle; ///< [out] Borrowed backing handle, or -1; owned by the VM.
   rj_handle_t in_handle;     ///< [in,out] Client-provided fd (e.g. debugger notifier), or -1.
 } rj_vm_cmd_t;
 
@@ -70,6 +70,7 @@ typedef struct rj_vm_map_t {
   uint32_t prot;        ///< Memory protection flags.
   uint32_t flags;       ///< Mapping flags.
   uint64_t mapped_addr; ///< [out] Address the mapping was placed at.
+  int32_t map_errno;    ///< [out] errno captured at the failing mmap (0 on success).
 } rj_vm_map_t;
 
 /// @brief Device memory unmapping descriptor.
@@ -157,6 +158,29 @@ RJ_API_EXPORT rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode,
 /// @retval ROCJITSU_STATUS_ERROR Parsing or construction failed.
 RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode,
                                                    rj_vm_t **vm);
+
+/// @brief Load and attach the execution plugins declared in a config to a VM.
+///
+/// @details Parses the `plugins`, `sinks`, and `profiled` sections of the
+/// config and attaches the resulting plugin group to the VM's SoC. This is the
+/// C-API equivalent of what the LD_PRELOAD interposer and the rocjitsu CLI do
+/// through the C++ PluginLoader, so a C-API host (e.g. the mirage daemon) can
+/// enable plugins without linking the simulator's C++ ABI. Call once after
+/// rj_vm_create / rj_vm_create_from_string and before rj_vm_run. A config with
+/// no `plugins` attaches an empty group (near-zero overhead).
+/// @param[in] vm VM handle from rj_vm_create / rj_vm_create_from_string.
+/// @param[in] config_json The full config-file JSON (same text used to create
+///            the VM). Never NULL.
+/// @param[in] plugin_dir Trusted directory to load plugin shared objects from
+///            by explicit path — required in daemon mode, where the process is
+///            not re-exec'd and cannot rely on a launcher-populated
+///            LD_LIBRARY_PATH. NULL or empty resolves plugins by soname via the
+///            dynamic-linker search path (the interposer/local path).
+/// @retval ROCJITSU_STATUS_SUCCESS Plugins were configured (or none declared).
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
+/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC or configuration failed.
+RJ_API_EXPORT rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json,
+                                             const char *plugin_dir);
 
 /// @brief Increment the VM's reference count.
 ///
@@ -252,6 +276,12 @@ RJ_API_EXPORT rj_status_t rj_vm_device_open(rj_vm_t *vm, rj_client_pid_t client_
 /// @param[in] process_id The process ID to close (0 closes the local process).
 RJ_API_EXPORT rj_status_t rj_vm_device_close(rj_vm_t *vm, uint32_t process_id);
 
+/// @brief Close every registered KFD process, waking any parked event waiters.
+/// @details Daemon-teardown helper: closes all live processes so client threads
+/// blocked in an infinite-timeout WAIT_EVENTS unblock and can be joined.
+/// @param[in] vm VM handle.
+RJ_API_EXPORT rj_status_t rj_vm_close_all_devices(rj_vm_t *vm);
+
 /// @brief Map device memory (local mode).
 /// @param[in] vm VM handle.
 /// @param[in,out] map Mapping descriptor; mapped_addr is set on success.
@@ -289,10 +319,12 @@ RJ_API_EXPORT rj_status_t rj_vm_drm_path(rj_vm_t *vm, const char **path);
 /// @param[out] info Simulated GPU metadata.
 RJ_API_EXPORT rj_status_t rj_vm_gpu_info(rj_vm_t *vm, rj_vm_gpu_info_t *info);
 
-/// @brief Get the backing memory handle (local mode).
+/// @brief Get the borrowed backing memory handle (local mode).
+/// @details The VM retains ownership; the caller must not close the handle.
 RJ_API_EXPORT rj_status_t rj_vm_get_shared_mem(rj_vm_t *vm, int64_t offset, rj_handle_t *handle);
 
-/// @brief Get the backing memory handle for a specific process (daemon mode).
+/// @brief Get the borrowed backing memory handle for a specific process (daemon mode).
+/// @details The VM retains ownership; the caller must not close the handle.
 RJ_API_EXPORT rj_status_t rj_vm_get_shared_mem_as(rj_vm_t *vm, uint32_t process_id, int64_t offset,
                                                   rj_handle_t *handle);
 

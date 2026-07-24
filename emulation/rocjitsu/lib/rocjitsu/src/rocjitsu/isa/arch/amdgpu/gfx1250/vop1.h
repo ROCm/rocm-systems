@@ -475,6 +475,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
 };
 
 class VMovrelsB32Vop1 : public Vop1 {
@@ -483,6 +484,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
 };
 
 class VMovrelsdB32Vop1 : public Vop1 {
@@ -491,6 +493,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
 };
 
 class VMovrelsd2B32Vop1 : public Vop1 {
@@ -499,6 +502,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
 };
 
 class VPermlane16SwapB32Vop1 : public Vop1 {
@@ -738,6 +742,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
 };
 
 class VNotB16Vop1 : public Vop1 {
