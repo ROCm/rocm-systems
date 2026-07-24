@@ -97,10 +97,12 @@ TEST(ParameterApiTests, Bind_UnknownKey_ReturnsInvalidArgAndLeavesOutUntouched) 
 }
 
 // Legacy NCCL_PARAM(...) knobs are not registered in the new registry.
+// NCCL_DEBUG was migrated to DEFINE_NCCL_PARAM in debug.cc; NVLS_ENABLE still
+// uses the legacy macro in src/transport/nvls.cc.
 TEST(ParameterApiTests, Bind_LegacyParamNotRegistered) {
   RUN_ISOLATED_TEST("Bind_LegacyParamNotRegistered", []() {
     ncclParamHandle_t h = nullptr;
-    ASSERT_EQ(ncclParamBind(&h, "NCCL_DEBUG"), ncclInvalidArgument);
+    ASSERT_EQ(ncclParamBind(&h, "NVLS_ENABLE"), ncclInvalidArgument);
   });
 }
 
