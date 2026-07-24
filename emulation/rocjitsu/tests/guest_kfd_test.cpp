@@ -165,7 +165,7 @@ bool relocate_active_config_to_long_path() {
 
   try {
     std::filesystem::path config_dir = *dir;
-    constexpr size_t kTargetParentLength = 4082;
+    constexpr size_t kTargetParentLength = 4081;
     while (config_dir.string().size() + 201 <= kTargetParentLength)
       config_dir /= std::string(200, 'a');
     const size_t final_component_length = kTargetParentLength - config_dir.string().size() - 1;
@@ -173,7 +173,7 @@ bool relocate_active_config_to_long_path() {
       config_dir /= std::string(final_component_length, 'a');
     std::filesystem::create_directories(config_dir);
     const std::filesystem::path config_path = config_dir / "config.json";
-    if (config_path.string().size() != 4094)
+    if (config_path.string().size() != 4093)
       return false;
 
     std::ofstream config(config_path);
