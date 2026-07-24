@@ -50,13 +50,6 @@ inline constexpr uint32_t kMovS8Zero = 0xbe880080u; // s_mov_b32 s8, 0  -> clobb
 inline constexpr uint32_t kMovV4S9 = 0x7E080209u;   // v_mov_b32 v4, s9 -> reads s9 (s9 live).
 inline constexpr uint32_t kMovS9Zero = 0xbe890080u; // s_mov_b32 s9, 0  -> clobbers s9.
 
-// s_mov_b32 <special>, 0: probe bodies that clobber special machine state the
-// trampoline preserves across the call (exec_lo=126, vcc_lo=106, m0=124).
-inline constexpr uint32_t kMovExecLoZero = 0xbefe0080u;    // s_mov_b32 exec_lo, 0 -> clobbers EXEC.
-inline constexpr uint32_t kMovVccLoZero = 0xbeea0080u;     // s_mov_b32 vcc_lo, 0  -> clobbers VCC.
-inline constexpr uint32_t kMovM0Zero = 0xbefc0080u;        // s_mov_b32 m0, 0      -> clobbers M0.
-inline constexpr uint32_t kMovFlatScrLoZero = 0xbee60080u; // s_mov_b32 flat_scratch_lo, 0.
-
 // v_mov_b32 v2, <inline const K> for K in [0, 64]. Inline constant 0 is encoded
 // as 128, and 1..64 as 129..192, in the src0 field (bits [8:0]).
 [[nodiscard]] inline constexpr uint32_t make_mov_v2_inline(uint32_t k) {
