@@ -1593,8 +1593,10 @@ TEST(FormatTraceTest, ConflictBeforeTraceWindow) {
 
 TEST(DisasmCacheTest, HandlesNonMonotonicPcOrder) {
   plugins::race_detector::DisasmCache cache;
-  cache.record(0x540024b100, "s_nop 0");
-  cache.record(0x100002a100, "s_endpgm");
+  Instruction high_instruction("s_nop 0", nullptr);
+  Instruction low_instruction("s_endpgm", nullptr);
+  cache.record(0x540024b100, high_instruction);
+  cache.record(0x100002a100, low_instruction);
 
   auto disasm = cache.to_map();
   EXPECT_EQ(disasm.at(0x540024b100), "s_nop 0");

@@ -72,11 +72,6 @@ struct DisasmCache {
     entries_.emplace(pc, inst.disassemble());
   }
 
-  void record(uint64_t pc, std::string disasm) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    entries_.try_emplace(pc, std::move(disasm));
-  }
-
   std::unordered_map<uint64_t, std::string> to_map() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return entries_;
