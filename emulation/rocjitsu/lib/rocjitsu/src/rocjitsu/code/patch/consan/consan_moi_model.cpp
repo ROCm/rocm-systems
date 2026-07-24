@@ -95,6 +95,20 @@ resolved_atomic_outcome(const ConSanMoiRecordReplayAtomicEvent &record) {
 
 } // namespace
 
+bool validate_consan_moi_scalar_state_temporaries(const ConSanOptions &options,
+                                                  std::string_view consumer,
+                                                  std::vector<std::string> &errors) {
+  if (!moi_uses_scalar_persistent_state(options) ||
+      (options.moi_owner_vgpr && options.moi_epoch_vgpr)) {
+    return true;
+  }
+  errors.emplace_back("ConSan MOI " + std::string(consumer) +
+                      " has no scalar-state VGPR temporaries (owner=" +
+                      std::string(options.moi_owner_vgpr ? "set" : "unset") +
+                      ", epoch=" + std::string(options.moi_epoch_vgpr ? "set" : "unset") + ")");
+  return false;
+}
+
 ConSanMoiSampledSyncClassification
 classify_consan_moi_sampled_sync_metadata(const ConSanMoiSampledSyncMetadata &metadata) {
   using Classification = ConSanMoiSampledSyncClassification;

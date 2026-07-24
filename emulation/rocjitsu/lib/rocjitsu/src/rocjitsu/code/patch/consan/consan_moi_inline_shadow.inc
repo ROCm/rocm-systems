@@ -2403,18 +2403,12 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     words.push_back(*wait);
   }
   if (moi_uses_scalar_persistent_state(options)) {
-    if (!options.moi_owner_vgpr || !options.moi_epoch_vgpr) {
-      errors.emplace_back(
-          "ConSan MOI sampled probe has no scalar-state VGPR temporaries (owner=" +
-          std::string(options.moi_owner_vgpr ? "set" : "unset") +
-          ", epoch=" + std::string(options.moi_epoch_vgpr ? "set" : "unset") + ")");
+    if (!validate_consan_moi_scalar_state_temporaries(options, "sampled probe", errors))
       return std::nullopt;
-    }
-    assert(options.moi_owner_vgpr && options.moi_epoch_vgpr);
-    words.push_back(build_v_mov_b32_e32(*options.moi_owner_vgpr,
-                                       *options.moi_persistent_owner_sgpr, arch));
-    words.push_back(build_v_mov_b32_e32(*options.moi_epoch_vgpr,
-                                       *options.moi_persistent_epoch_sgpr, arch));
+    words.push_back(
+        build_v_mov_b32_e32(*options.moi_owner_vgpr, *options.moi_persistent_owner_sgpr, arch));
+    words.push_back(
+        build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_epoch_sgpr, arch));
   }
   std::optional<uint16_t> preserved_lds_byte_offset_vgpr;
   const bool materialize_flat_offset =

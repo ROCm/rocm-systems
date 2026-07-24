@@ -6,6 +6,34 @@
 namespace rocjitsu {
 namespace {
 
+TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
+  for (uint32_t present_mask = 0u; present_mask < 3u; ++present_mask) {
+    SCOPED_TRACE(present_mask);
+    ConSanOptions options;
+    options.moi_persistent_owner_sgpr = 40u;
+    options.moi_persistent_epoch_sgpr = 41u;
+    if (present_mask & 1u)
+      options.moi_owner_vgpr = 6u;
+    if (present_mask & 2u)
+      options.moi_epoch_vgpr = 7u;
+    std::vector<std::string> errors;
+
+    EXPECT_FALSE(validate_consan_moi_scalar_state_temporaries(options, "test consumer", errors));
+    ASSERT_EQ(errors.size(), 1u);
+    EXPECT_NE(errors.front().find("test consumer has no scalar-state VGPR temporaries"),
+              std::string::npos);
+  }
+
+  ConSanOptions valid;
+  valid.moi_persistent_owner_sgpr = 40u;
+  valid.moi_persistent_epoch_sgpr = 41u;
+  valid.moi_owner_vgpr = 6u;
+  valid.moi_epoch_vgpr = 7u;
+  std::vector<std::string> errors;
+  EXPECT_TRUE(validate_consan_moi_scalar_state_temporaries(valid, "test consumer", errors));
+  EXPECT_TRUE(errors.empty());
+}
+
 TEST(ConSanMoi, Cdna4HeterogeneousOwnersKeepUsableComponentAcrossMoiEngines) {
   constexpr uint64_t kHighPressureEntry = 320u * sizeof(uint32_t);
   for (ConSanMoiEngine engine :
@@ -411,7 +439,7 @@ TEST(ConSanMoi, SharedHelperPlanUsesCommonDeadWindowAcrossTwoOwners) {
   EXPECT_EQ(plan.scratch_vgpr_count, 3u);
 }
 
-TEST(ConSanMoi, Cdna4SampledScalarStateClearsEverySharedOwnerAllocation) {
+TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const auto access =
       build_cdna4_ds_store_b32(/*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, kArch);
@@ -438,29 +466,41 @@ TEST(ConSanMoi, Cdna4SampledScalarStateClearsEverySharedOwnerAllocation) {
                               /*sgpr_count=*/0u, std::nullopt, std::nullopt,
                               /*has_dynamic_lds=*/false, kAdditionalOwners);
 
-  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
-  options.force_vgpr_spill = true;
-  options.moi_runtime_sample_stride = 2u;
-  options.moi_track_barriers = false;
-  options.moi_track_atomics = false;
-  options.moi_report_buffer_address = 0x123456780000ull;
-  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
-  options.max_patches = 1u;
+  // The per-owner context path is shared by the Sampled/Inline dynamic-stack
+  // fallback and Record/Replay's scalar tail. The InlineShadow companion
+  // below covers that engine's scalar entry and emission path.
+  for (ConSanMoiEngine engine : {ConSanMoiEngine::Sampled, ConSanMoiEngine::RecordReplay}) {
+    SCOPED_TRACE(testing::PrintToString(engine));
+    ConSanOptions options = moi_options(engine);
+    options.force_vgpr_spill = true;
+    options.moi_runtime_sample_stride = 2u;
+    options.moi_track_barriers = false;
+    // Record/Replay's CDNA atomic mode requires a persistent workgroup key
+    // and therefore exercises its scalar tail even though this fixture's
+    // selected shared site is the ordinary LDS access.
+    options.moi_track_atomics = true;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size =
+        engine == ConSanMoiEngine::Sampled ? direct_sampled_report_bytes(2) : 64u * 1024u * 1024u;
+    options.max_patches = 1u;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+    const ConSanResult result = try_patch_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
-  ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
-  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
-  EXPECT_GE(*result.resolved_moi_persistent_owner_sgpr, 80u);
-  const auto access_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.phase == ConSanPatchPhase::Instrumentation &&
-           patch.owner_descriptor_file_offsets.size() == 2u;
-  });
-  ASSERT_NE(access_patch, result.patches.end());
-  EXPECT_TRUE(result.final_validation_passed);
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
+    ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
+    EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
+    EXPECT_EQ(*result.resolved_moi_persistent_owner_sgpr,
+              engine == ConSanMoiEngine::Sampled ? 80u : 86u);
+    const auto access_patch =
+        std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+          return patch.phase == ConSanPatchPhase::Instrumentation &&
+                 patch.owner_descriptor_file_offsets.size() == 2u;
+        });
+    ASSERT_NE(access_patch, result.patches.end());
+    EXPECT_TRUE(result.final_validation_passed);
+  }
 }
 
 TEST(ConSanMoi, SharedHelperAtomicUsesCommonOwnerResourcePlan) {

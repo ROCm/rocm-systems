@@ -511,9 +511,8 @@ struct MoiSgprRange {
   uint16_t width = 0;
 };
 
-[[nodiscard]] bool
-cdna_sgpr_ranges_conflict_with_physical_vcc(std::span<const MoiSgprRange> ranges,
-                                            uint32_t current_sgpr_count) {
+[[nodiscard]] bool cdna_sgpr_ranges_conflict_with_physical_vcc(std::span<const MoiSgprRange> ranges,
+                                                               uint32_t current_sgpr_count) {
   const auto original_vcc = cdna_physical_vcc_base(current_sgpr_count);
   if (!original_vcc)
     return true;
@@ -792,8 +791,8 @@ candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
                                                                          : 0u) +
       (options.automatic_moi_private_epoch
            ? (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId ? 2u : 1u)
-           : moi_uses_scalar_persistent_state(options) ? 2u
-                                                       : 0u));
+       : moi_uses_scalar_persistent_state(options) ? 2u
+                                                   : 0u));
 }
 
 struct SampledAtomicScratchLayout {
@@ -1170,6 +1169,51 @@ struct MoiResourcePlanningState {
     valid = true;
   }
 };
+
+[[nodiscard]] std::vector<uint64_t> moi_scalar_owner_descriptors(const ConSanResult &result) {
+  std::vector<uint64_t> owners;
+  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    if (plan.source == ConSanRegisterAllocationSource::Unsupported)
+      continue;
+    for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
+      if (std::ranges::find(owners, descriptor_offset) == owners.end())
+        owners.push_back(descriptor_offset);
+    }
+  }
+  return owners;
+}
+
+[[nodiscard]] std::optional<std::vector<const MoiKernelResourceContext *>>
+resolve_moi_scalar_owner_contexts(const MoiResourcePlanningState &state,
+                                  std::span<const uint64_t> owners) {
+  if (!state.valid || owners.empty())
+    return std::nullopt;
+  std::vector<const MoiKernelResourceContext *> contexts;
+  contexts.reserve(owners.size());
+  for (uint64_t descriptor_offset : owners) {
+    const auto context =
+        std::ranges::find_if(state.contexts, [&](const MoiKernelResourceContext &candidate) {
+          return candidate.kernel != nullptr &&
+                 candidate.kernel->descriptor_file_offset == descriptor_offset;
+        });
+    if (context == state.contexts.end() || context->kernel == nullptr ||
+        !context->descriptor_valid) {
+      return std::nullopt;
+    }
+    contexts.push_back(&*context);
+  }
+  return contexts;
+}
+
+[[nodiscard]] uint32_t
+moi_scalar_persistent_tail_floor(std::span<const MoiKernelResourceContext *const> contexts) {
+  uint32_t first = 0u;
+  for (const MoiKernelResourceContext *context : contexts) {
+    first = std::max<uint32_t>(
+        first, std::max<uint16_t>(context->max_referenced_sgpr_count, context->current_sgpr_count));
+  }
+  return first;
+}
 
 [[nodiscard]] bool moi_relocatable_host_preserves_transient_sgprs(
     const MoiResourcePlanningState &state, const ConSanOptions &options,
@@ -2071,8 +2115,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
            base += 2u) {
         const uint16_t spill_base = static_cast<uint16_t>(base);
         std::vector<MoiSgprRange> selected_ranges{{spill_base, count}};
-        if (architecturally_reserved(spill_base, count) ||
-            conflicts_with_cdna_vcc(selected_ranges))
+        if (architecturally_reserved(spill_base, count) || conflicts_with_cdna_vcc(selected_ranges))
           continue;
         const auto unavailable_or_reserved = [&](uint16_t candidate, uint16_t width) {
           return range_overlaps(candidate, width, spill_base, count) ||
@@ -2779,10 +2822,9 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         }
         max_referenced_sgpr_count =
             std::max<uint32_t>(max_referenced_sgpr_count, plan.max_referenced_sgpr_count);
-        physical_vcc_conflict |=
-            instrumentation::is_cdna_family_arch(arch) &&
-            cdna_sgpr_window_conflicts_with_physical_vcc(dispatch_base, 2u,
-                                                         plan.current_sgpr_count);
+        physical_vcc_conflict |= instrumentation::is_cdna_family_arch(arch) &&
+                                 cdna_sgpr_window_conflicts_with_physical_vcc(
+                                     dispatch_base, 2u, plan.current_sgpr_count);
       }
       assignment.dispatch_id_sgpr =
           max_referenced_sgpr_count <= dispatch_base && !physical_vcc_conflict
@@ -2851,9 +2893,9 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
                    !plan.owner_descriptor_file_offsets.empty() &&
                    plan.max_referenced_sgpr_count <= static_cast<uint16_t>(base) &&
                    (!instrumentation::is_cdna_family_arch(arch) ||
-                    !cdna_sgpr_window_conflicts_with_physical_vcc(
-                        static_cast<uint16_t>(base), dispatch_state_count,
-                        plan.current_sgpr_count));
+                    !cdna_sgpr_window_conflicts_with_physical_vcc(static_cast<uint16_t>(base),
+                                                                  dispatch_state_count,
+                                                                  plan.current_sgpr_count));
           });
       if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) && !admits_owner)
         continue;
@@ -3144,14 +3186,13 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
     }
     if (options.moi_engine == ConSanMoiEngine::RecordReplay && !options.force_private_epoch) {
       const uint16_t scalar_count = static_cast<uint16_t>(2u + needs_workgroup_key);
-      uint32_t first = 0u;
-      for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-        if (plan.source == ConSanRegisterAllocationSource::Unsupported ||
-            plan.owner_descriptor_file_offsets.empty()) {
-          continue;
-        }
-        first = std::max<uint32_t>(first, plan.max_referenced_sgpr_count);
-      }
+      MoiResourcePlanningState scalar_state(bytes, arch, options, result);
+      const std::vector<uint64_t> scalar_owners = moi_scalar_owner_descriptors(result);
+      const auto resolved_contexts = resolve_moi_scalar_owner_contexts(scalar_state, scalar_owners);
+      const std::vector<const MoiKernelResourceContext *> scalar_contexts =
+          resolved_contexts.value_or(std::vector<const MoiKernelResourceContext *>{});
+      const uint32_t first = resolved_contexts ? moi_scalar_persistent_tail_floor(scalar_contexts)
+                                               : moi_ordinary_sgpr_limit(arch);
       const auto unavailable = [&](uint16_t base) {
         if ((options.moi_exec_save_sgpr &&
              range_overlaps(base, scalar_count, *options.moi_exec_save_sgpr,
@@ -3164,13 +3205,10 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
           return true;
         }
         return instrumentation::is_cdna_family_arch(arch) &&
-               std::ranges::any_of(result.resource_plans,
-                                   [&](const ConSanCandidateResourcePlan &plan) {
-                                     if (plan.owner_descriptor_file_offsets.empty())
-                                       return false;
-                                     return cdna_sgpr_window_conflicts_with_physical_vcc(
-                                         base, scalar_count, plan.current_sgpr_count);
-                                   });
+               std::ranges::any_of(scalar_contexts, [&](const MoiKernelResourceContext *context) {
+                 return cdna_sgpr_window_conflicts_with_physical_vcc(base, scalar_count,
+                                                                     context->current_sgpr_count);
+               });
       };
       for (uint32_t base = first; base + scalar_count <= moi_ordinary_sgpr_limit(arch); ++base) {
         if (unavailable(static_cast<uint16_t>(base)))
@@ -3212,35 +3250,15 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
       // that the pair is absent from the complete owner scopes; site-local
       // liveness is insufficient because the values cross arbitrary guest
       // code between the entry prologue and every probe.
-      MoiResourcePlanningState scalar_state(bytes, arch, options, result);
-      std::vector<uint64_t> scalar_owners;
-      for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-        if (plan.source == ConSanRegisterAllocationSource::Unsupported)
-          continue;
-        for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-          if (std::ranges::find(scalar_owners, descriptor_offset) == scalar_owners.end())
-            scalar_owners.push_back(descriptor_offset);
-        }
-      }
       ConSanOptions scalar_options = options;
       const bool scalar_state_valid =
-          scalar_state.valid && !scalar_owners.empty() &&
+          resolved_contexts.has_value() &&
           apply_moi_transient_sgpr_assignment(scalar_options, scalar_owners);
       RegisterSet component_references;
       bool component_uses_indirect_sgprs = false;
       bool every_owner_resolved = scalar_state_valid;
-      std::vector<const MoiKernelResourceContext *> scalar_contexts;
-      for (uint64_t descriptor_offset : scalar_owners) {
-        const auto context = std::ranges::find_if(
-            scalar_state.contexts, [&](const MoiKernelResourceContext &candidate) {
-              return candidate.kernel != nullptr &&
-                     candidate.kernel->descriptor_file_offset == descriptor_offset;
-            });
-        if (context == scalar_state.contexts.end() || !context->descriptor_valid) {
-          every_owner_resolved = false;
-          break;
-        }
-        scalar_contexts.push_back(&*context);
+      for (const MoiKernelResourceContext *context : scalar_contexts) {
+        const uint64_t descriptor_offset = context->kernel->descriptor_file_offset;
         if (context->kernel->uses_dynamic_stack.value_or(false)) {
           component_references.expand({RegClass::SGPR, 32u, 2u});
         }
@@ -3293,8 +3311,8 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         return std::ranges::any_of(scalar_contexts, [&](const MoiKernelResourceContext *context) {
           return static_cast<uint32_t>(base) + scalar_count > context->current_sgpr_count ||
                  (instrumentation::is_cdna_family_arch(arch) &&
-                  cdna_sgpr_window_conflicts_with_physical_vcc(
-                      base, scalar_count, context->current_sgpr_count));
+                  cdna_sgpr_window_conflicts_with_physical_vcc(base, scalar_count,
+                                                               context->current_sgpr_count));
         });
       };
       std::optional<uint16_t> persistent_hole;
@@ -3421,39 +3439,50 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
           // without changing ACCUM_OFFSET or consuming address-based private
           // state, so it composes with compiler-managed dynamic stacks.
           const uint16_t scalar_count = static_cast<uint16_t>(2u + needs_workgroup_key);
-          std::vector<uint64_t> scalar_owners;
-          for (const ConSanCandidateResourcePlan &scalar_plan : result.resource_plans) {
-            if (scalar_plan.source == ConSanRegisterAllocationSource::Unsupported)
-              continue;
-            for (uint64_t descriptor_offset : scalar_plan.owner_descriptor_file_offsets) {
-              if (std::ranges::find(scalar_owners, descriptor_offset) == scalar_owners.end())
-                scalar_owners.push_back(descriptor_offset);
-            }
-          }
+          const std::vector<uint64_t> scalar_owners = moi_scalar_owner_descriptors(result);
           MoiResourcePlanningState state(bytes, arch, options, result);
-          if (!state.valid) {
+          const auto resolved_contexts = resolve_moi_scalar_owner_contexts(state, scalar_owners);
+          if (!resolved_contexts) {
             result.outcome = ConSanTransformOutcome::Unsupported;
             result.warnings.emplace_back(
-                "ConSan MOI could not analyze entry-local VGPR scratch for scalar persistent "
-                "state");
+                "ConSan MOI could not resolve every scalar-state owner descriptor");
             return false;
           }
-          std::vector<const MoiKernelResourceContext *> scalar_contexts;
-          scalar_contexts.reserve(scalar_owners.size());
-          for (uint64_t descriptor_offset : scalar_owners) {
-            const auto context = std::ranges::find_if(
-                state.contexts, [&](const MoiKernelResourceContext &candidate) {
-                  return candidate.kernel != nullptr &&
-                         candidate.kernel->descriptor_file_offset == descriptor_offset;
-                });
-            if (context == state.contexts.end() || context->kernel == nullptr ||
-                !context->descriptor_valid) {
+          const std::vector<const MoiKernelResourceContext *> &scalar_contexts = *resolved_contexts;
+          std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch;
+          prologue_scratch.reserve(scalar_contexts.size());
+          for (const MoiKernelResourceContext *context : scalar_contexts) {
+            BasicBlock *entry_block =
+                block_for_offset(state.block_index, context->kernel->entry_text_offset);
+            const Instruction *entry =
+                instruction_at(entry_block, context->kernel->entry_text_offset);
+            if (entry_block == nullptr || entry == nullptr) {
               result.outcome = ConSanTransformOutcome::Unsupported;
               result.warnings.emplace_back(
-                  "ConSan MOI could not resolve a scalar-state owner descriptor");
+                  "ConSan MOI could not decode a scalar-state owner entry instruction");
               return false;
             }
-            scalar_contexts.push_back(&*context);
+            RegisterSet unavailable_vgprs = context->liveness->live_before(*entry);
+            const InstDefUse entry_def_use(*entry);
+            unavailable_vgprs |= entry_def_use.defs | entry_def_use.uses;
+            std::optional<uint16_t> scratch;
+            for (uint16_t candidate = 0; candidate + 2u <= context->ordinary_vgpr_limit;
+                 ++candidate) {
+              if (!unavailable_vgprs.contains({RegClass::VGPR, candidate, 1u}) &&
+                  !unavailable_vgprs.contains(
+                      {RegClass::VGPR, static_cast<uint16_t>(candidate + 1u), 1u})) {
+                scratch = candidate;
+                break;
+              }
+            }
+            if (!scratch) {
+              result.outcome = ConSanTransformOutcome::Unsupported;
+              result.warnings.emplace_back(
+                  "ConSan MOI could not place entry-local VGPR scratch for scalar persistent "
+                  "state");
+              return false;
+            }
+            prologue_scratch.push_back({context->kernel->descriptor_file_offset, *scratch});
           }
           // This pair crosses arbitrary guest code. Start beyond both the
           // statically named operands and every owner's original allocation:
@@ -3461,12 +3490,7 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
           // allocation, so descriptor growth cannot expose the new tuple to
           // the guest. The candidate filter below separately preserves the
           // physical-VCC location before and after that growth.
-          uint32_t first = 0u;
-          for (const MoiKernelResourceContext *context : scalar_contexts) {
-            first = std::max<uint32_t>(
-                first, std::max<uint16_t>(context->max_referenced_sgpr_count,
-                                          context->current_sgpr_count));
-          }
+          const uint32_t first = moi_scalar_persistent_tail_floor(scalar_contexts);
           const uint16_t scalar_limit = moi_ordinary_sgpr_limit(arch);
           const auto unavailable = [&](uint16_t base) {
             if ((options.moi_exec_save_sgpr &&
@@ -3480,8 +3504,8 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
                 range_overlaps(base, scalar_count, 32u, 2u))
               return true;
             return instrumentation::is_cdna_family_arch(arch) &&
-                   std::ranges::any_of(
-                       scalar_contexts, [&](const MoiKernelResourceContext *context) {
+                   std::ranges::any_of(scalar_contexts,
+                                       [&](const MoiKernelResourceContext *context) {
                                          return cdna_sgpr_window_conflicts_with_physical_vcc(
                                              base, scalar_count, context->current_sgpr_count);
                                        });
@@ -3489,51 +3513,6 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
           for (uint32_t base = first; base + scalar_count <= scalar_limit; ++base) {
             if (unavailable(static_cast<uint16_t>(base)))
               continue;
-            std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch;
-            for (uint64_t descriptor_offset : scalar_owners) {
-              const auto context = std::ranges::find_if(
-                  state.contexts, [&](const MoiKernelResourceContext &candidate) {
-                    return candidate.kernel != nullptr &&
-                           candidate.kernel->descriptor_file_offset == descriptor_offset;
-                  });
-              if (context == state.contexts.end() || context->kernel == nullptr) {
-                result.outcome = ConSanTransformOutcome::Unsupported;
-                result.warnings.emplace_back(
-                    "ConSan MOI could not resolve a scalar-state owner entry CFG");
-                return false;
-              }
-              BasicBlock *entry_block =
-                  block_for_offset(state.block_index, context->kernel->entry_text_offset);
-              const Instruction *entry =
-                  instruction_at(entry_block, context->kernel->entry_text_offset);
-              if (entry_block == nullptr || entry == nullptr) {
-                result.outcome = ConSanTransformOutcome::Unsupported;
-                result.warnings.emplace_back(
-                    "ConSan MOI could not decode a scalar-state owner entry instruction");
-                return false;
-              }
-              RegisterSet unavailable_vgprs = context->liveness->live_before(*entry);
-              const InstDefUse entry_def_use(*entry);
-              unavailable_vgprs |= entry_def_use.defs | entry_def_use.uses;
-              std::optional<uint16_t> scratch;
-              for (uint16_t candidate = 0; candidate + 2u <= context->ordinary_vgpr_limit;
-                   ++candidate) {
-                if (!unavailable_vgprs.contains({RegClass::VGPR, candidate, 1u}) &&
-                    !unavailable_vgprs.contains(
-                        {RegClass::VGPR, static_cast<uint16_t>(candidate + 1u), 1u})) {
-                  scratch = candidate;
-                  break;
-                }
-              }
-              if (!scratch) {
-                result.outcome = ConSanTransformOutcome::Unsupported;
-                result.warnings.emplace_back(
-                    "ConSan MOI could not place entry-local VGPR scratch for scalar persistent "
-                    "state");
-                return false;
-              }
-              prologue_scratch.push_back({descriptor_offset, *scratch});
-            }
             // Scalar persistence is a code-object-wide mode.  A prior
             // disconnected component may already have accumulated a VGPR
             // tuple, but every later emitted owner will take this scalar
@@ -3554,12 +3533,12 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
             result.moi_persistent_sgprs_automatic = true;
             result.resolved_moi_prologue_scratch_vgpr_assignments =
                 options.moi_prologue_scratch_vgpr_assignments;
-            result.warnings.emplace_back(
-                "ConSan MOI assigned persistent scalar owner/epoch" +
-                std::string(needs_workgroup_key ? "/workgroup-key" : "") + " state s" +
-                std::to_string(base) + ":s" + std::to_string(base + scalar_count - 1u) +
-                " below a full CDNA ordinary VGPR bank for " +
-                consan_moi_engine_name(options.moi_engine));
+            result.warnings.emplace_back("ConSan MOI assigned persistent scalar owner/epoch" +
+                                         std::string(needs_workgroup_key ? "/workgroup-key" : "") +
+                                         " state s" + std::to_string(base) + ":s" +
+                                         std::to_string(base + scalar_count - 1u) +
+                                         " below a full CDNA ordinary VGPR bank for " +
+                                         consan_moi_engine_name(options.moi_engine));
             return true;
           }
           result.outcome = ConSanTransformOutcome::Unsupported;

@@ -980,16 +980,12 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                             *private_layout, arch, errors))
     return false;
   if (moi_uses_scalar_persistent_state(options)) {
-    if (!options.moi_owner_vgpr || !options.moi_epoch_vgpr) {
-      errors.emplace_back(
-          "ConSan MOI sampled atomic prelude has no scalar-state VGPR temporaries");
+    if (!validate_consan_moi_scalar_state_temporaries(options, "sampled atomic prelude", errors))
       return false;
-    }
-    assert(options.moi_owner_vgpr && options.moi_epoch_vgpr);
-    words.push_back(build_v_mov_b32_e32(*options.moi_owner_vgpr,
-                                       *options.moi_persistent_owner_sgpr, arch));
-    words.push_back(build_v_mov_b32_e32(*options.moi_epoch_vgpr,
-                                       *options.moi_persistent_epoch_sgpr, arch));
+    words.push_back(
+        build_v_mov_b32_e32(*options.moi_owner_vgpr, *options.moi_persistent_owner_sgpr, arch));
+    words.push_back(
+        build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_epoch_sgpr, arch));
   }
   if (!guest_first) {
     if (!append_sampled_atomic_guest(words, bytes, candidate, arch, guest_instruction_offset))
