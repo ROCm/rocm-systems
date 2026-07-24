@@ -68,7 +68,13 @@ jobs:
             artifact-prefix: amdsmi-debian-wheels
 
     steps:
+      # rocm-systems is a large monorepo; the wheel build only needs the amdsmi
+      # project, so sparse-checkout keeps the fetch cheap.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          sparse-checkout: |
+            projects/amdsmi
+            .github/workflows
 
       - name: Install Debian build prerequisites
         if: matrix.target.id == 'debian'
@@ -113,24 +119,20 @@ jobs:
         run: |
           ${{matrix.target.python-bin}} -m pip install --upgrade pip
           ${{matrix.target.python-bin}} -m pip install "$GITHUB_WORKSPACE"/wheels/*.whl
-          ${{matrix.target.python-bin}} -c "import amdsmi; print('amdsmi import OK')"
+          # Prove the installed wheel is what imports (resolves under pip's
+          # location), not some other amdsmi on the path.
+          ${{matrix.target.python-bin}} -c "import os, subprocess, amdsmi; out = subprocess.check_output(['${{matrix.target.python-bin}}', '-m', 'pip', 'show', 'amdsmi'], text=True); loc = next((l.split(':', 1)[1].strip() for l in out.splitlines() if l.startswith('Location:')), ''); p = os.path.realpath(amdsmi.__file__); print('import from', p, 'pip loc', loc); assert loc and p.startswith(os.path.realpath(loc)), 'wheel is not the imported amdsmi'; print('amdsmi import OK')"
           # The wheel must ship with the system-library fallback disabled, so a
           # build-step ordering regression that leaves it enabled fails here
           # rather than shipping a wheel that can silently load a system .so.
           ${{matrix.target.python-bin}} -c "import amdsmi.amdsmi_wrapper as w; assert not w._AMDSMI_ALLOW_SYSTEM_FALLBACK, 'wheel shipped with system fallback enabled'; print('fallback disabled OK')"
 
-      - name: Upload wheels (by SHA)
+      # Not consumed by any downstream job; kept so a reviewer can download the
+      # built wheel from a run. Named by commit SHA for traceability.
+      - name: Upload wheels
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ${{matrix.target.artifact-prefix}}-${{github.sha}}
           path: ${{github.workspace}}/wheels/*.whl
           if-no-files-found: error
           retention-days: 30
-
-      - name: Upload wheels (downloadable)
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: ${{matrix.target.artifact-prefix}}
-          path: ${{github.workspace}}/wheels/*.whl
-          if-no-files-found: warn
-          retention-days: 90
