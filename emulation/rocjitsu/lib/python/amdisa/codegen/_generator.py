@@ -4071,10 +4071,6 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_getreg':
-            if not profile.use_hwreg_helpers:
-                raise RuntimeError(
-                    'HWREG scalar codegen requires profile.use_hwreg_helpers'
-                )
             L.append(f'  uint16_t hwreg = {src_ops[0]}.encoding_value_;')
             L.append('  uint32_t reg_val = 0;')
             L.append('  auto result = amdgpu::read_hwreg_field(wf, hwreg, reg_val);')
@@ -4089,10 +4085,6 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_setreg':
-            if not profile.use_hwreg_helpers:
-                raise RuntimeError(
-                    'HWREG scalar codegen requires profile.use_hwreg_helpers'
-                )
             L.append(f'  uint16_t hwreg = {dst_ops[0]}.encoding_value_;')
             L.append(
                 f'  uint32_t src = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
@@ -4106,10 +4098,6 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_setreg_imm':
-            if not profile.use_hwreg_helpers:
-                raise RuntimeError(
-                    'HWREG scalar codegen requires profile.use_hwreg_helpers'
-                )
             L.append(f'  uint16_t hwreg = {dst_ops[0]}.encoding_value_;')
             # S_SETREG_IMM32_B32's source is the extension literal. When it is
             # modeled as a fieldless simm32 operand it appears in src_ops and is
@@ -7969,12 +7957,10 @@ class CodeGenerator:
                 if has_hwreg_access and not is_mem_enc:
                     cpp_includes.extend(
                         [
-                            ('rocjitsu/vm/amdgpu/compute_unit.h', False),
+                            ('rocjitsu/vm/amdgpu/hwreg.h', False),
                             ('util/log.h', False),
                         ]
                     )
-                    if profile.use_hwreg_helpers:
-                        cpp_includes.append(('rocjitsu/vm/amdgpu/hwreg.h', False))
 
                 # Include the unified shared execute template header when
                 # any instruction in this encoding delegates to a template.

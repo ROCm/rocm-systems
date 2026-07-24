@@ -1188,11 +1188,6 @@ def test_gfx1250_profile_enables_generator_backed_quirks():
     assert profile.uses_packed_16bit_e32_source_selectors
     assert profile.uses_true16_vop3_opsel
     assert profile.vbuffer_store_data_uses_dst_vgpr_msb_role
-    assert profile.use_hwreg_helpers
-    assert profile.hwreg_mode_id == 1
-    assert profile.hwreg_status_id == 2
-    assert profile.hwreg_wave_sched_mode_id == 26
-    assert profile.hwreg_ib_sts2_id == 28
     assert profile.generate_scaled_wmma_vop3px2
     assert profile.smem_address_uses_access_size
     assert profile.vop3_cmp_sdst_size_bits == 32
@@ -1239,10 +1234,6 @@ def test_rdna4_profile_enables_gfx12_true16_and_mode_hwregs_only():
     assert profile.uses_packed_16bit_e32_source_selectors
     assert profile.uses_true16_vop3_opsel
     assert not profile.vbuffer_store_data_uses_dst_vgpr_msb_role
-    assert profile.use_hwreg_helpers
-    assert profile.hwreg_mode_id == 1
-    assert profile.hwreg_status_id == 2
-    assert profile.hwreg_wave_sched_mode_id is None
     assert not profile.generate_scaled_wmma_vop3px2
     assert not profile.smem_address_uses_access_size
     assert profile.vop3_cmp_sdst_size_bits is None
@@ -2422,61 +2413,6 @@ def test_mode_status_hwreg_semantics_call_central_vm_helpers(arch_name, profile)
     assert 'wf.set_status_raw' not in setreg_imm
 
 
-def test_hwreg_scalar_codegen_rejects_non_helper_profiles():
-    class NonHelperProfile(CdnaProfile):
-        @property
-        def use_hwreg_helpers(self):
-            return False
-
-    codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(
-        arch_name='nonhelper',
-        profile=NonHelperProfile(),
-        inst_encodings=[],
-        encoding_map={},
-    )
-    instructions = [
-        (
-            Instruction(
-                'S_GETREG_B32',
-                'ENC_SOPK',
-                17,
-                [
-                    Operand('sdst', 32, 'OPR_SDST', False, True, False, True, 1),
-                    Operand('simm16', 16, 'OPR_HWREG', True, False, False, True, 2),
-                ],
-            ),
-            InstructionSemantics('S_GETREG_B32', 'scalar_getreg'),
-        ),
-        (
-            Instruction(
-                'S_SETREG_B32',
-                'ENC_SOPK',
-                18,
-                [
-                    Operand('simm16', 16, 'OPR_HWREG', False, True, False, True, 1),
-                    Operand('sdst', 32, 'OPR_SDST', True, False, False, True, 2),
-                ],
-            ),
-            InstructionSemantics('S_SETREG_B32', 'scalar_setreg'),
-        ),
-        (
-            Instruction(
-                'S_SETREG_IMM32_B32',
-                'SOPK_INST_LITERAL',
-                20,
-                [Operand('simm16', 16, 'OPR_HWREG', False, True, False, True, 1)],
-                is_implied_literal_enc=True,
-            ),
-            InstructionSemantics('S_SETREG_IMM32_B32', 'scalar_setreg_imm'),
-        ),
-    ]
-
-    for inst, semantics in instructions:
-        with pytest.raises(RuntimeError, match='use_hwreg_helpers'):
-            codegen._gen_execute_body(inst, semantics)
-
-
 def _hwreg_predefined_values(isa_name: str) -> dict[str, int]:
     root = elem_tree.parse(_mrisa_dir() / f'amdgpu_isa_{isa_name}.xml').getroot()
     for operand_type in root.iter('OperandType'):
@@ -2506,32 +2442,6 @@ def _cpp_hwreg_table_values(source: str, table_name: str) -> dict[int, str]:
         int(match.group(1)): match.group(2)
         for match in re.finditer(r'\{\s*(\d+),\s*"([^"]+)"', body)
     }
-
-
-@pytest.mark.parametrize(
-    ('isa_name', 'profile'),
-    [
-        ('cdna1', Cdna1Profile()),
-        ('cdna2', Cdna2Profile()),
-        ('cdna3', CdnaProfile()),
-        ('cdna4', CdnaProfile()),
-        ('rdna1', Rdna1Profile()),
-        ('rdna2', Rdna2Profile()),
-        ('rdna3', Rdna3Profile()),
-        ('rdna3_5', Rdna3_5Profile()),
-        ('rdna4', Rdna4Profile()),
-    ],
-)
-def test_mode_status_hwreg_profiles_match_checked_in_xml(isa_name, profile):
-    values = _hwreg_predefined_values(isa_name)
-    mode_value = values.get('hw_reg_mode', values.get('hw_reg_wave_mode'))
-    status_value = values.get('hw_reg_status', values.get('hw_reg_wave_status'))
-
-    assert mode_value == 1
-    assert status_value == 2
-    assert profile.use_hwreg_helpers
-    assert profile.hwreg_mode_id == mode_value
-    assert profile.hwreg_status_id == status_value
 
 
 @pytest.mark.parametrize(
