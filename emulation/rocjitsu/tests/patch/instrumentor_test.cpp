@@ -2209,7 +2209,7 @@ TEST(InstrumentorProbeSpill, Rdna4SpillsLiveClobberedSgpr) {
   EXPECT_EQ(patched_private_segment_size(patched), 68u);
 }
 
-// An RDNA4 kernel with zero fixed scratch fails closed (§9), like CDNA4.
+// An RDNA4 kernel with zero fixed scratch fails closed, like CDNA4.
 TEST(InstrumentorProbeSpill, Rdna4ZeroScratchFailsClosed) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   const uint32_t endpgm = build_s_endpgm(kArch);
@@ -2233,7 +2233,7 @@ TEST(InstrumentorProbeSpill, Rdna4ZeroScratchFailsClosed) {
       << "error was: " << result.errors.front();
 }
 
-// A kernel with zero fixed scratch cannot be spilled into (§9) and fails closed.
+// A kernel with zero fixed scratch cannot be spilled into and fails closed.
 TEST(InstrumentorProbeSpill, Cdna4ZeroScratchFailsClosed) {
   const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   auto target = make_gfx950_kernel_elf({kMovV3V2, endpgm}, /*private_bytes=*/0);
@@ -2256,7 +2256,7 @@ TEST(InstrumentorProbeSpill, Cdna4ZeroScratchFailsClosed) {
 }
 
 // A base scratch size that pushes the spill slot past the CDNA4 12-bit FLAT
-// offset field fails closed rather than emitting a truncated offset (§7).
+// offset field fails closed rather than emitting a truncated offset.
 TEST(InstrumentorProbeSpill, Cdna4ScratchOffsetPastFieldFailsClosed) {
   const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   auto target = make_gfx950_kernel_elf({kMovV3V2, endpgm}, /*private_bytes=*/0x1000);
@@ -2278,20 +2278,44 @@ TEST(InstrumentorProbeSpill, Cdna4ScratchOffsetPastFieldFailsClosed) {
       << "error was: " << result.errors.front();
 }
 
-// Shared driver for the special-state preservation tests: patch a kernel with a
-// probe whose body clobbers one special register and return the appended cave.
-// The anchor (v_mov v3, v2) needs no spill, so this isolates the save/restore of
-// the special register; zero scratch is fine since preservation uses no scratch.
-[[nodiscard]] std::vector<uint32_t> patch_probe_clobbering(uint32_t probe_clobber_word) {
-  const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
-  auto target = make_gfx950_kernel_elf({kMovV3V2, endpgm}, /*private_bytes=*/0);
-  auto probe = make_gfx950_probe_elf("rj_test_probe", {probe_clobber_word, kProbeSetpcS30S31});
-  AmdGpuCodeObject obj(target.data(), target.size());
-  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+// {target, probe} ELF pair for the preservation tests: target {v_mov v3,v2;
+// s_endpgm}, probe {clobber; setpc}. CDNA4 -> gfx950, RDNA4 -> gfx1200.
+struct ProbePair {
+  std::vector<uint8_t> target;
+  std::vector<uint8_t> probe;
+};
+[[nodiscard]] ProbePair make_clobber_pair(uint32_t clobber, uint32_t private_bytes,
+                                          rj_code_arch_t arch) {
+  const uint32_t endpgm = build_s_endpgm(arch);
+  const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, arch);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return {make_gfx950_kernel_elf({kMovV3V2, endpgm}, private_bytes),
+            make_gfx950_probe_elf("rj_test_probe", {clobber, setpc})};
+  return {make_gfx1200_kernel_elf({kMovV3V2, endpgm}, private_bytes),
+          make_gfx1200_probe_elf("rj_test_probe", {clobber, setpc})};
+}
+
+// Assert the cave both saves and restores `operand` via an s_mov of `mov_op`.
+void expect_special_preserved(const std::vector<uint32_t> &cave, uint32_t mov_op,
+                              uint16_t operand) {
+  EXPECT_TRUE(cave_has_special_mov(cave, mov_op, operand, /*as_src=*/true))
+      << "missing special-state save (s_mov tmp, <reg>)";
+  EXPECT_TRUE(cave_has_special_mov(cave, mov_op, operand, /*as_src=*/false))
+      << "missing special-state restore (s_mov <reg>, tmp)";
+}
+
+// Patch a kernel with a probe that clobbers one special register and return the
+// appended cave. The anchor (v_mov v3, v2) needs no spill, isolating the special
+// register's save/restore. Shared by CDNA4 and RDNA4.
+[[nodiscard]] std::vector<uint32_t> patch_probe_clobbering(uint32_t probe_clobber_word,
+                                                           rj_code_arch_t arch) {
+  auto elfs = make_clobber_pair(probe_clobber_word, /*private_bytes=*/0, arch);
+  AmdGpuCodeObject obj(elfs.target.data(), elfs.target.size());
+  AmdGpuCodeObject probe_obj(elfs.probe.data(), elfs.probe.size());
   EXPECT_TRUE(obj.is_valid());
   EXPECT_TRUE(probe_obj.is_valid());
 
-  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  Instrumentor instr(obj, arch);
   InstrumentationPoint pt;
   pt.anchor_offset = 0;
   pt.probe_obj = &probe_obj;
@@ -2317,51 +2341,74 @@ TEST(InstrumentorProbeSpill, Cdna4ScratchOffsetPastFieldFailsClosed) {
   return std::vector<uint32_t>(text.begin() + kOriginalTextWords, text.end());
 }
 
-// A probe that clobbers EXEC is accepted: the trampoline brackets the call with
-// s_mov_b64 <tmp>, exec (save) and s_mov_b64 exec, <tmp> (restore).
+// A probe that clobbers EXEC is preserved: s_mov_b64 tmp, exec (save) / s_mov_b64
+// exec, tmp (restore). On RDNA4 the save/restore stays wave64-shaped even on wave32
+// (width hardcoded to 2); EXEC_LO round-trips correctly.
 TEST(InstrumentorProbeSpill, Cdna4PreservesClobberedExec) {
-  const std::vector<uint32_t> cave = patch_probe_clobbering(kMovExecLoZero);
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const uint32_t clobber = build_s_mov_b32(kScalarOperandExecLo, /*inline 0=*/128, kArch);
+  const std::vector<uint32_t> cave = patch_probe_clobbering(clobber, kArch);
   ASSERT_FALSE(cave.empty());
-  const uint32_t mov64 = sop1_op_mov_b64(ROCJITSU_CODE_ARCH_CDNA4);
-  EXPECT_TRUE(cave_has_special_mov(cave, mov64, kScalarOperandExecLo, /*as_src=*/true))
-      << "missing EXEC save (s_mov_b64 tmp, exec)";
-  EXPECT_TRUE(cave_has_special_mov(cave, mov64, kScalarOperandExecLo, /*as_src=*/false))
-      << "missing EXEC restore (s_mov_b64 exec, tmp)";
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
 }
 
-// A probe that clobbers VCC is preserved the same way (64-bit pair, wave64).
+TEST(InstrumentorProbeSpill, Rdna4PreservesClobberedExec) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  const uint32_t clobber = build_s_mov_b32(kScalarOperandExecLo, /*inline 0=*/128, kArch);
+  const std::vector<uint32_t> cave = patch_probe_clobbering(clobber, kArch);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
+}
+
+// VCC is preserved the same way (64-bit pair).
 TEST(InstrumentorProbeSpill, Cdna4PreservesClobberedVcc) {
-  const std::vector<uint32_t> cave = patch_probe_clobbering(kMovVccLoZero);
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const uint32_t clobber = build_s_mov_b32(kScalarOperandVccLo, /*inline 0=*/128, kArch);
+  const std::vector<uint32_t> cave = patch_probe_clobbering(clobber, kArch);
   ASSERT_FALSE(cave.empty());
-  const uint32_t mov64 = sop1_op_mov_b64(ROCJITSU_CODE_ARCH_CDNA4);
-  EXPECT_TRUE(cave_has_special_mov(cave, mov64, kScalarOperandVccLo, /*as_src=*/true))
-      << "missing VCC save (s_mov_b64 tmp, vcc)";
-  EXPECT_TRUE(cave_has_special_mov(cave, mov64, kScalarOperandVccLo, /*as_src=*/false))
-      << "missing VCC restore (s_mov_b64 vcc, tmp)";
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
 }
 
-// A probe that clobbers M0 is preserved with a single 32-bit s_mov (CDNA4 m0=124).
+TEST(InstrumentorProbeSpill, Rdna4PreservesClobberedVcc) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  const uint32_t clobber = build_s_mov_b32(kScalarOperandVccLo, /*inline 0=*/128, kArch);
+  const std::vector<uint32_t> cave = patch_probe_clobbering(clobber, kArch);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+}
+
+// M0 is preserved with a single 32-bit s_mov (m0 = 124 on CDNA4, 125 on RDNA4).
 TEST(InstrumentorProbeSpill, Cdna4PreservesClobberedM0) {
-  const std::vector<uint32_t> cave = patch_probe_clobbering(kMovM0Zero);
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const uint16_t m0 = scalar_operand_m0(kArch);
+  const uint32_t clobber = build_s_mov_b32(m0, /*inline 0=*/128, kArch);
+  const std::vector<uint32_t> cave = patch_probe_clobbering(clobber, kArch);
   ASSERT_FALSE(cave.empty());
-  const uint32_t mov32 = sop1_op_mov_b32(ROCJITSU_CODE_ARCH_CDNA4);
-  const uint16_t m0 = scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA4);
-  EXPECT_TRUE(cave_has_special_mov(cave, mov32, m0, /*as_src=*/true))
-      << "missing M0 save (s_mov_b32 tmp, m0)";
-  EXPECT_TRUE(cave_has_special_mov(cave, mov32, m0, /*as_src=*/false))
-      << "missing M0 restore (s_mov_b32 m0, tmp)";
+  expect_special_preserved(cave, sop1_op_mov_b32(kArch), m0);
 }
 
-// FLAT_SCRATCH stays rejected: the spill store/load depend on it, so a probe that
-// clobbers it cannot be preserved. Fails closed rather than corrupting the host.
-TEST(InstrumentorProbeSpill, Cdna4RejectsClobberedFlatScratch) {
-  const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
-  auto target = make_gfx950_kernel_elf({kMovV3V2, endpgm}, /*private_bytes=*/0);
-  auto probe = make_gfx950_probe_elf("rj_test_probe", {kMovFlatScrLoZero, kProbeSetpcS30S31});
-  AmdGpuCodeObject obj(target.data(), target.size());
-  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+TEST(InstrumentorProbeSpill, Rdna4PreservesClobberedM0) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  const uint16_t m0 = scalar_operand_m0(kArch);
+  const uint32_t clobber = build_s_mov_b32(m0, /*inline 0=*/128, kArch);
+  const std::vector<uint32_t> cave = patch_probe_clobbering(clobber, kArch);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b32(kArch), m0);
+}
 
-  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+// FLAT_SCRATCH stays rejected (the spill store/load depend on it), failing closed.
+// CDNA4 (gfx9) only: flat_scratch_lo/hi are writable operands (102/103) here; gfx11+
+// removed them (OPR_SDST_SGPR_MAX=105, so dst 102 is the plain SGPR s102), so the
+// clobber is inexpressible via s_mov on RDNA4 -- no RDNA4 analog.
+TEST(InstrumentorProbeSpill, Cdna4RejectsClobberedFlatScratch) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  // FLAT_SCRATCH_LO is operand 102 on gfx9.
+  const uint32_t clobber = build_s_mov_b32(/*flat_scratch_lo=*/102, /*inline 0=*/128, kArch);
+  auto elfs = make_clobber_pair(clobber, /*private_bytes=*/0, kArch);
+  AmdGpuCodeObject obj(elfs.target.data(), elfs.target.size());
+  AmdGpuCodeObject probe_obj(elfs.probe.data(), elfs.probe.size());
+
+  Instrumentor instr(obj, kArch);
   InstrumentationPoint pt;
   pt.anchor_offset = 0;
   pt.probe_obj = &probe_obj;
@@ -2376,7 +2423,7 @@ TEST(InstrumentorProbeSpill, Cdna4RejectsClobberedFlatScratch) {
 }
 
 // A site that must spill on a code object with more than one kernel has no
-// unambiguous descriptor to grow, so it fails closed (§9, instrumentor.cpp:768).
+// unambiguous descriptor to grow, so it fails closed (instrumentor.cpp:768).
 TEST(InstrumentorProbeSpill, Cdna4MultiKernelSpillFailsClosed) {
   const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   auto target = make_gfx950_two_kernel_elf({kMovV3V2, endpgm}, /*private_bytes=*/64);

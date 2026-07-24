@@ -61,6 +61,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -69,7 +70,6 @@ namespace {
 using test::kMovV2Zero;
 using test::kMovV3S8;
 using test::kMovV3V2;
-using test::kProbeSetpcS30S31;
 
 constexpr uint32_t kWaveSize = 64;
 constexpr uint32_t kSentinel = 7; // Inline-const value placed into v2 (1..64).
@@ -275,25 +275,25 @@ protected:
   uint32_t patched_scratch_ = 0;
 };
 
-class DbiCdna4SpillSimFixture : public DbiVgprSpillSimBase {
+class DbiCdna4VgprSpillSimFixture : public DbiVgprSpillSimBase {
 protected:
-  DbiCdna4SpillSimFixture() : DbiVgprSpillSimBase(kCdna4SpillArch) {}
+  DbiCdna4VgprSpillSimFixture() : DbiVgprSpillSimBase(kCdna4SpillArch) {}
 };
-class DbiRdna4SpillSimFixture : public DbiVgprSpillSimBase {
+class DbiRdna4VgprSpillSimFixture : public DbiVgprSpillSimBase {
 protected:
-  DbiRdna4SpillSimFixture() : DbiVgprSpillSimBase(kRdna4SpillArch) {}
+  DbiRdna4VgprSpillSimFixture() : DbiVgprSpillSimBase(kRdna4SpillArch) {}
 };
 
-TEST_F(DbiCdna4SpillSimFixture, SpilledVgprSurvivesClobberingProbe) {
+TEST_F(DbiCdna4VgprSpillSimFixture, SpilledVgprSurvivesClobberingProbe) {
   expect_spilled_vgpr_survives();
 }
-TEST_F(DbiCdna4SpillSimFixture, MissingRestoreLeavesVgprClobbered) {
+TEST_F(DbiCdna4VgprSpillSimFixture, MissingRestoreLeavesVgprClobbered) {
   expect_missing_restore_clobbers_vgpr();
 }
-TEST_F(DbiRdna4SpillSimFixture, SpilledVgprSurvivesClobberingProbe) {
+TEST_F(DbiRdna4VgprSpillSimFixture, SpilledVgprSurvivesClobberingProbe) {
   expect_spilled_vgpr_survives();
 }
-TEST_F(DbiRdna4SpillSimFixture, MissingRestoreLeavesVgprClobbered) {
+TEST_F(DbiRdna4VgprSpillSimFixture, MissingRestoreLeavesVgprClobbered) {
   expect_missing_restore_clobbers_vgpr();
 }
 
@@ -417,16 +417,54 @@ TEST_F(DbiRdna4SgprSpillSimFixture, MissingReadlaneLeavesSgprClobbered) {
 }
 
 //==============================================================================
-// EXEC preservation (special-state, no spill)
+// EXEC preservation + full-mask spilling on CDNA4 (wave64) and RDNA4 (wave32). The
+// partial-EXEC-mask scenario is wave-size-specific, so it rides a per-arch config
+// (ExecSimArch) with thin DbiCdna4*/DbiRdna4* wrappers. Only EXEC is runtime-
+// observable; VCC/M0 are static-only (InstrumentorProbeSpill.*Preserves*).
+//
+// wave32 caveat: EXEC save/restore + full-mask toggle stay wave64-shaped
+// (s_mov_b64); on wave32 the extra EXEC_HI write is harmless (EXEC_LO round-trips).
 //==============================================================================
 
-constexpr uint32_t kActiveLanes = 32; // Low half active after clearing exec_hi.
+// s_mov_b32 <sdst>, <32-bit literal>: two words (src0 = 255 selects a trailing
+// literal). Used for the RDNA4 wave32 partial EXEC mask (exec_lo=0x0000FFFF).
+[[nodiscard]] std::vector<uint32_t> s_mov_b32_literal(uint16_t sdst, uint32_t literal,
+                                                      rj_code_arch_t arch) {
+  return {build_s_mov_b32(sdst, /*literal marker=*/255, arch), literal};
+}
+
+// Per-arch EXEC-sim config. set_partial_mask narrows EXEC to [0, active_lanes);
+// restore_full_mask widens it back (both variable length).
+struct ExecSimArch {
+  SpillSimArch base;
+  uint32_t active_lanes;
+  std::vector<uint32_t> set_partial_mask;
+  std::vector<uint32_t> restore_full_mask;
+};
+
+// CDNA4 wave64: clear exec_hi -> lanes 0..31; restore with exec_hi = -1.
+[[nodiscard]] inline ExecSimArch cdna4_exec_arch() {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  return {kCdna4SpillArch,
+          /*active_lanes=*/32,
+          {build_s_mov_b32(/*exec_hi=*/127, /*inline 0=*/128, kArch)},
+          {build_s_mov_b32(/*exec_hi=*/127, kScalarInlineNegOne, kArch)}};
+}
+
+// RDNA4 wave32: narrow exec_lo to 0x0000FFFF (lanes 0..15); restore with exec_lo = -1.
+[[nodiscard]] inline ExecSimArch rdna4_exec_arch() {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  return {kRdna4SpillArch,
+          /*active_lanes=*/16,
+          s_mov_b32_literal(kScalarOperandExecLo, /*lanes 0..15=*/0x0000FFFFu, kArch),
+          {build_s_mov_b32(kScalarOperandExecLo, kScalarInlineNegOne, kArch)}};
+}
 
 // Index of the trampoline's EXEC restore: an s_mov_b64 writing EXEC_LO from a
 // dead SGPR temp (< VCC_LO), not the probe's own `s_mov_b64 exec, 0` (reads
 // inline 0 = 128). text.size() if absent.
-[[nodiscard]] size_t find_exec_restore(const std::vector<uint32_t> &text) {
-  const uint32_t mov64 = sop1_op_mov_b64(ROCJITSU_CODE_ARCH_CDNA4);
+[[nodiscard]] size_t find_exec_restore(const std::vector<uint32_t> &text, rj_code_arch_t arch) {
+  const uint32_t mov64 = sop1_op_mov_b64(arch);
   for (size_t i = 0; i < text.size(); ++i) {
     const uint32_t w = text[i];
     if ((w >> 23) == kSop1EncodingPrefix && ((w >> 8) & 0xFFu) == mov64 &&
@@ -436,37 +474,42 @@ constexpr uint32_t kActiveLanes = 32; // Low half active after clearing exec_hi.
   return text.size();
 }
 
-// Patch a kernel whose anchor (v_mov_b32 v3, K) runs under a half-lane EXEC mask,
+// Patch a kernel whose anchor (v_mov_b32 v3, K) runs under a partial EXEC mask,
 // with a probe that clobbers EXEC (s_mov_b64 exec, 0). If EXEC is preserved, the
-// relocated v_mov writes K only to the originally-active low 32 lanes.
-class DbiCdna4ExecPreserveSimFixture : public ::testing::Test {
+// relocated v_mov writes K only to the originally-active [0, active_lanes) lanes.
+class DbiExecPreserveSimBase : public ::testing::Test {
 protected:
+  explicit DbiExecPreserveSimBase(ExecSimArch a) : a_(std::move(a)) {}
+
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+    const uint32_t endpgm = build_s_endpgm(a_.base.arch);
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch);
     const uint32_t mov_v3_0 = 0x7E060280u;                      // v_mov_b32 v3, 0
     const uint32_t mov_v3_k = 0x7E060200u | (128u + kSentinel); // v_mov_b32 v3, K
-    // s_mov_b32 exec_hi, 0: exec starts all-64 active at dispatch, so clearing the
-    // high dword leaves lanes 0..31 active across the anchor.
-    const uint32_t mov_exec_hi_0 =
-        build_s_mov_b32(/*exec_hi=*/127, /*inline 0=*/128, ROCJITSU_CODE_ARCH_CDNA4);
     // Probe clobbers the whole EXEC pair: s_mov_b64 exec, 0.
     const uint32_t probe_clobber_exec =
-        build_s_mov_b64(kScalarOperandExecLo, /*inline 0=*/128, ROCJITSU_CODE_ARCH_CDNA4);
+        build_s_mov_b64(kScalarOperandExecLo, /*inline 0=*/128, a_.base.arch);
 
-    // v_mov v3,0 (all lanes) ; clear exec_hi ; ANCHOR v_mov v3,K ; s_endpgm.
-    auto target = test::make_gfx950_kernel_elf({mov_v3_0, mov_exec_hi_0, mov_v3_k, endpgm},
-                                               /*private_bytes=*/0);
+    // v_mov v3,0 (all lanes) ; <narrow EXEC> ; ANCHOR v_mov v3,K ; s_endpgm.
+    std::vector<uint32_t> code = {mov_v3_0};
+    code.insert(code.end(), a_.set_partial_mask.begin(), a_.set_partial_mask.end());
+    const uint32_t anchor_off = static_cast<uint32_t>(code.size() * sizeof(uint32_t));
+    code.push_back(mov_v3_k);
+    code.push_back(endpgm);
+
+    auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/0,
+                                               /*granulated_sgpr_count=*/3, a_.base.e_flags);
     auto probe =
-        test::make_gfx950_probe_elf("rj_test_probe", {probe_clobber_exec, kProbeSetpcS30S31});
+        test::make_amdgpu_probe_elf("rj_test_probe", {probe_clobber_exec, setpc}, a_.base.e_flags);
 
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
     ASSERT_TRUE(obj.is_valid());
     ASSERT_TRUE(probe_obj.is_valid());
 
-    Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+    Instrumentor instr(obj, a_.base.arch);
     InstrumentationPoint pt;
-    pt.anchor_offset = 8; // v_mov_b32 v3, K, run under the half-lane exec mask.
+    pt.anchor_offset = anchor_off; // v_mov_b32 v3, K, run under the partial exec mask.
     pt.probe_obj = &probe_obj;
     pt.probe_symbol = "rj_test_probe";
     instr.add_point(pt);
@@ -485,91 +528,118 @@ protected:
     ASSERT_EQ(test::patched_private_segment_size(patched), 0u);
   }
 
+  // EXEC survives: the relocated v_mov writes K to the active low lanes, leaving
+  // the inactive high lanes at their prior 0.
+  void expect_preserved_exec_survives() {
+    DbiSim sim(a_.base.sim_arch, a_.base.wave_size);
+    const std::vector<uint32_t> v3 = sim.run_and_read_vgpr(patched_text_, /*private_bytes=*/0,
+                                                           /*reg=*/3);
+    ASSERT_EQ(v3.size(), a_.base.wave_size) << "kernel did not run to completion";
+    for (uint32_t lane = 0; lane < a_.base.wave_size; ++lane) {
+      const uint32_t expected = lane < a_.active_lanes ? kSentinel : 0u;
+      EXPECT_EQ(v3[lane], expected)
+          << "lane " << lane << ": EXEC not restored to its anchor value after the probe";
+    }
+  }
+
+  // Negative control: nop the EXEC restore, so exec stays 0 and the relocated
+  // v_mov writes no lane -- v3 keeps its prior 0 everywhere.
+  void expect_missing_exec_restore_clobbers_all() {
+    const size_t restore = find_exec_restore(patched_text_, a_.base.arch);
+    ASSERT_LT(restore, patched_text_.size()) << "EXEC restore (s_mov_b64 exec, tmp) not found";
+
+    std::vector<uint32_t> sabotaged = patched_text_;
+    sabotaged[restore] = build_s_nop(0, a_.base.arch);
+
+    DbiSim broken(a_.base.sim_arch, a_.base.wave_size);
+    const std::vector<uint32_t> v3_broken =
+        broken.run_and_read_vgpr(sabotaged, /*private_bytes=*/0, /*reg=*/3);
+    ASSERT_EQ(v3_broken.size(), a_.base.wave_size);
+    for (uint32_t lane = 0; lane < a_.base.wave_size; ++lane)
+      EXPECT_EQ(v3_broken[lane], 0u)
+          << "lane " << lane << ": without the EXEC restore, no lane should be written";
+
+    // Revert: the intact restore recovers the low-lane writes.
+    DbiSim intact(a_.base.sim_arch, a_.base.wave_size);
+    const std::vector<uint32_t> v3_intact =
+        intact.run_and_read_vgpr(patched_text_, /*private_bytes=*/0, /*reg=*/3);
+    ASSERT_EQ(v3_intact.size(), a_.base.wave_size);
+    for (uint32_t lane = 0; lane < a_.base.wave_size; ++lane)
+      EXPECT_EQ(v3_intact[lane], lane < a_.active_lanes ? kSentinel : 0u)
+          << "lane " << lane << ": intact EXEC restore should recover the low-lane writes";
+  }
+
+  ExecSimArch a_;
   std::vector<uint32_t> patched_text_;
 };
 
-// EXEC survives the clobbering probe: the relocated v_mov writes K to the low 32
-// lanes (active across the anchor) and leaves the high 32 at their prior 0.
+class DbiCdna4ExecPreserveSimFixture : public DbiExecPreserveSimBase {
+protected:
+  DbiCdna4ExecPreserveSimFixture() : DbiExecPreserveSimBase(cdna4_exec_arch()) {}
+};
+class DbiRdna4ExecPreserveSimFixture : public DbiExecPreserveSimBase {
+protected:
+  DbiRdna4ExecPreserveSimFixture() : DbiExecPreserveSimBase(rdna4_exec_arch()) {}
+};
+
 TEST_F(DbiCdna4ExecPreserveSimFixture, PreservedExecSurvivesClobberingProbe) {
-  DbiSim sim;
-  const std::vector<uint32_t> v3 = sim.run_and_read_vgpr(patched_text_, /*private_bytes=*/0,
-                                                         /*reg=*/3);
-  ASSERT_EQ(v3.size(), kWaveSize) << "kernel did not run to completion";
-  for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
-    const uint32_t expected = lane < kActiveLanes ? kSentinel : 0u;
-    EXPECT_EQ(v3[lane], expected) << "lane " << lane
-                                  << ": EXEC not restored to its anchor value after the probe";
-  }
+  expect_preserved_exec_survives();
 }
-
-// Negative control: nop out the EXEC restore, so exec stays 0 (as the probe left
-// it) and the relocated v_mov writes no lane -- v3 keeps its prior 0 everywhere.
 TEST_F(DbiCdna4ExecPreserveSimFixture, MissingExecRestoreLeavesAllLanesClobbered) {
-  const size_t restore = find_exec_restore(patched_text_);
-  ASSERT_LT(restore, patched_text_.size()) << "EXEC restore (s_mov_b64 exec, tmp) not found";
-
-  std::vector<uint32_t> sabotaged = patched_text_;
-  sabotaged[restore] = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
-
-  DbiSim broken;
-  const std::vector<uint32_t> v3_broken =
-      broken.run_and_read_vgpr(sabotaged, /*private_bytes=*/0, /*reg=*/3);
-  ASSERT_EQ(v3_broken.size(), kWaveSize);
-  for (uint32_t lane = 0; lane < kWaveSize; ++lane)
-    EXPECT_EQ(v3_broken[lane], 0u)
-        << "lane " << lane << ": without the EXEC restore, no lane should be written";
-
-  // Revert: the intact restore recovers the low-lane writes.
-  DbiSim intact;
-  const std::vector<uint32_t> v3_intact =
-      intact.run_and_read_vgpr(patched_text_, /*private_bytes=*/0, /*reg=*/3);
-  ASSERT_EQ(v3_intact.size(), kWaveSize);
-  for (uint32_t lane = 0; lane < kWaveSize; ++lane)
-    EXPECT_EQ(v3_intact[lane], lane < kActiveLanes ? kSentinel : 0u)
-        << "lane " << lane << ": intact EXEC restore should recover the low-lane writes";
+  expect_missing_exec_restore_clobbers_all();
+}
+TEST_F(DbiRdna4ExecPreserveSimFixture, PreservedExecSurvivesClobberingProbe) {
+  expect_preserved_exec_survives();
+}
+TEST_F(DbiRdna4ExecPreserveSimFixture, MissingExecRestoreLeavesAllLanesClobbered) {
+  expect_missing_exec_restore_clobbers_all();
 }
 
 //==============================================================================
 // Full-mask spilling: an EXEC-widening probe must not corrupt inactive-lane
-// spilled registers.
+// spilled registers. Executed on CDNA4 (wave64) and RDNA4 (wave32).
 //==============================================================================
 
-// Patch a kernel that spills a live VGPR (v2) at an anchor running under a
-// half-lane EXEC mask, with a probe that *widens* EXEC to all lanes and then
-// clobbers v2. With full-mask spilling, the store/load run under EXEC=-1, so v2 is
-// saved and restored on all 64 lanes; without it, the high 32 lanes would keep the
-// probe's clobber. v2 is copied to the observable v3 under a restored full mask.
-class DbiCdna4ExecWidenSpillSimFixture : public ::testing::Test {
+// Spill a live VGPR (v2) at an anchor under a partial EXEC mask, with a probe that
+// *widens* EXEC then clobbers v2. Full-mask spilling runs the store/load under
+// EXEC=-1, saving/restoring v2 on all lanes; v2 is then copied to the observable v3.
+class DbiExecWidenSpillSimBase : public ::testing::Test {
 protected:
+  explicit DbiExecWidenSpillSimBase(ExecSimArch a) : a_(std::move(a)) {}
+
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+    const uint32_t endpgm = build_s_endpgm(a_.base.arch);
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch);
     const uint32_t mov_v2_k = test::make_mov_v2_inline(kSentinel); // v_mov v2, K (all lanes)
     const uint32_t mov_v3_0 = 0x7E060280u;                         // v_mov v3, 0
     const uint32_t mov_v4_v2 = 0x7E080302u;                        // v_mov v4, v2 (v2 live)
     const uint32_t mov_v3_v2 = kMovV3V2;                           // v_mov v3, v2
-    const uint32_t clr_exec_hi =
-        build_s_mov_b32(/*exec_hi=*/127, /*inline 0=*/128, ROCJITSU_CODE_ARCH_CDNA4);
-    const uint32_t set_exec_hi =
-        build_s_mov_b32(/*exec_hi=*/127, kScalarInlineNegOne, ROCJITSU_CODE_ARCH_CDNA4);
     // Probe widens EXEC to all lanes, then clobbers v2 on all of them.
     const uint32_t probe_widen =
-        build_s_mov_b64(kScalarOperandExecLo, kScalarInlineNegOne, ROCJITSU_CODE_ARCH_CDNA4);
+        build_s_mov_b64(kScalarOperandExecLo, kScalarInlineNegOne, a_.base.arch);
 
-    // v2=K ; v3=0 ; exec=lanes0-31 ; ANCHOR v_mov v4,v2 ; exec=full ; v3=v2 ; endpgm.
-    auto target = test::make_gfx950_kernel_elf(
-        {mov_v2_k, mov_v3_0, clr_exec_hi, mov_v4_v2, set_exec_hi, mov_v3_v2, endpgm},
-        /*private_bytes=*/64);
-    auto probe =
-        test::make_gfx950_probe_elf("rj_test_probe", {probe_widen, kMovV2Zero, kProbeSetpcS30S31});
+    // v2=K ; v3=0 ; <narrow EXEC> ; ANCHOR v_mov v4,v2 ; <widen EXEC> ; v3=v2 ; endpgm.
+    std::vector<uint32_t> code = {mov_v2_k, mov_v3_0};
+    code.insert(code.end(), a_.set_partial_mask.begin(), a_.set_partial_mask.end());
+    const uint32_t anchor_off = static_cast<uint32_t>(code.size() * sizeof(uint32_t));
+    code.push_back(mov_v4_v2);
+    code.insert(code.end(), a_.restore_full_mask.begin(), a_.restore_full_mask.end());
+    code.push_back(mov_v3_v2);
+    code.push_back(endpgm);
+
+    auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/64,
+                                               /*granulated_sgpr_count=*/3, a_.base.e_flags);
+    auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {probe_widen, kMovV2Zero, setpc},
+                                             a_.base.e_flags);
 
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
     ASSERT_TRUE(obj.is_valid());
     ASSERT_TRUE(probe_obj.is_valid());
 
-    Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+    Instrumentor instr(obj, a_.base.arch);
     InstrumentationPoint pt;
-    pt.anchor_offset = 12; // v_mov v4, v2 -> v2 live at the anchor, under lanes 0-31.
+    pt.anchor_offset = anchor_off; // v_mov v4, v2 -> v2 live at the anchor, under the partial mask.
     pt.probe_obj = &probe_obj;
     pt.probe_symbol = "rj_test_probe";
     instr.add_point(pt);
@@ -588,51 +658,72 @@ protected:
     ASSERT_EQ(patched_scratch_, 68u) << "descriptor scratch must grow to cover the spill slot";
   }
 
+  // Full-mask spilling saves/restores v2 on all lanes, so v3 (a full-mask copy made
+  // after the probe) reads the sentinel everywhere despite the widening probe.
+  void expect_full_mask_spill_survives() {
+    DbiSim sim(a_.base.sim_arch, a_.base.wave_size);
+    const std::vector<uint32_t> v3 =
+        sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
+    ASSERT_EQ(v3.size(), a_.base.wave_size) << "kernel did not run to completion";
+    for (uint32_t lane = 0; lane < a_.base.wave_size; ++lane)
+      EXPECT_EQ(v3[lane], kSentinel)
+          << "lane " << lane
+          << ": v2 was not saved/restored under full mask across the widening probe";
+  }
+
+  // Negative control: nop the store-side EXEC=-1 toggle, so the store runs under the
+  // anchor mask and v2's inactive lanes are never saved -- they lose the sentinel.
+  void expect_missing_store_full_mask_loses_high_lanes() {
+    const std::vector<uint32_t> store = build_scratch_store_dword(2, 64, a_.base.arch);
+    const uint32_t toggle =
+        build_s_mov_b64(kScalarOperandExecLo, kScalarInlineNegOne, a_.base.arch);
+    auto it = std::search(patched_text_.begin(), patched_text_.end(), store.begin(), store.end());
+    ASSERT_NE(it, patched_text_.end()) << "spill scratch_store not found";
+    ASSERT_NE(it, patched_text_.begin());
+    const size_t toggle_idx = static_cast<size_t>(it - patched_text_.begin()) - 1;
+    ASSERT_EQ(patched_text_[toggle_idx], toggle)
+        << "word before the store should be the prologue EXEC=-1 toggle";
+
+    std::vector<uint32_t> sabotaged = patched_text_;
+    sabotaged[toggle_idx] = build_s_nop(0, a_.base.arch);
+
+    DbiSim broken(a_.base.sim_arch, a_.base.wave_size);
+    const std::vector<uint32_t> v3 =
+        broken.run_and_read_vgpr(sabotaged, patched_scratch_, /*reg=*/3);
+    ASSERT_EQ(v3.size(), a_.base.wave_size);
+    for (uint32_t lane = 0; lane < a_.active_lanes; ++lane)
+      EXPECT_EQ(v3[lane], kSentinel)
+          << "lane " << lane << ": active-lane spill should still round-trip";
+    for (uint32_t lane = a_.active_lanes; lane < a_.base.wave_size; ++lane)
+      EXPECT_NE(v3[lane], kSentinel)
+          << "lane " << lane << ": without the store full-mask, this lane must not be recovered";
+  }
+
+  ExecSimArch a_;
   std::vector<uint32_t> patched_text_;
   uint32_t patched_scratch_ = 0;
 };
 
-// With full-mask spilling, the widened probe cannot corrupt inactive-lane copies:
-// v2 is saved/restored on all 64 lanes, so v3 (a full-mask copy of v2 made after
-// the probe) reads the sentinel on every lane.
+class DbiCdna4ExecWidenSpillSimFixture : public DbiExecWidenSpillSimBase {
+protected:
+  DbiCdna4ExecWidenSpillSimFixture() : DbiExecWidenSpillSimBase(cdna4_exec_arch()) {}
+};
+class DbiRdna4ExecWidenSpillSimFixture : public DbiExecWidenSpillSimBase {
+protected:
+  DbiRdna4ExecWidenSpillSimFixture() : DbiExecWidenSpillSimBase(rdna4_exec_arch()) {}
+};
+
 TEST_F(DbiCdna4ExecWidenSpillSimFixture, FullMaskSpillSurvivesExecWideningProbe) {
-  DbiSim sim;
-  const std::vector<uint32_t> v3 =
-      sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
-  ASSERT_EQ(v3.size(), kWaveSize) << "kernel did not run to completion";
-  for (uint32_t lane = 0; lane < kWaveSize; ++lane)
-    EXPECT_EQ(v3[lane], kSentinel)
-        << "lane " << lane
-        << ": v2 was not saved/restored under full mask across the widening probe";
+  expect_full_mask_spill_survives();
 }
-
-// Negative control: nop the prologue EXEC=-1 (the store-side full-mask toggle), so
-// the store runs under the anchor mask and lanes 32-63 of v2 are never saved. Those
-// lanes then do not carry the sentinel into v3, proving the store-side toggle is
-// what makes inactive-lane spilling correct.
 TEST_F(DbiCdna4ExecWidenSpillSimFixture, MissingStoreFullMaskLosesHighLanes) {
-  const std::vector<uint32_t> store = build_scratch_store_dword(2, 64, ROCJITSU_CODE_ARCH_CDNA4);
-  const uint32_t toggle =
-      build_s_mov_b64(kScalarOperandExecLo, kScalarInlineNegOne, ROCJITSU_CODE_ARCH_CDNA4);
-  auto it = std::search(patched_text_.begin(), patched_text_.end(), store.begin(), store.end());
-  ASSERT_NE(it, patched_text_.end()) << "spill scratch_store not found";
-  ASSERT_NE(it, patched_text_.begin());
-  const size_t toggle_idx = static_cast<size_t>(it - patched_text_.begin()) - 1;
-  ASSERT_EQ(patched_text_[toggle_idx], toggle)
-      << "word before the store should be the prologue EXEC=-1 toggle";
-
-  std::vector<uint32_t> sabotaged = patched_text_;
-  sabotaged[toggle_idx] = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
-
-  DbiSim broken;
-  const std::vector<uint32_t> v3 = broken.run_and_read_vgpr(sabotaged, patched_scratch_, /*reg=*/3);
-  ASSERT_EQ(v3.size(), kWaveSize);
-  for (uint32_t lane = 0; lane < kActiveLanes; ++lane)
-    EXPECT_EQ(v3[lane], kSentinel)
-        << "lane " << lane << ": active-lane spill should still round-trip";
-  for (uint32_t lane = kActiveLanes; lane < kWaveSize; ++lane)
-    EXPECT_NE(v3[lane], kSentinel)
-        << "lane " << lane << ": without the store full-mask, this lane must not be recovered";
+  expect_missing_store_full_mask_loses_high_lanes();
+}
+TEST_F(DbiRdna4ExecWidenSpillSimFixture, FullMaskSpillSurvivesExecWideningProbe) {
+  expect_full_mask_spill_survives();
+}
+TEST_F(DbiRdna4ExecWidenSpillSimFixture, MissingStoreFullMaskLosesHighLanes) {
+  expect_missing_store_full_mask_loses_high_lanes();
 }
 
 } // namespace
