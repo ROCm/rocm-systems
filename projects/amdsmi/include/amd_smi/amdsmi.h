@@ -5923,41 +5923,6 @@ amdsmi_status_t amdsmi_get_gpu_ecc_enabled(amdsmi_processor_handle processor_han
                                            uint64_t* enabled_blocks);
 
 /**
- *  @brief Retrieve the enabled ECC bit-mask. It is not supported on virtual machine guest
- *
- *  See [RAS Error Count sysfs Interface (AMDGPU RAS Support - Linux Kernel
- *  documentation)](https://docs.kernel.org/gpu/amdgpu/ras.html#ras-error-count-sysfs-interface)
- *  to learn how these error counts are accessed.
- *
- *  @ingroup tagECCInfo
- *
- *  @platform{gpu_bm_linux} @platform{host}
- *
- *  @details Given a processor handle @p processor_handle, and a pointer to a uint64_t @p
- *  enabled_mask, this function will write bits to memory pointed to by
- *  @p enabled_blocks. Upon a successful call, @p enabled_blocks can then be
- *  AND'd with elements of the ::amdsmi_gpu_block_t ennumeration to determine if
- *  the corresponding block has ECC enabled.
- *
- *  @note Whether a block has ECC enabled or not in the device is independent
- *  of whether there is kernel support for error counting for that block.
- *  Although a block may be enabled, but there may not be kernel support for
- *  reading error counters for that block.
- *
- *  @param[in] processor_handle a processor handle
- *
- *  @param[in,out] enabled_blocks A pointer to a uint64_t to which the enabled
- *  blocks bits will be written.
- *  If this parameter is nullptr, this function will return ::AMDSMI_STATUS_INVAL
- *  if the function is supported with the provided arguments and ::AMDSMI_STATUS_NOT_SUPPORTED
- *  if it is not supported with the provided arguments.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_gpu_ecc_supported(amdsmi_processor_handle processor_handle,
-                                             uint64_t* enabled_blocks);
-
-/**
  *  @brief Returns the total number of ECC errors (correctable,
  *         uncorrectable and deferred) in the given GPU. It is not supported on
  *         virtual machine guest

@@ -231,7 +231,6 @@ from .amdsmi_interface import amdsmi_get_gpu_available_counters
 # # Error Query
 from .amdsmi_interface import amdsmi_get_gpu_ecc_count
 from .amdsmi_interface import amdsmi_get_gpu_ecc_enabled
-from .amdsmi_interface import amdsmi_get_gpu_ecc_supported
 from .amdsmi_interface import amdsmi_get_gpu_ecc_status
 from .amdsmi_interface import amdsmi_status_code_to_string
 

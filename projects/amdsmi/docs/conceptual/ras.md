@@ -70,7 +70,7 @@ See {ref}`ECC information <tagECCInfo>` and {ref}`RAS information <tagRasInfo>` 
 See related APIs:
 
 - [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_ecc_count)
-- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_ecc_supported)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_ecc_enabled)
 - [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_ecc_status)
 - [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_total_ecc_count)
 - [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_cper_entries)

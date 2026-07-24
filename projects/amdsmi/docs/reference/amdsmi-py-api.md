@@ -4663,7 +4663,7 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
-### amdsmi_get_gpu_ecc_supported
+### amdsmi_get_gpu_ecc_enabled
 
 Description: Retrieve the enabled ECC bit-mask. It is not supported on virtual
 machine guest.
@@ -4683,7 +4683,7 @@ Input parameters:
 
 Output: Enabled ECC bit-mask
 
-Exceptions that can be thrown by `amdsmi_get_gpu_ecc_supported` function:
+Exceptions that can be thrown by `amdsmi_get_gpu_ecc_enabled` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
@@ -4707,7 +4707,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            enabled =  amdsmi.amdsmi_get_gpu_ecc_supported(device)
+            enabled =  amdsmi.amdsmi_get_gpu_ecc_enabled(device)
             print(enabled)
 except amdsmi.AmdSmiException as e:
     print(e)

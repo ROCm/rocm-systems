@@ -63,9 +63,7 @@ class TestGpuRas(unittest.TestCase):
 
     def test_get_gpu_ecc_enabled(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_ecc_supported=amdsmi.amdsmi_get_gpu_ecc_supported
-        )
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_ecc_enabled=amdsmi.amdsmi_get_gpu_ecc_enabled)
         return
 
     def test_get_gpu_ecc_status(self):

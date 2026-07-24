@@ -6399,16 +6399,8 @@ def amdsmi_get_gpu_ecc_enabled(processor_handle: processor_handle_t) -> int:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    blocks = amdsmi_get_gpu_ecc_supported(processor_handle)
-    return blocks
-
-
-def amdsmi_get_gpu_ecc_supported(processor_handle: processor_handle_t) -> int:
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
     blocks = ctypes.c_uint64(0)
-    _check_res(amdsmi_wrapper.amdsmi_get_gpu_ecc_supported(processor_handle, ctypes.byref(blocks)))
+    _check_res(amdsmi_wrapper.amdsmi_get_gpu_ecc_enabled(processor_handle, ctypes.byref(blocks)))
 
     return blocks.value
 
