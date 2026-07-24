@@ -137,6 +137,15 @@ pub const AMDSMI_DATE_FORMAT: &[u8; 35] = b"%04d-%02d-%02d:%02d:%02d:%02d.%03d\0
 pub const AMDSMI_LIB_VERSION_MAJOR: u32 = 26;
 pub const AMDSMI_LIB_VERSION_MINOR: u32 = 5;
 pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 0;
+pub const AMDSMI_MAX_VF_COUNT: u32 = 32;
+pub const AMDSMI_MAX_DRIVER_NUM: u32 = 2;
+pub const AMDSMI_DFC_FW_NUMBER_OF_ENTRIES: u32 = 9;
+pub const AMDSMI_MAX_WHITE_LIST_ELEMENTS: u32 = 16;
+pub const AMDSMI_MAX_BLACK_LIST_ELEMENTS: u32 = 64;
+pub const AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS: u32 = 8;
+pub const AMDSMI_MAX_ERR_RECORDS: u32 = 10;
+pub const AMDSMI_MAX_PROFILE_COUNT: u32 = 16;
+pub const AMDSMI_PF_INDEX: u32 = 31;
 pub const AMDSMI_MAX_DRIVER_INFO_RSVD: u32 = 64;
 pub const AMDSMI_MAX_UUID_ELEMENTS: u32 = 16;
 pub const AMDSMI_MAX_NUM_FREQUENCIES: u32 = 33;
@@ -4074,6 +4083,12 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_vcn_busy_percent(
+        processor_handle: AmdsmiProcessorHandle,
+        vcn_busy_percent: *mut u32,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_utilization_count(
         processor_handle: AmdsmiProcessorHandle,
         utilization_counters: *mut AmdsmiUtilizationCounterT,
@@ -4477,48 +4492,36 @@ const _: () = {
 };
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct AmdsmiFabricInfoVerT {
-    pub version: u32,
-    pub fabric_version: AmdsmiFabricInfoVerTFabricInfo,
+pub struct AmdsmiFabricInfoT {
+    pub bdf: AmdsmiBdfT,
+    pub fabric_version: u32,
+    pub fabric_info: AmdsmiFabricInfoTFabricInfo,
+    pub reserved: [u32; 15usize],
 }
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub union AmdsmiFabricInfoVerTFabricInfo {
+pub union AmdsmiFabricInfoTFabricInfo {
     pub v1: AmdsmiFabricInfoV1T,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiFabricInfoVerTFabricInfo"]
-        [::std::mem::size_of::<AmdsmiFabricInfoVerTFabricInfo>() - 244usize];
-    ["Alignment of AmdsmiFabricInfoVerTFabricInfo"]
-        [::std::mem::align_of::<AmdsmiFabricInfoVerTFabricInfo>() - 4usize];
-    ["Offset of field: AmdsmiFabricInfoVerTFabricInfo::v1"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoVerTFabricInfo, v1) - 0usize];
+    ["Size of AmdsmiFabricInfoTFabricInfo"]
+        [::std::mem::size_of::<AmdsmiFabricInfoTFabricInfo>() - 244usize];
+    ["Alignment of AmdsmiFabricInfoTFabricInfo"]
+        [::std::mem::align_of::<AmdsmiFabricInfoTFabricInfo>() - 4usize];
+    ["Offset of field: AmdsmiFabricInfoTFabricInfo::v1"]
+        [::std::mem::offset_of!(AmdsmiFabricInfoTFabricInfo, v1) - 0usize];
 };
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of AmdsmiFabricInfoVerT"][::std::mem::size_of::<AmdsmiFabricInfoVerT>() - 248usize];
-    ["Alignment of AmdsmiFabricInfoVerT"][::std::mem::align_of::<AmdsmiFabricInfoVerT>() - 4usize];
-    ["Offset of field: AmdsmiFabricInfoVerT::version"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoVerT, version) - 0usize];
-    ["Offset of field: AmdsmiFabricInfoVerT::fabric_version"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoVerT, fabric_version) - 4usize];
-};
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct AmdsmiFabricInfoT {
-    pub bdf: AmdsmiBdfT,
-    pub fabric_info: AmdsmiFabricInfoVerT,
-    pub reserved: [u32; 15usize],
-}
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of AmdsmiFabricInfoT"][::std::mem::size_of::<AmdsmiFabricInfoT>() - 320usize];
     ["Alignment of AmdsmiFabricInfoT"][::std::mem::align_of::<AmdsmiFabricInfoT>() - 8usize];
     ["Offset of field: AmdsmiFabricInfoT::bdf"]
         [::std::mem::offset_of!(AmdsmiFabricInfoT, bdf) - 0usize];
+    ["Offset of field: AmdsmiFabricInfoT::fabric_version"]
+        [::std::mem::offset_of!(AmdsmiFabricInfoT, fabric_version) - 8usize];
     ["Offset of field: AmdsmiFabricInfoT::fabric_info"]
-        [::std::mem::offset_of!(AmdsmiFabricInfoT, fabric_info) - 8usize];
+        [::std::mem::offset_of!(AmdsmiFabricInfoT, fabric_info) - 12usize];
     ["Offset of field: AmdsmiFabricInfoT::reserved"]
         [::std::mem::offset_of!(AmdsmiFabricInfoT, reserved) - 256usize];
 };

@@ -7090,10 +7090,10 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
     if ret not in (amdsmi_wrapper.AMDSMI_STATUS_SUCCESS, amdsmi_wrapper.AMDSMI_STATUS_NO_DATA):
         raise AmdSmiLibraryException(ret)
 
-    v1 = info.fabric_info.fabric_version.v1
+    v1 = info.fabric_info.v1
     return {
         "bdf": _format_bdf(info.bdf),
-        "version": info.fabric_info.version,
+        "version": info.fabric_version,
         "accelerator_id": v1.accelerator_id,
         "fabric_type": _FABRIC_TYPE_NAMES.get(v1.fabric_type, "UNKNOWN"),
         "bandwidth": v1.bandwidth,

@@ -245,33 +245,26 @@ int main() {
         }
         std::cout << "\t\t\tFabric info data: " << "\n";
         std::cout << "\t\t\t\t** BDF: " << bdf_to_str(fabric_info.bdf) << "\n";
-        std::cout << "\t\t\t\t** Fabric Version: " << fabric_info.fabric_info.version << "\n";
-        std::cout << "\t\t\t\t** Fabric Type: "
-                  << fabric_info.fabric_info.fabric_version.v1.fabric_type << "\n";
-        std::cout << "\t\t\t\t** Accelerator ID: "
-                  << fabric_info.fabric_info.fabric_version.v1.accelerator_id << "\n";
-        std::cout << "\t\t\t\t** Bandwidth: " << fabric_info.fabric_info.fabric_version.v1.bandwidth
+        std::cout << "\t\t\t\t** Fabric Version: " << fabric_info.fabric_version << "\n";
+        std::cout << "\t\t\t\t** Fabric Type: " << fabric_info.fabric_info.v1.fabric_type << "\n";
+        std::cout << "\t\t\t\t** Accelerator ID: " << fabric_info.fabric_info.v1.accelerator_id
                   << "\n";
-        std::cout << "\t\t\t\t** Latency: " << fabric_info.fabric_info.fabric_version.v1.latency
+        std::cout << "\t\t\t\t** Bandwidth: " << fabric_info.fabric_info.v1.bandwidth << "\n";
+        std::cout << "\t\t\t\t** Latency: " << fabric_info.fabric_info.v1.latency << "\n";
+        std::cout << "\t\t\t\t** PPOD ID: " << ppod_id_to_str(fabric_info.fabric_info.v1.ppod_id)
                   << "\n";
-        std::cout << "\t\t\t\t** PPOD ID: "
-                  << ppod_id_to_str(fabric_info.fabric_info.fabric_version.v1.ppod_id) << "\n";
-        std::cout << "\t\t\t\t** PPOD Size: " << fabric_info.fabric_info.fabric_version.v1.ppod_size
-                  << "\n";
-        std::cout << "\t\t\t\t** VPOD ID: " << fabric_info.fabric_info.fabric_version.v1.vpod_id
-                  << "\n";
-        std::cout << "\t\t\t\t** VPOD Size: " << fabric_info.fabric_info.fabric_version.v1.vpod_size
-                  << "\n";
+        std::cout << "\t\t\t\t** PPOD Size: " << fabric_info.fabric_info.v1.ppod_size << "\n";
+        std::cout << "\t\t\t\t** VPOD ID: " << fabric_info.fabric_info.v1.vpod_id << "\n";
+        std::cout << "\t\t\t\t** VPOD Size: " << fabric_info.fabric_info.v1.vpod_size << "\n";
         print_array_grid(std::cout, "\t\t\t\t", "VPOD Active Accelerators",
-                         fabric_info.fabric_info.fabric_version.v1.vpod_active_accelerators,
+                         fabric_info.fabric_info.v1.vpod_active_accelerators,
                          AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE, MAX_COLUMNS_PER_GRID);
         print_array_grid(std::cout, "\t\t\t\t", "Local Accelerators",
-                         fabric_info.fabric_info.fabric_version.v1.local_accelerators,
+                         fabric_info.fabric_info.v1.local_accelerators,
                          AMDSMI_FABRIC_MAX_LOCAL_GPUS, MAX_COLUMNS_PER_GRID);
-        std::cout << "\t\t\t\t** Address Mode: "
-                  << fabric_info.fabric_info.fabric_version.v1.addr_mode << "\n";
-        std::cout << "\t\t\t\t** Accelerator State: "
-                  << fabric_info.fabric_info.fabric_version.v1.accel_state << "\n";
+        std::cout << "\t\t\t\t** Address Mode: " << fabric_info.fabric_info.v1.addr_mode << "\n";
+        std::cout << "\t\t\t\t** Accelerator State: " << fabric_info.fabric_info.v1.accel_state
+                  << "\n";
         std::cout << "\n";
       }
     }
