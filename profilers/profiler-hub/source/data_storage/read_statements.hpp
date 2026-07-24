@@ -54,6 +54,7 @@ struct read_statements : public read_statements_base
         initialize_correlated_event_statements();
         initialize_count_statements();
         initialize_time_range_statements();
+        initialize_summary_statements();
 
         initialize_track_synthesis_statements();
         initialize_interval_track_statements();
@@ -253,6 +254,25 @@ struct read_statements : public read_statements_base
     [[nodiscard]] const time_range_func_t& memory_alloc_time_range() const override
     {
         return m_memory_alloc_time_range;
+    }
+
+    [[nodiscard]] const summary_func_t& kernel_summary() const override
+    {
+        return m_kernel_summary;
+    }
+    [[nodiscard]] const summary_time_filtered_func_t& kernel_summary_time_filtered()
+        const override
+    {
+        return m_kernel_summary_time_filtered;
+    }
+    [[nodiscard]] const summary_func_t& region_summary() const override
+    {
+        return m_region_summary;
+    }
+    [[nodiscard]] const summary_time_filtered_func_t& region_summary_time_filtered()
+        const override
+    {
+        return m_region_summary_time_filtered;
     }
 
     // Track synthesis accessors
@@ -1280,6 +1300,56 @@ private:
         m_memory_alloc_time_range    = make_time_range_stmt("rocpd_memory_allocate");
     }
 
+    // GROUP-BY-name aggregates: one row per distinct name id with COUNT and
+    // (end - start) duration SUM/MIN/MAX. name_col is grouped (kernel_id for kernels,
+    // name_id for regions) and resolved to a display string by the reader. The
+    // time-filtered variant keeps events overlapping [start,end] (bind order end,start),
+    // matching the count / interval overlap convention.
+    void initialize_summary_statements()
+    {
+        const auto& u = m_uuid;
+
+        auto make_summary_stmt = [&](const std::string& table,
+                                     const std::string& name_col) {
+            return m_backend->create_read_statement_executor<summary_result>(
+                fmt::format("SELECT {col}, COUNT(*), SUM(\"end\" - start), "
+                            "MIN(\"end\" - start), MAX(\"end\" - start) "
+                            "FROM {tbl}_{u} GROUP BY {col}",
+                            fmt::arg("col", name_col),
+                            fmt::arg("tbl", table),
+                            fmt::arg("u", u)),
+                &summary_result::name_ref,
+                &summary_result::count,
+                &summary_result::total_duration,
+                &summary_result::min_duration,
+                &summary_result::max_duration);
+        };
+        auto make_summary_time_filtered_stmt = [&](const std::string& table,
+                                                   const std::string& name_col) {
+            return m_backend->create_read_statement_executor<summary_result,
+                                                             bind_types<size_t, size_t>>(
+                fmt::format("SELECT {col}, COUNT(*), SUM(\"end\" - start), "
+                            "MIN(\"end\" - start), MAX(\"end\" - start) "
+                            "FROM {tbl}_{u} WHERE start <= ? AND \"end\" >= ? "
+                            "GROUP BY {col}",
+                            fmt::arg("col", name_col),
+                            fmt::arg("tbl", table),
+                            fmt::arg("u", u)),
+                &summary_result::name_ref,
+                &summary_result::count,
+                &summary_result::total_duration,
+                &summary_result::min_duration,
+                &summary_result::max_duration);
+        };
+
+        m_kernel_summary = make_summary_stmt("rocpd_kernel_dispatch", "kernel_id");
+        m_kernel_summary_time_filtered =
+            make_summary_time_filtered_stmt("rocpd_kernel_dispatch", "kernel_id");
+        m_region_summary = make_summary_stmt("rocpd_region", "name_id");
+        m_region_summary_time_filtered =
+            make_summary_time_filtered_stmt("rocpd_region", "name_id");
+    }
+
     // Ranked per-track pmc candidates for v3 counter tracks. One AMD-SMI poll
     // co-samples all of an agent's metrics under a single rocpd_sample.event_id, so a
     // plain sample->pmc_event join on event_id fans a track out to every co-sampled
@@ -2024,6 +2094,12 @@ private:
     time_range_func_t m_kernel_dispatch_time_range;
     time_range_func_t m_memory_copy_time_range;
     time_range_func_t m_memory_alloc_time_range;
+
+    // GROUP-BY-name summary statements
+    summary_func_t               m_kernel_summary;
+    summary_time_filtered_func_t m_kernel_summary_time_filtered;
+    summary_func_t               m_region_summary;
+    summary_time_filtered_func_t m_region_summary_time_filtered;
 
     // Track synthesis statements
     distinct_gpu_queue_func_t    m_distinct_gpu_queue_tracks;

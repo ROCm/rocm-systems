@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <set>
 #include <stdexcept>
@@ -2139,6 +2140,93 @@ reader_t::impl::get_event_counts(const reader_types::time_window_t& window)
         get_count(m_read_statements->memory_alloc_count(),
                   m_read_statements->memory_alloc_count_time_filtered());
     return counts;
+}
+
+namespace
+{
+// Fold the per-name-id GROUP BY rows into one event_summary_t per distinct DISPLAY name.
+// resolve_name maps a raw name id to the display string using the same utilities/fallback
+// the interval path uses; rows whose ids resolve to the same string are merged (multiple
+// kernel_symbol ids can share a display_name), so the result is truly one row per name.
+// avg = total/count; the list is sorted by name for deterministic consumers/tests.
+template <typename ResolveFn>
+reader_types::event_summary_list_t
+fold_summary_rows(const std::vector<data_storage::summary_result>& rows,
+                  ResolveFn                                        resolve_name)
+{
+    std::map<std::string, reader_types::event_summary_t> by_name;
+    for(const auto& r : rows)
+    {
+        if(r.count == 0) continue;
+        std::string name =
+            r.name_ref.has_value() ? resolve_name(r.name_ref.value()) : std::string{};
+        auto it = by_name.find(name);
+        if(it == by_name.end())
+        {
+            reader_types::event_summary_t s;
+            s.name           = name;
+            s.count          = r.count;
+            s.total_duration = r.total_duration;
+            s.min_duration   = r.min_duration;
+            s.max_duration   = r.max_duration;
+            by_name.emplace(std::move(name), s);
+        }
+        else
+        {
+            auto& s = it->second;
+            s.count += r.count;
+            s.total_duration += r.total_duration;
+            s.min_duration = std::min(s.min_duration, r.min_duration);
+            s.max_duration = std::max(s.max_duration, r.max_duration);
+        }
+    }
+
+    reader_types::event_summary_list_t out;
+    out.reserve(by_name.size());
+    for(auto& [name, s] : by_name)
+    {
+        s.avg_duration = s.count > 0 ? s.total_duration / s.count : 0;
+        out.push_back(std::move(s));
+    }
+    return out;
+}
+}  // namespace
+
+reader_types::event_summary_list_t
+reader_t::impl::get_kernel_summary(const reader_types::time_window_t& window)
+{
+    const bool has_time = window.start.has_value() && window.end.has_value();
+    auto       rows     = has_time ? m_read_statements
+                               ->kernel_summary_time_filtered()(window.end.value(),
+                                                                window.start.value())
+                               .to_vector()
+                                   : m_read_statements->kernel_summary()().to_vector();
+
+    return fold_summary_rows(rows, [&](size_t id) -> std::string {
+        auto kit = m_kernel_symbol_info_utility.find(id);
+        if(kit != m_kernel_symbol_info_utility.end() && kit->second)
+        {
+            return !kit->second->display_name.empty() ? kit->second->display_name
+                                                      : kit->second->name;
+        }
+        return {};
+    });
+}
+
+reader_types::event_summary_list_t
+reader_t::impl::get_region_summary(const reader_types::time_window_t& window)
+{
+    const bool has_time = window.start.has_value() && window.end.has_value();
+    auto       rows     = has_time ? m_read_statements
+                               ->region_summary_time_filtered()(window.end.value(),
+                                                                window.start.value())
+                               .to_vector()
+                                   : m_read_statements->region_summary()().to_vector();
+
+    return fold_summary_rows(rows, [&](size_t id) -> std::string {
+        auto sit = m_string_info_utility.find(id);
+        return sit != m_string_info_utility.end() ? sit->second : std::string{};
+    });
 }
 
 // ============================================================================

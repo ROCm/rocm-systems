@@ -193,15 +193,13 @@ reader_t::get_correlated_events(const reader_types::timeline_event_t& event) con
 reader_types::event_summary_list_t
 reader_t::get_kernel_summary(const reader_types::time_window_t& window) const
 {
-    (void) window;
-    return {};
+    return m_impl->get_kernel_summary(window);
 }
 
 reader_types::event_summary_list_t
 reader_t::get_region_summary(const reader_types::time_window_t& window) const
 {
-    (void) window;
-    return {};
+    return m_impl->get_region_summary(window);
 }
 
 reader_types::time_window_t

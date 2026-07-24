@@ -77,6 +77,7 @@ struct read_statements : public read_statements_base
         initialize_correlated_event_statements();
         initialize_detail_statements();
         initialize_time_range_statements();
+        initialize_summary_statements();
     }
     read_statements()                                  = delete;
     read_statements(const read_statements&)            = delete;
@@ -411,6 +412,25 @@ struct read_statements : public read_statements_base
     [[nodiscard]] const time_range_func_t& memory_alloc_time_range() const override
     {
         return m_memory_alloc_time_range;
+    }
+
+    [[nodiscard]] const summary_func_t& kernel_summary() const override
+    {
+        return m_kernel_summary;
+    }
+    [[nodiscard]] const summary_time_filtered_func_t& kernel_summary_time_filtered()
+        const override
+    {
+        return m_kernel_summary_time_filtered;
+    }
+    [[nodiscard]] const summary_func_t& region_summary() const override
+    {
+        return m_region_summary;
+    }
+    [[nodiscard]] const summary_time_filtered_func_t& region_summary_time_filtered()
+        const override
+    {
+        return m_region_summary_time_filtered;
     }
 
 private:
@@ -1365,6 +1385,61 @@ private:
         m_memory_alloc_time_range    = make_time_range_stmt("rocpd_memory_allocate");
     }
 
+    // GROUP-BY-name aggregates (v4.0). Duration is (ts_e.value - ts_s.value) via the
+    // rocpd_timestamp spine reached through start_id/end_id; grouped by name_col
+    // (kernel_id for kernels, name_id for regions). The time-filtered variant keeps
+    // events overlapping [start,end] (bind order end,start).
+    void initialize_summary_statements()
+    {
+        const auto& u = m_uuid;
+
+        auto make_summary_stmt = [&](const std::string& table,
+                                     const std::string& name_col) {
+            return m_backend->create_read_statement_executor<summary_result>(
+                fmt::format("SELECT T.{col}, COUNT(*), "
+                            "SUM(ts_e.value - ts_s.value), MIN(ts_e.value - ts_s.value), "
+                            "MAX(ts_e.value - ts_s.value) FROM {tbl}_{u} T "
+                            "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = T.start_id "
+                            "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = T.end_id "
+                            "GROUP BY T.{col}",
+                            fmt::arg("col", name_col),
+                            fmt::arg("tbl", table),
+                            fmt::arg("u", u)),
+                &summary_result::name_ref,
+                &summary_result::count,
+                &summary_result::total_duration,
+                &summary_result::min_duration,
+                &summary_result::max_duration);
+        };
+        auto make_summary_time_filtered_stmt = [&](const std::string& table,
+                                                   const std::string& name_col) {
+            return m_backend->create_read_statement_executor<summary_result,
+                                                             bind_types<size_t, size_t>>(
+                fmt::format("SELECT T.{col}, COUNT(*), "
+                            "SUM(ts_e.value - ts_s.value), MIN(ts_e.value - ts_s.value), "
+                            "MAX(ts_e.value - ts_s.value) FROM {tbl}_{u} T "
+                            "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = T.start_id "
+                            "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = T.end_id "
+                            "WHERE ts_s.value <= ? AND ts_e.value >= ? "
+                            "GROUP BY T.{col}",
+                            fmt::arg("col", name_col),
+                            fmt::arg("tbl", table),
+                            fmt::arg("u", u)),
+                &summary_result::name_ref,
+                &summary_result::count,
+                &summary_result::total_duration,
+                &summary_result::min_duration,
+                &summary_result::max_duration);
+        };
+
+        m_kernel_summary = make_summary_stmt("rocpd_kernel_dispatch", "kernel_id");
+        m_kernel_summary_time_filtered =
+            make_summary_time_filtered_stmt("rocpd_kernel_dispatch", "kernel_id");
+        m_region_summary = make_summary_stmt("rocpd_region", "name_id");
+        m_region_summary_time_filtered =
+            make_summary_time_filtered_stmt("rocpd_region", "name_id");
+    }
+
     // Parse a JSONB array-of-strings column (rocpd_info_source_code.lines /
     // .instructions) into a vector<string>. Matches v3 deserialize_source_context:
     // only string elements are kept; malformed JSON yields an empty vector.
@@ -1853,6 +1928,11 @@ private:
     time_range_func_t m_kernel_dispatch_time_range;
     time_range_func_t m_memory_copy_time_range;
     time_range_func_t m_memory_alloc_time_range;
+
+    summary_func_t               m_kernel_summary;
+    summary_time_filtered_func_t m_kernel_summary_time_filtered;
+    summary_func_t               m_region_summary;
+    summary_time_filtered_func_t m_region_summary_time_filtered;
 };
 
 }  // namespace profiler_hub::data_storage::schema_v4

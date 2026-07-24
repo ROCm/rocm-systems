@@ -175,6 +175,12 @@ struct reader_t::impl
     [[nodiscard]] reader_types::event_counts_t get_event_counts(
         const reader_types::time_window_t& window);
 
+    // Aggregate (GROUP BY name) summaries
+    [[nodiscard]] reader_types::event_summary_list_t get_kernel_summary(
+        const reader_types::time_window_t& window);
+    [[nodiscard]] reader_types::event_summary_list_t get_region_summary(
+        const reader_types::time_window_t& window);
+
 private:
     void initialize_string_list();
     void initialize_all_info_lists();

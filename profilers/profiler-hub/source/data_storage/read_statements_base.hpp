@@ -344,6 +344,20 @@ struct time_range_result
     std::optional<size_t> max_end;
 };
 
+/// One GROUP-BY-name aggregate row for get_kernel_summary / get_region_summary.
+/// name_ref is the raw name id (kernel_symbol id for kernels, rocpd_string id for
+/// regions) which the reader resolves to a display name; nullopt when the grouped
+/// name id is NULL. Durations are (end - start) aggregates over the group; avg is
+/// computed by the reader from total/count.
+struct summary_result
+{
+    std::optional<size_t> name_ref;
+    size_t                count{};
+    size_t                total_duration{};
+    size_t                min_duration{};
+    size_t                max_duration{};
+};
+
 // ----- Track-scoped query result structs (interval / scalar / flow) -----
 
 /// One interval row on a track. name_ref is a string id for region/memory_copy
@@ -610,6 +624,9 @@ struct read_statements_base
         std::function<sqlite_backend::result_set<count_result>(size_t, size_t)>;
     using time_range_func_t =
         std::function<sqlite_backend::result_set<time_range_result>()>;
+    using summary_func_t = std::function<sqlite_backend::result_set<summary_result>()>;
+    using summary_time_filtered_func_t =
+        std::function<sqlite_backend::result_set<summary_result>(size_t, size_t)>;
 
     using correlated_event_func_t =
         std::function<sqlite_backend::result_set<timeline_event_result>(size_t, size_t)>;
@@ -900,6 +917,31 @@ struct read_statements_base
     [[nodiscard]] virtual const time_range_func_t& memory_alloc_time_range() const
     {
         static const time_range_func_t e{};
+        return e;
+    }
+
+    // GROUP-BY-name aggregates for get_kernel_summary / get_region_summary. Both
+    // backends override; the default static-empty function is never called.
+    [[nodiscard]] virtual const summary_func_t& kernel_summary() const
+    {
+        static const summary_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const summary_time_filtered_func_t&
+    kernel_summary_time_filtered() const
+    {
+        static const summary_time_filtered_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const summary_func_t& region_summary() const
+    {
+        static const summary_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const summary_time_filtered_func_t&
+    region_summary_time_filtered() const
+    {
+        static const summary_time_filtered_func_t e{};
         return e;
     }
 
