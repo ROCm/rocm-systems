@@ -33,7 +33,8 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         __threadfence_system();
       }
 
-      if (hasWins) {
+      // Skip zero-length RDMA writes (0-byte put_nbi can stall quiet()/flush() -> deadlock); signal still delivered, matching native rocSHMEM/PROXY.
+      if (hasWins && bytes != 0) {
         ncclGinRocshmemGdaMemHandle* dstMh = (ncclGinRocshmemGdaMemHandle*)dstWin;
         ncclGinRocshmemGdaMemHandle* srcMh = (ncclGinRocshmemGdaMemHandle*)srcWin;
 
@@ -50,7 +51,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         uintptr_t sigAddr =
           loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_add((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/false);
+        qp->atomic_nofetch((void*)sigAddr, sigRkey, (int64_t)signalOpArg, /*cond=*/0, wf_info);
       } else if (hasCounter) {
         qp->quiet(wf_info);
       }
@@ -97,7 +98,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         uintptr_t sigAddr =
           loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_add((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/false);
+        qp->atomic_nofetch((void*)sigAddr, sigRkey, (int64_t)signalOpArg, /*cond=*/0, wf_info);
       }
     }
     coop.sync();

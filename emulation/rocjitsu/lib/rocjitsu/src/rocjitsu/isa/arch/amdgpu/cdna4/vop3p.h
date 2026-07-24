@@ -376,7 +376,7 @@ public:
 
 class VMfmaF3216x16x128F8f6f4Vop3pMfma : public Vop3pMfma {
 public:
-  VMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *inst);
+  VMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *inst, bool has_vop3px2_prefix = false);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
@@ -387,7 +387,7 @@ public:
 
 class VMfmaF3232x32x64F8f6f4Vop3pMfma : public Vop3pMfma {
 public:
-  VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *inst);
+  VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *inst, bool has_vop3px2_prefix = false);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;

@@ -28,6 +28,8 @@
 #include "context.hpp"
 #include "team.hpp"
 #include "queue_pair.hpp"
+#include "constmem.hpp"
+#include "gda/gda_symm_table.hpp"
 
 namespace rocshmem {
 
@@ -48,7 +50,7 @@ class GDAContext : public Context {
   __device__ void putmem_nbi(void *dest, const void *source, size_t nelems,
                              int pe);
 
-  __device__ void getmem_nbi(void *dest, const void *source, size_t size,
+  __device__ void getmem_nbi(void *dest, const void *source, size_t nelems,
                              int pe);
 
   __device__ void fence();
@@ -142,25 +144,28 @@ class GDAContext : public Context {
 
   // Collectives
   template <typename T, ROCSHMEM_OP Op>
-  __device__ int reduce(rocshmem_team_t team, T *dest, const T *source, int nreduce);
+  __device__ int reduce_wg(rocshmem_team_t team, T *dest, const T *source, int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_scatter_wg(rocshmem_team_t team, T *dest, const T *source,
                                    int nreduce);
 
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_wave(rocshmem_team_t team, T *dest, const T *source, int nreduce);
+
   template <typename T>
   __device__ void broadcast_wg(rocshmem_team_t team, T *dest, const T *source,
                             int nelems, int pe_root);
 
-  __device__ void broadcastmem_wg(rocshmem_team_t team, void *dest, const void* source, 
-                                  int nelement, int PE_root);
+  __device__ void broadcastmem_wg(rocshmem_team_t team, void *dest, const void* source,
+                                  int nelems, int PE_root);
 
   template <typename T>
   __device__ int broadcast_wave(rocshmem_team_t team,
-                                T *dest, const T* source, int nelement, int PE_root);
+                                T *dest, const T* source, int nelems, int PE_root);
 
   __device__ int broadcastmem_wave(rocshmem_team_t team,
-                                void *dest, const void* source, int nelement, int PE_root);
+                                void *dest, const void* source, int nelems, int PE_root);
 
   template <typename T>
   __device__ void alltoall_wg(rocshmem_team_t team, T *dest, const T *source,
@@ -221,7 +226,7 @@ class GDAContext : public Context {
   __device__ void putmem_nbi_wg(void *dest, const void *source, size_t nelems,
                                 int pe);
 
-  __device__ void getmem_nbi_wg(void *dest, const void *source, size_t size,
+  __device__ void getmem_nbi_wg(void *dest, const void *source, size_t nelems,
                                 int pe);
 
   __device__ void putmem_wave(void *dest, const void *source, size_t nelems,
@@ -233,7 +238,7 @@ class GDAContext : public Context {
   __device__ void putmem_nbi_wave(void *dest, const void *source, size_t nelems,
                                   int pe);
 
-  __device__ void getmem_nbi_wave(void *dest, const void *source, size_t size,
+  __device__ void getmem_nbi_wave(void *dest, const void *source, size_t nelems,
                                   int pe);
 
   template <typename T>
@@ -361,11 +366,20 @@ class GDAContext : public Context {
       int n_pes, int64_t *pSync, ActiveWFInfo &wf_info);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ void internal_direct_allreduce(T *dst, const T *src, int nelems,
+  __device__ void internal_direct_allreduce_wg(T *dst, const T *src, int nelems,
       GDATeam *team_obj, ActiveWFInfo &wf_info);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ void internal_ring_allreduce(T *dst, const T *src, int nelems,
+  __device__ void internal_direct_allreduce_wave(T *dst, const T *src, int nelems,
+      GDATeam *team_obj, ActiveWFInfo &wf_info);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_ring_allreduce_wg(T *dst, const T *src, int nelems,
+      GDATeam *team_obj, int n_seg, int seg_size, int chunk_size,
+      ActiveWFInfo &wf_info);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_ring_allreduce_wave(T *dst, const T *src, int nelems,
       GDATeam *team_obj, int n_seg, int seg_size, int chunk_size,
       ActiveWFInfo &wf_info);
 
@@ -424,6 +438,20 @@ class GDAContext : public Context {
    * @brief Get the Queue Pair index to use for a given PE
    */
   __device__ __forceinline__ uint32_t get_qp_index(int pe, ActiveWFInfo wf_info);
+
+  /**
+   * @brief Resolve the node-local peer pointer for a symmetric address.
+   *
+   * Delegates to the shared IpcImpl::ipcPeerPtr resolver, indexed by this PE's
+   * shm rank and the node-local peer index (as returned by isIpcAvailable).
+   * Handles both heap objects and IPC-registered user buffers; returns nullptr
+   * when the address is not reachable over IPC (e.g. an NIC-only registered
+   * buffer or IPC disabled), so callers fall back to the NIC path.
+   */
+  __device__ __forceinline__ char *ipc_peer_ptr(const void *sym_addr,
+                                                 int local_pe) {
+    return ipcImpl_.ipcPeerPtr(sym_addr, ipcImpl_.shm_rank, local_pe);
+  }
 
   //Temporary scratchpad memory used by internal barrier algorithms.
   int64_t *barrier_sync{nullptr};

@@ -229,9 +229,11 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if (has_lit64())
+  if (hasImpliedLiteral())
+    size_ += impliedLiteralWordCount() * sizeof(MachineInst);
+  else if (has_lit64() || hasImpliedLiteral64())
     size_ += 2 * sizeof(MachineInst);
-  else if (!default_encoding() || hasImpliedLiteral())
+  else if (!default_encoding())
     size_ += sizeof(MachineInst);
   if (hasImpliedLiteral())
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
@@ -267,6 +269,18 @@ bool Vop2::has_dpp16() { return (inst_.src0 == 250); }
 bool Vop2::hasImpliedLiteral() {
   return inst_.op == 35 || inst_.op == 36 || inst_.op == 44 || inst_.op == 45 || inst_.op == 55 ||
          inst_.op == 56;
+}
+
+bool Vop2::hasImpliedLiteral64() { return inst_.op == 35 || inst_.op == 36; }
+
+uint32_t Vop2::impliedLiteralWordCount() {
+  return inst_.op == 35   ? 2
+         : inst_.op == 36 ? 2
+         : inst_.op == 44 ? 1
+         : inst_.op == 45 ? 1
+         : inst_.op == 55 ? 1
+         : inst_.op == 56 ? 1
+                          : 0;
 }
 
 Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn)

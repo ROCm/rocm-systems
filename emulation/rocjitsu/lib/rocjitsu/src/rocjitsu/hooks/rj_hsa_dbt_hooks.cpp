@@ -22,16 +22,25 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
+#include "rocjitsu/code/dbt/virtual_lds.h"
+#include "rocjitsu/code/patch/kernarg_extension.h"
+#include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/hooks/sidecar_registry.h"
+#include "rocjitsu/hooks/virtual_lds.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "util/arena_alloc.h"
 #include "util/intrusive_list.h"
 #include "util/log.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <condition_variable>
 #include <cstdarg>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -39,24 +48,35 @@
 #include <exception>
 #include <execinfo.h>
 #include <fcntl.h>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <optional>
+#include <set>
 #include <shared_mutex>
 #include <signal.h>
 #include <span>
 #include <string>
 #include <string_view>
+#include <sys/stat.h>
+#include <thread>
 #include <unistd.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
+RJ_DIAGNOSTIC_POP
+
 namespace {
 
 using rocjitsu::AmdGpuCodeObject;
 using rocjitsu::arch_for_elf_mach;
+using rocjitsu::arch_lds_bytes;
 using rocjitsu::BinaryTranslator;
 using rocjitsu::BinaryTranslatorOptions;
 using rocjitsu::DiagnosticKind;
@@ -68,12 +88,47 @@ using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1201;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950;
 using rocjitsu::Elf64_Ehdr;
+using rocjitsu::Elf64_Shdr;
 using rocjitsu::elf_mach_for_arch;
 using rocjitsu::elf_mach_name;
 using rocjitsu::ELFCLASS64;
 using rocjitsu::EM_AMDGPU;
 using rocjitsu::has_error_diagnostic;
+using rocjitsu::has_skipped_kernel;
+using rocjitsu::KernargExtensionLayout;
+using rocjitsu::KernargExtensionMetadata;
+using rocjitsu::KernargExtensionPayloadLayout;
+using rocjitsu::KernargExtensionPayloadWrite;
+using rocjitsu::kVirtualLdsFlagRuntimeStateBlock;
+using rocjitsu::kVirtualLdsFlagWorkgroupIdX;
+using rocjitsu::kVirtualLdsFlagWorkgroupIdY;
+using rocjitsu::kVirtualLdsFlagWorkgroupIdZ;
+using rocjitsu::kVirtualLdsMetadataSectionName;
+using rocjitsu::kVirtualLdsRuntimeStatePayloadName;
+using rocjitsu::make_kernarg_extension_layout;
+using rocjitsu::parse_kernarg_extension_metadata;
+using rocjitsu::parse_virtual_lds_metadata;
+using rocjitsu::plan_virtual_lds_dispatch;
+using rocjitsu::ProcessorRevision;
+using rocjitsu::SHN_UNDEF;
+using rocjitsu::SHT_NULL;
+using rocjitsu::SHT_STRTAB;
 using rocjitsu::TranslationDiagnostic;
+using rocjitsu::VirtualLdsDispatchDecision;
+using rocjitsu::VirtualLdsDispatchGeometry;
+using rocjitsu::VirtualLdsDispatchKernelFacts;
+using rocjitsu::VirtualLdsDispatchPacketFields;
+using rocjitsu::VirtualLdsDispatchState;
+using rocjitsu::write_kernarg_extension_wrapper;
+using rocjitsu::hooks::completed_virtual_lds_dispatch;
+using rocjitsu::hooks::empty_virtual_lds_buffers;
+using rocjitsu::hooks::first_unsupportable_virtual_lds_kernel;
+using rocjitsu::hooks::parse_virtual_lds_hook_metadata;
+using rocjitsu::hooks::record_virtual_lds_completion_signal;
+using rocjitsu::hooks::release_virtual_lds_buffers;
+using rocjitsu::hooks::VirtualLdsDispatchAllocator;
+using rocjitsu::hooks::VirtualLdsDispatchBuffers;
+using rocjitsu::hooks::VirtualLdsRuntimeRegistry;
 
 enum HookLogLevel : int {
   kLogDisabled = 0,
@@ -129,6 +184,20 @@ static_assert(api_table_field_end_offset(offsetof(AmdExtTable, hsa_amd_memory_as
 static_assert(api_table_field_end_offset(offsetof(AmdExtTable, hsa_amd_agent_preload_fn),
                                          &AmdExtTable::hsa_amd_agent_preload_fn) == 656);
 
+/// @brief Number of recent AQL packet IDs rescanned by the polling fallback.
+///
+/// @details HSA's write index can become visible before the packet body is
+/// stable. Rescanning the tail is safe because packet rewriting is idempotent:
+/// an already-rewritten slot is recognized by its rocjitsu-owned kernarg/state
+/// pointers, and old slot allocations are retired behind completion signals
+/// before a reused queue slot receives new buffers. Doorbell-triggered scans
+/// still maintain the contiguous cursor used for the normal HSA signal path.
+constexpr uint64_t kVirtualLdsScannerTailPackets = 512;
+
+/// @brief AMD memory-pool enum values mirrored locally for internal allocation.
+///
+/// @details Keep these constants out of msgpack or YAML metadata paths: runtime
+/// virtual-LDS state is carried by the rocjitsu ELF section and AQL rewrite.
 /// @brief Runtime configuration consumed by the HSA tools hook.
 struct HookConfig {
   TargetInfo target{};
@@ -137,6 +206,11 @@ struct HookConfig {
   uint32_t host_gpu_id = 0;
   int log_level = kLogDisabled;
   bool signal_backtrace = false;
+  /// @brief Guest/host silicon revisions from the DBT guest config. gfx1250 A0 and
+  /// B0 share an ELF machine ID, so the revision cannot be inferred from the code
+  /// object; it selects the B0->A0 workaround direction for same-target loads.
+  ProcessorRevision guest_revision = ProcessorRevision::Unspecified;
+  ProcessorRevision host_revision = ProcessorRevision::Unspecified;
 };
 
 /// @brief Parse a config ISA name or architecture alias into a DBT target.
@@ -154,6 +228,20 @@ struct HookConfig {
       return target;
   }
   return std::nullopt;
+}
+
+/// @brief Map a config silicon revision to the DBT translator revision.
+[[nodiscard]] ProcessorRevision
+processor_revision_from_config(rocjitsu::config::DbtSiliconRevision revision) {
+  switch (revision) {
+  case rocjitsu::config::DbtSiliconRevision::Unspecified:
+    return ProcessorRevision::Unspecified;
+  case rocjitsu::config::DbtSiliconRevision::Gfx1250A0:
+    return ProcessorRevision::Gfx1250A0;
+  case rocjitsu::config::DbtSiliconRevision::Gfx1250B0:
+    return ProcessorRevision::Gfx1250B0;
+  }
+  return ProcessorRevision::Unspecified;
 }
 
 /// @brief Clamp a user-provided hook log level to the supported range.
@@ -286,6 +374,8 @@ void restore_signal_backtrace_handlers() {
   config.host_gpu_id = dbt_guest->host.gpu_id;
   config.log_level = clamp_log_level(dbt_guest->log_level);
   config.signal_backtrace = dbt_guest->signal_backtrace;
+  config.guest_revision = processor_revision_from_config(dbt_guest->guest_revision);
+  config.host_revision = processor_revision_from_config(dbt_guest->host_revision);
   return config;
 }
 
@@ -301,6 +391,116 @@ void log_message(int required_level, const char *format, ...) {
   va_end(args);
 
   util::Logger::dbt_hooks(message.data());
+}
+
+/// @brief Return true when public hook logging will emit @p required_level.
+[[nodiscard]] bool log_level_enabled(int required_level) {
+  return g_log_level.load(std::memory_order_relaxed) >= required_level;
+}
+
+/// @brief Return true when public debug logging will include virtual-LDS dispatch traces.
+[[nodiscard]] bool trace_virtual_lds_dispatch_enabled() { return log_level_enabled(kLogDebug); }
+
+/// @brief Emit a virtual-LDS dispatch trace line through public hook logging.
+void trace_virtual_lds_dispatch(const char *format, ...) {
+  if (!trace_virtual_lds_dispatch_enabled())
+    return;
+
+  std::array<char, 512> message{};
+  va_list args;
+  va_start(args, format);
+  std::vsnprintf(message.data(), message.size(), format, args);
+  va_end(args);
+  util::Logger::dbt_hooks(message.data());
+}
+
+[[nodiscard]] bool trace_virtual_lds_kernarg_enabled() { return log_level_enabled(kLogDebug); }
+
+[[nodiscard]] bool trace_virtual_lds_userargs_enabled() { return log_level_enabled(kLogDebug); }
+
+[[nodiscard]] bool host_range_is_readable(uint64_t address, size_t size) {
+  if (address == 0 || size == 0)
+    return false;
+  if (address > std::numeric_limits<uint64_t>::max() - static_cast<uint64_t>(size - 1))
+    return false;
+
+  FILE *maps = std::fopen("/proc/self/maps", "r");
+  if (maps == nullptr)
+    return false;
+
+  const uint64_t end = address + static_cast<uint64_t>(size);
+  char line[512];
+  while (std::fgets(line, sizeof(line), maps) != nullptr) {
+    unsigned long long start = 0;
+    unsigned long long stop = 0;
+    char perms[5] = {};
+    if (std::sscanf(line, "%llx-%llx %4s", &start, &stop, perms) != 3)
+      continue;
+    if (perms[0] != 'r')
+      continue;
+    if (address >= start && end <= stop) {
+      std::fclose(maps);
+      return true;
+    }
+  }
+
+  std::fclose(maps);
+  return false;
+}
+
+void trace_virtual_lds_userargs_pointer(uint64_t packet_id, uint32_t offset, uint64_t pointer) {
+  constexpr size_t kUserArgsTraceBytes = 128;
+  if (!trace_virtual_lds_userargs_enabled())
+    return;
+
+  if (!host_range_is_readable(pointer, kUserArgsTraceBytes)) {
+    std::fprintf(stderr,
+                 "[rocjitsu-vlds-userargs] packet=%llu kernarg_off=%u ptr=0x%llx unreadable\n",
+                 static_cast<unsigned long long>(packet_id), offset,
+                 static_cast<unsigned long long>(pointer));
+    return;
+  }
+
+  std::fprintf(stderr, "[rocjitsu-vlds-userargs] packet=%llu kernarg_off=%u ptr=0x%llx bytes=",
+               static_cast<unsigned long long>(packet_id), offset,
+               static_cast<unsigned long long>(pointer));
+  const auto *bytes = reinterpret_cast<const uint8_t *>(pointer);
+  for (size_t i = 0; i < kUserArgsTraceBytes; ++i)
+    std::fprintf(stderr, "%02x", bytes[i]);
+  std::fprintf(stderr, "\n");
+}
+
+void trace_virtual_lds_kernarg(uint64_t packet_id, const void *kernarg, size_t size) {
+  if (!trace_virtual_lds_kernarg_enabled())
+    return;
+
+  constexpr size_t kMaxTraceBytes = 96;
+  const size_t trace_bytes = std::min(size, kMaxTraceBytes);
+  std::fprintf(stderr, "[rocjitsu-vlds-kernarg] packet=%llu size=%zu bytes=",
+               static_cast<unsigned long long>(packet_id), size);
+  const auto *bytes = static_cast<const uint8_t *>(kernarg);
+  for (size_t i = 0; i < trace_bytes; ++i)
+    std::fprintf(stderr, "%02x", bytes[i]);
+  if (trace_bytes != size)
+    std::fprintf(stderr, "...");
+  std::fprintf(stderr, "\n");
+
+  // Tensile UserArgs kernels commonly pass a host-side argument block pointer
+  // in the tail of the kernarg preload window. Dump the pointed-to block only
+  // when explicitly requested and only for mapped readable host addresses.
+  if (trace_virtual_lds_userargs_enabled()) {
+    uint64_t previous_pointer = 0;
+    for (uint32_t offset = 0; offset + sizeof(uint64_t) <= size; offset += sizeof(uint32_t)) {
+      uint64_t pointer = 0;
+      std::memcpy(&pointer, bytes + offset, sizeof(pointer));
+      if (pointer == 0 || pointer == previous_pointer)
+        continue;
+      if (pointer < (uint64_t{1} << 32u))
+        continue;
+      trace_virtual_lds_userargs_pointer(packet_id, offset, pointer);
+      previous_pointer = pointer;
+    }
+  }
 }
 
 /// @brief Return a compact architecture-family name for diagnostics.
@@ -345,6 +545,8 @@ void log_message(int required_level, const char *format, ...) {
     return "expand-failed";
   case DiagnosticKind::ResourceLimit:
     return "resource-limit";
+  case DiagnosticKind::KernelSkipped:
+    return "kernel-skipped";
   }
   return "unknown";
 }
@@ -367,7 +569,8 @@ void print_diagnostic(FILE *stream, const TranslationDiagnostic &diagnostic) {
 void print_diagnostics(FILE *stream, std::span<const TranslationDiagnostic> diagnostics,
                        bool include_warnings) {
   for (const TranslationDiagnostic &diagnostic : diagnostics) {
-    if (diagnostic.severity == DiagnosticSeverity::Error || include_warnings)
+    if (diagnostic.severity == DiagnosticSeverity::Error || include_warnings ||
+        diagnostic.kind == DiagnosticKind::KernelSkipped)
       print_diagnostic(stream, diagnostic);
   }
 }
@@ -619,6 +822,15 @@ hsa_status_t HSA_API rj_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue
 /// @brief Forward destruction for queues returned by guest queue creation.
 hsa_status_t HSA_API rj_queue_destroy(hsa_queue_t *queue);
 
+/// @brief Detach virtual-LDS buffers before destroying an application-owned signal.
+hsa_status_t HSA_API rj_signal_destroy(hsa_signal_t signal);
+
+/// @brief Rewrite queued dispatch packets before forwarding a relaxed doorbell store.
+void HSA_API rj_signal_store_relaxed(hsa_signal_t signal, hsa_signal_value_t value);
+
+/// @brief Rewrite queued dispatch packets before forwarding a release doorbell store.
+void HSA_API rj_signal_store_screlease(hsa_signal_t signal, hsa_signal_value_t value);
+
 /// @brief Return host memory regions for guest region iteration.
 hsa_status_t HSA_API rj_agent_iterate_regions(
     hsa_agent_t agent, hsa_status_t (*callback)(hsa_region_t region, void *data), void *data);
@@ -642,6 +854,11 @@ hsa_status_t HSA_API rj_executable_get_symbol_by_name(hsa_executable_t executabl
                                                       const hsa_agent_t *agent,
                                                       hsa_executable_symbol_t *symbol);
 
+/// @brief Observe loaded kernel-object addresses for virtual-LDS dispatch metadata.
+hsa_status_t HSA_API rj_executable_symbol_get_info(hsa_executable_symbol_t executable_symbol,
+                                                   hsa_executable_symbol_info_t attribute,
+                                                   void *value);
+
 /// @brief Define executable globals against the host load agent.
 hsa_status_t HSA_API rj_executable_agent_global_variable_define(hsa_executable_t executable,
                                                                 hsa_agent_t agent,
@@ -653,6 +870,11 @@ hsa_status_t HSA_API rj_executable_iterate_agent_symbols(
     hsa_executable_t executable, hsa_agent_t agent,
     hsa_status_t (*callback)(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t, void *),
     void *data);
+
+/// @brief Wrap the deprecated agentless symbol iterator to record symbol names.
+hsa_status_t HSA_API rj_executable_iterate_symbols(
+    hsa_executable_t executable,
+    hsa_status_t (*callback)(hsa_executable_t, hsa_executable_symbol_t, void *), void *data);
 
 /// @brief Enumerate guest memory pools for public guest-agent discovery.
 hsa_status_t HSA_API rj_amd_agent_iterate_memory_pools(
@@ -718,7 +940,7 @@ hsa_status_t HSA_API rj_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa
 /// @brief Query preferred copy engines using mapped host agents.
 hsa_status_t HSA_API rj_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent,
                                                              hsa_agent_t src_agent,
-                                                             hsa_amd_sdma_engine_id_t *engine_id);
+                                                             uint32_t *engine_ids_mask);
 
 /// @brief Map agent arrays before locking host memory for GPU access.
 hsa_status_t HSA_API rj_amd_memory_lock(void *host_ptr, size_t size, hsa_agent_t *agents,
@@ -763,11 +985,20 @@ hsa_status_t HSA_API rj_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op
 /// @brief Preload runtime state on the real host agent.
 hsa_status_t HSA_API rj_amd_agent_preload(hsa_agent_t agent, uint64_t flags);
 
+/// @brief Create and track AMD queue-intercept queues on the real host agent.
+hsa_status_t HSA_API rj_amd_queue_intercept_create(
+    hsa_agent_t agent_handle, uint32_t size, hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t status, hsa_queue_t *source, void *data), void *data,
+    uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t **queue);
+
 /// @brief Clear cached guest-to-host memory-pool mappings on HSA unload.
 void clear_memory_pool_mapper();
 
 /// @brief Clear cached guest-to-host agent mapping on HSA unload.
 void clear_agent_mapper();
+
+/// @brief Release virtual-LDS dispatch buffers and drop tracked queue state.
+void clear_virtual_lds_dispatch_queues();
 
 /// @brief Original HSA table entries saved for internal hook queries but not patched.
 ///
@@ -780,7 +1011,16 @@ void clear_agent_mapper();
 /// - `type` is the exact function-pointer type stored in `original_<name>_`.
 #define RJ_HSA_SAVED_ONLY_ENTRIES(X)                                                               \
   X(agent_get_info, core_, true, hsa_agent_get_info_fn, decltype(hsa_agent_get_info) *)            \
-  X(isa_get_info_alt, core_, true, hsa_isa_get_info_alt_fn, decltype(hsa_isa_get_info_alt) *)
+  X(isa_get_info_alt, core_, true, hsa_isa_get_info_alt_fn, decltype(hsa_isa_get_info_alt) *)      \
+  X(queue_load_write_index_relaxed, core_, true, hsa_queue_load_write_index_relaxed_fn,            \
+    decltype(hsa_queue_load_write_index_relaxed) *)                                                \
+  X(signal_create, core_, true, hsa_signal_create_fn, decltype(hsa_signal_create) *)               \
+  X(signal_load_scacquire, core_, true, hsa_signal_load_scacquire_fn,                              \
+    decltype(hsa_signal_load_scacquire) *)                                                         \
+  X(amd_queue_intercept_register, amd_ext_,                                                        \
+    api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_queue_intercept_register_fn),      \
+                        &AmdExtTable::hsa_amd_queue_intercept_register_fn),                        \
+    hsa_amd_queue_intercept_register_fn, hsa_amd_queue_intercept_register_fn_t)
 
 /// @brief HSA table entries patched by the DBT hook.
 ///
@@ -806,6 +1046,12 @@ void clear_agent_mapper();
     decltype(hsa_queue_create) *)                                                                  \
   X(queue_destroy, core_, true, false, hsa_queue_destroy_fn, rj_queue_destroy,                     \
     decltype(hsa_queue_destroy) *)                                                                 \
+  X(signal_destroy, core_, true, false, hsa_signal_destroy_fn, rj_signal_destroy,                  \
+    decltype(hsa_signal_destroy) *)                                                                \
+  X(signal_store_relaxed, core_, true, true, hsa_signal_store_relaxed_fn, rj_signal_store_relaxed, \
+    decltype(hsa_signal_store_relaxed) *)                                                          \
+  X(signal_store_screlease, core_, true, true, hsa_signal_store_screlease_fn,                      \
+    rj_signal_store_screlease, decltype(hsa_signal_store_screlease) *)                             \
   X(agent_iterate_regions, core_, true, false, hsa_agent_iterate_regions_fn,                       \
     rj_agent_iterate_regions, decltype(hsa_agent_iterate_regions) *)                               \
   X(memory_assign_agent, core_, true, false, hsa_memory_assign_agent_fn, rj_memory_assign_agent,   \
@@ -816,11 +1062,15 @@ void clear_agent_mapper();
     rj_executable_get_symbol, decltype(hsa_executable_get_symbol) *)                               \
   X(executable_get_symbol_by_name, core_, true, false, hsa_executable_get_symbol_by_name_fn,       \
     rj_executable_get_symbol_by_name, decltype(hsa_executable_get_symbol_by_name) *)               \
+  X(executable_symbol_get_info, core_, true, false, hsa_executable_symbol_get_info_fn,             \
+    rj_executable_symbol_get_info, decltype(hsa_executable_symbol_get_info) *)                     \
   X(executable_agent_global_variable_define, core_, true, false,                                   \
     hsa_executable_agent_global_variable_define_fn, rj_executable_agent_global_variable_define,    \
     decltype(hsa_executable_agent_global_variable_define) *)                                       \
   X(executable_iterate_agent_symbols, core_, true, false, hsa_executable_iterate_agent_symbols_fn, \
     rj_executable_iterate_agent_symbols, decltype(hsa_executable_iterate_agent_symbols) *)         \
+  X(executable_iterate_symbols, core_, true, false, hsa_executable_iterate_symbols_fn,             \
+    rj_executable_iterate_symbols, decltype(hsa_executable_iterate_symbols) *)                     \
   X(create_from_file, core_, true, false, hsa_code_object_reader_create_from_file_fn,              \
     rj_code_object_reader_create_from_file, decltype(hsa_code_object_reader_create_from_file) *)   \
   X(create_from_memory, core_, true, false, hsa_code_object_reader_create_from_memory_fn,          \
@@ -895,7 +1145,12 @@ void clear_agent_mapper();
   X(amd_agent_preload, amd_ext_,                                                                   \
     api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_agent_preload_fn),                 \
                         &AmdExtTable::hsa_amd_agent_preload_fn),                                   \
-    true, hsa_amd_agent_preload_fn, rj_amd_agent_preload, hsa_amd_agent_preload_fn_t)
+    true, hsa_amd_agent_preload_fn, rj_amd_agent_preload, hsa_amd_agent_preload_fn_t)              \
+  X(amd_queue_intercept_create, amd_ext_,                                                          \
+    api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_queue_intercept_create_fn),        \
+                        &AmdExtTable::hsa_amd_queue_intercept_create_fn),                          \
+    true, hsa_amd_queue_intercept_create_fn, rj_amd_queue_intercept_create,                        \
+    hsa_amd_queue_intercept_create_fn_t)
 
 /// @brief Process-local HSA API table patch state for the rocjitsu DBT tool.
 ///
@@ -976,6 +1231,11 @@ public:
     CodeObjectReaderRegistry::instance().clear();
     ExecutableAgentRegistry::instance().clear();
     clear_agent_mapper();
+    VirtualLdsRuntimeRegistry::instance().clear();
+    clear_virtual_lds_dispatch_queues();
+    // Drop the installed runtime-API table so a later OnLoad cannot race readers
+    // against stale entry points and post-unload callbacks become no-ops.
+    rocjitsu::hooks::clear_virtual_lds_runtime_api();
     clear_memory_pool_mapper();
     if (!had_state)
       return;
@@ -1633,12 +1893,40 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_file(
 
   const hsa_status_t status = original(file, code_object_reader);
   if (status == HSA_STATUS_SUCCESS && code_object_reader != nullptr) {
-    // File-backed readers do not expose stable ELF bytes through the later
-    // load-agent callback. Hook the create path anyway so users get a direct
-    // warning instead of an unexplained INVALID_ISA pass-through failure.
+    // `hsa_executable_load_agent_code_object` only receives the opaque reader,
+    // not the original file descriptor. Copy the file bytes while we still have
+    // the descriptor so HIP extension modules that use file-backed readers take
+    // the same DBT path as memory-backed framework code objects.
+    struct stat statbuf {};
+    if (file >= 0 && fstat(file, &statbuf) == 0 && statbuf.st_size > 0) {
+      std::shared_ptr<std::vector<uint8_t>> owned;
+      try {
+        owned = std::make_shared<std::vector<uint8_t>>(static_cast<size_t>(statbuf.st_size));
+      } catch (const std::bad_alloc &) {
+        // The HSA tools ABI cannot propagate C++ allocation failures. Fall
+        // through to the existing diagnostic and let ROCR keep the reader.
+      }
+      if (owned) {
+        size_t done = 0;
+        while (done < owned->size()) {
+          const ssize_t read =
+              pread(file, owned->data() + done, owned->size() - done, static_cast<off_t>(done));
+          if (read <= 0)
+            break;
+          done += static_cast<size_t>(read);
+        }
+        if (done == owned->size() &&
+            CodeObjectReaderRegistry::instance().store(*code_object_reader, owned->data(),
+                                                       owned->size(), owned)) {
+          log_message(kLogDebug, "registered file-backed reader=%llu bytes=%zu",
+                      static_cast<unsigned long long>(code_object_reader->handle), owned->size());
+          return status;
+        }
+      }
+    }
     std::fprintf(stderr,
-                 "[rocjitsu-hooks] file-backed code-object reader=%llu is not translated; use "
-                 "hsa_code_object_reader_create_from_memory for DBT hook translation\n",
+                 "[rocjitsu-hooks] file-backed code-object reader=%llu could not be copied for "
+                 "DBT translation\n",
                  static_cast<unsigned long long>(code_object_reader->handle));
   }
   return status;
@@ -1852,6 +2140,888 @@ void map_pointer_info_accessible_agents(uint32_t *num_agents_accessible, hsa_age
   *num_agents_accessible = out_count;
 }
 
+/// @brief Return true when an AQL packet header names a kernel dispatch.
+[[nodiscard]] uint32_t aql_packet_type(uint16_t header) {
+  constexpr uint32_t kPacketTypeMask = (1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u;
+  return (header >> HSA_PACKET_HEADER_TYPE) & kPacketTypeMask;
+}
+
+/// @brief Return true when an AQL packet header names a kernel dispatch.
+[[nodiscard]] bool is_kernel_dispatch_packet(const hsa_kernel_dispatch_packet_t &packet) {
+  return aql_packet_type(packet.header) == HSA_PACKET_TYPE_KERNEL_DISPATCH;
+}
+
+/// @brief Return a copy of @p header with the packet type forced to INVALID.
+///
+/// @details Used only as a transient "not ready" marker while the ring rewrite
+/// mutates a not-yet-doorbelled slot: the header is set to INVALID, the packet
+/// body is edited, then the original header is republished. A command processor
+/// that observes an INVALID slot treats it as "the producer has not finished
+/// writing this packet" and waits (it does NOT skip the slot), so this must only
+/// ever be a transient value that is overwritten before the doorbell is rung.
+/// HSA_PACKET_TYPE_INVALID is 1 (HSA_PACKET_TYPE_VENDOR_SPECIFIC is 0), so this
+/// clears the type field and writes the INVALID code.
+[[nodiscard]] uint16_t make_invalid_packet_header(uint16_t header) {
+  constexpr uint16_t kTypeMask =
+      static_cast<uint16_t>(((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u) << HSA_PACKET_HEADER_TYPE);
+  return static_cast<uint16_t>((header & ~kTypeMask) |
+                               (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE));
+}
+
+/// @brief Queue-doorbell rewrite state for virtual-LDS dispatch selection.
+///
+/// @details This registry remains in the HSA interposition layer because it
+/// coordinates queue creation/destruction, packet-interceptor callbacks,
+/// doorbell hooks, the active RjHsaLayer API table, and runtime tracing. The
+/// reusable allocation and packet-rewrite primitives live in virtual_lds.h/cpp;
+/// moving this class there would make that lower-level module depend on the
+/// process-global hook layer and its callback lifecycle.
+class VirtualLdsDispatchQueueRegistry {
+public:
+  static VirtualLdsDispatchQueueRegistry &instance() {
+    static VirtualLdsDispatchQueueRegistry registry;
+    return registry;
+  }
+
+  /// @brief Track a real host queue returned to the application.
+  void record_queue(hsa_queue_t *queue, hsa_agent_t host_agent,
+                    bool uses_packet_interceptor = false) {
+    if (queue == nullptr || queue->base_address == nullptr || queue->size == 0 ||
+        queue->doorbell_signal.handle == 0 || host_agent.handle == 0) {
+      return;
+    }
+
+    QueueState state;
+    state.queue = queue;
+    state.host_agent = host_agent;
+    state.doorbell_signal = queue->doorbell_signal.handle;
+    if (auto config = layer().config())
+      state.host_lds_bytes = arch_lds_bytes(config->target.arch);
+    // host_agent is the mapped agent: for a guest queue rj_queue_create remapped
+    // the guest agent to the guest's execution host, so a match here means this is
+    // the queue that runs guest work. Only that queue's dispatches are rewritten
+    // and only its oversized-no-metadata launches fail closed; unrelated agents'
+    // queues are tracked for doorbell forwarding but otherwise left untouched.
+    const hsa_agent_t guest_host = AgentMapper::instance().host_for_guest();
+    state.is_guest_queue = guest_host.handle != 0 && host_agent.handle == guest_host.handle;
+    state.uses_packet_interceptor = uses_packet_interceptor;
+    state.slots.resize(queue->size);
+
+    std::lock_guard lock(mutex_);
+    // Intercept queues are rewritten synchronously in the ROCR packet callback.
+    // The polling scanner is only a fallback for non-intercept queues that use
+    // the normal doorbell path; starting it for intercept-only workloads leaves
+    // an unnecessary background reader active during process teardown.
+    if (!uses_packet_interceptor)
+      ensure_scanner_started_locked();
+    const uint64_t queue_key = reinterpret_cast<uintptr_t>(queue);
+    auto old = queues_by_ptr_.find(queue_key);
+    if (old != queues_by_ptr_.end()) {
+      queues_by_doorbell_.erase(old->second.doorbell_signal);
+      release_queue(old->second);
+    }
+    const uint32_t host_lds_bytes = state.host_lds_bytes;
+    queues_by_doorbell_[state.doorbell_signal] = queue_key;
+    queues_by_ptr_[queue_key] = std::move(state);
+    log_message(kLogDebug, "tracked queue=%p doorbell=%llu size=%u host_agent=%llu lds_limit=%u",
+                static_cast<void *>(queue),
+                static_cast<unsigned long long>(queue->doorbell_signal.handle), queue->size,
+                static_cast<unsigned long long>(host_agent.handle), host_lds_bytes);
+    trace_virtual_lds_dispatch(
+        "tracked queue=%p type=%u size=%u doorbell=%llu host_agent=%llu lds_limit=%u "
+        "interceptor=%d "
+        "load_write_index=%d",
+        static_cast<void *>(queue), static_cast<unsigned>(queue->type), queue->size,
+        static_cast<unsigned long long>(queue->doorbell_signal.handle),
+        static_cast<unsigned long long>(host_agent.handle), host_lds_bytes, uses_packet_interceptor,
+        layer().queue_load_write_index_relaxed() != nullptr);
+  }
+
+  /// @brief Release all slot-owned resources for a queue being destroyed.
+  void erase_queue(hsa_queue_t *queue) {
+    if (queue == nullptr)
+      return;
+    std::lock_guard lock(mutex_);
+    const uint64_t queue_key = reinterpret_cast<uintptr_t>(queue);
+    auto it = queues_by_ptr_.find(queue_key);
+    if (it == queues_by_ptr_.end())
+      return;
+    queues_by_doorbell_.erase(it->second.doorbell_signal);
+    release_queue(it->second);
+    queues_by_ptr_.erase(it);
+  }
+
+  /// @brief Stop retaining an application signal immediately before its destruction.
+  ///
+  /// @details The dispatch packet borrows an application-supplied completion
+  /// signal; ownership never transfers to rocjitsu. A conforming application may
+  /// destroy that signal as soon as it observes dispatch completion, before a
+  /// later packet gives us another opportunity to poll it. Detach every matching
+  /// borrowed handle while it is still valid and record completion explicitly.
+  ///
+  /// Scanner slot buffers remain in place until their AQL slot is reused because
+  /// the slot record also prevents the scanner from rewriting a stale completed
+  /// packet. Interceptor buffers are already retired, so reap them immediately.
+  void retire_destroyed_completion_signal(hsa_signal_t signal) {
+    if (signal.handle == 0)
+      return;
+
+    // O(queues x slots) per hsa_signal_destroy. Acceptable because virtual-LDS
+    // dispatches (the only ones that borrow a completion signal) are rare relative
+    // to plain signal churn, and the scan is bounded by the queue ring size. If a
+    // workload ever makes this hot, index borrowed signals by handle so destroy
+    // becomes O(1); today the simpler full sweep keeps the borrow bookkeeping in
+    // one place.
+    std::lock_guard lock(mutex_);
+    for (auto &[queue_key, state] : queues_by_ptr_) {
+      (void)queue_key;
+      for (VirtualLdsDispatchBuffers &buffers : state.slots)
+        mark_destroyed_completion_signal(buffers, signal);
+      for (VirtualLdsDispatchBuffers &buffers : state.retired_buffers)
+        mark_destroyed_completion_signal(buffers, signal);
+      release_completed_retired_buffers(state);
+    }
+  }
+
+  /// @brief Rewrite any kernel dispatch packet made visible by this doorbell.
+  void rewrite_before_doorbell(hsa_signal_t signal, hsa_signal_value_t value) {
+    if (value < 0)
+      return;
+    std::lock_guard lock(mutex_);
+    auto doorbell_it = queues_by_doorbell_.find(signal.handle);
+    static std::atomic<uint32_t> doorbell_trace_count{0};
+    if (doorbell_trace_count.fetch_add(1, std::memory_order_relaxed) < 128) {
+      trace_virtual_lds_dispatch("doorbell signal=%llu value=%lld tracked=%d",
+                                 static_cast<unsigned long long>(signal.handle),
+                                 static_cast<long long>(value),
+                                 doorbell_it != queues_by_doorbell_.end());
+    }
+    if (doorbell_it == queues_by_doorbell_.end())
+      return;
+    auto queue_it = queues_by_ptr_.find(doorbell_it->second);
+    if (queue_it == queues_by_ptr_.end())
+      return;
+
+    QueueState &state = queue_it->second;
+    if (state.queue == nullptr || state.queue->base_address == nullptr || state.queue->size == 0)
+      return;
+    if (state.uses_packet_interceptor)
+      return;
+
+    const uint64_t packet_id = static_cast<uint64_t>(value);
+    // A producer (single- OR multi-producer) can reserve and publish several
+    // consecutive packets and then ring once with the final packet ID. Rewriting
+    // only the doorbell-named packet would let an earlier still-unrewritten
+    // predecessor (e.g. a virtual-LDS dispatch at next_packet_id) reach the CP
+    // unrevised, and advancing next_packet_id past it would make the scanner skip
+    // it too. So rewrite the whole newly-published range [next_packet_id,
+    // packet_id]. note_packet_ready advances the contiguous frontier and remembers
+    // ready-but-non-contiguous successors, so an out-of-order producer that leaves
+    // an unready hole does not advance the cursor past it -- but once the hole
+    // closes the cursor catches up across every already-ready successor instead of
+    // stranding below the ready suffix. The range must fit the ring to bound the
+    // scan.
+    if (packet_id >= state.next_packet_id && packet_id - state.next_packet_id < state.queue->size) {
+      rewrite_packet_range(state, state.next_packet_id, packet_id + 1, true);
+      return;
+    }
+
+    // Doorbell ID below the frontier (a lagging out-of-order ring) or a jump
+    // larger than the ring: rewrite at least the named packet. The background
+    // scanner covers any packets between the frontier and this one.
+    const bool ready = rewrite_packet(state, packet_id);
+    if (ready && packet_id >= state.next_packet_id) {
+      // A jump larger than the ring means the intervening packets have wrapped
+      // (their slots reused), so step the cursor past this packet directly and
+      // discard any now-stale ready_ahead entries below the new frontier rather
+      // than trying to make the cursor contiguous across the wrapped gap.
+      state.next_packet_id = packet_id + 1;
+      state.ready_ahead.erase(state.ready_ahead.begin(),
+                              state.ready_ahead.lower_bound(state.next_packet_id));
+    }
+  }
+
+  /// @brief Release all tracked queues during HSA tool unload.
+  void clear() {
+    // Stop the scanner and hand its jthread to a local, then JOIN WITH NO LOCK
+    // HELD. The scanner thread takes mutex_ inside scan_ready_packets(), and a
+    // concurrent record_queue() holds mutex_ while it waits on
+    // scanner_lifecycle_mutex_ in ensure_scanner_started_locked(). Joining while
+    // holding either mutex_ or scanner_lifecycle_mutex_ would therefore close a
+    // deadlock cycle (clear waits for the scanner to exit, the scanner waits for
+    // mutex_, record_queue holds mutex_ and waits for the lifecycle mutex). Set
+    // stopping_ and request_stop under the lifecycle mutex so record_queue cannot
+    // resurrect the thread, move the handle out, release the lock, then join.
+    std::jthread scanner_to_join;
+    {
+      std::lock_guard lifecycle(scanner_lifecycle_mutex_);
+      stopping_ = true;
+      scanner_.request_stop();
+      scanner_to_join = std::move(scanner_);
+    }
+    if (scanner_to_join.joinable())
+      scanner_to_join.join();
+
+    std::lock_guard lock(mutex_);
+    for (auto &[queue, state] : queues_by_ptr_) {
+      (void)queue;
+      release_queue(state);
+    }
+    queues_by_ptr_.clear();
+    queues_by_doorbell_.clear();
+    VirtualLdsDispatchAllocator::instance().clear();
+    // Allow the scanner to start again if the registry is reused after a clear
+    // (e.g. an in-process reload). Safe under mutex_ because start is gated by
+    // stopping_ under the lifecycle mutex.
+    {
+      std::lock_guard lifecycle(scanner_lifecycle_mutex_);
+      stopping_ = false;
+    }
+  }
+
+  /// @brief Rewrite a contiguous packet batch delivered by ROCR's intercept queue.
+  void rewrite_intercept_packets(hsa_queue_t *queue, const void *pkts, uint64_t pkt_count,
+                                 uint64_t user_pkt_index,
+                                 hsa_amd_queue_intercept_packet_writer_t writer) {
+    if (writer == nullptr || pkts == nullptr || pkt_count == 0)
+      return;
+    static_assert(sizeof(hsa_kernel_dispatch_packet_t) == 64,
+                  "AQL packets must remain 64 bytes for intercept rewriting");
+
+    std::vector<hsa_kernel_dispatch_packet_t> packets(static_cast<size_t>(pkt_count));
+    std::memcpy(packets.data(), pkts, packets.size() * sizeof(hsa_kernel_dispatch_packet_t));
+
+    {
+      std::lock_guard lock(mutex_);
+      auto queue_it = queues_by_ptr_.find(reinterpret_cast<uintptr_t>(queue));
+      if (queue_it == queues_by_ptr_.end()) {
+        writer(packets.data(), pkt_count);
+        return;
+      }
+
+      QueueState &state = queue_it->second;
+      // Reclaim buffers from earlier intercept dispatches whose completion signal
+      // has fired. The intercept path has no slot bookkeeping and no scanner (the
+      // scanner skips intercept-managed queues), so without a sweep here a queue
+      // that issues virtual-LDS dispatches accumulates retired_buffers until the
+      // queue is destroyed. Sweeping at batch entry bounds retention to "until the
+      // next dispatch on this queue", matching the slot path.
+      release_completed_retired_buffers(state);
+      trace_virtual_lds_dispatch("intercept batch queue=%p begin=%llu count=%llu",
+                                 static_cast<void *>(queue),
+                                 static_cast<unsigned long long>(user_pkt_index),
+                                 static_cast<unsigned long long>(pkt_count));
+      for (uint64_t index = 0; index < pkt_count; ++index) {
+        hsa_kernel_dispatch_packet_t &packet = packets[static_cast<size_t>(index)];
+        if (!is_kernel_dispatch_packet(packet))
+          continue;
+        ensure_intercept_packet_private_size(packet, user_pkt_index + index);
+        const uint64_t packet_id = user_pkt_index + index;
+        auto prepared = prepare_virtual_lds_dispatch(state, packet, packet_id, "intercept");
+        if (!prepared) {
+          // nullopt here means KeepNormal: no virtual-LDS plan or a below-threshold
+          // launch whose normal descriptor is safe. Any sidecar-required dispatch
+          // that could not be prepared aborts inside prepare_virtual_lds_dispatch,
+          // so this never silently submits an oversized normal packet. (Do NOT
+          // publish an INVALID header: the command processor treats INVALID as
+          // "producer has not finished writing this slot" and stalls the queue.)
+          continue;
+        }
+        apply_virtual_lds_dispatch(packet, *prepared);
+        trace_prepared_virtual_lds_dispatch(*prepared, packet_id, "intercept");
+        state.retired_buffers.push_back(std::exchange(prepared->buffers, {}));
+      }
+    }
+
+    writer(packets.data(), pkt_count);
+  }
+
+private:
+  struct QueueState {
+    hsa_queue_t *queue = nullptr;
+    hsa_agent_t host_agent{};
+    uint64_t doorbell_signal = 0;
+    uint64_t next_packet_id = 0;
+    // Packet IDs observed ready at or beyond next_packet_id but not yet contiguous
+    // with the cursor (an out-of-order producer rang a later packet while an
+    // earlier hole was still INVALID). When the hole closes, note_packet_ready
+    // drains the contiguous run from here so the cursor catches up across every
+    // already-ready successor instead of stranding below the ready suffix. Bounded
+    // by the ring size: an id leaves the set as soon as the cursor passes it.
+    std::set<uint64_t> ready_ahead;
+    uint32_t host_lds_bytes = 0;
+    bool uses_packet_interceptor = false;
+    // True only for the queue running guest work on the guest's execution host
+    // agent. host_lds_bytes is derived from the configured host target arch, so
+    // its limit is only meaningful for this queue. Other agents' queues are
+    // tracked (so their doorbell stores still forward) but their dispatches are
+    // never rewritten and an oversized packet on them is the driver's concern.
+    bool is_guest_queue = false;
+    std::vector<VirtualLdsDispatchBuffers> slots;
+    std::vector<VirtualLdsDispatchBuffers> retired_buffers;
+  };
+
+  /// @brief Delivery-independent result of preparing one virtual-LDS dispatch.
+  ///
+  /// @details Packet discovery paths have different publication rules, but the
+  /// sidecar decision, allocation, wrapper construction, and completion lifetime
+  /// are identical. Keeping those decisions here prevents the intercept and ring
+  /// paths from drifting as virtual-LDS metadata evolves.
+  struct PreparedVirtualLdsDispatch {
+    std::string kernel_name;
+    uint64_t original_kernel_object = 0;
+    uint64_t virtual_kernel_object = 0;
+    uint64_t requested_lds = 0;
+    uint32_t original_group_segment_size = 0;
+    uint32_t original_private_segment_size = 0;
+    uint32_t virtual_private_segment_size = 0;
+    VirtualLdsDispatchGeometry geometry;
+    uint64_t state_address = 0;
+    hsa_signal_t completion_signal{};
+    VirtualLdsDispatchBuffers buffers;
+  };
+
+  static void release_queue(QueueState &state) {
+    for (VirtualLdsDispatchBuffers &buffers : state.slots)
+      release_virtual_lds_buffers(buffers);
+    for (VirtualLdsDispatchBuffers &buffers : state.retired_buffers)
+      release_virtual_lds_buffers(buffers);
+    state.retired_buffers.clear();
+  }
+
+  static void release_completed_retired_buffers(QueueState &state) {
+    auto out = state.retired_buffers.begin();
+    for (auto it = state.retired_buffers.begin(); it != state.retired_buffers.end(); ++it) {
+      if (completed_virtual_lds_dispatch(*it)) {
+        release_virtual_lds_buffers(*it);
+        continue;
+      }
+      if (out != it)
+        *out = *it;
+      ++out;
+    }
+    state.retired_buffers.erase(out, state.retired_buffers.end());
+  }
+
+  /// @brief Detach one borrowed completion signal that the application is destroying.
+  static void mark_destroyed_completion_signal(VirtualLdsDispatchBuffers &buffers,
+                                               hsa_signal_t signal) {
+    // Internally-created signals are destroyed only by release_virtual_lds_buffers
+    // through the saved original HSA entry point, so they never enter this hook.
+    // Keep the ownership check explicit in case a handle is exposed unexpectedly.
+    if (buffers.owns_completion_signal || buffers.completion_signal.handle != signal.handle)
+      return;
+
+    buffers.completion_signal = {};
+    buffers.completion_signal_was_pending = false;
+    buffers.completion_signal_destroyed = true;
+  }
+
+  /// @brief Return true when a queue's host architecture has a modeled LDS limit.
+  [[nodiscard]] static bool has_host_lds_limit(const QueueState &state) {
+    return state.host_lds_bytes != 0;
+  }
+
+  /// @brief Return true when @p bytes exceeds the queue host's modeled LDS limit.
+  [[nodiscard]] static bool exceeds_host_lds_limit(const QueueState &state, uint64_t bytes) {
+    return has_host_lds_limit(state) && bytes > state.host_lds_bytes;
+  }
+
+  static void retire_slot_buffers(QueueState &state, uint32_t slot) {
+    VirtualLdsDispatchBuffers &slot_buffers = state.slots[slot];
+    if (empty_virtual_lds_buffers(slot_buffers))
+      return;
+    // AQL queue slots may be reused before the previously dispatched kernel has
+    // retired. Move old virtual-LDS backing allocations to the retired list and
+    // let completion-signal cleanup release them once CP has finished the
+    // dispatch. Signal-less packets remain live until queue destruction.
+    state.retired_buffers.push_back(slot_buffers);
+    slot_buffers = {};
+  }
+
+  static void publish_packet_header(hsa_kernel_dispatch_packet_t &packet, uint16_t header) {
+    std::atomic_ref<uint16_t>(packet.header).store(header, std::memory_order_release);
+  }
+
+  [[nodiscard]] static uint32_t descriptor_private_segment_size(uint64_t kernel_object) {
+    return VirtualLdsRuntimeRegistry::instance().private_segment_size_for_object(kernel_object);
+  }
+
+  static void ensure_intercept_packet_private_size(hsa_kernel_dispatch_packet_t &packet,
+                                                   uint64_t packet_id) {
+    const uint32_t descriptor_private = descriptor_private_segment_size(packet.kernel_object);
+    if (descriptor_private <= packet.private_segment_size)
+      return;
+
+    // Unlike ensure_queue_packet_private_size (the ring path), no INVALID header
+    // toggle is needed here: the intercept path edits a private std::vector copy
+    // that is handed to the CP via writer(...) only after the whole batch is
+    // rewritten, so no consumer can observe a half-written packet. Do not add a
+    // header fence to "match" the ring path.
+    const uint32_t original_private = packet.private_segment_size;
+    packet.private_segment_size = descriptor_private;
+    trace_virtual_lds_dispatch("patched intercept private packet=%llu object=0x%llx private=%u->%u",
+                               static_cast<unsigned long long>(packet_id),
+                               static_cast<unsigned long long>(packet.kernel_object),
+                               original_private, descriptor_private);
+  }
+
+  static void ensure_queue_packet_private_size(hsa_kernel_dispatch_packet_t &packet,
+                                               uint64_t packet_id, uint32_t slot, uint16_t header) {
+    const uint32_t descriptor_private = descriptor_private_segment_size(packet.kernel_object);
+    if (descriptor_private <= packet.private_segment_size)
+      return;
+
+    const uint32_t original_private = packet.private_segment_size;
+    // Mark the slot not-ready (INVALID) while mutating the body, then republish
+    // the original header. Header 0 would be VENDOR_SPECIFIC — a processable
+    // type — so a consumer could act on a half-written packet; INVALID tells the
+    // consumer the producer has not finished. Route every transient header
+    // toggle through make_invalid_packet_header for consistency with the ring
+    // rewrite path.
+    publish_packet_header(packet, make_invalid_packet_header(header));
+    packet.private_segment_size = descriptor_private;
+    publish_packet_header(packet, header);
+    trace_virtual_lds_dispatch(
+        "patched packet private packet=%llu slot=%u object=0x%llx private=%u->%u",
+        static_cast<unsigned long long>(packet_id), slot,
+        static_cast<unsigned long long>(packet.kernel_object), original_private,
+        descriptor_private);
+  }
+
+  static void note_packet_ready(QueueState &state, uint64_t packet_id, bool ready) {
+    // Only packets at or beyond the contiguous cursor can advance it; a ready
+    // packet below it was already accounted for.
+    if (!ready || packet_id < state.next_packet_id)
+      return;
+
+    // Remember this packet as ready even if it is not the one the cursor is
+    // waiting for. An out-of-order producer can ring a later packet while an
+    // earlier hole is still INVALID, so the cursor must be able to catch up across
+    // this successor once the hole closes -- otherwise it strands below the
+    // already-ready suffix and a later doorbell range can skip a packet.
+    if (packet_id != state.next_packet_id) {
+      state.ready_ahead.insert(packet_id);
+      return;
+    }
+
+    // The cursor's packet is ready: advance across it and every contiguous
+    // successor already observed ready in a prior doorbell.
+    ++state.next_packet_id;
+    auto it = state.ready_ahead.begin();
+    while (it != state.ready_ahead.end() && *it == state.next_packet_id) {
+      ++state.next_packet_id;
+      it = state.ready_ahead.erase(it);
+    }
+  }
+
+  [[nodiscard]] static VirtualLdsDispatchState
+  make_virtual_lds_dispatch_state(uint64_t backing_address,
+                                  const VirtualLdsDispatchGeometry &geometry) {
+    return VirtualLdsDispatchState{.backing_base = backing_address,
+                                   .stride_x = geometry.stride_x,
+                                   .stride_y = geometry.stride_y,
+                                   .stride_z = geometry.stride_z};
+  }
+
+  [[nodiscard]] static bool
+  write_virtual_lds_kernarg_wrapper(void *wrapper, const KernargExtensionLayout &layout,
+                                    const hsa_kernel_dispatch_packet_t &packet,
+                                    const VirtualLdsDispatchState &dispatch_state) {
+    if (wrapper == nullptr)
+      return false;
+    const uint64_t original_kernarg_pointer = reinterpret_cast<uintptr_t>(packet.kernarg_address);
+    const KernargExtensionPayloadWrite payload{
+        .data = &dispatch_state,
+        .size = static_cast<uint32_t>(sizeof(dispatch_state)),
+    };
+    return write_kernarg_extension_wrapper(
+        std::span<uint8_t>(static_cast<uint8_t *>(wrapper), layout.wrapper_size), layout,
+        packet.kernarg_address, original_kernarg_pointer, std::span{&payload, 1});
+  }
+
+  /// @brief Abort the process after a virtual-LDS sidecar dispatch cannot be prepared.
+  ///
+  /// @details Once plan_virtual_lds_dispatch selects UseSidecar (or Reject), the
+  /// requested LDS exceeds the host limit, so the normal descriptor is unsafe for
+  /// THIS dispatch even when it is a live (non-stubbed) descriptor -- e.g. a kernel
+  /// whose static LDS fits but whose dynamic (packet) group segment overflows.
+  /// Falling back to the normal descriptor would submit a host-faulting oversized
+  /// launch, and a persistent INVALID header would stall the queue forever. Neither
+  /// is acceptable, and there is no per-dispatch recovery, so fail loudly and stop.
+  [[noreturn]] static void abort_virtual_lds_dispatch(const char *reason, const char *delivery,
+                                                      uint64_t packet_id, const char *kernel_name,
+                                                      uint64_t requested_lds,
+                                                      uint32_t host_lds_bytes) {
+    std::fprintf(stderr,
+                 "[rocjitsu-hooks] fatal: virtual-LDS sidecar dispatch could not be prepared "
+                 "(%s) delivery=%s packet=%llu kernel=%s requested_lds=%llu host_lds=%u; the "
+                 "normal descriptor is oversized for this launch and cannot be dispatched\n",
+                 reason, delivery, static_cast<unsigned long long>(packet_id),
+                 kernel_name ? kernel_name : "<unknown>",
+                 static_cast<unsigned long long>(requested_lds), host_lds_bytes);
+    std::abort();
+  }
+
+  /// @brief Prepare a virtual-LDS rewrite without publishing packet fields.
+  ///
+  /// @details This is the single policy path shared by ROCR intercept batches and
+  /// direct queue scanning. The returned buffers transfer to the delivery adapter,
+  /// which publishes fields using the synchronization required by its packet source.
+  /// A nullopt result means "dispatch the packet on its normal descriptor" and is
+  /// returned ONLY when the normal descriptor is safe: there is no virtual-LDS plan
+  /// and the packet fits the host LDS limit, or the request is below threshold
+  /// (KeepNormal). Any case where the normal descriptor would be oversized -- an
+  /// unregistered kernel whose group segment exceeds the host limit, or a plan that
+  /// selects a sidecar (UseSidecar/Reject) followed by a preparation failure --
+  /// calls abort_virtual_lds_dispatch rather than returning nullopt, so it never
+  /// silently falls back to a host-faulting launch.
+  [[nodiscard]] static std::optional<PreparedVirtualLdsDispatch>
+  prepare_virtual_lds_dispatch(QueueState &state, const hsa_kernel_dispatch_packet_t &packet,
+                               uint64_t packet_id, const char *delivery) {
+    auto resolved =
+        VirtualLdsRuntimeRegistry::instance().find_by_kernel_object(packet.kernel_object);
+    if (!resolved) {
+      // No virtual-LDS variant for this kernel object. On the guest's own queue a
+      // group segment exceeding the host LDS limit has no sidecar to fall back to
+      // and the normal descriptor would fault the host, so fail closed (consistent
+      // with the post-plan paths). host_lds_bytes is derived from the configured
+      // host target arch, so this check is only meaningful for the guest queue; an
+      // unrelated agent with a larger real LDS capacity must keep its packet
+      // unchanged.
+      if (state.is_guest_queue && exceeds_host_lds_limit(state, packet.group_segment_size)) {
+        abort_virtual_lds_dispatch("kernel has no virtual-LDS variant but its group segment "
+                                   "exceeds the host LDS limit",
+                                   delivery, packet_id, "<unregistered>", packet.group_segment_size,
+                                   state.host_lds_bytes);
+      }
+      return std::nullopt;
+    }
+
+    const rocjitsu::hooks::VirtualLdsKernelRuntimeMetadata &metadata = resolved->metadata;
+    const VirtualLdsDispatchPacketFields packet_fields{
+        .group_segment_size = packet.group_segment_size,
+        .private_segment_size = packet.private_segment_size,
+        .workgroup_size_x = packet.workgroup_size_x,
+        .workgroup_size_y = packet.workgroup_size_y,
+        .workgroup_size_z = packet.workgroup_size_z,
+        .grid_size_x = packet.grid_size_x,
+        .grid_size_y = packet.grid_size_y,
+        .grid_size_z = packet.grid_size_z,
+    };
+    const VirtualLdsDispatchKernelFacts kernel_facts{
+        .static_lds_bytes = metadata.static_lds_bytes,
+        .normal_private_segment_size = metadata.normal_private_segment_size,
+        .virtual_private_segment_size = metadata.virtual_private_segment_size,
+        .has_workgroup_id_x = (metadata.flags & kVirtualLdsFlagWorkgroupIdX) != 0,
+        .has_workgroup_id_y = (metadata.flags & kVirtualLdsFlagWorkgroupIdY) != 0,
+        .has_workgroup_id_z = (metadata.flags & kVirtualLdsFlagWorkgroupIdZ) != 0,
+    };
+    const auto rewrite =
+        plan_virtual_lds_dispatch(packet_fields, kernel_facts, state.host_lds_bytes);
+    if (rewrite.decision == VirtualLdsDispatchDecision::KeepNormal) {
+      trace_virtual_lds_dispatch(
+          "virtual-LDS below threshold delivery=%s packet=%llu kernel=%s static=%u "
+          "packet_group=%u requested=%llu",
+          delivery, static_cast<unsigned long long>(packet_id), metadata.kernel_name.c_str(),
+          metadata.static_lds_bytes, packet.group_segment_size,
+          static_cast<unsigned long long>(rewrite.requested_lds));
+      return std::nullopt;
+    }
+    if (rewrite.decision == VirtualLdsDispatchDecision::Reject) {
+      // A dispatch-time-only rejection (per-packet grid geometry overflowing the
+      // runtime-state ABI). The load-time check cannot see packet dimensions, so
+      // this is reachable. The request exceeds the host LDS limit, so the normal
+      // descriptor cannot service this launch either -- abort rather than fault.
+      abort_virtual_lds_dispatch(rewrite.diagnostic.c_str(), delivery, packet_id,
+                                 metadata.kernel_name.c_str(), rewrite.requested_lds,
+                                 state.host_lds_bytes);
+    }
+
+    if ((metadata.flags & kVirtualLdsFlagRuntimeStateBlock) == 0 ||
+        (metadata.kernarg_size != 0 && packet.kernarg_address == nullptr)) {
+      // Sidecar is required (requested LDS exceeds host) but the runtime-state ABI
+      // is missing or the app supplied no kernarg buffer to wrap. These are fixed
+      // per kernel and validated at load, but the null-kernarg case is packet
+      // data; either way the normal descriptor is oversized, so fail closed.
+      abort_virtual_lds_dispatch(
+          (metadata.flags & kVirtualLdsFlagRuntimeStateBlock) == 0
+              ? "kernel lacks the runtime-state-block ABI required for a sidecar dispatch"
+              : "dispatch supplied no kernarg buffer to wrap for the sidecar",
+          delivery, packet_id, metadata.kernel_name.c_str(), rewrite.requested_lds,
+          state.host_lds_bytes);
+    }
+    const KernargExtensionPayloadLayout payload{
+        .size = static_cast<uint32_t>(sizeof(VirtualLdsDispatchState)),
+        .alignment = alignof(uint64_t),
+    };
+    const auto wrapper_layout =
+        make_kernarg_extension_layout(metadata.kernarg_size, std::span{&payload, 1});
+    if (!wrapper_layout || wrapper_layout->payload_offsets.size() != 1 ||
+        wrapper_layout->payload_offsets.front() != metadata.backing_pointer_kernarg_offset) {
+      // The wrapper layout is fixed per kernel and validated at load; a mismatch
+      // here means the descriptor and metadata disagree, so the sidecar cannot be
+      // built and the normal descriptor is oversized for this launch.
+      abort_virtual_lds_dispatch("sidecar kernarg wrapper layout does not match the descriptor",
+                                 delivery, packet_id, metadata.kernel_name.c_str(),
+                                 rewrite.requested_lds, state.host_lds_bytes);
+    }
+
+    release_completed_retired_buffers(state);
+    VirtualLdsDispatchBuffers buffers;
+    if (!VirtualLdsDispatchAllocator::instance().allocate(state.host_agent,
+                                                          rewrite.geometry.backing_bytes,
+                                                          wrapper_layout->wrapper_size, buffers)) {
+      // Backing/kernarg allocation is a genuinely dispatch-time-only failure (OOM
+      // or pool discovery). There is no per-dispatch recovery and the normal
+      // descriptor is oversized, so abort rather than fault the GPU.
+      abort_virtual_lds_dispatch("sidecar backing/kernarg allocation failed", delivery, packet_id,
+                                 metadata.kernel_name.c_str(), rewrite.requested_lds,
+                                 state.host_lds_bytes);
+    }
+
+    const VirtualLdsDispatchState dispatch_state = make_virtual_lds_dispatch_state(
+        reinterpret_cast<uintptr_t>(buffers.backing), rewrite.geometry);
+    if (!write_virtual_lds_kernarg_wrapper(buffers.kernarg, *wrapper_layout, packet,
+                                           dispatch_state)) {
+      release_virtual_lds_buffers(buffers);
+      abort_virtual_lds_dispatch("sidecar kernarg wrapper could not be written", delivery,
+                                 packet_id, metadata.kernel_name.c_str(), rewrite.requested_lds,
+                                 state.host_lds_bytes);
+    }
+    trace_virtual_lds_kernarg(packet_id, buffers.kernarg, metadata.kernarg_size);
+
+    // Completion-signal creation edits the packet. Do it on a private copy so
+    // queue-backed callers can publish every changed field under an invalid header.
+    hsa_kernel_dispatch_packet_t packet_with_signal = packet;
+    buffers.virtual_kernel_object = resolved->virtual_kernel_object;
+    record_virtual_lds_completion_signal(buffers, packet_with_signal);
+
+    return PreparedVirtualLdsDispatch{
+        .kernel_name = metadata.kernel_name,
+        .original_kernel_object = packet.kernel_object,
+        .virtual_kernel_object = resolved->virtual_kernel_object,
+        .requested_lds = rewrite.requested_lds,
+        .original_group_segment_size = packet.group_segment_size,
+        .original_private_segment_size = packet.private_segment_size,
+        .virtual_private_segment_size = rewrite.private_segment_size,
+        .geometry = rewrite.geometry,
+        .state_address = reinterpret_cast<uintptr_t>(static_cast<uint8_t *>(buffers.kernarg) +
+                                                     metadata.backing_pointer_kernarg_offset),
+        .completion_signal = packet_with_signal.completion_signal,
+        .buffers = buffers,
+    };
+  }
+
+  /// @brief Publish the fields owned by virtual-LDS dispatch rewriting.
+  static void apply_virtual_lds_dispatch(hsa_kernel_dispatch_packet_t &packet,
+                                         const PreparedVirtualLdsDispatch &prepared) {
+    packet.kernel_object = prepared.virtual_kernel_object;
+    packet.kernarg_address = prepared.buffers.kernarg;
+    packet.group_segment_size = 0;
+    packet.private_segment_size = prepared.virtual_private_segment_size;
+    packet.completion_signal = prepared.completion_signal;
+  }
+
+  static void trace_prepared_virtual_lds_dispatch(const PreparedVirtualLdsDispatch &prepared,
+                                                  uint64_t packet_id, const char *delivery) {
+    trace_virtual_lds_dispatch(
+        "rewrote delivery=%s packet=%llu kernel=%s original_object=0x%llx virtual_object=0x%llx "
+        "packet_group=%u private=%u->%u requested=%llu groups=%u,%u,%u strides=%u,%u,%u "
+        "backing_bytes=%zu kernarg=%p backing=%p state=0x%llx",
+        delivery, static_cast<unsigned long long>(packet_id), prepared.kernel_name.c_str(),
+        static_cast<unsigned long long>(prepared.original_kernel_object),
+        static_cast<unsigned long long>(prepared.virtual_kernel_object),
+        prepared.original_group_segment_size, prepared.original_private_segment_size,
+        prepared.virtual_private_segment_size,
+        static_cast<unsigned long long>(prepared.requested_lds), prepared.geometry.groups_x,
+        prepared.geometry.groups_y, prepared.geometry.groups_z, prepared.geometry.stride_x,
+        prepared.geometry.stride_y, prepared.geometry.stride_z, prepared.geometry.backing_bytes,
+        prepared.buffers.kernarg, prepared.buffers.backing,
+        static_cast<unsigned long long>(prepared.state_address));
+  }
+
+  static void rewrite_packet_range(QueueState &state, uint64_t begin_packet_id,
+                                   uint64_t end_packet_id, bool advance_contiguous_cursor) {
+    // The HSA queue can contain invalid/no-op holes before later ready dispatches.
+    // Keep scanning the visible range so an oversized-LDS kernel is not missed behind
+    // such a hole, but only advance the contiguous cursor across packets that were
+    // actually ready when observed.
+    for (uint64_t packet_id = begin_packet_id; packet_id < end_packet_id; ++packet_id) {
+      const bool ready = rewrite_packet(state, packet_id);
+      if (advance_contiguous_cursor)
+        note_packet_ready(state, packet_id, ready);
+    }
+  }
+
+  /// @returns true when the packet header is ready and the scanner may advance.
+  static bool rewrite_packet(QueueState &state, uint64_t packet_id) {
+    const uint32_t slot = static_cast<uint32_t>(packet_id % state.queue->size);
+    VirtualLdsDispatchBuffers &slot_buffers = state.slots[slot];
+
+    auto *packets = static_cast<hsa_kernel_dispatch_packet_t *>(state.queue->base_address);
+    hsa_kernel_dispatch_packet_t &packet = packets[slot];
+    const uint16_t header =
+        std::atomic_ref<uint16_t>(packet.header).load(std::memory_order_acquire);
+    const uint32_t type = aql_packet_type(header);
+    if (type == HSA_PACKET_TYPE_INVALID)
+      return false;
+
+    if (!is_kernel_dispatch_packet(packet)) {
+      retire_slot_buffers(state, slot);
+      return true;
+    }
+
+    if (slot_buffers.kernarg != nullptr && packet.kernarg_address == slot_buffers.kernarg)
+      return true;
+
+    retire_slot_buffers(state, slot);
+    ensure_queue_packet_private_size(packet, packet_id, slot, header);
+    auto prepared = prepare_virtual_lds_dispatch(state, packet, packet_id, "queue");
+    if (!prepared) {
+      // nullopt here means KeepNormal: no virtual-LDS plan or a below-threshold
+      // launch whose normal descriptor is safe. Any sidecar-required dispatch that
+      // could not be prepared aborts inside prepare_virtual_lds_dispatch, so this
+      // never silently submits an oversized normal packet. Do NOT publish an
+      // INVALID header: the command processor treats INVALID as "producer has not
+      // finished writing this slot" and stalls the queue permanently.
+      return true;
+    }
+    publish_packet_header(packet, make_invalid_packet_header(header));
+    apply_virtual_lds_dispatch(packet, *prepared);
+    publish_packet_header(packet, header);
+    trace_prepared_virtual_lds_dispatch(*prepared, packet_id, "queue");
+    slot_buffers = std::exchange(prepared->buffers, {});
+    return true;
+  }
+
+  void scan_ready_packets() {
+    auto *load_write_index = layer().queue_load_write_index_relaxed();
+    if (load_write_index == nullptr) {
+      static std::atomic<bool> reported{false};
+      bool expected = false;
+      if (reported.compare_exchange_strong(expected, true, std::memory_order_relaxed))
+        trace_virtual_lds_dispatch("scanner disabled: hsa_queue_load_write_index_relaxed missing");
+      return;
+    }
+
+    std::lock_guard lock(mutex_);
+    for (auto &[queue_key, state] : queues_by_ptr_) {
+      (void)queue_key;
+      if (state.queue == nullptr || state.queue->base_address == nullptr || state.queue->size == 0)
+        continue;
+      if (state.uses_packet_interceptor)
+        continue;
+      const uint64_t write_index = load_write_index(state.queue);
+      if (write_index != 0) {
+        static std::atomic<uint32_t> scan_trace_count{0};
+        if (scan_trace_count.fetch_add(1, std::memory_order_relaxed) < 128) {
+          trace_virtual_lds_dispatch("scan queue=%p next=%llu write=%llu",
+                                     static_cast<void *>(state.queue),
+                                     static_cast<unsigned long long>(state.next_packet_id),
+                                     static_cast<unsigned long long>(write_index));
+        }
+      }
+      // Only rewrite packets the doorbell hook has not already published to the
+      // command processor. rewrite_before_doorbell() advances next_packet_id past
+      // every slot it rewrote BEFORE the original doorbell store makes those slots
+      // visible to the CP; re-touching a slot below next_packet_id here would mutate
+      // (and briefly INVALID-toggle) a packet the CP may already be consuming — a
+      // data race against the consumer. Clamp the scan's lower edge to
+      // next_packet_id so the scanner only ever handles not-yet-doorbelled packets
+      // (the safety-net case where a submission's doorbell was not observed).
+      const uint64_t tail_packets = std::min(write_index, kVirtualLdsScannerTailPackets);
+      const uint64_t scan_begin = std::max(write_index - tail_packets, state.next_packet_id);
+      if (scan_begin >= write_index)
+        continue;
+      rewrite_packet_range(state, scan_begin, write_index, false);
+    }
+  }
+
+  // Called while holding mutex_. Acquires scanner_lifecycle_mutex_ second; clear()
+  // takes the lifecycle mutex WITHOUT mutex_ held, so the two paths share the same
+  // (data-then-lifecycle) nesting order and cannot deadlock. The lifecycle mutex
+  // guards the jthread handle and stopping_ against a concurrent clear() that is
+  // joining the thread.
+  void ensure_scanner_started_locked() {
+    std::lock_guard lifecycle(scanner_lifecycle_mutex_);
+    if (stopping_ || scanner_.joinable())
+      return;
+    scanner_ = std::jthread([this](std::stop_token stop) {
+      using namespace std::chrono_literals;
+      trace_virtual_lds_dispatch("scanner started load_write_index=%d",
+                                 layer().queue_load_write_index_relaxed() != nullptr);
+      while (!stop.stop_requested()) {
+        scan_ready_packets();
+        std::this_thread::sleep_for(25us);
+      }
+    });
+  }
+
+  // Guards the queue maps and the whole doorbell/intercept rewrite path. The HSA
+  // runtime calls made under this lock (memory-pool allocate, agents_allow_access,
+  // signal_create/load in prepare_virtual_lds_dispatch and
+  // record_virtual_lds_completion_signal) are the *saved original* ROCr entry
+  // points captured in set_virtual_lds_runtime_api, NOT the rocjitsu wrappers, so
+  // they cannot re-enter this mutex. Future changes MUST keep routing those calls
+  // through the saved originals; routing them through the wrappers would deadlock.
+  std::mutex mutex_;
+  std::unordered_map<uint64_t, QueueState> queues_by_ptr_;
+  std::unordered_map<uint64_t, uint64_t> queues_by_doorbell_;
+  // Serializes scanner start (ensure_scanner_started_locked) against stop/join
+  // (clear). Separate from mutex_ because clear() must join the scanner thread,
+  // which itself takes mutex_ — joining under mutex_ would deadlock.
+  std::mutex scanner_lifecycle_mutex_;
+  bool stopping_ = false;
+  std::jthread scanner_;
+};
+
+void clear_virtual_lds_dispatch_queues() { VirtualLdsDispatchQueueRegistry::instance().clear(); }
+
+/// @brief ROCR intercept-queue callback that rewrites virtual-LDS packets pre-submit.
+void virtual_lds_packet_interceptor(const void *pkts, uint64_t pkt_count, uint64_t user_pkt_index,
+                                    void *data, hsa_amd_queue_intercept_packet_writer_t writer) {
+  auto *queue = static_cast<hsa_queue_t *>(data);
+  static std::atomic<uint32_t> intercept_trace_count{0};
+  if (intercept_trace_count.fetch_add(1, std::memory_order_relaxed) < 128) {
+    uint16_t first_header = 0;
+    if (pkts != nullptr && pkt_count != 0)
+      std::memcpy(&first_header, pkts, sizeof(first_header));
+    trace_virtual_lds_dispatch(
+        "intercept callback queue=%p packets=%llu user_index=%llu first_header=0x%x",
+        static_cast<void *>(queue), static_cast<unsigned long long>(pkt_count),
+        static_cast<unsigned long long>(user_pkt_index), first_header);
+  }
+  if (queue == nullptr) {
+    if (writer != nullptr)
+      writer(pkts, pkt_count);
+    return;
+  }
+  VirtualLdsDispatchQueueRegistry::instance().rewrite_intercept_packets(queue, pkts, pkt_count,
+                                                                        user_pkt_index, writer);
+}
+
+/// @brief Attach the virtual-LDS packet interceptor to an AMD intercept queue.
+/// @returns true iff the interceptor was successfully registered. Callers must not
+/// record the queue as intercept-managed unless this succeeds — a queue flagged
+/// uses_packet_interceptor is skipped by BOTH the doorbell and scanner rewrite
+/// paths, so a failed registration would silently disable all packet rewriting for
+/// it and every oversized-LDS dispatch would fault.
+[[nodiscard]] bool register_virtual_lds_packet_interceptor(hsa_queue_t *queue) {
+  auto *register_interceptor = layer().amd_queue_intercept_register();
+  if (register_interceptor == nullptr || queue == nullptr)
+    return false;
+  const hsa_status_t status = register_interceptor(queue, virtual_lds_packet_interceptor, queue);
+  if (status != HSA_STATUS_SUCCESS) {
+    log_message(kLogInfo, "failed to register virtual-LDS queue interceptor queue=%p status=%d",
+                static_cast<void *>(queue), static_cast<int>(status));
+    trace_virtual_lds_dispatch("queue interceptor registration failed queue=%p status=%d",
+                               static_cast<void *>(queue), static_cast<int>(status));
+    return false;
+  }
+  return true;
+}
+
 hsa_status_t HSA_API rj_iterate_agents(hsa_status_t (*callback)(hsa_agent_t agent, void *data),
                                        void *data) {
   auto *original = layer().iterate_agents();
@@ -1919,8 +3089,53 @@ hsa_status_t HSA_API rj_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue
   log_message(kLogVerbose, "queue_create agent=%llu mapped=%llu size=%u",
               static_cast<unsigned long long>(agent.handle),
               static_cast<unsigned long long>(mapped.handle), size);
-  return original(mapped, size, type, callback, data, private_segment_size, group_segment_size,
-                  queue);
+
+  hsa_status_t status = HSA_STATUS_ERROR;
+  auto *intercept_create = layer().amd_queue_intercept_create();
+  auto *intercept_register = layer().amd_queue_intercept_register();
+  if (intercept_create != nullptr && intercept_register != nullptr && size >= 3) {
+    status = intercept_create(mapped, size, type, callback, data, private_segment_size,
+                              group_segment_size, queue);
+    if (status == HSA_STATUS_SUCCESS && queue != nullptr) {
+      // Record the queue as intercept-managed ONLY if the interceptor actually
+      // attaches. If registration fails, record it as a normal queue so the
+      // doorbell/scanner rewrite path still services its oversized-LDS dispatches
+      // instead of leaving it silently un-rewritten.
+      const bool intercepting = register_virtual_lds_packet_interceptor(*queue);
+      VirtualLdsDispatchQueueRegistry::instance().record_queue(*queue, mapped, intercepting);
+      return status;
+    }
+    log_message(kLogInfo, "intercept queue_create failed status=%d; falling back",
+                static_cast<int>(status));
+  }
+
+  status =
+      original(mapped, size, type, callback, data, private_segment_size, group_segment_size, queue);
+  if (status == HSA_STATUS_SUCCESS && queue != nullptr)
+    VirtualLdsDispatchQueueRegistry::instance().record_queue(*queue, mapped);
+  return status;
+}
+
+hsa_status_t HSA_API rj_amd_queue_intercept_create(
+    hsa_agent_t agent_handle, uint32_t size, hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t, hsa_queue_t *, void *), void *data,
+    uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t **queue) {
+  auto *original = layer().amd_queue_intercept_create();
+  if (!original)
+    return HSA_STATUS_ERROR;
+  hsa_agent_t mapped = AgentMapper::instance().map(agent_handle);
+  log_message(kLogVerbose, "queue_intercept_create agent=%llu mapped=%llu size=%u",
+              static_cast<unsigned long long>(agent_handle.handle),
+              static_cast<unsigned long long>(mapped.handle), size);
+  const hsa_status_t status =
+      original(mapped, size, type, callback, data, private_segment_size, group_segment_size, queue);
+  if (status == HSA_STATUS_SUCCESS && queue != nullptr) {
+    // Only mark intercept-managed when the interceptor attaches; otherwise record
+    // as a normal queue so the doorbell/scanner rewrite path still covers it.
+    const bool intercepting = register_virtual_lds_packet_interceptor(*queue);
+    VirtualLdsDispatchQueueRegistry::instance().record_queue(*queue, mapped, intercepting);
+  }
+  return status;
 }
 
 hsa_status_t HSA_API rj_queue_destroy(hsa_queue_t *queue) {
@@ -1929,9 +3144,36 @@ hsa_status_t HSA_API rj_queue_destroy(hsa_queue_t *queue) {
     return HSA_STATUS_ERROR;
   log_message(kLogVerbose, "queue_destroy queue=%p id=%llu", static_cast<void *>(queue),
               queue ? static_cast<unsigned long long>(queue->id) : 0);
+  VirtualLdsDispatchQueueRegistry::instance().erase_queue(queue);
   hsa_status_t status = original(queue);
   log_message(kLogVerbose, "queue_destroy status=%d", static_cast<int>(status));
   return status;
+}
+
+hsa_status_t HSA_API rj_signal_destroy(hsa_signal_t signal) {
+  auto *original = layer().signal_destroy();
+  if (!original)
+    return HSA_STATUS_ERROR;
+
+  // Detach the borrowed handle before ROCR invalidates it. This also serializes
+  // against the queue scanner and intercept callbacks, both of which use the
+  // registry mutex while polling completion state.
+  VirtualLdsDispatchQueueRegistry::instance().retire_destroyed_completion_signal(signal);
+  return original(signal);
+}
+
+void HSA_API rj_signal_store_relaxed(hsa_signal_t signal, hsa_signal_value_t value) {
+  VirtualLdsDispatchQueueRegistry::instance().rewrite_before_doorbell(signal, value);
+  auto *original = layer().signal_store_relaxed();
+  if (original != nullptr)
+    original(signal, value);
+}
+
+void HSA_API rj_signal_store_screlease(hsa_signal_t signal, hsa_signal_value_t value) {
+  VirtualLdsDispatchQueueRegistry::instance().rewrite_before_doorbell(signal, value);
+  auto *original = layer().signal_store_screlease();
+  if (original != nullptr)
+    original(signal, value);
 }
 
 hsa_status_t HSA_API rj_agent_iterate_regions(
@@ -1977,6 +3219,7 @@ hsa_status_t HSA_API rj_shut_down() {
 hsa_status_t HSA_API rj_executable_destroy(hsa_executable_t executable) {
   log_message(kLogVerbose, "executable_destroy exec=%llu",
               static_cast<unsigned long long>(executable.handle));
+  VirtualLdsRuntimeRegistry::instance().erase_executable(executable);
   ExecutableAgentRegistry::instance().erase_executable(executable);
   auto *original = layer().executable_destroy();
   if (!original)
@@ -1999,7 +3242,11 @@ hsa_status_t HSA_API rj_executable_get_symbol(hsa_executable_t executable, const
               static_cast<unsigned long long>(executable.handle),
               static_cast<unsigned long long>(agent.handle),
               static_cast<unsigned long long>(mapped.handle), symbol_name ? symbol_name : "");
-  return original(executable, module_name, symbol_name, mapped, call_convention, symbol);
+  hsa_status_t status =
+      original(executable, module_name, symbol_name, mapped, call_convention, symbol);
+  if (status == HSA_STATUS_SUCCESS && symbol_name != nullptr && symbol != nullptr)
+    VirtualLdsRuntimeRegistry::instance().record_symbol(executable, symbol_name, *symbol);
+  return status;
 }
 
 hsa_status_t HSA_API rj_executable_get_symbol_by_name(hsa_executable_t executable,
@@ -2020,7 +3267,51 @@ hsa_status_t HSA_API rj_executable_get_symbol_by_name(hsa_executable_t executabl
               static_cast<unsigned long long>(executable.handle),
               static_cast<unsigned long long>(agent ? agent->handle : 0),
               static_cast<unsigned long long>(mapped_agent.handle), symbol_name ? symbol_name : "");
-  return original(executable, symbol_name, mapped_ptr, symbol);
+  hsa_status_t status = original(executable, symbol_name, mapped_ptr, symbol);
+  if (status == HSA_STATUS_SUCCESS && symbol_name != nullptr && symbol != nullptr)
+    VirtualLdsRuntimeRegistry::instance().record_symbol(executable, symbol_name, *symbol);
+  return status;
+}
+
+hsa_status_t HSA_API rj_executable_symbol_get_info(hsa_executable_symbol_t executable_symbol,
+                                                   hsa_executable_symbol_info_t attribute,
+                                                   void *value) {
+  auto *original = layer().executable_symbol_get_info();
+  if (!original)
+    return HSA_STATUS_ERROR;
+
+  hsa_status_t status = original(executable_symbol, attribute, value);
+  if (status == HSA_STATUS_SUCCESS && attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT &&
+      value != nullptr) {
+    uint64_t kernel_object = 0;
+    std::memcpy(&kernel_object, value, sizeof(kernel_object));
+    uint32_t private_segment_size = 0;
+    (void)original(executable_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE,
+                   &private_segment_size);
+    VirtualLdsRuntimeRegistry::instance().note_kernel_object(executable_symbol, kernel_object,
+                                                             private_segment_size);
+  }
+  return status;
+}
+
+/// @brief Query the original ROCR symbol-name fields without recursing into this hook.
+[[nodiscard]] std::optional<std::string>
+query_executable_symbol_name(hsa_executable_symbol_t executable_symbol) {
+  auto *original = layer().executable_symbol_get_info();
+  if (!original)
+    return std::nullopt;
+
+  uint32_t name_length = 0;
+  hsa_status_t status =
+      original(executable_symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH, &name_length);
+  if (status != HSA_STATUS_SUCCESS || name_length == 0)
+    return std::nullopt;
+
+  std::string symbol_name(name_length, '\0');
+  status = original(executable_symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, symbol_name.data());
+  if (status != HSA_STATUS_SUCCESS)
+    return std::nullopt;
+  return symbol_name;
 }
 
 hsa_status_t HSA_API rj_executable_agent_global_variable_define(hsa_executable_t executable,
@@ -2051,6 +3342,13 @@ struct IterateAgentSymbolsData {
 hsa_status_t HSA_API rj_iterate_agent_symbols_callback(hsa_executable_t executable, hsa_agent_t,
                                                        hsa_executable_symbol_t symbol, void *data) {
   auto *wrapped = static_cast<IterateAgentSymbolsData *>(data);
+  if (auto symbol_name = query_executable_symbol_name(symbol)) {
+    // Clients often obtain kernel handles by iteration and then immediately ask
+    // for KERNEL_OBJECT inside their callback. Record the name before handing
+    // the symbol to the client so the KERNEL_OBJECT hook can resolve the
+    // virtual-LDS metadata for this symbol path too.
+    VirtualLdsRuntimeRegistry::instance().record_symbol(executable, *symbol_name, symbol);
+  }
   return wrapped->callback(executable, wrapped->guest, symbol, wrapped->data);
 }
 
@@ -2063,10 +3361,43 @@ hsa_status_t HSA_API rj_executable_iterate_agent_symbols(
     return HSA_STATUS_ERROR;
   hsa_agent_t mapped = ExecutableAgentRegistry::instance().map_agent(executable, agent);
   mapped = AgentMapper::instance().map(mapped);
-  if (mapped.handle == agent.handle)
-    return original(executable, mapped, callback, data);
+  // Always route through the recording callback, even when the agent mapping is
+  // identity. The wrapper records each symbol's name so the KERNEL_OBJECT hook can
+  // later resolve its virtual-LDS sidecar; skipping it on the identity path would
+  // let iterated symbols get a normal kernel object with no executable/name
+  // association, leaving an oversized virtual-LDS dispatch stuck on its normal
+  // descriptor. The client still sees the original agent it passed in.
   IterateAgentSymbolsData wrapped{callback, data, agent};
   return original(executable, mapped, rj_iterate_agent_symbols_callback, &wrapped);
+}
+
+struct IterateSymbolsData {
+  hsa_status_t (*callback)(hsa_executable_t, hsa_executable_symbol_t, void *) = nullptr;
+  void *data = nullptr;
+};
+
+/// @brief Deprecated agentless iterate-symbols callback that records each name.
+hsa_status_t HSA_API rj_iterate_symbols_callback(hsa_executable_t executable,
+                                                 hsa_executable_symbol_t symbol, void *data) {
+  auto *wrapped = static_cast<IterateSymbolsData *>(data);
+  if (auto symbol_name = query_executable_symbol_name(symbol)) {
+    // Same rationale as the agent-symbols wrapper: record the name before the
+    // client can query KERNEL_OBJECT so the virtual-LDS sidecar stays resolvable
+    // for symbols discovered through the legacy (deprecated) iterator too.
+    VirtualLdsRuntimeRegistry::instance().record_symbol(executable, *symbol_name, symbol);
+  }
+  return wrapped->callback(executable, symbol, wrapped->data);
+}
+
+/// @brief Wrap the deprecated agentless symbol iterator to record symbol names.
+hsa_status_t HSA_API rj_executable_iterate_symbols(
+    hsa_executable_t executable,
+    hsa_status_t (*callback)(hsa_executable_t, hsa_executable_symbol_t, void *), void *data) {
+  auto *original = layer().executable_iterate_symbols();
+  if (!original)
+    return HSA_STATUS_ERROR;
+  IterateSymbolsData wrapped{callback, data};
+  return original(executable, rj_iterate_symbols_callback, &wrapped);
 }
 
 hsa_status_t HSA_API rj_amd_agent_iterate_memory_pools(
@@ -2279,12 +3610,12 @@ hsa_status_t HSA_API rj_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa
 
 hsa_status_t HSA_API rj_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent,
                                                              hsa_agent_t src_agent,
-                                                             hsa_amd_sdma_engine_id_t *engine_id) {
+                                                             uint32_t *engine_ids_mask) {
   auto *original = layer().amd_memory_get_preferred_copy_engine();
   if (!original)
     return HSA_STATUS_ERROR;
   return forward_amd_call(original, mapped_agent_arg(dst_agent), mapped_agent_arg(src_agent),
-                          engine_id);
+                          engine_ids_mask);
 }
 
 hsa_status_t HSA_API rj_amd_memory_lock(void *host_ptr, size_t size, hsa_agent_t *agents,
@@ -2487,18 +3818,28 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
               static_cast<unsigned long long>(agent.handle), guest_load ? 1 : 0,
               static_cast<unsigned long long>(code_object_reader.handle));
 
-  hsa_agent_t load_agent = guest_load ? AgentMapper::instance().host_for_guest() : agent;
-  if (guest_load && load_agent.handle == 0)
+  // Only the configured guest agent's loads belong to the DBT pipeline. An
+  // unrelated GPU's native code object must not be reinterpreted as the guest
+  // ISA, translated for the configured host, or subjected to rocjitsu metadata
+  // validation/registration -- doing so could misdecode it and load a wrong
+  // artifact on that agent. Forward it verbatim before any reader lookup, target
+  // detection, source override, translation, or registry mutation.
+  if (!guest_load)
+    return original_load(executable, agent, code_object_reader, options, loaded_code_object);
+
+  hsa_agent_t load_agent = AgentMapper::instance().host_for_guest();
+  if (load_agent.handle == 0)
     return HSA_STATUS_ERROR_INVALID_AGENT;
 
   CodeObjectReaderRegistry::ReaderBytes reader_bytes =
       CodeObjectReaderRegistry::instance().lookup(code_object_reader);
   if (!reader_bytes) {
+    // A guest load with no registered memory bytes cannot be translated (the DBT
+    // path needs the source image); fail rather than load an untranslated guest
+    // object on the host.
     log_message(kLogInfo, "no memory bytes registered for reader=%llu",
                 static_cast<unsigned long long>(code_object_reader.handle));
-    if (guest_load)
-      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
-    return original_load(executable, load_agent, code_object_reader, options, loaded_code_object);
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
   }
   const uint8_t *bytes = reader_bytes.bytes;
   size_t size = reader_bytes.size;
@@ -2516,19 +3857,75 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return HSA_STATUS_ERROR;
   }
 
-  if (source_target.arch == config->target.arch && source_target.mach == config->target.mach) {
+  // gfx1250 A0 and B0 share an ELF machine ID, so a same-arch/same-mach match does
+  // NOT prove the code object is already the target silicon revision. The revision
+  // cannot be inferred from the code object; it comes from the DBT guest config.
+  // When both revisions are configured, this is a real same-ISA revision
+  // translation (e.g. B0->A0), so it must go through the translator below rather
+  // than the pass-through path. When they are not configured, a same-target gfx1250
+  // load cannot be proven safe to pass through unchanged (it might require B0->A0
+  // workarounds), so fail closed. Other architectures are unambiguous by mach.
+  const bool gfx1250_same_target = source_target.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                   config->target.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                   source_target.mach == config->target.mach;
+  const bool have_gfx1250_revisions = config->guest_revision != ProcessorRevision::Unspecified &&
+                                      config->host_revision != ProcessorRevision::Unspecified;
+  if (gfx1250_same_target && !have_gfx1250_revisions) {
+    std::fprintf(stderr,
+                 "[rocjitsu-hooks] gfx1250 same-target load requires guest and host silicon "
+                 "revisions in the DBT guest config; failing load\n");
+    return HSA_STATUS_ERROR;
+  }
+
+  if (!gfx1250_same_target && source_target.arch == config->target.arch &&
+      source_target.mach == config->target.mach) {
     log_message(kLogInfo,
                 "source target %s arch %s already matches requested target; passing through",
                 elf_mach_name(source_target.mach), arch_name(source_target.arch));
+    // Parse and validate hook metadata BEFORE loading, so an unusable code object
+    // is rejected without first mutating executable state, and so the malformed-
+    // metadata policy matches the translated path (reject, not ignore).
+    auto hook_metadata = parse_virtual_lds_hook_metadata(std::span<const uint8_t>(bytes, size));
+    if (!hook_metadata) {
+      std::fprintf(stderr,
+                   "[rocjitsu-hooks] target code object has malformed virtual-LDS metadata\n");
+      return HSA_STATUS_ERROR;
+    }
+    if (auto bad = first_unsupportable_virtual_lds_kernel(*hook_metadata)) {
+      std::fprintf(stderr,
+                   "[rocjitsu-hooks] virtual-LDS kernel '%s' cannot be dispatched on this host "
+                   "(missing runtime-state ABI or inconsistent kernarg wrapper); failing load\n",
+                   bad->c_str());
+      return HSA_STATUS_ERROR;
+    }
     hsa_status_t status =
         original_load(executable, load_agent, code_object_reader, options, loaded_code_object);
     log_message(kLogVerbose, "load_agent_code_object already-target status=%d",
                 static_cast<int>(status));
-    if (status == HSA_STATUS_SUCCESS && guest_load)
+    if (status == HSA_STATUS_SUCCESS)
       ExecutableAgentRegistry::instance().record(executable, agent, load_agent);
+    if (status == HSA_STATUS_SUCCESS) {
+      const hsa_loaded_code_object_t loaded =
+          loaded_code_object != nullptr ? *loaded_code_object : hsa_loaded_code_object_t{};
+      VirtualLdsRuntimeRegistry::instance().record_load(executable, agent, load_agent, loaded,
+                                                        std::move(*hook_metadata));
+    }
     return status;
   }
 
+  BinaryTranslatorOptions translator_options;
+  // Runtime DBT loads large framework code objects where some kernel symbols may
+  // never be dispatched in the current process. Keep the code object loadable if
+  // an independent kernel fails translation; the skipped-kernel diagnostic names
+  // the symbol that is redirected to a target no-op stub.
+  translator_options.skip_failed_kernels = true;
+  // Silicon revisions come from the DBT guest config, not the code object (gfx1250
+  // A0/B0 share a machine ID). They select the same-ISA workaround direction, e.g.
+  // a B0 guest translated to A0 host.
+  translator_options.input_revision = config->guest_revision;
+  translator_options.output_revision = config->host_revision;
+
+  std::vector<uint8_t> translated_elf;
   log_message(kLogInfo, "translating reader=%llu %s/%s -> %s/%s mach=0x%x",
               static_cast<unsigned long long>(code_object_reader.handle),
               elf_mach_name(source_target.mach), arch_name(source_target.arch),
@@ -2540,11 +3937,9 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return HSA_STATUS_ERROR;
   }
 
-  rocjitsu::TranslatedCodeObject translated;
-  BinaryTranslatorOptions translator_options;
   BinaryTranslator translator(source_target.arch, config->target.arch, config->target.mach,
                               translator_options);
-  translated = translator.translate(source_object);
+  rocjitsu::TranslatedCodeObject translated = translator.translate(source_object);
 
   print_diagnostics(stderr, translated.diagnostics, config->log_level > kLogDisabled);
   if (translated.elf_bytes.empty() || has_error_diagnostic(translated.diagnostics)) {
@@ -2552,9 +3947,40 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return HSA_STATUS_ERROR;
   }
 
+  // A skipped kernel is redirected to an s_endpgm stub. Dispatching that stub
+  // would COMPLETE NORMALLY without producing the kernel's outputs, so the application
+  // would observe success with stale/garbage output instead of a failure. There is no
+  // safe way to let such a kernel be dispatched, so fail the whole code-object
+  // load rather than hand back an executable that can silently produce wrong
+  // results. (This trades the "keep the module loadable when an unused kernel
+  // fails to translate" behavior for correctness; a dispatched skipped kernel
+  // must never appear to succeed.)
+  if (has_skipped_kernel(translated.diagnostics)) {
+    std::fprintf(stderr,
+                 "[rocjitsu-hooks] code object contains a kernel that could not be translated and "
+                 "would silently complete if dispatched; refusing the load\n");
+    return HSA_STATUS_ERROR;
+  }
+
+  translated_elf = std::move(translated.elf_bytes);
+
+  auto hook_metadata = parse_virtual_lds_hook_metadata(
+      std::span<const uint8_t>(translated_elf.data(), translated_elf.size()));
+  if (!hook_metadata) {
+    std::fprintf(stderr,
+                 "[rocjitsu-hooks] translated code object has malformed virtual-LDS metadata\n");
+    return HSA_STATUS_ERROR;
+  }
+  if (auto bad = first_unsupportable_virtual_lds_kernel(*hook_metadata)) {
+    std::fprintf(stderr,
+                 "[rocjitsu-hooks] virtual-LDS kernel '%s' cannot be dispatched on this host "
+                 "(missing runtime-state ABI or inconsistent kernarg wrapper); failing load\n",
+                 bad->c_str());
+    return HSA_STATUS_ERROR;
+  }
+
   hsa_code_object_reader_t translated_reader{};
-  hsa_status_t status =
-      create_translated_reader(std::move(translated.elf_bytes), &translated_reader);
+  hsa_status_t status = create_translated_reader(std::move(translated_elf), &translated_reader);
   if (status != HSA_STATUS_SUCCESS) {
     std::fprintf(stderr, "[rocjitsu-hooks] failed to create translated code-object reader: %d\n",
                  static_cast<int>(status));
@@ -2571,8 +3997,14 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   if (status != HSA_STATUS_SUCCESS) {
     std::fprintf(stderr, "[rocjitsu-hooks] translated code-object load failed: %d\n",
                  static_cast<int>(status));
-  } else if (guest_load) {
+  } else {
     ExecutableAgentRegistry::instance().record(executable, agent, load_agent);
+  }
+  if (status == HSA_STATUS_SUCCESS) {
+    const hsa_loaded_code_object_t loaded =
+        loaded_code_object != nullptr ? *loaded_code_object : hsa_loaded_code_object_t{};
+    VirtualLdsRuntimeRegistry::instance().record_load(executable, agent, load_agent, loaded,
+                                                      std::move(*hook_metadata));
   }
   return status;
 }
@@ -2604,6 +4036,20 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
   const bool signal_backtrace = config->signal_backtrace;
   if (!layer().install(table, std::move(*config)))
     return false;
+  // Virtual-LDS resource management lives in its own hook component. Give it
+  // only the original runtime entries so allocations cannot recurse through
+  // the wrappers installed above.
+  rocjitsu::hooks::set_virtual_lds_runtime_api({
+      .iterate_agents = layer().iterate_agents(),
+      .signal_create = layer().signal_create(),
+      .signal_destroy = layer().signal_destroy(),
+      .signal_load_scacquire = layer().signal_load_scacquire(),
+      .iterate_memory_pools = layer().amd_agent_iterate_memory_pools(),
+      .memory_pool_get_info = layer().amd_memory_pool_get_info(),
+      .memory_pool_allocate = layer().amd_memory_pool_allocate(),
+      .memory_pool_free = layer().amd_memory_pool_free(),
+      .agents_allow_access = layer().amd_agents_allow_access(),
+  });
   maybe_install_signal_backtrace(signal_backtrace);
   return true;
 }

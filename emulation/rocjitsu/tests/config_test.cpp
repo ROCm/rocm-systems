@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "halt_snapshot_plugin.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
@@ -369,6 +370,31 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
                                              dbt.guest_device.simd_per_cu);
   EXPECT_EQ(dbt.guest_device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(dbt.guest_device.local_mem_size, 309237645312ULL);
+  // Revisions default to Unspecified when the config omits them.
+  EXPECT_EQ(dbt.guest_revision, config::DbtSiliconRevision::Unspecified);
+  EXPECT_EQ(dbt.host_revision, config::DbtSiliconRevision::Unspecified);
+}
+
+TEST(ConfigLoaderTest, LoadsDbtGuestSiliconRevisions) {
+  // gfx1250 A0/B0 share an ELF machine ID, so the silicon revision is carried in
+  // the DBT guest config out of band. A same-target B0->A0 load selects the A0
+  // workarounds from these fields.
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_dbt_guest_revision_config_test.json", R"({
+      "dbt_guest": {
+        "enabled": true,
+        "guest_isa": "gfx1250",
+        "host_isa": "gfx1250",
+        "guest_revision": "gfx1250_b0",
+        "host_revision": "gfx1250_a0"
+      }
+    })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(path.string());
+  std::filesystem::remove(path);
+
+  EXPECT_EQ(dbt.guest_revision, config::DbtSiliconRevision::Gfx1250B0);
+  EXPECT_EQ(dbt.host_revision, config::DbtSiliconRevision::Gfx1250A0);
 }
 
 TEST(ConfigLoaderTest, RejectsDbtGuestDeviceWithInconsistentSimdCount) {
@@ -709,7 +735,11 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
   loaded.wire_links(engine.topology());
-  engine.build();
+  engine.create();
+
+  rocjitsu::test::DispatchCountPlugin *dispatch_count = nullptr;
+  auto plugin_group = rocjitsu::test::make_dispatch_count_group(&dispatch_count);
+  soc->set_plugin_group(plugin_group);
 
   // Write a kernel descriptor + invalid instruction so wavefronts halt immediately.
   using namespace rocr::llvm::amdhsa;
@@ -732,12 +762,13 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
 
   engine.step();
 
-  // After one step, the doorbell event dispatched wavefronts to CUs
-  // (allocated but not yet executed). Verify round-robin distribution.
+  // After one step, the doorbell event dispatched wavefronts to CUs. Count them
+  // via the dispatch hook (fired at placement) so the check is independent of when
+  // waves execute and free themselves. Verify round-robin distribution.
   EXPECT_EQ(xcd->command_processor()->dispatched_count(), 1u);
   auto *se = soc->xcd(0)->shader_engine(0);
-  EXPECT_EQ(se->compute_unit(0)->num_wfs(), 1u);
-  EXPECT_EQ(se->compute_unit(1)->num_wfs(), 1u);
+  EXPECT_EQ(dispatch_count->for_cu(se->compute_unit(0)), 1u);
+  EXPECT_EQ(dispatch_count->for_cu(se->compute_unit(1)), 1u);
 }
 
 TEST(CheckpointTest, SaveAndRestoreMemory) {
