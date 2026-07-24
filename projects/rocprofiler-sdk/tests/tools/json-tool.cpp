@@ -679,26 +679,26 @@ struct spm_counting_record_t
     }
 };
 
-auto counter_info                  = std::deque<rocprofiler_counter_info_v0_t>{};
-auto runtime_init_cb_records       = std::deque<runtime_init_callback_record_t>{};
-auto code_object_records           = std::deque<code_object_callback_record_t>{};
-auto kernel_symbol_records         = std::deque<kernel_symbol_callback_record_t>{};
-auto host_function_records         = std::deque<host_function_callback_record_t>{};
-auto hsa_api_cb_records            = std::deque<hsa_api_callback_record_t>{};
-auto marker_api_cb_records         = std::deque<marker_api_callback_record_t>{};
-auto counter_collection_bf_records = std::deque<profile_counting_record>{};
+auto counter_info                      = std::deque<rocprofiler_counter_info_v0_t>{};
+auto runtime_init_cb_records           = std::deque<runtime_init_callback_record_t>{};
+auto code_object_records               = std::deque<code_object_callback_record_t>{};
+auto kernel_symbol_records             = std::deque<kernel_symbol_callback_record_t>{};
+auto host_function_records             = std::deque<host_function_callback_record_t>{};
+auto hsa_api_cb_records                = std::deque<hsa_api_callback_record_t>{};
+auto marker_api_cb_records             = std::deque<marker_api_callback_record_t>{};
+auto counter_collection_bf_records     = std::deque<profile_counting_record>{};
 auto counter_collection_pending_values = std::deque<rocprofiler_record_counter_t>{};
-auto hip_api_cb_records            = std::deque<hip_api_callback_record_t>{};
-auto scratch_memory_cb_records     = std::deque<scratch_memory_callback_record_t>{};
-auto kernel_dispatch_cb_records    = std::deque<kernel_dispatch_callback_record_t>{};
-auto memory_copy_cb_records        = std::deque<memory_copy_callback_record_t>{};
-auto memory_allocation_cb_records  = std::deque<memory_allocation_callback_record_t>{};
-auto rccl_api_cb_records           = std::deque<rccl_api_callback_record_t>{};
-auto rocdecode_api_cb_records      = std::deque<rocdecode_api_callback_record_t>{};
-auto rocjpeg_api_cb_records        = std::deque<rocjpeg_api_callback_record_t>{};
-auto ompt_cb_records               = std::deque<ompt_callback_record_t>{};
-auto spm_cb_records                = std::deque<spm_counting_record_t>{};
-auto spm_bf_records                = std::deque<spm_profile_counting_record>{};
+auto hip_api_cb_records                = std::deque<hip_api_callback_record_t>{};
+auto scratch_memory_cb_records         = std::deque<scratch_memory_callback_record_t>{};
+auto kernel_dispatch_cb_records        = std::deque<kernel_dispatch_callback_record_t>{};
+auto memory_copy_cb_records            = std::deque<memory_copy_callback_record_t>{};
+auto memory_allocation_cb_records      = std::deque<memory_allocation_callback_record_t>{};
+auto rccl_api_cb_records               = std::deque<rccl_api_callback_record_t>{};
+auto rocdecode_api_cb_records          = std::deque<rocdecode_api_callback_record_t>{};
+auto rocjpeg_api_cb_records            = std::deque<rocjpeg_api_callback_record_t>{};
+auto ompt_cb_records                   = std::deque<ompt_callback_record_t>{};
+auto spm_cb_records                    = std::deque<spm_counting_record_t>{};
+auto spm_bf_records                    = std::deque<spm_profile_counting_record>{};
 
 int
 set_external_correlation_id(rocprofiler_thread_id_t                            thr_id,
@@ -1459,10 +1459,10 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
         {
             auto* profiler_record = static_cast<rocprofiler_record_counter_t*>(header->payload);
             auto  ritr            = std::find_if(counter_collection_bf_records.rbegin(),
-                                      counter_collection_bf_records.rend(),
-                                      [profiler_record](const profile_counting_record& itr) {
-                                          return itr == *profiler_record;
-                                      });
+                                     counter_collection_bf_records.rend(),
+                                     [profiler_record](const profile_counting_record& itr) {
+                                         return itr == *profiler_record;
+                                     });
             // The dispatch header for this value may not have been delivered yet: the SDK
             // double-buffers and can flush mid-dispatch, so a dispatch's records can be split
             // across flush batches. Park the value and attach it when its header arrives rather
@@ -2681,6 +2681,19 @@ tool_fini(void* tool_data)
     pop_external_correlation();
 
     rocprofiler_get_timestamp(&fini_time);
+
+    if(!counter_collection_pending_values.empty())
+    {
+        auto msg = std::stringstream{};
+        msg << "missing rocprofiler_dispatch_counting_service_record_t (header) for "
+            << counter_collection_pending_values.size()
+            << " buffered counter value record(s); unmatched records:";
+        for(const auto& itr : counter_collection_pending_values)
+        {
+            msg << " {dispatch_id=" << itr.dispatch_id << ", counter_instance_id=" << itr.id << "}";
+        }
+        throw std::runtime_error{msg.str()};
+    }
 
     std::cerr << "[" << getpid() << "][" << __FUNCTION__
               << "] Finalizing... agents=" << agents.size()
