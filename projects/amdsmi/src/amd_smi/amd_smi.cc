@@ -6332,13 +6332,12 @@ amdsmi_status_t amdsmi_get_cpu_affinity_with_scope(amdsmi_processor_handle proce
     return status;
   }
 
-  if (node_id < 0) {
-    return AMDSMI_STATUS_NOT_FOUND;
-  }
-
   std::memset(cpu_set, 0, cpu_set_size * sizeof(uint64_t));
   switch (scope) {
     case AMDSMI_AFFINITY_SCOPE_NODE: {
+      if (node_id < 0) {
+        return AMDSMI_STATUS_NOT_FOUND;
+      }
       std::vector<uint64_t> bitmask = gpu_device->get_bitmask_from_numa_node(node_id, cpu_set_size);
       if (bitmask[0] == std::numeric_limits<int32_t>::max()) {
         return AMDSMI_STATUS_REFCOUNT_OVERFLOW;
