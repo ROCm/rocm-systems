@@ -359,6 +359,9 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamH
  * @ingroup group_amd_rocjpeg
  * @brief Synchronizes a pending asynchronous JPEG decode.
  *
+ * This function must be used in conjunction with rocJpegDecodeAsync to ensure the decoding
+ * is complete before accessing the decoded output.
+ *
  * @param handle The rocJPEG handle.
  * @param destination A pointer to RocJpegImage where the decoded image will be stored.
  * @return A RocJpegStatus indicating the success or failure of the sync operation.
