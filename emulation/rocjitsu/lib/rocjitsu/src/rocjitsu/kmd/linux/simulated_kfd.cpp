@@ -2304,6 +2304,10 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
   for (uint32_t r = 0; r < state.num_vgprs; ++r)
     for (uint32_t lane = 0; lane < 64; ++lane)
       state.vgprs[static_cast<size_t>(r) * 64 + lane] = wf.debug_read_vgpr(r, lane);
+  state.lds.resize(wf.lds_size());
+  if (!state.lds.empty())
+    static_cast<const amdgpu::Lds &>(wf.lds()).read(wf.lds_base(), state.lds.data(),
+                                                    static_cast<uint32_t>(state.lds.size()));
   return state;
 }
 
@@ -2365,6 +2369,8 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
     waves[index].is_first_in_group = index == 0 || !same_group(waves[index], waves[index - 1]);
     waves[index].is_last_in_group =
         index + 1 == waves.size() || !same_group(waves[index], waves[index + 1]);
+    if (!waves[index].is_first_in_group)
+      waves[index].lds.clear();
   }
   auto *memory = gpu->soc->memory();
   const auto layout = kmd::serialize_queue_cwsr_bulk(
@@ -2796,6 +2802,24 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
     });
     bool restored = stopped.empty();
     if (!stopped.empty() && context.base != 0) {
+      std::sort(states.begin(), states.end(), [](const auto &lhs, const auto &rhs) {
+        if (lhs.queue_packet_id != rhs.queue_packet_id)
+          return lhs.queue_packet_id < rhs.queue_packet_id;
+        if (lhs.group_ids != rhs.group_ids)
+          return lhs.group_ids < rhs.group_ids;
+        return lhs.wave_in_group < rhs.wave_in_group;
+      });
+      auto same_group = [](const auto &lhs, const auto &rhs) {
+        return lhs.queue_packet_id == rhs.queue_packet_id && lhs.group_ids == rhs.group_ids;
+      };
+      for (size_t index = 0; index < states.size(); ++index) {
+        states[index].is_first_in_group =
+            index == 0 || !same_group(states[index], states[index - 1]);
+        states[index].is_last_in_group =
+            index + 1 == states.size() || !same_group(states[index], states[index + 1]);
+        if (!states[index].is_first_in_group)
+          states[index].lds.clear();
+      }
       auto *memory = gpu->soc->memory();
       restored = kmd::deserialize_queue_cwsr_bulk(
           context.base, context.size, states, [&](uint64_t address, std::span<uint8_t> bytes) {
@@ -2836,6 +2860,10 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
       if (restored) {
         for (size_t state_index = 0; state_index < states.size(); ++state_index) {
           const size_t wave_index = matches[state_index];
+          if (!states[state_index].lds.empty())
+            stopped[wave_index]->lds().write(stopped[wave_index]->lds_base(),
+                                             states[state_index].lds.data(),
+                                             static_cast<uint32_t>(states[state_index].lds.size()));
           owners[wave_index]->with_wave_state_locked(
               [&] { apply_cwsr_to_wave(*stopped[wave_index], states[state_index]); });
         }

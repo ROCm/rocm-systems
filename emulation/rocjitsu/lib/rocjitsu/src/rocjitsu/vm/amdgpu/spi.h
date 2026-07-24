@@ -111,6 +111,7 @@ public:
                                         wg.entry->sgprs_per_wf, wg.entry->vgprs_per_wf);
         assert(wf && "dispatch_wf failed after select_cu returned a CU");
         wf->set_lds_base(lds_base);
+        wf->set_lds_size(util::align_up(wg.entry->group_segment_fixed_size, 256u));
         wf->set_lds(placement->lds);
         wf->set_dispatch_id(wg.entry->dispatch_id);
         wf->set_process_id(wg.entry->process_id);

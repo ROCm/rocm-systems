@@ -35,19 +35,19 @@ constexpr uint32_t kRelaunchStateBit = 1u << 31;
 constexpr uint32_t round_up(uint32_t v, uint32_t m) { return (v / m + (v % m != 0)) * m; }
 
 // Encode the COMPUTE_RELAUNCH "state" word so rocm-dbgapi decodes exactly
-// @vgpr_count / @sgpr_count with zero accumulation (ACC) VGPRs and no LDS:
+// @vgpr_count / @sgpr_count with zero accumulation (ACC) VGPRs:
 //   vgpr_count      = (accum_offset[24:29] + 1) * 4
 //   acc_vgpr_count  = (vgprs[0:5]      + 1) * 8 - vgpr_count   (== 0 here)
 //   sgpr_count      = (sgprs[6:8]      + 1) * 16 - 16
-//   lds_size        = lds[9:16] * ...   (== 0 here)
-uint32_t encode_state_word(uint32_t vgpr_count, uint32_t sgpr_count) {
+//   lds_size        = lds[9:16] * 1280 bytes on gfx950
+uint32_t encode_state_word(uint32_t vgpr_count, uint32_t sgpr_count, uint32_t lds_size) {
   uint32_t vgprs_field = (vgpr_count / 8) - 1;  // acc == 0  =>  vgpr_count = (vgprs+1)*8
   uint32_t accum_offset = (vgpr_count / 4) - 1; // vgpr_count = (accum_offset+1)*4
   uint32_t sgprs_field = sgpr_count / 16;       // sgpr_count = sgprs_field*16
   uint32_t w = 0;
   w |= (vgprs_field & 0x3Fu);
   w |= (sgprs_field & 0x7u) << 6;
-  // lds field [9:16] left 0.
+  w |= ((lds_size / 1280) & 0xFFu) << 9;
   w |= (accum_offset & 0x3Fu) << 24;
   w |= kRelaunchStateBit;
   return w;
@@ -103,6 +103,7 @@ struct CwsrGeometry {
   uint32_t hwreg_bytes = 0;
   uint32_t sgpr_bytes = 0;
   uint32_t vgpr_bytes = 0;
+  uint32_t lds_bytes = 0;
   uint64_t per_wave = 0;
 };
 
@@ -112,12 +113,20 @@ CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveStat
     return geometry;
 
   uint32_t max_vgprs = 0;
+  uint32_t max_lds = 0;
   for (const auto &wave : waves) {
     if (wave.num_vgprs > kMaxVgprs || wave.num_sgprs > kMaxSgprs || wave.trap_id > 0xFu ||
         wave.wave_in_group > 0x3Fu || wave.queue_packet_id > 0x1FFFFFFu)
       return geometry;
     max_vgprs = std::max(max_vgprs, wave.num_vgprs);
+    if (wave.lds.size() > std::numeric_limits<uint32_t>::max())
+      return geometry;
+    max_lds = std::max(max_lds, static_cast<uint32_t>(wave.lds.size()));
   }
+
+  geometry.lds_bytes = round_up(max_lds, 1280);
+  if (geometry.lds_bytes / 1280 > 0xFFu)
+    return geometry;
 
   geometry.vgpr_count = std::max<uint32_t>(round_up(max_vgprs, 8), 8);
   geometry.vcc_lo_slot = std::min(kArchScalars, geometry.sgpr_count) - 2;
@@ -127,7 +136,9 @@ CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveStat
   geometry.per_wave = 64u + geometry.hwreg_bytes + geometry.sgpr_bytes + geometry.vgpr_bytes;
 
   const uint64_t num_waves = waves.size();
-  const uint64_t wave_state_size = geometry.per_wave * num_waves;
+  const uint64_t num_groups = std::count_if(
+      waves.begin(), waves.end(), [](const auto &wave) { return wave.is_first_in_group; });
+  const uint64_t wave_state_size = geometry.per_wave * num_waves + geometry.lds_bytes * num_groups;
   const uint64_t control_stack_size = (3u + num_waves) * sizeof(uint32_t);
   const uint64_t wave_area_begin = kControlStackOffset + control_stack_size;
   const uint64_t wave_state_offset = wave_area_begin + wave_state_size;
@@ -173,9 +184,8 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   if (waves.empty() || !write32 || (ctx_base & (alignof(uint32_t) - 1)) != 0)
     return layout;
 
-  // Uniform per-dispatch register geometry. ACC-VGPRs and LDS are not modeled
-  // in the save area (state word encodes zero of each), which keeps the layout
-  // to [TTMP|HWREG]/[SGPR]/[VGPR] per wave.
+  // Uniform per-dispatch register geometry. ACC-VGPRs are not modeled. gfx950
+  // saves one uniformly-sized LDS block before each workgroup leader.
   const CwsrGeometry geometry = compute_geometry(area_size, waves);
   if (!geometry.layout.ok)
     return layout;
@@ -186,6 +196,7 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   const uint32_t hwreg_bytes = geometry.hwreg_bytes;
   const uint32_t sgpr_bytes = geometry.sgpr_bytes;
   const uint32_t vgpr_bytes = geometry.vgpr_bytes;
+  const uint32_t lds_bytes = geometry.lds_bytes;
   const uint64_t num_waves = waves.size();
   const uint64_t wave_state_offset = layout.wave_state_offset;
   if (ctx_base > std::numeric_limits<uint64_t>::max() - wave_state_offset)
@@ -196,7 +207,7 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   const uint64_t cs_base = ctx_base + layout.control_stack_offset;
   write32(cs_base + 0, 0); // PM4 (skipped)
   write32(cs_base + 4, 0); // PM4 (skipped)
-  write32(cs_base + 8, encode_state_word(vgpr_count, sgpr_count));
+  write32(cs_base + 8, encode_state_word(vgpr_count, sgpr_count, lds_bytes));
   for (size_t i = 0; i < num_waves; ++i) {
     // first/last mark workgroup boundaries in the control stack, not the whole
     // queue: a wave is "first" if it opens a new workgroup (group leader) and
@@ -213,13 +224,24 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   for (size_t i = 0; i < num_waves; ++i) {
     const CwsrWaveState &w = waves[i];
     const uint64_t save_area_addr = last_wave_area - 64;
-    const uint64_t hwregs_addr = save_area_addr - hwreg_bytes;
-    const uint64_t ttmps_addr = save_area_addr - kTtmpCount * sizeof(uint32_t);
-    const uint64_t sgprs_addr = hwregs_addr - sgpr_bytes;
-    const uint64_t vgprs_addr = sgprs_addr - vgpr_bytes;
-
+    uint64_t register_area_end = save_area_addr;
     for (uint32_t byte = 0; byte < 64; byte += sizeof(uint32_t))
       write32(save_area_addr + byte, 0);
+
+    if (w.is_first_in_group) {
+      register_area_end -= lds_bytes;
+      for (uint32_t byte = 0; byte < lds_bytes; byte += sizeof(uint32_t)) {
+        uint32_t value = 0;
+        if (byte < w.lds.size())
+          std::memcpy(&value, w.lds.data() + byte,
+                      std::min<size_t>(sizeof(value), w.lds.size() - byte));
+        write32(register_area_end + byte, value);
+      }
+    }
+    const uint64_t hwregs_addr = register_area_end - hwreg_bytes;
+    const uint64_t ttmps_addr = register_area_end - kTtmpCount * sizeof(uint32_t);
+    const uint64_t sgprs_addr = hwregs_addr - sgpr_bytes;
+    const uint64_t vgprs_addr = sgprs_addr - vgpr_bytes;
 
     // HWREG block (32 dwords). The top 16 dwords are the TTMPs.
     write32(hwregs_addr + 0 * 4, w.m0);
@@ -335,14 +357,26 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   const uint32_t hwreg_bytes = geometry.hwreg_bytes;
   const uint32_t sgpr_bytes = geometry.sgpr_bytes;
   const uint32_t vgpr_bytes = geometry.vgpr_bytes;
+  const uint32_t lds_bytes = geometry.lds_bytes;
   const uint32_t num_waves = static_cast<uint32_t>(waves.size());
 
   uint64_t last_wave_area = ctx_base + geometry.layout.wave_state_offset;
   for (uint32_t i = 0; i < num_waves; ++i) {
     CwsrWaveState &w = waves[i];
     const uint64_t save_area_addr = last_wave_area - 64;
-    const uint64_t hwregs_addr = save_area_addr - hwreg_bytes;
-    const uint64_t ttmps_addr = save_area_addr - kTtmpCount * sizeof(uint32_t);
+    uint64_t register_area_end = save_area_addr;
+    if (w.is_first_in_group) {
+      register_area_end -= lds_bytes;
+      w.lds.resize(lds_bytes);
+      for (uint32_t byte = 0; byte < lds_bytes; byte += sizeof(uint32_t)) {
+        const uint32_t value = read32(register_area_end + byte);
+        std::memcpy(w.lds.data() + byte, &value, sizeof(value));
+      }
+    } else {
+      w.lds.clear();
+    }
+    const uint64_t hwregs_addr = register_area_end - hwreg_bytes;
+    const uint64_t ttmps_addr = register_area_end - kTtmpCount * sizeof(uint32_t);
     const uint64_t sgprs_addr = hwregs_addr - sgpr_bytes;
     const uint64_t vgprs_addr = sgprs_addr - vgpr_bytes;
 

@@ -197,6 +197,12 @@ public:
   /// @brief Set the per-WG LDS base offset.
   void set_lds_base(uint32_t base) { lds_base_ = base; }
 
+  /// @brief Return the aligned LDS allocation size for this workgroup.
+  uint32_t lds_size() const { return lds_size_; }
+
+  /// @brief Set the aligned LDS allocation size for this workgroup.
+  void set_lds_size(uint32_t size) { lds_size_ = size; }
+
   /// @brief Return the LDS backing selected for this workgroup placement.
   ///
   /// CU-mode workgroups use their owning CU's LDS. WGP-mode workgroups can
@@ -590,6 +596,7 @@ public:
     wave_in_group_ = 0;
     process_id_ = 0;
     lds_base_ = 0;
+    lds_size_ = 0;
     lds_ = nullptr;
     cluster_rank_ = 0;
     cluster_size_ = 1;
@@ -651,6 +658,7 @@ protected:
   uint32_t process_id_ = 0;     ///< Owning process ID (PASID analog, set per dispatch).
   uint32_t queue_id_ = 0;       ///< KFD queue ID that launched this wave (debugger correlation).
   uint32_t lds_base_ = 0;       ///< Per-WG LDS base offset (set per dispatch).
+  uint32_t lds_size_ = 0;       ///< Aligned per-WG LDS allocation size.
   Lds *lds_ = nullptr;          ///< Placement-selected LDS backing; nullptr means CU-local LDS.
   uint32_t cluster_rank_ = 0;   ///< Workgroup rank inside the dispatch cluster.
   uint32_t cluster_size_ = 1;   ///< Number of workgroups in the dispatch cluster.

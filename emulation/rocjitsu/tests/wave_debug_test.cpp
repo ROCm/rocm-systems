@@ -387,6 +387,7 @@ struct ParsedWave {
   uint32_t group[3] = {};
   std::vector<uint32_t> sgprs;
   std::vector<uint32_t> vgprs;
+  std::vector<uint8_t> lds;
 };
 
 // Walk the CWSR area exactly as rocm-dbgapi's control_stack_iterate +
@@ -426,10 +427,12 @@ std::vector<ParsedWave> parse_cwsr(const std::map<uint64_t, uint32_t> &mem, uint
     const uint32_t vgpr_count = (accum + 1) * 4;
     const uint32_t acc = (vgprs_field + 1) * 8 - vgpr_count;
     const uint32_t sgpr_count = (sgprs_field + 1) * 16 - 16;
+    const uint32_t lds_size = ((state >> 9) & 0xFF) * 1280;
 
     const uint64_t save = last_wave_area - 64;
-    const uint64_t hwregs = save - 32 * 4;
-    const uint64_t ttmps = save - 16 * 4;
+    const uint64_t register_area_end = save - ((rl & (1u << 17)) ? lds_size : 0);
+    const uint64_t hwregs = register_area_end - 32 * 4;
+    const uint64_t ttmps = register_area_end - 16 * 4;
     const uint64_t sgprs_addr = hwregs - sgpr_count * 4;
     const uint64_t accv = sgprs_addr - acc * 256;
     const uint64_t vgprs_addr = accv - static_cast<uint64_t>(vgpr_count) * 256;
@@ -458,6 +461,12 @@ std::vector<ParsedWave> parse_cwsr(const std::map<uint64_t, uint32_t> &mem, uint
     for (uint32_t r = 0; r < vgpr_count; ++r)
       for (uint32_t l = 0; l < 64; ++l)
         pw.vgprs[r * 64 + l] = rd(vgprs_addr + r * 256 + l * 4);
+    if (pw.first) {
+      pw.lds.resize(lds_size);
+      for (uint32_t byte = 0; byte < lds_size; ++byte)
+        pw.lds[byte] =
+            static_cast<uint8_t>(rd(register_area_end + (byte & ~3u)) >> ((byte & 3u) * 8));
+    }
     out.push_back(std::move(pw));
     last_wave_area = vgprs_addr;
   }
@@ -511,6 +520,8 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
   waves[2].group_ids[0] = 2;
   waves[2].is_first_in_group = true;
   waves[2].is_last_in_group = true;
+  waves[0].lds = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
+  waves[2].lds = {0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6, 0x07, 0x18};
 
   kmd::CwsrLayout layout = kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, waves, write32);
   ASSERT_TRUE(layout.ok);
@@ -545,6 +556,12 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
     for (uint32_t r = 0; r < in.num_vgprs; ++r)
       for (uint32_t l = 0; l < 64; ++l)
         EXPECT_EQ(out.vgprs[r * 64 + l], in.vgprs[r * 64 + l]) << "vgpr " << r << " lane " << l;
+    if (in.is_first_in_group) {
+      ASSERT_GE(out.lds.size(), in.lds.size());
+      EXPECT_TRUE(std::equal(in.lds.begin(), in.lds.end(), out.lds.begin()));
+    } else {
+      EXPECT_TRUE(out.lds.empty());
+    }
   }
 
   const auto original_mem = mem;
