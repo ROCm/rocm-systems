@@ -182,9 +182,8 @@ struct gpu_traits
                 }
                 else
                 {
-                    LOG_INFO("{} device [{}] (BDF {}) is not visible to the ROCm runtime "
-                             "(ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES); excluding "
-                             "from sampling",
+                    LOG_INFO("{} device [{}] (BDF {}) not visible to ROCm runtime; "
+                             "excluding from sampling",
                              device_name, index, bdf);
                 }
                 should_include = false;
