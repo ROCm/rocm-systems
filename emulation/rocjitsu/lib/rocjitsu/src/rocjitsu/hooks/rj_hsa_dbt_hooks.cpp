@@ -141,6 +141,15 @@ enum HookLogLevel : int {
 std::atomic<int> g_log_level{kLogDisabled};
 std::atomic<bool> g_signal_backtrace_enabled{false};
 std::atomic<bool> g_signal_backtrace_installed{false};
+
+/// @brief Saved original AMD-loader vendor reader constructor.
+///
+/// @details The hook replaces this entry in the vendor table copies it returns
+/// so it can capture source bytes; the wrapper must still call the real ROCr
+/// constructor. Set the first time a vendor table containing the field is
+/// queried; a single process-wide value because ROCr returns the same function.
+std::atomic<hsa_ven_amd_loader_reader_create_from_file_with_offset_size_fn_t>
+    g_original_vendor_reader_create{nullptr};
 struct sigaction g_previous_sigsegv {};
 struct sigaction g_previous_sigabrt {};
 
@@ -863,6 +872,10 @@ hsa_status_t HSA_API rj_agent_iterate_isas(hsa_agent_t agent,
 /// @brief Present a synthetic B0 identity for A0 agents in auto-A0 mode.
 hsa_status_t HSA_API rj_agent_get_info(hsa_agent_t agent, hsa_agent_info_t attribute, void *value);
 
+/// @brief Wrap the AMD loader vendor table so the fd/offset reader captures bytes.
+hsa_status_t HSA_API rj_system_get_major_extension_table(uint16_t extension, uint16_t version_major,
+                                                         size_t table_length, void *table);
+
 /// @brief Create real host queues when the application asks for a guest queue.
 hsa_status_t HSA_API rj_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
                                      void (*callback)(hsa_status_t, hsa_queue_t *, void *),
@@ -1127,6 +1140,8 @@ void clear_virtual_lds_dispatch_queues();
   X(create_from_memory, core_, true, false, hsa_code_object_reader_create_from_memory_fn,          \
     rj_code_object_reader_create_from_memory,                                                      \
     decltype(hsa_code_object_reader_create_from_memory) *)                                         \
+  X(system_get_major_extension_table, core_, true, false, hsa_system_get_major_extension_table_fn, \
+    rj_system_get_major_extension_table, decltype(hsa_system_get_major_extension_table) *)         \
   X(destroy, core_, true, false, hsa_code_object_reader_destroy_fn, rj_code_object_reader_destroy, \
     decltype(hsa_code_object_reader_destroy) *)                                                    \
   X(load_agent_code_object, core_, true, false, hsa_executable_load_agent_code_object_fn,          \
@@ -1348,6 +1363,7 @@ private:
   void clear_unlocked() {
     active_ = false;
     g_log_level.store(kLogDisabled, std::memory_order_relaxed);
+    g_original_vendor_reader_create.store(nullptr, std::memory_order_release);
     restore_signal_backtrace_handlers();
     table_ = nullptr;
     core_ = nullptr;
@@ -2063,6 +2079,125 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_file(
                  "DBT translation\n",
                  static_cast<unsigned long long>(code_object_reader->handle));
   }
+  return status;
+}
+
+/// @brief Read [offset, offset+size) of @p file into a fresh owned buffer.
+///
+/// @details Bounded, overflow-checked, and EINTR/short-read tolerant. Uses pread
+/// so the caller's file offset is not perturbed (the fd is shared with the lower
+/// reader, which mmaps the same descriptor). Returns nullptr on any bounds,
+/// allocation, or I/O failure; the caller then falls back to loading the object
+/// without a captured source image (which fails closed on the auto-A0 path).
+[[nodiscard]] std::shared_ptr<std::vector<uint8_t>> read_file_region(hsa_file_t file, size_t offset,
+                                                                     size_t size) {
+  if (file < 0)
+    return nullptr;
+
+  const off_t file_size = lseek(file, 0, SEEK_END);
+  if (file_size < 0)
+    return nullptr;
+  const auto file_size_u = static_cast<size_t>(file_size);
+
+  // When size is 0 the vendor API means "to end of file". Validate the range
+  // without overflow: offset must be within the file and size must fit after it.
+  if (offset > file_size_u)
+    return nullptr;
+  const size_t remaining = file_size_u - offset;
+  const size_t region = (size == 0) ? remaining : size;
+  if (region > remaining || region == 0)
+    return nullptr;
+
+  std::shared_ptr<std::vector<uint8_t>> owned;
+  try {
+    owned = std::make_shared<std::vector<uint8_t>>(region);
+  } catch (const std::bad_alloc &) {
+    return nullptr;
+  }
+
+  size_t done = 0;
+  while (done < region) {
+    const ssize_t got =
+        pread(file, owned->data() + done, region - done, static_cast<off_t>(offset + done));
+    if (got < 0) {
+      if (errno == EINTR)
+        continue;
+      return nullptr;
+    }
+    if (got == 0)
+      return nullptr; // truncated relative to the size we validated
+    done += static_cast<size_t>(got);
+  }
+  return owned;
+}
+
+/// @brief Vendor reader wrapper: capture bytes, then call the real constructor.
+///
+/// @details Installed into the copy of the AMD loader vendor table the hook
+/// returns from rj_system_get_major_extension_table. CLR closes the fd right
+/// after this returns, so the source bytes are read here while the descriptor is
+/// still valid and associated with the returned reader handle for the load path.
+hsa_status_t
+rj_vendor_reader_create_from_file_with_offset_size(hsa_file_t file, size_t offset, size_t size,
+                                                   hsa_code_object_reader_t *code_object_reader) {
+  auto original = g_original_vendor_reader_create.load(std::memory_order_acquire);
+  if (original == nullptr)
+    return HSA_STATUS_ERROR;
+
+  const hsa_status_t status = original(file, offset, size, code_object_reader);
+  if (status != HSA_STATUS_SUCCESS || code_object_reader == nullptr)
+    return status;
+
+  if (auto owned = read_file_region(file, offset, size)) {
+    if (CodeObjectReaderRegistry::instance().store(*code_object_reader, owned->data(),
+                                                   owned->size(), owned)) {
+      log_message(kLogDebug, "registered vendor file reader=%llu bytes=%zu",
+                  static_cast<unsigned long long>(code_object_reader->handle), owned->size());
+    } else {
+      log_message(kLogInfo, "failed to track vendor file reader=%llu",
+                  static_cast<unsigned long long>(code_object_reader->handle));
+    }
+  } else {
+    log_message(kLogInfo, "could not capture bytes for vendor file reader=%llu",
+                static_cast<unsigned long long>(code_object_reader->handle));
+  }
+  return status;
+}
+
+hsa_status_t HSA_API rj_system_get_major_extension_table(uint16_t extension, uint16_t version_major,
+                                                         size_t table_length, void *table) {
+  auto *original = layer().system_get_major_extension_table();
+  if (original == nullptr)
+    return HSA_STATUS_ERROR;
+
+  const hsa_status_t status = original(extension, version_major, table_length, table);
+  if (status != HSA_STATUS_SUCCESS || table == nullptr)
+    return status;
+
+  // Only the AMD loader major-1 table carries the fd/offset reader, and only
+  // patch when the caller's table is large enough to actually contain that
+  // field (partial minor tables are valid). Leave every other byte untouched;
+  // never retain the caller's table pointer.
+  constexpr size_t kReaderFieldEnd =
+      offsetof(hsa_ven_amd_loader_1_03_pfn_t,
+               hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size) +
+      sizeof(hsa_ven_amd_loader_reader_create_from_file_with_offset_size_fn_t);
+  if (extension != HSA_EXTENSION_AMD_LOADER || version_major != 1 || table_length < kReaderFieldEnd)
+    return status;
+
+  auto *vendor = static_cast<hsa_ven_amd_loader_1_03_pfn_t *>(table);
+  auto *reader = vendor->hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size;
+  if (reader == nullptr)
+    return status;
+
+  // Save the real constructor once (ROCr returns the same function each query),
+  // then hand the caller our capturing wrapper in its own table.
+  hsa_ven_amd_loader_reader_create_from_file_with_offset_size_fn_t expected = nullptr;
+  g_original_vendor_reader_create.compare_exchange_strong(expected, reader,
+                                                          std::memory_order_acq_rel);
+  vendor->hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size =
+      rj_vendor_reader_create_from_file_with_offset_size;
+  log_message(kLogDebug, "wrapped AMD loader vendor reader (table_length=%zu)", table_length);
   return status;
 }
 

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -352,6 +353,45 @@ hsa_status_t HSA_API fake_code_object_reader_destroy(hsa_code_object_reader_t) {
   return HSA_STATUS_SUCCESS;
 }
 
+// Records what the fake vendor reader constructor last saw, so a test can assert
+// the hook forwarded the fd/offset/size to the real constructor.
+struct FakeVendorReaderCall {
+  int count = 0;
+  hsa_file_t file = -1;
+  size_t offset = 0;
+  size_t size = 0;
+};
+FakeVendorReaderCall g_fake_vendor_reader_call;
+
+hsa_status_t
+fake_vendor_reader_create_from_file_with_offset_size(hsa_file_t file, size_t offset, size_t size,
+                                                     hsa_code_object_reader_t *code_object_reader) {
+  ++g_fake_vendor_reader_call.count;
+  g_fake_vendor_reader_call.file = file;
+  g_fake_vendor_reader_call.offset = offset;
+  g_fake_vendor_reader_call.size = size;
+  if (code_object_reader == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  code_object_reader->handle = g_next_memory_reader_handle++;
+  return HSA_STATUS_SUCCESS;
+}
+
+// A fake AMD loader vendor table with only the reader constructor populated.
+hsa_ven_amd_loader_1_03_pfn_t g_fake_vendor_table = {
+    nullptr, nullptr, nullptr,
+    nullptr, nullptr, fake_vendor_reader_create_from_file_with_offset_size,
+    nullptr};
+
+hsa_status_t HSA_API fake_system_get_major_extension_table(uint16_t extension,
+                                                           uint16_t version_major,
+                                                           size_t table_length, void *table) {
+  if (extension != HSA_EXTENSION_AMD_LOADER || version_major != 1 || table == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  std::memcpy(table, &g_fake_vendor_table,
+              std::min(table_length, sizeof(hsa_ven_amd_loader_1_03_pfn_t)));
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t HSA_API fake_executable_load_agent_code_object(
     hsa_executable_t, hsa_agent_t agent, hsa_code_object_reader_t reader, const char *,
     hsa_loaded_code_object_t *loaded_code_object) {
@@ -614,6 +654,7 @@ struct FakeApiTable {
     core.hsa_shut_down_fn = fake_shut_down;
     core.hsa_iterate_agents_fn = fake_iterate_agents;
     core.hsa_agent_get_info_fn = fake_agent_get_info;
+    core.hsa_system_get_major_extension_table_fn = fake_system_get_major_extension_table;
     core.hsa_agent_iterate_isas_fn = fake_agent_iterate_isas;
     core.hsa_isa_get_info_alt_fn = fake_isa_get_info_alt;
     core.hsa_queue_create_fn = fake_queue_create;
@@ -1506,6 +1547,181 @@ TEST(HsaHooksUnitTest, AutoA0ForwardsNonGfx1250Object) {
   // Forwarded verbatim: the loader saw the original reader, not a translated one.
   EXPECT_EQ(g_fake_load_agent_calls, 1);
   EXPECT_EQ(g_last_load_reader.handle, reader.handle);
+  OnUnload();
+}
+
+// Query the AMD loader vendor table through the (patched) core entry.
+hsa_ven_amd_loader_1_03_pfn_t query_vendor_table(FakeApiTable &api) {
+  hsa_ven_amd_loader_1_03_pfn_t table{};
+  EXPECT_EQ(api.core.hsa_system_get_major_extension_table_fn(HSA_EXTENSION_AMD_LOADER, 1,
+                                                             sizeof(table), &table),
+            HSA_STATUS_SUCCESS);
+  return table;
+}
+
+// Write bytes to a fresh temp file and return an open read fd (owned by caller).
+struct TempFile {
+  std::filesystem::path path;
+  int fd = -1;
+  ~TempFile() {
+    if (fd >= 0)
+      ::close(fd);
+    if (!path.empty())
+      std::filesystem::remove(path);
+  }
+};
+TempFile make_temp_file(const std::vector<uint8_t> &bytes) {
+  TempFile tf;
+  tf.path = std::filesystem::temp_directory_path() /
+            ("rocjitsu-vendor-" + std::to_string(static_cast<long long>(::getpid())) + "-" +
+             std::to_string(reinterpret_cast<uintptr_t>(&tf)));
+  {
+    std::ofstream out(tf.path, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(bytes.data()),
+              static_cast<std::streamsize>(bytes.size()));
+  }
+  tf.fd = ::open(tf.path.c_str(), O_RDONLY);
+  return tf;
+}
+
+// The hook wraps the vendor reader constructor: querying the AMD loader table
+// yields the hook's wrapper, not the underlying fake, and calling it forwards
+// the fd/offset/size to the real constructor.
+TEST(HsaHooksUnitTest, WrapsVendorReaderAndForwardsToOriginal) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  const auto table = query_vendor_table(api);
+  ASSERT_NE(table.hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size, nullptr);
+  EXPECT_NE(table.hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size,
+            fake_vendor_reader_create_from_file_with_offset_size);
+
+  const auto header = make_amdgpu_elf_header(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  std::vector<uint8_t> image(reinterpret_cast<const uint8_t *>(&header),
+                             reinterpret_cast<const uint8_t *>(&header) + sizeof(header));
+  TempFile tf = make_temp_file(image);
+  ASSERT_GE(tf.fd, 0);
+
+  g_fake_vendor_reader_call = {};
+  hsa_code_object_reader_t reader{};
+  EXPECT_EQ(table.hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size(
+                tf.fd, 0, image.size(), &reader),
+            HSA_STATUS_SUCCESS);
+  // The real (fake) constructor was called with the same fd/offset/size.
+  EXPECT_EQ(g_fake_vendor_reader_call.count, 1);
+  EXPECT_EQ(g_fake_vendor_reader_call.file, tf.fd);
+  EXPECT_EQ(g_fake_vendor_reader_call.offset, 0u);
+  EXPECT_EQ(g_fake_vendor_reader_call.size, image.size());
+  OnUnload();
+}
+
+// Bytes captured through the vendor reader are available to the load path: an
+// auto-A0 load of a non-gfx1250 object created via the vendor reader forwards
+// verbatim (it has captured bytes, so it does not fail closed for missing bytes).
+TEST(HsaHooksUnitTest, VendorReaderCaptureFeedsLoadPath) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_fake_gfx1250_asic_revision = 0;
+  g_fake_load_agent_calls = 0;
+
+  const auto table = query_vendor_table(api);
+  const auto header = make_amdgpu_elf_header(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942);
+  std::vector<uint8_t> image(reinterpret_cast<const uint8_t *>(&header),
+                             reinterpret_cast<const uint8_t *>(&header) + sizeof(header));
+  TempFile tf = make_temp_file(image);
+  ASSERT_GE(tf.fd, 0);
+
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(table.hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size(
+                tf.fd, 0, image.size(), &reader),
+            HSA_STATUS_SUCCESS);
+
+  // Non-gfx1250 object on the A0 agent: forwarded (captured bytes were found, so
+  // the load did not fail closed for a missing source image).
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_fake_load_agent_calls, 1);
+  EXPECT_EQ(g_last_load_reader.handle, reader.handle);
+  OnUnload();
+}
+
+// A partial vendor table too small to contain the reader-create field must not
+// be patched, and every byte the caller provided must be left untouched.
+TEST(HsaHooksUnitTest, DoesNotPatchVendorTableTooSmallForReaderField) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  // Request only the first three pointers -- smaller than the reader field.
+  const size_t small_len = 3 * sizeof(void (*)());
+  ASSERT_LT(small_len,
+            offsetof(hsa_ven_amd_loader_1_03_pfn_t,
+                     hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size));
+  alignas(
+      hsa_ven_amd_loader_1_03_pfn_t) unsigned char buffer[sizeof(hsa_ven_amd_loader_1_03_pfn_t)];
+  std::memset(buffer, 0xAB, sizeof(buffer));
+  EXPECT_EQ(api.core.hsa_system_get_major_extension_table_fn(HSA_EXTENSION_AMD_LOADER, 1, small_len,
+                                                             buffer),
+            HSA_STATUS_SUCCESS);
+  // Bytes beyond the requested length are untouched (the hook did not write the
+  // reader field into a too-small table).
+  for (size_t i = small_len; i < sizeof(buffer); ++i)
+    EXPECT_EQ(buffer[i], 0xAB) << "byte " << i << " was modified";
+  OnUnload();
+}
+
+// Capture is bounds-checked: an offset past end-of-file yields no captured bytes
+// (the load still forwards to the loader; it is not a valid gfx1250 object).
+TEST(HsaHooksUnitTest, VendorReaderOutOfBoundsOffsetCapturesNothing) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_fake_gfx1250_asic_revision = 0;
+  g_fake_load_agent_calls = 0;
+
+  const auto table = query_vendor_table(api);
+  const auto header = make_amdgpu_elf_header(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942);
+  std::vector<uint8_t> image(reinterpret_cast<const uint8_t *>(&header),
+                             reinterpret_cast<const uint8_t *>(&header) + sizeof(header));
+  TempFile tf = make_temp_file(image);
+  ASSERT_GE(tf.fd, 0);
+
+  hsa_code_object_reader_t reader{};
+  // Offset past EOF: the real constructor still succeeds (fake), but capture is
+  // refused, so the auto-A0 load has no bytes for this reader and fails closed.
+  ASSERT_EQ(table.hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size(
+                tf.fd, image.size() + 4096, image.size(), &reader),
+            HSA_STATUS_SUCCESS);
+
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER);
+  EXPECT_EQ(g_fake_load_agent_calls, 0);
   OnUnload();
 }
 

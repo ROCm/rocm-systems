@@ -210,3 +210,34 @@ using hsa_amd_agent_set_async_scratch_limit_fn_t = hsa_status_t(HSA_API *)(hsa_a
 using hsa_amd_memory_async_batch_copy_fn_t = hsa_status_t(HSA_API *)(
     const hsa_amd_memory_copy_op_t *, uint32_t, uint32_t, const hsa_signal_t *);
 using hsa_amd_agent_preload_fn_t = hsa_status_t(HSA_API *)(hsa_agent_t, uint64_t);
+
+// AMD loader vendor extension (queried via hsa_system_get_major_extension_table
+// with HSA_EXTENSION_AMD_LOADER). Source of truth:
+// projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_ven_amd_loader.h. The hook
+// only needs to intercept the file-with-offset/size reader constructor to
+// capture source bytes, so the fields preceding it are mirrored as opaque
+// function pointers -- all pointers are the same width, which preserves the
+// offset of the reader field for the versioned partial-table size checks. Only
+// the reader constructor is given its real signature because it is the only
+// field the hook calls. HSA_EXTENSION_AMD_LOADER is already defined in hsa.h.
+using hsa_ven_amd_loader_reader_create_from_file_with_offset_size_fn_t = hsa_status_t (*)(
+    hsa_file_t file, size_t offset, size_t size, hsa_code_object_reader_t *code_object_reader);
+
+struct hsa_ven_amd_loader_1_03_pfn_t {
+  void (*hsa_ven_amd_loader_query_host_address)();
+  void (*hsa_ven_amd_loader_query_segment_descriptors)();
+  void (*hsa_ven_amd_loader_query_executable)();
+  void (*hsa_ven_amd_loader_executable_iterate_loaded_code_objects)();
+  void (*hsa_ven_amd_loader_loaded_code_object_get_info)();
+  hsa_ven_amd_loader_reader_create_from_file_with_offset_size_fn_t
+      hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size;
+  void (*hsa_ven_amd_loader_iterate_executables)();
+};
+
+// The reader constructor is the sixth pointer (offset 5 * pointer size). ROCr's
+// 1.02 table added it; the hook must not touch it in a table too small to hold
+// it. This guards the offset against ABI drift in the mirror above.
+static_assert(offsetof(hsa_ven_amd_loader_1_03_pfn_t,
+                       hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size) ==
+                  5 * sizeof(void (*)()),
+              "vendor loader reader-create field offset changed");
