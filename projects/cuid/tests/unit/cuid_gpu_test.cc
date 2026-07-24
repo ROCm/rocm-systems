@@ -39,30 +39,24 @@ TestCuidGpuRenderNode::TestCuidGpuRenderNode() {
 void TestCuidGpuRenderNode::SetUp() {}
 
 void TestCuidGpuRenderNode::Run() {
-  // Paths produced by the GIM enumeration path are of the form
-  // "/sys/bus/pci/devices/<bdf>" and must be preserved verbatim, otherwise
-  // every GIM-only GPU collapses to the parent directory and the CUID file
-  // ends up with an ambiguous device_node.
+  // GIM enumeration passes "/sys/bus/pci/devices/<bdf>" and must be kept
+  // verbatim; trimming would collapse every GIM-only GPU to the parent dir.
   {
     const std::string pci_path = "/sys/bus/pci/devices/0000:65:00.0";
     EXPECT_EQ(CuidGpu::normalize_render_node(pci_path), pci_path)
         << "GIM-style PCI device paths must not be trimmed";
   }
 
-  // Paths produced by /sys/class/drm enumeration end in "/device" and the
-  // trailing component must be stripped so that downstream consumers can
-  // re-append "/device/<attribute>" themselves. Use a card number unlikely to
-  // exist on the test host so no renderD node is resolved and the trimmed
-  // card path is returned unchanged.
+  // DRM enumeration passes "/sys/class/drm/<card>/device"; the trailing
+  // "/device" must be stripped. card999 is unlikely to exist, so no renderD
+  // node is resolved and the trimmed card path is returned unchanged.
   {
     const std::string drm_path = "/sys/class/drm/card999/device";
     EXPECT_EQ(CuidGpu::normalize_render_node(drm_path), "/sys/class/drm/card999")
         << "DRM enumeration paths must have the trailing /device stripped";
   }
 
-  // A path that does not end in "/device" and is not a DRM card path must be
-  // returned verbatim. This guards against a future regression where a partial
-  // suffix match (e.g. "...evice") accidentally matches.
+  // A path that is neither form must be returned verbatim.
   {
     const std::string path = "/some/custom/path";
     EXPECT_EQ(CuidGpu::normalize_render_node(path), path);

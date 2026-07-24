@@ -40,18 +40,10 @@ namespace gim {
 
 namespace {
 
-// =============================================================================
-// GIM SMI ABI mirror types
-//
-// These structures mirror the binary layout of the corresponding types defined
-// in the host AMD-SMI library
-//   (MxGPU-Virtualization/gim-coms-lib/inc/smi_cmd_def.h)
-//   (MxGPU-Virtualization/smi-lib/inc/common/smi_cmd.h)
-// for the SMI ioctl client transport. They are intentionally kept here (rather
-// than vendored as headers) so that this CUID library has no build-time
-// dependency on the GIM driver source tree. The static_asserts below catch any
-// accidental ABI drift.
-// =============================================================================
+// GIM SMI ABI mirror types. These mirror the binary layout of the host
+// AMD-SMI / GIM smi_cmd_def.h and smi_cmd.h types, duplicated here to avoid a
+// build dependency on the GIM driver source. The static_asserts guard against
+// ABI drift.
 
 constexpr size_t kSmiMaxStringLength = 256;
 constexpr size_t kSmiMaxPayload = 1024;          // uint32_t entries

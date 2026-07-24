@@ -103,9 +103,8 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
   // create duplicates of GPUs that are also visible via /sys/class/drm.
   std::set<std::string> seen_bdfs;
 
-  // Create one GimClient up front and share it across every discover_single
-  // call as well as the GIM enumeration loop below. This avoids the per-GPU
-  // ioctl handshake overhead that a fresh client incurs on construction.
+  // Share one GimClient across all discover_single calls and the GIM
+  // enumeration below to avoid repeating the ioctl handshake per GPU.
   std::unique_ptr<cuid::gim::GimClient> gim_client;
   if (cuid::gim::GimClient::is_available()) {
     gim_client.reset(new cuid::gim::GimClient());
@@ -144,10 +143,8 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
         if (dev.bdf.empty() || seen_bdfs.count(dev.bdf) > 0) {
           continue;
         }
-        // Skip devices the GIM driver reports as failed: such devices are
-        // either not present, not initialized, or otherwise unable to
-        // provide useful identifying information, so they should not be
-        // surfaced to consumers as discoverable GPUs.
+        // Skip devices GIM reports as failed; they cannot provide useful
+        // identifying information.
         if (dev.failed) {
           LOG(DEBUG, "GIM: skipping failed device at BDF " << dev.bdf);
           continue;
@@ -161,12 +158,8 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
         if (info.bdf.empty()) {
           info.bdf = dev.bdf;
         }
-        // discover_single() may have synthesized an unrelated render_node
-        // (e.g. by trimming the input path) for inputs that are not the
-        // canonical /sys/class/drm/<card>/device form used elsewhere. For
-        // GIM-only devices the per-device PCI sysfs directory is the
-        // stable identifier we want persisted in the CUID file, so always
-        // overwrite it here.
+        // For GIM-only devices the per-device PCI sysfs directory is the
+        // stable identifier to persist in the CUID file.
         info.render_node = sys_device_path;
         info.header.device_type = AMDCUID_DEVICE_TYPE_GPU;
         seen_bdfs.insert(dev.bdf);
@@ -280,12 +273,8 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
   info.bdf = bdf;
   info.render_node = full_device_node;
 
-  // Final fallback: when sysfs and PCI config space were both unable to
-  // populate the core PCI identifiers (typical of hosts running the GIM
-  // SR-IOV driver where the PCI device files are not exposed to userspace),
-  // query the same fields via the GIM SMI ioctl interface. The caller is
-  // expected to share a single GimClient across all discover_single calls
-  // so the ioctl handshake only happens once per discovery pass.
+  // Fallback for GIM SR-IOV hosts, where PCI device files are not exposed to
+  // userspace: fill the core identifiers from the GIM SMI ioctl interface.
   const bool needs_gim_fallback = !info.bdf.empty() && gim_client != nullptr &&
                                   (info.header.fields.gpu.vendor_id == 0 ||
                                    info.header.fields.gpu.device_id == 0);
@@ -305,9 +294,8 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
         info.header.fields.gpu.revision_id =
             static_cast<uint8_t>(asic.rev_id);
       }
-      // pci_class is not exposed by the GIM ASIC info; default to the
-      // standard PCI display-controller class (0x0300) so consumers do not
-      // see an all-zero class identifier for GIM-only GPUs.
+      // GIM ASIC info omits pci_class; default to the PCI display-controller
+      // class so GIM-only GPUs do not report an all-zero class.
       if (info.header.fields.gpu.pci_class == 0) {
         info.header.fields.gpu.pci_class = 0x0300;
       }
@@ -325,12 +313,8 @@ CuidGpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
     return AMDCUID_STATUS_PERMISSION_DENIED;
   }
 
-  // The render_node may be either a DRM character-device directory
-  // ("/sys/class/drm/renderD<N>" or "/sys/class/drm/card<N>"), under which
-  // the PCI device attributes live at "<render_node>/device/...", or a PCI
-  // device directory directly ("/sys/bus/pci/devices/<bdf>") in which case
-  // the attributes are at "<render_node>/...". Detect the latter so the
-  // sysfs unique_id lookup works for GIM-only devices too.
+  // For DRM render nodes the PCI attributes live at "<render_node>/device";
+  // for GIM-only PCI directories they live directly under render_node.
   const bool render_node_is_pci_dir =
       m_info.render_node.find("/sys/bus/pci/devices/") == 0;
   const std::string device_attr_prefix =

@@ -32,9 +32,7 @@
 namespace cuid {
 namespace gim {
 
-// Path to the GIM SMI character device exposed by the GIM kernel driver.
-// This mirrors the path used by the host AMD-SMI library
-// (gim-coms-lib/src/gim_ioctl.c).
+// GIM SMI character device exposed by the GIM kernel driver.
 constexpr const char *kGimSmiDevicePath = "/dev/gim-smi0";
 
 // Mirror of struct smi_asic_info subset returned by SMI_CMD_CODE_GET_ASIC_INFO
@@ -59,11 +57,9 @@ struct GimDeviceEntry {
   bool failed = false;     // Reported by GIM as failed.
 };
 
-// Thin RAII wrapper around the GIM SMI ioctl interface used to query device
-// information when sysfs is not populated (typical of hosts running the GIM
-// SR-IOV driver). All public methods are safe to call regardless of whether
-// the device node exists; methods will return AMDCUID_STATUS_UNSUPPORTED when
-// the GIM driver is unavailable.
+// RAII wrapper around the GIM SMI ioctl interface, used to query device info
+// when sysfs is not populated (GIM SR-IOV hosts). All methods are safe to call
+// when the device node is absent and return AMDCUID_STATUS_UNSUPPORTED then.
 class GimClient {
 public:
   GimClient();
