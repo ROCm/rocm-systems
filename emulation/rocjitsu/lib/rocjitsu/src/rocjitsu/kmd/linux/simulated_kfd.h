@@ -291,13 +291,10 @@ private:
   bool on_wave_sendmsg(amdgpu::Wavefront &wf, uint32_t message);
   void on_wave_trap_complete(amdgpu::Wavefront &wf);
 
-  /// @brief True if any wave of the given queue is still executing (may yet trap
-  /// or complete). Used to defer the debugger report until all waves of a
-  /// multi-wave dispatch have stopped, so they are serialized atomically.
-  bool queue_has_running_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
-                               const amdgpu::Wavefront *exclude);
-
   bool on_wave_single_step_complete(amdgpu::Wavefront &wf);
+  void notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+                          uint32_t gpu_id,
+                          uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
   void report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                            uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size,
                            uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
@@ -315,6 +312,7 @@ private:
   bool on_wave_watchpoint(amdgpu::Wavefront &wf, uint64_t addr, uint32_t bytes, bool is_write,
                           bool is_atomic);
   bool on_wave_illegal_instruction(amdgpu::Wavefront &wf);
+  bool on_wave_alu_exception(amdgpu::Wavefront &wf);
 
   /// @brief Memory-violation handler installed on every compute unit.
   /// @details Runs on the engine thread for a global-memory access to an
@@ -330,7 +328,7 @@ private:
   void set_debug_active_on_all_cus(bool active);
 
   /// @brief Serialize all debug-halted waves of a queue into its CWSR area.
-  void serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
+  bool serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
                                    uint64_t ctx_base, uint32_t ctx_size);
 
   /// @brief Stop the target's running waves and refresh their CWSR areas

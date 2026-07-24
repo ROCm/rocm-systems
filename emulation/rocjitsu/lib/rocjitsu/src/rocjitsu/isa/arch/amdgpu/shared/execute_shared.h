@@ -8,6 +8,7 @@
 #define ROCJITSU_ISA_AMDGPU_SHARED_EXECUTE_SHARED_H_
 
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -9875,8 +9876,11 @@ inline void execute_v_div_fixup_f16_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_div_fixup_f32_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
-      [](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); });
+  uint32_t alu_causes = classify_div_fixup_f32_exceptions(inst, wf);
+  if (!(wf.mode_raw() & kAluExceptionModeMask)) {
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
+        [](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); });
+  }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -9931,6 +9935,7 @@ inline void execute_v_div_fixup_f32_vop3([[maybe_unused]] Inst &inst,
       result = std::clamp(result, 0.0f, 1.0f);
     sdwa::write_lane<true>(inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>(result));
   }
+  wf.set_trapsts(wf.trapsts() | alu_causes);
 }
 
 template <typename Inst>
@@ -16042,7 +16047,10 @@ inline void execute_v_mul_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_mul_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_BINARY(float32_t, std::multiplies<>{});
+  uint32_t alu_causes = classify_mul_f32_vop2(inst, wf);
+  if (!(wf.mode_raw() & kAluExceptionModeMask)) {
+    ROCJITSU_TRY_SIMD_VOP2_BINARY(float32_t, std::multiplies<>{});
+  }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -16053,11 +16061,15 @@ inline void execute_v_mul_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
             (std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)) *
              std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))));
   }
+  wf.set_trapsts(wf.trapsts() | alu_causes);
 }
 
 template <typename Inst>
 inline void execute_v_mul_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, std::multiplies<>{});
+  uint32_t alu_causes = classify_mul_f32_vop3(inst, wf);
+  if (!(wf.mode_raw() & kAluExceptionModeMask)) {
+    ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, std::multiplies<>{});
+  }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -16096,6 +16108,7 @@ inline void execute_v_mul_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                              return v;
                            }()));
   }
+  wf.set_trapsts(wf.trapsts() | alu_causes);
 }
 
 template <typename Inst>
@@ -17579,7 +17592,11 @@ inline void execute_v_rcp_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_rcp_iflag_f32_vop1([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, float32_t, [](auto a) { return util::rcp_f32_simd(a); });
+  uint32_t alu_causes = classify_rcp_iflag_f32_exceptions(inst, wf);
+  if (!(wf.mode_raw() & kAluExceptionModeMask)) {
+    ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, float32_t,
+                                 [](auto a) { return util::rcp_f32_simd(a); });
+  }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -17589,13 +17606,17 @@ inline void execute_v_rcp_iflag_f32_vop1([[maybe_unused]] Inst &inst,
         std::bit_cast<uint32_t>(amdgpu::transcendental::rcp_f32(
             std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)))));
   }
+  wf.set_trapsts(wf.trapsts() | alu_causes);
 }
 
 template <typename Inst>
 inline void execute_v_rcp_iflag_f32_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t,
-                                  [](auto a) { return util::rcp_f32_simd(a); });
+  uint32_t alu_causes = classify_rcp_iflag_f32_exceptions(inst, wf);
+  if (!(wf.mode_raw() & kAluExceptionModeMask)) {
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t,
+                                    [](auto a) { return util::rcp_f32_simd(a); });
+  }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -17624,6 +17645,7 @@ inline void execute_v_rcp_iflag_f32_vop3([[maybe_unused]] Inst &inst,
                              return v;
                            }()));
   }
+  wf.set_trapsts(wf.trapsts() | alu_causes);
 }
 
 template <typename Inst>
@@ -18341,7 +18363,11 @@ inline void execute_v_sqrt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_v_sqrt_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, float32_t, [](auto a) { return util::sqrt_f32_simd(a); });
+  uint32_t alu_causes = classify_sqrt_f32_vop1(inst, wf);
+  if (!(wf.mode_raw() & kAluExceptionModeMask)) {
+    ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, float32_t,
+                                 [](auto a) { return util::sqrt_f32_simd(a); });
+  }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -18351,12 +18377,16 @@ inline void execute_v_sqrt_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]
         std::bit_cast<uint32_t>(amdgpu::transcendental::sqrt_f32(
             std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)))));
   }
+  wf.set_trapsts(wf.trapsts() | alu_causes);
 }
 
 template <typename Inst>
 inline void execute_v_sqrt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t,
-                                  [](auto a) { return util::sqrt_f32_simd(a); });
+  uint32_t alu_causes = classify_sqrt_f32_vop3(inst, wf);
+  if (!(wf.mode_raw() & kAluExceptionModeMask)) {
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t,
+                                    [](auto a) { return util::sqrt_f32_simd(a); });
+  }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -18385,6 +18415,7 @@ inline void execute_v_sqrt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
                              return v;
                            }()));
   }
+  wf.set_trapsts(wf.trapsts() | alu_causes);
 }
 
 template <typename Inst>

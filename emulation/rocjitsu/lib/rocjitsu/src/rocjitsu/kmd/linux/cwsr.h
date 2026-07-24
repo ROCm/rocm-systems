@@ -22,6 +22,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <vector>
 
 namespace rocjitsu {
@@ -121,6 +122,22 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                                 const std::vector<CwsrWaveState> &waves,
                                 const std::function<void(uint64_t, uint32_t)> &write32);
 
+/// @brief Serialize a queue using two block writes: payload first, then header.
+///
+/// @details This is the production-oriented equivalent of
+/// @ref serialize_queue_cwsr. It constructs the same byte-exact image but
+/// publishes the contiguous control-stack/wave payload with one callback and
+/// the 40-byte ABI header with a second callback. Keeping the header write last
+/// preserves the CWSR publication contract while avoiding a GPU page-table
+/// lookup and lock acquisition for every dword of every wave register.
+///
+/// @param write_block Callback receiving a target address and contiguous bytes.
+/// @returns The chosen layout; @ref CwsrLayout::ok is false and no callback is
+///          made when the image is invalid or does not fit.
+CwsrLayout serialize_queue_cwsr_bulk(
+    uint64_t ctx_base, uint32_t area_size, const std::vector<CwsrWaveState> &waves,
+    const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block);
+
 /// @brief Read wave register state back from a serialized CWSR area.
 ///
 /// @details The inverse of @ref serialize_queue_cwsr. rocm-dbgapi writes a
@@ -142,6 +159,16 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                             std::vector<CwsrWaveState> &waves,
                             const std::function<uint32_t(uint64_t)> &read32);
+
+/// @brief Read and deserialize a queue CWSR image using block transfers.
+///
+/// @details Validates the ABI header against the geometry implied by @p waves,
+/// reads the contiguous control-stack/wave payload once, then applies the same
+/// decoder as @ref deserialize_queue_cwsr. The queue must remain suspended for
+/// the complete operation.
+bool deserialize_queue_cwsr_bulk(
+    uint64_t ctx_base, uint32_t area_size, std::vector<CwsrWaveState> &waves,
+    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block);
 
 } // namespace kmd
 } // namespace rocjitsu

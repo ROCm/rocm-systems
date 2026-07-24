@@ -233,6 +233,27 @@ public:
     /// more watchpoints than the device snapshot told it exist.
     static constexpr uint32_t kMaxAddressWatches = kmd::kNumWatchPoints;
     std::array<AddressWatch, kMaxAddressWatches> address_watches;
+
+    /// @brief Return a bit for every hardware watch slot matching an access.
+    /// @details A single access may overlap multiple programmed watch ranges.
+    /// Hardware reports all of them concurrently in TRAPSTS, allowing the
+    /// debugger to associate every logical watchpoint with the same stop.
+    /// @param matching_modes Bit set of watch modes the access satisfies,
+    /// indexed by mode value. The modes overlap (a write is both NONREAD and
+    /// ALL), so the caller -- which owns the KFD ABI -- resolves them into this
+    /// set rather than passing a single mode to compare for equality.
+    [[nodiscard]] constexpr uint32_t matching_address_watch_slots(uint64_t access_address,
+                                                                  uint32_t bytes,
+                                                                  uint32_t matching_modes) const {
+      uint32_t slots = 0;
+      for (uint32_t slot = 0; slot < kMaxAddressWatches; ++slot) {
+        const auto &watch = address_watches[slot];
+        if (watch.mode < 32 && ((matching_modes >> watch.mode) & 1u) != 0 &&
+            watch.overlaps(access_address, bytes))
+          slots |= uint32_t{1} << slot;
+      }
+      return slots;
+    }
   };
 
   /// @brief Per-page translation entry, mirroring HW PTE fields.
