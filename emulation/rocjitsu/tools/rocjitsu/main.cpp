@@ -304,7 +304,7 @@ std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
   for (uint32_t ordinal = 0; ordinal < nodes.size(); ++ordinal)
     gpus.push_back({ordinal, nodes[ordinal].gpu_id, nodes[ordinal].gfx_target_version,
                     nodes[ordinal].unique_id});
-  return gpus;
+  return rocjitsu::cli::enumerate_kfd_gpus(gpus);
 }
 
 std::optional<std::string_view> environment_value(const char *name) {
@@ -369,7 +369,7 @@ dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
     const auto &device = devices[ordinal];
     gpus.push_back({ordinal, device.gpu_id, device.gfx_target_version, device.unique_id});
   }
-  return gpus;
+  return rocjitsu::cli::enumerate_kfd_gpus(gpus);
 }
 
 void print_usage() {

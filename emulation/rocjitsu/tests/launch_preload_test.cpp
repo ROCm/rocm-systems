@@ -111,6 +111,16 @@ TEST(RocmVisibilityTest, UnsetAndEmptyRocrSelectorsDiffer) {
   EXPECT_TRUE(rocjitsu::cli::filter_rocr_visible_gpus(gpus, std::string_view{}).empty());
 }
 
+TEST(RocmVisibilityTest, KfdEnumerationSkipsZeroGpuIdsAndCompactsOrdinals) {
+  const std::vector<rocjitsu::cli::VisibleGpu> candidates{{0, 0, 90402, 0},
+                                                          {1, 101, 90402, 0x2222222222222222ULL}};
+  const auto gpus = rocjitsu::cli::enumerate_kfd_gpus(candidates);
+
+  ASSERT_EQ(1u, gpus.size());
+  EXPECT_EQ(0u, gpus[0].ordinal);
+  EXPECT_EQ(101u, gpus[0].gpu_id);
+}
+
 TEST(RocmVisibilityTest, NumericAndUuidSelectorsReorderDevices) {
   const auto gpus = test_gpus();
   const auto numeric = rocjitsu::cli::filter_rocr_visible_gpus(gpus, "1,0");

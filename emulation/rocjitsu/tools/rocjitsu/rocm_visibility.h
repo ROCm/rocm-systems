@@ -35,6 +35,8 @@ struct VisibilityOverride {
   std::string value;
 };
 
+std::vector<VisibleGpu> enumerate_kfd_gpus(const std::vector<VisibleGpu> &candidates);
+
 std::vector<VisibleGpu> filter_rocr_visible_gpus(const std::vector<VisibleGpu> &gpus,
                                                  std::optional<std::string_view> selector);
 

@@ -44,6 +44,19 @@ client_selector(std::optional<std::string_view> hip_visible,
 
 } // namespace
 
+std::vector<VisibleGpu> enumerate_kfd_gpus(const std::vector<VisibleGpu> &candidates) {
+  std::vector<VisibleGpu> gpus;
+  gpus.reserve(candidates.size());
+  for (const VisibleGpu &candidate : candidates) {
+    if (candidate.gpu_id == 0)
+      continue;
+    VisibleGpu gpu = candidate;
+    gpu.ordinal = static_cast<uint32_t>(gpus.size());
+    gpus.push_back(gpu);
+  }
+  return gpus;
+}
+
 std::vector<VisibleGpu> filter_rocr_visible_gpus(const std::vector<VisibleGpu> &gpus,
                                                  std::optional<std::string_view> selector) {
   if (!selector)
