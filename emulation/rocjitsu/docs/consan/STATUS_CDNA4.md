@@ -93,15 +93,16 @@ yet counted as physical gfx950 or instrumentation acceptance evidence.
 ## RocJitsu test-corpus expansion
 
 The source-built kernel survey below began at historical corpus revision
-`aa54cc86c9eb`.  Revision `f88d4583022d` first enabled the bounded gfx950 HIP
-Stream-K cases and packaged the runtime-generated gfx950 Tensile row described
-below.  The current workspace corpus at descendant revision `0db836e7bd8c`
-retains those cases and adds the runner provenance and isolation coverage used
-for the fresh qualification.  The older pre-generated Tensile artifact tree
-remains gfx1250-only and may not be relabeled as gfx950 evidence; gfx950 code
-objects are generated from the checked-in gfx950 YAML.  Every source-built cell
-below remains gray until the case has an independent oracle, a retained
-target-native inventory, and a standard-profile clean run for that flavor.
+`aa54cc86c9eb`.  Revision `61b5af0b5ee9` first enabled the bounded gfx950 HIP
+Stream-K cases, and `46a4c58a7be8` packaged the runtime-generated gfx950
+Tensile row described below.  The current workspace corpus at descendant
+revision `0db836e7bd8c` retains those cases and adds the runner provenance and
+isolation coverage used for the fresh qualification.  The older pre-generated
+Tensile artifact tree remains gfx1250-only and may not be relabeled as gfx950
+evidence; gfx950 code objects are generated from the checked-in gfx950 YAML.
+Every source-built cell below remains gray until the case has an independent
+oracle, a retained target-native inventory, and a standard-profile clean run
+for that flavor.
 
 The gfx950 corpus configuration enables HIP matmul, HipKittens, HIP Stream-K,
 and rocBLAS.  It has no run-time skip list.  It currently skips compilation of
@@ -135,10 +136,10 @@ gfx950 ConSan execution evidence.
 
 ### gfx950 Tensile follow-on
 
-Corpus revision `f88d4583022d` first packaged one bounded, target-native
-gfx950 TensileLite Stream-K row.  The selected row is intentionally a runtime
-validation case rather than a tuning sweep; fresh qualification uses descendant
-revision `0db836e7bd8c`:
+Corpus revision `46a4c58a7be8` first packaged one bounded, target-native gfx950
+TensileLite Stream-K row.  The selected row is intentionally a runtime
+validation case rather than a tuning sweep; fresh qualification uses
+descendant revision `0db836e7bd8c`:
 
 - one assembly FP32 GEMM solution with `StreamK: 3`;
 - exact problem size `[129, 129, 1, 129]` with beta;
@@ -270,7 +271,7 @@ instrumentation acceptance evidence.
 | Physical dispatch smoke | On 2026-07-22, workspace TheRock `rocminfo` reports MI355X / `gfx950:sramecc+:xnack-`.  Five native CDNA4 hip-moi host-reference tests pass in 92--188 ms, and corpus `hip_matmul` m128³ passes correctness for all three selected MFMA/shared-memory kernels.  Separately, all six target-native hip-moi executables, including both Jakub parameterizations, pass 14/14 tests through the gfx950 RocJITsu simulator. |
 | Validation corpus | `iree-test-suites` `49f46d6d4370e5aa0a6367751474e20c6c4e95c0`; required Sharktank assets present; LFS fsck clean |
 | Validation doctor | The target-aware registry and workload-scoped doctor resolve all six native hip-moi roles through the explicit `hip-moi-build-gfx950-tests` build tree, including the Jakub counterpart. |
-| RocJitsu test corpus | `rocjitsu-test-corpus` `0db836e7bd8c6400b7ffd187d749225899875d7c`; gfx950 enables source-built HIP matmul, HipKittens, HIP Stream-K, and rocBLAS cases and packages the bounded `gfx950_sk_sgemm_streamk` runtime row.  Revision `f88d4583022d438ea72fb82c0e89143ccbf61843` first enabled and packaged those rows; the intervening commits harden Tensile runner provenance and isolation.  Its historical pre-generated Tensile artifact tree remains gfx1250-only. |
+| RocJitsu test corpus | Local commit `0db836e7bd8c6400b7ffd187d749225899875d7c`; gfx950 enables source-built HIP matmul, HipKittens, HIP Stream-K, and rocBLAS cases and packages the bounded `gfx950_sk_sgemm_streamk` runtime row.  Commits `61b5af0b5ee9ef9221391f5f81550b5e295e7e59` and `46a4c58a7be89b4118c2e3f94081591783d5391a` introduced the Stream-K and Tensile rows, respectively; commits after the earlier `f88d4583022d438ea72fb82c0e89143ccbf61843` snapshot harden Tensile runner provenance and isolation.  No fetched remote ref contains the current commit, so clean remote reproduction requires publishing or transferring it.  The historical pre-generated Tensile artifact tree remains gfx1250-only. |
 | gfx950 Tensile source pool | The 36-YAML pool was surveyed and the bounded Stream-K candidate selected at `rocm-libraries` `c2fafc16393d0ce47a0a5801d827d43f0d3714a4`; the packaged `gfx950_sk_sgemm_streamk` row was reduced from `a8f0845f87ab50adc3dc8d0edd86693cb31065b1`.  The remaining source pool is not part of the validation denominator. |
 | PyTorch discovery | The gfx1250-only thin-wheel mismatch is diagnosed and isolated.  The separate official nightly environment passes `torch.arange` plus all six portable one-repetition exact oracles on gfx950.  Workload-scoped doctor confirms gfx950 numeric dispatch and exact-hook mapping. |
 | Registry boundary | The six portable PyTorch rows and native hip-moi roles are registered validation IDs for gfx950.  The bounded Tensile row is an external corpus executable denominator, not yet a `consan_validation.py` workload.  The remaining source-built corpus rows stay planned expansion until they are built and registered. |
@@ -359,6 +360,15 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-24: Advanced the gfx950 corpus evidence baseline to local commit
+  `0db836e7bd8c6400b7ffd187d749225899875d7c`, regenerated the bounded Tensile
+  baseline and four standard-profile artifacts with retained 120-second
+  invocation provenance, and qualified the result honestly: baseline and
+  SuperCollider pass, while Record/Replay, Sampled, and Inline Shadow reject
+  before the oracle on their tracked placement gaps.  The corpus commit is not
+  present on a fetched remote ref and must be published or transferred for a
+  clean remote reproduction.
 
 - 2026-07-23: Added the target-native gfx950 Jakub reference executable and
   resolved all six hip-moi roles through the explicit
