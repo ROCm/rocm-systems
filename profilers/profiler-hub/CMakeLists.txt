@@ -269,23 +269,11 @@ endforeach()
 # otherwise get no transitive link requirements at all. Explicitly restore
 # the ones that are genuinely resolvable by real consumers.
 #
-# profiler-hub_queries IS one of them (added below, both BUILD_INTERFACE and
-# INSTALL_INTERFACE): it is a genuinely separate static archive
-# (query_builder_base.cpp, select_query_builders.cpp) that profiler-hub-objects
-# only links PRIVATE. Unlike a SHARED library - which bakes a PRIVATE
-# dependency's object code directly into the .so at its own link time - a
-# plain STATIC library link never absorbs a dependency's object code, so
-# profiler-hub_queries's object files never make it into libprofiler-hub.a.
-# Any consumer that pulls in query-builder symbols, including profiler-hub's
-# own reader_impl.cpp, must be told to link profiler-hub_queries explicitly.
-# sqlite3 and profiler-hub-objects itself stay excluded: sqlite3 is in-tree-only
-# for now (a separately-tracked follow-up, not part of this fix), and
-# profiler-hub-objects is the object library itself, not a separate consumable
-# archive. nlohmann_json is deliberately excluded too: it is a PRIVATE,
-# header-only dependency of profiler-hub-objects that never appears in the
-# installed public headers, so it carries no link symbols a static consumer
-# needs. profiler-hub (SHARED) needs no such list: its dependencies are already
-# fully baked into the .so.
+# profiler-hub_queries is added below (BUILD_INTERFACE + INSTALL_INTERFACE):
+# unlike a SHARED library, a STATIC archive doesn't absorb its PRIVATE deps'
+# object code, so consumers need it linked explicitly. sqlite3 stays excluded
+# (separately-tracked follow-up); nlohmann_json is header-only, no link
+# symbols needed.
 #
 # Each dependency added here must also get a matching find_dependency() call
 # in profiler-hub-config.cmake.in (accumulated below into
@@ -352,12 +340,8 @@ if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
         "find_dependency(rocprofiler-sdk-rocpd)\n"
     )
 endif()
-# Unconditional (not tied to the fmt/spdlog loop or the rocpd block above):
-# profiler-hub_queries is always built in-tree as part of this project, so both
-# the BUILD_INTERFACE (in-tree add_subdirectory consumption, e.g. ProfilerHub.cmake's
-# fallback tier) and INSTALL_INTERFACE (exported/installed package) entries are
-# needed - only one evaluates non-empty depending on how profiler-hub-static ends
-# up consumed.
+# Always in-tree; needs both interfaces since only one evaluates non-empty
+# depending on how profiler-hub-static ends up consumed.
 list(
     APPEND profiler_hub_static_iface_libs
     "$<BUILD_INTERFACE:profiler-hub_queries>"
@@ -402,13 +386,8 @@ install(
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT profiler-hub
 )
 
-# profiler-hub_queries is a real, separate static archive (query_builder_base.cpp,
-# select_query_builders.cpp), not something baked into libprofiler-hub.a - a static
-# archive never absorbs its own PRIVATE target_link_libraries dependencies' object
-# code, unlike a SHARED library. Any consumer of profiler-hub-static (installed or
-# in-tree) that uses public headers under source/queries/ (e.g. table_select_query.hpp,
-# used by profiler-hub's own reader_impl.cpp) needs this archive on its own link line.
-# Export it so tier-1 (installed package) consumers can resolve it too.
+# Not baked into libprofiler-hub.a (see comment above); export it too so
+# installed-package consumers can resolve it.
 install(
     TARGETS profiler-hub_queries
     EXPORT ${PACKAGE_NAME}
