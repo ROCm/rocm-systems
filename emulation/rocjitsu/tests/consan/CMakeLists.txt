@@ -301,7 +301,8 @@ function(rj_add_consan_common_sim_cases)
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
-        PASS_REGEX "site=access.*source=spill reason=none"
+        PASS_REGEX
+            "site=access.*source=spill reason=none.*kind=1.*first_owner=0 second_owner=[1-9][0-9]*.*second_lanes=0x[1-9a-fA-F].*first_lds=\\[0,4\\) second_lds=\\[0,4\\)"
         FAIL_REGEX "RJ_CONSAN_MOI_REQUIRE_(RECORDS|DIAGNOSTICS) requested"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
