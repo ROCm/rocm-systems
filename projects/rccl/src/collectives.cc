@@ -449,6 +449,8 @@ NCCL_API(ncclResult_t, ncclAlltoAllv, const void* sendbuff, const size_t sendcou
 ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[], const size_t sdispls[], void* recvbuff,
                                 const size_t recvcounts[], const size_t rdispls[], ncclDataType_t datatype,
                                 ncclComm_t comm, hipStream_t stream) {
+  // NEGATIVE TEST: intentionally break AllToAllv to verify CI catches it
+  return ncclInvalidUsage;
   NVTX3_FUNC_WITH_PARAMS(AlltoAllv, NcclNvtxParamsAlltoAllv,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, sendcounts[comm->rank] * ncclTypeSize(datatype),
                                        recvcounts[comm->rank] * ncclTypeSize(datatype), datatype));
