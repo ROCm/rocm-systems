@@ -188,14 +188,10 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["d128-block"]["overhead_filter"],
             ("HipMoiCdna4D128AttentionBlock." "SampledFastContextMatchesHostReference"),
         )
-        self.assertIn(
-            "HipMoiCdna4MfmaStreamKArrivalCounter",
-            workloads["streamk-arrival"]["overhead_filter"],
-        )
-        self.assertEqual(
-            workloads["tree-atomic-or"]["clean_filter"],
-            ("HipMoiCdna4MfmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersMfmaPartials"),
-        )
+        for workload_id in ("streamk-arrival", "tree-atomic-or"):
+            streamk = workloads[workload_id]
+            self.assertEqual(streamk["clean_filter"], streamk["overhead_filter"])
+            self.assertNotIn("*", streamk["clean_filter"])
         self.assertEqual(
             workloads["jakub-attention"]["relative_path"],
             "hip-moi-build/tests/hip_moi_reference_cdna4_jakub_matmul",
@@ -231,10 +227,10 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["wmma-attention"]["clean_filter"],
             "HipMoiGfx1250WmmaAttentionBlock.*",
         )
-        self.assertIn(
-            "HipMoiGfx1250WmmaStreamKArrivalCounter",
-            workloads["streamk-arrival"]["overhead_filter"],
-        )
+        for workload_id in ("streamk-arrival", "tree-atomic-or"):
+            streamk = workloads[workload_id]
+            self.assertEqual(streamk["clean_filter"], streamk["overhead_filter"])
+            self.assertNotIn("*", streamk["clean_filter"])
         self.assertEqual(
             workloads["d128-block"]["fault_filter"],
             (

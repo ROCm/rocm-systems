@@ -935,6 +935,8 @@ GFX950_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
             "hip-moi-build/tests/"
             "hip_moi_instrumented_cdna4_mfma_streamk_tree_atomic_or_test"
         ),
+        # Clean, overhead, and the implicit fault fallback deliberately use
+        # only the ordering oracle; do not widen this to the racy sibling test.
         "clean_filter": (
             "HipMoiCdna4MfmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersMfmaPartials"
         ),
