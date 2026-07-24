@@ -1384,6 +1384,79 @@ RjHsaLayer &layer() {
   return state;
 }
 
+/// @brief Read the first ISA name advertised by @p agent, or empty on failure.
+///
+/// @details Uses the saved (unpatched) ISA-iteration entries so detection runs
+/// against ROCR's real values regardless of any presentation overlay installed
+/// on the patched table. Mirrors ROCr hotswap's GetAgentIsaName.
+[[nodiscard]] std::string agent_first_isa_name(hsa_agent_t agent) {
+  auto *iterate_isas = layer().agent_iterate_isas();
+  auto *isa_get_info = layer().isa_get_info_alt();
+  if (!iterate_isas || !isa_get_info)
+    return {};
+
+  struct IsaNameData {
+    decltype(hsa_isa_get_info_alt) *get_info;
+    std::string name;
+  } data{isa_get_info, {}};
+
+  iterate_isas(
+      agent,
+      [](hsa_isa_t isa, void *arg) -> hsa_status_t {
+        auto *out = static_cast<IsaNameData *>(arg);
+        uint32_t len = 0;
+        if (out->get_info(isa, HSA_ISA_INFO_NAME_LENGTH, &len) != HSA_STATUS_SUCCESS || len == 0)
+          return HSA_STATUS_ERROR;
+        out->name.resize(len);
+        if (out->get_info(isa, HSA_ISA_INFO_NAME, out->name.data()) != HSA_STATUS_SUCCESS) {
+          out->name.clear();
+          return HSA_STATUS_ERROR;
+        }
+        if (!out->name.empty() && out->name.back() == '\0')
+          out->name.pop_back();
+        return HSA_STATUS_INFO_BREAK;
+      },
+      &data);
+  return data.name;
+}
+
+/// @brief Extract the gfx processor token (e.g. "gfx1250") from an HSA ISA name.
+///
+/// @details ISA names look like "amdgcn-amd-amdhsa--gfx1250:feature+"; the target
+/// is the segment after the last '-' up to the first ':'.
+[[nodiscard]] std::string_view gfx_target_of_isa_name(std::string_view isa_name) {
+  const size_t last_dash = isa_name.rfind('-');
+  if (last_dash != std::string_view::npos)
+    isa_name.remove_prefix(last_dash + 1);
+  const size_t colon = isa_name.find(':');
+  if (colon != std::string_view::npos)
+    isa_name = isa_name.substr(0, colon);
+  return isa_name;
+}
+
+/// @brief Return true when @p agent is a gfx1250 A0 device.
+///
+/// @details A0 and B0 share the gfx1250 ISA string, so the stepping comes from
+/// the ASIC revision: A0 == 0. Mirrors ROCr hotswap's
+/// IsHotswapSupportedGfxRevision (gfx1250 && asic_revision == 0). Reads the saved
+/// (unpatched) agent entries so the result reflects real silicon, not any
+/// presentation overlay. NOTE: the "A0 == asic_revision 0" mapping is taken from
+/// ROCr hotswap; confirm against real A0/B0 hardware in testing.
+[[nodiscard]] bool agent_is_gfx1250_a0(hsa_agent_t agent) {
+  auto *get_info = layer().agent_get_info();
+  if (!get_info)
+    return false;
+
+  if (gfx_target_of_isa_name(agent_first_isa_name(agent)) != "gfx1250")
+    return false;
+
+  uint32_t asic_revision = 0;
+  if (get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION),
+               &asic_revision) != HSA_STATUS_SUCCESS)
+    return false;
+  return asic_revision == 0;
+}
+
 /// @brief Parse a uint32_t from a NUL-terminated sysfs text value.
 [[nodiscard]] bool parse_u32_text(const char *text, uint32_t *out) {
   if (!text || !out)
@@ -4118,3 +4191,12 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
 /// after unloading tools, but the hook does its own cleanup so tests and future
 /// in-process reload paths do not retain stale translated ELF buffers.
 extern "C" RJ_HOOK_EXPORT void OnUnload() { layer().uninstall(); }
+
+/// @brief Test-only accessor for gfx1250 A0 detection.
+///
+/// @details Exposes the internal per-agent A0 check so unit tests can drive it
+/// against a fake HSA table. Not part of the public hook ABI; used only by
+/// rocjitsu's own tests. Requires an installed hook (reads the saved entries).
+extern "C" RJ_HOOK_EXPORT bool rj_test_agent_is_gfx1250_a0(uint64_t agent_handle) {
+  return agent_is_gfx1250_a0(hsa_agent_t{agent_handle});
+}

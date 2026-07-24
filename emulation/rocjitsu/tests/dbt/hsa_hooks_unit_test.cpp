@@ -37,6 +37,7 @@ RJ_DIAGNOSTIC_POP
 extern "C" bool OnLoad(HsaApiTable *table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char *const *failed_tool_names);
 extern "C" void OnUnload();
+extern "C" bool rj_test_agent_is_gfx1250_a0(uint64_t agent_handle);
 
 namespace {
 
@@ -46,8 +47,15 @@ constexpr hsa_agent_t kHostAgent{2};
 // are tracked for doorbell forwarding but never rewritten, and host_lds_bytes
 // (derived from the guest target arch) does not apply to them.
 constexpr hsa_agent_t kUnrelatedAgent{3};
+// A gfx1250 agent used to exercise auto-A0 detection. Its ASIC revision is
+// controlled per test via g_fake_gfx1250_asic_revision.
+constexpr hsa_agent_t kGfx1250Agent{4};
 constexpr hsa_isa_t kGuestIsa{950};
 constexpr hsa_isa_t kHostIsa{1201};
+constexpr hsa_isa_t kGfx1250Isa{1250};
+
+// ASIC revision reported for kGfx1250Agent by fake_agent_get_info. 0 => A0.
+uint32_t g_fake_gfx1250_asic_revision = 0;
 constexpr hsa_amd_memory_pool_t kGuestPool{10};
 constexpr hsa_amd_memory_pool_t kHostPool{20};
 constexpr hsa_amd_memory_pool_t kHostKernargPool{21};
@@ -124,6 +132,8 @@ const char *isa_name(hsa_isa_t isa) {
     return "amdgcn-amd-amdhsa--gfx950";
   if (isa.handle == kHostIsa.handle)
     return "amdgcn-amd-amdhsa--gfx1201";
+  if (isa.handle == kGfx1250Isa.handle)
+    return "amdgcn-amd-amdhsa--gfx1250";
   return "";
 }
 
@@ -173,12 +183,21 @@ hsa_status_t HSA_API fake_agent_get_info(hsa_agent_t agent, hsa_agent_info_t att
     return HSA_STATUS_SUCCESS;
   }
   if (attribute == HSA_AGENT_INFO_ISA) {
-    *static_cast<hsa_isa_t *>(value) = agent.handle == kGuestAgent.handle ? kGuestIsa : kHostIsa;
+    if (agent.handle == kGfx1250Agent.handle)
+      *static_cast<hsa_isa_t *>(value) = kGfx1250Isa;
+    else
+      *static_cast<hsa_isa_t *>(value) = agent.handle == kGuestAgent.handle ? kGuestIsa : kHostIsa;
     return HSA_STATUS_SUCCESS;
   }
   if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID)) {
     *static_cast<uint32_t *>(value) =
         agent.handle == kGuestAgent.handle ? kGuestNodeId : kHostNodeId;
+    return HSA_STATUS_SUCCESS;
+  }
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION)) {
+    if (agent.handle != kGfx1250Agent.handle)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    *static_cast<uint32_t *>(value) = g_fake_gfx1250_asic_revision;
     return HSA_STATUS_SUCCESS;
   }
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -194,6 +213,8 @@ hsa_status_t HSA_API fake_agent_iterate_isas(hsa_agent_t agent,
     return callback(kGuestIsa, data);
   if (agent.handle == kHostAgent.handle)
     return callback(kHostIsa, data);
+  if (agent.handle == kGfx1250Agent.handle)
+    return callback(kGfx1250Isa, data);
   return HSA_STATUS_ERROR_INVALID_AGENT;
 }
 
@@ -1336,6 +1357,44 @@ TEST(HsaHooksUnitTest, InstallsInAutoA0ModeWhenNoConfigPresent) {
   // The load-side wrappers are installed, so the table is patched.
   EXPECT_NE(api.core.hsa_shut_down_fn, original_shutdown);
   OnUnload();
+}
+
+// A gfx1250 agent reporting ASIC revision 0 is detected as A0; a nonzero
+// revision (B0 or later) is not. Mirrors ROCr hotswap's
+// IsHotswapSupportedGfxRevision.
+TEST(HsaHooksUnitTest, DetectsGfx1250A0ByAsicRevision) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  g_fake_gfx1250_asic_revision = 0;
+  EXPECT_TRUE(rj_test_agent_is_gfx1250_a0(kGfx1250Agent.handle));
+
+  g_fake_gfx1250_asic_revision = 1;
+  EXPECT_FALSE(rj_test_agent_is_gfx1250_a0(kGfx1250Agent.handle));
+
+  g_fake_gfx1250_asic_revision = 0;
+}
+
+// Detection is gfx1250-specific: a non-gfx1250 agent is never A0, even though
+// the guest agent's ISA (gfx950) also has no ASIC-revision attribute.
+TEST(HsaHooksUnitTest, DoesNotDetectNonGfx1250AgentAsA0) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  EXPECT_FALSE(rj_test_agent_is_gfx1250_a0(kGuestAgent.handle));
+  EXPECT_FALSE(rj_test_agent_is_gfx1250_a0(kHostAgent.handle));
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsSymbolInfoReportsNormalDescriptorUntilPacketFallback) {
