@@ -130,26 +130,32 @@ evidence.
 
 ### gfx950 Tensile follow-on
 
-There is not yet a packaged gfx950 Tensile manifest in
-`rocjitsu-test-corpus`.  The workspace rocm-libraries checkout at revision
-`c2fafc16393d` contains 36 gfx950 GEMM YAML files.  The following bounded
-subset is the proposed gfx950 equivalent of the high-signal gfx1250 Tensile
-rows; it must be generated and added to the corpus before validation.  All
-statuses are deliberately gray.
+Corpus revision `f88d4583022d` packages one bounded, target-native gfx950
+TensileLite Stream-K row.  The selected row is intentionally a runtime
+validation case rather than a tuning sweep:
 
-| Priority | Proposed gfx950 config | SuperCollider | Record/Replay | Sampled | Inline Shadow | Selection rationale |
+- one assembly FP32 GEMM solution with `StreamK: 3`;
+- exact problem size `[129, 129, 1, 129]` with beta;
+- full output validation, one enqueue, no warmup, and a 16 MiB workspace cap;
+- source provenance at ROCm rocm-libraries revision
+  `a8f0845f87ab50adc3dc8d0edd86693cb31065b1`; and
+- three generated code objects whose ELF flags all name gfx950.
+
+The checked-in runner executes `tensilelite-client` through
+`gfx950_cdna4.json`, parses every numeric CSV result row, requires every
+validation field to be `PASSED`, and rejects missing or non-gfx950 code
+objects.  Fresh default-tool runs complete in about 5.7 seconds.  The runner
+and negative-oracle suite passes 15/15, and the repository-wide corpus gate
+passes 86/86 with the required IREE tools on `PATH`.
+
+| Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Current evidence |
 |---|---|---|---|---|---|---|
-| P0 | `gemm/gfx950/xfp32.yaml`, reduced Stream-K exact case | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | Combines `StreamK: 3`, `DirectToLds: 1`, optional cluster-local reads, XCC mapping, and exact problem sizes.  This is the first candidate for ordered global publication plus LDS synchronization. |
-| P1 | `gemm/gfx950/general_wgm.yaml`, reduced Stream-K matrix | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | Exercises Stream-K modes 1/2/3, LDS transpose, `StoreSyncOpt`, and workgroup/XCC mapping.  Reduce it to one numerically checked representative per distinct synchronization shape. |
-| P1 | `gemm/gfx950/lds_tr.yaml` | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | Explicit LDS-transpose instructions, single- and multiple-buffer layouts, and exact odd-size cases provide target-specific DS-shape breadth. |
-| P1 | `gemm/gfx950/lds160K.yaml` | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | Single/double-buffer transpose variants near the 160 KiB gfx950 LDS capacity stress descriptor growth and Inline Shadow placement without inventing a synthetic workload. |
-| P1 | `gemm/gfx950/subtile_mxfp8.yaml`, reduced Stream-K case | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | Low-precision Stream-K with direct-to-LDS broadens access widths and high-pressure placement beyond FP32. |
-| P2 | `gemm/gfx950/i8_gsu_gfx950.yaml` | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | 🩶 Not packaged | GlobalSplitU multiple-buffer execution supplies a non-Stream-K split-reduction control; retain it only if inventory shows synchronization beyond already selected rows. |
+| P0 | `gfx950_sk_sgemm_streamk` | 🩶 Baseline simulator oracle only | 🩶 Baseline simulator oracle only | 🩶 Baseline simulator oracle only | 🩶 Baseline simulator oracle only | Exact numeric simulator run and target-native ELF checks pass; no ConSan profile has been qualified yet. |
 
-Static YAML features are selection evidence only.  Generated code-object
-inventory determines whether a candidate actually contains admitted barriers,
-ordered atomics, fences, or LDS accesses, and numeric execution determines
-which generated solution enters the denominator.
+This row is the executable denominator selected from the larger gfx950 YAML
+survey.  Static YAML features alone do not promote or expand that denominator.
+Four-engine clean, coverage, fault, overhead, containment, health, cleanup,
+and provenance qualification remains tracked by `bd-1w9.9.4`.
 
 ## PyTorch expansion
 
