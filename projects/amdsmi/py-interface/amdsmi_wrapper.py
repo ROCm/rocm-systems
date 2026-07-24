@@ -3761,17 +3761,6 @@ class union_fabric_info_(Union):
     ('v1', amdsmi_fabric_info_v1_t),
      ]
 
-struct_amdsmi_fabric_info_ver_t._pack_ = 1 # source:False
-struct_amdsmi_fabric_info_ver_t._layout_ = 'ms'
-struct_amdsmi_fabric_info_ver_t._fields_ = [
-    ('version', ctypes.c_uint32),
-    ('fabric_version', union_fabric_info_),
-]
-
-amdsmi_fabric_info_ver_t = struct_amdsmi_fabric_info_ver_t
-class struct_amdsmi_fabric_info_t(Structure):
-    pass
-
 struct_amdsmi_fabric_info_t._pack_ = 1 # source:False
 struct_amdsmi_fabric_info_t._layout_ = 'ms'
 struct_amdsmi_fabric_info_t._fields_ = [
