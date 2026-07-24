@@ -100,9 +100,10 @@ revision `0db836e7bd8c` retains those cases and adds the runner provenance and
 isolation coverage used for the fresh qualification.  The older pre-generated
 Tensile artifact tree remains gfx1250-only and may not be relabeled as gfx950
 evidence; gfx950 code objects are generated from the checked-in gfx950 YAML.
-Every source-built cell below remains gray until the case has an independent
-oracle, a retained target-native inventory, and a standard-profile clean run
-for that flavor.
+A source-built cell is promoted only after the case has an independent oracle,
+a retained target-native inventory, and a standard-profile assessment for that
+flavor.  A profile that runs the oracle without finding an applicable code
+object is compatibility evidence rather than instrumentation acceptance.
 
 The gfx950 corpus configuration enables HIP matmul, HipKittens, HIP Stream-K,
 and rocBLAS.  It has no run-time skip list.  It currently skips compilation of
@@ -116,13 +117,13 @@ are useful planned rows, not runnable evidence.
 | `hip_matmul_matmul::m128_n128_k128` | **Runnable and smoke-passed** | `corpus/kernels/cases/hip-matmul/matmul/case.json`; executable `rocjitsu-test-corpus-build/kernels-gfx950-hip-matmul/cases/hip-matmul/hip_matmul_matmul`; `-m 128 -n 128 -k 128`, `FIXED_ITERATIONS=1`.  All three selected MFMA/shared-memory kernels pass correctness on the physical gfx950. |
 | `hipkittens_gemm_bf16fp32_16x32::m256_n256_k256` | **Environment-blocked before compilation** | A fresh gfx950-only configure reaches the case but fails `find_package(OpenMP REQUIRED)`: the host Clang probe cannot find `omp.h`, and no Clang OpenMP development package is installed.  No source compilation or ConSan run has occurred. |
 | FP8/MXFP8 four-wave HipKittens rows | **Compile-disabled** | Both exact case JSON files exist, but `corpus/kernels/configs/gfx950.json` lists them in `skip_compile_tests`. |
-| `hip_streamk_simple::m256_n256_k256` and `hip_streamk_two_tile::m256_n256_k256` | **Metadata-enabled; environment-blocked before compilation** | Corpus revision `61b5af0b5ee9` first enables HIP Stream-K in `corpus/kernels/configs/gfx950.json` and declares gfx950 in `corpus/kernels/cases/hip-stream-k/{simple_streamk,two_tile_streamk}/case.json`.  At current local revision `0db836e7bd8c`, each exact oracle uses one run, `--grid 8`, and `--validate`, and separate `nan_results_rejected` cases reject non-finite results.  The current workspace TheRock distribution still has neither `rocthrustConfig.cmake` nor rocThrust headers, so no gfx950 build or ConSan profile has run. |
+| `hip_streamk_simple::m256_n256_k256` and `hip_streamk_two_tile::m256_n256_k256` | **Runnable and simulator-baseline-passed** | Corpus revision `61b5af0b5ee9` first enables HIP Stream-K in `corpus/kernels/configs/gfx950.json` and declares gfx950 in `corpus/kernels/cases/hip-stream-k/{simple_streamk,two_tile_streamk}/case.json`.  At current local revision `0db836e7bd8c`, each exact oracle uses one run, `--grid 8`, and `--validate`, and separate `nan_results_rejected` cases reject non-finite results.  The current workspace TheRock SDK supplies rocThrust; both cases build and pass their exact oracles through the gfx950 RocJITsu simulator under a 120-second per-case bound. |
 | `rocblas_sgemm` exact cases | **Runnable and baseline-passed** | A dedicated gfx950 build now provides `rocjitsu-test-corpus-build/kernels-gfx950-rocblas/cases/rocblas/rocblas_sgemm`.  `RocblasGemmTest.Square_64x64` passes its physical-device baseline in 183 ms; the bounded strict Record/Replay assessment below records the current instrumentation frontier. |
 
-HIP-matmul and rocBLAS are runnable today.  HIP Stream-K is metadata-enabled
-but not build-qualified in the current workspace; the other rows are retained
-as explicit enablement work.  These unbuilt rows may not be counted as current
-gfx950 ConSan execution evidence.
+HIP-matmul, HIP Stream-K, and rocBLAS are runnable today.  The HIP Stream-K
+rows have bounded simulator baseline and four-profile assessments below; their
+non-green profile results may not be promoted as instrumentation acceptance.
+The HipKittens rows remain explicit enablement work.
 
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Why it matters and next proof |
 |---|---|---|---|---|---|---|
@@ -130,8 +131,8 @@ gfx950 ConSan execution evidence.
 | P0 | `hipkittens_gemm_bf16fp32_16x32::m256_n256_k256` | 🩶 Environment-blocked before compilation | 🩶 Environment-blocked before compilation | 🩶 Environment-blocked before compilation | 🩶 Environment-blocked before compilation | Explicit gfx950 case with dynamic LDS, wide DS reads/writes, direct global-to-LDS traffic, a deep barrier schedule, and MFMA.  Fresh configure evidence in `rocjitsu-test-corpus-build/kernels-gfx950-hipkittens-reassess-20260722` stops at missing Clang OpenMP headers/runtime (`omp.h`); no baseline or ConSan profile has run. |
 | P1 | `hipkittens_gemm_fp8fp32_4wave::m256_n256_k256` | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | Explicit gfx950 four-wave FP8 case; currently listed in `skip_compile_tests`.  Remove that corpus-level blocker only after recording the compiler failure or confirming a current toolchain build, then inventory its LDS/barrier shapes. |
 | P1 | `hipkittens_gemm_mxfp8_4wave::m256_n256_k256` | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | Explicit gfx950 four-wave microscaling GEMM; also currently compile-skipped.  It is the closest packaged low-precision companion to the BF16 row. |
-| P1 | `hip_streamk_simple::m256_n256_k256` gfx950 port | 🩶 Metadata-enabled; build blocked | 🩶 Metadata-enabled; build blocked | 🩶 Metadata-enabled; build blocked | 🩶 Metadata-enabled; build blocked | Source contains double-buffered LDS, workgroup barriers, and release-store/acquire-load cross-workgroup publication.  Corpus revision `61b5af0b5ee9` enables the bounded gfx950 case, but fresh configure evidence in `rocjitsu-test-corpus-build-gfx950-streamk-assess` stops at missing rocThrust configuration and headers before source compilation. |
-| P1 | `hip_streamk_two_tile::m256_n256_k256` gfx950 port | 🩶 Metadata-enabled; build blocked | 🩶 Metadata-enabled; build blocked | 🩶 Metadata-enabled; build blocked | 🩶 Metadata-enabled; build blocked | Adds two-tile ownership and repeated global publication/consumption to the same LDS and ordered-atomic structure.  Corpus revision `61b5af0b5ee9` enables its bounded gfx950 oracle; it shares the missing rocThrust configure blocker with the simple case and remains a separate denominator after dependency enablement. |
+| P1 | `hip_streamk_simple::m256_n256_k256` gfx950 port | 🟧 Exact simulator oracle passes, but the profile is inapplicable: zero supported LDS sites, zero patches, and `applicable_code_objects=0` | 🟥 Strict exit 92: helper-function barriers and atomics have no usable resource plan, and no LDS access is admitted | 🟥 Strict exit 92: all 4 discovered barriers fail placement/lowering, and no LDS access is admitted | 🟥 Strict exit 92: the inline barrier cannot publish visible evidence, and no LDS access is admitted | The compiler lowers `local_write_cooperative` and `local_read` shared-memory operations to provenance-unknown FLAT instructions in non-kernel functions.  The exact baseline and every standard profile are retained under the `consan-gfx950-streamk-*-provenance-20260724` artifact roots; `bd-1w9.9.10` tracks typed group provenance and function synchronization placement. |
+| P1 | `hip_streamk_two_tile::m256_n256_k256` gfx950 port | 🟧 Exact simulator oracle passes, but the profile is inapplicable: zero supported LDS sites, zero patches, and `applicable_code_objects=0` | 🟥 Strict exit 92: helper-function barriers and atomics have no usable resource plan, and no LDS access is admitted | 🟥 Strict exit 92: all 4 discovered barriers fail placement/lowering, and no LDS access is admitted | 🟥 Strict exit 92: the inline barrier cannot publish visible evidence, and no LDS access is admitted | The two-tile ownership path reproduces the same unknown-FLAT helper and function-level synchronization boundary as the simple case.  It remains a separate exact-oracle denominator under the same retained artifact roots and `bd-1w9.9.10`. |
 | P2 | `rocblas_sgemm` compact exact cases | 🩶 Baseline exact; profile unassessed | 🟥 The exact `Square_64x64` baseline passes, but strict Record/Replay rejects the 7,240,872-byte rocBLAS object before the oracle: a code-object-global persistent owner/epoch tuple cannot fit the heterogeneous per-kernel CDNA4 AccVGPR boundaries | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | One-repetition artifacts `consan-gfx950-rocblas-sgemm-rr-assessment-20260722/run.log` and `run-verbose.log`; preflight finds 49,435 access ranges and 2,558,464 barrier records before strict policy terminates with exit code 92.  Per-owner persistent tuples are a medium-sized gap, so this bounded red row is not an easy-cell candidate. |
 
 ### gfx950 Tensile follow-on
@@ -260,7 +261,7 @@ instrumentation acceptance evidence.
 
 | Item | Current evidence |
 |---|---|
-| Working branch | `users/bjacob/sanitizers` |
+| Working branch | `shared/rocjitsu/sanitizers` |
 | Survey base | `4495672ad45f3b90d0e367916e3231420a5be579`; this refresh records candidates above that committed implementation state |
 | Retained first-campaign provenance | The detailed native evidence below was produced on the former `users/bjacob/consan-gfx950-take2` line.  It remains useful compatibility evidence, but is not current-tip acceptance evidence. |
 | Device | AMD Instinct MI355X, `gfx950`, wave64 |
@@ -274,7 +275,7 @@ instrumentation acceptance evidence.
 | RocJitsu test corpus | Local commit `0db836e7bd8c6400b7ffd187d749225899875d7c`; gfx950 enables source-built HIP matmul, HipKittens, HIP Stream-K, and rocBLAS cases and packages the bounded `gfx950_sk_sgemm_streamk` runtime row.  Commits `61b5af0b5ee9ef9221391f5f81550b5e295e7e59` and `46a4c58a7be89b4118c2e3f94081591783d5391a` introduced the Stream-K and Tensile rows, respectively; commits after the earlier `f88d4583022d438ea72fb82c0e89143ccbf61843` snapshot harden Tensile runner provenance and isolation.  No fetched remote ref contains the current commit, so clean remote reproduction requires publishing or transferring it.  The historical pre-generated Tensile artifact tree remains gfx1250-only. |
 | gfx950 Tensile source pool | The 36-YAML pool was surveyed and the bounded Stream-K candidate selected at `rocm-libraries` `c2fafc16393d0ce47a0a5801d827d43f0d3714a4`; the packaged `gfx950_sk_sgemm_streamk` row was reduced from `a8f0845f87ab50adc3dc8d0edd86693cb31065b1`.  The remaining source pool is not part of the validation denominator. |
 | PyTorch discovery | The gfx1250-only thin-wheel mismatch is diagnosed and isolated.  The separate official nightly environment passes `torch.arange` plus all six portable one-repetition exact oracles on gfx950.  Workload-scoped doctor confirms gfx950 numeric dispatch and exact-hook mapping. |
-| Registry boundary | The six portable PyTorch rows and native hip-moi roles are registered validation IDs for gfx950.  The bounded Tensile row is an external corpus executable denominator, not yet a `consan_validation.py` workload.  The remaining source-built corpus rows stay planned expansion until they are built and registered. |
+| Registry boundary | The six portable PyTorch rows and native hip-moi roles are registered validation IDs for gfx950.  The bounded Tensile and HIP Stream-K rows are external corpus executable denominators, not yet `consan_validation.py` workloads.  Remaining source-built rows stay planned expansion until they are built and registered. |
 
 ## Implementation evidence
 
@@ -360,6 +361,16 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-24: Reassessed both bounded HIP Stream-K rows after the workspace
+  TheRock SDK gained rocThrust.  The two exact gfx950 simulator baselines pass
+  under a 120-second per-case bound.  SuperCollider preserves both oracles but
+  reports zero applicable code objects and zero supported LDS sites;
+  Record/Replay, Sampled, and Inline Shadow fail closed with exit 92 on
+  function-resource or barrier-placement gaps.  The five retained roots are
+  `consan-gfx950-streamk-{baseline,supercollider,record-replay,sampled,inline-shadow}-provenance-20260724`
+  under `rocjitsu-test-corpus/.pytest-artifacts`; `bd-1w9.9.10` tracks the
+  unknown-FLAT and function synchronization work.
 
 - 2026-07-24: Advanced the gfx950 corpus evidence baseline to local commit
   `0db836e7bd8c6400b7ffd187d749225899875d7c`, regenerated the bounded Tensile
