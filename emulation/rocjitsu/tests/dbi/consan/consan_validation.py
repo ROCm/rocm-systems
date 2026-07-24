@@ -883,11 +883,16 @@ def _fault_families(target: str, workload: Workload) -> tuple[str, ...]:
     if target in NATIVE_CDNA_TARGETS:
         # CDNA compiler atomics encode ordering through surrounding cache and
         # wait operations, but have no gfx12-style instruction scope field.
-        return tuple(
+        families = tuple(
             family
             for family in workload.fault_families
             if family != "atomic-weaken-scope"
         )
+        if not families:
+            raise ValidationError(
+                f"{target} workload has no applicable fault family: {workload.id}"
+            )
+        return families
     return workload.fault_families
 
 
@@ -1492,16 +1497,9 @@ def _doctor(
 
 def _manifest(target: str) -> dict:
     def manifest_workload(workload: Workload) -> dict:
-        resolved = _resolved_workload(target, workload)
         # The manifest is the executable target contract, not the union declared
         # by the target-independent Workload row.
-        return asdict(
-            replace(
-                resolved,
-                fault_families=_fault_families(target, resolved),
-                overhead_processes=_outer_repetitions(target, "overhead", resolved),
-            )
-        )
+        return asdict(_effective_workload(target, workload))
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -2024,6 +2022,15 @@ def _outer_repetitions(target: str, phase: str, workload: Workload) -> int:
     if target in SINGLE_REPETITION_TARGETS or phase != "overhead":
         return 1
     return workload.overhead_processes
+
+
+def _effective_workload(target: str, workload: Workload) -> Workload:
+    resolved = _resolved_workload(target, workload)
+    return replace(
+        resolved,
+        fault_families=_fault_families(target, resolved),
+        overhead_processes=_outer_repetitions(target, "overhead", resolved),
+    )
 
 
 def _run_profile(
@@ -2720,7 +2727,7 @@ def _explain_contract(
     workloads = []
     script = str(Path(__file__).resolve())
     for workload_id in workload_ids:
-        workload = WORKLOAD_BY_ID[workload_id]
+        workload = _effective_workload(target, WORKLOAD_BY_ID[workload_id])
         output_root = Path("$ARTIFACT_ROOT") / workload.id
         commands = {}
         for phase in ("clean", "overhead"):

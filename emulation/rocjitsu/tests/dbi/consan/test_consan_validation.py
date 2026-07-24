@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import redirect_stdout
+from dataclasses import replace
 import io
 import json
 import os
@@ -591,8 +592,42 @@ class ConSanValidationTest(unittest.TestCase):
         )
         for workload in audit["workloads"]:
             with self.subTest(workload=workload["id"]):
+                self.assertEqual(workload["overhead_processes"], 1)
                 self.assertEqual(workload["commands"]["clean"]["processes"], 1)
                 self.assertEqual(workload["commands"]["overhead"]["processes"], 1)
+        d128 = next(
+            workload
+            for workload in audit["workloads"]
+            if workload["id"] == "d128-pressure"
+        )
+        self.assertIn("cdna3", d128["relative_path"])
+
+    def test_gfx950_explain_uses_effective_atomic_fault_families(self) -> None:
+        audit = validation._explain_contract(
+            Path("/workspace"),
+            "gfx950",
+            ("pytorch-scatter-reduce",),
+            validation.PROFILE_IDS,
+            None,
+            allow_reference=False,
+        )
+        workload = audit["workloads"][0]
+        self.assertEqual(workload["fault_families"], ("atomic-weaken-order",))
+        self.assertEqual(
+            [fault["family"] for fault in workload["faults"]],
+            ["atomic-weaken-order"],
+        )
+
+    def test_native_cdna_rejects_a_scope_only_fault_contract(self) -> None:
+        workload = replace(
+            validation.WORKLOAD_BY_ID["pytorch-scatter-reduce"],
+            fault_families=("atomic-weaken-scope",),
+        )
+        with self.assertRaisesRegex(
+            validation.ValidationError,
+            "gfx950 workload has no applicable fault family: pytorch-scatter-reduce",
+        ):
+            validation._fault_families("gfx950", workload)
 
     def test_active_architecture_qwen_overhead_uses_one_repetition(self) -> None:
         workload = validation.WORKLOAD_BY_ID["qwen-prefill"]
