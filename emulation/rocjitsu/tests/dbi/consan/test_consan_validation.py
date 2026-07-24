@@ -273,6 +273,18 @@ class ConSanValidationTest(unittest.TestCase):
                 ),
             },
         }
+        executable_prefixes = {
+            "gfx1201": "hip-moi-build/tests/hip_moi_instrumented_rdna4_wmma_",
+            "gfx950": "hip-moi-build/tests/hip_moi_instrumented_cdna4_mfma_",
+            "gfx1250": (
+                "hip-moi-build-gfx1250-tests/tests/"
+                "hip_moi_instrumented_gfx1250_wmma_"
+            ),
+        }
+        executable_stems = {
+            "streamk-arrival": "streamk_arrival_counter_test",
+            "tree-atomic-or": "streamk_tree_atomic_or_test",
+        }
         for target, expected_by_workload in expected_filters.items():
             workloads = {
                 workload["id"]: workload
@@ -284,18 +296,25 @@ class ConSanValidationTest(unittest.TestCase):
                     self.assertEqual(streamk["clean_filter"], expected_filter)
                     self.assertEqual(streamk["overhead_filter"], expected_filter)
                     self.assertIsNone(streamk["fault_filter"])
-                    resolved = validation._resolved_workload(
-                        target, validation.WORKLOAD_BY_ID[workload_id]
-                    )
                     fault_command = validation._workload_command(
                         Path("/workspace"),
                         target,
-                        resolved,
+                        validation.WORKLOAD_BY_ID[workload_id],
                         "fault",
                         Path("/unused"),
                     )
                     self.assertEqual(
-                        fault_command[1], f"--gtest_filter={expected_filter}"
+                        fault_command,
+                        [
+                            str(
+                                Path("/workspace")
+                                / (
+                                    executable_prefixes[target]
+                                    + executable_stems[workload_id]
+                                )
+                            ),
+                            f"--gtest_filter={expected_filter}",
+                        ],
                     )
 
     def test_gfx1250_doctor_checks_target_native_executables(self) -> None:
