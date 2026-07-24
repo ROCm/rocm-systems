@@ -1127,8 +1127,6 @@ def _resolved_workload(target: str, workload: Workload) -> Workload:
 
 
 def _fault_families(target: str, workload: Workload) -> tuple[str, ...]:
-    # Boundary helpers accept canonical registry rows and resolve target
-    # overrides exactly once, including fields future overrides may add.
     return _target_fault_families(target, _resolved_workload(target, workload))
 
 
@@ -1539,7 +1537,6 @@ def _clean_environment(
     target: str | None = None,
 ) -> dict[str, str]:
     if target is not None:
-        # Keep environment derivation coherent with future target overrides.
         workload = _resolved_workload(target, workload)
     environment = {
         key: value
@@ -3401,9 +3398,6 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     try:
         target = _target(args)
-        requested_workload = getattr(args, "workload", "all")
-        if requested_workload != "all":
-            _workload_for_target(target, requested_workload)
         if args.command == "manifest":
             result = _manifest(target)
             if args.json:
