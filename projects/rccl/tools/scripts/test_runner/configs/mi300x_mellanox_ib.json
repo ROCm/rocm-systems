@@ -603,7 +603,7 @@
         },
         {
           "name": "Rcclwrap",
-          "description": "RCCL wrapper API unit tests",
+          "description": "RCCL wrapper API unit tests (includes WarpSpeed helper tests when built with ENABLE_WARP_SPEED)",
           "test_filter": "Rcclwrap.*"
         },
         {
