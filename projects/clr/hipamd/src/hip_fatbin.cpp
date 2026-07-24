@@ -758,13 +758,11 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
     return hipErrorInvalidValue;
   }
 
-  // Add KPACK load objects for each device.
-  // For each device type, the KPACK load returns one code object
-  // selected from the architecture priority list by using devices
-  // isa-name or generic name.
-  // Code object needs to be loaded for each device in system separately because
-  // there can be different types of GPUs on the same system and code-object
-  // is GPU type specific. (gfx1201, gfx90a)
+  // Load KPACK code objects per device.
+  // For each device, kpack selects a code object from an architecture
+  // priority list (device ISA name first, then a generic fallback).
+  // This must be done per device because heterogeneous systems can have
+  // different GPU ISAs (e.g., gfx1201 vs gfx90a).
   for (auto device : devices) {
     std::vector<std::string> arch_list;
     // Architecture names
