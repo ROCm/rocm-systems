@@ -145,10 +145,12 @@ bool IsEnvFlagEnabled(const char* name) {
 }
 
 bool IsHotswapDisabledByEnv() {
-#if defined(ROCM_TRANSLATOR_NONE)
-  // The NONE translator build compiles out all retargeting: every hotswap
-  // decision funnels through this predicate, so a constant true keeps the raw
-  // loader path with no rewrite, independent of any environment variable.
+#if defined(ROCM_TRANSLATOR_NONE) || defined(ROCM_TRANSLATOR_ROCJITSU)
+  // COMGR retargeting is compiled out unless this is a COMGR build: NONE keeps
+  // the raw loader path, and ROCJITSU translates in the rocjitsu hook instead
+  // (the two translators must never both process one load). Every hotswap
+  // decision funnels through this predicate, so a constant true disables the
+  // COMGR rewrite independent of any environment variable.
   return true;
 #else
   return IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE");

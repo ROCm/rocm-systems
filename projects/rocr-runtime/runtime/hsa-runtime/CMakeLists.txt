@@ -148,22 +148,32 @@ set_property(
 
 ## Code-object translator selection (must match the CLR build). Selects which,
 ## if any, same-ISA code-object retargeting translator is compiled in:
-##   COMGR - existing COMGR-based hotswap translator (default; today's behavior)
-##   NONE  - no translator; the raw loader path with no retargeting (baseline)
+##   COMGR    - existing COMGR-based hotswap translator (default; today's behavior)
+##   ROCJITSU - rocjitsu hooks translate B0->A0; ROCr loads the hook DSO and calls
+##              its two-phase install around LoadTools() instead of COMGR hotswap
+##   NONE     - no translator; the raw loader path with no retargeting (baseline)
 ## The choice is build-time because the public HSA load ABI cannot express
 ## "already translated", so two translators must never both process one load.
 if(NOT DEFINED ROCM_CODE_OBJECT_TRANSLATOR)
     set(ROCM_CODE_OBJECT_TRANSLATOR
         "COMGR"
         CACHE STRING
-        "Code-object translator: COMGR or NONE"
+        "Code-object translator: COMGR, ROCJITSU, or NONE"
     )
 endif()
-set_property(CACHE ROCM_CODE_OBJECT_TRANSLATOR PROPERTY STRINGS COMGR NONE)
+set_property(
+    CACHE ROCM_CODE_OBJECT_TRANSLATOR
+    PROPERTY STRINGS COMGR ROCJITSU NONE
+)
 if(ROCM_CODE_OBJECT_TRANSLATOR STREQUAL "COMGR")
     target_compile_definitions(
         ${CORE_RUNTIME_TARGET}
         PRIVATE ROCM_TRANSLATOR_COMGR=1
+    )
+elseif(ROCM_CODE_OBJECT_TRANSLATOR STREQUAL "ROCJITSU")
+    target_compile_definitions(
+        ${CORE_RUNTIME_TARGET}
+        PRIVATE ROCM_TRANSLATOR_ROCJITSU=1
     )
 elseif(ROCM_CODE_OBJECT_TRANSLATOR STREQUAL "NONE")
     target_compile_definitions(
@@ -173,7 +183,7 @@ elseif(ROCM_CODE_OBJECT_TRANSLATOR STREQUAL "NONE")
 else()
     message(
         FATAL_ERROR
-        "ROCM_CODE_OBJECT_TRANSLATOR must be COMGR or NONE, got "
+        "ROCM_CODE_OBJECT_TRANSLATOR must be COMGR, ROCJITSU, or NONE, got "
         "'${ROCM_CODE_OBJECT_TRANSLATOR}'"
     )
 endif()

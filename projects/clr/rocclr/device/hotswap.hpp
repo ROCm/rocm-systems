@@ -35,6 +35,12 @@ inline bool Enabled() {
   // ISA-compat path with no source-bundle forwarding, independent of any
   // environment variable.
   return false;
+#elif defined(ROCM_TRANSLATOR_ROCJITSU)
+  // The ROCJITSU build keeps CLR source-bundle forwarding (CLR must still
+  // deliver the B0 bundle; the rocjitsu hook in ROCr does the translation).
+  // Forwarding is unconditional: the build gate is the on/off switch, so the
+  // COMGR-era HSA_HOTSWAP_DISABLE env opt-out does not apply here.
+  return true;
 #else
   const char* disable = std::getenv("HSA_HOTSWAP_DISABLE");
   if (disable == nullptr || disable[0] == '\0') {
@@ -44,8 +50,8 @@ inline bool Enabled() {
   std::string value(disable);
   std::transform(value.begin(), value.end(), value.begin(),
                  [](unsigned char c) { return std::tolower(c); });
-  return value == "0" || value == "off" || value == "false" ||
-         value == "no" || value == "n" || value == "f";
+  return value == "0" || value == "off" || value == "false" || value == "no" || value == "n" ||
+         value == "f";
 #endif
 }
 
@@ -62,8 +68,7 @@ inline constexpr SourceTargetPair kSupportedPairs[] = {
 };
 
 // True if (source_gfx -> target_gfx) is a supported pair.
-inline bool IsSupportedPair(const std::string& source_gfx,
-                            const std::string& target_gfx) {
+inline bool IsSupportedPair(const std::string& source_gfx, const std::string& target_gfx) {
   for (const SourceTargetPair& p : kSupportedPairs) {
     if (source_gfx == p.source && target_gfx == p.target) {
       return true;

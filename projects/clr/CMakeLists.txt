@@ -50,29 +50,36 @@ option(CLR_BUILD_OCL "Build OCL" OFF)
 # Code-object translator selection (must match the ROCr build). Selects which,
 # if any, same-ISA code-object retargeting translator the CLR side offers to the
 # loader:
-#   COMGR - existing COMGR hotswap: forward source-ISA bundles + admit the
-#           supported foreign source->target pair (default; today's behavior)
-#   NONE  - baseline ISA-compat rejection, no source-bundle forwarding
+#   COMGR    - existing COMGR hotswap: forward source-ISA bundles + admit the
+#              supported foreign source->target pair (default; today's behavior)
+#   ROCJITSU - same CLR source-bundle forwarding as COMGR (CLR must still deliver
+#              the B0 bundle); the rocjitsu hook in ROCr does the translation
+#   NONE     - baseline ISA-compat rejection, no source-bundle forwarding
 # The choice is build-time and cross-project because the public HSA load ABI
 # cannot express "already translated"; two translators must never both process
-# one load. ROCM_TRANSLATOR_COMGR / ROCM_TRANSLATOR_NONE is applied as a compile
-# definition to every CLR target that consults amd::hotswap.
+# one load. The resulting compile definition is applied to every CLR target that
+# consults amd::hotswap.
 if(NOT DEFINED ROCM_CODE_OBJECT_TRANSLATOR)
     set(ROCM_CODE_OBJECT_TRANSLATOR
         "COMGR"
         CACHE STRING
-        "Code-object translator: COMGR or NONE"
+        "Code-object translator: COMGR, ROCJITSU, or NONE"
     )
 endif()
-set_property(CACHE ROCM_CODE_OBJECT_TRANSLATOR PROPERTY STRINGS COMGR NONE)
+set_property(
+    CACHE ROCM_CODE_OBJECT_TRANSLATOR
+    PROPERTY STRINGS COMGR ROCJITSU NONE
+)
 if(ROCM_CODE_OBJECT_TRANSLATOR STREQUAL "COMGR")
     set(ROCM_TRANSLATOR_COMPILE_DEF ROCM_TRANSLATOR_COMGR=1)
+elseif(ROCM_CODE_OBJECT_TRANSLATOR STREQUAL "ROCJITSU")
+    set(ROCM_TRANSLATOR_COMPILE_DEF ROCM_TRANSLATOR_ROCJITSU=1)
 elseif(ROCM_CODE_OBJECT_TRANSLATOR STREQUAL "NONE")
     set(ROCM_TRANSLATOR_COMPILE_DEF ROCM_TRANSLATOR_NONE=1)
 else()
     message(
         FATAL_ERROR
-        "ROCM_CODE_OBJECT_TRANSLATOR must be COMGR or NONE, got "
+        "ROCM_CODE_OBJECT_TRANSLATOR must be COMGR, ROCJITSU, or NONE, got "
         "'${ROCM_CODE_OBJECT_TRANSLATOR}'"
     )
 endif()
