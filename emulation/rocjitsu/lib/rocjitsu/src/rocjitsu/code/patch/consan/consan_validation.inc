@@ -3048,12 +3048,10 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       const std::vector<size_t> store_positions = positions(*store);
       return store_positions.size() == 1u && !cas_positions.empty() &&
              cas_positions.front() < store_positions.front() &&
-             std::ranges::any_of(
-                 owner_positions,
-                 [&](size_t owner_position) {
-                   return store_positions.front() < owner_position &&
-                          owner_position < cas_positions.back();
-                 });
+             std::ranges::any_of(owner_positions, [&](size_t owner_position) {
+               return store_positions.front() < owner_position &&
+                      owner_position < cas_positions.back();
+             });
     };
     bool snapshot_stores_valid =
         require_snapshot_store(offsetof(ConSanMoiInlineCausalSnapshot, entry_count),
@@ -3224,9 +3222,6 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
           const auto workgroup_key_vgpr = patch.persistent_workgroup_key_vgpr
                                               ? patch.persistent_workgroup_key_vgpr
                                               : result.resolved_moi_workgroup_key_vgpr;
-          const auto sample_sequence_vgpr = patch.persistent_sample_sequence_vgpr
-                                                ? patch.persistent_sample_sequence_vgpr
-                                                : result.resolved_moi_sample_sequence_vgpr;
           if (owner_vgpr) {
             requirement.required_vgpr_count = std::max<uint16_t>(
                 requirement.required_vgpr_count, static_cast<uint16_t>(*owner_vgpr + 1u));
@@ -3238,10 +3233,6 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
           if (workgroup_key_vgpr) {
             requirement.required_vgpr_count = std::max<uint16_t>(
                 requirement.required_vgpr_count, static_cast<uint16_t>(*workgroup_key_vgpr + 1u));
-          }
-          if (sample_sequence_vgpr) {
-            requirement.required_vgpr_count = std::max<uint16_t>(
-                requirement.required_vgpr_count, static_cast<uint16_t>(*sample_sequence_vgpr + 1u));
           }
           if (result.resolved_moi_persistent_owner_sgpr) {
             requirement.required_sgpr_count = std::max<uint16_t>(

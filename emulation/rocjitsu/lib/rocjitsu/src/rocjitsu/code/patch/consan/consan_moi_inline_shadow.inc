@@ -543,19 +543,19 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         auto [cached, inserted] =
             direct_private_layout_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
         if (inserted) {
-          cached->second = build_moi_private_epoch_layout(
-              result, *resources, arch, result.warnings,
-              /*include_sample_sequence=*/false, persist_workitem_owner,
-              /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-                  arch == ROCJITSU_CODE_ARCH_CDNA4);
+          cached->second = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
+                                                          /*include_owner=*/persist_workitem_owner,
+                                                          /*include_workgroup_key=*/arch ==
+                                                                  ROCJITSU_CODE_ARCH_CDNA3 ||
+                                                              arch == ROCJITSU_CODE_ARCH_CDNA4);
         }
         private_layout = cached->second;
       } else {
-        private_layout = build_moi_private_epoch_layout(
-            result, *resources, arch, result.warnings,
-            /*include_sample_sequence=*/false, persist_workitem_owner,
-            /*include_workgroup_key=*/arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-                arch == ROCJITSU_CODE_ARCH_CDNA4);
+        private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
+                                                        /*include_owner=*/persist_workitem_owner,
+                                                        /*include_workgroup_key=*/arch ==
+                                                                ROCJITSU_CODE_ARCH_CDNA3 ||
+                                                            arch == ROCJITSU_CODE_ARCH_CDNA4);
       }
       if (!private_layout)
         continue;
@@ -2340,8 +2340,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     uint32_t window_bank_count, size_t sampled_causal_windows_offset,
     size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
     std::optional<uint32_t> private_epoch_offset, std::optional<uint32_t> private_owner_offset,
-    std::optional<uint16_t> private_owner_shift,
-    std::optional<uint32_t> private_sample_sequence_offset, std::vector<std::string> &errors,
+    std::optional<uint16_t> private_owner_shift, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset = nullptr) {
   const auto access_ranges = candidate_access_ranges(bytes, candidate, arch);
   if (!access_ranges || access_ranges->empty()) {
@@ -2388,19 +2387,6 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     words.insert(words.end(), load->begin(), load->end());
     words.push_back(*wait);
     words.push_back(*owner);
-  }
-  if (private_sample_sequence_offset) {
-    if (!options.moi_sample_sequence_vgpr) {
-      errors.emplace_back("ConSan MOI sampled probe has no private sequence temporary");
-      return std::nullopt;
-    }
-    const auto load = instrumentation::build_private_load_b32(
-        *options.moi_sample_sequence_vgpr, *private_sample_sequence_offset, arch);
-    const auto wait = instrumentation::build_s_wait_private_load0(arch);
-    if (!load || !wait)
-      return std::nullopt;
-    words.insert(words.end(), load->begin(), load->end());
-    words.push_back(*wait);
   }
   if (moi_uses_scalar_persistent_state(options)) {
     if (!consan_detail::validate_scalar_state_temporaries(options, "sampled probe", errors))
@@ -2457,15 +2443,6 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
           static_cast<uint32_t>(words.size() * sizeof(uint32_t)) + range_guest_instruction_offset;
     }
     words.insert(words.end(), range_words->begin(), range_words->end());
-  }
-  if (private_sample_sequence_offset) {
-    const auto store = instrumentation::build_private_store_b32(
-        *options.moi_sample_sequence_vgpr, *private_sample_sequence_offset, arch);
-    const auto wait = instrumentation::build_s_wait_private_store0(arch);
-    if (!store || !wait)
-      return std::nullopt;
-    words.insert(words.end(), store->begin(), store->end());
-    words.push_back(*wait);
   }
   if (select_guest_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(

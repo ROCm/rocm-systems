@@ -956,8 +956,7 @@ apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
       continue;
     if (selected && (selected->owner_vgpr != assignment->owner_vgpr ||
                      selected->epoch_vgpr != assignment->epoch_vgpr ||
-                     selected->workgroup_key_vgpr != assignment->workgroup_key_vgpr ||
-                     selected->sample_sequence_vgpr != assignment->sample_sequence_vgpr)) {
+                     selected->workgroup_key_vgpr != assignment->workgroup_key_vgpr)) {
       return false;
     }
     selected = assignment;
@@ -967,7 +966,6 @@ apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
   options.moi_owner_vgpr = selected->owner_vgpr;
   options.moi_epoch_vgpr = selected->epoch_vgpr;
   options.moi_workgroup_key_vgpr = selected->workgroup_key_vgpr;
-  options.moi_sample_sequence_vgpr = selected->sample_sequence_vgpr;
   return true;
 }
 
@@ -1458,8 +1456,6 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
     request.forbidden.expand({RegClass::VGPR, assignment->epoch_vgpr, 1});
     if (assignment->workgroup_key_vgpr)
       request.forbidden.expand({RegClass::VGPR, *assignment->workgroup_key_vgpr, 1});
-    if (assignment->sample_sequence_vgpr)
-      request.forbidden.expand({RegClass::VGPR, *assignment->sample_sequence_vgpr, 1});
   }
 
   ConSanRegisterPlan register_plan = plan_consan_registers(request, live_before_all_owners);
@@ -1497,8 +1493,6 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
       spill_request.forbidden.expand({RegClass::VGPR, assignment->epoch_vgpr, 1});
       if (assignment->workgroup_key_vgpr)
         spill_request.forbidden.expand({RegClass::VGPR, *assignment->workgroup_key_vgpr, 1});
-      if (assignment->sample_sequence_vgpr)
-        spill_request.forbidden.expand({RegClass::VGPR, *assignment->sample_sequence_vgpr, 1});
     }
     register_plan = plan_consan_registers(spill_request, live_before_all_owners);
   }
@@ -1618,9 +1612,6 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const ConSanOp
       uint16_t end = static_cast<uint16_t>(assignment->epoch_vgpr + 1u);
       if (assignment->workgroup_key_vgpr)
         end = std::max<uint16_t>(end, static_cast<uint16_t>(*assignment->workgroup_key_vgpr + 1u));
-      if (assignment->sample_sequence_vgpr)
-        end =
-            std::max<uint16_t>(end, static_cast<uint16_t>(*assignment->sample_sequence_vgpr + 1u));
       resolved.required_vgpr_count = std::max(resolved.required_vgpr_count, end);
     }
     return resolved;
@@ -3051,8 +3042,7 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
                                                             ConSanResult &result,
                                                             std::span<const uint8_t> bytes,
                                                             rj_code_arch_t arch) {
-  if (options.moi_owner_vgpr || options.moi_epoch_vgpr || options.moi_workgroup_key_vgpr ||
-      options.moi_sample_sequence_vgpr)
+  if (options.moi_owner_vgpr || options.moi_epoch_vgpr || options.moi_workgroup_key_vgpr)
     return false;
   const bool has_supported_sampled_sync =
       options.moi_engine == ConSanMoiEngine::Sampled &&
@@ -3760,7 +3750,6 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
   result.resolved_moi_owner_vgpr = options.moi_owner_vgpr;
   result.resolved_moi_epoch_vgpr = options.moi_epoch_vgpr;
   result.resolved_moi_workgroup_key_vgpr = options.moi_workgroup_key_vgpr;
-  result.resolved_moi_sample_sequence_vgpr = options.moi_sample_sequence_vgpr;
   result.moi_persistent_vgprs_automatic = true;
   result.warnings.emplace_back(
       "ConSan MOI automatically assigned persistent owner/epoch" +

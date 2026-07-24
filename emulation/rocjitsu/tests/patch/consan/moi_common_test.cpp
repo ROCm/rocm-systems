@@ -75,6 +75,20 @@ TEST(ConSanMoi, ScalarOwnerContextResolutionFailsClosedAndComputesTailFloor) {
   invalid_contexts[1].descriptor_valid = true;
   invalid_contexts[1].descriptor_file_offset = std::nullopt;
   EXPECT_FALSE(consan_detail::resolve_scalar_owner_contexts(true, invalid_contexts, kOwners));
+
+  const std::array contexts_with_unrelated_invalid = {
+      Summary{.descriptor_file_offset = std::nullopt,
+              .current_sgpr_count = 200u,
+              .max_referenced_sgpr_count = 200u,
+              .descriptor_valid = false},
+      contexts[0],
+  };
+  constexpr std::array<uint64_t, 1> kValidOwner = {0x10u};
+  const auto skipped_invalid = consan_detail::resolve_scalar_owner_contexts(
+      true, contexts_with_unrelated_invalid, kValidOwner);
+  ASSERT_TRUE(skipped_invalid);
+  EXPECT_EQ(skipped_invalid->context_indices, (std::vector<size_t>{1u}));
+  EXPECT_EQ(skipped_invalid->tail_floor, 48u);
 }
 
 TEST(ConSanMoi, Cdna4HeterogeneousOwnersKeepUsableComponentAcrossMoiEngines) {

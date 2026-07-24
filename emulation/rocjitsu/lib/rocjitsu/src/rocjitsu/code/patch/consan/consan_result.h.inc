@@ -73,7 +73,6 @@ struct ConSanResult {
   std::optional<uint16_t> resolved_moi_owner_vgpr;
   std::optional<uint16_t> resolved_moi_epoch_vgpr;
   std::optional<uint16_t> resolved_moi_workgroup_key_vgpr;
-  std::optional<uint16_t> resolved_moi_sample_sequence_vgpr;
   std::vector<ConSanMoiPersistentVgprAssignment> resolved_moi_persistent_vgpr_assignments;
   std::optional<uint16_t> resolved_moi_persistent_owner_sgpr;
   std::optional<uint16_t> resolved_moi_persistent_epoch_sgpr;

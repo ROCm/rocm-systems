@@ -603,8 +603,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_owner_epoch_prologue_words(
     uint64_t prologue_text_offset, uint64_t original_entry_text_offset, uint16_t owner_vgpr,
-    uint16_t epoch_vgpr, std::optional<uint16_t> workgroup_key_vgpr,
-    std::optional<uint16_t> sample_sequence_vgpr, uint16_t owner_shift_bits,
+    uint16_t epoch_vgpr, std::optional<uint16_t> workgroup_key_vgpr, uint16_t owner_shift_bits,
     ConSanMoiOwnerSource owner_source, std::optional<uint16_t> owner_sgpr, bool one_based_owner_ids,
     std::optional<uint16_t> persistent_owner_sgpr, std::optional<uint16_t> persistent_epoch_sgpr,
     std::optional<uint16_t> persistent_workgroup_key_sgpr,
@@ -875,9 +874,6 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   } else {
     words.push_back(build_v_mov_b32_e32(epoch_vgpr, scalar_positive_inline_u32(0), arch));
   }
-  if (sample_sequence_vgpr)
-    words.push_back(
-        build_v_mov_b32_e32(*sample_sequence_vgpr, scalar_positive_inline_u32(0), arch));
   words.insert(words.end(), displaced_entry_words.begin(), displaced_entry_words.end());
 
   if (!append_moi_prologue_return(words, prologue_text_offset, original_entry_text_offset,
@@ -890,8 +886,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_private_epoch_prologue_words(
     uint64_t prologue_text_offset, uint64_t original_entry_text_offset, uint16_t scratch_vgpr,
     uint32_t epoch_offset, std::optional<uint32_t> owner_offset,
-    std::optional<uint32_t> workgroup_key_offset, std::optional<uint32_t> sample_sequence_offset,
-    const VgprSpillSequence &spill, std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow,
+    std::optional<uint32_t> workgroup_key_offset, const VgprSpillSequence &spill,
+    std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow,
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources,
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan,
     std::optional<uint16_t> persistent_dispatch_sgpr,
@@ -906,15 +902,9 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   if (workgroup_key_offset)
     workgroup_key_store =
         instrumentation::build_private_store_b32(scratch_vgpr, *workgroup_key_offset, arch);
-  std::optional<std::vector<uint32_t>> sequence_store;
-  if (sample_sequence_offset) {
-    sequence_store =
-        instrumentation::build_private_store_b32(scratch_vgpr, *sample_sequence_offset, arch);
-  }
   const auto wait_store = instrumentation::build_s_wait_private_store0(arch);
   if (!epoch_store || (owner_offset && !owner_store) ||
-      (workgroup_key_offset && !workgroup_key_store) ||
-      (sample_sequence_offset && !sequence_store) || !wait_store) {
+      (workgroup_key_offset && !workgroup_key_store) || !wait_store) {
     errors.emplace_back(
         "ConSan MOI private-epoch prologue could not encode persistent-state initialization");
     return std::nullopt;
@@ -978,8 +968,6 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   }
   words.push_back(build_v_mov_b32_e32(scratch_vgpr, scalar_positive_inline_u32(0), arch));
   words.insert(words.end(), epoch_store->begin(), epoch_store->end());
-  if (sequence_store)
-    words.insert(words.end(), sequence_store->begin(), sequence_store->end());
   words.push_back(*wait_store);
   words.insert(words.end(), spill.restore_words.begin(), spill.restore_words.end());
 
@@ -1226,15 +1214,10 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       persistent_end =
           std::max(persistent_end, *access_patch->persistent_workgroup_key_private_offset +
                                        SpillManager::kSlotBytes);
-    const std::optional<uint32_t> sample_sequence_offset =
-        access_patch->persistent_sample_sequence_private_offset;
-    if (sample_sequence_offset)
-      persistent_end = std::max(persistent_end, *sample_sequence_offset + SpillManager::kSlotBytes);
     MoiPrivateEpochLayout layout{
         .epoch_offset = *access_patch->persistent_epoch_private_offset,
         .owner_offset = access_patch->persistent_owner_private_offset,
         .workgroup_key_offset = access_patch->persistent_workgroup_key_private_offset,
-        .sample_sequence_offset = sample_sequence_offset,
         .ephemeral_base = access_patch->persistent_private_state_end.value_or(persistent_end)};
 
     const auto private_limit = address_free_scratch_private_limit(arch);
@@ -1342,9 +1325,9 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     auto words = build_private_epoch_prologue_words(
         prologue_text_offset, item.active_entry_text_offset, item.scratch_vgpr,
         item.layout.epoch_offset, item.layout.owner_offset, item.layout.workgroup_key_offset,
-        item.layout.sample_sequence_offset, item.spill, prologue_workgroup_shadow,
-        item.workgroup_sources, item.dispatch_plan, options.moi_dispatch_id_sgpr,
-        moi_runtime_sample_counter_sgpr(options), options.moi_exec_save_sgpr, arch, result.errors);
+        item.spill, prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan,
+        options.moi_dispatch_id_sgpr, moi_runtime_sample_counter_sgpr(options),
+        options.moi_exec_save_sgpr, arch, result.errors);
     if (!words)
       return;
     if (!patcher.redirect_kernel_entry(item.active_descriptor_file_offset,
@@ -1361,10 +1344,10 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       auto secondary_words = build_private_epoch_prologue_words(
           secondary_prologue_offset, item.active_entry_text_offset + kAmdhsaKernelEntryAlignment,
           item.scratch_vgpr, item.layout.epoch_offset, item.layout.owner_offset,
-          item.layout.workgroup_key_offset, item.layout.sample_sequence_offset, item.spill,
-          prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan,
-          options.moi_dispatch_id_sgpr, moi_runtime_sample_counter_sgpr(options),
-          options.moi_exec_save_sgpr, arch, result.errors);
+          item.layout.workgroup_key_offset, item.spill, prologue_workgroup_shadow,
+          item.workgroup_sources, item.dispatch_plan, options.moi_dispatch_id_sgpr,
+          moi_runtime_sample_counter_sgpr(options), options.moi_exec_save_sgpr, arch,
+          result.errors);
       if (!secondary_words)
         return;
       if (words->size() * sizeof(uint32_t) <= kAmdhsaKernelEntryAlignment &&
@@ -1378,20 +1361,19 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
         words = build_private_epoch_prologue_words(
             *primary_body_offset, item.active_entry_text_offset, item.scratch_vgpr,
             item.layout.epoch_offset, item.layout.owner_offset, item.layout.workgroup_key_offset,
-            item.layout.sample_sequence_offset, item.spill, prologue_workgroup_shadow,
-            item.workgroup_sources, item.dispatch_plan, options.moi_dispatch_id_sgpr,
-            moi_runtime_sample_counter_sgpr(options), options.moi_exec_save_sgpr, arch,
-            result.errors);
+            item.spill, prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan,
+            options.moi_dispatch_id_sgpr, moi_runtime_sample_counter_sgpr(options),
+            options.moi_exec_save_sgpr, arch, result.errors);
         if (!words)
           return;
         secondary_body_offset = *primary_body_offset + words->size() * sizeof(uint32_t);
         secondary_words = build_private_epoch_prologue_words(
             *secondary_body_offset, item.active_entry_text_offset + kAmdhsaKernelEntryAlignment,
             item.scratch_vgpr, item.layout.epoch_offset, item.layout.owner_offset,
-            item.layout.workgroup_key_offset, item.layout.sample_sequence_offset, item.spill,
-            prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan,
-            options.moi_dispatch_id_sgpr, moi_runtime_sample_counter_sgpr(options),
-            options.moi_exec_save_sgpr, arch, result.errors);
+            item.layout.workgroup_key_offset, item.spill, prologue_workgroup_shadow,
+            item.workgroup_sources, item.dispatch_plan, options.moi_dispatch_id_sgpr,
+            moi_runtime_sample_counter_sgpr(options), options.moi_exec_save_sgpr, arch,
+            result.errors);
         const auto primary_relay =
             compute_sopp_branch_simm16(prologue_text_offset, *primary_body_offset);
         const auto secondary_relay = compute_sopp_branch_simm16(
@@ -1424,7 +1406,6 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     info.persistent_epoch_private_offset = item.layout.epoch_offset;
     info.persistent_owner_private_offset = item.layout.owner_offset;
     info.persistent_workgroup_key_private_offset = item.layout.workgroup_key_offset;
-    info.persistent_sample_sequence_private_offset = item.layout.sample_sequence_offset;
     info.persistent_private_state_end = item.layout.ephemeral_base;
     info.spilled_vgpr_count = item.spill.vgpr_count;
     info.required_private_segment_size = item.required_private_bytes;
@@ -1685,9 +1666,6 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       required_vgpr_count =
           std::max<uint32_t>(required_vgpr_count, *kernel_options.moi_epoch_vgpr + 4u);
     }
-    if (kernel_options.moi_sample_sequence_vgpr)
-      required_vgpr_count =
-          std::max<uint32_t>(required_vgpr_count, *kernel_options.moi_sample_sequence_vgpr + 1u);
     if (kernel_options.moi_workgroup_key_vgpr)
       required_vgpr_count =
           std::max<uint32_t>(required_vgpr_count, *kernel_options.moi_workgroup_key_vgpr + 1u);
@@ -1821,9 +1799,9 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       return;
     auto words = build_owner_epoch_prologue_words(
         prologue_text_offset, prologue_return_target, *kernel_options.moi_owner_vgpr,
-        *kernel_options.moi_epoch_vgpr, kernel_options.moi_workgroup_key_vgpr,
-        kernel_options.moi_sample_sequence_vgpr, *owner_shift, kernel_options.moi_owner_source,
-        kernel_options.moi_owner_sgpr, kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
+        *kernel_options.moi_epoch_vgpr, kernel_options.moi_workgroup_key_vgpr, *owner_shift,
+        kernel_options.moi_owner_source, kernel_options.moi_owner_sgpr,
+        kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
         kernel_options.moi_persistent_owner_sgpr, kernel_options.moi_persistent_epoch_sgpr,
         kernel_options.moi_persistent_workgroup_key_sgpr, item.dispatch_plan,
         kernel_options.moi_dispatch_id_sgpr, moi_runtime_sample_counter_sgpr(kernel_options),
@@ -1884,9 +1862,8 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       auto secondary_words = build_owner_epoch_prologue_words(
           secondary_prologue_offset, kernel.entry_text_offset + kAmdhsaKernelEntryAlignment,
           *kernel_options.moi_owner_vgpr, *kernel_options.moi_epoch_vgpr,
-          kernel_options.moi_workgroup_key_vgpr, kernel_options.moi_sample_sequence_vgpr,
-          *owner_shift, kernel_options.moi_owner_source, kernel_options.moi_owner_sgpr,
-          kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
+          kernel_options.moi_workgroup_key_vgpr, *owner_shift, kernel_options.moi_owner_source,
+          kernel_options.moi_owner_sgpr, kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
           kernel_options.moi_persistent_owner_sgpr, kernel_options.moi_persistent_epoch_sgpr,
           kernel_options.moi_persistent_workgroup_key_sgpr, item.dispatch_plan,
           kernel_options.moi_dispatch_id_sgpr, moi_runtime_sample_counter_sgpr(kernel_options),
@@ -1912,9 +1889,8 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
         const uint64_t primary_body_offset = prologue_text_offset + kPairedEntryWindow;
         words = build_owner_epoch_prologue_words(
             primary_body_offset, prologue_return_target, *kernel_options.moi_owner_vgpr,
-            *kernel_options.moi_epoch_vgpr, kernel_options.moi_workgroup_key_vgpr,
-            kernel_options.moi_sample_sequence_vgpr, *owner_shift, kernel_options.moi_owner_source,
-            kernel_options.moi_owner_sgpr,
+            *kernel_options.moi_epoch_vgpr, kernel_options.moi_workgroup_key_vgpr, *owner_shift,
+            kernel_options.moi_owner_source, kernel_options.moi_owner_sgpr,
             kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
             kernel_options.moi_persistent_owner_sgpr, kernel_options.moi_persistent_epoch_sgpr,
             kernel_options.moi_persistent_workgroup_key_sgpr, item.dispatch_plan,
@@ -1929,8 +1905,8 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
         secondary_words = build_owner_epoch_prologue_words(
             secondary_body_offset, kernel.entry_text_offset + kAmdhsaKernelEntryAlignment,
             *kernel_options.moi_owner_vgpr, *kernel_options.moi_epoch_vgpr,
-            kernel_options.moi_workgroup_key_vgpr, kernel_options.moi_sample_sequence_vgpr,
-            *owner_shift, kernel_options.moi_owner_source, kernel_options.moi_owner_sgpr,
+            kernel_options.moi_workgroup_key_vgpr, *owner_shift, kernel_options.moi_owner_source,
+            kernel_options.moi_owner_sgpr,
             kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
             kernel_options.moi_persistent_owner_sgpr, kernel_options.moi_persistent_epoch_sgpr,
             kernel_options.moi_persistent_workgroup_key_sgpr, item.dispatch_plan,
@@ -1973,7 +1949,6 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     info.persistent_owner_vgpr = kernel_options.moi_owner_vgpr;
     info.persistent_epoch_vgpr = kernel_options.moi_epoch_vgpr;
     info.persistent_workgroup_key_vgpr = kernel_options.moi_workgroup_key_vgpr;
-    info.persistent_sample_sequence_vgpr = kernel_options.moi_sample_sequence_vgpr;
     if (item.workgroup_shadow) {
       info.workgroup_shadow_base = item.workgroup_shadow->base;
       info.workgroup_shadow_size = item.workgroup_shadow->size;

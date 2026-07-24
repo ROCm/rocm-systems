@@ -2,7 +2,6 @@ struct MoiPrivateEpochLayout {
   uint32_t epoch_offset = 0;
   std::optional<uint32_t> owner_offset;
   std::optional<uint32_t> workgroup_key_offset;
-  std::optional<uint32_t> sample_sequence_offset;
   uint32_t ephemeral_base = 0;
 };
 
@@ -177,8 +176,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
 [[nodiscard]] std::optional<MoiPrivateEpochLayout>
 build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScratchPlan &resources,
                                rj_code_arch_t arch, std::vector<std::string> &warnings,
-                               bool include_sample_sequence = false, bool include_owner = false,
-                               bool include_workgroup_key = false) {
+                               bool include_owner = false, bool include_workgroup_key = false) {
   if (resources.owner_descriptor_file_offsets.empty()) {
     warnings.emplace_back("ConSan MOI private epoch requires an owning kernel descriptor");
     return std::nullopt;
@@ -206,10 +204,6 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
       include_workgroup_key ? std::optional<uint64_t>(persistent_end) : std::nullopt;
   if (workgroup_key_offset)
     persistent_end += SpillManager::kSlotBytes;
-  const std::optional<uint64_t> sample_sequence_offset =
-      include_sample_sequence ? std::optional<uint64_t>(persistent_end) : std::nullopt;
-  if (sample_sequence_offset)
-    persistent_end += SpillManager::kSlotBytes;
   const auto private_limit = address_free_scratch_private_limit(arch);
   if (!private_limit) {
     warnings.emplace_back(
@@ -234,20 +228,15 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
           workgroup_key_offset
               ? std::optional<uint32_t>(static_cast<uint32_t>(*workgroup_key_offset))
               : std::nullopt,
-      .sample_sequence_offset =
-          sample_sequence_offset
-              ? std::optional<uint32_t>(static_cast<uint32_t>(*sample_sequence_offset))
-              : std::nullopt,
       .ephemeral_base = *ephemeral_base};
 }
 
 [[nodiscard]] std::optional<MoiPrivateEpochLayout> build_sampled_private_epoch_layout(
     const ConSanResult &result, const ResolvedMoiScratchPlan &resources,
     const ConSanOptions &options, rj_code_arch_t arch, std::vector<std::string> &warnings) {
-  return build_moi_private_epoch_layout(
-      result, resources, arch, warnings,
-      /*include_sample_sequence=*/options.automatic_moi_private_sample_sequence,
-      /*include_owner=*/options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId);
+  return build_moi_private_epoch_layout(result, resources, arch, warnings,
+                                        /*include_owner=*/options.moi_owner_source ==
+                                            ConSanMoiOwnerSource::WorkitemId);
 }
 
 [[nodiscard]] bool append_sampled_private_owner_epoch_load(
@@ -336,12 +325,9 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
       return std::nullopt;
     }
     const uint16_t saved_scc_sgpr = special_state->scc_save_sgpr;
-    const auto saved_frame_offset =
-        moi_dynamic_stack_frame_save_sgpr_offset(options.moi_engine);
-    if (!saved_frame_offset ||
-        *saved_frame_offset >= moi_exec_save_sgpr_count(options, arch)) {
-      warnings.emplace_back(
-          "ConSan MOI dynamic-stack spill has no reserved frame-base save slot");
+    const auto saved_frame_offset = moi_dynamic_stack_frame_save_sgpr_offset(options.moi_engine);
+    if (!saved_frame_offset || *saved_frame_offset >= moi_exec_save_sgpr_count(options, arch)) {
+      warnings.emplace_back("ConSan MOI dynamic-stack spill has no reserved frame-base save slot");
       return std::nullopt;
     }
     const uint16_t saved_frame_base_sgpr =
@@ -679,9 +665,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       reject_optional_scratch_range_overlap(options.moi_epoch_vgpr, *options.scratch_vgpr,
                                             scratch_count, "MOI epoch", errors) ||
       reject_optional_scratch_range_overlap(options.moi_workgroup_key_vgpr, *options.scratch_vgpr,
-                                            scratch_count, "MOI workgroup key", errors) ||
-      reject_optional_scratch_range_overlap(options.moi_sample_sequence_vgpr, *options.scratch_vgpr,
-                                            scratch_count, "MOI sample sequence", errors))
+                                            scratch_count, "MOI workgroup key", errors))
     return std::nullopt;
   auto byte_count = byte_count_for_candidate(candidate);
   if (!byte_count) {

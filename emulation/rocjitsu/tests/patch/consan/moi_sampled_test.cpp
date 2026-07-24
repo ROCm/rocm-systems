@@ -921,8 +921,7 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
         ASSERT_NE(prologue, result.patches.end());
         EXPECT_EQ(atomic->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
         EXPECT_EQ(atomic->persistent_owner_private_offset, access->persistent_owner_private_offset);
-        EXPECT_EQ(atomic->persistent_sample_sequence_private_offset,
-                  access->persistent_sample_sequence_private_offset);
+        EXPECT_EQ(atomic->persistent_private_state_end, access->persistent_private_state_end);
         EXPECT_EQ(prologue->persistent_private_state_end, access->persistent_private_state_end);
 
         ASSERT_TRUE(atomic->scratch_vgpr);
@@ -1352,8 +1351,7 @@ TEST(ConSanMoi, Cdna4SharedSampledAtomicSeparatesPersistentStateFromSpills) {
   ASSERT_TRUE(atomic->persistent_private_state_end);
   EXPECT_EQ(atomic->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
   EXPECT_EQ(atomic->persistent_owner_private_offset, access->persistent_owner_private_offset);
-  EXPECT_EQ(atomic->persistent_sample_sequence_private_offset,
-            access->persistent_sample_sequence_private_offset);
+  EXPECT_EQ(atomic->persistent_private_state_end, access->persistent_private_state_end);
   EXPECT_EQ(atomic->persistent_private_state_end, 48u);
   EXPECT_EQ(atomic->required_private_segment_size, 96u);
   EXPECT_EQ(atomic->spilled_vgpr_count, 10u);
@@ -1983,17 +1981,14 @@ TEST(ConSanMoi, CdnaSampledBarrierUsesPrivatePersistentStateAtAccvgprBoundary) {
       ASSERT_NE(prologue, result.patches.end());
       EXPECT_TRUE(access->persistent_epoch_private_offset);
       EXPECT_TRUE(access->persistent_owner_private_offset);
-      EXPECT_FALSE(access->persistent_sample_sequence_private_offset);
       EXPECT_EQ(barrier_patch->persistent_epoch_private_offset,
                 access->persistent_epoch_private_offset);
       EXPECT_EQ(barrier_patch->persistent_owner_private_offset,
                 access->persistent_owner_private_offset);
-      EXPECT_EQ(barrier_patch->persistent_sample_sequence_private_offset,
-                access->persistent_sample_sequence_private_offset);
+      EXPECT_EQ(barrier_patch->persistent_private_state_end, access->persistent_private_state_end);
       EXPECT_EQ(prologue->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
       EXPECT_EQ(prologue->persistent_owner_private_offset, access->persistent_owner_private_offset);
-      EXPECT_EQ(prologue->persistent_sample_sequence_private_offset,
-                access->persistent_sample_sequence_private_offset);
+      EXPECT_EQ(prologue->persistent_private_state_end, access->persistent_private_state_end);
 
       ASSERT_TRUE(barrier_patch->scratch_vgpr);
       ASSERT_TRUE(barrier_patch->persistent_owner_private_offset);
@@ -2078,7 +2073,6 @@ TEST(ConSanMoi, CdnaSampledSynchronizationSpillsThroughDynamicStackFrame) {
     EXPECT_GE(*result.resolved_moi_persistent_owner_sgpr, 40u);
     EXPECT_FALSE(result.resolved_moi_owner_vgpr);
     EXPECT_FALSE(result.resolved_moi_epoch_vgpr);
-    EXPECT_FALSE(result.resolved_moi_sample_sequence_vgpr);
     EXPECT_TRUE(
         std::ranges::all_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
           return plan.source == ConSanRegisterAllocationSource::SpillRequired;
@@ -2345,10 +2339,8 @@ TEST(ConSanMoi, CdnaSampledUsesPerOwnerPersistentTuplesAcrossAccvgprBoundaries) 
     ASSERT_NE(helper_assignment, result.resolved_moi_persistent_vgpr_assignments.end());
     EXPECT_EQ(probe_assignment->owner_vgpr, 12u);
     EXPECT_EQ(probe_assignment->epoch_vgpr, 13u);
-    EXPECT_FALSE(probe_assignment->sample_sequence_vgpr);
     EXPECT_EQ(helper_assignment->owner_vgpr, 24u);
     EXPECT_EQ(helper_assignment->epoch_vgpr, 25u);
-    EXPECT_FALSE(helper_assignment->sample_sequence_vgpr);
     EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                  &ConSanPatchInfo::kind),
               2u);

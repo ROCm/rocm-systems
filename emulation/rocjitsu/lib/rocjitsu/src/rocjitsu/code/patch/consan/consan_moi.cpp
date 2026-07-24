@@ -65,8 +65,7 @@ consan_detail::resolve_scalar_owner_contexts(bool planning_state_valid,
   for (uint64_t descriptor_offset : owners) {
     const auto context = std::ranges::find(contexts, descriptor_offset,
                                            &ScalarOwnerContextSummary::descriptor_file_offset);
-    if (context == contexts.end() || !context->descriptor_file_offset ||
-        !context->descriptor_valid) {
+    if (context == contexts.end() || !context->descriptor_valid) {
       return std::nullopt;
     }
     resolution.context_indices.push_back(
@@ -364,8 +363,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     result.resolved_moi_epoch_vgpr = effective_options.moi_epoch_vgpr;
   if (!result.resolved_moi_workgroup_key_vgpr)
     result.resolved_moi_workgroup_key_vgpr = effective_options.moi_workgroup_key_vgpr;
-  if (!result.resolved_moi_sample_sequence_vgpr)
-    result.resolved_moi_sample_sequence_vgpr = effective_options.moi_sample_sequence_vgpr;
   if (!result.resolved_moi_exec_save_sgpr)
     result.resolved_moi_exec_save_sgpr = effective_options.moi_exec_save_sgpr;
   if (!result.resolved_moi_owner_sgpr)

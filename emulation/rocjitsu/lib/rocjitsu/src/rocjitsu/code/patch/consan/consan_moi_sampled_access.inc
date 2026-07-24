@@ -172,7 +172,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     std::optional<uint32_t> private_epoch_offset;
     std::optional<uint32_t> private_owner_offset;
     std::optional<uint16_t> private_owner_shift;
-    std::optional<uint32_t> private_sample_sequence_offset;
     uint32_t persistent_private_state_end = 0;
     uint32_t required_private_bytes = 0;
     uint32_t probe_guest_instruction_offset = 0;
@@ -577,8 +576,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     }
     if (private_layout || moi_uses_scalar_persistent_state(candidate_options)) {
       uint16_t state_vgpr = static_cast<uint16_t>(resources->base + resources->count);
-      if (private_layout && private_layout->sample_sequence_offset)
-        candidate_options.moi_sample_sequence_vgpr = --state_vgpr;
       if (!private_layout || private_layout->owner_offset)
         candidate_options.moi_owner_vgpr = --state_vgpr;
       candidate_options.moi_epoch_vgpr = --state_vgpr;
@@ -610,8 +607,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         layout.sampled_pending_acquires_offset,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
         private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
-        private_layout ? private_layout->sample_sequence_offset : std::nullopt, candidate_errors,
-        &probe_guest_instruction_offset);
+        candidate_errors, &probe_guest_instruction_offset);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -704,8 +700,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     if (private_layout)
       planned.private_owner_offset = private_layout->owner_offset;
     planned.private_owner_shift = private_owner_shift;
-    if (private_layout)
-      planned.private_sample_sequence_offset = private_layout->sample_sequence_offset;
     if (private_layout)
       planned.persistent_private_state_end = private_layout->ephemeral_base;
     planned.required_private_bytes = required_private_bytes;
@@ -943,8 +937,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               static_cast<uint32_t>(candidate.text_offset + sizeof(uint32_t) - island_offset));
         }
         std::vector<uint32_t> matched_words;
-        if (!explicit_dense_key && !collapsed_spill_router &&
-            candidate.size > sizeof(uint32_t)) {
+        if (!explicit_dense_key && !collapsed_spill_router && candidate.size > sizeof(uint32_t)) {
           const uint32_t adjustment = candidate.size - sizeof(uint32_t);
           matched_words.push_back(
               build_s_add_u32(call_return_sgpr, call_return_sgpr, /*literal=*/255u, arch));
@@ -962,8 +955,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         if (direct_body) {
           matched_words.push_back(build_s_branch(*direct_body, arch));
         } else if (!append_moi_scc_preserving_indirect_jump(
-                       matched_words, matched_offset, planned_patch->placement.body_offset,
-                       pc_sgpr,
+                       matched_words, matched_offset, planned_patch->placement.body_offset, pc_sgpr,
                        special_state.scc_save_sgpr, /*capture_scc=*/false, arch)) {
           result.errors.emplace_back(
               "ConSan MOI sampled probe could not encode a dense dispatch target");
@@ -1066,8 +1058,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           moi_uses_scalar_persistent_state(candidate_options)) {
         uint16_t state_vgpr =
             static_cast<uint16_t>(planned_patch.resources.base + planned_patch.resources.count);
-        if (planned_patch.private_sample_sequence_offset)
-          candidate_options.moi_sample_sequence_vgpr = --state_vgpr;
         if (!planned_patch.private_epoch_offset || planned_patch.private_owner_offset)
           candidate_options.moi_owner_vgpr = --state_vgpr;
         candidate_options.moi_epoch_vgpr = --state_vgpr;
@@ -1081,8 +1071,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           window_bank_count, layout.sampled_causal_windows_offset,
           layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
           planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
-          planned_patch.private_owner_shift, planned_patch.private_sample_sequence_offset,
-          result.errors);
+          planned_patch.private_owner_shift, result.errors);
       if (!words)
         return;
       const uint64_t spill_bytes =
@@ -1133,7 +1122,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       info.scratch_vgpr = planned_patch.resources.base;
       info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
       info.persistent_owner_private_offset = planned_patch.private_owner_offset;
-      info.persistent_sample_sequence_private_offset = planned_patch.private_sample_sequence_offset;
       if (planned_patch.private_epoch_offset)
         info.persistent_private_state_end = planned_patch.persistent_private_state_end;
       info.required_private_segment_size = planned_patch.required_private_bytes;
@@ -1357,8 +1345,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                 moi_uses_scalar_persistent_state(candidate_options)) {
               uint16_t state_vgpr = static_cast<uint16_t>(planned_patch.resources.base +
                                                           planned_patch.resources.count);
-              if (planned_patch.private_sample_sequence_offset)
-                candidate_options.moi_sample_sequence_vgpr = --state_vgpr;
               if (!planned_patch.private_epoch_offset || planned_patch.private_owner_offset)
                 candidate_options.moi_owner_vgpr = --state_vgpr;
               candidate_options.moi_epoch_vgpr = --state_vgpr;
@@ -1372,8 +1358,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                 window_bank_count, layout.sampled_causal_windows_offset,
                 layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
                 planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
-                planned_patch.private_owner_shift, planned_patch.private_sample_sequence_offset,
-                result.errors);
+                planned_patch.private_owner_shift, result.errors);
             if (words) {
               const size_t planned_words =
                   static_cast<size_t>(planned_patch.placement.body_size / sizeof(uint32_t));
@@ -1400,8 +1385,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             info.scratch_vgpr = planned_patch.resources.base;
             info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
             info.persistent_owner_private_offset = planned_patch.private_owner_offset;
-            info.persistent_sample_sequence_private_offset =
-                planned_patch.private_sample_sequence_offset;
             if (planned_patch.private_epoch_offset)
               info.persistent_private_state_end = planned_patch.persistent_private_state_end;
             info.required_private_segment_size = planned_patch.required_private_bytes;

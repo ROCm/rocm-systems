@@ -216,10 +216,10 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
                             *private_layout, arch, errors))
     return std::nullopt;
   if (scalar_persistent) {
-    words.push_back(build_v_mov_b32_e32(*options.moi_owner_vgpr,
-                                       *options.moi_persistent_owner_sgpr, arch));
-    words.push_back(build_v_mov_b32_e32(*options.moi_epoch_vgpr,
-                                       *options.moi_persistent_epoch_sgpr, arch));
+    words.push_back(
+        build_v_mov_b32_e32(*options.moi_owner_vgpr, *options.moi_persistent_owner_sgpr, arch));
+    words.push_back(
+        build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_epoch_sgpr, arch));
   }
   if (!append_save_moi_special_state(words, options, arch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
@@ -249,8 +249,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
       // CDNA4's literal-add builder rejects destination/source aliasing because
       // it materializes the literal in the destination first. Use the
       // already-dead value temporary and copy the absolute slot back.
-      const uint16_t absolute_slot_vgpr =
-          arch == ROCJITSU_CODE_ARCH_CDNA4 ? value : bank_vgpr;
+      const uint16_t absolute_slot_vgpr = arch == ROCJITSU_CODE_ARCH_CDNA4 ? value : bank_vgpr;
       const auto absolute_slot = instrumentation::build_v_add_u32_literal(
           absolute_slot_vgpr, window.first_slot, bank_vgpr, arch);
       if (!absolute_slot) {
@@ -259,8 +258,8 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
       }
       words.insert(words.end(), absolute_slot->begin(), absolute_slot->end());
       if (absolute_slot_vgpr != bank_vgpr) {
-        words.push_back(build_v_mov_b32_e32(bank_vgpr, vector_source_vgpr(absolute_slot_vgpr),
-                                           arch));
+        words.push_back(
+            build_v_mov_b32_e32(bank_vgpr, vector_source_vgpr(absolute_slot_vgpr), arch));
       }
     }
     if (!append_sampled_indexed_address(words, first_window_address,
@@ -1222,8 +1221,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         const ConSanBarrierSite &site = planned.candidate.barrier.site;
         ConSanOptions candidate_options = options;
         candidate_options.scratch_vgpr = planned.resources.base;
-        if (!apply_moi_transient_sgpr_assignment(
-                candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+        if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                                 planned.resources.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
               "ConSan MOI sampled dense barrier lost its transient scalar assignment");
           return;
@@ -1370,8 +1369,6 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         if (planned.private_layout) {
           info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
           info.persistent_owner_private_offset = planned.private_layout->owner_offset;
-          info.persistent_sample_sequence_private_offset =
-              planned.private_layout->sample_sequence_offset;
           info.persistent_private_state_end = planned.private_layout->ephemeral_base;
         }
         info.required_private_segment_size = planned.required_private_bytes;
@@ -1400,8 +1397,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     const uint64_t cave_offset = new_text.size();
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
-    if (!apply_moi_transient_sgpr_assignment(
-            candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI sampled barrier sync lost its transient scalar assignment");
       return;
@@ -1490,8 +1487,6 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     if (planned.private_layout) {
       info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
       info.persistent_owner_private_offset = planned.private_layout->owner_offset;
-      info.persistent_sample_sequence_private_offset =
-          planned.private_layout->sample_sequence_offset;
       info.persistent_private_state_end = planned.private_layout->ephemeral_base;
     }
     info.required_private_segment_size = planned.required_private_bytes;
@@ -1978,8 +1973,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     const uint64_t cave_offset = placement_planner.appended_end();
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
-    if (!apply_moi_transient_sgpr_assignment(
-            candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI sampled atomic sync lost its transient scalar assignment");
       return;
@@ -2076,8 +2071,6 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     if (planned.private_layout) {
       info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
       info.persistent_owner_private_offset = planned.private_layout->owner_offset;
-      info.persistent_sample_sequence_private_offset =
-          planned.private_layout->sample_sequence_offset;
       info.persistent_private_state_end = planned.private_layout->ephemeral_base;
     }
     info.required_private_segment_size = planned.required_private_bytes;

@@ -196,7 +196,6 @@ struct ConSanMoiPersistentVgprAssignment {
   uint16_t owner_vgpr = 0;
   uint16_t epoch_vgpr = 0;
   std::optional<uint16_t> workgroup_key_vgpr;
-  std::optional<uint16_t> sample_sequence_vgpr;
 
   auto operator<=>(const ConSanMoiPersistentVgprAssignment &) const = default;
 };
@@ -323,9 +322,6 @@ struct ConSanOptions {
   /// Internal marker set when inline shadow derives owner at each probe and
   /// keeps epoch in per-lane private memory.
   bool automatic_moi_private_epoch = false;
-  /// Internal marker set when synchronization-aware Sampled mode also keeps
-  /// its per-workitem selection sequence in private persistent state.
-  bool automatic_moi_private_sample_sequence = false;
   /// Internal marker set after ConSan assigns the scalar EXEC-save window.
   bool automatic_moi_exec_save_sgprs = false;
   /// Per-owner overrides used when an automatic code-object-wide transient
@@ -421,8 +417,6 @@ struct ConSanOptions {
   /// copied into this VGPR at entry because they become ordinary guest state
   /// after the ABI prologue.
   std::optional<uint16_t> moi_workgroup_key_vgpr;
-  /// Internal persistent per-wave sequence used by runtime Sampled selection.
-  std::optional<uint16_t> moi_sample_sequence_vgpr;
   std::optional<uint64_t> report_buffer_address;
   std::optional<uint64_t> moi_report_buffer_address;
   uint64_t moi_report_buffer_size = 0;
