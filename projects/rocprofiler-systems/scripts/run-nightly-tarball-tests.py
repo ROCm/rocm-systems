@@ -534,6 +534,70 @@ def make_rocm_env(base_env: dict, rocm_dir: Path) -> dict:
     return env
 
 
+def apply_hpc_cray_settings(args, facts: dict) -> list[str]:
+    """Bundle Cray-MPICH-on-gfx90a HPC specifics.
+
+    Returns extra ``-D`` CMake args (MPI compile/link flags for the example build)
+    and mutates ``args`` / ``os.environ`` in place:
+      - injects Cray MPICH + XPMEM + GTL include/link flags so the tarball clang
+        can build the GPU-aware MPI examples (e.g. hpc/jacobi-hip),
+      - defaults the tarball variant to gfx90a,
+      - skips examples that don't build against the tarball (jpegdecode/videodecode),
+      - enables GPU-aware MPI at runtime (MPICH_GPU_SUPPORT_ENABLED=1).
+
+    Requires the Cray MPICH module to be loaded (``module load cray-mpich``).
+    """
+    log("Applying HPC Cray MPICH (gfx90a) settings...")
+
+    mpich_dir = os.environ.get("MPICH_DIR") or os.environ.get("CRAY_MPICH_DIR")
+    if not mpich_dir:
+        die(
+            "--hpc-cray requires Cray MPICH in the environment but neither "
+            "MPICH_DIR nor CRAY_MPICH_DIR is set.\n"
+            "       Run 'module load cray-mpich' (and the gfx90a accel module) first."
+        )
+    xpmem = os.environ.get("CRAY_XPMEM_POST_LINK_OPTS", "")
+    gtl_dir = os.environ.get("PE_MPICH_GTL_DIR_amd_gfx90a", "")
+    gtl_libs = os.environ.get("PE_MPICH_GTL_LIBS_amd_gfx90a", "")
+    if not gtl_libs:
+        log("WARNING: PE_MPICH_GTL_LIBS_amd_gfx90a is empty; GPU-aware MPI link may "
+            "fail. Ensure the craype-accel-amd-gfx90a module is loaded.")
+
+    # compile: MPI headers ; link: MPI + XPMEM + GPU-transport (GTL)
+    cxx_flags = f"-I{mpich_dir}/include"
+    link_flags = " ".join(
+        p for p in [f"-L{mpich_dir}/lib", "-lmpi", xpmem, "-lxpmem", gtl_dir, gtl_libs]
+        if p
+    )
+    extra = [f"-DCMAKE_CXX_FLAGS={cxx_flags}", f"-DCMAKE_EXE_LINKER_FLAGS={link_flags}"]
+
+    # runtime: resolve libmpi/GTL and enable GPU-aware transfers
+    lib_dirs = [f"{mpich_dir}/lib"]
+    if gtl_dir.startswith("-L"):
+        lib_dirs.append(gtl_dir[2:])
+    os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(
+        lib_dirs + [os.environ.get("LD_LIBRARY_PATH", "")]
+    ).rstrip(os.pathsep)
+    os.environ.setdefault("MPICH_GPU_SUPPORT_ENABLED", "1")
+
+    # default to the gfx90a tarball; honor an explicit --variant
+    if args.variant == "multiarch":
+        args.variant = "gfx90a"
+
+    # skip examples that don't build against the tarball in this environment
+    for ex in ("jpegdecode", "videodecode"):
+        if ex not in args.disable_examples.split(","):
+            args.disable_examples = (
+                f"{args.disable_examples},{ex}" if args.disable_examples else ex
+            )
+
+    facts["hpc_cray"] = "on"
+    facts["mpich_dir"] = mpich_dir
+    log(f"HPC Cray: MPICH_DIR={mpich_dir}")
+    log(f"HPC Cray: variant={args.variant}, disabled_examples={args.disable_examples}")
+    return extra
+
+
 # --------------------------------------------------------------------------- #
 # Preflight / environment discovery
 # --------------------------------------------------------------------------- #
@@ -706,6 +770,45 @@ def report_under_test(rocm_dir: Path, env: dict, facts: dict) -> None:
     facts["rocprofsys_version"] = version
     log(f"rocprof-sys binaries under test: {rocm_dir / 'bin'}")
     log(f"rocprof-sys version : {version}")
+
+
+def smoke_check_rocprofsys(rocm_dir: Path, env: dict) -> None:
+    """Fail fast if the shipped rocprof-sys binaries can't even start here.
+
+    Runs ``rocprof-sys-avail --version``; if it is killed by a signal (e.g. SIGILL,
+    SIGSEGV, SIGABRT) the binaries are incompatible with this machine and every test
+    would fail, so abort early with a clear, generic message.
+    """
+    avail = rocm_dir / "bin" / "rocprof-sys-avail"
+    if not avail.exists():
+        return
+    try:
+        rc = subprocess.run(
+            [str(avail), "--version"],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+        ).returncode
+    except subprocess.TimeoutExpired:
+        log("WARNING: 'rocprof-sys-avail --version' timed out during smoke check; "
+            "continuing.")
+        return
+    # killed by a signal: negative returncode (direct exec) or 128+signal convention
+    if rc < 0 or rc >= 128:
+        sig = -rc if rc < 0 else rc - 128
+        die(
+            "the rocprof-sys binaries in the tarball crash on this system: "
+            f"'rocprof-sys-avail --version' was killed by signal {sig} (exit {rc}).\n"
+            "       The shipped binaries appear incompatible with this machine (a "
+            "common cause is a CPU instruction-set / build mismatch). Every test "
+            "would fail, so aborting now.\n"
+            "       Investigate with: "
+            f"gdb -q --batch -ex run -ex 'x/i $pc' --args {avail}"
+        )
+    if rc != 0:
+        log(f"WARNING: 'rocprof-sys-avail --version' exited {rc} during smoke check "
+            "(continuing).")
 
 
 def capture_rocm_sanity(rocm_dir: Path, env: dict, out_path: Path, facts: dict) -> None:
@@ -932,6 +1035,8 @@ def build_from_source(
     venv_py: Path,
     jobs: int,
     use_mpi: bool,
+    disable_examples: list[str] | None = None,
+    extra_cmake_args: list[str] | None = None,
 ) -> Path:
     """Configure + build the full rocprofiler-systems project from source.
 
@@ -968,6 +1073,10 @@ def build_from_source(
         "-DROCPROFSYS_MAX_THREADS=64",
         f"-DROCPROFSYS_USE_MPI={'ON' if use_mpi else 'OFF'}",
     ]
+    if disable_examples:
+        cfg.append("-DROCPROFSYS_DISABLE_EXAMPLES=" + ";".join(disable_examples))
+    if extra_cmake_args:
+        cfg += extra_cmake_args
     log("Configuring full source build (this pulls/builds dyninst, elfutils, etc.)")
     run(cfg, env=build_env)
     log(f"Building rocprofiler-systems from source with {jobs} jobs (can take ~1-2h)")
@@ -983,6 +1092,7 @@ def build_examples(
     jobs: int,
     use_mpi: bool,
     disable_examples: list[str],
+    extra_cmake_args: list[str] | None = None,
 ) -> None:
     """Configure/build the standalone examples and install into the ROCm prefix."""
     build_dir = workdir / "build-examples"
@@ -1003,6 +1113,8 @@ def build_examples(
         # semicolon-separated CMake list; skips add_subdirectory() for these
         cfg.append("-DROCPROFSYS_DISABLE_EXAMPLES=" + ";".join(disable_examples))
         log("Skipping examples: " + ", ".join(disable_examples))
+    if extra_cmake_args:
+        cfg += extra_cmake_args
     run(cfg, env=env)
     run([cmake, "--build", str(build_dir), "--parallel", str(jobs)], env=env)
     run([cmake, "--install", str(build_dir)], env=env)
@@ -1239,6 +1351,34 @@ def write_failures_log(path: Path, failed: list[tuple[str, str, str]]) -> None:
             fh.write("\n")
 
 
+def clean_previous_logs(workdir: Path, keep_stamp: str | None = None) -> None:
+    """Delete log/report artifacts from previous runs (keeps rocm/, source, venv,
+    and build dirs). Files matching the current run's ``keep_stamp`` are preserved."""
+    patterns = [
+        "detailed-*.log",
+        "summary-*.log",
+        "RESULT-*.md",
+        "failures-*.log",
+        "rocm-sanity-*.log",
+        "pip-freeze-*.txt",
+        "logs-*.tar.gz",
+        "pytest-rerun-*.xml",
+        "pytest-results.xml",
+        "latest-*.txt",
+    ]
+    removed = 0
+    for pattern in patterns:
+        for f in workdir.glob(pattern):
+            if keep_stamp and keep_stamp in f.name:
+                continue
+            try:
+                f.unlink()
+                removed += 1
+            except OSError:
+                pass
+    log(f"--clean: removed {removed} log/report artifact(s) from previous runs")
+
+
 def parse_junit(junit: Path) -> dict | None:
     """Return aggregate pytest counts from the JUnit XML, or None if unavailable."""
     if not junit.is_file():
@@ -1391,12 +1531,28 @@ def parse_args(argv=None):
         help="Do everything except run the pytest suite.",
     )
     p.add_argument(
+        "--clean",
+        action="store_true",
+        help="Delete log/report artifacts from previous runs (detailed/summary/"
+        "RESULT/failures/sanity/pip-freeze/junit/archives/latest-*) before starting. "
+        "Preserves the extracted ROCm tree, source checkout, venv, and build dirs.",
+    )
+    p.add_argument(
         "--build-from-source",
         action="store_true",
         help="Instead of testing the tarball's shipped binaries, build the full "
         "rocprofiler-systems from source (using the tarball for ROCm runtime + "
         "toolchain) and validate the freshly-built build-tree binaries. Pulls "
         "submodules and takes ~1-2h. Mirrors the QA build+CTest flow.",
+    )
+    p.add_argument(
+        "--hpc-cray",
+        action="store_true",
+        help="Bundle Cray-MPICH-on-gfx90a HPC specifics: inject Cray MPICH + XPMEM + "
+        "GTL build flags (so GPU-aware MPI examples like hpc/jacobi-hip build with "
+        "the tarball clang), default the tarball variant to gfx90a, skip examples "
+        "that don't build on the tarball (jpegdecode/videodecode), and enable "
+        "GPU-aware MPI at runtime. Requires 'module load cray-mpich'.",
     )
     # ---- offline / two-phase (air-gapped compute node) workflow ----------- #
     p.add_argument(
@@ -1441,6 +1597,9 @@ def main(argv=None) -> int:
     _SUMMARY_PATH = summary_log
     open_detailed_log(detail_log)
 
+    if args.clean:
+        clean_previous_logs(workdir, keep_stamp=run_stamp)
+
     facts = _FACTS
     facts.update(
         {
@@ -1473,6 +1632,13 @@ def main(argv=None) -> int:
     log(f"ROCm prefix (ROCM_PATH): {rocm_dir}")
     log(f"Detailed log: {detail_log}")
     log(f"Summary log:  {summary_log}")
+
+    # HPC Cray MPICH bundle: mutates args (variant/disable_examples) + os.environ
+    # and returns extra CMake args (MPI compile/link flags) for the example/source
+    # build.
+    hpc_cray_cmake_args: list[str] = []
+    if args.hpc_cray:
+        hpc_cray_cmake_args = apply_hpc_cray_settings(args, facts)
 
     # ---- 0. Preflight ----------------------------------------------------- #
     archs = preflight(args, workdir, rocm_dir)
@@ -1546,6 +1712,12 @@ def main(argv=None) -> int:
         rocm_dir, env, workdir / f"rocm-sanity-{run_stamp}.log", facts
     )
 
+    # Fail fast if the tarball binaries can't start on this machine. Skipped when
+    # building from source (those tarball binaries aren't what's tested) and during
+    # prepare-only (which may run on a different node than the tests).
+    if not args.build_from_source and not args.prepare_only:
+        smoke_check_rocprofsys(rocm_dir, env)
+
     facts["validation"] = (
         "build-from-source" if args.build_from_source else "tarball-install"
     )
@@ -1592,9 +1764,14 @@ def main(argv=None) -> int:
     # ---- 4. Build (source or examples) + prepare the test tree ------------ #
     if args.build_from_source:
         step("Build rocprofiler-systems from source")
+        _src_disable = [
+            e.strip() for e in args.disable_examples.split(",") if e.strip()
+        ]
         build_dir = build_from_source(
             src_dir, workdir, rocm_dir, env, venv_py, args.jobs,
             args.build_mpi_examples,
+            disable_examples=_src_disable,
+            extra_cmake_args=hpc_cray_cmake_args,
         )
         pytest_dir = build_dir / "share" / "rocprofiler-systems" / "tests" / "pytest"
         if not (pytest_dir / "conftest.py").is_file():
@@ -1643,6 +1820,7 @@ def main(argv=None) -> int:
                 args.jobs,
                 args.build_mpi_examples,
                 disable_examples,
+                extra_cmake_args=hpc_cray_cmake_args,
             )
         else:
             log(f"Examples up to date ({facts['git_revision'][:10]}); skipping rebuild.")
@@ -1734,6 +1912,8 @@ def write_summary(summary_log: Path, facts: dict) -> None:
         "tier",
         "reruns",
         "rerun_failed_attempts",
+        "hpc_cray",
+        "mpich_dir",
         "variant",
         "gpu_arch",
         "host",
