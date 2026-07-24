@@ -157,6 +157,39 @@ bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
   }
 }
 
+bool relocate_active_config_to_long_path() {
+  const auto dir = config_handoff_dir();
+  const auto json = read_active_config_json();
+  if (!dir || !json)
+    return false;
+
+  try {
+    std::filesystem::path config_dir = *dir;
+    constexpr size_t kTargetParentLength = 4082;
+    while (config_dir.string().size() + 201 <= kTargetParentLength)
+      config_dir /= std::string(200, 'a');
+    const size_t final_component_length = kTargetParentLength - config_dir.string().size() - 1;
+    if (final_component_length > 0)
+      config_dir /= std::string(final_component_length, 'a');
+    std::filesystem::create_directories(config_dir);
+    const std::filesystem::path config_path = config_dir / "config.json";
+    if (config_path.string().size() != 4094)
+      return false;
+
+    std::ofstream config(config_path);
+    config << *json;
+    config.close();
+    if (!config)
+      return false;
+
+    std::ofstream handoff(*dir / "config_path", std::ios::trunc);
+    handoff << config_path.string() << "\n50148\n";
+    return handoff.good();
+  } catch (const std::filesystem::filesystem_error &) {
+    return false;
+  }
+}
+
 bool read_gpu_id(const std::string &path, uint32_t *gpu_id) {
   FILE *file = fopen(path.c_str(), "r");
   if (!file)
@@ -428,6 +461,18 @@ TEST(GuestKfdFailureTest, SimulatorOversizedLdsFailsCleanly) {
   EXPECT_EQ(errno, ENODEV);
   if (fd >= 0)
     close(fd);
+}
+
+TEST(GuestKfdConfigTest, ReadsRuntimeHandoffLargerThan4095Bytes) {
+  const auto simulator_json = read_active_config_json();
+  ASSERT_TRUE(simulator_json.has_value());
+  ASSERT_TRUE(install_inline_dbt_config(*simulator_json, "gfx942", 64));
+  ASSERT_TRUE(relocate_active_config_to_long_path());
+
+  const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+  ASSERT_GE(fd, 0) << std::strerror(errno);
+  EXPECT_TRUE(guest_gpu_is_visible());
+  close(fd);
 }
 
 // Overwriting the interposer's hidden real /dev/kfd fd number via dup2 must not

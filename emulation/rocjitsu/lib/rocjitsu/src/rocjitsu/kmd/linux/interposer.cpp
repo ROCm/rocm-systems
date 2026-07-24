@@ -166,19 +166,41 @@ int kfd_ioctl_ret(int r) {
 /// host KFD gpu_id on the second line.
 std::optional<rocjitsu::config::DbtRuntimeConfigHandoff>
 child_config_handoff(const std::string &cfg_file) {
-  char cfg_buf[4096]{};
+  constexpr size_t kMaxHandoffSize = 64 * 1024;
+  constexpr size_t kReadChunkSize = 4096;
   auto &real = rocjitsu::libc_passthrough();
   int cfg_fd = real.openat(AT_FDCWD, cfg_file.c_str(), O_RDONLY, 0);
   if (cfg_fd < 0)
     return std::nullopt;
 
-  auto n = real.read(cfg_fd, cfg_buf, sizeof(cfg_buf) - 1);
+  std::string contents;
+  contents.reserve(kReadChunkSize);
+  while (contents.size() < kMaxHandoffSize) {
+    char buffer[kReadChunkSize];
+    const size_t remaining = kMaxHandoffSize - contents.size();
+    ssize_t bytes_read = 0;
+    do {
+      bytes_read = real.read(cfg_fd, buffer, std::min(sizeof(buffer), remaining));
+    } while (bytes_read < 0 && errno == EINTR);
+    if (bytes_read < 0) {
+      real.close(cfg_fd);
+      return std::nullopt;
+    }
+    if (bytes_read == 0)
+      break;
+    contents.append(buffer, static_cast<size_t>(bytes_read));
+  }
+
+  char extra = 0;
+  ssize_t extra_bytes = 0;
+  do {
+    extra_bytes = real.read(cfg_fd, &extra, 1);
+  } while (extra_bytes < 0 && errno == EINTR);
   real.close(cfg_fd);
-  if (n <= 0)
+  if (contents.empty() || extra_bytes != 0)
     return std::nullopt;
 
-  return rocjitsu::config::parse_dbt_runtime_config_handoff(
-      std::string_view(cfg_buf, static_cast<size_t>(n)));
+  return rocjitsu::config::parse_dbt_runtime_config_handoff(contents);
 }
 
 void *raw_mmap_syscall(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
