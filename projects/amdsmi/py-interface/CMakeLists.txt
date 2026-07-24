@@ -56,8 +56,11 @@ if(NOT GOOD_CLANG_FOUND)
         AUTHOR_WARNING
         "A wrapper will not be re-generated! Using old wrapper instead.\nSet -DBUILD_WRAPPER=ON to re-build the wrapper"
     )
-    # Still need Python3 for building the wheel package
-    find_package(Python3 3.6 COMPONENTS Interpreter REQUIRED)
+    # Python3 is only consumed by the wheel build; the wrapper is copied with
+    # plain cmake here, so don't require an interpreter for a C-only build.
+    if(BUILD_PYTHON_WHEEL)
+        find_package(Python3 3.6 COMPONENTS Interpreter REQUIRED)
+    endif()
     add_custom_command(
         OUTPUT amdsmi_wrapper.py ${PY_PACKAGE_DIR}/amdsmi_wrapper.py
         DEPENDS ${AMD_SMI} ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_wrapper.py
