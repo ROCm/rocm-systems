@@ -19,10 +19,11 @@ save and restore sequences.
 
 RocJitsu shares the `PrivateSegmentCursor` range-allocation abstraction with
 that work. The DBI backend adds transactional multi-register reservations,
-RDNA4 save and restore emission, kernel-descriptor updates, and focused tests.
-Kunwar's broader DBT and CDNA3 text-relocation implementation is not a
-dependency of this backend. In particular, both implementations deliberately
-avoid rewriting AMDGPU MessagePack notes for private-storage growth.
+target-specific save and restore emission, kernel-descriptor updates, and
+focused tests. Kunwar's broader DBT and CDNA3 text-relocation implementation is
+not a dependency of this backend. In particular, both implementations
+deliberately avoid rewriting AMDGPU MessagePack notes for private-storage
+growth.
 
 ## Responsibilities and boundaries
 
@@ -31,8 +32,9 @@ The reusable implementation provides:
 - a monotonic allocator for ranges in a kernel private segment;
 - stable, idempotent register-to-slot assignment;
 - transactional reservation of a multi-register window;
-- fixed-offset gfx1201 save and restore sequences for ordinary VGPRs;
-- a gfx1201 site-local dynamic-stack frame sequence;
+- fixed-offset save and restore sequences for ordinary VGPRs on gfx942,
+  gfx950, gfx1201, and gfx1250;
+- site-local dynamic-stack frame sequences on those targets;
 - kernel-descriptor private-size updates.
 
 It does not provide:
@@ -81,11 +83,12 @@ compatible layout. A sound policy starts the shared zone at
 `align_up(max(original_private_bytes), 16)` and grows every owning descriptor to
 the resulting common extent. `SpillManager` does not discover those owners.
 
-## Fixed-offset gfx1201 sequences
+## Fixed-offset sequences
 
 `build_vgpr_spill_sequence()` supports ordinary B32 VGPR windows on
-RDNA4/gfx1201. It reserves stable slots and returns separate save and restore
-word sequences plus the resulting private-segment size.
+gfx942, gfx950, gfx1201, and gfx1250. It reserves stable slots and returns
+separate target-native save and restore word sequences plus the resulting
+private-segment size.
 
 Conceptually, the emitted sequence is:
 
@@ -113,9 +116,9 @@ The instructions execute under the caller's current `EXEC` mask and do not
 change it. Instrumentation that narrows `EXEC` must restore the guest mask
 before the VGPR window is returned.
 
-Address-free gfx1201 scratch instructions impose a target-specific encodable
-private-offset limit. Requests outside that limit return `std::nullopt`
-without changing `SpillManager`.
+Address-free scratch instructions impose a target-specific encodable
+private-offset limit and private-size normalization. Requests outside that
+limit return `std::nullopt` without changing `SpillManager`.
 
 ## Dynamic-stack sequences
 
@@ -168,8 +171,8 @@ intercept kernel loads or dispatches.
 | Capability | Current state |
 |---|---|
 | Stable private slots | SGPR, VGPR, and AccVGPR identities can be assigned storage. |
-| Fixed-offset save/restore | Ordinary B32 VGPR windows on gfx1201. |
-| Dynamic-stack save/restore | Ordinary B32 VGPR windows on gfx1201, with caller-proven stack convention and scalar saves. |
+| Fixed-offset save/restore | Ordinary B32 VGPR windows on gfx942, gfx950, gfx1201, and gfx1250. |
+| Dynamic-stack save/restore | Ordinary B32 VGPR windows on gfx942, gfx950, gfx1201, and gfx1250, with a caller-proven stack convention and scalar saves. |
 | Descriptor growth | Fixed and dynamic private backing, including zero-to-nonzero growth. |
 | AMDGPU metadata notes | Deliberately untouched; they are not a ROCR runtime authority. |
 | SGPR save/restore | Not implemented. |
@@ -200,11 +203,13 @@ The implementation is in:
 
 - `lib/rocjitsu/src/rocjitsu/code/patch/spill_manager.h`;
 - `lib/rocjitsu/src/rocjitsu/code/patch/spill_manager.cpp`;
+- `lib/rocjitsu/src/rocjitsu/code/patch/cdna3_instrumentation_builder.h`;
+- `lib/rocjitsu/src/rocjitsu/code/patch/cdna4_instrumentation_builder.h`;
 - `lib/rocjitsu/src/rocjitsu/code/patch/rdna4_instrumentation_builder.h`.
 
 Focused tests are in `tests/patch/spill_manager_test.cpp`, with instruction
-encoding coverage in `tests/patch/rdna4_instrumentation_builder_test.cpp` and
-integration coverage in `tests/patch/trampoline_builder_test.cpp`.
+encoding coverage in the target-specific `*_instrumentation_builder_test.cpp`
+files and integration coverage in `tests/patch/trampoline_builder_test.cpp`.
 
 Run the focused host tests with:
 

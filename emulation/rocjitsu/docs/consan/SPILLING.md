@@ -32,12 +32,13 @@ not bypass liveness, ownership, or overlap checks, and ordinary runs do not
 require them.
 
 The ordinary-VGPR architectural limit is 256. ConSan does not implement a
-general SGPR spill stack. It does have a narrower private-memory recipe for
-selected Record/Replay, Sampled, and InlineShadow probes that preserves a fixed
-transient scalar window: each borrowed uniform SGPR is copied through one
-spill-managed VGPR, stored per lane, reloaded, and restored with
-`v_readfirstlane_b32`. The planner selects that recipe only when it can also
-find owner-compatible indirect-router PC, key, call-return, and SCC state.
+general SGPR spill stack. It does have a narrower private-memory recipe
+available to selected Record/Replay, Sampled, and InlineShadow probes. The
+recipe preserves a fixed transient scalar window: each borrowed uniform SGPR
+is copied through one spill-managed VGPR, stored per lane, reloaded, and
+restored with `v_readfirstlane_b32`. The planner selects that recipe only when
+it can also find owner-compatible indirect-router PC, key, call-return, and SCC
+state.
 Those router registers are needed outside the saved window and must therefore
 be dead or fresh at every routed site. A probe fails explicitly when neither
 the bounded recipe nor a safe ordinary window exists.
@@ -110,7 +111,9 @@ which `s32` is the stack top and `s33` is the current frame base. A spill-backed
 probe uses the shared backend's site-local dynamic frame only after ownership
 analysis establishes that this recipe applies. InlineShadow supports the
 recipe on every admitted target. Record/Replay and Sampled support it on
-CDNA3/CDNA4 when every owner of the spilled site uses a dynamic stack.
+CDNA3/CDNA4 when every owner of the spilled site uses a dynamic stack. This is
+an implementation boundary rather than an ISA limitation: the non-Inline
+frame-save and scalar-window layouts are not yet wired for RDNA4-family targets.
 
 ConSan supplies safe scalar save registers, preserves SCC and the incoming
 frame, borrows the VGPR window, and restores all state before resuming guest
@@ -157,7 +160,7 @@ from removing private-size mutation.
 
 | Probe family | Current resource path |
 |---|---|
-| Record/replay access probes | Dead, fresh-growth, and spill-backed VGPR windows; dynamic-stack spill on CDNA3/CDNA4. |
+| Record/Replay access probes | Dead, fresh-growth, and spill-backed VGPR windows; dynamic-stack spill on CDNA3/CDNA4. |
 | Sampled access probes | Dead, fresh-growth, and spill-backed VGPR windows; dynamic-stack spill on CDNA3/CDNA4. |
 | InlineShadow access probes | Dead, fresh-growth, and spill-backed VGPR windows on every admitted target; fixed-stack owners may use the private-epoch fallback. |
 | Reachable shared helpers | One all-owner-compatible dead, fresh, or common spill plan; a dynamic spill requires every owner to be dynamic. |
@@ -184,10 +187,10 @@ examples include:
 - invalid descriptor or private-segment growth;
 - dynamic-stack use outside the supported recipe;
 - incompatible owner wave sizes;
-- branch, cave, or relocated-prefix placement failure; and
+- branch, cave, or relocated-prefix placement failure;
 - unsupported target or register class; and
-- decoded access forms without an instrumentation lowering, currently including
-  `flat_load_d16_b16`, reported as `unsupported_mnemonic`.
+- decoded access forms without an instrumentation lowering, reported as
+  `unsupported_mnemonic`.
 
 The HSA log distinguishes explicit, dead, descriptor-growth, spill, and
 unsupported plans. It reports planned and emitted spill bytes, site kind,
