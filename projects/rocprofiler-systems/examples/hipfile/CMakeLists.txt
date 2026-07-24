@@ -38,7 +38,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED On)
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/../../cmake)
 list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR}/lib/cmake ${ROCmVersion_DIR})
 
-set(CMAKE_BUILD_TYPE "RelWithDebInfo")
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "RelWithDebInfo")
+endif()
 string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_DEBUG}")
 
 # Locate hipFILE - prefer the exported CMake target, fall back to a manual search.
