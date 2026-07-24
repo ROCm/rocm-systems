@@ -726,22 +726,24 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
     return hipErrorInvalidValue;
   }
 
-  // Load KPACK code objects per device.
-  // For each device, kpack selects a code object from an architecture
-  // priority list (device ISA name first, then a generic fallback).
-  // This must be done per device because heterogeneous systems can have
-  // different GPU ISAs (e.g., gfx1201 vs gfx90a).
+  // Load one KPACK code object per unique device ISA. Devices with the
+  // same ISA can share the extracted buffer, while heterogeneous devices
+  // require separate architecture selection.
+  std::unordered_map<std::string, std::vector<hip::Device*>> devices_by_isa;
   for (auto device : devices) {
+    devices_by_isa[device->devices()[0]->isa().isaName()].push_back(device);
+  }
+
+  for (const auto& [device_name, matching_devices] : devices_by_isa) {
     std::vector<std::string> arch_list;
     // Architecture names
-    // 1) exact devices ISA name, examples:
+    // 1) exact device ISA name, examples:
     //  - amdgcn-amd-amdhsa--gfx1100
     //  - amdgcn-amd-amdhsa--gfx90a:sramecc+:xnack-
     // 2) generic fallback name, examples:
     //  - amdgcn-amd-amdhsa--gfx11-generic
     //  - can also be empty string for some arch like gfx90a
     arch_list.reserve(2);
-    std::string device_name = device->devices()[0]->isa().isaName();
     arch_list.push_back(device_name);
 
     // Add generic fallback arch-name
@@ -775,12 +777,19 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
       return hipErrorInvalidImage;
     }
 
-    // The kpack buffer isn't backed by a file on disk, so no fd is passed.
-    hipError_t hip_err =
-        AddDevProgram(device, code_object, code_object_size, amd::Os::FDescInit());
-    if (hip_err != hipSuccess) {
-      kpack_free_code_object(code_object);
-      return hip_err;
+    // Add device type specific kpack code object buffer for each similar type of device.
+    // The kpack buffer is shared by devices with the same ISA and is not
+    // backed by a file on disk, so no fd is passed.
+    for (auto device : matching_devices) {
+      hipError_t hip_err =
+          AddDevProgram(device, code_object, code_object_size, amd::Os::FDescInit());
+      if (hip_err != hipSuccess) {
+        LogPrintfError(
+            "AddDevProgram failed with error: %d; isa name: %s; device id: %d", hip_err,
+            device_name.c_str(), device->deviceId());
+        kpack_free_code_object(code_object);
+        return hip_err;
+      }
     }
 
     // Track allocation for cleanup in destructor
