@@ -4550,12 +4550,6 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
-    pub fn amdsmi_get_gpu_ecc_supported(
-        processor_handle: AmdsmiProcessorHandle,
-        enabled_blocks: *mut u64,
-    ) -> AmdsmiStatusT;
-}
-extern "C" {
     pub fn amdsmi_get_gpu_total_ecc_count(
         processor_handle: AmdsmiProcessorHandle,
         ec: *mut AmdsmiErrorCountT,

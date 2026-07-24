@@ -3707,12 +3707,6 @@ try:
 except AttributeError:
     pass
 try:
-    amdsmi_get_gpu_ecc_supported = _libraries['libamd_smi.so'].amdsmi_get_gpu_ecc_supported
-    amdsmi_get_gpu_ecc_supported.restype = amdsmi_status_t
-    amdsmi_get_gpu_ecc_supported.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint64)]
-except AttributeError:
-    pass
-try:
     amdsmi_get_gpu_total_ecc_count = _libraries['libamd_smi.so'].amdsmi_get_gpu_total_ecc_count
     amdsmi_get_gpu_total_ecc_count.restype = amdsmi_status_t
     amdsmi_get_gpu_total_ecc_count.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_error_count_t)]
@@ -5158,8 +5152,7 @@ __all__ = \
     'amdsmi_get_gpu_cper_entries', 'amdsmi_get_gpu_device_bdf',
     'amdsmi_get_gpu_device_uuid', 'amdsmi_get_gpu_driver_info',
     'amdsmi_get_gpu_ecc_count', 'amdsmi_get_gpu_ecc_enabled',
-    'amdsmi_get_gpu_ecc_status', 'amdsmi_get_gpu_ecc_supported',
-    'amdsmi_get_gpu_enumeration_info',
+    'amdsmi_get_gpu_ecc_status', 'amdsmi_get_gpu_enumeration_info',
     'amdsmi_get_gpu_event_notification', 'amdsmi_get_gpu_fabric_info',
     'amdsmi_get_gpu_fan_rpms', 'amdsmi_get_gpu_fan_speed',
     'amdsmi_get_gpu_fan_speed_max', 'amdsmi_get_gpu_id',
