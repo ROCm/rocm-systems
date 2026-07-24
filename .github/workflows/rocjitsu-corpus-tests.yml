@@ -173,6 +173,7 @@ jobs:
             "DaemonTest\.HipMemcpyRoundTripInt"
             "DaemonTest\.HipMemcpyDeviceToDevice"
             "DaemonTest\.TwoIndependentClients"
+            "DaemonTest\.LoggingPlugin"
             "BfeRegressionTest\.ThreadIdxY"
             "LoggingTest\.dispatch_logged"
             "ProfiledPluginTest\.hook_profile_output"

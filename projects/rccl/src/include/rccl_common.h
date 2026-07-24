@@ -164,5 +164,8 @@ bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan);
 ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes);
 int rcclGetMaxWarpsPerBlock(struct ncclComm* comm);
 bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes);
+int rcclWarpSpeedComputeNChannels(struct ncclComm* comm, int nc, int channelMultiplier, int maxChannels,
+                                  int adjustedMaxNchannels, bool userUpdatedMaxChannels);
+int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info, int nc);
 #endif
 #endif
