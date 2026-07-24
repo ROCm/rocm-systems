@@ -3,107 +3,107 @@ from pathlib import Path
 import os
 import sys
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 import therock_configure_ci
 
 
 class ConfigureCITest(unittest.TestCase):
-    @patch("subprocess.run")
-    def test_pull_request(self, mock_run):
+    def setUp(self):
+        # Keep run() tests independent of a sibling TheRock checkout and the
+        # GitHub Actions step output file.
+        select_build_runner_patcher = patch(
+            "therock_configure_ci.select_build_runner", return_value=""
+        )
+        self.addCleanup(select_build_runner_patcher.stop)
+        select_build_runner_patcher.start()
+
+        set_github_output_patcher = patch("therock_configure_ci.set_github_output")
+        self.addCleanup(set_github_output_patcher.stop)
+        set_github_output_patcher.start()
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_pull_request(self, mock_get_modified):
         args = {"is_pull_request": True, "base_ref": "HEAD^"}
 
-        mock_process = MagicMock()
-        mock_process.stdout = "projects/rocminfo/src/main.cpp"
-        mock_run.return_value = mock_process
+        mock_get_modified.return_value = ["projects/rocminfo/src/main.cpp"]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertGreaterEqual(len(project_to_run), 1)
 
-    @patch("subprocess.run")
-    def test_pull_request_empty(self, mock_run):
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_pull_request_empty(self, mock_get_modified):
         args = {"is_pull_request": True, "base_ref": "HEAD^"}
 
-        mock_process = MagicMock()
-        mock_process.stdout = ""
-        mock_run.return_value = mock_process
+        mock_get_modified.return_value = []
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
-        # Empty modified_paths should return empty list (no changes = no CI)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
+        # An empty diff should skip CI.
         self.assertEqual(len(project_to_run), 0)
 
-    @patch("subprocess.run")
-    def test_workflow_dispatch(self, mock_run):
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_workflow_dispatch(self, mock_get_modified):
         args = {
             "is_workflow_dispatch": True,
             "input_projects": "projects/rocminfo projects/clr",
             "base_ref": "HEAD^",
         }
 
-        mock_process = MagicMock()
-        mock_process.stdout = "projects/rocminfo/src/main.cpp"
-        mock_run.return_value = mock_process
+        mock_get_modified.return_value = ["projects/rocminfo/src/main.cpp"]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertGreaterEqual(len(project_to_run), 1)
 
-    @patch("subprocess.run")
-    def test_workflow_dispatch_bad_input(self, mock_run):
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_workflow_dispatch_bad_input(self, mock_get_modified):
         args = {
             "is_workflow_dispatch": True,
             "input_projects": "projects/invalid$$projects/fake",
             "base_ref": "HEAD^",
         }
 
-        mock_process = MagicMock()
-        mock_process.stdout = "projects/rocminfo/src/main.cpp"
-        mock_run.return_value = mock_process
+        mock_get_modified.return_value = ["projects/rocminfo/src/main.cpp"]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
-    @patch("subprocess.run")
-    def test_workflow_dispatch_all(self, mock_run):
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_workflow_dispatch_all(self, mock_get_modified):
         args = {
             "is_workflow_dispatch": True,
             "input_projects": "all",
             "base_ref": "HEAD^",
         }
 
-        mock_process = MagicMock()
-        mock_process.stdout = "projects/rocminfo/src/main.cpp"
-        mock_run.return_value = mock_process
+        mock_get_modified.return_value = ["projects/rocminfo/src/main.cpp"]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertGreaterEqual(len(project_to_run), 1)
 
-    @patch("subprocess.run")
-    def test_workflow_dispatch_empty(self, mock_run):
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_workflow_dispatch_empty(self, mock_get_modified):
         args = {"is_workflow_dispatch": True, "input_projects": "", "base_ref": "HEAD^"}
 
-        mock_process = MagicMock()
-        mock_process.stdout = "projects/rocminfo/src/main.cpp"
-        mock_run.return_value = mock_process
+        mock_get_modified.return_value = ["projects/rocminfo/src/main.cpp"]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
     def test_scheduled_run(self):
         args = {"is_nightly": True, "input_projects": "", "base_ref": "HEAD^"}
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 1)
+        self.assertEqual(test_type, "comprehensive")
 
-    @patch("subprocess.run")
-    def test_is_push(self, mock_run):
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_is_push(self, mock_get_modified):
         args = {"is_push": True, "base_ref": "HEAD^"}
 
-        mock_process = MagicMock()
-        mock_process.stdout = "projects/rocminfo/src/main.cpp"
-        mock_run.return_value = mock_process
+        mock_get_modified.return_value = ["projects/rocminfo/src/main.cpp"]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertGreaterEqual(len(project_to_run), 1)
 
     def test_is_path_skippable(self):
@@ -125,7 +125,8 @@ class ConfigureCITest(unittest.TestCase):
             "tools/systems_pr_bot/policy_check.py",
             "experimental/perf-dkms/CMakeLists.txt",
             "projects/rocr-runtime/libhsakmt/src/dxg/dxgmodule.c",
-            # Workflow and action files unrelated to TheRock CI are skippable.
+            # GitHub metadata, workflow, and action files unrelated to TheRock
+            # CI are skippable.
             ".github/labeler.yml",
             ".github/labels.yml",
             ".github/actions/rocprofiler-sdk-util/action.yml",
@@ -181,7 +182,7 @@ class ConfigureCITest(unittest.TestCase):
             "projects/rocprim/docs/api.md",
         ]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
     @patch("therock_configure_ci.get_modified_paths")
@@ -201,7 +202,7 @@ class ConfigureCITest(unittest.TestCase):
             "projects/hipother/hello/test.cpp",
         ]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
     @patch("therock_configure_ci.get_modified_paths")
@@ -223,7 +224,7 @@ class ConfigureCITest(unittest.TestCase):
             ".github/workflows/therock-ci.yml",  # contains windows CI trigger
         ]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 1)
 
     @patch("therock_configure_ci.get_modified_paths")
@@ -249,7 +250,7 @@ class ConfigureCITest(unittest.TestCase):
             ".github/scripts/therock_matrix.py",
         ]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
 
         self.assertEqual(len(project_to_run), 1)
         cmake_options = project_to_run[0]["cmake_options"]
@@ -280,7 +281,7 @@ class ConfigureCITest(unittest.TestCase):
             "projects/rocprofiler-compute/src/compute.cpp",
         ]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
 
         # Windows CI must not be skipped for an explicit workflow_dispatch selection
         self.assertEqual(len(project_to_run), 1)
@@ -298,12 +299,10 @@ class ConfigureCITest(unittest.TestCase):
             "platform": "windows",
         }
 
-        # Branch only touched CI scripts — no Windows-path files in the diff
-        mock_get_modified.return_value = [
-            ".github/scripts/therock_configure_ci.py",
-        ]
+        # Explicit workflow_dispatch selections do not depend on modified paths.
+        mock_get_modified.return_value = []
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertGreaterEqual(len(project_to_run), 1)
 
     @patch("therock_configure_ci.get_modified_paths")
@@ -320,12 +319,12 @@ class ConfigureCITest(unittest.TestCase):
 
         mock_get_modified.return_value = []
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
     @patch("therock_configure_ci.get_modified_paths")
     def test_rccl_ci_triggered_by_rccl_paths_pull_request(self, mock_get_modified):
-        """workflow_dispatch with a windows_only subtree must not trigger Linux CI."""
+        """A RCCL-only pull request should run RCCL CI but not regular CI."""
         args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
 
         mock_get_modified.return_value = [
@@ -342,7 +341,7 @@ class ConfigureCITest(unittest.TestCase):
     def test_rccl_ci_not_triggered_by_non_rccl_paths_pull_request(
         self, mock_get_modified
     ):
-        """workflow_dispatch with a windows_only subtree must not trigger Linux CI."""
+        """A non-RCCL pull request should run regular CI but not RCCL CI."""
         args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
 
         mock_get_modified.return_value = ["projects/rocprim/rocprim.cpp"]
@@ -353,7 +352,7 @@ class ConfigureCITest(unittest.TestCase):
         self.assertEqual(outputs["run_linux_rccl_ci"], "false")
 
     def test_rccl_ci_triggered_nightly(self):
-        """workflow_dispatch with a windows_only subtree must not trigger Linux CI."""
+        """A nightly event should run both regular and RCCL CI."""
         args = {"is_nightly": True, "base_ref": "HEAD^", "platform": "linux"}
 
         outputs = therock_configure_ci.run(args)
@@ -361,8 +360,9 @@ class ConfigureCITest(unittest.TestCase):
         self.assertGreaterEqual(len(projects), 1)
         self.assertEqual(outputs["run_linux_rccl_ci"], "true")
 
-    def test_rccl_ci_triggered_workflow_dispatch(self):
-        """workflow_dispatch with a windows_only subtree must not trigger Linux CI."""
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_rccl_ci_triggered_workflow_dispatch(self, mock_get_modified):
+        """Selecting only RCCL manually should run RCCL CI but not regular CI."""
         args = {
             "is_workflow_dispatch": True,
             "input_projects": "projects/rccl",
@@ -370,21 +370,26 @@ class ConfigureCITest(unittest.TestCase):
             "platform": "linux",
         }
 
+        mock_get_modified.return_value = []
+
         outputs = therock_configure_ci.run(args)
         projects = json.loads(outputs["projects"])
         self.assertEqual(len(projects), 0)
         self.assertEqual(outputs["run_linux_rccl_ci"], "true")
 
-    def test_rccl_ci_not_triggered_push(self):
-        """workflow_dispatch with a windows_only subtree must not trigger Linux CI."""
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_non_rccl_push_runs_regular_ci_only(self, mock_get_modified):
+        """A non-RCCL push should run regular CI but not RCCL CI."""
         args = {"is_push": True, "base_ref": "HEAD^", "platform": "linux"}
+
+        mock_get_modified.return_value = ["projects/rocprim/rocprim.cpp"]
 
         outputs = therock_configure_ci.run(args)
         projects = json.loads(outputs["projects"])
         self.assertGreaterEqual(len(projects), 1)
         self.assertEqual(outputs["run_linux_rccl_ci"], "false")
 
-    # Tests for push event with RCCL changes
+    # Push event combinations.
     @patch("therock_configure_ci.get_modified_paths")
     def test_push_only_rccl_skips_regular_ci(self, mock_get_modified):
         """Push with only RCCL changes should skip regular CI but run RCCL CI."""
@@ -446,7 +451,6 @@ class ConfigureCITest(unittest.TestCase):
         self.assertGreaterEqual(len(projects), 1)
         self.assertEqual(outputs["run_linux_rccl_ci"], "false")
 
-
     @patch("therock_configure_ci.get_modified_paths")
     def test_hipfile_pr_triggers_storage_libs_linux_ci(self, mock_get_modified):
         """PR with hipfile changes should trigger storage_libs build with THEROCK_ENABLE_STORAGE_LIBS=ON."""
@@ -461,7 +465,7 @@ class ConfigureCITest(unittest.TestCase):
             "projects/hipfile/include/hipfile.h",
         ]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 1)
         cmake_options = project_to_run[0]["cmake_options"]
         self.assertIn("DTHEROCK_ENABLE_STORAGE_LIBS=ON", cmake_options)
@@ -481,7 +485,7 @@ class ConfigureCITest(unittest.TestCase):
             "projects/hipfile/include/hipfile.h",
         ]
 
-        project_to_run = therock_configure_ci.retrieve_projects(args)
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
 

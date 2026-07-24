@@ -121,12 +121,6 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   if (!d.is_load)
     return MemoryAccessCompletion::Complete;
 
-  // D16 memory completion merges a loaded half into the destination dword. The
-  // preserved half is storage state, not an instruction-visible source operand.
-  auto read_dst_lane_storage_for_d16_merge = [&](uint32_t reg, uint32_t lane) {
-    return reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(reg))[lane];
-  };
-
   // Buffer load with LDS bit: scatter loaded data into LDS instead of VGPRs.
   // Each lane writes num_elems * elem_size bytes to LDS at lds_base + lane_offset.
   if (d.lds_dst)
@@ -162,7 +156,7 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       for (uint32_t i = 0; i < vgpr_count; ++i) {
         uint32_t val = 0;
         if (!cu.sram_ecc() && d.elem_size <= 2 && (d.d16_hi || d.d16_lo)) {
-          const uint32_t old = read_dst_lane_storage_for_d16_merge(d.dst_reg_base + i, lane);
+          const uint32_t old = cu.read_vgpr_storage(d.dst_reg_base + i, lane);
           val = d.d16_hi ? (old & 0x0000FFFFu) : (old & 0xFFFF0000u);
         }
         cu.write_vgpr(d.dst_reg_base + i, lane, val);
@@ -191,7 +185,7 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
           else
             val = val & 0xFFFF;
         } else {
-          uint32_t old = read_dst_lane_storage_for_d16_merge(d.dst_reg_base + i, lane);
+          uint32_t old = cu.read_vgpr_storage(d.dst_reg_base + i, lane);
           if (d.d16_hi)
             val = (old & 0xFFFF) | (val << 16);
           else
@@ -315,10 +309,11 @@ uint32_t atomic_source_stride(const VectorMemState &d) {
 
 /// @brief Perform a per-lane atomic RMW through L2.
 ///
-/// Reads old value from L2, applies the atomic operation, writes new value
-/// back. Invalidates the L1 line to prevent stale reads. Old values are
-/// stored in response_data for GLC return.
-void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1, uint32_t vmid) {
+/// Reads the old value through L2's backing-memory atomic path, applies the
+/// operation, and writes the new value back. The device coherence epoch makes
+/// cached L1/L2 lines stale at the atomic boundary. Old values are stored in
+/// response_data for GLC return.
+void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid) {
   const uint32_t esz = d.elem_size;
   d.response_data.resize(d.wf_size * esz);
   const bool uses_two_sources =
@@ -380,9 +375,6 @@ void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1, uint3
           }
         },
         vmid);
-
-    // Invalidate stale L1 line.
-    l1->invalidate(ea, vmid);
   }
 }
 
@@ -487,7 +479,7 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   }
 
   if (d.atomic_op != AtomicOp::NONE) {
-    execute_atomic_rmw(d, l2_, l1_, wf.process_id());
+    execute_atomic_rmw(d, l2_, wf.process_id());
     return;
   }
 
@@ -633,8 +625,8 @@ MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wave
       for (uint32_t ln = 0; ln < d.wf_size; ++ln) {
         if (!(d.lane_mask & (1ULL << ln)))
           continue;
-        uint32_t v1 = cu.read_vgpr(d.dst_reg_base, ln);
-        uint32_t v2 = cu.read_vgpr(d.ds2_dst_reg_base, ln);
+        uint32_t v1 = cu.read_vgpr_storage(d.dst_reg_base, ln);
+        uint32_t v2 = cu.read_vgpr_storage(d.ds2_dst_reg_base, ln);
         os << std::format(" L{}:v{}={:#x},v{}={:#x}", ln, d.dst_reg_base, v1, d.ds2_dst_reg_base,
                           v2);
       }

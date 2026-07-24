@@ -33,9 +33,6 @@ namespace {
 ///   * v_cvt_pk_fp8_f32, v_cvt_sr_fp8_f32 (only when CLAMP selects the B0-only
 ///     mode; the ordinary form stays on the copy path),
 ///   * v_wmma_scale / v_wmma_scale16 forms without an implemented rule,
-///   * the bare low-precision WMMA/SWMMAC families added below
-///     (v_wmma_f32_16x16x128_f8f6f4, the K=64 FP8/BF8 WMMA family, and the
-///     FP8/BF8 SWMMAC family), and
 ///   * integer IU8/IU4 WMMA/SWMMAC.
 /// Separately, a 64-bit source using FLAT_SCRATCH_BASE_HI is classified via
 /// operand inspection (see uses_flat_scratch_base_hi_64bit_source), and the
@@ -89,11 +86,10 @@ inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
   if (mnemonic.starts_with("v_cvt_f32_fp8"))
     return true;
 
-  // These eight K=128 FP8/BF8 forms and the standalone 32x16 FP4 WMMA exist on B0
-  // but have no proven A0 lowering yet, so they are classified to fail closed
-  // rather than being copied through. Match the closed family precisely: ordinary
-  // K=128 F8F6F4 is the A0 replacement for another workaround and is not in this
-  // set.
+  // The eight K=128 FP8/BF8 forms and the standalone 32x16 FP4 WMMA exist on B0
+  // but not A0, so they require semantic expansion. The f32 K=128 family has an
+  // exact neutral regular-Scale lowering; f16 and standalone 32x16 FP4 still fail
+  // closed in their semantic rules.
   const bool is_k128_fp8_bf8 = (mnemonic.starts_with("v_wmma_f16_16x16x128_") ||
                                 mnemonic.starts_with("v_wmma_f32_16x16x128_")) &&
                                (mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||
@@ -101,28 +97,24 @@ inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
   if (is_k128_fp8_bf8 || mnemonic == "v_wmma_f32_32x16x128_f4")
     return true;
 
-  // Scale16 and regular Scale have separate mandatory encoding/scale-source
-  // workarounds. Keep them fail-closed until their semantic rules land.
-  if (mnemonic.starts_with("v_wmma_scale"))
+  // A0 trap/CWSR recovery requires every low-precision F8F6F4 WMMA to carry
+  // its load-scale prefix, even when the requested scale is 1.0. Standalone
+  // input is therefore wrapped with inline-zero neutral scales. Scale16 and
+  // regular Scale have separate mandatory encoding/scale-source workarounds,
+  // including B0-only M=32 forms.
+  if (mnemonic == "v_wmma_f32_16x16x128_f8f6f4" || mnemonic.starts_with("v_wmma_scale"))
     return true;
 
-  // Additional low-precision WMMA/SWMMAC forms are not yet supported on this
-  // target and are classified so translation fails closed rather than copying
-  // them through unchanged (see the not-yet-supported note above). These have no
-  // semantic rule yet:
-  //   * the bare K=128 F8F6F4 WMMA,
-  //   * the K=64 FP8/BF8 WMMA family, and
-  //   * the FP8/BF8 SWMMAC family (the integer SWMMAC is handled below).
-  const auto ends_with_fp8_bf8_pair = [&] {
-    return mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||
-           mnemonic.ends_with("_bf8_fp8") || mnemonic.ends_with("_bf8_bf8");
-  };
-  if (mnemonic == "v_wmma_f32_16x16x128_f8f6f4")
-    return true;
-  if (mnemonic.starts_with("v_wmma_f32_16x16x64_") && ends_with_fp8_bf8_pair())
-    return true;
-  if (mnemonic.starts_with("v_swmmac_") && ends_with_fp8_bf8_pair())
-    return true;
+  // K=64 FP8/BF8 WMMA is present on A0 and retains its architectural encoding.
+  // It stays on the ordinary copy path. K=128 F8F6F4 is also present on A0, but
+  // the A0 trap workaround above requires its scaled wrapper in software-visible
+  // code. Semantic lowerings may still use it as the matrix body of that atomic
+  // four-DWORD wrapper.
+  //
+  // FP8/BF8 SWMMAC is present on both A0 and B0. Unlike dense K=128 WMMA,
+  // the gfx1250 A0-to-B0 change table does not classify these sparse forms as
+  // B0 additions, and their opcodes remain inside the A0 seven-bit VOP3P
+  // opcode field. They therefore stay on the same-stepping byte-copy path.
 
   // The A0 co-execution distance exceeds B0 only for integer IU8/IU4 WMMA or
   // SWMMAC. FP16/BF16 need four safe slots on both steppings, while floating

@@ -27,21 +27,12 @@ target_link_libraries(
         rocjitsu_code
         rocjitsu_isa
         rocjitsu_isa_registry
-        rocjitsu_isa_cdna1
-        rocjitsu_isa_cdna2
-        rocjitsu_isa_cdna3
-        rocjitsu_isa_cdna4
-        rocjitsu_isa_rdna1
-        rocjitsu_isa_rdna2
-        rocjitsu_isa_rdna3
-        rocjitsu_isa_rdna3_5
-        rocjitsu_isa_rdna4
-        rocjitsu_isa_gfx1250
-        # \NPI new ISA family: link its rocjitsu_isa_<isa> object library here.
-        rocjitsu_isa_risc_v
         simdojo
         rocjitsu_vm
         rocjitsu_vm_amdgpu
+        # Plugin loader: rj_vm_load_plugins() dlopen()s plugin modules in
+        # daemon mode.
+        rocjitsu_plugin_loader
         rocjitsu_vm_risc_v
         rocjitsu_config
         rocjitsu_dbt_config
