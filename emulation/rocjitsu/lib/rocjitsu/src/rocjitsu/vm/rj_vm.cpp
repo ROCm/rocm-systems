@@ -6,6 +6,7 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -25,6 +26,11 @@ RJ_DIAGNOSTIC_POP
 using namespace rocjitsu;
 
 namespace {
+
+void shutdown_plugin_group(rj_vm_t *vm) {
+  if (vm && vm->soc && vm->plugin_group_active.exchange(false, std::memory_order_acq_rel))
+    vm->soc->plugin_group().onShutdown();
+}
 
 rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, rj_vm_t **handle) {
   if (!loaded.soc())
@@ -173,6 +179,24 @@ rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode, rj_vm_
   }
 }
 
+rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char *plugin_dir) {
+  if (!vm || !config_json)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  if (!vm->soc)
+    return ROCJITSU_STATUS_ERROR;
+  try {
+    auto group = PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "",
+                                                      vm->engine_config);
+    shutdown_plugin_group(vm);
+    vm->soc->set_plugin_group(group);
+    group->onInit();
+    vm->plugin_group_active.store(true, std::memory_order_release);
+    return ROCJITSU_STATUS_SUCCESS;
+  } catch (const std::exception &) {
+    return ROCJITSU_STATUS_ERROR;
+  }
+}
+
 void rj_vm_retain(rj_vm_t *vm) {
   if (vm)
     vm->retain();
@@ -188,6 +212,7 @@ void rj_vm_release(rj_vm_t *vm) {
 void rj_vm_destroy(rj_vm_t *vm) {
   if (!vm)
     return;
+  shutdown_plugin_group(vm);
   if (vm->destroy())
     delete vm;
 }
@@ -216,6 +241,7 @@ rj_status_t rj_vm_run(rj_vm_t *vm, uint64_t *ticks_executed) {
     *ticks_executed = exit.tick;
 
   vm->engine->shutdown();
+  shutdown_plugin_group(vm);
   return (exit.code == 0) ? ROCJITSU_STATUS_SUCCESS : ROCJITSU_STATUS_ERROR;
 }
 

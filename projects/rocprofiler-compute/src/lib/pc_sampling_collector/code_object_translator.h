@@ -36,6 +36,9 @@ struct instruction_t
 class code_object_translator_t
 {
 public:
+    using ptr = std::shared_ptr<code_object_translator_t>;
+    static ptr create();
+
     virtual ~code_object_translator_t() = default;
     virtual void add_code_object(const char* filepath, size_t id, uint64_t load_addr, uint64_t mem_size) = 0;
     virtual void                       add_code_object(uint64_t data,
