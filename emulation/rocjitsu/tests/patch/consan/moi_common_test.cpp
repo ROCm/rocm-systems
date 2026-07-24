@@ -84,6 +84,8 @@ TEST(ConSanMoi, ScalarOwnerContextResolutionFailsClosedAndComputesTailFloor) {
       contexts[0],
   };
   constexpr std::array<uint64_t, 1> kValidOwner = {0x10u};
+  // Invalid contexts that are not named owners must not affect owner resolution
+  // or raise the scalar tail floor.
   const auto skipped_invalid = consan_detail::resolve_scalar_owner_contexts(
       true, contexts_with_unrelated_invalid, kValidOwner);
   ASSERT_TRUE(skipped_invalid);

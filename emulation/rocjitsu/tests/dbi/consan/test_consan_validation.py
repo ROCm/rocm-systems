@@ -125,16 +125,12 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(
             workloads["pytorch-rdna4-split-softmax"]["targets"], ("gfx1201",)
         )
-        self.assertEqual(
-            workloads["pytorch-rdna4-llm-topk"]["targets"], ("gfx1201",)
-        )
+        self.assertEqual(workloads["pytorch-rdna4-llm-topk"]["targets"], ("gfx1201",))
         self.assertEqual(
             workloads["pytorch-rdna4-llm-topk"]["run_timeout_seconds"], 120
         )
         self.assertEqual(workloads["pytorch-rdna4-sdpa"]["run_timeout_seconds"], 30)
-        self.assertEqual(
-            workloads["pytorch-rdna4-sdpa"]["targets"], ("gfx1201",)
-        )
+        self.assertEqual(workloads["pytorch-rdna4-sdpa"]["targets"], ("gfx1201",))
         self.assertEqual(
             workloads["pytorch-torch-histc"]["targets"],
             ("gfx950", "gfx1250", "gfx1201"),
@@ -142,9 +138,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(
             workloads["llama-rdna4-mul-mat-vec-q"]["targets"], ("gfx1201",)
         )
-        self.assertEqual(
-            workloads["llama-rdna4-rms-norm"]["targets"], ("gfx1201",)
-        )
+        self.assertEqual(workloads["llama-rdna4-rms-norm"]["targets"], ("gfx1201",))
 
     def test_gfx950_manifest_includes_portable_pytorch_workloads(self) -> None:
         workload_ids = {
@@ -197,6 +191,10 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertIn(
             "HipMoiCdna4MfmaStreamKArrivalCounter",
             workloads["streamk-arrival"]["overhead_filter"],
+        )
+        self.assertEqual(
+            workloads["tree-atomic-or"]["clean_filter"],
+            ("HipMoiCdna4MfmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersMfmaPartials"),
         )
         self.assertEqual(
             workloads["jakub-attention"]["relative_path"],
@@ -344,9 +342,7 @@ class ConSanValidationTest(unittest.TestCase):
             {"HSA_TOOLS_ROCPROFILER_V1_TOOLS": "0"},
             clear=False,
         ):
-            baseline = validation._clean_environment(
-                None, workload, Path("/hook.so")
-            )
+            baseline = validation._clean_environment(None, workload, Path("/hook.so"))
             environment = validation._clean_environment(
                 "record-replay", workload, Path("/hook.so")
             )
@@ -354,9 +350,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(environment["HSA_TOOLS_ROCPROFILER_V1_TOOLS"], "1")
         setting = validation._audited_settings(environment)
         v1_tool = next(
-            item
-            for item in setting
-            if item["name"] == "HSA_TOOLS_ROCPROFILER_V1_TOOLS"
+            item for item in setting if item["name"] == "HSA_TOOLS_ROCPROFILER_V1_TOOLS"
         )
         self.assertEqual(v1_tool["category"], "runtime-plumbing")
         self.assertFalse(v1_tool["usability_exception"])
@@ -426,8 +420,12 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_active_architectures_use_one_outer_overhead_process(self) -> None:
         workload = validation.WORKLOAD_BY_ID["d128-pressure"]
-        self.assertEqual(validation._outer_repetitions("gfx950", "overhead", workload), 1)
-        self.assertEqual(validation._outer_repetitions("gfx1250", "overhead", workload), 1)
+        self.assertEqual(
+            validation._outer_repetitions("gfx950", "overhead", workload), 1
+        )
+        self.assertEqual(
+            validation._outer_repetitions("gfx1250", "overhead", workload), 1
+        )
         self.assertEqual(
             validation._outer_repetitions("gfx1201", "overhead", workload),
             workload.overhead_processes,
@@ -469,9 +467,7 @@ class ConSanValidationTest(unittest.TestCase):
             gfx1250 = validation._clean_environment(
                 None, workload, Path("/workspace/hook.so"), "gfx1250"
             )
-        self.assertTrue(
-            validation.SOFTWARE_MODEL_ENVIRONMENT.isdisjoint(gfx950)
-        )
+        self.assertTrue(validation.SOFTWARE_MODEL_ENVIRONMENT.isdisjoint(gfx950))
         self.assertEqual(
             {name: gfx1250[name] for name in validation.SOFTWARE_MODEL_ENVIRONMENT},
             model_environment,
@@ -559,8 +555,7 @@ class ConSanValidationTest(unittest.TestCase):
         with temporary_root() as workspace:
             python = workspace / "consan-pytorch-venv" / "bin" / "python"
             hook = (
-                workspace
-                / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
+                workspace / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
                 "librocjitsu_dbi_hooks.so"
             )
             python.parent.mkdir(parents=True)
@@ -585,9 +580,7 @@ class ConSanValidationTest(unittest.TestCase):
             )
             with (
                 mock.patch.object(validation.shutil, "which", return_value="/tool"),
-                mock.patch.object(
-                    validation.subprocess, "run", return_value=completed
-                ),
+                mock.patch.object(validation.subprocess, "run", return_value=completed),
             ):
                 doctor = validation._doctor(workspace, "gfx1201", (workload.id,))
         runtime = doctor["runtimes"]["pytorch"]
@@ -604,8 +597,7 @@ class ConSanValidationTest(unittest.TestCase):
         with temporary_root() as workspace:
             python = workspace / "consan-pytorch-venv" / "bin" / "python"
             hook = (
-                workspace
-                / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
+                workspace / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
                 "librocjitsu_dbi_hooks.so"
             )
             python.parent.mkdir(parents=True)
@@ -746,7 +738,9 @@ class ConSanValidationTest(unittest.TestCase):
     def test_native_matvec_uses_fault_sensitive_realistic_shape(self) -> None:
         self.assertEqual(llama_validation.WORKLOADS["mul-mat-vec-q"]["n_embd"], 1024)
         self.assertEqual(llama_validation.WORKLOADS["mul-mat-vec-q"]["n_tokens"], 1)
-        self.assertEqual(llama_validation.WORKLOADS["mul-mat-vec-q"]["tolerance"], 2.0e-2)
+        self.assertEqual(
+            llama_validation.WORKLOADS["mul-mat-vec-q"]["tolerance"], 2.0e-2
+        )
 
     def test_llama_cpu_oracle_environment_scrubs_instrumentation(self) -> None:
         with mock.patch.dict(
@@ -1308,7 +1302,9 @@ class ConSanValidationTest(unittest.TestCase):
             loaded = validation._load_fault(path, "gfx1201", workload, "drop")
         self.assertEqual(loaded["id"], "drop")
 
-    def test_checked_in_gfx1201_fault_reference_is_a_valid_manifest_subset(self) -> None:
+    def test_checked_in_gfx1201_fault_reference_is_a_valid_manifest_subset(
+        self,
+    ) -> None:
         path = Path(__file__).with_name(
             "consan_validation_faults_gfx1201_reference.json"
         )
@@ -1365,9 +1361,7 @@ class ConSanValidationTest(unittest.TestCase):
             "consan_validation_faults_gfx1201_native_record_replay.json"
         )
         workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
-        fault = validation._load_fault(
-            path, "gfx1201", workload, "barrier-drop"
-        )
+        fault = validation._load_fault(path, "gfx1201", workload, "barrier-drop")
         policy, trials = validation._fault_trials(fault, "record-replay")
         self.assertEqual(policy["detector"], "detected")
         self.assertEqual(policy["oracle"], "any")
@@ -1382,9 +1376,7 @@ class ConSanValidationTest(unittest.TestCase):
             "consan_validation_faults_gfx1201_native_matvec_miss.json"
         )
         workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
-        fault = validation._load_fault(
-            path, "gfx1201", workload, "barrier-drop"
-        )
+        fault = validation._load_fault(path, "gfx1201", workload, "barrier-drop")
         for profile in ("supercollider", "record-replay", "sampled"):
             policy, trials = validation._fault_trials(fault, profile)
             self.assertEqual(policy["detector"], "not_detected")
@@ -1412,9 +1404,7 @@ class ConSanValidationTest(unittest.TestCase):
             "consan_validation_faults_gfx1201_native_rms_norm.json"
         )
         workload = validation.WORKLOAD_BY_ID["llama-rdna4-rms-norm"]
-        fault = validation._load_fault(
-            path, "gfx1201", workload, "barrier-drop"
-        )
+        fault = validation._load_fault(path, "gfx1201", workload, "barrier-drop")
         for profile in validation.PROFILE_IDS:
             policy, trials = validation._fault_trials(fault, profile)
             self.assertEqual(policy["detector"], "detected")

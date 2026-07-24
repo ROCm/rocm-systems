@@ -935,7 +935,9 @@ GFX950_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
             "hip-moi-build/tests/"
             "hip_moi_instrumented_cdna4_mfma_streamk_tree_atomic_or_test"
         ),
-        "clean_filter": "HipMoiCdna4MfmaStreamKTreeAtomicOr.*",
+        "clean_filter": (
+            "HipMoiCdna4MfmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersMfmaPartials"
+        ),
         "overhead_filter": (
             "HipMoiCdna4MfmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersMfmaPartials"
         ),
@@ -1125,9 +1127,7 @@ def _pytorch_python(workspace: Path | None = None) -> Path:
         workspace_interpreter = workspace / "consan-pytorch-venv" / "bin" / "python"
         if workspace_interpreter.is_file():
             return workspace_interpreter
-    return Path(
-        os.path.abspath(Path(sys.executable).expanduser())
-    )
+    return Path(os.path.abspath(Path(sys.executable).expanduser()))
 
 
 def _sharktank_python() -> Path:
@@ -1223,6 +1223,8 @@ os._exit(0)
         "detail": payload if payload is not None else probe.stderr.strip(),
         "reasons": reasons,
     }
+
+
 def _tensile_python() -> Path:
     return Path(
         os.path.abspath(
@@ -1273,7 +1275,9 @@ def _llama_executable(workspace: Path, target: str, name: str) -> Path:
         / "llama.cpp"
         / name,
     )
-    return next((candidate for candidate in candidates if candidate.is_file()), candidates[0])
+    return next(
+        (candidate for candidate in candidates if candidate.is_file()), candidates[0]
+    )
 
 
 def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, Path]:
@@ -1307,9 +1311,7 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
             / "llama.cpp"
             / case
             / "case.json",
-            "executable": _llama_executable(
-                workspace, target, workload.relative_path
-            ),
+            "executable": _llama_executable(workspace, target, workload.relative_path),
         }
     if workload.kind == "qwen":
         root = workspace / workload.relative_path
@@ -1673,11 +1675,7 @@ def _workload_command(
             "--workload",
             workload.id.removeprefix("pytorch-"),
             "--repetitions",
-            (
-                "1"
-                if target in {"gfx950", "gfx1250"}
-                else ("10" if overhead else "1")
-            ),
+            ("1" if target in {"gfx950", "gfx1250"} else ("10" if overhead else "1")),
             "--label",
             f"{workload.id}-{phase}",
         ]
@@ -3314,9 +3312,7 @@ def main(argv: list[str] | None = None) -> int:
                 _print_explain(result)
             return 0
         if args.command == "doctor":
-            workload_ids = (
-                None if args.workload == "all" else (args.workload,)
-            )
+            workload_ids = None if args.workload == "all" else (args.workload,)
             result = _doctor(workspace, target, workload_ids)
             if args.json:
                 print(json.dumps(result, indent=2, sort_keys=True))
