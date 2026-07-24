@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -19,6 +20,7 @@
 #include <string_view>
 #include <thread>
 #include <unistd.h>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -131,6 +133,12 @@ std::string g_fake_symbol_name = "oversized_kernel.kd";
 int g_fake_load_agent_calls = 0;
 hsa_agent_t g_last_load_agent{};
 hsa_code_object_reader_t g_last_load_reader{};
+// Maps a memory-reader handle to the exact bytes it was created over, so a test
+// can recover the image the loader saw for a substituted (snapshot) reader and
+// assert byte-equality with the source. Populated by the fake memory-reader
+// constructor; the load fake copies the matching bytes into g_last_load_bytes.
+std::unordered_map<uint64_t, std::vector<uint8_t>> g_memory_reader_bytes;
+std::vector<uint8_t> g_last_load_bytes;
 // Records forwarding through the two agent-less/deprecated load entries, so a
 // test can prove they forwarded (no A0 target) vs. were refused (fail-closed).
 int g_fake_load_program_calls = 0;
@@ -367,10 +375,16 @@ fake_code_object_reader_create_from_file(hsa_file_t, hsa_code_object_reader_t *c
 }
 
 hsa_status_t HSA_API fake_code_object_reader_create_from_memory(
-    const void *, size_t, hsa_code_object_reader_t *code_object_reader) {
+    const void *code_object, size_t size, hsa_code_object_reader_t *code_object_reader) {
   if (code_object_reader == nullptr)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   code_object_reader->handle = g_next_memory_reader_handle++;
+  // Snapshot the exact bytes this reader was created over so a test can recover
+  // the image the loader will see for a substituted (snapshot) reader.
+  if (code_object != nullptr)
+    g_memory_reader_bytes[code_object_reader->handle].assign(
+        static_cast<const uint8_t *>(code_object),
+        static_cast<const uint8_t *>(code_object) + size);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -425,6 +439,12 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
   ++g_fake_load_agent_calls;
   g_last_load_agent = agent;
   g_last_load_reader = reader;
+  // Recover the bytes this reader was created over (for memory/snapshot readers)
+  // so a test can assert the loader saw exactly the source image.
+  if (auto it = g_memory_reader_bytes.find(reader.handle); it != g_memory_reader_bytes.end())
+    g_last_load_bytes = it->second;
+  else
+    g_last_load_bytes.clear();
   if (loaded_code_object != nullptr)
     loaded_code_object->handle = 77;
   return HSA_STATUS_SUCCESS;
@@ -804,6 +824,8 @@ void expect_batch_copy_forwarding(const hsa_amd_memory_copy_op_t &op,
 
 void reset_queue_fakes() {
   g_next_memory_reader_handle = 2;
+  g_memory_reader_bytes.clear();
+  g_last_load_bytes.clear();
   g_fake_queue_packets = {};
   g_fake_queue = {};
   g_last_queue_create_agent = {};
@@ -1667,8 +1689,10 @@ TEST(HsaHooksUnitTest, AutoA0LoadWithoutCapturedBytesFailsClosed) {
   OnUnload();
 }
 
-// In auto-A0 mode a non-gfx1250 object on the A0 agent is not ours to translate
-// and is forwarded to the loader unchanged (same reader, one load call).
+// In auto-A0 mode a non-gfx1250 object on the A0 agent is not ours to translate,
+// but it is still loaded from an authoritative hook-owned snapshot rather than
+// the caller's mutable reader: the loader sees a *different* reader whose bytes
+// equal the source image.
 TEST(HsaHooksUnitTest, AutoA0ForwardsNonGfx1250Object) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
@@ -1689,9 +1713,11 @@ TEST(HsaHooksUnitTest, AutoA0ForwardsNonGfx1250Object) {
   EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
                                                               reader, nullptr, nullptr),
             HSA_STATUS_SUCCESS);
-  // Forwarded verbatim: the loader saw the original reader, not a translated one.
+  // Loaded from the snapshot: a hook-owned reader (not the caller's) whose bytes
+  // are byte-identical to the source image.
   EXPECT_EQ(g_fake_load_agent_calls, 1);
-  EXPECT_EQ(g_last_load_reader.handle, reader.handle);
+  EXPECT_NE(g_last_load_reader.handle, reader.handle);
+  EXPECT_EQ(g_last_load_bytes, image);
   OnUnload();
 }
 
@@ -1757,9 +1783,75 @@ TEST(HsaHooksUnitTest, AutoA0ForwardsConfirmedNonA0Gfx1250Agent) {
   OnUnload();
 }
 
+// TOCTOU: on the A0 agent the hook must load the bytes it inspected, not whatever
+// the application mutates the buffer to after reader creation. Register a memory
+// reader, corrupt the caller's buffer before the load, and assert the loader
+// still sees the ORIGINAL image (the hook's immutable snapshot).
+TEST(HsaHooksUnitTest, AutoA0SnapshotIsImmutableToPostCaptureMutation) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_fake_gfx1250_asic_revision = 0;
+  g_fake_load_agent_calls = 0;
+
+  // A non-gfx1250 object takes the forward-via-snapshot path on the A0 agent.
+  const auto header = make_amdgpu_elf_header(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942);
+  std::vector<uint8_t> image(reinterpret_cast<const uint8_t *>(&header),
+                             reinterpret_cast<const uint8_t *>(&header) + sizeof(header));
+  const std::vector<uint8_t> original = image;
+  hsa_code_object_reader_t reader = register_code_object(api, image);
+
+  // Application mutates its buffer after reader creation, before load.
+  std::fill(image.begin(), image.end(), uint8_t{0xCC});
+
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_fake_load_agent_calls, 1);
+  EXPECT_NE(g_last_load_reader.handle, reader.handle);
+  EXPECT_EQ(g_last_load_bytes, original); // the snapshot, not the mutated buffer
+  OnUnload();
+}
+
+// The authoritative snapshot for a forwarded auto-A0 load is retained for the
+// executable's lifetime (ROCR aliases it until executable destroy) and released
+// when the executable is destroyed.
+TEST(HsaHooksUnitTest, AutoA0SnapshotRetainedUntilExecutableDestroy) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_fake_gfx1250_asic_revision = 0;
+
+  const auto header = make_amdgpu_elf_header(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942);
+  std::vector<uint8_t> image(reinterpret_cast<const uint8_t *>(&header),
+                             reinterpret_cast<const uint8_t *>(&header) + sizeof(header));
+  hsa_code_object_reader_t reader = register_code_object(api, image);
+
+  ASSERT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 0u);
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  // The snapshot backing ROCR's alias is retained at executable scope.
+  EXPECT_GE(rj_test_retained_translation_count(kFakeExecutable.handle), 1u);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kFakeExecutable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 0u);
+  OnUnload();
+}
+
 // Idempotence: a gfx1250 object on the A0 agent that already carries a matching
 // B0->A0 provenance note is a previously-translated artifact. It is loaded
-// unchanged (the caller's own reader reaches the loader), not re-translated.
+// without re-translation -- from an authoritative hook-owned snapshot (a
+// different reader) whose bytes equal the source, not re-translated.
 TEST(HsaHooksUnitTest, AutoA0LoadsObjectWithMatchingProvenanceUnchanged) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
@@ -1781,9 +1873,11 @@ TEST(HsaHooksUnitTest, AutoA0LoadsObjectWithMatchingProvenanceUnchanged) {
   EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
                                                               reader, nullptr, nullptr),
             HSA_STATUS_SUCCESS);
-  // Loaded as-is: the loader saw the caller's own reader, not a translated one.
+  // Loaded without re-translation, but from the snapshot: a hook-owned reader
+  // (not the caller's) whose bytes are byte-identical to the source image.
   EXPECT_EQ(g_fake_load_agent_calls, 1);
-  EXPECT_EQ(g_last_load_reader.handle, reader.handle);
+  EXPECT_NE(g_last_load_reader.handle, reader.handle);
+  EXPECT_EQ(g_last_load_bytes, image);
   OnUnload();
 }
 
@@ -1951,10 +2045,13 @@ TEST(HsaHooksUnitTest, AutoA0FailClosedCoverageMatrix) {
   enum class Agent { kA0, kUnknownRevision, kConfirmedNonA0, kNonGfx1250 };
   enum class Bytes { kValidGfx1250, kNonGfx1250, kMissing };
   // kRefuse: loader never reached. kForwardOriginal: loader sees the caller's own
-  // (untranslated) reader -- safe only when the object is not a B0-on-A0 target.
-  // kTranslated: loader sees a *different* reader (the translated ELF) -- the only
-  // way B0 gfx1250 bytes may reach an A0 agent.
-  enum class Outcome { kRefuse, kForwardOriginal, kTranslated };
+  // reader verbatim -- only on non-A0/non-gfx1250 targets the hook does not police.
+  // kForwardSnapshot: loader sees a *different*, hook-owned reader whose bytes
+  // equal the source -- the auto-A0 authoritative-snapshot substitution for a
+  // forwarded object on an A0/possible-A0 target. kTranslated: loader sees a
+  // different reader holding the *translated* ELF -- the only way gfx1250 B0 bytes
+  // may reach an A0 agent.
+  enum class Outcome { kRefuse, kForwardOriginal, kForwardSnapshot, kTranslated };
 
   // Apply an agent class to the fakes and return the agent handle to load onto.
   auto setup_agent = [](Agent a) -> hsa_agent_t {
@@ -1985,17 +2082,17 @@ TEST(HsaHooksUnitTest, AutoA0FailClosedCoverageMatrix) {
   // A0: a gfx1250 object is routed into translation -- a header-only ELF (no
   //     loadable code sections) is rejected by the code-object parser, so the
   //     load fails closed rather than forwarding untranslated B0; a non-gfx1250
-  //     object is not ours and forwards the original; missing bytes refuse.
-  //     (A *successful* translated load is exercised by the dedicated per-case
-  //     tests with real fixtures; here the security property is that gfx1250
-  //     bytes on A0 never reach the loader as the caller's own reader.)
+  //     object is not ours to translate but still loads from the authoritative
+  //     snapshot (kForwardSnapshot, not the caller's mutable reader); missing
+  //     bytes refuse. (A *successful* translated load is exercised by the
+  //     dedicated per-case tests with real fixtures.)
   // UnknownRevision: refuse everything (stepping might be A0), before byte
   //     inspection -- no untranslated object reaches a possible-A0 agent.
   // ConfirmedNonA0 / NonGfx1250: never a translation target -> always forward the
   //     original untouched (including gfx1250 bytes: e.g. B0-on-B0 stays native).
   const AgentLoadCase agent_cases[] = {
       {"A0+gfx1250", Agent::kA0, Bytes::kValidGfx1250, Outcome::kRefuse},
-      {"A0+nonGfx1250", Agent::kA0, Bytes::kNonGfx1250, Outcome::kForwardOriginal},
+      {"A0+nonGfx1250", Agent::kA0, Bytes::kNonGfx1250, Outcome::kForwardSnapshot},
       {"A0+missing", Agent::kA0, Bytes::kMissing, Outcome::kRefuse},
       {"unknown+gfx1250", Agent::kUnknownRevision, Bytes::kValidGfx1250, Outcome::kRefuse},
       {"unknown+nonGfx1250", Agent::kUnknownRevision, Bytes::kNonGfx1250, Outcome::kRefuse},
@@ -2022,8 +2119,6 @@ TEST(HsaHooksUnitTest, AutoA0FailClosedCoverageMatrix) {
     g_fake_load_agent_calls = 0;
     g_last_load_reader = {};
 
-    // The memory reader stores a NON-owning pointer to these bytes, so `image`
-    // must outlive the load call below (kept in this loop-body scope).
     std::vector<uint8_t> image;
     hsa_code_object_reader_t reader{0xBEEF}; // unregistered handle for kMissing
     if (c.bytes != Bytes::kMissing) {
@@ -2047,6 +2142,12 @@ TEST(HsaHooksUnitTest, AutoA0FailClosedCoverageMatrix) {
       EXPECT_EQ(status, HSA_STATUS_SUCCESS);
       EXPECT_EQ(g_fake_load_agent_calls, 1);
       EXPECT_EQ(g_last_load_reader.handle, reader.handle); // caller's own reader
+      break;
+    case Outcome::kForwardSnapshot:
+      EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+      EXPECT_EQ(g_fake_load_agent_calls, 1);
+      EXPECT_NE(g_last_load_reader.handle, reader.handle); // hook-owned snapshot
+      EXPECT_EQ(g_last_load_bytes, image);                 // byte-identical to source
       break;
     case Outcome::kTranslated:
       EXPECT_EQ(status, HSA_STATUS_SUCCESS);
@@ -2243,12 +2344,14 @@ TEST(HsaHooksUnitTest, VendorReaderCaptureFeedsLoadPath) {
             HSA_STATUS_SUCCESS);
 
   // Non-gfx1250 object on the A0 agent: forwarded (captured bytes were found, so
-  // the load did not fail closed for a missing source image).
+  // the load did not fail closed for a missing source image), but loaded from the
+  // vendor-captured snapshot -- a hook-owned reader whose bytes equal the file.
   EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
                                                               reader, nullptr, nullptr),
             HSA_STATUS_SUCCESS);
   EXPECT_EQ(g_fake_load_agent_calls, 1);
-  EXPECT_EQ(g_last_load_reader.handle, reader.handle);
+  EXPECT_NE(g_last_load_reader.handle, reader.handle);
+  EXPECT_EQ(g_last_load_bytes, image);
   OnUnload();
 }
 

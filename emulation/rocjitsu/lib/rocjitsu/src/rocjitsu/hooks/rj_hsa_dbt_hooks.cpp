@@ -2189,8 +2189,25 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
 
   const hsa_status_t status = original(code_object, size, code_object_reader);
   if (status == HSA_STATUS_SUCCESS && code_object_reader != nullptr && code_object != nullptr) {
-    if (!CodeObjectReaderRegistry::instance().store(
-            *code_object_reader, static_cast<const uint8_t *>(code_object), size, {})) {
+    // Copy the caller bytes into hook-owned storage rather than tracking the raw
+    // application pointer. ROCR aliases a memory reader's buffer and retains that
+    // alias on the loaded code object until the executable is destroyed, so a
+    // non-owning pointer would let the app mutate the image between our
+    // inspection and ROCR's load (TOCTOU). The auto-A0 load path substitutes this
+    // immutable copy for the caller's reader, so the bytes we classify are
+    // exactly the bytes ROCR loads.
+    std::shared_ptr<std::vector<uint8_t>> owned;
+    try {
+      owned =
+          std::make_shared<std::vector<uint8_t>>(static_cast<const uint8_t *>(code_object),
+                                                 static_cast<const uint8_t *>(code_object) + size);
+    } catch (const std::bad_alloc &) {
+      // The HSA tools ABI cannot propagate C++ allocation failures; keep the
+      // reader untracked so the auto-A0 path fails closed on missing bytes.
+      owned = nullptr;
+    }
+    if (owned == nullptr || !CodeObjectReaderRegistry::instance().store(
+                                *code_object_reader, owned->data(), owned->size(), owned)) {
       if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
         (void)original_destroy(*code_object_reader);
       *code_object_reader = {};
@@ -4235,28 +4252,33 @@ hsa_status_t HSA_API rj_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
   return forward_amd_call(original, MappedAgentArg{mapped}, flags);
 }
 
-/// @brief Create an HSA reader from translated ELF bytes and keep the storage alive.
-[[nodiscard]] hsa_status_t create_translated_reader(std::vector<uint8_t> translated,
-                                                    hsa_code_object_reader_t *translated_reader) {
-  auto *owned_storage = new (std::nothrow) std::vector<uint8_t>(std::move(translated));
-  if (owned_storage == nullptr)
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  std::shared_ptr<const std::vector<uint8_t>> owned(owned_storage);
+/// @brief Create an HSA memory reader over hook-owned bytes and track the storage.
+///
+/// @details Used both for translated ELF output and for authoritative snapshots
+/// of forwarded objects. @p owned is the immutable backing; ROCR's memory reader
+/// aliases it, so the caller must retain @p owned (via TranslatedExecutableRegistry)
+/// for the loaded executable's lifetime after a successful load. The registry
+/// entry created here also holds @p owned so a concurrent reader destroy cannot
+/// free it mid-load.
+[[nodiscard]] hsa_status_t
+create_owned_memory_reader(std::shared_ptr<const std::vector<uint8_t>> owned,
+                           hsa_code_object_reader_t *out_reader) {
+  if (owned == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   auto *original_create = layer().create_from_memory();
-  if (original_create == nullptr) {
+  if (original_create == nullptr)
     return HSA_STATUS_ERROR;
-  }
 
-  const hsa_status_t status = original_create(owned->data(), owned->size(), translated_reader);
+  const hsa_status_t status = original_create(owned->data(), owned->size(), out_reader);
   if (status != HSA_STATUS_SUCCESS)
     return status;
 
-  if (!CodeObjectReaderRegistry::instance().store(*translated_reader, owned->data(), owned->size(),
+  if (!CodeObjectReaderRegistry::instance().store(*out_reader, owned->data(), owned->size(),
                                                   owned)) {
     if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
-      (void)original_destroy(*translated_reader);
-    *translated_reader = {};
+      (void)original_destroy(*out_reader);
+    *out_reader = {};
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   return HSA_STATUS_SUCCESS;
@@ -4301,6 +4323,46 @@ classify_translation_provenance(const AmdGpuCodeObject &object, ProcessorRevisio
   return TranslationProvenance::kIncompatible; // records a different direction
 }
 
+/// @brief Load a forwarded auto-A0 object from an authoritative hook-owned snapshot.
+///
+/// @details Used for the auto-A0 branches that forward an object to the A0 agent
+/// without translating it (a non-gfx1250 object, or one already carrying a
+/// matching provenance note). Rather than hand ROCR the caller's own reader --
+/// whose backing the application can still mutate after we inspected it -- build
+/// a memory reader over @p snapshot (the immutable copy captured at reader
+/// creation) so the bytes ROCR loads are exactly the bytes we classified. ROCR
+/// aliases that memory until the executable is destroyed, so on success the
+/// snapshot is retained for the executable's lifetime; the transient reader is
+/// then destroyed (ROCR has copied the segment payloads by load return).
+[[nodiscard]] hsa_status_t
+load_snapshot_for_auto_a0(hsa_executable_t executable, hsa_agent_t agent,
+                          std::shared_ptr<const std::vector<uint8_t>> snapshot, const char *options,
+                          hsa_loaded_code_object_t *loaded_code_object,
+                          decltype(hsa_executable_load_agent_code_object) *original_load) {
+  if (snapshot == nullptr) {
+    // Every tracked reader owns its bytes, so this should not happen; fail closed
+    // rather than fall back to loading from a mutable app/fd-backed reader on A0.
+    log_message(kLogInfo, "auto-A0: no owned snapshot for a forwarded load; refusing");
+    return HSA_STATUS_ERROR;
+  }
+
+  hsa_code_object_reader_t snapshot_reader{};
+  hsa_status_t status = create_owned_memory_reader(snapshot, &snapshot_reader);
+  if (status != HSA_STATUS_SUCCESS) {
+    log_message(kLogInfo, "auto-A0: failed to create snapshot reader: %d",
+                static_cast<int>(status));
+    return status;
+  }
+
+  status = original_load(executable, agent, snapshot_reader, options, loaded_code_object);
+  if (status == HSA_STATUS_SUCCESS)
+    TranslatedExecutableRegistry::instance().retain(executable, snapshot);
+  CodeObjectReaderRegistry::instance().remove(snapshot_reader);
+  if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
+    (void)original_destroy(snapshot_reader);
+  return status;
+}
+
 /// @brief Eagerly translate a gfx1250 B0 code object to A0 and load it.
 ///
 /// @details The auto-A0 load path. Unlike simulation there is no guest/host
@@ -4310,7 +4372,9 @@ classify_translation_provenance(const AmdGpuCodeObject &object, ProcessorRevisio
 /// BinaryTranslator. Fails closed: a load with no captured bytes, an invalid
 /// object, a failed translation, or a skipped kernel returns an HSA error rather
 /// than loading untranslated B0 on A0. An object that already carries a matching
-/// provenance note is loaded unchanged (idempotence).
+/// provenance note is loaded unchanged (idempotence). Objects we forward rather
+/// than translate are loaded from an authoritative hook-owned snapshot, never the
+/// caller's mutable reader (see load_snapshot_for_auto_a0).
 [[nodiscard]] hsa_status_t
 load_translated_for_auto_a0(const HookConfig &config, hsa_executable_t executable,
                             hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
@@ -4328,8 +4392,11 @@ load_translated_for_auto_a0(const HookConfig &config, hsa_executable_t executabl
 
   const DetectedElfTarget source = detect_target_from_elf(reader_bytes.bytes, reader_bytes.size);
   if (source.arch != ROCJITSU_CODE_ARCH_GFX1250) {
-    // A non-gfx1250 object on the A0 agent is not ours to translate; forward it.
-    return original_load(executable, agent, code_object_reader, options, loaded_code_object);
+    // A non-gfx1250 object on the A0 agent is not ours to translate, but it still
+    // loads from our authoritative snapshot rather than the caller's mutable
+    // reader (TOCTOU: the app could swap in gfx1250 B0 bytes after our check).
+    return load_snapshot_for_auto_a0(executable, agent, reader_bytes.owned, options,
+                                     loaded_code_object, original_load);
   }
 
   BinaryTranslatorOptions translator_options;
@@ -4356,7 +4423,9 @@ load_translated_for_auto_a0(const HookConfig &config, hsa_executable_t executabl
   case TranslationProvenance::kMatches:
     log_message(kLogDebug, "auto-A0: object already carries a matching B0->A0 provenance note; "
                            "loading without re-translation");
-    return original_load(executable, agent, code_object_reader, options, loaded_code_object);
+    // Already-translated: load from our snapshot, not the caller's mutable reader.
+    return load_snapshot_for_auto_a0(executable, agent, reader_bytes.owned, options,
+                                     loaded_code_object, original_load);
   case TranslationProvenance::kIncompatible:
     log_message(kLogInfo, "auto-A0: object carries a malformed or wrong-direction provenance "
                           "note; refusing the load");
@@ -4380,8 +4449,9 @@ load_translated_for_auto_a0(const HookConfig &config, hsa_executable_t executabl
   }
 
   hsa_code_object_reader_t translated_reader{};
-  hsa_status_t status =
-      create_translated_reader(std::move(translated.elf_bytes), &translated_reader);
+  hsa_status_t status = create_owned_memory_reader(
+      std::make_shared<const std::vector<uint8_t>>(std::move(translated.elf_bytes)),
+      &translated_reader);
   if (status != HSA_STATUS_SUCCESS) {
     log_message(kLogInfo, "auto-A0: failed to create translated reader: %d",
                 static_cast<int>(status));
@@ -4621,7 +4691,8 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   }
 
   hsa_code_object_reader_t translated_reader{};
-  hsa_status_t status = create_translated_reader(std::move(translated_elf), &translated_reader);
+  hsa_status_t status = create_owned_memory_reader(
+      std::make_shared<const std::vector<uint8_t>>(std::move(translated_elf)), &translated_reader);
   if (status != HSA_STATUS_SUCCESS) {
     std::fprintf(stderr, "[rocjitsu-hooks] failed to create translated code-object reader: %d\n",
                  static_cast<int>(status));
