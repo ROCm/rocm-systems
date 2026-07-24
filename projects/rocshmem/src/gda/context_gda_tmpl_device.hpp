@@ -1335,6 +1335,7 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
  ******************** TILE API RMA IMPLEMENTATIONS ****************************
  *****************************************************************************/
 
+// Synchronize outstanding tile PUT operations (IPC quiet or GDA QP quiet)
 __device__ __forceinline__ void GDAContext::tile_finish_put(int pe, int qp_index,
                                                             ActiveWFInfo &wf_info) {
   int local_pe{-1};
@@ -1345,12 +1346,13 @@ __device__ __forceinline__ void GDAContext::tile_finish_put(int pe, int qp_index
   }
 }
 
+// GET completion uses the same quiet path as PUT
 __device__ __forceinline__ void GDAContext::tile_finish_get(int pe, int qp_index,
                                                             ActiveWFInfo &wf_info) {
   tile_finish_put(pe, qp_index, wf_info);
 }
 
-// RMA PUT operations - Type-erased interface
+// RMA Operations - Type-erased implementations
 __device__ inline int GDAContext::tile_put(void* dst_data, const void* src_data,
                                            const size_t* dst_strides, const size_t* src_strides,
                                            const size_t* start_coord, const size_t* boundary,
@@ -1359,37 +1361,52 @@ __device__ inline int GDAContext::tile_put(void* dst_data, const void* src_data,
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
 
+  // For 2D tensors (most common case for tiles)
   if (ndim == 2) {
+    // Get strides
     const auto src_stride_0 = src_strides[0];
     const auto src_stride_1 = src_strides[1];
     const auto dst_stride_0 = dst_strides[0];
     const auto dst_stride_1 = dst_strides[1];
+
+    // Get tile dimensions from start_coord and boundary
     const auto tile_extent_0 = boundary[0] - start_coord[0];
     const auto tile_extent_1 = boundary[1] - start_coord[1];
 
+    // Calculate base pointers for the tile
     char* src_base = static_cast<char*>(const_cast<void*>(src_data));
     char* dst_base = static_cast<char*>(dst_data) +
                      (start_coord[0] * dst_stride_0 + start_coord[1] * dst_stride_1) * element_size;
 
+    // Optimization: Check if tile is contiguous (all elements adjacent)
     if (src_stride_1 == 1 && dst_stride_1 == 1 &&
         src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
+      // Fully contiguous - single bulk transfer
       size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
       internal_putmem_nbi(dst_base, src_base, total_size, pe, qp_index, wf_info);
-    } else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+    }
+    // Optimization: Row-major with contiguous rows
+    else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+      // Transfer row by row
       for (size_t i = 0; i < tile_extent_0; i++) {
         char* src_row = src_base + i * src_stride_0 * element_size;
         char* dst_row = dst_base + i * dst_stride_0 * element_size;
         size_t row_size = tile_extent_1 * element_size;
         internal_putmem_nbi(dst_row, src_row, row_size, pe, qp_index, wf_info);
       }
-    } else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+    }
+    // Optimization: Column-major with contiguous columns
+    else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+      // Transfer column by column
       for (size_t j = 0; j < tile_extent_1; j++) {
         char* src_col = src_base + j * src_stride_1 * element_size;
         char* dst_col = dst_base + j * dst_stride_1 * element_size;
         size_t col_size = tile_extent_0 * element_size;
         internal_putmem_nbi(dst_col, src_col, col_size, pe, qp_index, wf_info);
       }
-    } else {
+    }
+    // Fallback: Element-by-element transfer
+    else {
       for (size_t i = 0; i < tile_extent_0; i++) {
         for (size_t j = 0; j < tile_extent_1; j++) {
           char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
@@ -1398,14 +1415,18 @@ __device__ inline int GDAContext::tile_put(void* dst_data, const void* src_data,
         }
       }
     }
-  } else if (ndim == 1) {
+  }
+  // For 1D tensors
+  else if (ndim == 1) {
     const auto tile_extent = boundary[0] - start_coord[0];
     char* src_ptr = static_cast<char*>(const_cast<void*>(src_data));
     char* dst_ptr = static_cast<char*>(dst_data) + start_coord[0] * dst_strides[0] * element_size;
 
     if (src_strides[0] == 1 && dst_strides[0] == 1) {
+      // Contiguous transfer
       internal_putmem_nbi(dst_ptr, src_ptr, tile_extent * element_size, pe, qp_index, wf_info);
     } else {
+      // Strided transfer
       for (size_t i = 0; i < tile_extent; i++) {
         internal_putmem_nbi(dst_ptr + i * dst_strides[0] * element_size,
                             src_ptr + i * src_strides[0] * element_size,
@@ -1426,6 +1447,7 @@ __device__ inline int GDAContext::tile_put_wave(void* dst_data, const void* src_
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
+  // IPC fast path: direct peer access via shmem_ptr
   if (ipc_avail) {
     void* remote_base = shmem_ptr(dst_data, pe);
     if (!remote_base) {
@@ -1443,27 +1465,36 @@ __device__ inline int GDAContext::tile_put_wave(void* dst_data, const void* src_
       char* src_base = static_cast<char*>(const_cast<void*>(src_data));
       char* dst_base = static_cast<char*>(remote_base) +
                        (start_coord[0] * dst_stride_0 + start_coord[1] * dst_stride_1) * element_size;
+
+      // Wave-collective: threads cooperate to transfer tile
       int wave_tid = get_flat_block_id() % WF_SIZE;
 
+      // Fully contiguous case - use wave-collective memcpy
       if (src_stride_1 == 1 && dst_stride_1 == 1 &&
           src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
         size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
         memcpy_wave<MemcpyKind::Put>(dst_base, src_base, total_size);
-      } else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+      }
+      // Row-major with contiguous rows - distribute rows among wave
+      else if (src_stride_1 == 1 && dst_stride_1 == 1) {
         for (size_t i = wave_tid; i < tile_extent_0; i += WF_SIZE) {
           char* src_row = src_base + i * src_stride_0 * element_size;
           char* dst_row = dst_base + i * dst_stride_0 * element_size;
           size_t row_size = tile_extent_1 * element_size;
           memcpy_lane<MemcpyKind::Put>(dst_row, src_row, row_size);
         }
-      } else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+      }
+      // Column-major with contiguous columns - distribute columns among wave
+      else if (src_stride_0 == 1 && dst_stride_0 == 1) {
         for (size_t j = wave_tid; j < tile_extent_1; j += WF_SIZE) {
           char* src_col = src_base + j * src_stride_1 * element_size;
           char* dst_col = dst_base + j * dst_stride_1 * element_size;
           size_t col_size = tile_extent_0 * element_size;
           memcpy_lane<MemcpyKind::Put>(dst_col, src_col, col_size);
         }
-      } else {
+      }
+      // Fallback: Distribute elements among wave threads
+      else {
         int total_elements = tile_extent_0 * tile_extent_1;
         for (int idx = wave_tid; idx < total_elements; idx += WF_SIZE) {
           int i = idx / tile_extent_1;
@@ -1477,10 +1508,12 @@ __device__ inline int GDAContext::tile_put_wave(void* dst_data, const void* src_
       const auto tile_extent = boundary[0] - start_coord[0];
       char* src_ptr = static_cast<char*>(const_cast<void*>(src_data));
       char* dst_ptr = static_cast<char*>(remote_base) + start_coord[0] * dst_strides[0] * element_size;
+
       int wave_tid = get_flat_block_id() % WF_SIZE;
 
       if (src_strides[0] == 1 && dst_strides[0] == 1) {
-        memcpy_wave<MemcpyKind::Put>(dst_ptr, src_ptr, tile_extent * element_size);
+        size_t total_size = tile_extent * element_size;
+        memcpy_wave<MemcpyKind::Put>(dst_ptr, src_ptr, total_size);
       } else {
         for (size_t i = wave_tid; i < tile_extent; i += WF_SIZE) {
           memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst_strides[0] * element_size,
@@ -1493,7 +1526,9 @@ __device__ inline int GDAContext::tile_put_wave(void* dst_data, const void* src_
     if (is_thread_zero_in_wave()) {
       ipcImpl_.ipcQuiet();
     }
-  } else if (is_thread_zero_in_wave()) {
+  }
+  // GDA path: delegate to lane variant from wave leader
+  else if (is_thread_zero_in_wave()) {
     tile_put(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
              ndim, element_size, pe, flags);
   }
@@ -1509,6 +1544,7 @@ __device__ inline int GDAContext::tile_put_wg(void* dst_data, const void* src_da
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
+  // IPC fast path: direct peer access via shmem_ptr
   if (ipc_avail) {
     void* remote_base = shmem_ptr(dst_data, pe);
     if (!remote_base) {
@@ -1526,30 +1562,39 @@ __device__ inline int GDAContext::tile_put_wg(void* dst_data, const void* src_da
       char* src_base = static_cast<char*>(const_cast<void*>(src_data));
       char* dst_base = static_cast<char*>(remote_base) +
                        (start_coord[0] * dst_stride_0 + start_coord[1] * dst_stride_1) * element_size;
+
+      // Workgroup-collective: all threads in block cooperate
       int thread_id = get_flat_block_id();
       int block_size = get_flat_block_size();
 
+      // Fully contiguous case
       if (src_stride_1 == 1 && dst_stride_1 == 1 &&
           src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
         size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
         if (thread_id == 0) {
           memcpy_lane<MemcpyKind::Put>(dst_base, src_base, total_size);
         }
-      } else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+      }
+      // Row-major with contiguous rows - distribute rows among workgroup
+      else if (src_stride_1 == 1 && dst_stride_1 == 1) {
         for (size_t i = thread_id; i < tile_extent_0; i += block_size) {
           char* src_row = src_base + i * src_stride_0 * element_size;
           char* dst_row = dst_base + i * dst_stride_0 * element_size;
           size_t row_size = tile_extent_1 * element_size;
           memcpy_lane<MemcpyKind::Put>(dst_row, src_row, row_size);
         }
-      } else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+      }
+      // Column-major with contiguous columns - distribute columns among workgroup
+      else if (src_stride_0 == 1 && dst_stride_0 == 1) {
         for (size_t j = thread_id; j < tile_extent_1; j += block_size) {
           char* src_col = src_base + j * src_stride_1 * element_size;
           char* dst_col = dst_base + j * dst_stride_1 * element_size;
           size_t col_size = tile_extent_0 * element_size;
           memcpy_lane<MemcpyKind::Put>(dst_col, src_col, col_size);
         }
-      } else {
+      }
+      // Fallback: Distribute elements among workgroup threads
+      else {
         int total_elements = tile_extent_0 * tile_extent_1;
         for (int idx = thread_id; idx < total_elements; idx += block_size) {
           int i = idx / tile_extent_1;
@@ -1563,6 +1608,7 @@ __device__ inline int GDAContext::tile_put_wg(void* dst_data, const void* src_da
       const auto tile_extent = boundary[0] - start_coord[0];
       char* src_ptr = static_cast<char*>(const_cast<void*>(src_data));
       char* dst_ptr = static_cast<char*>(remote_base) + start_coord[0] * dst_strides[0] * element_size;
+
       int thread_id = get_flat_block_id();
       int block_size = get_flat_block_size();
 
@@ -1584,7 +1630,9 @@ __device__ inline int GDAContext::tile_put_wg(void* dst_data, const void* src_da
       ipcImpl_.ipcQuiet();
     }
     __builtin_amdgcn_s_barrier();
-  } else if (is_thread_zero_in_block()) {
+  }
+  // GDA path: delegate to lane variant from block leader
+  else if (is_thread_zero_in_block()) {
     tile_put(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
              ndim, element_size, pe, flags);
     __builtin_amdgcn_s_barrier();
@@ -1595,7 +1643,7 @@ __device__ inline int GDAContext::tile_put_wg(void* dst_data, const void* src_da
   return ROCSHMEM_SUCCESS;
 }
 
-// RMA GET operations - Type-erased interface
+// RMA GET operations - Type-erased implementations
 __device__ inline int GDAContext::tile_get(void* dst_data, const void* src_data,
                                            const size_t* dst_strides, const size_t* src_strides,
                                            const size_t* start_coord, const size_t* boundary,
@@ -1616,25 +1664,32 @@ __device__ inline int GDAContext::tile_get(void* dst_data, const void* src_data,
                      (start_coord[0] * src_stride_0 + start_coord[1] * src_stride_1) * element_size;
     char* dst_base = static_cast<char*>(dst_data);
 
+    // Fully contiguous
     if (src_stride_1 == 1 && dst_stride_1 == 1 &&
         src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
       size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
       internal_getmem_nbi(dst_base, src_base, total_size, pe, qp_index, wf_info);
-    } else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+    }
+    // Row-major with contiguous rows
+    else if (src_stride_1 == 1 && dst_stride_1 == 1) {
       for (size_t i = 0; i < tile_extent_0; i++) {
         char* src_row = src_base + i * src_stride_0 * element_size;
         char* dst_row = dst_base + i * dst_stride_0 * element_size;
         size_t row_size = tile_extent_1 * element_size;
         internal_getmem_nbi(dst_row, src_row, row_size, pe, qp_index, wf_info);
       }
-    } else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+    }
+    // Column-major with contiguous columns
+    else if (src_stride_0 == 1 && dst_stride_0 == 1) {
       for (size_t j = 0; j < tile_extent_1; j++) {
         char* src_col = src_base + j * src_stride_1 * element_size;
         char* dst_col = dst_base + j * dst_stride_1 * element_size;
         size_t col_size = tile_extent_0 * element_size;
         internal_getmem_nbi(dst_col, src_col, col_size, pe, qp_index, wf_info);
       }
-    } else {
+    }
+    // Fallback: Element-by-element
+    else {
       for (size_t i = 0; i < tile_extent_0; i++) {
         for (size_t j = 0; j < tile_extent_1; j++) {
           char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
@@ -1672,6 +1727,7 @@ __device__ inline int GDAContext::tile_get_wave(void* dst_data, const void* src_
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
+  // IPC fast path: direct peer access via shmem_ptr
   if (ipc_avail) {
     void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
     if (!remote_base) {
@@ -1689,27 +1745,36 @@ __device__ inline int GDAContext::tile_get_wave(void* dst_data, const void* src_
       char* src_base = static_cast<char*>(remote_base) +
                        (start_coord[0] * src_stride_0 + start_coord[1] * src_stride_1) * element_size;
       char* dst_base = static_cast<char*>(dst_data);
+
+      // Wave-collective: threads cooperate to transfer tile
       int wave_tid = get_flat_block_id() % WF_SIZE;
 
+      // Fully contiguous case - use wave-collective memcpy
       if (src_stride_1 == 1 && dst_stride_1 == 1 &&
           src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
         size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
         memcpy_wave<MemcpyKind::Get>(dst_base, src_base, total_size);
-      } else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+      }
+      // Row-major with contiguous rows - distribute rows among wave
+      else if (src_stride_1 == 1 && dst_stride_1 == 1) {
         for (size_t i = wave_tid; i < tile_extent_0; i += WF_SIZE) {
           char* src_row = src_base + i * src_stride_0 * element_size;
           char* dst_row = dst_base + i * dst_stride_0 * element_size;
           size_t row_size = tile_extent_1 * element_size;
           memcpy_lane<MemcpyKind::Get>(dst_row, src_row, row_size);
         }
-      } else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+      }
+      // Column-major with contiguous columns - distribute columns among wave
+      else if (src_stride_0 == 1 && dst_stride_0 == 1) {
         for (size_t j = wave_tid; j < tile_extent_1; j += WF_SIZE) {
           char* src_col = src_base + j * src_stride_1 * element_size;
           char* dst_col = dst_base + j * dst_stride_1 * element_size;
           size_t col_size = tile_extent_0 * element_size;
           memcpy_lane<MemcpyKind::Get>(dst_col, src_col, col_size);
         }
-      } else {
+      }
+      // Fallback: Distribute elements among wave threads
+      else {
         int total_elements = tile_extent_0 * tile_extent_1;
         for (int idx = wave_tid; idx < total_elements; idx += WF_SIZE) {
           int i = idx / tile_extent_1;
@@ -1723,10 +1788,12 @@ __device__ inline int GDAContext::tile_get_wave(void* dst_data, const void* src_
       const auto tile_extent = boundary[0] - start_coord[0];
       char* src_ptr = static_cast<char*>(remote_base) + start_coord[0] * src_strides[0] * element_size;
       char* dst_ptr = static_cast<char*>(dst_data);
+
       int wave_tid = get_flat_block_id() % WF_SIZE;
 
       if (src_strides[0] == 1 && dst_strides[0] == 1) {
-        memcpy_wave<MemcpyKind::Get>(dst_ptr, src_ptr, tile_extent * element_size);
+        size_t total_size = tile_extent * element_size;
+        memcpy_wave<MemcpyKind::Get>(dst_ptr, src_ptr, total_size);
       } else {
         for (size_t i = wave_tid; i < tile_extent; i += WF_SIZE) {
           memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst_strides[0] * element_size,
@@ -1739,7 +1806,9 @@ __device__ inline int GDAContext::tile_get_wave(void* dst_data, const void* src_
     if (is_thread_zero_in_wave()) {
       ipcImpl_.ipcQuiet();
     }
-  } else if (is_thread_zero_in_wave()) {
+  }
+  // GDA path: delegate to lane variant from wave leader
+  else if (is_thread_zero_in_wave()) {
     tile_get(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
              ndim, element_size, pe, flags);
   }
@@ -1755,6 +1824,7 @@ __device__ inline int GDAContext::tile_get_wg(void* dst_data, const void* src_da
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
+  // IPC fast path: direct peer access via shmem_ptr
   if (ipc_avail) {
     void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
     if (!remote_base) {
@@ -1772,30 +1842,38 @@ __device__ inline int GDAContext::tile_get_wg(void* dst_data, const void* src_da
       char* src_base = static_cast<char*>(remote_base) +
                        (start_coord[0] * src_stride_0 + start_coord[1] * src_stride_1) * element_size;
       char* dst_base = static_cast<char*>(dst_data);
+
       int thread_id = get_flat_block_id();
       int block_size = get_flat_block_size();
 
+      // Fully contiguous
       if (src_stride_1 == 1 && dst_stride_1 == 1 &&
           src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
         size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
         if (thread_id == 0) {
           memcpy_lane<MemcpyKind::Get>(dst_base, src_base, total_size);
         }
-      } else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+      }
+      // Row-major with contiguous rows - distribute among workgroup
+      else if (src_stride_1 == 1 && dst_stride_1 == 1) {
         for (size_t i = thread_id; i < tile_extent_0; i += block_size) {
           char* src_row = src_base + i * src_stride_0 * element_size;
           char* dst_row = dst_base + i * dst_stride_0 * element_size;
           size_t row_size = tile_extent_1 * element_size;
           memcpy_lane<MemcpyKind::Get>(dst_row, src_row, row_size);
         }
-      } else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+      }
+      // Column-major with contiguous columns - distribute among workgroup
+      else if (src_stride_0 == 1 && dst_stride_0 == 1) {
         for (size_t j = thread_id; j < tile_extent_1; j += block_size) {
           char* src_col = src_base + j * src_stride_1 * element_size;
           char* dst_col = dst_base + j * dst_stride_1 * element_size;
           size_t col_size = tile_extent_0 * element_size;
           memcpy_lane<MemcpyKind::Get>(dst_col, src_col, col_size);
         }
-      } else {
+      }
+      // Fallback: Distribute elements among workgroup
+      else {
         int total_elements = tile_extent_0 * tile_extent_1;
         for (int idx = thread_id; idx < total_elements; idx += block_size) {
           int i = idx / tile_extent_1;
@@ -1809,6 +1887,7 @@ __device__ inline int GDAContext::tile_get_wg(void* dst_data, const void* src_da
       const auto tile_extent = boundary[0] - start_coord[0];
       char* src_ptr = static_cast<char*>(remote_base) + start_coord[0] * src_strides[0] * element_size;
       char* dst_ptr = static_cast<char*>(dst_data);
+
       int thread_id = get_flat_block_id();
       int block_size = get_flat_block_size();
 
@@ -1830,7 +1909,9 @@ __device__ inline int GDAContext::tile_get_wg(void* dst_data, const void* src_da
       ipcImpl_.ipcQuiet();
     }
     __builtin_amdgcn_s_barrier();
-  } else if (is_thread_zero_in_block()) {
+  }
+  // GDA path: delegate to lane variant from block leader
+  else if (is_thread_zero_in_block()) {
     tile_get(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
              ndim, element_size, pe, flags);
     __builtin_amdgcn_s_barrier();
@@ -1841,7 +1922,7 @@ __device__ inline int GDAContext::tile_get_wg(void* dst_data, const void* src_da
   return ROCSHMEM_SUCCESS;
 }
 
-// Allgather operations - Type-erased interface
+// Collective Allgather - Type-erased implementations
 __device__ inline int GDAContext::tile_allgather([[maybe_unused]] rocshmem_team_t team,
                                           [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
                                           [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
@@ -1872,7 +1953,7 @@ __device__ inline int GDAContext::tile_allgather_wg([[maybe_unused]] rocshmem_te
   return ROCSHMEM_ERROR;
 }
 
-// Broadcast operations - Type-erased interface
+// Collective Broadcast - Type-erased implementations
 __device__ inline int GDAContext::tile_broadcast([[maybe_unused]] rocshmem_team_t team,
                                           [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
                                           [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
@@ -1903,7 +1984,7 @@ __device__ inline int GDAContext::tile_broadcast_wg([[maybe_unused]] rocshmem_te
   return ROCSHMEM_ERROR;
 }
 
-// SUM Reduction operations - Type-erased interface
+// SUM Reductions - Type-erased implementations
 __device__ inline int GDAContext::tile_sum_reduce([[maybe_unused]] rocshmem_team_t team,
                                            [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
                                            [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
@@ -1934,7 +2015,7 @@ __device__ inline int GDAContext::tile_sum_reduce_wg([[maybe_unused]] rocshmem_t
   return ROCSHMEM_ERROR;
 }
 
-// MAX Reduction operations - Type-erased interface
+// MAX Reductions - Type-erased interface
 __device__ inline int GDAContext::tile_max_reduce([[maybe_unused]] rocshmem_team_t team,
                                                    [[maybe_unused]] void* dst_data,
                                                    [[maybe_unused]] const void* src_data,
@@ -1980,7 +2061,7 @@ __device__ inline int GDAContext::tile_max_reduce_wg([[maybe_unused]] rocshmem_t
   return ROCSHMEM_ERROR;
 }
 
-// MIN Reduction operations - Type-erased interface
+// MIN Reductions - Type-erased interface
 __device__ inline int GDAContext::tile_min_reduce([[maybe_unused]] rocshmem_team_t team,
                                                    [[maybe_unused]] void* dst_data,
                                                    [[maybe_unused]] const void* src_data,
