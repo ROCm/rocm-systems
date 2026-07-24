@@ -680,7 +680,10 @@ static struct tuningModel tuning_model_6{
      {1, 1, 48},
      {1048576, 4194304, 56},
      {4194304, 268435457, 64}},
-    /*AllReduce*/ {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}},
+    // gfx950 multi-node: cap AllReduce to 48 channels for per-rank sizes in
+    // (4 MiB, 8 MiB]; 64 (post-#7848 default) regresses this window on RING.
+    /*AllReduce*/
+    {{4194304, 8388608, 48}},
   },
 };
 
