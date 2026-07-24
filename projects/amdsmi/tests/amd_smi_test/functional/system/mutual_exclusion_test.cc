@@ -470,8 +470,8 @@ void TestMutualExclusion::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_supported", "0", VERB(STANDARD));
-    ret = amdsmi_get_gpu_ecc_supported(processor_handles_[0], &dmy_ui64);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_enabled", "0", VERB(STANDARD));
+    ret = amdsmi_get_gpu_ecc_enabled(processor_handles_[0], &dmy_ui64);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 

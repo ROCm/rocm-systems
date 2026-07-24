@@ -74,15 +74,14 @@ void TestErrCntRead::Run(void) {
     for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
       PrintDeviceHeader(processor_handles_[i]);
 
-      DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_supported", "gpu=" + std::to_string(i),
-                         VERB(STANDARD));
-      err = amdsmi_get_gpu_ecc_supported(processor_handles_[i], &enabled_mask);
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_enabled", "gpu=" + std::to_string(i), VERB(STANDARD));
+      err = amdsmi_get_gpu_ecc_enabled(processor_handles_[i], &enabled_mask);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
         // Verify api support checking functionality is working
-        DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_supported", "gpu=" + std::to_string(i),
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_enabled", "gpu=" + std::to_string(i),
                            VERB(STANDARD));
-        err = amdsmi_get_gpu_ecc_supported(processor_handles_[i], nullptr);
+        err = amdsmi_get_gpu_ecc_enabled(processor_handles_[i], nullptr);
         DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
         ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
         continue;
@@ -90,9 +89,9 @@ void TestErrCntRead::Run(void) {
         CHK_ERR_ASRT(err)
 
         // Verify api support checking functionality is working
-        DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_supported", "gpu=" + std::to_string(i),
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_enabled", "gpu=" + std::to_string(i),
                            VERB(STANDARD));
-        err = amdsmi_get_gpu_ecc_supported(processor_handles_[i], nullptr);
+        err = amdsmi_get_gpu_ecc_enabled(processor_handles_[i], nullptr);
         DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
         ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 

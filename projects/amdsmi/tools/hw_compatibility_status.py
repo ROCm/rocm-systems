@@ -970,9 +970,7 @@ def run_tests():
         lambda: amdsmi.amdsmi_get_gpu_ecc_count(gpu_handle, need("AmdSmiGpuBlock").UMC),
     )
 
-    test_api(
-        "amdsmi_get_gpu_ecc_supported", lambda: amdsmi.amdsmi_get_gpu_ecc_supported(gpu_handle)
-    )
+    test_api("amdsmi_get_gpu_ecc_enabled", lambda: amdsmi.amdsmi_get_gpu_ecc_enabled(gpu_handle))
 
     test_api(
         "amdsmi_get_gpu_ecc_status",

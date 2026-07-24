@@ -916,12 +916,12 @@ class TestGpuBenchmark(unittest.TestCase):
         self.common.print_func_name("")
 
         for i, processor in enumerate(self.processors):
-            self._log_test_start("amdsmi_get_gpu_ecc_supported", "Processor", i)
+            self._log_test_start("amdsmi_get_gpu_ecc_enabled", "Processor", i)
 
-            self._print_api_result(amdsmi.amdsmi_get_gpu_ecc_supported, i, processor)
+            self._print_api_result(amdsmi.amdsmi_get_gpu_ecc_enabled, i, processor)
 
             stats = self._measure_api_performance(
-                amdsmi.amdsmi_get_gpu_ecc_supported, f"get_gpu_ecc_enabled_gpu_{i}", processor
+                amdsmi.amdsmi_get_gpu_ecc_enabled, f"get_gpu_ecc_enabled_gpu_{i}", processor
             )
 
             self.perf_results[f"get_gpu_ecc_enabled_gpu_{i}"] = stats
@@ -936,7 +936,7 @@ class TestGpuBenchmark(unittest.TestCase):
             self._log_test_completion("Processor", i)
 
         self._log_performance_summary(
-            "amdsmi_get_gpu_ecc_supported", "Processors", "get_gpu_ecc_supported"
+            "amdsmi_get_gpu_ecc_enabled", "Processors", "get_gpu_ecc_enabled"
         )
 
     def test_performance_get_gpu_ecc_status(self):
