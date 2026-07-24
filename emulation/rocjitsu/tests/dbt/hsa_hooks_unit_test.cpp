@@ -1397,10 +1397,10 @@ TEST(HsaHooksUnitTest, InstallsInAutoA0ModeWhenNoConfigPresent) {
   clear_runtime_config_path();
 
   FakeApiTable api;
-  auto *original_shutdown = api.core.hsa_shut_down_fn;
+  auto *original_get_info = api.core.hsa_agent_get_info_fn;
   EXPECT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   // The load-side wrappers are installed, so the table is patched.
-  EXPECT_NE(api.core.hsa_shut_down_fn, original_shutdown);
+  EXPECT_NE(api.core.hsa_agent_get_info_fn, original_get_info);
   OnUnload();
 }
 
@@ -1482,8 +1482,9 @@ TEST(HsaHooksUnitTest, AutoA0InstallsNarrowManifest) {
             fake_executable_load_agent_code_object);
   EXPECT_NE(api.core.hsa_system_get_major_extension_table_fn,
             fake_system_get_major_extension_table);
-  EXPECT_NE(api.core.hsa_shut_down_fn, fake_shut_down);
-  // NOT patched in auto-A0 (simulation-only surface).
+  // NOT patched in auto-A0 (simulation-only surface). shut_down is a pure
+  // passthrough in auto-A0, so its table pointer is left untouched.
+  EXPECT_EQ(api.core.hsa_shut_down_fn, fake_shut_down);
   EXPECT_EQ(api.core.hsa_queue_create_fn, fake_queue_create);
   EXPECT_EQ(api.core.hsa_signal_store_relaxed_fn, fake_signal_store_relaxed);
   OnUnload();

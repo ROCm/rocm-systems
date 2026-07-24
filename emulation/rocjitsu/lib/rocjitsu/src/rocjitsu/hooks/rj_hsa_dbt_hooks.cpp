@@ -1277,8 +1277,12 @@ void clear_virtual_lds_dispatch_queues();
 /// agent. This allowlist is the auto-A0 patch set; simulation installs the whole
 /// manifest. Entry names come from RJ_HSA_PATCH_ENTRIES.
 [[nodiscard]] constexpr bool auto_a0_patches(std::string_view name) {
-  return name == "shut_down" ||                        // forwarding shutdown (no suppress)
-         name == "agent_get_info" ||                   // B0 presentation overlay
+  // NOTE: `shut_down` is intentionally NOT patched in auto-A0. `rj_shut_down`
+  // only suppresses teardown when a simulation `guest_target` is configured; in
+  // auto-A0 there is no config, so the wrapper is a pure `return original()`.
+  // Leaving the table's own pointer in place avoids a needless indirection and a
+  // wrapper-lifetime dependency on the hook DSO during ROCr teardown.
+  return name == "agent_get_info" ||                   // B0 presentation overlay
          name == "create_from_file" ||                 // source-byte capture
          name == "create_from_memory" ||               // source-byte capture
          name == "system_get_major_extension_table" || // vendor-reader capture wrap
