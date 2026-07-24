@@ -163,6 +163,8 @@ inline constexpr const char *elf_mach_name(uint32_t mach) {
     return "gfx1200";
   case EF_AMDGPU_MACH_AMDGCN_GFX1201:
     return "gfx1201";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1250:
+    return "gfx1250";
   default:
     return "unknown";
   }

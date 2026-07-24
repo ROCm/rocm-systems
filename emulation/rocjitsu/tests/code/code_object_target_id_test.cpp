@@ -182,6 +182,7 @@ void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target)
 TEST(AmdGpuElfMachineFlags, MapsGfx1250ArchitectureInBothDirections) {
   EXPECT_EQ(arch_for_elf_mach(EF_AMDGPU_MACH_AMDGCN_GFX1250), ROCJITSU_CODE_ARCH_GFX1250);
   EXPECT_EQ(elf_mach_for_arch(ROCJITSU_CODE_ARCH_GFX1250), EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  EXPECT_STREQ(elf_mach_name(EF_AMDGPU_MACH_AMDGCN_GFX1250), "gfx1250");
 }
 
 //==============================================================================
