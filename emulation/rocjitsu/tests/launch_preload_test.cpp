@@ -150,6 +150,22 @@ TEST(RocmVisibilityTest, InvalidRocrTokenPreservesValidPrefix) {
   EXPECT_EQ(101u, selected[0].gpu_id);
 }
 
+TEST(RocmVisibilityTest, DuplicateAndReorderedSelectorsMatchRuntimeBehavior) {
+  const auto rocr_duplicate = rocjitsu::cli::filter_rocr_visible_gpus(test_gpus(), "0,0,1");
+  ASSERT_EQ(1u, rocr_duplicate.size());
+  EXPECT_EQ(100u, rocr_duplicate[0].gpu_id);
+
+  const auto client_duplicate = rocjitsu::cli::filter_client_visible_gpus(test_gpus(), "0,0,1");
+  ASSERT_EQ(2u, client_duplicate.size());
+  EXPECT_EQ(100u, client_duplicate[0].gpu_id);
+  EXPECT_EQ(101u, client_duplicate[1].gpu_id);
+
+  const auto client_reordered = rocjitsu::cli::filter_client_visible_gpus(test_gpus(), "2,0");
+  ASSERT_EQ(2u, client_reordered.size());
+  EXPECT_EQ(102u, client_reordered[0].gpu_id);
+  EXPECT_EQ(100u, client_reordered[1].gpu_id);
+}
+
 TEST(RocmVisibilityTest, NegativeRocrOrdinalPreservesValidPrefix) {
   const auto selected = rocjitsu::cli::filter_rocr_visible_gpus(test_gpus(), "0,-1,1");
   ASSERT_EQ(1u, selected.size());
