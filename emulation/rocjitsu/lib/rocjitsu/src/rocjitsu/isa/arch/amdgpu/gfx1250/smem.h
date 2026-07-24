@@ -21,6 +21,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -31,6 +32,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -41,6 +43,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -51,6 +54,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -61,6 +65,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -71,6 +76,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -81,6 +87,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -91,6 +98,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -101,6 +109,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -111,6 +120,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -121,6 +131,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -131,6 +142,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -141,6 +153,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -151,6 +164,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -161,6 +175,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -171,6 +186,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -181,6 +197,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -191,6 +208,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -201,6 +219,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -211,6 +230,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 

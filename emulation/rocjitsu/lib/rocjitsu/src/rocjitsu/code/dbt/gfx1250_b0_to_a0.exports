@@ -1,0 +1,11 @@
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
+ * SPDX-License-Identifier: MIT
+ */
+
+{
+    global:
+        rj_gfx1250_b0_to_a0_translate;
+        rj_gfx1250_b0_to_a0_free;
+    local:
+        *;
+};

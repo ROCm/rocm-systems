@@ -1464,16 +1464,12 @@ math:
     disabled: [amd_windows, amd_wsl]
   Unit_Device___hisinf2_Accuracy_Positive:
     <<: *level_2
-    # Below 2 tests are disable due to defect EXSWHTEC-356
-    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_Device___hisnan_Accuracy_Positive:
     <<: *level_2
     # Below tests cause timeout in stress test of 09/02/24
     disabled: [amd_windows, amd_wsl]
   Unit_Device___hisnan2_Accuracy_Positive:
     <<: *level_2
-    # Below 2 tests are disable due to defect EXSWHTEC-356
-    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_Device___heq_Accuracy_Positive:
     <<: *level_2
     # Below tests cause timeout in stress test of 09/02/24
@@ -1488,8 +1484,6 @@ math:
     disabled: [amd_windows, amd_wsl]
   Unit_Device___hbequ2_Accuracy_Positive:
     <<: *level_2
-    # Below 2 tests are disable due to defect EXSWHTEC-356
-    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_Device___heq2_Accuracy_Positive:
     <<: *level_2
     # Below tests cause timeout in stress test of 09/02/24
@@ -1500,12 +1494,8 @@ math:
     disabled: [amd_windows, amd_wsl]
   Unit_Device___hne_Accuracy_Positive:
     <<: *level_2
-    # Below 2 tests are disable due to defect EXSWHTEC-356
-    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_Device___hbne2_Accuracy_Positive:
     <<: *level_2
-    # Below 2 tests are disable due to defect EXSWHTEC-356
-    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_Device___hneu_Accuracy_Positive:
     <<: *level_2
     # Below tests cause timeout in stress test of 09/02/24
@@ -1516,8 +1506,6 @@ math:
     disabled: [amd_windows, amd_wsl]
   Unit_Device___hne2_Accuracy_Positive:
     <<: *level_2
-    # Below 2 tests are disable due to defect EXSWHTEC-356
-    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_Device___hneu2_Accuracy_Positive:
     <<: *level_2
     # Below tests cause timeout in stress test of 09/02/24
@@ -1536,8 +1524,6 @@ math:
     disabled: [amd_windows, amd_wsl]
   Unit_Device___hbgeu2_Accuracy_Positive:
     <<: *level_2
-    # Below 2 tests are disable due to defect EXSWHTEC-356
-    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_Device___hge2_Accuracy_Positive:
     <<: *level_2
     # Below tests cause timeout in stress test of 09/02/24
@@ -1560,8 +1546,6 @@ math:
     disabled: [amd_windows, amd_wsl]
   Unit_Device___hbgtu2_Accuracy_Positive:
     <<: *level_2
-    # Below 2 tests are disable due to defect EXSWHTEC-356
-    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_Device___hgt2_Accuracy_Positive:
     <<: *level_2
     # Below tests cause timeout in stress test of 09/02/24
@@ -1584,8 +1568,6 @@ math:
     disabled: [amd_windows, amd_wsl]
   Unit_Device___hbleu2_Accuracy_Positive:
     <<: *level_2
-    # Below 2 tests are disable due to defect EXSWHTEC-356
-    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_Device___hle2_Accuracy_Positive:
     <<: *level_2
     # Below tests cause timeout in stress test of 09/02/24
@@ -1608,8 +1590,6 @@ math:
     disabled: [amd_windows, amd_wsl]
   Unit_Device___hbltu2_Accuracy_Positive:
     <<: *level_2
-    # Below 2 tests are disable due to defect EXSWHTEC-356
-    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_Device___hlt2_Accuracy_Positive:
     <<: *level_2
     # Below tests cause timeout in stress test of 09/02/24

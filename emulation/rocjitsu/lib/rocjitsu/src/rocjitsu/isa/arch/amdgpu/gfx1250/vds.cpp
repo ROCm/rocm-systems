@@ -15,11 +15,16 @@ DsAddU32Vds::DsAddU32Vds(const MachineInst *inst)
     : Vds("ds_add_u32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsAddU32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -29,11 +34,16 @@ DsSubU32Vds::DsSubU32Vds(const MachineInst *inst)
     : Vds("ds_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsSubU32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -43,11 +53,16 @@ DsRsubU32Vds::DsRsubU32Vds(const MachineInst *inst)
     : Vds("ds_rsub_u32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsRsubU32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -57,11 +72,16 @@ DsIncU32Vds::DsIncU32Vds(const MachineInst *inst)
     : Vds("ds_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsIncU32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -71,11 +91,16 @@ DsDecU32Vds::DsDecU32Vds(const MachineInst *inst)
     : Vds("ds_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsDecU32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -85,11 +110,16 @@ DsMinI32Vds::DsMinI32Vds(const MachineInst *inst)
     : Vds("ds_min_i32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsMinI32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -99,11 +129,16 @@ DsMaxI32Vds::DsMaxI32Vds(const MachineInst *inst)
     : Vds("ds_max_i32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsMaxI32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -113,11 +148,16 @@ DsMinU32Vds::DsMinU32Vds(const MachineInst *inst)
     : Vds("ds_min_u32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsMinU32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -127,11 +167,16 @@ DsMaxU32Vds::DsMaxU32Vds(const MachineInst *inst)
     : Vds("ds_max_u32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsMaxU32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -141,11 +186,16 @@ DsAndB32Vds::DsAndB32Vds(const MachineInst *inst)
     : Vds("ds_and_b32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsAndB32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -155,11 +205,16 @@ DsOrB32Vds::DsOrB32Vds(const MachineInst *inst)
     : Vds("ds_or_b32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsOrB32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -169,11 +224,16 @@ DsXorB32Vds::DsXorB32Vds(const MachineInst *inst)
     : Vds("ds_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsXorB32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -184,12 +244,17 @@ DsMskorB32Vds::DsMskorB32Vds(const MachineInst *inst)
           registered_exec_fn<DsMskorB32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
-  num_src_ = 3;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[3] = &dsmem_in;
+  num_src_ = 4;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
@@ -200,11 +265,14 @@ DsStoreB32Vds::DsStoreB32Vds(const MachineInst *inst)
     : Vds("ds_store_b32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsStoreB32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
+  dst_operands_[0] = &dsmem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -215,12 +283,15 @@ DsStore2addrB32Vds::DsStore2addrB32Vds(const MachineInst *inst)
           registered_exec_fn<DsStore2addrB32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
+  dst_operands_[0] = &dsmem;
   num_src_ = 3;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
@@ -232,12 +303,15 @@ DsStore2addrStride64B32Vds::DsStore2addrStride64B32Vds(const MachineInst *inst)
           registered_exec_fn<DsStore2addrStride64B32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
+  dst_operands_[0] = &dsmem;
   num_src_ = 3;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
@@ -249,12 +323,17 @@ DsCmpstoreB32Vds::DsCmpstoreB32Vds(const MachineInst *inst)
           registered_exec_fn<DsCmpstoreB32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
-  num_src_ = 3;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[3] = &dsmem_in;
+  num_src_ = 4;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
@@ -265,11 +344,16 @@ DsMinNumF32Vds::DsMinNumF32Vds(const MachineInst *inst)
     : Vds("ds_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsMinNumF32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -279,11 +363,16 @@ DsMaxNumF32Vds::DsMaxNumF32Vds(const MachineInst *inst)
     : Vds("ds_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsMaxNumF32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -299,11 +388,16 @@ DsAddF32Vds::DsAddF32Vds(const MachineInst *inst)
     : Vds("ds_add_f32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsAddF32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -313,11 +407,14 @@ DsStoreB8Vds::DsStoreB8Vds(const MachineInst *inst)
     : Vds("ds_store_b8", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsStoreB8Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(8, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
+  dst_operands_[0] = &dsmem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -327,11 +424,14 @@ DsStoreB16Vds::DsStoreB16Vds(const MachineInst *inst)
     : Vds("ds_store_b16", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsStoreB16Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(16, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
+  dst_operands_[0] = &dsmem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -342,12 +442,17 @@ DsAddRtnU32Vds::DsAddRtnU32Vds(const MachineInst *inst)
           registered_exec_fn<DsAddRtnU32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -359,12 +464,17 @@ DsSubRtnU32Vds::DsSubRtnU32Vds(const MachineInst *inst)
           registered_exec_fn<DsSubRtnU32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -376,12 +486,17 @@ DsRsubRtnU32Vds::DsRsubRtnU32Vds(const MachineInst *inst)
           registered_exec_fn<DsRsubRtnU32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -393,12 +508,17 @@ DsIncRtnU32Vds::DsIncRtnU32Vds(const MachineInst *inst)
           registered_exec_fn<DsIncRtnU32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -410,12 +530,17 @@ DsDecRtnU32Vds::DsDecRtnU32Vds(const MachineInst *inst)
           registered_exec_fn<DsDecRtnU32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -427,12 +552,17 @@ DsMinRtnI32Vds::DsMinRtnI32Vds(const MachineInst *inst)
           registered_exec_fn<DsMinRtnI32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -444,12 +574,17 @@ DsMaxRtnI32Vds::DsMaxRtnI32Vds(const MachineInst *inst)
           registered_exec_fn<DsMaxRtnI32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -461,12 +596,17 @@ DsMinRtnU32Vds::DsMinRtnU32Vds(const MachineInst *inst)
           registered_exec_fn<DsMinRtnU32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -478,12 +618,17 @@ DsMaxRtnU32Vds::DsMaxRtnU32Vds(const MachineInst *inst)
           registered_exec_fn<DsMaxRtnU32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -495,12 +640,17 @@ DsAndRtnB32Vds::DsAndRtnB32Vds(const MachineInst *inst)
           registered_exec_fn<DsAndRtnB32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -512,12 +662,17 @@ DsOrRtnB32Vds::DsOrRtnB32Vds(const MachineInst *inst)
           registered_exec_fn<DsOrRtnB32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -529,12 +684,17 @@ DsXorRtnB32Vds::DsXorRtnB32Vds(const MachineInst *inst)
           registered_exec_fn<DsXorRtnB32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -547,13 +707,18 @@ DsMskorRtnB32Vds::DsMskorRtnB32Vds(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[3] = &dsmem_in;
+  num_src_ = 4;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -566,12 +731,17 @@ DsStorexchgRtnB32Vds::DsStorexchgRtnB32Vds(const MachineInst *inst)
           registered_exec_fn<DsStorexchgRtnB32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -584,13 +754,18 @@ DsStorexchg2addrRtnB32Vds::DsStorexchg2addrRtnB32Vds(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[3] = &dsmem_in;
+  num_src_ = 4;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -604,13 +779,18 @@ DsStorexchg2addrStride64RtnB32Vds::DsStorexchg2addrStride64RtnB32Vds(const Machi
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[3] = &dsmem_in;
+  num_src_ = 4;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -624,13 +804,18 @@ DsCmpstoreRtnB32Vds::DsCmpstoreRtnB32Vds(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[3] = &dsmem_in;
+  num_src_ = 4;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -643,12 +828,17 @@ DsMinNumRtnF32Vds::DsMinNumRtnF32Vds(const MachineInst *inst)
           registered_exec_fn<DsMinNumRtnF32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -660,12 +850,17 @@ DsMaxNumRtnF32Vds::DsMaxNumRtnF32Vds(const MachineInst *inst)
           registered_exec_fn<DsMaxNumRtnF32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -689,11 +884,14 @@ DsLoadB32Vds::DsLoadB32Vds(const MachineInst *inst)
     : Vds("ds_load_b32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadB32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -703,11 +901,14 @@ DsLoad2addrB32Vds::DsLoad2addrB32Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_b32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoad2addrB32Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -717,11 +918,14 @@ DsLoad2addrStride64B32Vds::DsLoad2addrStride64B32Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_stride64_b32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoad2addrStride64B32Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -731,11 +935,14 @@ DsLoadI8Vds::DsLoadI8Vds(const MachineInst *inst)
     : Vds("ds_load_i8", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadI8Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -745,11 +952,14 @@ DsLoadU8Vds::DsLoadU8Vds(const MachineInst *inst)
     : Vds("ds_load_u8", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadU8Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -759,11 +969,14 @@ DsLoadI16Vds::DsLoadI16Vds(const MachineInst *inst)
     : Vds("ds_load_i16", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadI16Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(16, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -773,11 +986,14 @@ DsLoadU16Vds::DsLoadU16Vds(const MachineInst *inst)
     : Vds("ds_load_u16", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadU16Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(16, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -786,10 +1002,15 @@ DsLoadU16Vds::DsLoadU16Vds(const MachineInst *inst)
 DsConsumeVds::DsConsumeVds(const MachineInst *inst)
     : Vds("ds_consume", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsConsumeVds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
-  num_src_ = 0;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[0] = &dsmem_in;
+  num_src_ = 1;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   flags_ |= MEMORY_OP;
 }
@@ -797,10 +1018,15 @@ DsConsumeVds::DsConsumeVds(const MachineInst *inst)
 DsAppendVds::DsAppendVds(const MachineInst *inst)
     : Vds("ds_append", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsAppendVds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
-  num_src_ = 0;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[0] = &dsmem_in;
+  num_src_ = 1;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   flags_ |= MEMORY_OP;
 }
@@ -809,11 +1035,16 @@ DsAddU64Vds::DsAddU64Vds(const MachineInst *inst)
     : Vds("ds_add_u64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsAddU64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -823,11 +1054,16 @@ DsSubU64Vds::DsSubU64Vds(const MachineInst *inst)
     : Vds("ds_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsSubU64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -837,11 +1073,16 @@ DsRsubU64Vds::DsRsubU64Vds(const MachineInst *inst)
     : Vds("ds_rsub_u64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsRsubU64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -851,11 +1092,16 @@ DsIncU64Vds::DsIncU64Vds(const MachineInst *inst)
     : Vds("ds_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsIncU64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -865,11 +1111,16 @@ DsDecU64Vds::DsDecU64Vds(const MachineInst *inst)
     : Vds("ds_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsDecU64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -879,11 +1130,16 @@ DsMinI64Vds::DsMinI64Vds(const MachineInst *inst)
     : Vds("ds_min_i64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsMinI64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -893,11 +1149,16 @@ DsMaxI64Vds::DsMaxI64Vds(const MachineInst *inst)
     : Vds("ds_max_i64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsMaxI64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -907,11 +1168,16 @@ DsMinU64Vds::DsMinU64Vds(const MachineInst *inst)
     : Vds("ds_min_u64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsMinU64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -921,11 +1187,16 @@ DsMaxU64Vds::DsMaxU64Vds(const MachineInst *inst)
     : Vds("ds_max_u64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsMaxU64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -935,11 +1206,16 @@ DsAndB64Vds::DsAndB64Vds(const MachineInst *inst)
     : Vds("ds_and_b64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsAndB64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -949,11 +1225,16 @@ DsOrB64Vds::DsOrB64Vds(const MachineInst *inst)
     : Vds("ds_or_b64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsOrB64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -963,11 +1244,16 @@ DsXorB64Vds::DsXorB64Vds(const MachineInst *inst)
     : Vds("ds_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsXorB64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -978,12 +1264,17 @@ DsMskorB64Vds::DsMskorB64Vds(const MachineInst *inst)
           registered_exec_fn<DsMskorB64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
-  num_src_ = 3;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[3] = &dsmem_in;
+  num_src_ = 4;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
@@ -994,11 +1285,14 @@ DsStoreB64Vds::DsStoreB64Vds(const MachineInst *inst)
     : Vds("ds_store_b64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsStoreB64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
+  dst_operands_[0] = &dsmem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -1009,12 +1303,15 @@ DsStore2addrB64Vds::DsStore2addrB64Vds(const MachineInst *inst)
           registered_exec_fn<DsStore2addrB64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
+  dst_operands_[0] = &dsmem;
   num_src_ = 3;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
@@ -1026,12 +1323,15 @@ DsStore2addrStride64B64Vds::DsStore2addrStride64B64Vds(const MachineInst *inst)
           registered_exec_fn<DsStore2addrStride64B64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
+  dst_operands_[0] = &dsmem;
   num_src_ = 3;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
@@ -1043,12 +1343,17 @@ DsCmpstoreB64Vds::DsCmpstoreB64Vds(const MachineInst *inst)
           registered_exec_fn<DsCmpstoreB64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
-  num_src_ = 3;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[3] = &dsmem_in;
+  num_src_ = 4;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
@@ -1059,11 +1364,16 @@ DsMinNumF64Vds::DsMinNumF64Vds(const MachineInst *inst)
     : Vds("ds_min_num_f64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsMinNumF64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -1073,11 +1383,16 @@ DsMaxNumF64Vds::DsMaxNumF64Vds(const MachineInst *inst)
     : Vds("ds_max_num_f64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsMaxNumF64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -1087,11 +1402,16 @@ DsAddF64Vds::DsAddF64Vds(const MachineInst *inst)
     : Vds("ds_add_f64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsAddF64Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -1100,10 +1420,15 @@ DsAddF64Vds::DsAddF64Vds(const MachineInst *inst)
 DsAtomicAsyncBarrierArriveB64Vds::DsAtomicAsyncBarrierArriveB64Vds(const MachineInst *inst)
     : Vds("ds_atomic_async_barrier_arrive_b64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsAtomicAsyncBarrierArriveB64Vds>()),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
-  num_src_ = 1;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[1] = &dsmem_in;
+  num_src_ = 2;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
 }
@@ -1113,12 +1438,17 @@ DsAddRtnU64Vds::DsAddRtnU64Vds(const MachineInst *inst)
           registered_exec_fn<DsAddRtnU64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1130,12 +1460,17 @@ DsSubRtnU64Vds::DsSubRtnU64Vds(const MachineInst *inst)
           registered_exec_fn<DsSubRtnU64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1147,12 +1482,17 @@ DsRsubRtnU64Vds::DsRsubRtnU64Vds(const MachineInst *inst)
           registered_exec_fn<DsRsubRtnU64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1164,12 +1504,17 @@ DsIncRtnU64Vds::DsIncRtnU64Vds(const MachineInst *inst)
           registered_exec_fn<DsIncRtnU64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1181,12 +1526,17 @@ DsDecRtnU64Vds::DsDecRtnU64Vds(const MachineInst *inst)
           registered_exec_fn<DsDecRtnU64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1198,12 +1548,17 @@ DsMinRtnI64Vds::DsMinRtnI64Vds(const MachineInst *inst)
           registered_exec_fn<DsMinRtnI64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1215,12 +1570,17 @@ DsMaxRtnI64Vds::DsMaxRtnI64Vds(const MachineInst *inst)
           registered_exec_fn<DsMaxRtnI64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1232,12 +1592,17 @@ DsMinRtnU64Vds::DsMinRtnU64Vds(const MachineInst *inst)
           registered_exec_fn<DsMinRtnU64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1249,12 +1614,17 @@ DsMaxRtnU64Vds::DsMaxRtnU64Vds(const MachineInst *inst)
           registered_exec_fn<DsMaxRtnU64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1266,12 +1636,17 @@ DsAndRtnB64Vds::DsAndRtnB64Vds(const MachineInst *inst)
           registered_exec_fn<DsAndRtnB64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1283,12 +1658,17 @@ DsOrRtnB64Vds::DsOrRtnB64Vds(const MachineInst *inst)
           registered_exec_fn<DsOrRtnB64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1300,12 +1680,17 @@ DsXorRtnB64Vds::DsXorRtnB64Vds(const MachineInst *inst)
           registered_exec_fn<DsXorRtnB64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1318,13 +1703,18 @@ DsMskorRtnB64Vds::DsMskorRtnB64Vds(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[3] = &dsmem_in;
+  num_src_ = 4;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1337,12 +1727,17 @@ DsStorexchgRtnB64Vds::DsStorexchgRtnB64Vds(const MachineInst *inst)
           registered_exec_fn<DsStorexchgRtnB64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1355,13 +1750,18 @@ DsStorexchg2addrRtnB64Vds::DsStorexchg2addrRtnB64Vds(const MachineInst *inst)
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[3] = &dsmem_in;
+  num_src_ = 4;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1375,13 +1775,18 @@ DsStorexchg2addrStride64RtnB64Vds::DsStorexchg2addrStride64RtnB64Vds(const Machi
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[3] = &dsmem_in;
+  num_src_ = 4;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1395,13 +1800,18 @@ DsCmpstoreRtnB64Vds::DsCmpstoreRtnB64Vds(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
+      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
   src_operands_[2] = &data1;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[3] = &dsmem_in;
+  num_src_ = 4;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1414,12 +1824,17 @@ DsMinNumRtnF64Vds::DsMinNumRtnF64Vds(const MachineInst *inst)
           registered_exec_fn<DsMinNumRtnF64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1431,12 +1846,17 @@ DsMaxNumRtnF64Vds::DsMaxNumRtnF64Vds(const MachineInst *inst)
           registered_exec_fn<DsMaxNumRtnF64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1448,12 +1868,17 @@ DsAddRtnF64Vds::DsAddRtnF64Vds(const MachineInst *inst)
           registered_exec_fn<DsAddRtnF64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1465,12 +1890,17 @@ DsAtomicBarrierArriveRtnB64Vds::DsAtomicBarrierArriveRtnB64Vds(const MachineInst
           registered_exec_fn<DsAtomicBarrierArriveRtnB64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1481,11 +1911,14 @@ DsLoadB64Vds::DsLoadB64Vds(const MachineInst *inst)
     : Vds("ds_load_b64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadB64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1495,11 +1928,14 @@ DsLoad2addrB64Vds::DsLoad2addrB64Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_b64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoad2addrB64Vds>()),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1509,11 +1945,14 @@ DsLoad2addrStride64B64Vds::DsLoad2addrStride64B64Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_stride64_b64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoad2addrStride64B64Vds>()),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1524,12 +1963,17 @@ DsAddRtnF32Vds::DsAddRtnF32Vds(const MachineInst *inst)
           registered_exec_fn<DsAddRtnF32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1541,12 +1985,17 @@ DsCondxchg32RtnB64Vds::DsCondxchg32RtnB64Vds(const MachineInst *inst)
           registered_exec_fn<DsCondxchg32RtnB64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1557,11 +2006,16 @@ DsCondSubU32Vds::DsCondSubU32Vds(const MachineInst *inst)
     : Vds("ds_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsCondSubU32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -1571,11 +2025,16 @@ DsSubClampU32Vds::DsSubClampU32Vds(const MachineInst *inst)
     : Vds("ds_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsSubClampU32Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -1585,11 +2044,16 @@ DsPkAddF16Vds::DsPkAddF16Vds(const MachineInst *inst)
     : Vds("ds_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsPkAddF16Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -1599,11 +2063,16 @@ DsPkAddBf16Vds::DsPkAddBf16Vds(const MachineInst *inst)
     : Vds("ds_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsPkAddBf16Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -1613,11 +2082,14 @@ DsStoreB8D16HiVds::DsStoreB8D16HiVds(const MachineInst *inst)
     : Vds("ds_store_b8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsStoreB8D16HiVds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(8, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
+  dst_operands_[0] = &dsmem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -1627,11 +2099,14 @@ DsStoreB16D16HiVds::DsStoreB16D16HiVds(const MachineInst *inst)
     : Vds("ds_store_b16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsStoreB16D16HiVds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(16, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
+  dst_operands_[0] = &dsmem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -1641,11 +2116,14 @@ DsLoadU8D16Vds::DsLoadU8D16Vds(const MachineInst *inst)
     : Vds("ds_load_u8_d16", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadU8D16Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1655,11 +2133,14 @@ DsLoadU8D16HiVds::DsLoadU8D16HiVds(const MachineInst *inst)
     : Vds("ds_load_u8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadU8D16HiVds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1669,11 +2150,14 @@ DsLoadI8D16Vds::DsLoadI8D16Vds(const MachineInst *inst)
     : Vds("ds_load_i8_d16", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadI8D16Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1683,11 +2167,14 @@ DsLoadI8D16HiVds::DsLoadI8D16HiVds(const MachineInst *inst)
     : Vds("ds_load_i8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadI8D16HiVds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1697,11 +2184,14 @@ DsLoadU16D16Vds::DsLoadU16D16Vds(const MachineInst *inst)
     : Vds("ds_load_u16_d16", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadU16D16Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(16, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1711,11 +2201,14 @@ DsLoadU16D16HiVds::DsLoadU16D16HiVds(const MachineInst *inst)
     : Vds("ds_load_u16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadU16D16HiVds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(16, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1726,12 +2219,17 @@ DsCondSubRtnU32Vds::DsCondSubRtnU32Vds(const MachineInst *inst)
           registered_exec_fn<DsCondSubRtnU32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1743,12 +2241,17 @@ DsSubClampRtnU32Vds::DsSubClampRtnU32Vds(const MachineInst *inst)
           registered_exec_fn<DsSubClampRtnU32Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1760,12 +2263,17 @@ DsPkAddRtnF16Vds::DsPkAddRtnF16Vds(const MachineInst *inst)
           registered_exec_fn<DsPkAddRtnF16Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1777,12 +2285,17 @@ DsPkAddRtnBf16Vds::DsPkAddRtnBf16Vds(const MachineInst *inst)
           registered_exec_fn<DsPkAddRtnBf16Vds>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1792,10 +2305,15 @@ DsPkAddRtnBf16Vds::DsPkAddRtnBf16Vds(const MachineInst *inst)
 DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
     : Vds("ds_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsStoreAddtidB32Vds>()),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &data0;
-  num_src_ = 1;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
@@ -1803,10 +2321,15 @@ DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
 DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
     : Vds("ds_load_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadAddtidB32Vds>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
   dst_operands_[0] = &vdst;
-  num_src_ = 0;
+  src_operands_[0] = &dsmem;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   flags_ |= MEMORY_OP;
 }
@@ -1863,11 +2386,14 @@ DsStoreB96Vds::DsStoreB96Vds(const MachineInst *inst)
     : Vds("ds_store_b96", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsStoreB96Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(96, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
+  dst_operands_[0] = &dsmem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -1877,11 +2403,14 @@ DsStoreB128Vds::DsStoreB128Vds(const MachineInst *inst)
     : Vds("ds_store_b128", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsStoreB128Vds>()),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      data0(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      dsmem(128, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
+  dst_operands_[0] = &dsmem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
@@ -1891,11 +2420,14 @@ DsLoadTr4B64Vds::DsLoadTr4B64Vds(const MachineInst *inst)
     : Vds("ds_load_tr4_b64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadTr4B64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1905,11 +2437,14 @@ DsLoadTr6B96Vds::DsLoadTr6B96Vds(const MachineInst *inst)
     : Vds("ds_load_tr6_b96", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadTr6B96Vds>()),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(96, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1919,11 +2454,14 @@ DsLoadTr16B128Vds::DsLoadTr16B128Vds(const MachineInst *inst)
     : Vds("ds_load_tr16_b128", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadTr16B128Vds>()),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(128, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1933,11 +2471,14 @@ DsLoadTr8B64Vds::DsLoadTr8B64Vds(const MachineInst *inst)
     : Vds("ds_load_tr8_b64", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadTr8B64Vds>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1947,11 +2488,14 @@ DsLoadB96Vds::DsLoadB96Vds(const MachineInst *inst)
     : Vds("ds_load_b96", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadB96Vds>()),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(96, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
@@ -1961,11 +2505,14 @@ DsLoadB128Vds::DsLoadB128Vds(const MachineInst *inst)
     : Vds("ds_load_b128", reinterpret_cast<const OpEncoding *>(inst),
           registered_exec_fn<DsLoadB128Vds>()),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(128, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
