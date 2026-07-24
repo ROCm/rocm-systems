@@ -92,10 +92,13 @@ yet counted as physical gfx950 or instrumentation acceptance evidence.
 
 ## RocJitsu test-corpus expansion
 
-The workspace corpus was surveyed at revision `aa54cc86c9eb`.  Its packaged
-Tensile artifacts are gfx1250-only, so none may be relabeled or executed as
-gfx950 evidence.  The corpus does contain several source-built gfx950 kernel
-cases.  Every cell below remains gray until the case has an independent
+The source-built kernel survey below was recorded at historical corpus
+revision `aa54cc86c9eb`.  The current workspace corpus at revision
+`f88d4583022d` preserves those rows and also packages the bounded,
+runtime-generated gfx950 Tensile row described below.  The older pre-generated
+Tensile artifact tree remains gfx1250-only and may not be relabeled as gfx950
+evidence; gfx950 code objects are generated from the checked-in gfx950 YAML.
+Every source-built cell below remains gray until the case has an independent
 oracle, a retained target-native inventory, and a standard-profile clean run
 for that flavor.
 
@@ -145,8 +148,9 @@ The checked-in runner executes `tensilelite-client` through
 `gfx950_cdna4.json`, parses every numeric CSV result row, requires every
 validation field to be `PASSED`, and rejects missing or non-gfx950 code
 objects.  Fresh default-tool runs complete in about 5.7 seconds.  The runner
-and negative-oracle suite passes 15/15, and the repository-wide corpus gate
-passes 86/86 with the required IREE tools on `PATH`.
+and negative-oracle suite pass 15/15.  The maintained corpus gate
+`python -m pytest -q tests` passes 86/86 with the required IREE tools on
+`PATH`; bare repository-root collection is not the gate.
 
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Current evidence |
 |---|---|---|---|---|---|---|
@@ -223,10 +227,10 @@ instrumentation acceptance evidence.
 | Physical dispatch smoke | On 2026-07-22, workspace TheRock `rocminfo` reports MI355X / `gfx950:sramecc+:xnack-`.  Five native CDNA4 hip-moi host-reference tests pass in 92--188 ms, and corpus `hip_matmul` m128³ passes correctness for all three selected MFMA/shared-memory kernels.  Separately, all six target-native hip-moi executables, including both Jakub parameterizations, pass 14/14 tests through the gfx950 RocJITsu simulator. |
 | Validation corpus | `iree-test-suites` `49f46d6d4370e5aa0a6367751474e20c6c4e95c0`; required Sharktank assets present; LFS fsck clean |
 | Validation doctor | The target-aware registry and workload-scoped doctor resolve all six native hip-moi roles through the explicit `hip-moi-build-gfx950-tests` build tree, including the Jakub counterpart. |
-| RocJitsu test corpus | `rocjitsu-test-corpus` `aa54cc86c9ebff3eb840743b36ff8d9b3b2d43c4`; gfx950 enables source-built HIP matmul, HipKittens, and rocBLAS cases.  Its packaged Tensile artifacts are gfx1250-only. |
-| gfx950 Tensile source pool | `rocm-libraries` `c2fafc16393d0ce47a0a5801d827d43f0d3714a4`; 36 gfx950 GEMM YAMLs are available for reduction and packaging, but none is presently a validation-registry row. |
+| RocJitsu test corpus | `rocjitsu-test-corpus` `f88d4583022d438ea72fb82c0e89143ccbf61843`; gfx950 enables source-built HIP matmul, HipKittens, and rocBLAS cases and packages the bounded `gfx950_sk_sgemm_streamk` runtime row.  Its historical pre-generated Tensile artifact tree remains gfx1250-only. |
+| gfx950 Tensile source pool | `rocm-libraries` `c2fafc16393d0ce47a0a5801d827d43f0d3714a4`; this historical 36-YAML survey supplied the reduced, packaged `gfx950_sk_sgemm_streamk` row.  The remaining source pool is not part of the validation denominator. |
 | PyTorch discovery | The gfx1250-only thin-wheel mismatch is diagnosed and isolated.  The separate official nightly environment passes `torch.arange` plus all six portable one-repetition exact oracles on gfx950.  Workload-scoped doctor confirms gfx950 numeric dispatch and exact-hook mapping. |
-| Registry boundary | The six portable PyTorch rows and native hip-moi roles are executable validation IDs for gfx950.  The corpus table remains planned expansion until its source-only rows are built and registered. |
+| Registry boundary | The six portable PyTorch rows, native hip-moi roles, and bounded Tensile row are executable validation IDs for gfx950.  The remaining source-built corpus rows stay planned expansion until they are built and registered. |
 
 ## Implementation evidence
 
