@@ -37,10 +37,10 @@ jobs:
     name: ${{matrix.target.name}}
     runs-on: ${{matrix.target.runs-on}}
     container: ${{matrix.target.container}}
-    # Shared build directory: build_wheel.py writes the CMake build tree here,
-    # and the SONAME conflict check reads both libraries back from it. Setting
-    # it explicitly (rather than relying on build_wheel.py's default) keeps the
-    # two steps coupled to one value.
+    # Build directory for build_wheel.py's CMake tree. This mirrors
+    # build_wheel.py's own default (/tmp/amdsmi-build); it is set explicitly
+    # here so the build step and the SONAME conflict check, which reads both
+    # libraries back from it, stay coupled to one value.
     env:
       AMDSMI_WHEEL_BUILD_DIR: /tmp/amdsmi-build
 
