@@ -257,6 +257,88 @@ class CdnaHipMoiSimulatorTest(unittest.TestCase):
             output.getvalue(),
         )
 
+    def test_main_uses_each_target_default_config(self) -> None:
+        suite = simulator.SUITE_BY_ID["jakub-matmul"]
+        for target in simulator.TARGETS.values():
+            with self.subTest(target=target.id):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    rocjitsu = root / "rocjitsu"
+                    build = root / target.build_dir_name
+                    executable = build / simulator._executable_suffix(target, suite)
+                    executable.parent.mkdir(parents=True)
+                    executable.touch()
+                    rocjitsu.touch()
+                    completed = subprocess.CompletedProcess(
+                        args=[],
+                        returncode=0,
+                        stdout="[  PASSED  ] 2 tests.\n",
+                        stderr="",
+                    )
+                    with (
+                        mock.patch.object(
+                            simulator.subprocess, "run", return_value=completed
+                        ) as run,
+                        contextlib.redirect_stdout(io.StringIO()),
+                    ):
+                        result = simulator.main(
+                            [
+                                "--target",
+                                target.id,
+                                "--rocjitsu",
+                                str(rocjitsu),
+                                "--hip-moi-build",
+                                str(build),
+                                "--suite",
+                                suite.id,
+                            ]
+                        )
+
+                self.assertEqual(result, 0)
+                command = run.call_args.args[0]
+                config = Path(command[command.index("--config") + 1])
+                self.assertEqual(
+                    config,
+                    Path(simulator.__file__).resolve().parents[3]
+                    / "configs"
+                    / target.default_config_name,
+                )
+
+    def test_main_rejects_the_other_targets_build_directory(self) -> None:
+        target = simulator.TARGETS["gfx950"]
+        wrong_target = simulator.TARGETS["gfx942"]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            rocjitsu = root / "rocjitsu"
+            wrong_build = root / wrong_target.build_dir_name
+            rocjitsu.touch()
+            wrong_build.mkdir()
+            errors = io.StringIO()
+            with (
+                mock.patch.object(simulator.subprocess, "run") as run,
+                contextlib.redirect_stderr(errors),
+            ):
+                result = simulator.main(
+                    [
+                        "--target",
+                        target.id,
+                        "--rocjitsu",
+                        str(rocjitsu),
+                        "--hip-moi-build",
+                        str(wrong_build),
+                        "--suite",
+                        "jakub-matmul",
+                    ]
+                )
+
+        self.assertEqual(result, 2)
+        run.assert_not_called()
+        self.assertIn(
+            "--hip-moi-build must name an existing "
+            "hip-moi-build-gfx950-tests directory",
+            errors.getvalue(),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

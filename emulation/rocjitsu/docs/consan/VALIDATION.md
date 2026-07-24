@@ -91,8 +91,9 @@ ctest --test-dir "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build" \
   -R '^ConSanGfx(942|950)HipMoiSim\.' --output-on-failure -j1
 ```
 
-For compatibility with the original gfx1201 workspace, it also recognizes
-`rocjitsu-main-gpu-build/` as the rocJITsu build name. The hook must be at
+For compatibility with the original gfx1201 workspace,
+`consan_validation.py` also recognizes `rocjitsu-main-gpu-build/` as the
+rocJITsu build name. The hook must be at
 `lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so` inside that build.
 
 `iree-run-module`, `iree-benchmark-module`, and `rocminfo` are resolved from

@@ -54,6 +54,8 @@ TARGETS = {
     target.id: target
     for target in (
         Target("gfx942", "hip-moi-build-gfx942-tests", "gfx942_cdna3_kmd.json"),
+        # The gfx950 KMD config has an unbounded tick budget.  Keep this smoke
+        # gate on the standalone config's 100000-tick bound.
         Target("gfx950", "hip-moi-build-gfx950-tests", "gfx950_cdna4.json"),
     )
 }
