@@ -128,9 +128,12 @@ SBarrierWaitSopp::SBarrierWaitSopp(const MachineInst *inst)
 
 SBarrierLeaveSopp::SBarrierLeaveSopp(const MachineInst *inst)
     : Sopp("s_barrier_leave", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<SBarrierLeaveSopp>()) {
+           registered_exec_fn<SBarrierLeaveSopp>()),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
+  dst_operands_[0] = &scc;
   num_src_ = 0;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  scc.apply_fieldless_caps(false, false, false);
 }
 
 SCodeEndSopp::SCodeEndSopp(const MachineInst *inst)
@@ -158,10 +161,13 @@ std::optional<int64_t> SBranchSopp::branch_offset_bytes() const {
 SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
     : Sopp("s_cbranch_scc0", reinterpret_cast<const OpEncoding *>(inst),
            registered_exec_fn<SCbranchScc0Sopp>()),
-      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &scc;
+  num_src_ = 2;
   num_dst_ = 0;
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
 }
 
@@ -173,10 +179,13 @@ std::optional<int64_t> SCbranchScc0Sopp::branch_offset_bytes() const {
 SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst)
     : Sopp("s_cbranch_scc1", reinterpret_cast<const OpEncoding *>(inst),
            registered_exec_fn<SCbranchScc1Sopp>()),
-      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &scc;
+  num_src_ = 2;
   num_dst_ = 0;
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
 }
 
@@ -188,10 +197,13 @@ std::optional<int64_t> SCbranchScc1Sopp::branch_offset_bytes() const {
 SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst)
     : Sopp("s_cbranch_vccz", reinterpret_cast<const OpEncoding *>(inst),
            registered_exec_fn<SCbranchVcczSopp>()),
-      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      vcc(64, OperandType::OPR_VCC, 106) {
   src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &vcc;
+  num_src_ = 2;
   num_dst_ = 0;
+  vcc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
 }
 
@@ -203,10 +215,13 @@ std::optional<int64_t> SCbranchVcczSopp::branch_offset_bytes() const {
 SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst)
     : Sopp("s_cbranch_vccnz", reinterpret_cast<const OpEncoding *>(inst),
            registered_exec_fn<SCbranchVccnzSopp>()),
-      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      vcc(64, OperandType::OPR_VCC, 106) {
   src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &vcc;
+  num_src_ = 2;
   num_dst_ = 0;
+  vcc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
 }
 
@@ -218,10 +233,13 @@ std::optional<int64_t> SCbranchVccnzSopp::branch_offset_bytes() const {
 SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst)
     : Sopp("s_cbranch_execz", reinterpret_cast<const OpEncoding *>(inst),
            registered_exec_fn<SCbranchExeczSopp>()),
-      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &sdst_exec;
+  num_src_ = 2;
   num_dst_ = 0;
+  sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
 }
 
@@ -233,10 +251,13 @@ std::optional<int64_t> SCbranchExeczSopp::branch_offset_bytes() const {
 SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst)
     : Sopp("s_cbranch_execnz", reinterpret_cast<const OpEncoding *>(inst),
            registered_exec_fn<SCbranchExecnzSopp>()),
-      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &sdst_exec;
+  num_src_ = 2;
   num_dst_ = 0;
+  sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
 }
 
@@ -280,19 +301,25 @@ SSetprioSopp::SSetprioSopp(const MachineInst *inst)
 SSendmsgSopp::SSendmsgSopp(const MachineInst *inst)
     : Sopp("s_sendmsg", reinterpret_cast<const OpEncoding *>(inst),
            registered_exec_fn<SSendmsgSopp>()),
-      simm16(16, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
   num_dst_ = 0;
+  m0.apply_fieldless_caps(false, false, false);
 }
 
 SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
     : Sopp("s_sendmsghalt", reinterpret_cast<const OpEncoding *>(inst),
            registered_exec_fn<SSendmsghaltSopp>()),
-      simm16(16, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
   num_dst_ = 0;
+  m0.apply_fieldless_caps(false, false, false);
 }
 
 SIncperflevelSopp::SIncperflevelSopp(const MachineInst *inst)
@@ -315,9 +342,12 @@ SDecperflevelSopp::SDecperflevelSopp(const MachineInst *inst)
 
 STtracedataSopp::STtracedataSopp(const MachineInst *inst)
     : Sopp("s_ttracedata", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<STtracedataSopp>()) {
-  num_src_ = 0;
+           registered_exec_fn<STtracedataSopp>()),
+      m0(32, OperandType::OPR_SDST_M0, 125) {
+  src_operands_[0] = &m0;
+  num_src_ = 1;
   num_dst_ = 0;
+  m0.apply_fieldless_caps(false, false, false);
 }
 
 STtracedataImmSopp::STtracedataImmSopp(const MachineInst *inst)

@@ -132,6 +132,13 @@ public:
       p->onAmdgpuReadVgprLanes(wf, physical_reg, lane_mask, byte_mask);
   }
 
+  virtual void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
+                                      uint64_t lane_mask,
+                                      uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
+    for (auto &p : plugins_)
+      p->onAmdgpuWriteVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+  }
+
   virtual void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) {
     for (auto &p : plugins_)
       p->onAmdgpuReadSgpr(wf, physical_reg);

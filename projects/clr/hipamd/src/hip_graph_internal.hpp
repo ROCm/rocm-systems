@@ -2164,6 +2164,19 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
           }
         }
         break;
+      case hipWriteBuffer:
+        // H2D: src is plain host memory (srcMemory == nullptr), dst is the only
+        // device-side memory. dev_id_ otherwise defaults to the device that was
+        // current when the node was recorded, which can differ from the device
+        // that actually owns dst (e.g. hipSetDevice() called between the
+        // hipMalloc and the node's creation) -- override it to dst's real device.
+        dev_id_ = dstMemory->GetDeviceById()->index();
+        break;
+      case hipReadBuffer:
+        // D2H: dst is plain host memory (dstMemory == nullptr), src is the only
+        // device-side memory. Same rationale as hipWriteBuffer above, mirrored.
+        dev_id_ = srcMemory->GetDeviceById()->index();
+        break;
       default:
         break;
     }
@@ -3569,24 +3582,39 @@ class hipGraphExternalSemWaitNode : public GraphNode {
 class hipGraphBatchMemOpNode : public GraphNode {
   hipBatchMemOpNodeParams batchMemOpNodeParam_;
 
+  void copyParams(const hipBatchMemOpNodeParams* src) {
+    delete[] batchMemOpNodeParam_.paramArray;
+    batchMemOpNodeParam_ = *src;
+    if (src->paramArray && src->count > 0) {
+      // Deep-copy paramArray — caller's array may be freed before graph replay.
+      batchMemOpNodeParam_.paramArray = new hipStreamBatchMemOpParams[src->count];
+      std::memcpy(batchMemOpNodeParam_.paramArray, src->paramArray,
+                  src->count * sizeof(hipStreamBatchMemOpParams));
+    }
+  }
+
  protected:
   // Copy constructor is needed for cloning the node, but it should not be used for any other
   // purpose. To prevent accidental misuse, the copy-assignment operator is deleted.
   hipGraphBatchMemOpNode(const hipGraphBatchMemOpNode& rhs) : GraphNode(rhs) {
-    batchMemOpNodeParam_ = rhs.batchMemOpNodeParam_;
+    batchMemOpNodeParam_.paramArray = nullptr;
+    copyParams(&rhs.batchMemOpNodeParam_);
   }
 
  public:
   hipGraphBatchMemOpNode(const hipBatchMemOpNodeParams* pNodeParams)
       : GraphNode(hipGraphNodeTypeBatchMemOp, "solid", "rectangle", "BATCH_MEM_OP_NODE") {
-    batchMemOpNodeParam_ = *pNodeParams;
+    batchMemOpNodeParam_.paramArray = nullptr;
+    copyParams(pNodeParams);
   }
-  ~hipGraphBatchMemOpNode() {}
+  ~hipGraphBatchMemOpNode() { delete[] batchMemOpNodeParam_.paramArray; }
 
   // Delete copy-assignment operator to prevent accidental copies causing unexpected behaviors.
   hipGraphBatchMemOpNode& operator=(const hipGraphBatchMemOpNode&) = delete;
 
   GraphNode* clone() const override { return new hipGraphBatchMemOpNode(*this); }
+
+  virtual bool GraphCaptureEnabled() override { return true; }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
@@ -3607,7 +3635,7 @@ class hipGraphBatchMemOpNode : public GraphNode {
   }
 
   hipError_t SetParams(const hipBatchMemOpNodeParams* pNodeParams) {
-    std::memcpy(&batchMemOpNodeParam_, pNodeParams, sizeof(hipBatchMemOpNodeParams));
+    copyParams(pNodeParams);
     return hipSuccess;
   }
 };
