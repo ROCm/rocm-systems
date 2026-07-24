@@ -885,6 +885,21 @@
         {"name": "AsymmetricVisibility.CommInitRankAllReduce", "description": "ROCM-27034: RCCL comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES", "test_filter": "AsymmetricVisibility.CommInitRankAllReduce"}
       ]
     },
+    "plugin_compat_v11": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "PluginCompatV11.NetLazyInitialization", "description": "AICOMRCCL-1532: v11 net plugin compat layer initializes lazily (only ncclNet.init set until init() runs)", "test_filter": "PluginCompatV11.NetLazyInitialization"},
+        {"name": "PluginCompatV11.CollNetLazyInitialization", "description": "AICOMRCCL-1532: v11 collnet plugin compat layer initializes lazily", "test_filter": "PluginCompatV11.CollNetLazyInitialization"}
+      ]
+    },
     "debug_tests": {
       "is_gtest": true,
       "binary": "rccl-UnitTests",
@@ -3364,6 +3379,12 @@
       "name": "Unit Tests - Fixtures (Debug)",
       "description": "Non-MPI unit tests accessing internal symbols (Debug only)",
       "config": "unit_tests_fixtures_debug",
+      "enabled": true
+    },
+    {
+      "name": "Plugin Compat v11 - Lazy Init",
+      "description": "AICOMRCCL-1532: v11 net/collnet plugin compat layer lazy initialization (Debug only)",
+      "config": "plugin_compat_v11",
       "enabled": true
     },
     {
