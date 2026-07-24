@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 import io
 import json
@@ -172,27 +172,57 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("tensile-sk-mxf8gemm-explicit", text)
 
     def test_explain_all_matches_the_target_manifest_workload_set(self) -> None:
+        for target in ("gfx942", "gfx1250"):
+            with self.subTest(target=target), temporary_root() as workspace:
+                output = io.StringIO()
+                with (
+                    mock.patch.dict(
+                        os.environ,
+                        {validation.WORKSPACE_ENV: str(workspace)},
+                        clear=False,
+                    ),
+                    redirect_stdout(output),
+                ):
+                    self.assertEqual(
+                        validation.main(["--target", target, "explain", "--json"]),
+                        0,
+                    )
+                explained = json.loads(output.getvalue())
+                self.assertEqual(
+                    [workload["id"] for workload in explained["workloads"]],
+                    [
+                        workload["id"]
+                        for workload in validation._manifest(target)["workloads"]
+                    ],
+                )
+
+    def test_explain_rejects_workload_excluded_by_target_manifest(self) -> None:
         with temporary_root() as workspace:
-            output = io.StringIO()
+            error = io.StringIO()
             with (
                 mock.patch.dict(
                     os.environ,
                     {validation.WORKSPACE_ENV: str(workspace)},
                     clear=False,
                 ),
-                redirect_stdout(output),
+                redirect_stderr(error),
             ):
                 self.assertEqual(
-                    validation.main(["--target", "gfx942", "explain", "--json"]),
-                    0,
+                    validation.main(
+                        [
+                            "--target",
+                            "gfx942",
+                            "explain",
+                            "--workload",
+                            "pytorch-rdna4-compiled-softmax",
+                            "--json",
+                        ]
+                    ),
+                    2,
                 )
-        explained = json.loads(output.getvalue())
-        self.assertEqual(
-            [workload["id"] for workload in explained["workloads"]],
-            [
-                workload["id"]
-                for workload in validation._manifest("gfx942")["workloads"]
-            ],
+        self.assertIn(
+            "gfx942 manifest excludes workload: " "pytorch-rdna4-compiled-softmax",
+            error.getvalue(),
         )
 
     def test_gfx950_manifest_resolves_cdna4_native_workloads(self) -> None:

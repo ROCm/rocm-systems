@@ -874,7 +874,7 @@ def _workloads_for_target(target: str) -> tuple[Workload, ...]:
     )
 
 
-def _fault_families(target: str, workload: Workload) -> tuple[str, ...]:
+def _target_fault_families(target: str, workload: Workload) -> tuple[str, ...]:
     if target == "gfx1250" and workload.id in (
         "tp1-prefill",
         "tp1-decode-combined",
@@ -1117,6 +1117,10 @@ def _resolved_workload(target: str, workload: Workload) -> Workload:
             f"{target} gtest workload has no target-specific registry entry: {workload.id}"
         )
     return replace(workload, **override)
+
+
+def _fault_families(target: str, workload: Workload) -> tuple[str, ...]:
+    return _target_fault_families(target, _resolved_workload(target, workload))
 
 
 class ValidationError(RuntimeError):
@@ -1523,6 +1527,8 @@ def _clean_environment(
     hook: Path,
     target: str | None = None,
 ) -> dict[str, str]:
+    if target is not None:
+        workload = _resolved_workload(target, workload)
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -2018,18 +2024,24 @@ def _launcher_from_json(value: str | None) -> list[str]:
     return launcher
 
 
-def _outer_repetitions(target: str, phase: str, workload: Workload) -> int:
+def _target_outer_repetitions(target: str, phase: str, workload: Workload) -> int:
     if target in SINGLE_REPETITION_TARGETS or phase != "overhead":
         return 1
     return workload.overhead_processes
+
+
+def _outer_repetitions(target: str, phase: str, workload: Workload) -> int:
+    return _target_outer_repetitions(
+        target, phase, _resolved_workload(target, workload)
+    )
 
 
 def _effective_workload(target: str, workload: Workload) -> Workload:
     resolved = _resolved_workload(target, workload)
     return replace(
         resolved,
-        fault_families=_fault_families(target, resolved),
-        overhead_processes=_outer_repetitions(target, "overhead", resolved),
+        fault_families=_target_fault_families(target, resolved),
+        overhead_processes=_target_outer_repetitions(target, "overhead", resolved),
     )
 
 
@@ -3388,11 +3400,17 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         workspace = _workspace_from_environment()
         if args.command == "explain":
-            workload_ids = (
-                tuple(workload.id for workload in _workloads_for_target(target))
-                if args.workload == "all"
-                else (args.workload,)
+            target_workload_ids = tuple(
+                workload.id for workload in _workloads_for_target(target)
             )
+            if args.workload == "all":
+                workload_ids = target_workload_ids
+            elif args.workload in target_workload_ids:
+                workload_ids = (args.workload,)
+            else:
+                raise ValidationError(
+                    f"{target} manifest excludes workload: {args.workload}"
+                )
             profiles = PROFILE_IDS if args.profile == "all" else (args.profile,)
             result = _explain_contract(
                 workspace,
