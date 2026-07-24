@@ -19,7 +19,9 @@ promote a cell in this ledger.
 ## Status legend
 
 - 🩶 **unseen / unassessed:** no qualifying current-tip gfx942 workload
-  evidence;
+  evidence. A cell labeled **simulator prerequisite only** remains gray: the
+  target-native build and simulator oracle pass, but physical qualification is
+  still pending;
 - 🟥 **does not work:** current target-native execution establishes a product
   defect;
 - 🟧 **some things work:** useful execution evidence exists but major
@@ -72,16 +74,21 @@ gtest roles deliberately require these target-native definitions:
 | `jakub-attention` | `hip_moi_reference_cdna3_jakub_matmul`; `SafeFp16Packed/JakubCdna3MatmulReference.MatchesHostReference/*` |
 
 At hip-moi source revision `ded161ce2577`, the validator's workload-scoped
-`doctor` command resolves all six exact paths from the retained
-`hip-moi-build-gfx942-tests` build. It must never substitute an RDNA4 or CDNA4
-executable.
+`doctor` command resolves all six exact paths directly under the retained
+`hip-moi-build-gfx942-tests` build. It must never substitute a mutable generic
+build link or an RDNA4 or CDNA4 executable.
 
 ## Retained simulator prerequisites
 
-The focused CTest gate currently exercises gfx942 simulator coverage for:
+Manual runs through
+`rocjitsu --config emulation/rocjitsu/configs/gfx942_cdna3_kmd.json` pass all
+14 tests in the six target-native hip-moi suites, including binaries from a
+build configured for `gfx942:xnack-`. Automated registration of those external
+suites is tracked by `bd-1w9.1.3`.
 
-- all 14 tests in the six target-native hip-moi suites, including a build
-  configured for `gfx942:xnack-`;
+Separately, the focused in-repo CTest gate exercises gfx942 simulator coverage
+for:
+
 - SuperCollider clean execution;
 - flat-LDS and MOI Record/Replay forced spilling;
 - Sampled, Inline Shadow, shared-helper, barrier, and atomic forced spilling;

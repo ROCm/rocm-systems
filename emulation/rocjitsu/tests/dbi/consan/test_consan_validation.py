@@ -375,7 +375,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(
             workloads["d128-block"]["relative_path"],
             (
-                "hip-moi-build/tests/"
+                "hip-moi-build-gfx942-tests/tests/"
                 "hip_moi_instrumented_cdna3_d128_attention_block_test"
             ),
         )
@@ -389,7 +389,10 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(
             workloads["jakub-attention"]["relative_path"],
-            "hip-moi-build/tests/hip_moi_reference_cdna3_jakub_matmul",
+            (
+                "hip-moi-build-gfx942-tests/tests/"
+                "hip_moi_reference_cdna3_jakub_matmul"
+            ),
         )
         self.assertEqual(
             workloads["streamk-arrival"]["fault_families"],
@@ -410,10 +413,36 @@ class ConSanValidationTest(unittest.TestCase):
         with temporary_root() as workspace:
             with mock.patch.object(validation.shutil, "which", return_value="/tool"):
                 doctor = validation._doctor(workspace, "gfx942")
-        d128 = doctor["paths"]["workload:d128-block:executable"]
-        self.assertTrue(d128["path"].endswith("cdna3_d128_attention_block_test"))
-        jakub = doctor["paths"]["workload:jakub-attention:executable"]
-        self.assertTrue(jakub["path"].endswith("hip_moi_reference_cdna3_jakub_matmul"))
+        expected_paths = {
+            "d128-block": (
+                "hip-moi-build-gfx942-tests/tests/"
+                "hip_moi_instrumented_cdna3_d128_attention_block_test"
+            ),
+            "d128-pressure": (
+                "hip-moi-build-gfx942-tests/tests/"
+                "hip_moi_instrumented_cdna3_d128_attention_pressure_test"
+            ),
+            "wmma-attention": (
+                "hip-moi-build-gfx942-tests/tests/"
+                "hip_moi_instrumented_cdna3_mfma_attention_block_test"
+            ),
+            "streamk-arrival": (
+                "hip-moi-build-gfx942-tests/tests/"
+                "hip_moi_instrumented_cdna3_mfma_streamk_arrival_counter_test"
+            ),
+            "tree-atomic-or": (
+                "hip-moi-build-gfx942-tests/tests/"
+                "hip_moi_instrumented_cdna3_mfma_streamk_tree_atomic_or_test"
+            ),
+            "jakub-attention": (
+                "hip-moi-build-gfx942-tests/tests/"
+                "hip_moi_reference_cdna3_jakub_matmul"
+            ),
+        }
+        for workload_id, relative_path in expected_paths.items():
+            with self.subTest(workload=workload_id):
+                executable = doctor["paths"][f"workload:{workload_id}:executable"]
+                self.assertEqual(executable["path"], str(workspace / relative_path))
 
     def test_gfx950_doctor_checks_resolved_cdna4_executables(self) -> None:
         with temporary_root() as workspace:
@@ -505,7 +534,9 @@ class ConSanValidationTest(unittest.TestCase):
         # Reconstruct paths independently of the override tables so this test
         # catches a wrong target-resolved Stream-K executable spelling.
         executable_prefixes = {
-            "gfx942": "hip-moi-build/tests/hip_moi_instrumented_cdna3_mfma_",
+            "gfx942": (
+                "hip-moi-build-gfx942-tests/tests/" "hip_moi_instrumented_cdna3_mfma_"
+            ),
             "gfx1201": "hip-moi-build/tests/hip_moi_instrumented_rdna4_wmma_",
             "gfx950": "hip-moi-build/tests/hip_moi_instrumented_cdna4_mfma_",
             "gfx1250": (

@@ -910,7 +910,8 @@ def _target_fault_families(target: str, workload: Workload) -> tuple[str, ...]:
 GFX942_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
     "d128-block": {
         "relative_path": (
-            "hip-moi-build/tests/hip_moi_instrumented_cdna3_d128_attention_block_test"
+            "hip-moi-build-gfx942-tests/tests/"
+            "hip_moi_instrumented_cdna3_d128_attention_block_test"
         ),
         "clean_filter": "HipMoiCdna3D128AttentionBlock.*",
         "overhead_filter": (
@@ -919,7 +920,7 @@ GFX942_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
     },
     "d128-pressure": {
         "relative_path": (
-            "hip-moi-build/tests/"
+            "hip-moi-build-gfx942-tests/tests/"
             "hip_moi_instrumented_cdna3_d128_attention_pressure_test"
         ),
         "clean_filter": "HipMoiCdna3D128AttentionPressure.*",
@@ -930,14 +931,15 @@ GFX942_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
     },
     "wmma-attention": {
         "relative_path": (
-            "hip-moi-build/tests/hip_moi_instrumented_cdna3_mfma_attention_block_test"
+            "hip-moi-build-gfx942-tests/tests/"
+            "hip_moi_instrumented_cdna3_mfma_attention_block_test"
         ),
         "clean_filter": "HipMoiCdna3MfmaAttentionBlock.*",
         "overhead_filter": "HipMoiCdna3MfmaAttentionBlock.ExactContextMatchesHostReference",
     },
     "streamk-arrival": {
         "relative_path": (
-            "hip-moi-build/tests/"
+            "hip-moi-build-gfx942-tests/tests/"
             "hip_moi_instrumented_cdna3_mfma_streamk_arrival_counter_test"
         ),
         "clean_filter": (
@@ -949,7 +951,7 @@ GFX942_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
     },
     "tree-atomic-or": {
         "relative_path": (
-            "hip-moi-build/tests/"
+            "hip-moi-build-gfx942-tests/tests/"
             "hip_moi_instrumented_cdna3_mfma_streamk_tree_atomic_or_test"
         ),
         "clean_filter": (
@@ -959,10 +961,10 @@ GFX942_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
             "HipMoiCdna3MfmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersMfmaPartials"
         ),
     },
-    # Keep the row visible and let doctor report the missing target-native
-    # artifact until hip-moi provides the semantically equivalent workload.
     "jakub-attention": {
-        "relative_path": "hip-moi-build/tests/hip_moi_reference_cdna3_jakub_matmul",
+        "relative_path": (
+            "hip-moi-build-gfx942-tests/tests/" "hip_moi_reference_cdna3_jakub_matmul"
+        ),
         "clean_filter": "SafeFp16Packed/JakubCdna3MatmulReference.MatchesHostReference/*",
         "overhead_filter": "SafeFp16Packed/JakubCdna3MatmulReference.MatchesHostReference/*",
     },
