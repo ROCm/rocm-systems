@@ -573,7 +573,7 @@ int main(int argc, char *argv[]) {
     if (std::optional<rocjitsu::cli::VisibilityOverride> client_visible =
             rocjitsu::cli::normalized_client_visible_devices(
                 dbt_execution_gpus, child_rocr_visible, environment_value("HIP_VISIBLE_DEVICES"),
-                environment_value("CUDA_VISIBLE_DEVICES")))
+                environment_value("CUDA_VISIBLE_DEVICES"), dbt_guest_config.host.gpu_id))
       launch_environment.set(client_visible->name, client_visible->value);
     // The HSA hook still uses the legacy tools callback path. Disable only the
     // rocprofiler-register table-delivery path so it cannot validate an

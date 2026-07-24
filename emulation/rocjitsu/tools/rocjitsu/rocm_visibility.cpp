@@ -136,13 +136,21 @@ std::vector<VisibleGpu> effective_visible_gpus(const std::vector<VisibleGpu> &to
 
 std::optional<VisibilityOverride> normalized_client_visible_devices(
     const std::vector<VisibleGpu> &topology, std::optional<std::string_view> rocr_visible,
-    std::optional<std::string_view> hip_visible, std::optional<std::string_view> cuda_visible) {
+    std::optional<std::string_view> hip_visible, std::optional<std::string_view> cuda_visible,
+    std::optional<uint32_t> first_gpu_id) {
   const auto client = client_selector(hip_visible, cuda_visible);
   if (!client)
     return std::nullopt;
 
   const std::vector<VisibleGpu> rocr_gpus = filter_rocr_visible_gpus(topology, rocr_visible);
-  const std::vector<VisibleGpu> selected = filter_client_visible_gpus(rocr_gpus, client->second);
+  std::vector<VisibleGpu> selected = filter_client_visible_gpus(rocr_gpus, client->second);
+  if (first_gpu_id) {
+    const auto first = std::find_if(selected.begin(), selected.end(), [&](const VisibleGpu &gpu) {
+      return gpu.gpu_id == *first_gpu_id;
+    });
+    if (first != selected.end())
+      std::rotate(selected.begin(), first, first + 1);
+  }
   std::vector<std::string> ordinals;
   for (const VisibleGpu &gpu : selected) {
     auto match = std::find_if(rocr_gpus.begin(), rocr_gpus.end(), [&](const VisibleGpu &candidate) {

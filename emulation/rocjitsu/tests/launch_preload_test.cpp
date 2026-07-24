@@ -206,6 +206,17 @@ TEST(RocmVisibilityTest, NormalizesClientSelectorAgainstExpandedRocrOrder) {
   EXPECT_EQ("1", normalized->value);
 }
 
+TEST(RocmVisibilityTest, NormalizesSelectedDbtHostToClientDeviceZero) {
+  const std::vector<rocjitsu::cli::VisibleGpu> heterogeneous_gpus{
+      {0, 100, 110000, 0x1111111111111111ULL}, {1, 101, 90402, 0x2222222222222222ULL}};
+  const auto normalized = rocjitsu::cli::normalized_client_visible_devices(
+      heterogeneous_gpus, std::nullopt, "0,1", std::nullopt, 101);
+
+  ASSERT_TRUE(normalized);
+  EXPECT_EQ("HIP_VISIBLE_DEVICES", normalized->name);
+  EXPECT_EQ("1,0", normalized->value);
+}
+
 TEST(RocmVisibilityTest, ExpandsRocrSelectionWithGuestOrdinal) {
   const auto expanded = rocjitsu::cli::expanded_rocr_visible_devices(test_gpus(), "GPU-2222");
   ASSERT_TRUE(expanded);
