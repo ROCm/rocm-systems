@@ -3102,6 +3102,120 @@ amdsmi_status_t amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_han
   return amd::smi::rsmi_to_amdsmi_status(rstatus);
 }
 
+namespace amd {
+namespace smi {
+
+// Pure redirect decision factored out of get_primary_partition_handle() so it
+// can be unit tested without hardware.
+//
+// Given the partition ids of every logical GPU partition that shares a physical
+// device and the index of the querying partition within that list, return the
+// index of the primary partition (partition_id == 0) that partition-config
+// queries must be redirected to, or -1 when no redirect is needed: the device is
+// not split into multiple logical partitions, the querying partition is already
+// the primary, or no primary sibling exists. Siblings whose id could not be read
+// must be passed as UINT32_MAX so they are skipped.
+int primary_partition_redirect_index(const std::vector<uint32_t>& partition_ids,
+                                     size_t self_index) {
+  // A physical device that exposes a single logical GPU has no separate primary
+  // partition to redirect to.
+  if (partition_ids.size() <= 1) {
+    return -1;
+  }
+  for (size_t i = 0; i < partition_ids.size(); ++i) {
+    if (i == self_index) {
+      continue;
+    }
+    if (partition_ids[i] == 0) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+}  // namespace smi
+}  // namespace amd
+
+// On MI300-class accelerators that are split into multiple logical partitions
+// (for example CPX + NPS4), the compute- and memory-partition sysfs nodes only
+// respond on the primary partition (partition_id == 0) of each physical device.
+// Queries issued against a logical sub-partition handle (partition_id > 0)
+// therefore fail and the tool falls back to reporting "N/A". All logical
+// partitions of a physical device share the same partition configuration and are
+// grouped under the same AMDSmiSocket (keyed on the BD portion of the BDF), so
+// this helper walks the owning socket and returns the primary partition's handle
+// for a given sub-partition handle.
+//
+// Returns nullptr when the handle is already the primary partition, when the
+// device is not partitioned into multiple logical GPUs, or when no primary
+// sibling can be found.
+static amdsmi_processor_handle get_primary_partition_handle(
+    amdsmi_processor_handle processor_handle) {
+  amd::smi::AMDSmiProcessor* processor = nullptr;
+  amdsmi_status_t status =
+      amd::smi::AMDSmiSystem::getInstance().handle_to_processor(processor_handle, &processor);
+  if (status != AMDSMI_STATUS_SUCCESS || processor == nullptr) {
+    return nullptr;
+  }
+
+  // Fast path: the primary partition (partition_id == 0) already answers
+  // partition-config queries directly, so it never needs a redirect. Reading the
+  // caller's own partition id first avoids the socket walk and the per-sibling
+  // sysfs reads below on every primary partition and every unpartitioned (SPX)
+  // device.
+  uint32_t self_partition_id = std::numeric_limits<uint32_t>::max();
+  if (rsmi_wrapper(rsmi_dev_partition_id_get, processor_handle, 0, &self_partition_id) ==
+          AMDSMI_STATUS_SUCCESS &&
+      self_partition_id == 0) {
+    return nullptr;
+  }
+
+  // Find the socket (physical device) that owns this processor.
+  amd::smi::AMDSmiSocket* owning_socket = nullptr;
+  for (auto* socket : amd::smi::AMDSmiSystem::getInstance().get_sockets()) {
+    if (socket == nullptr) {
+      continue;
+    }
+    auto& gpu_processors = socket->get_processors(AMDSMI_PROCESSOR_TYPE_AMD_GPU);
+    if (std::find(gpu_processors.begin(), gpu_processors.end(), processor) !=
+        gpu_processors.end()) {
+      owning_socket = socket;
+      break;
+    }
+  }
+  if (owning_socket == nullptr) {
+    return nullptr;
+  }
+
+  // Collect the partition id of every logical GPU partition on this physical
+  // device (marking siblings whose id cannot be read as unqueryable) and locate
+  // this processor within that list, then defer the redirect decision to the
+  // pure helper above.
+  auto& siblings = owning_socket->get_processors(AMDSMI_PROCESSOR_TYPE_AMD_GPU);
+  std::vector<uint32_t> partition_ids(siblings.size(), std::numeric_limits<uint32_t>::max());
+  size_t self_index = siblings.size();
+  for (size_t i = 0; i < siblings.size(); ++i) {
+    if (siblings[i] == processor) {
+      self_index = i;
+    }
+    if (siblings[i] == nullptr) {
+      continue;
+    }
+    auto sibling_handle = reinterpret_cast<amdsmi_processor_handle>(siblings[i]);
+    uint32_t sibling_partition_id = std::numeric_limits<uint32_t>::max();
+    if (rsmi_wrapper(rsmi_dev_partition_id_get, sibling_handle, 0, &sibling_partition_id) ==
+        AMDSMI_STATUS_SUCCESS) {
+      partition_ids[i] = sibling_partition_id;
+    }
+  }
+
+  int primary_index = amd::smi::primary_partition_redirect_index(partition_ids, self_index);
+  if (primary_index < 0) {
+    return nullptr;
+  }
+  return reinterpret_cast<amdsmi_processor_handle>(siblings[primary_index]);
+}
+
 // Compute Partition functions
 // This API is deprecated, use amdsmi_get_gpu_accelerator_partition_profile() instead
 amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle processor_handle,
@@ -3111,6 +3225,17 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle process
 
   auto status =
       rsmi_wrapper(rsmi_dev_compute_partition_get, processor_handle, 0, compute_partition, len);
+  // The compute-partition sysfs node only responds on the primary partition
+  // (partition_id == 0). For a logical sub-partition handle the query above fails,
+  // so retry against the owning physical device's primary partition handle. All
+  // partitions of a physical device share the same compute-partition mode.
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    amdsmi_processor_handle primary_handle = get_primary_partition_handle(processor_handle);
+    if (primary_handle != nullptr) {
+      status =
+          rsmi_wrapper(rsmi_dev_compute_partition_get, primary_handle, 0, compute_partition, len);
+    }
+  }
   ss << __PRETTY_FUNCTION__ << " |  rsmi_dev_compute_partition_get() returned: "
      << smi_amdgpu_get_status_string(status, false);
   LOG_INFO(ss);
@@ -3178,6 +3303,16 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processo
   AMDSMI_CHECK_INIT();
   amdsmi_status_t ret =
       rsmi_wrapper(rsmi_dev_memory_partition_get, processor_handle, 0, memory_partition, len);
+  // The memory-partition sysfs node only responds on the primary partition
+  // (partition_id == 0). For a logical sub-partition handle the query above fails,
+  // so retry against the owning physical device's primary partition handle. All
+  // partitions of a physical device share the same memory-partition (NPS) mode.
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    amdsmi_processor_handle primary_handle = get_primary_partition_handle(processor_handle);
+    if (primary_handle != nullptr) {
+      ret = rsmi_wrapper(rsmi_dev_memory_partition_get, primary_handle, 0, memory_partition, len);
+    }
+  }
   return ret;
 }
 
@@ -3207,12 +3342,21 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle p
   // TODO(amdsmi_team): Will BM/guest VMs have numa ranges?
   config->num_numa_ranges = 0;
 
+  // For a logical sub-partition handle (partition_id > 0) the partition-capability
+  // sysfs nodes only respond on the owning physical device's primary partition, so
+  // redirect capability queries there.
+  amdsmi_processor_handle query_handle = processor_handle;
+  amdsmi_processor_handle primary_handle = get_primary_partition_handle(processor_handle);
+  if (primary_handle != nullptr) {
+    query_handle = primary_handle;
+  }
+
   // current memory partition
   constexpr uint32_t kCurrentPartitionSize = 5;
   char current_mem_partition[kCurrentPartitionSize] = {};
   std::string current_mem_partition_str = "N/A";
-  amdsmi_status_t status = amdsmi_get_gpu_memory_partition(processor_handle, current_mem_partition,
-                                                           kCurrentPartitionSize);
+  amdsmi_status_t status =
+      amdsmi_get_gpu_memory_partition(query_handle, current_mem_partition, kCurrentPartitionSize);
   ss << __PRETTY_FUNCTION__ << " | amdsmi_get_gpu_memory_partition() current_partition = |"
      << current_mem_partition << "|";
   LOG_DEBUG(ss);
@@ -3232,8 +3376,8 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle p
   // Add memory partition capabilities here
   constexpr uint32_t kLenCapsSize = 30;
   char memory_caps[kLenCapsSize] = {};
-  auto status_mem_caps = rsmi_wrapper(rsmi_dev_memory_partition_capabilities_get, processor_handle,
-                                      0, memory_caps, kLenCapsSize);
+  auto status_mem_caps = rsmi_wrapper(rsmi_dev_memory_partition_capabilities_get, query_handle, 0,
+                                      memory_caps, kLenCapsSize);
   ss << __PRETTY_FUNCTION__ << " | rsmi_dev_memory_partition_capabilities_get Returning: "
      << smi_amdgpu_get_status_string(status, false) << " | Type: memory_partition_capabilities"
      << " | Data: " << memory_caps;
@@ -3743,6 +3887,18 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   auto tmp_partition_id = uint32_t(0);
   amdsmi_status_t status = AMDSMI_STATUS_NOT_SUPPORTED;
 
+  // For a logical sub-partition handle (partition_id > 0) the partition-profile
+  // sysfs/ioctl interfaces only respond on the owning physical device's primary
+  // partition (partition_id == 0). Redirect the capability/profile queries there so
+  // sub-partitions report the same profile as their parent instead of "N/A". The
+  // reported partition_id below intentionally continues to use the original handle
+  // so each logical partition keeps its own identity.
+  amdsmi_processor_handle query_handle = processor_handle;
+  amdsmi_processor_handle primary_handle = get_primary_partition_handle(processor_handle);
+  if (primary_handle != nullptr) {
+    query_handle = primary_handle;
+  }
+
   // TODO(amdsmi_team): should we do fallback?
   // Info doesn't populate properly if missing other files - CLI FIX?
   // Reason: older kernels do not support xcp_configs
@@ -3757,7 +3913,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   constexpr uint32_t kLenXCPConfigSize = 30;
   char supported_xcp_configs[kLenXCPConfigSize];
   bool use_xcp_config = false;
-  status = rsmi_wrapper(rsmi_dev_compute_partition_supported_xcp_configs_get, processor_handle, 0,
+  status = rsmi_wrapper(rsmi_dev_compute_partition_supported_xcp_configs_get, query_handle, 0,
                         supported_xcp_configs, kLenXCPConfigSize);
   if (status == AMDSMI_STATUS_SUCCESS) {
     accelerator_capabilities.clear();
@@ -3795,7 +3951,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   char current_partition[kCurrentPartitionSize] = {0};
   std::string current_partition_str = "N/A";
   amdsmi_status_t compute_status =
-      amdsmi_get_gpu_compute_partition(processor_handle, current_partition, kCurrentPartitionSize);
+      amdsmi_get_gpu_compute_partition(query_handle, current_partition, kCurrentPartitionSize);
   ss << __PRETTY_FUNCTION__ << " | amdsmi_get_gpu_compute_partition() current_partition = |"
      << current_partition << "|";
   LOG_DEBUG(ss);
@@ -3836,7 +3992,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   }
 
   amdsmi_gpu_metrics_t metric_info = {};
-  status = amdsmi_get_gpu_metrics_info(processor_handle, &metric_info);
+  status = amdsmi_get_gpu_metrics_info(query_handle, &metric_info);
   if (status == AMDSMI_STATUS_SUCCESS &&
       metric_info.num_partition != std::numeric_limits<uint16_t>::max()) {
     profile->num_partitions = metric_info.num_partition;
@@ -3853,7 +4009,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
     } else if (profile->profile_type == AMDSMI_ACCELERATOR_PARTITION_CPX) {
       // Note: # of XCDs is max # of partitions CPX supports
       uint16_t tmp_xcd_count = 0;
-      amdsmi_status_t xcd_status = amdsmi_get_gpu_xcd_counter(processor_handle, &tmp_xcd_count);
+      amdsmi_status_t xcd_status = amdsmi_get_gpu_xcd_counter(query_handle, &tmp_xcd_count);
       if (xcd_status == AMDSMI_STATUS_SUCCESS) {
         profile->num_partitions = tmp_xcd_count;
       }
@@ -3887,8 +4043,8 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   // Add memory partition capabilities here
   constexpr uint32_t kLenCapsSize = 30;
   char memory_caps[kLenCapsSize];
-  status = rsmi_wrapper(rsmi_dev_memory_partition_capabilities_get, processor_handle, 0,
-                        memory_caps, kLenCapsSize);
+  status = rsmi_wrapper(rsmi_dev_memory_partition_capabilities_get, query_handle, 0, memory_caps,
+                        kLenCapsSize);
   ss << __PRETTY_FUNCTION__ << " | rsmi_dev_memory_partition_capabilities_get Returning: "
      << smi_amdgpu_get_status_string(status, false) << " | Type: memory_partition_capabilities"
      << " | Data: " << memory_caps;
