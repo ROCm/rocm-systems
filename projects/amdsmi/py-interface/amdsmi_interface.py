@@ -83,8 +83,6 @@ AMDSMI_MAX_CONTAINER_TYPE = 2
 AMDSMI_MAX_CACHE_TYPES = 10
 AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK = 64
 AMDSMI_GPU_UUID_SIZE = 38
-_AMDSMI_STRING_LENGTH = 80
-_AMDSMI_MAX_STRING_LENGTH = 256
 
 
 class AmdSmiStatus(IntEnum):
@@ -3798,10 +3796,10 @@ def amdsmi_get_nic_fw_version(processor_handle: amdsmi_wrapper.amdsmi_processor_
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    uuid = ctypes.create_string_buffer(_AMDSMI_MAX_STRING_LENGTH)
+    uuid = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     uuid_length = ctypes.c_uint32()
-    uuid_length.value = _AMDSMI_MAX_STRING_LENGTH
+    uuid_length.value = AMDSMI_MAX_STRING_LENGTH
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_nic_fw_version(processor_handle, ctypes.byref(uuid_length), uuid)
@@ -4076,9 +4074,9 @@ def amdsmi_get_gpu_vendor_name(processor_handle: processor_handle_t) -> str:
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     length = ctypes.c_uint64()
-    length.value = _AMDSMI_STRING_LENGTH
+    length.value = AMDSMI_MAX_STRING_LENGTH
 
-    vendor_name = ctypes.create_string_buffer(_AMDSMI_STRING_LENGTH)
+    vendor_name = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     _check_res(amdsmi_wrapper.amdsmi_get_gpu_vendor_name(processor_handle, vendor_name, length))
 
@@ -4111,9 +4109,9 @@ def amdsmi_get_gpu_vram_vendor(processor_handle: processor_handle_t):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     length = ctypes.c_uint32()
-    length.value = _AMDSMI_STRING_LENGTH
+    length.value = AMDSMI_MAX_STRING_LENGTH
 
-    vram_vendor = ctypes.create_string_buffer(_AMDSMI_STRING_LENGTH)
+    vram_vendor = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     _check_res(amdsmi_wrapper.amdsmi_get_gpu_vram_vendor(processor_handle, vram_vendor, length))
 
@@ -4137,9 +4135,9 @@ def amdsmi_get_gpu_subsystem_name(processor_handle: processor_handle_t):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     length = ctypes.c_uint64()
-    length.value = _AMDSMI_STRING_LENGTH
+    length.value = AMDSMI_MAX_STRING_LENGTH
 
-    name = ctypes.create_string_buffer(_AMDSMI_STRING_LENGTH)
+    name = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     _check_res(amdsmi_wrapper.amdsmi_get_gpu_subsystem_name(processor_handle, name, length))
 
@@ -4355,9 +4353,9 @@ def amdsmi_get_gpu_compute_partition(processor_handle: processor_handle_t):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     length = ctypes.c_uint32()
-    length.value = _AMDSMI_STRING_LENGTH
+    length.value = AMDSMI_MAX_STRING_LENGTH
 
-    compute_partition = ctypes.create_string_buffer(_AMDSMI_STRING_LENGTH)
+    compute_partition = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_compute_partition(processor_handle, compute_partition, length)
@@ -4425,9 +4423,9 @@ def amdsmi_get_gpu_memory_partition(processor_handle: processor_handle_t):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     length = ctypes.c_uint32()
-    length.value = _AMDSMI_STRING_LENGTH
+    length.value = AMDSMI_MAX_STRING_LENGTH
 
-    memory_partition = ctypes.create_string_buffer(_AMDSMI_STRING_LENGTH)
+    memory_partition = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_memory_partition(processor_handle, memory_partition, length)
@@ -4979,10 +4977,10 @@ def amdsmi_get_gpu_topo_cpu_affinity(processor_handle: amdsmi_wrapper.amdsmi_pro
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    gpucpuaffid = ctypes.create_string_buffer(_AMDSMI_MAX_STRING_LENGTH)
+    gpucpuaffid = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     gpucpuaffid_length = ctypes.c_uint32()
-    gpucpuaffid_length.value = _AMDSMI_MAX_STRING_LENGTH
+    gpucpuaffid_length.value = AMDSMI_MAX_STRING_LENGTH
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_topo_cpu_affinity(
@@ -4996,10 +4994,10 @@ def amdsmi_get_nic_topo_cpu_affinity(processor_handle: amdsmi_wrapper.amdsmi_pro
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    niccpuaffid = ctypes.create_string_buffer(_AMDSMI_MAX_STRING_LENGTH)
+    niccpuaffid = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     niccpuaffid_length = ctypes.c_uint32()
-    niccpuaffid_length.value = _AMDSMI_MAX_STRING_LENGTH
+    niccpuaffid_length.value = AMDSMI_MAX_STRING_LENGTH
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_nic_topo_cpu_affinity(
@@ -5013,10 +5011,10 @@ def amdsmi_get_switch_topo_cpu_affinity(processor_handle: amdsmi_wrapper.amdsmi_
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    switchcpuaffid = ctypes.create_string_buffer(_AMDSMI_MAX_STRING_LENGTH)
+    switchcpuaffid = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     switchcpuaffid_length = ctypes.c_uint32()
-    switchcpuaffid_length.value = _AMDSMI_MAX_STRING_LENGTH
+    switchcpuaffid_length.value = AMDSMI_MAX_STRING_LENGTH
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_switch_topo_cpu_affinity(
@@ -5036,10 +5034,10 @@ def amdsmi_get_nic_gpu_topo_info(
     if not isinstance(processor_handle_dst, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle_dst, amdsmi_wrapper.amdsmi_processor_handle)
 
-    niccgpuinfo = ctypes.create_string_buffer(_AMDSMI_MAX_STRING_LENGTH)
+    niccgpuinfo = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     niccgpuinfo_length = ctypes.c_uint32()
-    niccgpuinfo_length.value = _AMDSMI_MAX_STRING_LENGTH
+    niccgpuinfo_length.value = AMDSMI_MAX_STRING_LENGTH
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_nic_gpu_topo_info(
