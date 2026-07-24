@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/output/agent_info.hpp"
 #include "lib/output/counter_info.hpp"
+#include "lib/output/format_path.hpp"
 #include "lib/output/metadata.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -321,6 +322,25 @@ agent_info(uint64_t agent_handle, const char** agent_info_str)
         }
     }
     *agent_info_str = agent_json.at(rocprofiler_agent_id_t{agent_handle}).c_str();
+}
+
+int
+format_output_path(const char* input, const char* tag, const char** output) noexcept
+{
+    if(!output) return 0;
+    *output = nullptr;
+    if(!input) return 0;
+
+    try
+    {
+        static thread_local auto formatted = std::string{};
+        formatted                          = tool::format_path(input, (tag) ? tag : "");
+        *output                            = formatted.c_str();
+        return 1;
+    } catch(...)
+    {
+        return 0;
+    }
 }
 
 ROCPROFILER_EXTERN_C_FINI
