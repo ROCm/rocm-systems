@@ -66,37 +66,6 @@ cmake --build build --target amd_smi -j"$(nproc)"
 A build without `-DENABLE_WSL_BACKEND=ON` produces the standard native library;
 the WSL source is not compiled and the intercept hooks expand to nothing.
 
-## Activating the backend at runtime
-
-Even in a WSL-enabled build, the backend stays inert until it is activated. This
-lets a single binary ship the capability while defaulting to native behavior.
-
-While the backend returns mock data (the D3DKMT implementation is still being
-brought up), activation is **explicit only** so a real WSL2 host is never
-silently served synthetic data:
-
-| `AMDSMI_WSL_MODE` | Behavior |
-|-------------------|----------|
-| `1` | Enable the WSL backend. |
-| any other value, or unset | Native behavior. |
-
-```{note}
-Only the exact value `1` enables the backend; any other non-empty value (for
-example `true` or `yes`) is treated as off. Automatic activation from the
-presence of `/sys/module/dxgkrnl` is deferred until the production D3DKMT backend
-replaces the mock.
-```
-
-Example:
-
-```bash
-# Enable the WSL backend for a single command
-AMDSMI_WSL_MODE=1 amd-smi static
-
-# Native behavior (default)
-amd-smi metric
-```
-
 ## Impact on existing scripts
 
 The WSL backend is designed to be a drop-in. For users with existing automation:
@@ -109,18 +78,18 @@ The WSL backend is designed to be a drop-in. For users with existing automation:
   than wrong. Scripts should already tolerate `N/A` for unsupported hardware;
   the same handling covers WSL.
 - **Native installs are unaffected.** If you never build with
-  `-DENABLE_WSL_BACKEND=ON` or never set `AMDSMI_WSL_MODE=1`, nothing changes.
-- **Opt-in is explicit.** The backend activates only when you set
-  `AMDSMI_WSL_MODE=1`, so nothing changes for a script until you ask for it.
+  `-DENABLE_WSL_BACKEND=ON` or never set `=1`, nothing changes.
 
 ## Verifying
 
 ```bash
 # Confirm you are on WSL
+ls /dev/dxg && echo "wsl present"
+
 ls /sys/module/dxgkrnl && echo "dxgkrnl present"
 
 # Confirm amd-smi is answering through the WSL backend
-AMDSMI_WSL_MODE=1 amd-smi static --asic
+amd-smi static --asic
 ```
 
 If the backend is active you will see WDDM-sourced values for the supported

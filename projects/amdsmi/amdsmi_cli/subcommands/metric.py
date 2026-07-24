@@ -128,6 +128,10 @@ class MetricCommands:
                 args.base_board = base_board
             if gpu_board:
                 args.gpu_board = gpu_board
+            if partition:
+                args.partition = partition
+            if not hasattr(args, 'partition'):
+                args.partition = False
             if power:
                 args.power = power
             if clock:

@@ -72,6 +72,10 @@ class WSLGPUBackend : public IGPUBackend {
   amdsmi_status_t GetUuid(unsigned int*, char*) override;
   amdsmi_status_t GetGpuCacheInfo(amdsmi_gpu_cache_info_t*) override;
   amdsmi_status_t GetFwInfo(amdsmi_fw_info_t*) override;
+  amdsmi_status_t GetGpuMetricsInfo(amdsmi_gpu_metrics_t*) override;
+  amdsmi_status_t GetPowerCapInfo(amdsmi_power_cap_info_t*) override;
+  amdsmi_status_t GetFanSpeed(uint32_t sensor_ind, int64_t* speed) override;
+  amdsmi_status_t GetFanSpeedMax(uint32_t sensor_ind, uint64_t* max_speed) override;
 
   // Device identity (populated from HsaNodeProperties at construction).
   uint32_t node_id() const { return node_id_; }

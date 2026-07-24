@@ -2214,11 +2214,25 @@ amdsmi_status_t amdsmi_get_gpu_fan_rpms(amdsmi_processor_handle processor_handle
 
 amdsmi_status_t amdsmi_get_gpu_fan_speed(amdsmi_processor_handle processor_handle,
                                          uint32_t sensor_ind, int64_t* speed) {
+#ifdef ENABLE_WSL_BACKEND
+  AMDSMI_CHECK_INIT();
+  amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+  amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  if (auto* b = gpu_device->backend()) return b->GetFanSpeed(sensor_ind, speed);
+#endif
   return rsmi_wrapper(rsmi_dev_fan_speed_get, processor_handle, 0, sensor_ind, speed);
 }
 
 amdsmi_status_t amdsmi_get_gpu_fan_speed_max(amdsmi_processor_handle processor_handle,
                                              uint32_t sensor_ind, uint64_t* max_speed) {
+#ifdef ENABLE_WSL_BACKEND
+  AMDSMI_CHECK_INIT();
+  amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+  amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  if (auto* b = gpu_device->backend()) return b->GetFanSpeedMax(sensor_ind, max_speed);
+#endif
   return rsmi_wrapper(rsmi_dev_fan_speed_max_get, processor_handle, 0, sensor_ind, max_speed);
 }
 
@@ -4105,6 +4119,15 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
     return AMDSMI_STATUS_INVAL;  // Return error if pgpu_metrics is null
   }
 
+#ifdef ENABLE_WSL_BACKEND
+  {
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (r != AMDSMI_STATUS_SUCCESS) return r;
+    if (auto* b = gpu_device->backend()) return b->GetGpuMetricsInfo(pgpu_metrics);
+  }
+#endif
+
   *pgpu_metrics = amdsmi_gpu_metrics_t{};
   rsmi_gpu_metrics_t rsmi_metrics{};
   auto status = rsmi_wrapper(rsmi_dev_gpu_metrics_info_get, processor_handle, 0, &rsmi_metrics);
@@ -4158,6 +4181,9 @@ amdsmi_status_t amdsmi_get_power_cap_info(amdsmi_processor_handle processor_hand
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* b = gpudevice->backend()) return b->GetPowerCapInfo(info);
+#endif
   // Ignore errors to get as much as possible info.
   memset(info, 0, sizeof(amdsmi_power_cap_info_t));
 
@@ -4276,6 +4302,26 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
                                     amdsmi_clk_type_t clk_type, amdsmi_frequencies_t* f) {
   AMDSMI_CHECK_INIT();
   // nullptr api supported
+
+#ifdef ENABLE_WSL_BACKEND
+  {
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (r != AMDSMI_STATUS_SUCCESS) return r;
+    if (auto* b = gpu_device->backend()) {
+      amdsmi_clk_info_t clk_info = {};
+      amdsmi_status_t ret = b->GetClockInfo(clk_type, &clk_info);
+      if (ret != AMDSMI_STATUS_SUCCESS) return ret;
+      if (f != nullptr) {
+        std::memset(f, 0, sizeof(*f));
+        f->num_supported = 1;
+        f->current = 0;
+        f->frequency[0] = static_cast<uint64_t>(clk_info.clk) * 1000000ULL;
+      }
+      return AMDSMI_STATUS_SUCCESS;
+    }
+  }
+#endif
 
   // VCLK/DCLK have no rsmi/gpu_metrics path; read directly from pp_dpm_* sysfs.
   if (clk_type == AMDSMI_CLK_TYPE_VCLK0 || clk_type == AMDSMI_CLK_TYPE_VCLK1 ||
@@ -5201,6 +5247,9 @@ amdsmi_status_t amdsmi_get_gpu_total_ecc_count(amdsmi_processor_handle processor
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (status != AMDSMI_STATUS_SUCCESS) return status;
+#ifdef ENABLE_WSL_BACKEND
+  if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
+#endif
 
   amdsmi_ras_err_state_t state = {};
   // Iterate through the ecc blocks

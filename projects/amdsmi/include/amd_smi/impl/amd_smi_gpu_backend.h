@@ -90,6 +90,16 @@ class IGPUBackend {
   virtual amdsmi_status_t GetFwInfo(amdsmi_fw_info_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
+  virtual amdsmi_status_t GetGpuMetricsInfo(amdsmi_gpu_metrics_t*) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  virtual amdsmi_status_t GetPowerCapInfo(amdsmi_power_cap_info_t*) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  virtual amdsmi_status_t GetFanSpeed(uint32_t, int64_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
+  virtual amdsmi_status_t GetFanSpeedMax(uint32_t, uint64_t*) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
 
   IGPUBackend(const IGPUBackend&) = delete;
   IGPUBackend& operator=(const IGPUBackend&) = delete;

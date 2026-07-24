@@ -314,10 +314,8 @@ amdsmi_status_t WSLGPUBackend::load_device_info() const {
 
 amdsmi_status_t WSLGPUBackend::GetKfdInfo(amdsmi_kfd_info_t* info) {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  std::memset(info, 0, sizeof(*info));
-  info->kfd_id = unique_id_ ? unique_id_ : std::numeric_limits<uint64_t>::max();
-  info->node_id = node_id_;
-  info->current_partition_id = std::numeric_limits<uint32_t>::max();
+  // No KFD in WSL — the KFD ID and node ID concepts don't apply.
+  std::memset(info, 0xFF, sizeof(*info));
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -336,9 +334,16 @@ amdsmi_status_t WSLGPUBackend::GetAsicInfo(amdsmi_asic_info_t* info) {
     info->device_id = a.device_id;
     info->rev_id = a.rev_id;
     std::snprintf(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, "%016lx", a.asic_serial);
-    info->oam_id = std::numeric_limits<uint32_t>::max();
+    info->oam_id = gpu_id_;
     info->num_of_compute_units = a.num_of_compute_units;
-    info->target_graphics_version = a.target_graphics_version;
+    // Convert IP version (major<<16|minor<<8|stepping) to the nibble-packed
+    // hex format Python expects: hex(value)[2:] == "MMSS" (e.g. 0x1100 → "gfx1100").
+    {
+      uint32_t maj = (a.target_graphics_version >> 16) & 0xFF;
+      uint32_t min = (a.target_graphics_version >> 8) & 0xFF;
+      uint32_t stp = a.target_graphics_version & 0xFF;
+      info->target_graphics_version = ((maj / 10) << 12) | ((maj % 10) << 8) | (min << 4) | stp;
+    }
     info->subsystem_id = a.subsystem_id;
     return AMDSMI_STATUS_SUCCESS;
   }
@@ -353,7 +358,7 @@ amdsmi_status_t WSLGPUBackend::GetAsicInfo(amdsmi_asic_info_t* info) {
   info->device_id = device_id_;
   info->rev_id = std::numeric_limits<uint32_t>::max();
   copy_string(info->asic_serial, "ffffffffffffffff");
-  info->oam_id = std::numeric_limits<uint32_t>::max();
+  info->oam_id = gpu_id_;
   info->num_of_compute_units =
       num_compute_units_ ? num_compute_units_ : std::numeric_limits<uint32_t>::max();
   info->target_graphics_version = std::numeric_limits<uint64_t>::max();
@@ -647,6 +652,76 @@ amdsmi_status_t WSLGPUBackend::GetFwInfo(amdsmi_fw_info_t* info) {
 #else
   return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
+}
+
+amdsmi_status_t WSLGPUBackend::GetFanSpeed(uint32_t /* sensor_ind */, int64_t* speed) {
+  if (speed == nullptr) return AMDSMI_STATUS_INVAL;
+#ifdef AMDSMI_HAS_ROCDXG_SMI
+  rocdxg_smi_gpu_metrics_info_t metrics = {};
+  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_gpu_metrics_info(node_id_, &metrics);
+  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
+  *speed = static_cast<int64_t>(metrics.current_fan_speed_percent);
+  return AMDSMI_STATUS_SUCCESS;
+#else
+  return AMDSMI_STATUS_NOT_SUPPORTED;
+#endif
+}
+
+amdsmi_status_t WSLGPUBackend::GetFanSpeedMax(uint32_t /* sensor_ind */, uint64_t* max_speed) {
+  if (max_speed == nullptr) return AMDSMI_STATUS_INVAL;
+  *max_speed = 100;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t WSLGPUBackend::GetPowerCapInfo(amdsmi_power_cap_info_t* info) {
+  if (info == nullptr) return AMDSMI_STATUS_INVAL;
+  std::memset(info, 0, sizeof(*info));
+#ifdef AMDSMI_HAS_ROCDXG_SMI
+  amdsmi_power_info_t power = {};
+  amdsmi_status_t r = GetPowerInfo(&power);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  if (power.power_limit != std::numeric_limits<uint32_t>::max())
+    info->power_cap = power.power_limit;
+#endif
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t WSLGPUBackend::GetGpuMetricsInfo(amdsmi_gpu_metrics_t* info) {
+  if (info == nullptr) return AMDSMI_STATUS_INVAL;
+  // Init all numeric fields to sentinel (0xFF = max for all uint types); keep the pointer null.
+  std::memset(info, 0xFF, sizeof(*info));
+  info->apu_metrics = nullptr;
+#ifdef AMDSMI_HAS_ROCDXG_SMI
+  rocdxg_smi_gpu_metrics_info_t metrics = {};
+  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_gpu_metrics_info(node_id_, &metrics);
+  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
+
+  // rocdxg temperatures are in degrees C (uint32_t); amdsmi_gpu_metrics_t uses uint16_t degrees C.
+  info->temperature_edge = static_cast<uint16_t>(metrics.temperature_edge);
+  info->temperature_hotspot = static_cast<uint16_t>(metrics.temperature_hotspot);
+  info->average_gfx_activity = static_cast<uint16_t>(metrics.average_gfx_activity);
+  info->average_umc_activity = static_cast<uint16_t>(metrics.average_umc_activity);
+  info->current_socket_power = static_cast<uint16_t>(metrics.current_socket_power);
+  info->average_socket_power = static_cast<uint16_t>(metrics.current_socket_power);
+  // Populate current clocks from rocdxg. Guard against UINT32_MAX sentinel
+  // (rocdxg returns UINT32_MAX when a field is unsupported on this version).
+  if (metrics.current_gfxclk <= 0xFFFEU) {
+    // All XCCs run at the same GFX clock on MI300X; propagate to all XCC slots.
+    uint32_t n = std::min(num_xcc_, static_cast<uint32_t>(AMDSMI_MAX_NUM_GFX_CLKS));
+    for (uint32_t i = 0; i < n; ++i)
+      info->current_gfxclks[i] = static_cast<uint16_t>(metrics.current_gfxclk);
+  }
+  if (metrics.current_socclk <= 0xFFFEU)
+    info->current_socclk = static_cast<uint16_t>(metrics.current_socclk);
+  // VCN/JPEG decoders report 0% activity in WSL (no video workloads on this path).
+  std::fill(info->vcn_activity, info->vcn_activity + AMDSMI_MAX_NUM_VCN, static_cast<uint16_t>(0));
+  std::fill(info->jpeg_activity, info->jpeg_activity + AMDSMI_MAX_NUM_JPEG, static_cast<uint16_t>(0));
+  // GFX clocks are not locked in WSL; report 0 (all DISABLED bits).
+  info->gfxclk_lock_status = 0;
+  // No throttle telemetry in WSL; report unthrottled.
+  info->throttle_status = 0;
+#endif
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t WSLGPUBackend::GetProcessList(std::vector<amdsmi_proc_info_t>* processes) {
