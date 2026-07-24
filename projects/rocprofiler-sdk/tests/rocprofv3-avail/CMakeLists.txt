@@ -127,17 +127,21 @@ set(CLI_DEPENDS
     rocprofiler-sdk-shared-library rocprofiler-sdk-roctx-shared-library
     rocprofiler-sdk-rocpd-shared-library)
 add_custom_target(rocprofv3-avail-cli-dependencies)
-add_dependencies(rocprofv3-avail-cli-dependencies ${CLI_DEPENDS})
+foreach(_TARGET IN LISTS CLI_DEPENDS)
+    if(TARGET ${_TARGET})
+        add_dependencies(rocprofv3-avail-cli-dependencies ${_TARGET})
+    endif()
+endforeach()
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-avail-cli-test
-    TEST_PATHS validate_cli.py
+    TEST_PATHS test_validate_cli.py
     COPY conftest.py
     CONFIG pytest.ini
     BUNDLE_TESTS
     ARGS --rocm-path ${rocprofiler-sdk_ROOT_DIR} --rocprofv3-avail
          $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> --rocprofv3
-         $<TARGET_FILE:rocprofiler-sdk::rocprofv3>
+         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -x
     TIMEOUT 300
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"
