@@ -2637,7 +2637,12 @@ hsa_status_t Runtime::Load() {
   // can return early through rocprofiler-register (so the tool path may not run
   // at all), installs tools on the wrong side of rocprofiler, and would tear
   // the DSO down with tool_libs_ (see LoadRocjitsuHook for the pinning contract).
-  LoadRocjitsuHook();
+  // Fail initialization if the hook cannot be installed: a ROCJITSU build must
+  // never come up with only the raw loader.
+  const hsa_status_t rocjitsu_status = LoadRocjitsuHook();
+  if (rocjitsu_status != HSA_STATUS_SUCCESS) {
+    return rocjitsu_status;
+  }
 #endif
 
   // Load tools libraries
@@ -2898,24 +2903,33 @@ constexpr char kRocjitsuHookLib[] = "librocjitsu_hooks.so";
 typedef bool (*rj_on_load_t)(::HsaApiTable*, uint64_t, uint64_t, const char* const*);
 }  // namespace
 
-void Runtime::LoadRocjitsuHook() {
+hsa_status_t Runtime::LoadRocjitsuHook() {
+  // A ROCJITSU build cannot translate without its hook. Every failure below
+  // fails closed by returning an error so Runtime::Load aborts initialization --
+  // never assert-only, which would compile out under NDEBUG and let a release
+  // runtime come up with only the raw loader and run untranslated code on A0.
   rocjitsu_hook_lib_ = os::LoadLib(kRocjitsuHookLib);
   if (rocjitsu_hook_lib_ == nullptr) {
-    // A ROCJITSU build cannot translate without its hook. Fail closed rather
-    // than silently running untranslated code objects.
     fprintf(stderr, "[hsa-runtime] ROCJITSU build could not load '%s'\n", kRocjitsuHookLib);
-    assert(false && "rocjitsu hook DSO failed to load in a ROCJITSU build");
-    return;
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
   auto on_load = reinterpret_cast<rj_on_load_t>(os::GetExportAddress(rocjitsu_hook_lib_, "OnLoad"));
   if (on_load == nullptr) {
     fprintf(stderr, "[hsa-runtime] '%s' is missing OnLoad\n", kRocjitsuHookLib);
-    assert(false && "rocjitsu hook DSO is missing OnLoad");
-    return;
+    os::CloseLib(rocjitsu_hook_lib_);
+    rocjitsu_hook_lib_ = nullptr;
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
-  on_load(&hsa_api_table().hsa_api, hsa_api_table().hsa_api.version.major_id,
-          /*failed_tool_count=*/0, /*failed_tool_names=*/nullptr);
+
+  if (!on_load(&hsa_api_table().hsa_api, hsa_api_table().hsa_api.version.major_id,
+               /*failed_tool_count=*/0, /*failed_tool_names=*/nullptr)) {
+    fprintf(stderr, "[hsa-runtime] '%s' OnLoad reported failure\n", kRocjitsuHookLib);
+    os::CloseLib(rocjitsu_hook_lib_);
+    rocjitsu_hook_lib_ = nullptr;
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
 }
 #endif  // ROCM_TRANSLATOR_ROCJITSU
 

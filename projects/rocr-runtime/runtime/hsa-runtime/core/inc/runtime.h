@@ -854,8 +854,11 @@ class Runtime {
 #if defined(ROCM_TRANSLATOR_ROCJITSU)
   /// @brief In a ROCJITSU build, load the rocjitsu hook DSO and call its OnLoad
   /// entry. Runs before LoadTools() so the hook's wrappers sit below
-  /// rocprofiler on the load path.
-  void LoadRocjitsuHook();
+  /// rocprofiler on the load path. Returns an error (which fails Runtime::Load)
+  /// if the DSO is missing, lacks OnLoad, or OnLoad reports failure: a ROCJITSU
+  /// build must not initialize without its translator, since that would leave
+  /// only the raw loader and could run untranslated code objects.
+  hsa_status_t LoadRocjitsuHook();
 #endif
 
   // @brief Binds Error handlers to this node.
