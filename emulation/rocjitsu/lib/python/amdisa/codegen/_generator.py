@@ -7764,7 +7764,6 @@ class CodeGenerator:
                                     '      }\n'
                                     '      dpp_src0_ = std::make_unique<DppOperand>(\n'
                                     '          *src_operands_[0], result, static_cast<int>(ws));\n'
-                                    '      src_operands_[0] = dpp_src0_.get();\n'
                                     '    }\n' + _sdwa_src1_block + '  }\n'
                                 )
                             _dpp_preamble += (

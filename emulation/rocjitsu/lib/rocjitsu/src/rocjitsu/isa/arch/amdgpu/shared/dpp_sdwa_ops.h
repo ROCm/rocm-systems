@@ -316,7 +316,6 @@ inline void stage_dpp_operand(Operand *&src0, const DppAccessPlan &plan,
     }
     storage = std::make_unique<StagedOperand>(*src0, result, static_cast<int>(wf.wf_size()));
   }
-  src0 = storage.get();
 }
 
 /// @brief Pre-permute src0 for a DPP instruction.
