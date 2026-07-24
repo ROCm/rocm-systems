@@ -59,7 +59,7 @@ scratch before promotion.
 | **P4 hip-moi MFMA attention** | 🟩 current accepted bundle: two exact clean oracles, 12/12 group-FLAT coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟩 post-rebase accepted bundle: exact MFMA oracle, complete 12/12 accesses plus 4/4 barriers, paired 15.61x, and a reviewed exact-one barrier drop that fails the oracle and produces one Record/Replay diagnosis; containment, health, cleanup, and clean provenance pass | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before either oracle | 🟩 current generation-qualified bundle: both exact clean oracles, zero diagnostics, complete 12/12 accesses plus 4/4 barriers, paired 15.56x, reviewed exact-one qualified miss, bounded memory and cleanup, containment, health, and clean provenance |
 | **P4 hip-moi Stream-K arrival** | 🟩 current accepted bundle: exact clean, 4/4 coverage, paired 143.70x, reviewed exact-one CDNA4 atomic-order fault, containment, health, and clean provenance | 🟩 frozen accepted bundle: exact clean and paired oracles, complete 4/4 accesses plus 4/4 barriers, 10/10 atomics, and 16/16 fences, zero diagnostics, 34.8x paired slowdown, and a reviewed exact-one release-order fault with pass/qualified-miss outcome, containment, health, cleanup, and clean provenance | 🟥 current planner requires a spill for a dynamic-stack owner, which is unsupported, and rejects before an oracle | 🟥 current dynamic-stack owner has no safe scalar placement and rejects before an oracle |
 | **P4 hip-moi tree atomic-OR** | 🟩 current accepted bundle: both exact clean tests, 4/4 coverage, paired 185.5x, reviewed exact-one producer-release atomic-order fault, containment, health, and clean provenance | 🟩 frozen accepted bundle: exact clean and paired oracles, complete 4/4 accesses plus 4/4 barriers, 10/10 atomics, and 16/16 fences, zero diagnostics, 47.08x paired slowdown, and a reviewed exact-one producer-release atomic-order fault with pass/no-diagnosis outcome, containment, health, and clean provenance | 🟥 current physical rerun rejects before an oracle: the dynamic-stack owner needs transient spilling and its synchronization-aware Sampled state also needs a per-workitem sequence below a full ordinary VGPR bank; the existing private-state fallback is incompatible with a compiler-managed dynamic stack | 🟥 current dynamic-stack owner has a full ordinary VGPR bank, so persistent scalar placement rejects the object before an oracle |
-| **P4 hip-moi Jakub attention** | 🩶 Assessed blocked: no target-native executable | 🩶 Assessed blocked: no target-native executable | 🩶 Assessed blocked: no target-native executable | 🩶 Assessed blocked: no target-native executable |
+| **P4 hip-moi Jakub attention** | 🩶 Target-native simulator baseline passes; profile unassessed | 🩶 Target-native simulator baseline passes; profile unassessed | 🩶 Target-native simulator baseline passes; profile unassessed | 🩶 Target-native simulator baseline passes; profile unassessed |
 
 ### Current-matrix executable audit
 
@@ -81,12 +81,12 @@ an instrumentation acceptance claim.
 | `wmma-attention` | **Runnable and smoke-passed** | `hip_moi_instrumented_cdna4_mfma_attention_block_test`, `HipMoiCdna4MfmaAttentionBlock.ExactContextMatchesHostReference`; physical gfx950 oracle passes in 142 ms.  The historical validation ID is retained, but the native operation is MFMA rather than WMMA. |
 | `streamk-arrival` | **Runnable and smoke-passed** | `hip_moi_instrumented_cdna4_mfma_streamk_arrival_counter_test`, `HipMoiCdna4MfmaStreamKArrivalCounter.AcqRelFetchAddOrdersMfmaPartials`; physical gfx950 oracle passes in 92 ms. |
 | `tree-atomic-or` | **Runnable and smoke-passed** | `hip_moi_instrumented_cdna4_mfma_streamk_tree_atomic_or_test`, `HipMoiCdna4MfmaStreamKTreeAtomicOr.AcqRelBitmaskOrdersMfmaPartials`; physical gfx950 oracle passes in 101 ms. |
-| `jakub-attention` | **Blocked** | The registry deliberately requires `hip_moi_reference_cdna4_jakub_matmul`; that target-native executable does not yet exist. |
+| `jakub-attention` | **Runnable and simulator-smoke-passed** | `hip_moi_reference_cdna4_jakub_matmul`, `SafeFp16Packed/JakubCdna4MatmulReference.MatchesHostReference/*`; both parameterized cases pass through the gfx950 RocJITsu simulator. |
 
-The blocked Jakub row remains visible so its missing deliverable is explicit.
-It must not be scheduled as executable validation until the named artifact
-exists.  All smoke commands use the physical device through the workspace
-TheRock runtime, with software-model environment variables unset.
+The five previously available smoke commands use the physical device through
+the workspace TheRock runtime, with software-model environment variables
+unset.  The new Jakub row has target-native simulator evidence only; it is not
+yet counted as physical gfx950 or instrumentation acceptance evidence.
 
 ## RocJitsu test-corpus expansion
 
@@ -211,9 +211,9 @@ instrumentation acceptance evidence.
 | ISA | `amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-` |
 | Driver/runtime | ROCk 6.14.14; workspace TheRock HSA runtime 1.21 |
 | ROCm distribution | `$WORKSPACE_ROOT/TheRock/build/dist/rocm` |
-| Physical dispatch smoke | On 2026-07-22, workspace TheRock `rocminfo` reports MI355X / `gfx950:sramecc+:xnack-`.  Five native CDNA4 hip-moi host-reference tests pass in 92--188 ms, and corpus `hip_matmul` m128³ passes correctness for all three selected MFMA/shared-memory kernels. |
+| Physical dispatch smoke | On 2026-07-22, workspace TheRock `rocminfo` reports MI355X / `gfx950:sramecc+:xnack-`.  Five native CDNA4 hip-moi host-reference tests pass in 92--188 ms, and corpus `hip_matmul` m128³ passes correctness for all three selected MFMA/shared-memory kernels.  Separately, all six target-native hip-moi executables, including both Jakub parameterizations, pass 14/14 tests through the gfx950 RocJITsu simulator. |
 | Validation corpus | `iree-test-suites` `49f46d6d4370e5aa0a6367751474e20c6c4e95c0`; required Sharktank assets present; LFS fsck clean |
-| Validation doctor | `f5c91c6d1d`: target-aware registry and workload-scoped doctor are active. The gfx950 `d128-block` doctor passes with the current hook, CDNA4 executable, workspace TheRock `rocminfo`, and hip-moi source/build. The all-workload doctor now resolves all five available hip-moi roles to CDNA4/MFMA artifacts and isolates the remaining missing inputs to the Qwen build tree plus a true CDNA4 Jakub counterpart. |
+| Validation doctor | The target-aware registry and workload-scoped doctor resolve all six native hip-moi roles through the explicit `hip-moi-build-gfx950-tests` build tree, including the Jakub counterpart. |
 | RocJitsu test corpus | `rocjitsu-test-corpus` `aa54cc86c9ebff3eb840743b36ff8d9b3b2d43c4`; gfx950 enables source-built HIP matmul, HipKittens, and rocBLAS cases.  Its packaged Tensile artifacts are gfx1250-only. |
 | gfx950 Tensile source pool | `rocm-libraries` `c2fafc16393d0ce47a0a5801d827d43f0d3714a4`; 36 gfx950 GEMM YAMLs are available for reduction and packaging, but none is presently a validation-registry row. |
 | PyTorch discovery | The gfx1250-only thin-wheel mismatch is diagnosed and isolated.  The separate official nightly environment passes `torch.arange` plus all six portable one-repetition exact oracles on gfx950.  Workload-scoped doctor confirms gfx950 numeric dispatch and exact-hook mapping. |
@@ -303,6 +303,13 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-23: Added the target-native gfx950 Jakub reference executable and
+  resolved all six hip-moi roles through the explicit
+  `hip-moi-build-gfx950-tests` tree.  The six binaries pass 14/14 tests through
+  the RocJITsu gfx950 simulator, including both parameterized Jakub cases.
+  This is simulator baseline evidence only; the Jakub profile cells remain
+  unassessed on physical gfx950 and under ConSan.
 
 - 2026-07-22: Commits `7fbd3b708d`, `cb82107577`, and `cd8230c019`
   move the hip-moi Record/Replay frontier past its typed dynamic-stack limit.

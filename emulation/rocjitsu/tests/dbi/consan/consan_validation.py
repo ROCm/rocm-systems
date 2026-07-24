@@ -974,7 +974,8 @@ GFX942_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
 GFX950_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
     "d128-block": {
         "relative_path": (
-            "hip-moi-build/tests/hip_moi_instrumented_cdna4_d128_attention_block_test"
+            "hip-moi-build-gfx950-tests/tests/"
+            "hip_moi_instrumented_cdna4_d128_attention_block_test"
         ),
         "clean_filter": "HipMoiCdna4D128AttentionBlock.*",
         # This specialization executes the admitted group-FLAT probes on
@@ -985,7 +986,8 @@ GFX950_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
     },
     "d128-pressure": {
         "relative_path": (
-            "hip-moi-build/tests/hip_moi_instrumented_cdna4_d128_attention_pressure_test"
+            "hip-moi-build-gfx950-tests/tests/"
+            "hip_moi_instrumented_cdna4_d128_attention_pressure_test"
         ),
         "clean_filter": "HipMoiCdna4D128AttentionPressure.*",
         "overhead_filter": (
@@ -995,14 +997,15 @@ GFX950_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
     },
     "wmma-attention": {
         "relative_path": (
-            "hip-moi-build/tests/hip_moi_instrumented_cdna4_mfma_attention_block_test"
+            "hip-moi-build-gfx950-tests/tests/"
+            "hip_moi_instrumented_cdna4_mfma_attention_block_test"
         ),
         "clean_filter": "HipMoiCdna4MfmaAttentionBlock.*",
         "overhead_filter": "HipMoiCdna4MfmaAttentionBlock.ExactContextMatchesHostReference",
     },
     "streamk-arrival": {
         "relative_path": (
-            "hip-moi-build/tests/"
+            "hip-moi-build-gfx950-tests/tests/"
             "hip_moi_instrumented_cdna4_mfma_streamk_arrival_counter_test"
         ),
         "clean_filter": (
@@ -1014,7 +1017,7 @@ GFX950_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
     },
     "tree-atomic-or": {
         "relative_path": (
-            "hip-moi-build/tests/"
+            "hip-moi-build-gfx950-tests/tests/"
             "hip_moi_instrumented_cdna4_mfma_streamk_tree_atomic_or_test"
         ),
         # Clean, overhead, and the implicit fault fallback deliberately use
@@ -1026,11 +1029,10 @@ GFX950_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
             "HipMoiCdna4MfmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersMfmaPartials"
         ),
     },
-    # This name is intentionally not redirected to a different workload.  The
-    # doctor must report the missing CDNA4 Jakub artifact until hip-moi grows
-    # the semantically equivalent target-native test.
     "jakub-attention": {
-        "relative_path": "hip-moi-build/tests/hip_moi_reference_cdna4_jakub_matmul",
+        "relative_path": (
+            "hip-moi-build-gfx950-tests/tests/" "hip_moi_reference_cdna4_jakub_matmul"
+        ),
         "clean_filter": "SafeFp16Packed/JakubCdna4MatmulReference.MatchesHostReference/*",
         "overhead_filter": "SafeFp16Packed/JakubCdna4MatmulReference.MatchesHostReference/*",
     },

@@ -52,8 +52,9 @@ rocjitsu-build/
 
 For hip-moi rows, the runner requires the exact target-resolved executable
 reported by `manifest` and `doctor`; it does not require a generic
-`hip-moi-build/` alias. Current manifests use `hip-moi-build/` for gfx1201 and
-gfx950, `hip-moi-build-gfx942-tests/` for gfx942, and
+`hip-moi-build/` alias. Current manifests use `hip-moi-build/` for gfx1201,
+`hip-moi-build-gfx942-tests/` for gfx942,
+`hip-moi-build-gfx950-tests/` for gfx950, and
 `hip-moi-build-gfx1250-tests/` for gfx1250.
 
 ### gfx942 hip-moi simulator smoke

@@ -333,7 +333,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(
             workloads["d128-block"]["relative_path"],
             (
-                "hip-moi-build/tests/"
+                "hip-moi-build-gfx950-tests/tests/"
                 "hip_moi_instrumented_cdna4_d128_attention_block_test"
             ),
         )
@@ -347,7 +347,10 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(
             workloads["jakub-attention"]["relative_path"],
-            "hip-moi-build/tests/hip_moi_reference_cdna4_jakub_matmul",
+            (
+                "hip-moi-build-gfx950-tests/tests/"
+                "hip_moi_reference_cdna4_jakub_matmul"
+            ),
         )
         self.assertEqual(
             workloads["streamk-arrival"]["fault_families"],
@@ -499,13 +502,53 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertFalse(doctor["ok"])
 
     def test_gfx950_doctor_checks_resolved_cdna4_executables(self) -> None:
+        expected_paths = {
+            "d128-block": (
+                "hip-moi-build-gfx950-tests/tests/"
+                "hip_moi_instrumented_cdna4_d128_attention_block_test"
+            ),
+            "d128-pressure": (
+                "hip-moi-build-gfx950-tests/tests/"
+                "hip_moi_instrumented_cdna4_d128_attention_pressure_test"
+            ),
+            "wmma-attention": (
+                "hip-moi-build-gfx950-tests/tests/"
+                "hip_moi_instrumented_cdna4_mfma_attention_block_test"
+            ),
+            "streamk-arrival": (
+                "hip-moi-build-gfx950-tests/tests/"
+                "hip_moi_instrumented_cdna4_mfma_streamk_arrival_counter_test"
+            ),
+            "tree-atomic-or": (
+                "hip-moi-build-gfx950-tests/tests/"
+                "hip_moi_instrumented_cdna4_mfma_streamk_tree_atomic_or_test"
+            ),
+            "jakub-attention": (
+                "hip-moi-build-gfx950-tests/tests/"
+                "hip_moi_reference_cdna4_jakub_matmul"
+            ),
+        }
         with temporary_root() as workspace:
+            (workspace / "hip-moi").mkdir()
+            hook = (
+                workspace / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
+                "librocjitsu_dbi_hooks.so"
+            )
+            hook.parent.mkdir(parents=True)
+            hook.touch()
+            for relative_path in expected_paths.values():
+                executable = workspace / relative_path
+                executable.parent.mkdir(parents=True, exist_ok=True)
+                executable.touch()
+            self.assertFalse((workspace / "hip-moi-build").exists())
             with mock.patch.object(validation.shutil, "which", return_value="/tool"):
-                doctor = validation._doctor(workspace, "gfx950")
-        d128 = doctor["paths"]["workload:d128-block:executable"]
-        self.assertTrue(d128["path"].endswith("cdna4_d128_attention_block_test"))
-        jakub = doctor["paths"]["workload:jakub-attention:executable"]
-        self.assertTrue(jakub["path"].endswith("hip_moi_reference_cdna4_jakub_matmul"))
+                doctor = validation._doctor(workspace, "gfx950", tuple(expected_paths))
+        self.assertTrue(doctor["ok"])
+        for workload_id, relative_path in expected_paths.items():
+            with self.subTest(workload=workload_id):
+                executable = doctor["paths"][f"workload:{workload_id}:executable"]
+                self.assertEqual(executable["path"], str(workspace / relative_path))
+                self.assertTrue(executable["present"])
 
     def test_gfx1250_manifest_resolves_target_native_workloads(self) -> None:
         manifest = validation._manifest("gfx1250")
@@ -592,7 +635,9 @@ class ConSanValidationTest(unittest.TestCase):
                 "hip-moi-build-gfx942-tests/tests/" "hip_moi_instrumented_cdna3_mfma_"
             ),
             "gfx1201": "hip-moi-build/tests/hip_moi_instrumented_rdna4_wmma_",
-            "gfx950": "hip-moi-build/tests/hip_moi_instrumented_cdna4_mfma_",
+            "gfx950": (
+                "hip-moi-build-gfx950-tests/tests/" "hip_moi_instrumented_cdna4_mfma_"
+            ),
             "gfx1250": (
                 "hip-moi-build-gfx1250-tests/tests/"
                 "hip_moi_instrumented_gfx1250_wmma_"
