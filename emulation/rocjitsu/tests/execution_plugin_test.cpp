@@ -1593,12 +1593,37 @@ TEST(FormatTraceTest, ConflictBeforeTraceWindow) {
 
 TEST(DisasmCacheTest, HandlesNonMonotonicPcOrder) {
   plugins::race_detector::DisasmCache cache;
-  cache.record(0x540024b100, "s_nop 0");
-  cache.record(0x100002a100, "s_endpgm");
+  Instruction high_instruction("s_nop 0", nullptr);
+  Instruction low_instruction("s_endpgm", nullptr);
+  cache.record(0x540024b100, high_instruction);
+  cache.record(0x100002a100, low_instruction);
 
   auto disasm = cache.to_map();
   EXPECT_EQ(disasm.at(0x540024b100), "s_nop 0");
   EXPECT_EQ(disasm.at(0x100002a100), "s_endpgm");
+}
+
+TEST(DisasmCacheTest, DisassemblesOnlyFirstInstructionAtPc) {
+  class ObservableInstruction final : public Instruction {
+  public:
+    ObservableInstruction() : Instruction("s_count", nullptr) {}
+    bool was_disassembled() const { return !disassembly_.empty(); }
+  };
+
+  plugins::race_detector::DisasmCache cache;
+  ObservableInstruction first;
+  ObservableInstruction duplicate;
+
+  // DisasmCache is keyed by the absolute instruction PC. The value itself is
+  // arbitrary here; using the same synthetic PC proves that a newly decoded
+  // instruction at an already-cached address is not disassembled again.
+  constexpr uint64_t synthetic_pc = 0x100;
+  cache.record(synthetic_pc, first);
+  cache.record(synthetic_pc, duplicate);
+
+  EXPECT_TRUE(first.was_disassembled());
+  EXPECT_FALSE(duplicate.was_disassembled());
+  EXPECT_EQ(cache.to_map().at(synthetic_pc), "s_count");
 }
 
 TEST(RaceDetectorPluginOutputTest, DispatchLineUsesQuestionMarksForUnresolvedKernel) {
