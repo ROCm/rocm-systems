@@ -58,6 +58,9 @@ constexpr hsa_isa_t kGfx1250Isa{1250};
 
 // ASIC revision reported for kGfx1250Agent by fake_agent_get_info. 0 => A0.
 uint32_t g_fake_gfx1250_asic_revision = 0;
+// When true, fake_agent_get_info fails the ASIC_REVISION query for kGfx1250Agent,
+// simulating a gfx1250 device whose stepping cannot be read (unknown revision).
+bool g_fake_gfx1250_revision_query_fails = false;
 constexpr hsa_amd_memory_pool_t kGuestPool{10};
 constexpr hsa_amd_memory_pool_t kHostPool{20};
 constexpr hsa_amd_memory_pool_t kHostKernargPool{21};
@@ -199,6 +202,8 @@ hsa_status_t HSA_API fake_agent_get_info(hsa_agent_t agent, hsa_agent_info_t att
   if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION)) {
     if (agent.handle != kGfx1250Agent.handle)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if (g_fake_gfx1250_revision_query_fails)
+      return HSA_STATUS_ERROR; // simulate an unreadable stepping (unknown revision)
     *static_cast<uint32_t *>(value) = g_fake_gfx1250_asic_revision;
     return HSA_STATUS_SUCCESS;
   }
@@ -1608,6 +1613,68 @@ TEST(HsaHooksUnitTest, AutoA0ForwardsNonGfx1250Object) {
   // Forwarded verbatim: the loader saw the original reader, not a translated one.
   EXPECT_EQ(g_fake_load_agent_calls, 1);
   EXPECT_EQ(g_last_load_reader.handle, reader.handle);
+  OnUnload();
+}
+
+// In auto-A0 mode a load onto a gfx1250 agent whose ASIC revision cannot be read
+// is refused (fail-closed): the stepping is unknown, the agent might be A0, and
+// forwarding would risk running raw B0 text on A0 silicon. The object is not
+// handed to the loader.
+TEST(HsaHooksUnitTest, AutoA0LoadWithUnknownRevisionFailsClosed) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_fake_gfx1250_revision_query_fails = true; // gfx1250, but stepping unreadable
+  g_fake_load_agent_calls = 0;
+
+  // Valid gfx1250 bytes so the refusal is attributable to the unknown stepping,
+  // not to missing/invalid source bytes.
+  const auto header = make_amdgpu_elf_header(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  std::vector<uint8_t> image(reinterpret_cast<const uint8_t *>(&header),
+                             reinterpret_cast<const uint8_t *>(&header) + sizeof(header));
+  hsa_code_object_reader_t reader = register_code_object(api, image);
+
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_AGENT);
+  EXPECT_EQ(g_fake_load_agent_calls, 0);
+
+  g_fake_gfx1250_revision_query_fails = false;
+  OnUnload();
+}
+
+// In auto-A0 mode a confirmed non-A0 gfx1250 agent (nonzero revision, e.g. real
+// B0) is not a translation target: its loads forward to the loader unchanged.
+TEST(HsaHooksUnitTest, AutoA0ForwardsConfirmedNonA0Gfx1250Agent) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_fake_gfx1250_asic_revision = 7; // gfx1250 but not A0
+  g_fake_load_agent_calls = 0;
+
+  const auto header = make_amdgpu_elf_header(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  std::vector<uint8_t> image(reinterpret_cast<const uint8_t *>(&header),
+                             reinterpret_cast<const uint8_t *>(&header) + sizeof(header));
+  hsa_code_object_reader_t reader = register_code_object(api, image);
+
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  // Forwarded verbatim: the loader saw the original reader, not a translated one.
+  EXPECT_EQ(g_fake_load_agent_calls, 1);
+  EXPECT_EQ(g_last_load_reader.handle, reader.handle);
+
+  g_fake_gfx1250_asic_revision = 0;
   OnUnload();
 }
 

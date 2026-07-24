@@ -1537,27 +1537,55 @@ RjHsaLayer &layer() {
   return isa_name;
 }
 
-/// @brief Return true when @p agent is a gfx1250 A0 device.
+/// @brief gfx1250 stepping classification for auto-A0 policy decisions.
+///
+/// @details Deliberately tri-state (plus a "not gfx1250" case) so callers never
+/// have to collapse "definitely not A0" and "could not tell" into one bit. The
+/// auto-A0 load path must fail *closed* on @ref kUnknownRevision: a gfx1250 agent
+/// whose stepping we cannot read might be A0, and forwarding raw B0 text onto A0
+/// silicon is exactly what this feature exists to prevent.
+enum class Gfx1250Stepping : uint8_t {
+  kNotGfx1250,      ///< Not a gfx1250 agent (or ISA could not be determined).
+  kA0,              ///< gfx1250 with ASIC revision 0.
+  kNotA0,           ///< gfx1250 with a nonzero ASIC revision (e.g. real B0).
+  kUnknownRevision, ///< gfx1250 but the ASIC revision query failed.
+};
+
+/// @brief Classify @p agent as a gfx1250 stepping.
 ///
 /// @details A0 and B0 share the gfx1250 ISA string, so the stepping comes from
 /// the ASIC revision: A0 == 0. Mirrors ROCr hotswap's
 /// IsHotswapSupportedGfxRevision (gfx1250 && asic_revision == 0). Reads the saved
 /// (unpatched) agent entries so the result reflects real silicon, not any
-/// presentation overlay. NOTE: the "A0 == asic_revision 0" mapping is taken from
-/// ROCr hotswap; confirm against real A0/B0 hardware in testing.
-[[nodiscard]] bool agent_is_gfx1250_a0(hsa_agent_t agent) {
+/// presentation overlay. A non-gfx1250 agent (or one whose ISA cannot be read)
+/// is @ref kNotGfx1250 -- not our concern. A gfx1250 agent whose revision query
+/// fails is @ref kUnknownRevision, which the load path treats as fail-closed.
+/// NOTE: the "A0 == asic_revision 0" mapping is taken from ROCr hotswap; confirm
+/// against real A0/B0 hardware in testing.
+[[nodiscard]] Gfx1250Stepping classify_gfx1250_stepping(hsa_agent_t agent) {
   auto *get_info = layer().agent_get_info();
   if (!get_info)
-    return false;
+    return Gfx1250Stepping::kNotGfx1250;
 
   if (gfx_target_of_isa_name(agent_first_isa_name(agent)) != "gfx1250")
-    return false;
+    return Gfx1250Stepping::kNotGfx1250;
 
   uint32_t asic_revision = 0;
   if (get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION),
                &asic_revision) != HSA_STATUS_SUCCESS)
-    return false;
-  return asic_revision == 0;
+    return Gfx1250Stepping::kUnknownRevision;
+  return asic_revision == 0 ? Gfx1250Stepping::kA0 : Gfx1250Stepping::kNotA0;
+}
+
+/// @brief Return true when @p agent is a confirmed gfx1250 A0 device.
+///
+/// @details Thin predicate over @ref classify_gfx1250_stepping for the callers
+/// that only need "confirmed A0" (e.g. the B0 presentation overlay). Unknown
+/// revisions are intentionally *not* A0 here: presenting a synthetic B0 identity
+/// for an agent we cannot confirm is A0 would be wrong. The load path uses the
+/// full classification instead so it can fail closed on unknown revisions.
+[[nodiscard]] bool agent_is_gfx1250_a0(hsa_agent_t agent) {
+  return classify_gfx1250_stepping(agent) == Gfx1250Stepping::kA0;
 }
 
 /// @brief Synthetic ASIC revision presented for a B0 gfx1250 identity.
@@ -4270,10 +4298,24 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   if (original_load == nullptr)
     return HSA_STATUS_ERROR;
 
-  if (auto config = layer().config();
-      config && config->mode == HookMode::kAutoA0 && agent_is_gfx1250_a0(agent)) {
-    return load_translated_for_auto_a0(*config, executable, agent, code_object_reader, options,
-                                       loaded_code_object, original_load);
+  if (auto config = layer().config(); config && config->mode == HookMode::kAutoA0) {
+    switch (classify_gfx1250_stepping(agent)) {
+    case Gfx1250Stepping::kA0:
+      return load_translated_for_auto_a0(*config, executable, agent, code_object_reader, options,
+                                         loaded_code_object, original_load);
+    case Gfx1250Stepping::kUnknownRevision:
+      // The agent is gfx1250 but its stepping is unreadable, so it *might* be A0.
+      // Forwarding the object could execute raw B0 text on A0 silicon -- refuse
+      // rather than fail open. A confirmed non-A0 gfx1250 (kNotA0) or a
+      // non-gfx1250 agent (kNotGfx1250) falls through to the normal path below.
+      log_message(kLogInfo,
+                  "auto-A0: gfx1250 agent=%llu has an unreadable ASIC revision; refusing the load",
+                  static_cast<unsigned long long>(agent.handle));
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    case Gfx1250Stepping::kNotA0:
+    case Gfx1250Stepping::kNotGfx1250:
+      break;
+    }
   }
 
   auto config = layer().config();
