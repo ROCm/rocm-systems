@@ -743,11 +743,8 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
   return build_sopc_encoding(arch, sopc_op_cmp_lg_u32(arch), ssrc0, ssrc1);
 }
 
-// DBI register-spilling primitives (CDNA4 and RDNA4 only). These are the
-// vector/memory ops the scalar helpers above do not cover: the SGPR<->VGPR lane
-// bridge, off-mode scratch store/load, and the load-completion wait. All use
-// off-mode addressing (lds/sve left 0), so the caller passes only a within-lane
-// byte offset from SpillManager.
+// VOP3 src-operand encoders used by the DBI register-spilling primitives, whose
+// ISA-dispatch builders live in spill_builders.h.
 
 /// @brief VOP3 src encoding for a VGPR (256 + index).
 [[nodiscard]] inline constexpr uint16_t vop3_vgpr_src(uint16_t vgpr) {
@@ -757,100 +754,6 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 /// @brief VOP3 src encoding for a non-negative inline integer (lane selector).
 [[nodiscard]] inline constexpr uint16_t vop3_inline_uint(uint16_t value) {
   return static_cast<uint16_t>(kScalarPositiveInlineBase + value);
-}
-
-/// @brief Encode v_writelane_b32: bridge SGPR @p sgpr_src into lane of @p vgpr_dst.
-[[nodiscard]] inline std::array<uint32_t, 2>
-build_v_writelane_b32(uint16_t vgpr_dst, uint16_t sgpr_src, uint16_t lane, rj_code_arch_t arch) {
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    return cdna4::build_vop3(
-        cdna4::kVWritelaneB32Vop3,
-        {.vdst = static_cast<uint8_t>(vgpr_dst), .src0 = sgpr_src, .src1 = vop3_inline_uint(lane)});
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    return rdna4::build_vop3(
-        rdna4::kVWritelaneB32Vop3,
-        {.vdst = static_cast<uint8_t>(vgpr_dst), .src0 = sgpr_src, .src1 = vop3_inline_uint(lane)});
-  default:
-    throw util::UnimplementedInst("v_writelane_b32 for target architecture");
-  }
-}
-
-/// @brief Encode v_readlane_b32: read lane of @p vgpr_src back into @p sgpr_dst.
-[[nodiscard]] inline std::array<uint32_t, 2>
-build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_code_arch_t arch) {
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    return cdna4::build_vop3(cdna4::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sgpr_dst),
-                                                        .src0 = vop3_vgpr_src(vgpr_src),
-                                                        .src1 = vop3_inline_uint(lane)});
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    return rdna4::build_vop3(rdna4::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sgpr_dst),
-                                                        .src0 = vop3_vgpr_src(vgpr_src),
-                                                        .src1 = vop3_inline_uint(lane)});
-  default:
-    throw util::UnimplementedInst("v_readlane_b32 for target architecture");
-  }
-}
-
-/// @brief Encode an off-mode scratch store of @p vdata at @p byte_offset.
-/// @note CDNA offset is 12-bit (0..4095); RDNA is 24-bit. 2 words on CDNA, 3 on RDNA.
-[[nodiscard]] inline std::vector<uint32_t>
-build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rj_code_arch_t arch) {
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA4: {
-    const auto w = cdna4::build_flat(cdna4::kFlatStoreDwordFlat,
-                                     {.offset = static_cast<uint16_t>(byte_offset & 0xFFFu),
-                                      .seg = 1,
-                                      .data = static_cast<uint8_t>(vdata),
-                                      .saddr = 0x7F});
-    return {w.begin(), w.end()};
-  }
-  case ROCJITSU_CODE_ARCH_RDNA4: {
-    const auto w = rdna4::build_vscratch(
-        rdna4::kScratchStoreB32Vscratch,
-        {.saddr = 0x7C, .vsrc = static_cast<uint8_t>(vdata), .ioffset = byte_offset & 0xFFFFFFu});
-    return {w.begin(), w.end()};
-  }
-  default:
-    throw util::UnimplementedInst("scratch_store for target architecture");
-  }
-}
-
-/// @brief Encode an off-mode scratch load into @p vdst at @p byte_offset.
-/// @note A build_wait_loads_complete() must precede any use of @p vdst.
-[[nodiscard]] inline std::vector<uint32_t>
-build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arch) {
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA4: {
-    const auto w = cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
-                                     {.offset = static_cast<uint16_t>(byte_offset & 0xFFFu),
-                                      .seg = 1,
-                                      .saddr = 0x7F,
-                                      .vdst = static_cast<uint8_t>(vdst)});
-    return {w.begin(), w.end()};
-  }
-  case ROCJITSU_CODE_ARCH_RDNA4: {
-    const auto w = rdna4::build_vscratch(
-        rdna4::kScratchLoadB32Vscratch,
-        {.saddr = 0x7C, .vdst = static_cast<uint8_t>(vdst), .ioffset = byte_offset & 0xFFFFFFu});
-    return {w.begin(), w.end()};
-  }
-  default:
-    throw util::UnimplementedInst("scratch_load for target architecture");
-  }
-}
-
-/// @brief Encode a wait for outstanding loads: s_waitcnt 0 (CDNA), s_wait_loadcnt 0 (RDNA).
-[[nodiscard]] inline uint32_t build_wait_loads_complete(rj_code_arch_t arch) {
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    return build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0);
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    return build_sopp_encoding(arch, rdna4::kSWaitLoadcntSopp, 0);
-  default:
-    throw util::UnimplementedInst("load-completion wait for target architecture");
-  }
 }
 
 } // namespace rocjitsu
