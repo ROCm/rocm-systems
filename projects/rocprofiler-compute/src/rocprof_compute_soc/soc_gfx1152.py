@@ -16,22 +16,9 @@ class gfx1152_soc(OmniSoC_Base):
         self.set_arch("gfx1152")
         self.set_compatible_profilers(["rocprofv3", "rocprofiler-sdk"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
-        # RDNA3.5 perfmon config - fallback to gfx11xx defaults if not defined
-        try:
-            self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx1152"))
-        except KeyError:
-            # Fallback to RDNA3 defaults if gfx1152 not defined
-            self.set_perfmon_config({
-                "SQ": 16,
-                "SQC": 8,
-                "TCP": 4,
-                "GL1C": 4,
-                "GL2C": 4,
-                "SPI": 6,
-                "GRBM": 2,
-            })
+        self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx1152"))
 
-        self._mspec.l2_banks = 8
+        self._mspec.l2_banks = 4
         self._mspec.lds_banks_per_cu = 32
         self._mspec.pipes_per_gpu = 2
 
