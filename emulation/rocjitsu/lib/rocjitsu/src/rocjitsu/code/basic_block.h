@@ -69,18 +69,18 @@ public:
   /// @returns Instruction count.
   uint32_t num_instructions() const { return num_instructions_; }
 
-  /// @brief Whether the block ends with a terminator instruction or sentinel.
+  /// @brief Whether the block ends with a terminator instruction or compiler stub.
   /// @retval true The last instruction is a branch/program terminator, or the
-  /// block reaches a gfx1250 zero-word program terminator sentinel.
+  /// block is an exact gfx1250 clang unreachable-stub body followed by padding.
   /// @retval false The block falls through to the next.
   bool has_terminator() const { return has_terminator_; }
 
   /// @brief Whether sequential execution would enter undecodable source bytes.
   ///
   /// @details Large code objects may place padding or opaque data between
-  /// functions in `.text`. A gfx1250 zero word is treated as a program
-  /// terminator sentinel. Fallthrough into any other undecodable gap cannot be
-  /// safely relocated and must make translation fail closed.
+  /// functions in `.text`. Fallthrough into an undecodable gap cannot be safely
+  /// relocated and must make translation fail closed. The only exception is a
+  /// recognized gfx1250 clang unreachable-stub body followed by zero padding.
   bool falls_through_to_undecodable_text() const { return falls_through_to_undecodable_text_; }
 
   /// @brief Last instruction in the block, or nullptr for an empty block.
@@ -145,6 +145,7 @@ public:
 
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);
+  [[nodiscard]] bool is_gfx1250_clang_unreachable_stub() const;
   void add_successor(BasicBlock &successor);
   void add_static_indirect_call_fixup(IndirectCallFixup fixup);
 

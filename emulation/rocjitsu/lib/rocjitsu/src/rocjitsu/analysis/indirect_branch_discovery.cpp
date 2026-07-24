@@ -3,6 +3,7 @@
 
 #include "rocjitsu/analysis/indirect_branch_discovery.h"
 
+#include "rocjitsu/analysis/control_flow.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
@@ -667,10 +668,6 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
   facts.written_sgprs.for_each([&](uint16_t sgpr) { state.invalidate_half(sgpr, protected_pair); });
 }
 
-[[nodiscard]] bool is_program_terminator(const Instruction &inst) {
-  return (inst.flags() & PROGRAM_TERMINATOR) != 0;
-}
-
 [[nodiscard]] bool is_unconditional_branch(const Instruction &inst) {
   return (inst.flags() & BRANCH) && !(inst.flags() & COND_BRANCH);
 }
@@ -680,8 +677,8 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
 }
 
 [[nodiscard]] bool is_block_terminator(const Instruction &inst) {
-  return inst.flags() &
-         (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR);
+  return is_program_path_terminator(inst) ||
+         (inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL));
 }
 
 [[nodiscard]] bool is_direct_call(const Instruction &inst) {
@@ -693,7 +690,7 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
   // Indirect calls still expose their ordinary fallthrough/return continuation
   // in the direct CFG, which is required for liveness and for callers that do
   // not care about the callee body.
-  return is_program_terminator(inst) || is_indirect_branch(inst);
+  return is_program_path_terminator(inst) || is_indirect_branch(inst);
 }
 
 [[nodiscard]] std::optional<size_t>
@@ -1568,7 +1565,7 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
     LatticeFacts new_entry;
     std::bitset<REGISTER_SET_MAX_SGPRS> mentioned_pairs;
     const bool new_reachable =
-        predecessors[block_index].empty() ||
+        block_index == 0 || predecessors[block_index].empty() ||
         std::ranges::any_of(predecessors[block_index],
                             [&](size_t predecessor) { return reachable[predecessor]; });
     if (new_reachable && !predecessors[block_index].empty()) {
@@ -1630,6 +1627,11 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
             join_lattice_value(joined, *entry);
           }
         }
+        // Block zero is always an external entry, even if a loop backedge gives
+        // it structural predecessors. The external path carries an
+        // unconstrained SGPR pair and must participate in the join.
+        if (block_index == 0)
+          joined.incomplete = true;
         new_entry.append(pair_lo, std::move(joined));
       }
     }
@@ -1904,6 +1906,13 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
             append_unique(recovered, *fixup);
         }
       }
+      if (facts.swappc_sdst) {
+        // A returning indirect call may execute arbitrary callee code before
+        // the fallthrough continuation. Resolve this call from the pre-call
+        // state above, then discard every lane stash before publishing the
+        // block exit so a callee-clobbered value cannot reach the continuation.
+        state.slots.clear();
+      }
 
       RegisterSet vgpr_defs;
       for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
@@ -1987,13 +1996,22 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
     }
 
     // A block with no direct predecessors is a possible kernel/device-function
-    // entry. Only the first text block is guaranteed to start with architectural
-    // bank zero; other roots must establish their bank explicitly.
-    if (predecessors[block_index].empty()) {
+    // entry. Block zero is also always an external entry, even when a loop
+    // backedge gives it structural predecessors. Meet that external state with
+    // any reachable backedge: it contributes no lane stash and guarantees bank
+    // zero only for the first text block.
+    if (predecessors[block_index].empty() || block_index == 0) {
       new_reachable = true;
-      new_entry = VectorLaneFlowState{};
+      VectorLaneFlowState external_entry;
       if (block_index == 0)
-        new_entry.vgpr_msb_imm = uint8_t{0};
+        external_entry.vgpr_msb_imm = uint8_t{0};
+      if (!have_predecessor_state) {
+        new_entry = std::move(external_entry);
+      } else {
+        new_entry.slots.clear();
+        if (new_entry.vgpr_msb_imm != external_entry.vgpr_msb_imm)
+          new_entry.vgpr_msb_imm = std::nullopt;
+      }
     }
     if (!new_reachable)
       continue;

@@ -102,8 +102,7 @@ inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
   // input is therefore wrapped with inline-zero neutral scales. Scale16 and
   // regular Scale have separate mandatory encoding/scale-source workarounds,
   // including B0-only M=32 forms.
-  if (mnemonic == "v_wmma_f32_16x16x128_f8f6f4" ||
-      mnemonic.starts_with("v_wmma_scale"))
+  if (mnemonic == "v_wmma_f32_16x16x128_f8f6f4" || mnemonic.starts_with("v_wmma_scale"))
     return true;
 
   // K=64 FP8/BF8 WMMA is present on A0 and retains its architectural encoding.

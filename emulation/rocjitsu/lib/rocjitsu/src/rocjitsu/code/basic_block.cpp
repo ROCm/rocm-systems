@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/basic_block.h"
 
+#include "rocjitsu/analysis/control_flow.h"
 #include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/isa/decoder.h"
@@ -11,6 +12,7 @@
 #include "util/except.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <memory>
 #include <optional>
@@ -25,27 +27,15 @@ namespace rocjitsu {
 
 namespace {
 
-bool is_rocr_program_terminator(const Instruction &inst) {
-  // ROCr reserves trap ID 2 for an assertion/abort path that does not return
-  // to the instruction following S_TRAP. Other trap IDs remain resumable and
-  // therefore retain their normal fallthrough edge.
-  if (inst.mnemonic() != "s_trap" || inst.size() != sizeof(uint32_t))
-    return false;
-  const uint32_t *raw = inst.raw_encoding();
-  return raw != nullptr && static_cast<uint16_t>(raw[0]) == 2;
-}
-
 bool is_block_terminator(const Instruction &inst) {
-  return is_rocr_program_terminator(inst) ||
-         (inst.flags() &
-          (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR));
+  return is_program_path_terminator(inst) ||
+         (inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL));
 }
 
 bool has_no_static_successor(const Instruction &inst) {
   // Indirect calls return to the fallthrough block; indirect branches do not
   // expose a statically-known successor in this local CFG.
-  return is_rocr_program_terminator(inst) ||
-         (inst.flags() & (PROGRAM_TERMINATOR | INDIRECT_BRANCH));
+  return is_program_path_terminator(inst) || (inst.flags() & INDIRECT_BRANCH);
 }
 
 bool is_unconditional_branch(const Instruction &inst) {
@@ -65,6 +55,12 @@ bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
   if (inst.size() != sizeof(uint32_t) || (mnemonic != "s_setpc_b64" && mnemonic != "s_set_pc_i64"))
     return false;
   return static_cast<uint16_t>(word & 0xffu) == ssrc0;
+}
+
+bool has_exact_words(const Instruction &inst, std::span<const uint32_t> words) {
+  if (inst.size() != static_cast<int>(words.size_bytes()) || inst.raw_encoding() == nullptr)
+    return false;
+  return std::equal(words.begin(), words.end(), inst.raw_encoding());
 }
 
 std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
@@ -110,6 +106,23 @@ const Instruction *BasicBlock::terminator() const {
   return storage_.back().get();
 }
 
+bool BasicBlock::is_gfx1250_clang_unreachable_stub() const {
+  // clang emits two known rocPRIM target-specialization stubs for a source body
+  // ending in __builtin_unreachable(). Neither has an architectural terminator;
+  // its trailing zero is function-alignment padding. Match the complete decoded
+  // body so an arbitrary reachable instruction followed by zero remains invalid.
+  constexpr std::array<uint32_t, 2> kSetReplayMode = {0xb9800641u, 1u};
+  if (storage_.size() == 1)
+    return has_exact_words(*storage_[0], kSetReplayMode);
+
+  if (storage_.size() != 3)
+    return false;
+  constexpr std::array<uint32_t, 3> kGlobalPrefetchB8 = {0xee174000u, 0x00040000u, 0u};
+  constexpr std::array<uint32_t, 1> kVNop = {0x7e000000u};
+  return has_exact_words(*storage_[0], kGlobalPrefetchB8) && has_exact_words(*storage_[1], kVNop) &&
+         has_exact_words(*storage_[2], kSetReplayMode);
+}
+
 void BasicBlock::add_successor(BasicBlock &successor) {
   if (std::ranges::find(successors_, &successor) != successors_.end())
     return;
@@ -149,13 +162,11 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
     std::vector<std::unique_ptr<Instruction>> decoded;
 
     while (pc < inst_data_size) {
-      // The gfx1250 code objects used for offline translation place zero-filled
-      // alignment holes between function bodies. Zero is not a gfx1250
-      // instruction, so recognize that sentinel before calling the decoder.
-      // For gfx1250, reaching the first zero terminates the current program
-      // path; block construction below records that policy explicitly. Other
-      // invalid words remain hard decode failures rather than being silently
-      // classified as padding.
+      // gfx1250 code objects place zero-filled alignment holes between function
+      // bodies. Zero is not an instruction, so skip it before decoding. Block
+      // construction below still fails closed if a reachable path enters the
+      // hole, except for the exact clang unreachable-stub bodies recognized
+      // there.
       if (arch == ROCJITSU_CODE_ARCH_GFX1250 && inst_data[pc] == 0) {
         ++pc;
         byte_offset += sizeof(uint32_t);
@@ -166,9 +177,8 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
       try {
         raw_inst = decoder.decode(&inst_data[pc], byte_offset);
       } catch (const util::InvalidInst &error) {
-        throw util::InvalidInst(std::string(error.what()) + " at .text byte offset " +
-                                   std::to_string(byte_offset),
-                               "");
+        throw util::InvalidInst(
+            std::string(error.what()) + " at .text byte offset " + std::to_string(byte_offset), "");
       }
       std::unique_ptr<Instruction> inst(raw_inst);
       uint32_t inst_size_bytes = static_cast<uint32_t>(inst->size());
@@ -256,10 +266,10 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
         const bool decode_gap =
             i >= decoded.size() ? next_offset < section_end : decoded[i]->src_loc() != next_offset;
         if (decode_gap && !terminates) {
-          const bool reaches_gfx1250_zero =
-              arch == ROCJITSU_CODE_ARCH_GFX1250 && next_offset < section_end &&
-              inst_data[next_offset / sizeof(uint32_t)] == 0;
-          if (reaches_gfx1250_zero)
+          const bool reaches_gfx1250_zero = arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                            next_offset < section_end &&
+                                            inst_data[next_offset / sizeof(uint32_t)] == 0;
+          if (reaches_gfx1250_zero && current->is_gfx1250_clang_unreachable_stub())
             current->has_terminator_ = true;
           else
             current->falls_through_to_undecodable_text_ = true;
