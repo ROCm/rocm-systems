@@ -13,15 +13,6 @@ namespace rocjitsu {
 namespace amdgpu {
 namespace {
 
-template <typename T> void register_cache(std::vector<T *> &caches, T *cache) {
-  assert(cache != nullptr);
-  const auto it = std::find(caches.begin(), caches.end(), cache);
-  assert(it == caches.end());
-  if (it != caches.end())
-    return;
-  caches.push_back(cache);
-}
-
 template <typename T> void unregister_cache(std::vector<T *> &caches, T *cache) {
   auto it = std::find(caches.begin(), caches.end(), cache);
   assert(it != caches.end());

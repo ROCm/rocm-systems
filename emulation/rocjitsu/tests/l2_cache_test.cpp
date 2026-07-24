@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/memory_side_cache.h"
+#include "simdojo/sim/exec_mode.h"
 
 #include <gtest/gtest.h>
 
@@ -33,9 +36,11 @@
 namespace {
 
 using rocjitsu::amdgpu::GpuMemory;
+using rocjitsu::amdgpu::HbmController;
 using rocjitsu::amdgpu::L1ScalarCache;
 using rocjitsu::amdgpu::L1VectorCache;
 using rocjitsu::amdgpu::L2Cache;
+using rocjitsu::amdgpu::MemorySideCache;
 using rocjitsu::amdgpu::Mtype;
 
 void increment_u32(uint8_t *line, uint32_t offset) {
@@ -818,6 +823,79 @@ TEST(L2CacheTest, FunctionalLinkedPortAtomicRmwUpdatesBacking) {
   EXPECT_EQ(backing.read32(kAddr), 42u);
   EXPECT_EQ(backing.read8(kAddr - 1), 0xA5);
   EXPECT_EQ(backing.read8(kAddr + sizeof(uint32_t)), 0x5A);
+}
+
+TEST(L2CacheTest, LinkedPortAtomicRmwRefreshesStaleMemorySideAlias) {
+  constexpr uint32_t kVmidA = 41;
+  constexpr uint32_t kVmidB = 42;
+  constexpr uint64_t kVaA = 0xC10000;
+  constexpr uint64_t kVaB = 0xD20000;
+  constexpr uint32_t kOffset = 64;
+  constexpr uint32_t kPublishedValue = 40;
+
+  rocjitsu::KfdProcess process_a(kVmidA);
+  rocjitsu::KfdProcess process_b(kVmidB);
+  std::array<uint8_t, GpuMemory::PAGE_SIZE> backing{};
+  process_a.map_pages(kVaA, backing.data(), backing.size(), Mtype::RW);
+  process_b.map_pages(kVaB, backing.data(), backing.size(), Mtype::RW);
+
+  GpuMemory memory("memory");
+  memory.register_process(kVmidA, &process_a.page_table_, &process_a.page_table_mutex_,
+                          process_a.page_table_generation());
+  memory.register_process(kVmidB, &process_b.page_table_, &process_b.page_table_mutex_,
+                          process_b.page_table_generation());
+
+  HbmController hbm("hbm", &memory);
+  MemorySideCache msc("msc");
+  L2Cache l2a("l2a");
+  L2Cache l2b("l2b");
+
+  simdojo::Port *l2a_msc_port = msc.create_cpl_port("l2a");
+  simdojo::Port *l2b_msc_port = msc.create_cpl_port("l2b");
+  simdojo::Link msc_hbm_link(/*id=*/0, msc.req_port(), hbm.cpl_port(), /*latency=*/0);
+  simdojo::Link l2a_msc_link(/*id=*/1, l2a.req_port(), l2a_msc_port, /*latency=*/0);
+  simdojo::Link l2b_msc_link(/*id=*/2, l2b.req_port(), l2b_msc_port, /*latency=*/0);
+  for (simdojo::Link *link : {&msc_hbm_link, &l2a_msc_link, &l2b_msc_link})
+    link->set_exec_mode(simdojo::ExecMode::FUNCTIONAL);
+  msc.req_port()->set_link(&msc_hbm_link);
+  hbm.cpl_port()->set_link(&msc_hbm_link);
+  l2a.req_port()->set_link(&l2a_msc_link);
+  l2a_msc_port->set_link(&l2a_msc_link);
+  l2b.req_port()->set_link(&l2b_msc_link);
+  l2b_msc_port->set_link(&l2b_msc_link);
+
+  uint32_t stale_value = 1;
+  l2b.read(kVaB + kOffset, reinterpret_cast<uint8_t *>(&stale_value), sizeof(stale_value),
+           Mtype::RW, kVmidB);
+  ASSERT_EQ(stale_value, 0u);
+
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty_line{};
+  std::memcpy(dirty_line.data() + kOffset, &kPublishedValue, sizeof(kPublishedValue));
+  l2a.writeback_line(kVaA, dirty_line.data(), kOffset, sizeof(kPublishedValue), Mtype::RW, kVmidA);
+
+  uint32_t callback_old_value = 0;
+  l2b.atomic_rmw(
+      kVaB + kOffset, sizeof(uint32_t),
+      [&](uint8_t *target, uint32_t offset) {
+        std::memcpy(&callback_old_value, target + offset, sizeof(callback_old_value));
+        const uint32_t replacement = callback_old_value + 1;
+        std::memcpy(target + offset, &replacement, sizeof(replacement));
+      },
+      kVmidB);
+
+  EXPECT_EQ(callback_old_value, kPublishedValue);
+  uint32_t host_value = 0;
+  std::memcpy(&host_value, backing.data() + kOffset, sizeof(host_value));
+  EXPECT_EQ(host_value, kPublishedValue + 1);
+
+  uint32_t alias_a_value = 0;
+  uint32_t alias_b_value = 0;
+  l2a.read(kVaA + kOffset, reinterpret_cast<uint8_t *>(&alias_a_value), sizeof(alias_a_value),
+           Mtype::RW, kVmidA);
+  l2b.read(kVaB + kOffset, reinterpret_cast<uint8_t *>(&alias_b_value), sizeof(alias_b_value),
+           Mtype::RW, kVmidB);
+  EXPECT_EQ(alias_a_value, kPublishedValue + 1);
+  EXPECT_EQ(alias_b_value, kPublishedValue + 1);
 }
 
 TEST(L2CacheTest, AliasedVasRequireCoherenceBoundary) {
