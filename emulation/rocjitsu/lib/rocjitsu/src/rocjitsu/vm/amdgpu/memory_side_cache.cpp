@@ -14,13 +14,21 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-void MemorySideCache::WriterPreferredAccessGate::lock_shared() {
+void WriterPreferredAccessGate::lock_shared() {
   std::unique_lock lock(mutex_);
   cv_.wait(lock, [this] { return !writer_active_ && waiting_writers_ == 0; });
   ++active_readers_;
 }
 
-void MemorySideCache::WriterPreferredAccessGate::unlock_shared() {
+bool WriterPreferredAccessGate::try_lock_shared() {
+  std::lock_guard lock(mutex_);
+  if (writer_active_ || waiting_writers_ != 0)
+    return false;
+  ++active_readers_;
+  return true;
+}
+
+void WriterPreferredAccessGate::unlock_shared() {
   bool notify_writer = false;
   {
     std::lock_guard lock(mutex_);
@@ -32,7 +40,7 @@ void MemorySideCache::WriterPreferredAccessGate::unlock_shared() {
     cv_.notify_all();
 }
 
-void MemorySideCache::WriterPreferredAccessGate::lock() {
+void WriterPreferredAccessGate::lock() {
   std::unique_lock lock(mutex_);
   ++waiting_writers_;
   cv_.wait(lock, [this] { return !writer_active_ && active_readers_ == 0; });
@@ -40,7 +48,7 @@ void MemorySideCache::WriterPreferredAccessGate::lock() {
   writer_active_ = true;
 }
 
-void MemorySideCache::WriterPreferredAccessGate::unlock() {
+void WriterPreferredAccessGate::unlock() {
   {
     std::lock_guard lock(mutex_);
     assert(writer_active_ && "unlock without an active writer");

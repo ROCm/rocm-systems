@@ -19,6 +19,30 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+class WriterPreferredAccessGateTestAccess;
+
+/// @brief Shared access gate that gives queued exclusive owners priority.
+///
+/// @details This type is internal to the memory-side cache implementation but
+/// is kept separate so its writer-preference invariant can be tested directly.
+class WriterPreferredAccessGate {
+public:
+  void lock_shared();
+  bool try_lock_shared();
+  void unlock_shared();
+  void lock();
+  void unlock();
+
+private:
+  friend class WriterPreferredAccessGateTestAccess;
+
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  uint32_t active_readers_ = 0;
+  uint32_t waiting_writers_ = 0;
+  bool writer_active_ = false;
+};
+
 /// @brief Memory-side cache component sitting between L2 and HBM on each IOD.
 ///
 /// @details Write-through, write-allocate cache, and no mtype awareness. All traffic from
@@ -101,21 +125,6 @@ public:
   }
 
 private:
-  class WriterPreferredAccessGate {
-  public:
-    void lock_shared();
-    void unlock_shared();
-    void lock();
-    void unlock();
-
-  private:
-    std::mutex mutex_;
-    std::condition_variable cv_;
-    uint32_t active_readers_ = 0;
-    uint32_t waiting_writers_ = 0;
-    bool writer_active_ = false;
-  };
-
   void ensure_line(uint64_t addr, uint32_t vmid);
 
   /// @brief Send a read or write request to the backing store via the req port.

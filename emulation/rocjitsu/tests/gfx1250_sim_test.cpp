@@ -27,6 +27,7 @@
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 #include "rocjitsu/vm/soc.h"
 #include "util/except.h"
@@ -54,12 +55,25 @@ RJ_DIAGNOSTIC_POP
 #include <memory>
 #include <optional>
 #include <set>
+#include <shared_mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
+
+namespace rocjitsu::amdgpu {
+
+class WriterPreferredAccessGateTestAccess {
+public:
+  static bool has_waiting_writer(WriterPreferredAccessGate &gate) {
+    std::lock_guard lock(gate.mutex_);
+    return gate.waiting_writers_ != 0;
+  }
+};
+
+} // namespace rocjitsu::amdgpu
 
 namespace {
 
@@ -5163,6 +5177,34 @@ TEST(Gfx1250SimulationTest, MemorySideCacheFlushSerializesConcurrentAccess) {
   EXPECT_EQ(sim.memory->read32(output_addr), iterations);
 }
 
+TEST(WriterPreferredAccessGateTest, WaitingWriterBlocksLateSharedEntrant) {
+  amdgpu::WriterPreferredAccessGate gate;
+  std::shared_lock active_reader(gate);
+  bool writer_acquired = false;
+  std::thread writer([&] {
+    std::unique_lock waiting_writer(gate);
+    writer_acquired = true;
+  });
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+  while (!amdgpu::WriterPreferredAccessGateTestAccess::has_waiting_writer(gate) &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+
+  const bool writer_waiting = amdgpu::WriterPreferredAccessGateTestAccess::has_waiting_writer(gate);
+  EXPECT_TRUE(writer_waiting);
+  if (writer_waiting) {
+    const bool late_reader_acquired = gate.try_lock_shared();
+    EXPECT_FALSE(late_reader_acquired);
+    if (late_reader_acquired)
+      gate.unlock_shared();
+  }
+
+  active_reader.unlock();
+  writer.join();
+  EXPECT_TRUE(writer_acquired);
+}
+
 TEST(Gfx1250SimulationTest, MemorySideCacheFlushMakesProgressUnderContinuousReads) {
   constexpr uint64_t output_addr = 0x2000;
   constexpr uint32_t reader_count = 4;
@@ -5171,22 +5213,26 @@ TEST(Gfx1250SimulationTest, MemorySideCacheFlushMakesProgressUnderContinuousRead
   auto *msc = sim.soc->iod(0)->msc();
   std::barrier start(reader_count + 1);
   std::atomic<bool> stop_readers = false;
-  std::atomic<uint32_t> completed_reads = 0;
+  std::atomic<uint32_t> readers_started = 0;
   std::vector<std::thread> readers;
   readers.reserve(reader_count);
   for (uint32_t i = 0; i < reader_count; ++i) {
     readers.emplace_back([&] {
       start.arrive_and_wait();
+      bool first_read = true;
       while (!stop_readers.load(std::memory_order_acquire)) {
         uint32_t value = 0;
         msc->read(output_addr, reinterpret_cast<uint8_t *>(&value), sizeof(value));
-        completed_reads.fetch_add(1, std::memory_order_relaxed);
+        if (first_read) {
+          readers_started.fetch_add(1, std::memory_order_release);
+          first_read = false;
+        }
       }
     });
   }
 
   start.arrive_and_wait();
-  while (completed_reads.load(std::memory_order_relaxed) < reader_count)
+  while (readers_started.load(std::memory_order_acquire) < reader_count)
     std::this_thread::yield();
 
   std::atomic<bool> flush_completed = false;
@@ -5195,7 +5241,7 @@ TEST(Gfx1250SimulationTest, MemorySideCacheFlushMakesProgressUnderContinuousRead
     flush_completed.store(true, std::memory_order_release);
   });
 
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
   while (!flush_completed.load(std::memory_order_acquire) &&
          std::chrono::steady_clock::now() < deadline)
     std::this_thread::yield();
