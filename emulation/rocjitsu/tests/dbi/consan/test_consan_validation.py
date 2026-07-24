@@ -470,7 +470,20 @@ class ConSanValidationTest(unittest.TestCase):
             with mock.patch.object(validation.shutil, "which", return_value="/tool"):
                 doctor = validation._doctor(workspace, "gfx942", ("d128-block",))
         executable = doctor["paths"]["workload:d128-block:executable"]
+        self.assertEqual(
+            executable["path"],
+            str(
+                workspace / "hip-moi-build-gfx942-tests/tests/"
+                "hip_moi_instrumented_cdna3_d128_attention_block_test"
+            ),
+        )
         self.assertFalse(executable["present"])
+        self.assertEqual(
+            {label for label, path in doctor["paths"].items() if not path["present"]},
+            {"workload:d128-block:executable"},
+        )
+        self.assertTrue(all(doctor["tools"].values()))
+        self.assertEqual(doctor["runtimes"], {})
         self.assertFalse(doctor["ok"])
 
     def test_gfx950_doctor_checks_resolved_cdna4_executables(self) -> None:
