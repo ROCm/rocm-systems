@@ -49,6 +49,8 @@ set_tests_properties(
                "integration-tests;kernel-replay"
                ENVIRONMENT
                "${rocprofv3-generate-env}"
+               RESOURCE_LOCK
+               rocprofiler_kernel_replay
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP
@@ -99,6 +101,8 @@ set_tests_properties(
                "integration-tests;kernel-replay"
                ENVIRONMENT
                "${rocprofv3-generate-env};ROCPROF_COUNTER_GROUPS_INTERVAL=2"
+               RESOURCE_LOCK
+               rocprofiler_kernel_replay
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP
