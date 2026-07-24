@@ -20,6 +20,7 @@ hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
       * :doc:`Install hipFile <install/install>`
       * :doc:`Build hipFile from source <install/build-from-source>`
       * :doc:`Install the hipFile Python bindings <install/python-bindings>`
+      * :doc:`Check system compatibility <install/checking-system-compatibility>`
 
 .. grid:: 2
    :gutter: 3
