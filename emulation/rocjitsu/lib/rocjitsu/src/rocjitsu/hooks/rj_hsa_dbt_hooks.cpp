@@ -85,6 +85,7 @@ using rocjitsu::EF_AMDGPU_MACH;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1100;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1200;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1201;
+using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950;
 using rocjitsu::Elf64_Ehdr;
@@ -198,8 +199,20 @@ constexpr uint64_t kVirtualLdsScannerTailPackets = 512;
 ///
 /// @details Keep these constants out of msgpack or YAML metadata paths: runtime
 /// virtual-LDS state is carried by the rocjitsu ELF section and AQL rewrite.
+/// @brief Which translation scenario the hook is serving.
+enum class HookMode {
+  /// @brief Config-file driven: full-device emulation / DBT simulation / daemon.
+  /// A guest GPU is presented on a different host agent (distinct handles).
+  kSimulation,
+  /// @brief No config file: auto-translate gfx1250 B0 code objects to run on real
+  /// gfx1250 A0 silicon. Presentation (B0 identity) and execution share the one
+  /// real A0 agent; the mode is self-synthesized, not read from a file.
+  kAutoA0,
+};
+
 /// @brief Runtime configuration consumed by the HSA tools hook.
 struct HookConfig {
+  HookMode mode = HookMode::kSimulation;
   TargetInfo target{};
   std::optional<TargetInfo> source_override;
   std::optional<TargetInfo> guest_target;
@@ -335,51 +348,85 @@ void restore_signal_backtrace_handlers() {
   (void)::sigaction(SIGABRT, &g_previous_sigabrt, nullptr);
 }
 
-/// @brief Load and validate DBT hook configuration from the runtime config file.
+/// @brief Build the default auto-A0 configuration used when no config file exists.
+///
+/// @details Auto-A0 translates gfx1250 B0 code objects for execution on real
+/// gfx1250 A0 silicon. Guest and host are the same gfx1250 target on the one real
+/// agent; the revisions carry the B0->A0 translation direction (A0 and B0 share
+/// an ELF machine ID, so the code object alone cannot express it). There is no
+/// guest_target/source_override: presentation and execution use the same agent,
+/// so the distinct-agent mapper is not engaged (§7.2 identity overlay is added in
+/// a later change). Which agents are actually A0 is decided per agent at run time
+/// (§13 detection); this config only records the mode and translation direction.
+[[nodiscard]] HookConfig config_for_autotranslate() {
+  constexpr std::string_view kGfx1250Name = elf_mach_name(EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const TargetInfo gfx1250{kGfx1250Name, ROCJITSU_CODE_ARCH_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX1250};
+
+  HookConfig config;
+  config.mode = HookMode::kAutoA0;
+  config.target = gfx1250;
+  config.guest_revision = ProcessorRevision::Gfx1250B0;
+  config.host_revision = ProcessorRevision::Gfx1250A0;
+  return config;
+}
+
+/// @brief Emit a hook log message through the rocjitsu logger (defined below).
+void log_message(int required_level, const char *format, ...);
+
+/// @brief Build a simulation config from a loaded, present DBT guest config.
+[[nodiscard]] std::optional<HookConfig>
+config_from_dbt_guest(const rocjitsu::config::DbtGuestConfig &dbt_guest) {
+  if (!dbt_guest.enabled) {
+    log_message(kLogInfo, "runtime config does not enable dbt_guest mode");
+    return std::nullopt;
+  }
+
+  auto target = parse_target(dbt_guest.host.isa);
+  if (!target) {
+    log_message(kLogInfo, "invalid dbt_guest.host_isa='%s'", dbt_guest.host.isa.c_str());
+    return std::nullopt;
+  }
+  auto guest = parse_target(dbt_guest.guest_isa);
+  if (!guest) {
+    log_message(kLogInfo, "invalid dbt_guest.guest_isa='%s'", dbt_guest.guest_isa.c_str());
+    return std::nullopt;
+  }
+
+  HookConfig config;
+  config.mode = HookMode::kSimulation;
+  config.target = *target;
+  config.source_override = *guest;
+  config.guest_target = *guest;
+  config.host_gpu_id = dbt_guest.host.gpu_id;
+  config.log_level = clamp_log_level(dbt_guest.log_level);
+  config.signal_backtrace = dbt_guest.signal_backtrace;
+  config.guest_revision = processor_revision_from_config(dbt_guest.guest_revision);
+  config.host_revision = processor_revision_from_config(dbt_guest.host_revision);
+  return config;
+}
+
+/// @brief Select the hook configuration: config-file simulation, else auto-A0.
+///
+/// @details Loads the runtime config once. A wholly absent config is the common
+/// case and yields the default **auto-A0** mode (translate gfx1250 B0 -> A0 on
+/// real silicon). A config that is present but malformed / disabled / invalid is
+/// a hard error (nullopt), so a misconfigured simulation run fails loudly rather
+/// than silently switching to auto-A0.
 [[nodiscard]] std::optional<HookConfig> parse_config() {
   std::optional<rocjitsu::config::DbtGuestConfig> dbt_guest;
   try {
     dbt_guest = rocjitsu::config::load_dbt_guest_config_from_runtime_config();
   } catch (const std::exception &error) {
-    std::fprintf(stderr, "[rocjitsu-hooks] failed to load runtime config: %s\n", error.what());
-    return std::nullopt;
-  }
-  if (!dbt_guest) {
-    std::fprintf(stderr, "[rocjitsu-hooks] runtime config is required for the DBT HSA hook\n");
+    // A present-but-unreadable config is a hard error, not a fall-through.
+    log_message(kLogInfo, "failed to load runtime config: %s", error.what());
     return std::nullopt;
   }
 
-  if (!dbt_guest->enabled) {
-    std::fprintf(stderr, "[rocjitsu-hooks] runtime config does not enable dbt_guest mode\n");
-    return std::nullopt;
-  }
-
-  auto target = parse_target(dbt_guest->host.isa);
-  if (!target) {
-    std::fprintf(stderr, "[rocjitsu-hooks] invalid dbt_guest.host_isa='%s'\n",
-                 dbt_guest->host.isa.c_str());
-    return std::nullopt;
-  }
-  auto guest = parse_target(dbt_guest->guest_isa);
-  if (!guest) {
-    std::fprintf(stderr, "[rocjitsu-hooks] invalid dbt_guest.guest_isa='%s'\n",
-                 dbt_guest->guest_isa.c_str());
-    return std::nullopt;
-  }
-
-  HookConfig config;
-  config.target = *target;
-  config.source_override = *guest;
-  config.guest_target = *guest;
-  config.host_gpu_id = dbt_guest->host.gpu_id;
-  config.log_level = clamp_log_level(dbt_guest->log_level);
-  config.signal_backtrace = dbt_guest->signal_backtrace;
-  config.guest_revision = processor_revision_from_config(dbt_guest->guest_revision);
-  config.host_revision = processor_revision_from_config(dbt_guest->host_revision);
-  return config;
+  if (!dbt_guest)
+    return config_for_autotranslate();
+  return config_from_dbt_guest(*dbt_guest);
 }
 
-/// @brief Emit a hook log message through the rocjitsu logger.
 void log_message(int required_level, const char *format, ...) {
   if (g_log_level.load(std::memory_order_relaxed) < required_level)
     return;

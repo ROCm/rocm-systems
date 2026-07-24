@@ -1309,6 +1309,35 @@ TEST(HsaHooksUnitTest, GuestShutdownKeepsHookInstalledForProcessLifetime) {
   EXPECT_NE(api.core.hsa_shut_down_fn, fake_shut_down);
 }
 
+// Point every config-file tier at a fresh empty directory so parse_config()
+// sees no config and selects the default auto-A0 mode.
+void clear_runtime_config_path() {
+  std::filesystem::path runtime_dir =
+      std::filesystem::temp_directory_path() /
+      ("rocjitsu-hsa-hooks-unit-noconfig-" + std::to_string(static_cast<long long>(::getpid())));
+  std::filesystem::remove_all(runtime_dir);
+  std::filesystem::create_directories(runtime_dir);
+  setenv("ROCJITSU_RUNTIME_DIR", runtime_dir.c_str(), 1);
+  unsetenv("ROCJITSU_INVOCATION_DIR");
+}
+
+// With no config file present, OnLoad installs in the default auto-A0 mode
+// (translate gfx1250 B0 -> A0), whereas the config-driven simulation path
+// requires a file. Previously a missing config was a hard failure.
+TEST(HsaHooksUnitTest, InstallsInAutoA0ModeWhenNoConfigPresent) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  OnUnload();
+  clear_runtime_config_path();
+
+  FakeApiTable api;
+  auto *original_shutdown = api.core.hsa_shut_down_fn;
+  EXPECT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  // The load-side wrappers are installed, so the table is patched.
+  EXPECT_NE(api.core.hsa_shut_down_fn, original_shutdown);
+  OnUnload();
+}
+
 TEST(HsaHooksUnitTest, VirtualLdsSymbolInfoReportsNormalDescriptorUntilPacketFallback) {
   using rocr::llvm::amdhsa::kernel_descriptor_t;
 
