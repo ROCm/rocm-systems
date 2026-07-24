@@ -77,6 +77,8 @@ struct CwsrWaveState {
   std::vector<uint32_t> sgprs;
   /// Vector register values, index = vgpr_number * 64 + lane.
   std::vector<uint32_t> vgprs;
+  /// Workgroup LDS bytes. Present only on the first wave in each workgroup.
+  std::vector<uint8_t> lds;
 };
 
 /// @brief The CWSR geometry chosen for a serialized wave save area.
