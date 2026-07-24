@@ -1684,9 +1684,10 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   if (!gpu || !gpu->soc)
     return -EINVAL;
 
-  // Select the target CP before reserving any per-process state, so a null CP
-  // cannot leave a doorbell offset / queue-id bookkeeping entry orphaned.
-  auto *target_cp = gpu->soc->assign_queue_cp();
+  // Queue IDs are process-local and start at one. Equivalent runtime queues in
+  // different processes therefore share XCD resources while each process still
+  // distributes additional queues across the device.
+  auto *target_cp = gpu->soc->assign_queue_cp(proc.next_queue_id_ - 1);
   if (!target_cp)
     return -EINVAL;
 
@@ -2882,12 +2883,14 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
             wake.insert(owners[index]);
       });
     }
+    const bool keep_dispatch_suspended =
+        std::ranges::any_of(stopped, [](const auto *wave) { return wave->debug_halted(); });
     // Keep the queue-level launch gate closed until every resident wave has
     // consumed its CWSR state and become runnable. Reopen it before scheduling
     // those waves so CP completion processing cannot observe a queue as still
     // suspended if a resumed wave completes immediately.
     gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
-      cp->set_queue_debug_suspended(context.queue_id, proc->process_id(), false);
+      cp->set_queue_debug_suspended(context.queue_id, proc->process_id(), keep_dispatch_suspended);
     });
     for (auto *cu : wake)
       cu->schedule_work_async();

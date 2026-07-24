@@ -749,8 +749,7 @@ public:
       last_quantum_executed_ = 0;
       for (uint32_t i = 0; i < kFunctionalQuantum && step(); ++i) {
         ++last_quantum_executed_;
-        if (debug_active_.load(std::memory_order_relaxed) ||
-            std::exchange(functional_yield_requested_, false))
+        if (std::exchange(functional_yield_requested_, false))
           break;
       }
     } else {

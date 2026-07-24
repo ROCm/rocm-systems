@@ -59,6 +59,9 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   auto *xcd = soc->xcd(0);
   EXPECT_EQ(xcd->num_shader_engines(), 4u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 8u);
+  EXPECT_EQ(soc->assign_queue_cp(0), soc->xcd(0)->command_processor());
+  EXPECT_EQ(soc->assign_queue_cp(1), soc->xcd(1)->command_processor());
+  EXPECT_EQ(soc->assign_queue_cp(soc->num_xcds()), soc->xcd(0)->command_processor());
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {

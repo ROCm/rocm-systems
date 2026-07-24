@@ -2430,6 +2430,39 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
     EXPECT_FALSE(stepping->debug_halted());
     EXPECT_FALSE(peer->debug_halted());
 
+    if (step + 1 == kStepCount) {
+      control = {};
+      control.pid = static_cast<uint32_t>(getpid());
+      control.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
+      control.suspend_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+      control.suspend_queues.num_queues = 1;
+      ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+      ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
+          kCwsrAddress, kCwsrSize, states,
+          [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); }));
+      auto stopped_peer = std::find_if(states.begin(), states.end(), [&](const auto &state) {
+        return state.wave_id != kSteppingWaveId;
+      });
+      ASSERT_NE(stopped_peer, states.end());
+      stopped_peer->wave_stopped = true;
+      ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(
+                      kCwsrAddress, kCwsrSize, states,
+                      [&](uint64_t address, uint32_t value) {
+                        memory->write32(address, value, driver_->local_process_id());
+                      })
+                      .ok);
+      control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
+      control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+      control.resume_queues.num_queues = 1;
+      ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+      bool queue_suspended = false;
+      soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+        queue_suspended |=
+            cp->queue_debug_suspended_for_test(create.queue_id, driver_->local_process_id());
+      });
+      EXPECT_TRUE(queue_suspended);
+    }
+
     // Clear the header sentinel only, so the next completion proves that
     // notification remains independent from CWSR serialization.
     memory->write32(kCwsrAddress, 0, driver_->local_process_id());
