@@ -289,6 +289,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "decode",
         "videodecode",
         "jpegdecode",
+        "hipfile",
         "rocprof_binary",
         "rocprof_config",
         "xgmi",
@@ -2527,7 +2528,10 @@ def assert_perfetto(subtests, tests_dir, request, test_output_dir):
                         pytest.fail(
                             f"Fail regex found: {pattern}\n{output}", pytrace=False
                         )
-            _print_subtest_output(request, subtest_name, output)
+            # On success echo only the command: validation.message may contain the
+            # full "-p"/--print perfetto dump, which floods ctest/CI logs. Failures
+            # above still surface the complete output.
+            _print_subtest_output(request, subtest_name, f"Command: {validation.command}")
 
     return _assert_perfetto
 

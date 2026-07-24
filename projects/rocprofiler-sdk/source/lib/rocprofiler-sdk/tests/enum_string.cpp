@@ -319,6 +319,13 @@ TEST(enum_string, rocjpeg_api_id)
     TEST_API_ID_STR(ROCPROFILER_ROCJPEG_API_ID, rocJpegGetErrorName);
 }
 
+TEST(enum_string, hipfile_api_id)
+{
+    TEST_API_ID_STR(ROCPROFILER_HIPFILE_API_ID, hipFileHandleRegister);
+    TEST_API_ID_STR(ROCPROFILER_HIPFILE_API_ID, hipFileRead);
+    TEST_API_ID_STR(ROCPROFILER_HIPFILE_API_ID, hipFileSetParameterString);
+}
+
 TEST(enum_string, runtime_evaluation)
 {
     // String representation of all enum values should have a prefix ROCPROFILER

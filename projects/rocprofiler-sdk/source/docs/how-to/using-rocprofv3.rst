@@ -605,6 +605,20 @@ The conversion generates a ``rocshmem_api_trace.csv`` file. Here are its content
 
 Perfetto will also show rocSHMEM API arguments. Pointers will not be dereferenced and only the address will be displayed.
 
+hipFILE trace
++++++++++++++
+
+`hipFILE <https://github.com/ROCm/rocm-systems/tree/develop/projects/hipfile>`_ is a GPU-aware file I/O library for HIP applications. This option traces the hipFILE API.
+
+.. code-block:: shell
+
+    rocprofv3 --hipfile-trace --output-format json rocpd -- <application_path>
+
+The above command stores hipFILE API records in the JSON results file and the rocpd database file.
+
+The hipFILE records include API arguments. Pointers are not dereferenced unless argument
+iteration is configured to do so.
+
 OMPT trace
 ++++++++++
 
@@ -1831,6 +1845,17 @@ Here are the properties of the JSON output schema:
                - **size** *(integer, required)*: Size of the rocDecode API record.
                - **kind** *(integer, required)*: Kind of the rocDecode API.
                - **operation** *(integer, required)*: Operation of the rocDecode API.
+               - **correlation_id** *(object, required)*: Correlation ID information.
+                  - **internal** *(integer, required)*: Internal correlation ID.
+                  - **external** *(integer, required)*: External correlation ID.
+               - **start_timestamp** *(integer, required)*: Start timestamp.
+               - **end_timestamp** *(integer, required)*: End timestamp.
+               - **thread_id** *(integer, required)*: Thread ID.
+         - **hipfile_api** *(array)*: hipFILE API records.
+            - **Items** *(object)*
+               - **size** *(integer, required)*: Size of the hipFILE API record.
+               - **kind** *(integer, required)*: Kind of the hipFILE API.
+               - **operation** *(integer, required)*: Operation of the hipFILE API.
                - **correlation_id** *(object, required)*: Correlation ID information.
                   - **internal** *(integer, required)*: Internal correlation ID.
                   - **external** *(integer, required)*: External correlation ID.

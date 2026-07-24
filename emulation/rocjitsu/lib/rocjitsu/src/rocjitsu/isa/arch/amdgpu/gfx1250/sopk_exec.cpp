@@ -6,7 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/sopk.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
-#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -19,78 +19,6 @@
 
 namespace rocjitsu {
 namespace gfx1250 {
-
-namespace {
-constexpr uint32_t HW_REG_MODE = 1;
-constexpr uint32_t HW_REG_STATUS = 2;
-constexpr uint32_t HW_REG_HW_ID1 = 4;
-constexpr uint32_t HW_REG_HW_ID2 = 5;
-constexpr uint32_t HW_REG_GPR_ALLOC = 6;
-constexpr uint32_t HW_REG_VGPR_ALLOC = 7;
-constexpr uint32_t HW_REG_WAVE_SCHED_MODE = 26;
-constexpr uint32_t HW_REG_IB_STS2 = 28;
-constexpr uint32_t HW_REG_IB_STS2_CLUSTER_ID_SHIFT = 6;
-constexpr uint32_t HW_REG_IB_STS2_CLUSTER_ID_MASK = 0xFu;
-constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT = 21;
-constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_MASK = 0xFu;
-
-[[maybe_unused]] uint32_t insert_hwreg_field(uint32_t reg_val, uint32_t src, uint32_t offset,
-                                             uint32_t mask) {
-  return (reg_val & ~(mask << offset)) | ((src & mask) << offset);
-}
-
-[[maybe_unused]] bool read_hwreg(amdgpu::Wavefront &wf, uint32_t reg_id, uint32_t &reg_val) {
-  switch (reg_id) {
-  case HW_REG_MODE:
-    reg_val = wf.mode_raw();
-    return true;
-  case HW_REG_STATUS:
-    reg_val = wf.status_raw();
-    return true;
-  case HW_REG_HW_ID1:
-    reg_val = static_cast<uint32_t>(wf.cu().id());
-    return true;
-  case HW_REG_HW_ID2:
-    reg_val = static_cast<uint32_t>(wf.cu().id() >> 16);
-    return true;
-  case HW_REG_GPR_ALLOC:
-    reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8);
-    return true;
-  case HW_REG_VGPR_ALLOC:
-    reg_val = (wf.vgpr_alloc().count & 0xFFu) | ((wf.vgpr_alloc().base & 0xFFu) << 8);
-    return true;
-  case HW_REG_WAVE_SCHED_MODE:
-    reg_val = wf.wave_sched_mode_raw();
-    return true;
-  case HW_REG_IB_STS2:
-    reg_val = (((wf.cluster_size() > 1 ? 1u : 0u) & HW_REG_IB_STS2_CLUSTER_ID_MASK)
-               << HW_REG_IB_STS2_CLUSTER_ID_SHIFT) |
-              ((wf.cluster_rank() & HW_REG_IB_STS2_WG_IN_CLUSTER_MASK)
-               << HW_REG_IB_STS2_WG_IN_CLUSTER_SHIFT);
-    return true;
-  default:
-    return false;
-  }
-}
-
-[[maybe_unused]] bool write_hwreg(amdgpu::Wavefront &wf, uint32_t reg_id, uint32_t offset,
-                                  uint32_t mask, uint32_t src) {
-  switch (reg_id) {
-  case HW_REG_MODE:
-    wf.set_mode_raw(insert_hwreg_field(wf.mode_raw(), src, offset, mask));
-    return true;
-  case HW_REG_STATUS:
-    wf.set_status_raw(insert_hwreg_field(wf.status_raw(), src, offset, mask));
-    return true;
-  case HW_REG_WAVE_SCHED_MODE:
-    wf.set_wave_sched_mode_raw(insert_hwreg_field(wf.wave_sched_mode_raw(), src, offset, mask));
-    return true;
-  default:
-    return false;
-  }
-}
-
-} // namespace
 
 const bool SMovkI32Sopk::execute_registered_ = register_exec_fn<SMovkI32Sopk>();
 
@@ -134,46 +62,34 @@ const bool SGetregB32Sopk::execute_registered_ = register_exec_fn<SGetregB32Sopk
 
 void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t hwreg = simm16.encoding_value_;
-  uint32_t reg_id = hwreg & 0x3Fu;
-  uint32_t offset = (hwreg >> 6) & 0x1Fu;
-  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
   uint32_t reg_val = 0;
-  if (!read_hwreg(wf, reg_id, reg_val))
-    util::Logger::warn("s_getreg_b32: unhandled hwreg id=", reg_id);
-  if (offset + size > 32)
-    size = 32 - offset;
-  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
-  amdgpu::RegisterAccess(wf).write_scalar(sdst, (reg_val >> offset) & mask);
+  auto result = amdgpu::read_hwreg_field(wf, hwreg, reg_val);
+  if (result != amdgpu::HwregAccessResult::Success)
+    util::Logger::warn("s_getreg_b32: ", amdgpu::hwreg_access_result_name(result),
+                       " hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, reg_val);
 }
 
 const bool SSetregB32Sopk::execute_registered_ = register_exec_fn<SSetregB32Sopk>();
 
 void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t hwreg = simm16.encoding_value_;
-  uint32_t reg_id = hwreg & 0x3Fu;
-  uint32_t offset = (hwreg >> 6) & 0x1Fu;
-  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
-  if (offset + size > 32)
-    size = 32 - offset;
-  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
   uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(sdst);
-  if (!write_hwreg(wf, reg_id, offset, mask, src))
-    util::Logger::warn("s_setreg_b32: unhandled hwreg id=", reg_id);
+  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);
+  if (result != amdgpu::HwregAccessResult::Success)
+    util::Logger::warn("s_setreg_b32: ", amdgpu::hwreg_access_result_name(result),
+                       " hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));
 }
 
 const bool SSetregImm32B32Sopk::execute_registered_ = register_exec_fn<SSetregImm32B32Sopk>();
 
 void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t hwreg = simm16.encoding_value_;
-  uint32_t reg_id = hwreg & 0x3Fu;
-  uint32_t offset = (hwreg >> 6) & 0x1Fu;
-  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
-  if (offset + size > 32)
-    size = 32 - offset;
-  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
   uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(literal);
-  if (!write_hwreg(wf, reg_id, offset, mask, src))
-    util::Logger::warn("s_setreg_imm32_b32: unhandled hwreg id=", reg_id);
+  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);
+  if (result != amdgpu::HwregAccessResult::Success)
+    util::Logger::warn("s_setreg_imm32_b32: ", amdgpu::hwreg_access_result_name(result),
+                       " hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));
 }
 
 const bool SCallI64Sopk::execute_registered_ = register_exec_fn<SCallI64Sopk>();
