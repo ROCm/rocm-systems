@@ -153,7 +153,7 @@ static ncclResult_t ginAnvilDevices(int* ndev) {
 // SDMA backend uses intra-node LSA (flat) signals, which behave as both strong
 // and VA-addressable signals; report both as supported (matches the behavior
 // previously injected by the v13->v14 shim for internal plugins).
-static ncclResult_t ginAnvilGetGinProperties(ncclGinProperties_v14_t* ginProps) {
+static ncclResult_t ginAnvilGetGinProperties(ncclGinProperties_t* ginProps) {
   ginProps->supportsStrongSignals = true;
   ginProps->supportsVASignals = true;
   return ncclSuccess;
@@ -492,7 +492,7 @@ fail:
   return ret;
 }
 
-static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_v14_t* config, void** outGinCtx,
+static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* config, void** outGinCtx,
                                           ncclNetDeviceHandle_v11_t** outDevHandle) {
   ginAnvilCollCtx* cctx = (ginAnvilCollCtx*)collComm;
   ncclResult_t ret = ncclSuccess;

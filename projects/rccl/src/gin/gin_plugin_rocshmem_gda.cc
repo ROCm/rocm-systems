@@ -85,7 +85,7 @@ static ncclResult_t ginRocshmemGdaDevices(int* ndev) {
 // v14 GIN plugins expose GIN capability flags via getGinProperties. The rocshmem
 // GDA backend uses IB atomics for signals (strong, VA-addressable); report both
 // as supported (matches the behavior previously injected by the v13->v14 shim).
-static ncclResult_t ginRocshmemGdaGetGinProperties(ncclGinProperties_v14_t* ginProps) {
+static ncclResult_t ginRocshmemGdaGetGinProperties(ncclGinProperties_t* ginProps) {
   ginProps->supportsStrongSignals = true;
   ginProps->supportsVASignals = true;
   return ncclSuccess;
@@ -243,7 +243,7 @@ static ncclResult_t ginRocshmemGdaDeregMrSym(void* collComm, void* mhandle) {
 // createContext: lightweight setup (signals, counters, GPU context)
 ///////////////////////////////////////////////////////////////////////////////
 
-static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_v14_t* config, void** outGinCtx,
+static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_t* config, void** outGinCtx,
                                                 ncclNetDeviceHandle_v11_t** outDevHandle) {
   struct ginRocshmemGdaCollCtx* cctx = (struct ginRocshmemGdaCollCtx*)collComm;
   ncclResult_t ret = ncclSuccess;
