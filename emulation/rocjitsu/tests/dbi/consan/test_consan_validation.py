@@ -222,6 +222,10 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["jakub-attention"]["relative_path"],
             "hip-moi-build/tests/hip_moi_reference_cdna3_jakub_matmul",
         )
+        self.assertEqual(
+            workloads["streamk-arrival"]["fault_families"],
+            ("atomic-weaken-order",),
+        )
         native_spellings = json.dumps(
             [
                 workloads[workload_id]
@@ -526,20 +530,27 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
 
-    def test_sharktank_gfx950_uses_configured_python_and_one_repetition(self) -> None:
+    def test_sharktank_native_cdna_uses_configured_python_and_one_repetition(
+        self,
+    ) -> None:
         tp1 = validation.WORKLOAD_BY_ID["tp1-prefill"]
         with mock.patch.dict(
             os.environ,
             {validation.SHARKTANK_PYTHON_ENV: "/workspace/venv/bin/python"},
         ):
-            command = validation._workload_command(
-                Path("/workspace"), "gfx950", tp1, "overhead", Path("/unused")
-            )
-        self.assertEqual(command[0], "/workspace/venv/bin/python")
-        self.assertEqual(command[command.index("--repetitions") + 1], "1")
+            for target in ("gfx942", "gfx950"):
+                with self.subTest(target=target):
+                    command = validation._workload_command(
+                        Path("/workspace"), target, tp1, "overhead", Path("/unused")
+                    )
+                    self.assertEqual(command[0], "/workspace/venv/bin/python")
+                    self.assertEqual(command[command.index("--repetitions") + 1], "1")
 
     def test_active_architectures_use_one_outer_overhead_process(self) -> None:
         workload = validation.WORKLOAD_BY_ID["d128-pressure"]
+        self.assertEqual(
+            validation._outer_repetitions("gfx942", "overhead", workload), 1
+        )
         self.assertEqual(
             validation._outer_repetitions("gfx950", "overhead", workload), 1
         )
@@ -551,16 +562,18 @@ class ConSanValidationTest(unittest.TestCase):
             workload.overhead_processes,
         )
 
-    def test_qwen_gfx950_overhead_uses_one_repetition(self) -> None:
+    def test_active_architecture_qwen_overhead_uses_one_repetition(self) -> None:
         workload = validation.WORKLOAD_BY_ID["qwen-prefill"]
-        command = validation._workload_command(
-            Path("/workspace"),
-            "gfx950",
-            workload,
-            "overhead",
-            Path("/artifacts/benchmark.json"),
-        )
-        self.assertIn("--benchmark_repetitions=1", command)
+        for target in ("gfx942", "gfx950", "gfx1250"):
+            with self.subTest(target=target):
+                command = validation._workload_command(
+                    Path("/workspace"),
+                    target,
+                    workload,
+                    "overhead",
+                    Path("/artifacts/benchmark.json"),
+                )
+                self.assertIn("--benchmark_repetitions=1", command)
 
     def test_pytorch_gfx950_overhead_uses_one_repetition(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]
@@ -573,7 +586,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
 
-    def test_gfx950_scrubs_software_model_environment_without_changing_gfx1250(
+    def test_native_cdna_scrubs_software_model_environment_without_changing_gfx1250(
         self,
     ) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]
@@ -581,13 +594,20 @@ class ConSanValidationTest(unittest.TestCase):
             name: f"configured-{name}" for name in validation.SOFTWARE_MODEL_ENVIRONMENT
         }
         with mock.patch.dict(os.environ, model_environment, clear=False):
-            gfx950 = validation._clean_environment(
-                None, workload, Path("/workspace/hook.so"), "gfx950"
-            )
+            native_cdna = {
+                target: validation._clean_environment(
+                    None, workload, Path("/workspace/hook.so"), target
+                )
+                for target in ("gfx942", "gfx950")
+            }
             gfx1250 = validation._clean_environment(
                 None, workload, Path("/workspace/hook.so"), "gfx1250"
             )
-        self.assertTrue(validation.SOFTWARE_MODEL_ENVIRONMENT.isdisjoint(gfx950))
+        for target, environment in native_cdna.items():
+            with self.subTest(target=target):
+                self.assertTrue(
+                    validation.SOFTWARE_MODEL_ENVIRONMENT.isdisjoint(environment)
+                )
         self.assertEqual(
             {name: gfx1250[name] for name in validation.SOFTWARE_MODEL_ENVIRONMENT},
             model_environment,
@@ -1367,19 +1387,21 @@ class ConSanValidationTest(unittest.TestCase):
     def test_fault_template_matches_target_barrier_geometry(self) -> None:
         workload = validation.WORKLOAD_BY_ID["d128-block"]
         rdna_fault = validation._fault_template("gfx1201", workload)["faults"][0]
-        cdna_fault = validation._fault_template("gfx950", workload)["faults"][0]
         self.assertIn(
             "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY",
             rdna_fault["environment"],
         )
-        self.assertNotIn(
-            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY",
-            cdna_fault["environment"],
-        )
-        self.assertEqual(
-            cdna_fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
-            "REPLACE_FROM_INVENTORY",
-        )
+        for target in ("gfx942", "gfx950"):
+            with self.subTest(target=target):
+                cdna_fault = validation._fault_template(target, workload)["faults"][0]
+                self.assertNotIn(
+                    "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY",
+                    cdna_fault["environment"],
+                )
+                self.assertEqual(
+                    cdna_fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
+                    "REPLACE_FROM_INVENTORY",
+                )
 
     def test_fault_acceptance_rejects_an_unattributed_process_signal(self) -> None:
         accepted, reasons = validation._fault_acceptance(

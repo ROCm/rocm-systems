@@ -39,7 +39,9 @@ PYTORCH_PYTHON_ENV = "CONSAN_VALIDATION_PYTORCH_PYTHON"
 SHARKTANK_PYTHON_ENV = "CONSAN_VALIDATION_SHARKTANK_PYTHON"
 TENSILE_PYTHON_ENV = "CONSAN_VALIDATION_TENSILE_PYTHON"
 TIMEOUT_SECONDS = 30
-QWEN_OVERHEAD_REPETITIONS = {"gfx950": 1, "gfx1250": 1}
+NATIVE_CDNA_TARGETS = frozenset(("gfx942", "gfx950"))
+SINGLE_REPETITION_TARGETS = frozenset(("gfx942", "gfx950", "gfx1250"))
+QWEN_OVERHEAD_REPETITIONS = {target: 1 for target in SINGLE_REPETITION_TARGETS}
 CONTROLLED_ENV_PREFIX = "RJ_CONSAN_"
 TOOLS = ("iree-run-module", "iree-benchmark-module", "rocminfo")
 HSA_TOOL_ENVIRONMENT = {
@@ -115,8 +117,8 @@ FAULT_FAMILY_ENVIRONMENTS = {
 
 def _fault_family_environment(target: str, family: str) -> dict[str, str]:
     environment = dict(FAULT_FAMILY_ENVIRONMENTS[family])
-    if target == "gfx950" and family == "barrier-drop":
-        # CDNA4 represents a full workgroup barrier with one s_barrier.  Unlike
+    if target in NATIVE_CDNA_TARGETS and family == "barrier-drop":
+        # CDNA3/4 represent a full workgroup barrier with one s_barrier. Unlike
         # RDNA4's signal/wait pair, it has no two-member logical sequence that
         # must be selected and dropped atomically.
         environment.pop("RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY")
@@ -878,7 +880,7 @@ def _fault_families(target: str, workload: Workload) -> tuple[str, ...]:
         "tp1-decode-combined",
     ):
         return ("barrier-move",)
-    if target in ("gfx942", "gfx950") and workload.id in (
+    if target in NATIVE_CDNA_TARGETS and workload.id in (
         "streamk-arrival",
         "tree-atomic-or",
     ):
@@ -1488,6 +1490,15 @@ def _doctor(
 
 
 def _manifest(target: str) -> dict:
+    def manifest_workload(workload: Workload) -> dict:
+        resolved = _resolved_workload(target, workload)
+        return asdict(
+            replace(
+                resolved,
+                fault_families=_fault_families(target, resolved),
+            )
+        )
+
     return {
         "schema_version": SCHEMA_VERSION,
         "protocol": "consan-real-workload-validation-v1",
@@ -1496,8 +1507,7 @@ def _manifest(target: str) -> dict:
         "tools_from_path": list(TOOLS),
         "profiles": [asdict(PROFILES[profile]) for profile in PROFILE_IDS],
         "workloads": [
-            asdict(_resolved_workload(target, workload))
-            for workload in _workloads_for_target(target)
+            manifest_workload(workload) for workload in _workloads_for_target(target)
         ],
         "ordinary_forbidden_environment": list(ORDINARY_FORBIDDEN_ENVIRONMENT),
         "timeout_seconds": TIMEOUT_SECONDS,
@@ -1516,7 +1526,7 @@ def _clean_environment(
         for key, value in os.environ.items()
         if not key.startswith(CONTROLLED_ENV_PREFIX)
         and key not in HSA_TOOL_ENVIRONMENT | {"HIP_TARGET"}
-        and not (target == "gfx950" and key in SOFTWARE_MODEL_ENVIRONMENT)
+        and not (target in NATIVE_CDNA_TARGETS and key in SOFTWARE_MODEL_ENVIRONMENT)
     }
     if target is not None:
         environment["HIP_TARGET"] = target
@@ -1719,7 +1729,7 @@ def _workload_command(
         # Keep both the outer process count and this inner suite count at one.
         repetitions = (
             1
-            if target in {"gfx950", "gfx1250"} or workload.overhead_processes > 1
+            if target in SINGLE_REPETITION_TARGETS or workload.overhead_processes > 1
             else (10 if overhead else 1)
         )
         return [
@@ -1743,7 +1753,11 @@ def _workload_command(
             "--workload",
             workload.id.removeprefix("pytorch-"),
             "--repetitions",
-            ("1" if target in {"gfx950", "gfx1250"} else ("10" if overhead else "1")),
+            (
+                "1"
+                if target in SINGLE_REPETITION_TARGETS
+                else ("10" if overhead else "1")
+            ),
             "--label",
             f"{workload.id}-{phase}",
         ]
@@ -2003,7 +2017,7 @@ def _launcher_from_json(value: str | None) -> list[str]:
 
 
 def _outer_repetitions(target: str, phase: str, workload: Workload) -> int:
-    if target in {"gfx950", "gfx1250"} or phase != "overhead":
+    if target in SINGLE_REPETITION_TARGETS or phase != "overhead":
         return 1
     return workload.overhead_processes
 
