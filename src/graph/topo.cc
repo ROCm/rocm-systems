@@ -120,6 +120,8 @@ ncclResult_t ncclTopoCreateNode(struct ncclTopoSystem* system, struct ncclTopoNo
     n->cpu.vendor = NCCL_TOPO_UNDEF;
     n->cpu.model = NCCL_TOPO_UNDEF;
   } else if (type == NET) {
+    n->net.vendor = UINT64_MAX;
+    n->net.device = UINT64_MAX;
     n->net.asic = 0ULL;
     n->net.port = NCCL_TOPO_UNDEF;
     n->net.bw = 0.0;
@@ -437,6 +439,10 @@ ncclResult_t ncclTopoAddNet(struct ncclXmlNode* xmlNet, struct ncclTopoSystem* s
   struct ncclXmlNode* parent = xmlNet->parent;
   while (parent != NULL && strcmp(parent->name, "pci") != 0) parent = parent->parent;
   if (parent) NCCLCHECK(xmlGetAttr(parent, "busid", &busId));
+  if (parent) {
+    NCCLCHECK(xmlGetAttrUint64Default(parent, "vendor", &net->net.vendor, UINT64_MAX));
+    NCCLCHECK(xmlGetAttrUint64Default(parent, "device", &net->net.device, UINT64_MAX));
+  }
   // If we fail to find the PCIe path, we use the GUID instead.
   if (busId) eatHash(hacc, busId, strlen(busId));
   else eatHash(hacc, &net->net.asic);
@@ -2056,6 +2062,8 @@ ncclResult_t ncclTopoGetNetDevsPolicy(enum netDevsPolicy* policy, int* policyNum
   return ncclSuccess;
 }
 
+NCCL_PARAM(TopoScatterStartNet, "TOPO_SCATTER_START_NET", 0);
+
 ncclResult_t ncclTopoGetLocalNetType(struct ncclTopoSystem* system, int type, int rank, int channelId, int64_t* id,
                                      int* dev) {
   int gpu;
@@ -2085,9 +2093,21 @@ ncclResult_t ncclTopoGetLocalNetType(struct ncclTopoSystem* system, int type, in
     return ncclInternalError;
   }
 
+  int gpuArch = system->nodes[GPU].nodes[gpu].gpu.cudaCompCap;
+  bool isCx8 = false;
+  int n = 0;
+  while (n < localNetCount && !isCx8) {
+    struct ncclTopoNode* net = &system->nodes[type].nodes[localNets[n]];
+    isCx8 |= net && net->net.vendor == 0x15b3 && (net->net.device == 0x2100 || net->net.device == 0x1023);
+    n++;
+  }
+
   // Starting net is chosen to avoid collision and follow a similar pattern for all GPUs.
   // localGpuCount GPUs share localNetCount NET devs; each GPU using netsPerGpu NET devs.
-  int net = system->nodes[GPU].nodes[gpu].gpu.dev % localGpuCount;
+  int net = system->nodes[GPU].nodes[gpu].gpu.dev;
+  if ((gpuArch >= 100 && isCx8) || ncclParamTopoScatterStartNet()) {
+    net = net % localGpuCount;
+  }
   if (isPow2(localNetCount)) net = mirrorBits(net, localNetCount);
   net += channelId % (netsPerGpu);
   if (id) *id = system->nodes[type].nodes[localNets[net % localNetCount]].id;

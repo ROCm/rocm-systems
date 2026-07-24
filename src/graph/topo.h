@@ -123,6 +123,8 @@ struct ncclTopoNode {
     } dev;
     struct {
       int dev; // Plugin dev number
+      uint64_t vendor; // PCI vendor ID
+      uint64_t device; // PCI device ID
       uint64_t pciId;
       uint64_t asic;
       int port;
