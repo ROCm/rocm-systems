@@ -562,13 +562,16 @@ static const std::unordered_map<uint64_t, const char*> telemetry_id_map = {
 };
 
 amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char** telem_name) {
+  if (telem_name == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
   auto it = telemetry_id_map.find(telem_id);
   if (it != telemetry_id_map.end()) {
     *telem_name = it->second;
     return AMDSMI_STATUS_SUCCESS;
   }
   *telem_name = "UNKNOWN";
-  return AMDSMI_STATUS_API_FAILED;
+  return AMDSMI_STATUS_NOT_FOUND;
 }
 
 // Note: AMDSMI and UALoE telemetry structures are now designed to be binary compatible
