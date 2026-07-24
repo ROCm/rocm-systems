@@ -69,17 +69,18 @@ public:
   /// @returns Instruction count.
   uint32_t num_instructions() const { return num_instructions_; }
 
-  /// @brief Whether the block ends with a terminator instruction.
-  /// @retval true The last instruction is a branch or program terminator.
+  /// @brief Whether the block ends with a terminator instruction or sentinel.
+  /// @retval true The last instruction is a branch/program terminator, or the
+  /// block reaches a gfx1250 zero-word program terminator sentinel.
   /// @retval false The block falls through to the next.
   bool has_terminator() const { return has_terminator_; }
 
   /// @brief Whether sequential execution would enter undecodable source bytes.
   ///
-  /// @details Large code objects may place zero padding or opaque data between
-  /// functions in `.text`. Such gaps are harmless after a real terminator, but
-  /// a reachable non-terminating block that falls into a gap cannot be safely
-  /// relocated and must make translation fail closed.
+  /// @details Large code objects may place padding or opaque data between
+  /// functions in `.text`. A gfx1250 zero word is treated as a program
+  /// terminator sentinel. Fallthrough into any other undecodable gap cannot be
+  /// safely relocated and must make translation fail closed.
   bool falls_through_to_undecodable_text() const { return falls_through_to_undecodable_text_; }
 
   /// @brief Last instruction in the block, or nullptr for an empty block.

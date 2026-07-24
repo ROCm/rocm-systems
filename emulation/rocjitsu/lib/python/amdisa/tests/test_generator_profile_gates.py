@@ -1791,6 +1791,7 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     gfx1250_generated_root: Path,
 ):
     encodings_h = (gfx1250_generated_root / 'encodings.h').read_text()
+    encodings_cpp = (gfx1250_generated_root / 'encodings.cpp').read_text()
     vop3_alu = '\n'.join(
         path.read_text()
         for path in sorted(gfx1250_generated_root.glob('vop3_alu*.cpp'))
@@ -1802,6 +1803,13 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     ]
     assert 'uint32_t dpp_ctrl_ = 0;' in vop3_base
     assert 'uint32_t dpp_fi_ = 1;' in vop3_base
+    assert 'std::array<uint32_t, 3> raw_words_{};' in vop3_base
+
+    vop3_encoding_ctor = _generated_constructor_body(encodings_cpp, 'Vop3')
+    assert 'if (has_dpp8() || has_dpp16())' in vop3_encoding_ctor
+    assert 'size_ += sizeof(MachineInst);' in vop3_encoding_ctor
+    assert 'std::memcpy(raw_words_.data(), inst, size_);' in vop3_encoding_ctor
+    assert 'raw_encoding_ = raw_words_.data();' in vop3_encoding_ctor
 
     ctor = _generated_constructor_body(vop3_alu, 'VAddF16Vop3')
     assert 'Vop3VopDpp16MachineInst' in ctor

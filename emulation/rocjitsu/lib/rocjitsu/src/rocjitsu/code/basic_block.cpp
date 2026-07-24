@@ -8,6 +8,8 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include "util/except.h"
+
 #include <algorithm>
 #include <cassert>
 #include <memory>
@@ -149,18 +151,25 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
     while (pc < inst_data_size) {
       // The gfx1250 code objects used for offline translation place zero-filled
       // alignment holes between function bodies. Zero is not a gfx1250
-      // instruction, so recognize that observed padding value before calling
-      // the decoder instead of using an InvalidInst exception as control flow.
-      // A later kernel-scope check still rejects any reachable block that falls
-      // through into one of these holes. Other invalid words remain hard decode
-      // failures rather than being silently classified as padding.
+      // instruction, so recognize that sentinel before calling the decoder.
+      // For gfx1250, reaching the first zero terminates the current program
+      // path; block construction below records that policy explicitly. Other
+      // invalid words remain hard decode failures rather than being silently
+      // classified as padding.
       if (arch == ROCJITSU_CODE_ARCH_GFX1250 && inst_data[pc] == 0) {
         ++pc;
         byte_offset += sizeof(uint32_t);
         continue;
       }
 
-      auto *raw_inst = decoder.decode(&inst_data[pc], byte_offset);
+      Instruction *raw_inst = nullptr;
+      try {
+        raw_inst = decoder.decode(&inst_data[pc], byte_offset);
+      } catch (const util::InvalidInst &error) {
+        throw util::InvalidInst(std::string(error.what()) + " at .text byte offset " +
+                                   std::to_string(byte_offset),
+                               "");
+      }
       std::unique_ptr<Instruction> inst(raw_inst);
       uint32_t inst_size_bytes = static_cast<uint32_t>(inst->size());
       uint32_t inst_words = inst_size_bytes / sizeof(uint32_t);
@@ -246,8 +255,15 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
 
         const bool decode_gap =
             i >= decoded.size() ? next_offset < section_end : decoded[i]->src_loc() != next_offset;
-        if (decode_gap && !terminates)
-          current->falls_through_to_undecodable_text_ = true;
+        if (decode_gap && !terminates) {
+          const bool reaches_gfx1250_zero =
+              arch == ROCJITSU_CODE_ARCH_GFX1250 && next_offset < section_end &&
+              inst_data[next_offset / sizeof(uint32_t)] == 0;
+          if (reaches_gfx1250_zero)
+            current->has_terminator_ = true;
+          else
+            current->falls_through_to_undecodable_text_ = true;
+        }
 
         if (terminates || decode_gap || (i < decoded.size() && leaders.contains(next_offset)))
           break;

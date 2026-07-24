@@ -763,6 +763,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
                                                                      uint16_t pair_lo) {
   // Match:
   //   s_add_i32 tmp, literal, 4
+  //   [s_delay_alu]
   //   s_add_u32 pair_lo, pair_lo, tmp
   //   s_addc_u32 pair_hi, pair_hi, 0
   //
@@ -773,6 +774,13 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   if (index + 2 > last_index)
     return std::nullopt;
 
+  size_t low_index = index + 1;
+  if (ctx.insts[low_index]->mnemonic() == "s_delay_alu")
+    ++low_index;
+  const size_t high_index = low_index + 1;
+  if (high_index > last_index)
+    return std::nullopt;
+
   const auto add_i32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddI32);
   const auto add_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddU32);
   const auto addc_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddcU32);
@@ -780,11 +788,11 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
     return std::nullopt;
 
   const Instruction &temp_inst = *ctx.insts[index];
-  const Instruction &low_inst = *ctx.insts[index + 1];
-  const Instruction &high_inst = *ctx.insts[index + 2];
+  const Instruction &low_inst = *ctx.insts[low_index];
+  const Instruction &high_inst = *ctx.insts[high_index];
   const uint32_t temp_word = ctx.facts[index].word;
-  const uint32_t low_word = ctx.facts[index + 1].word;
-  const uint32_t high_word = ctx.facts[index + 2].word;
+  const uint32_t low_word = ctx.facts[low_index].word;
+  const uint32_t high_word = ctx.facts[high_index].word;
   const auto temp_sdst = static_cast<uint16_t>((temp_word >> 16) & 0x7fu);
 
   uint32_t literal = 0;
@@ -802,7 +810,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   return TempDeltaPattern{
       .delta = static_cast<int64_t>(static_cast<int32_t>(literal)) + 4,
       .end_offset = high_inst.src_loc() + static_cast<uint64_t>(high_inst.size()),
-      .instruction_count = 3,
+      .instruction_count = high_index - index + 1,
   };
 }
 

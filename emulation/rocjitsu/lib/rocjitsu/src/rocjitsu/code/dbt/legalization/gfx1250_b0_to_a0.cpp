@@ -33,7 +33,6 @@ namespace {
 ///   * v_cvt_pk_fp8_f32, v_cvt_sr_fp8_f32 (only when CLAMP selects the B0-only
 ///     mode; the ordinary form stays on the copy path),
 ///   * v_wmma_scale / v_wmma_scale16 forms without an implemented rule,
-///   * the unsupported low-precision SWMMAC families added below, and
 ///   * integer IU8/IU4 WMMA/SWMMAC.
 /// Separately, a 64-bit source using FLAT_SCRATCH_BASE_HI is classified via
 /// operand inspection (see uses_flat_scratch_base_hi_64bit_source), and the
@@ -98,24 +97,25 @@ inline constexpr std::array<std::string_view, 18> kExactErrataMnemonics = {
   if (is_k128_fp8_bf8 || mnemonic == "v_wmma_f32_32x16x128_f4")
     return true;
 
-  // Scale16 and regular Scale have separate mandatory encoding/scale-source
-  // workarounds, including B0-only M=32 forms. Their semantic rules provide the
-  // A0 M/K splits and fail closed when operand ranges cannot be preserved.
-  if (mnemonic.starts_with("v_wmma_scale"))
+  // A0 trap/CWSR recovery requires every low-precision F8F6F4 WMMA to carry
+  // its load-scale prefix, even when the requested scale is 1.0. Standalone
+  // input is therefore wrapped with inline-zero neutral scales. Scale16 and
+  // regular Scale have separate mandatory encoding/scale-source workarounds,
+  // including B0-only M=32 forms.
+  if (mnemonic == "v_wmma_f32_16x16x128_f8f6f4" ||
+      mnemonic.starts_with("v_wmma_scale"))
     return true;
 
-  // K=64 FP8/BF8 WMMA and K=128 F8F6F4 are present on A0 and retain their
-  // architectural encodings. They must stay on the ordinary copy path. The
-  // neutral regular-Scale K=128 lowering and the B0-only 32x16 FP4 lowering use
-  // K=128 F8F6F4 as their A0 matrix base.
+  // K=64 FP8/BF8 WMMA is present on A0 and retains its architectural encoding.
+  // It stays on the ordinary copy path. K=128 F8F6F4 is also present on A0, but
+  // the A0 trap workaround above requires its scaled wrapper in software-visible
+  // code. Semantic lowerings may still use it as the matrix body of that atomic
+  // four-DWORD wrapper.
   //
-  // FP8/BF8 SWMMAC remains unsupported and fails closed.
-  const auto ends_with_fp8_bf8_pair = [&] {
-    return mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||
-           mnemonic.ends_with("_bf8_fp8") || mnemonic.ends_with("_bf8_bf8");
-  };
-  if (mnemonic.starts_with("v_swmmac_") && ends_with_fp8_bf8_pair())
-    return true;
+  // FP8/BF8 SWMMAC is present on both A0 and B0. Unlike dense K=128 WMMA,
+  // the gfx1250 A0-to-B0 change table does not classify these sparse forms as
+  // B0 additions, and their opcodes remain inside the A0 seven-bit VOP3P
+  // opcode field. They therefore stay on the same-stepping byte-copy path.
 
   // The A0 co-execution distance exceeds B0 only for integer IU8/IU4 WMMA or
   // SWMMAC. FP16/BF16 need four safe slots on both steppings, while floating

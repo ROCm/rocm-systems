@@ -1993,6 +1993,19 @@ class CodeGenerator:
         for inst_enc in self.isa_spec.inst_encodings:
             if not inst_enc.insts:
                 continue
+            dpp_struct, dpp8_struct = self._vop_dpp_struct_names(
+                inst_enc.enc_name
+            )
+            owns_dpp_extension = (
+                dpp_struct is not None
+                and self._supports_dpp_for_encoding(inst_enc.enc_name)
+            ) or dpp8_struct is not None
+            # Compact VOP1/VOP2/VOPC encodings already account for DPP through
+            # !default_encoding(). VOP3-family base encodings are 64 bits, so
+            # their DPP control DWORD must be counted explicitly.
+            needs_explicit_dpp_size = (
+                owns_dpp_extension and inst_enc.bit_cnt >= 64
+            )
             class_members = []
             public_members = [
                 cgen.Line('public:'),
@@ -2125,10 +2138,20 @@ class CodeGenerator:
                 )
             else:
                 size_line += extension_size_line
+            if needs_explicit_dpp_size:
+                size_line += (
+                    ' if (has_dpp8() || has_dpp16())'
+                    ' size_ += sizeof(MachineInst);'
+                )
             if inst_enc.has_implied_literal_ops:
                 size_line += (
                     ' if (hasImpliedLiteral())'
                     ' literal_ = reinterpret_cast<const uint32_t *>(inst)[1];'
+                )
+            if owns_dpp_extension:
+                size_line += (
+                    ' std::memcpy(raw_words_.data(), inst, size_);'
+                    ' raw_encoding_ = raw_words_.data();'
                 )
             if rule.use_flat_mnemonic:
                 # FLAT mnemonics are dynamically constructed ("scratch_*",
@@ -2278,6 +2301,23 @@ class CodeGenerator:
                 cgen.Statement(f'using OpEncoding = {inst_enc.fmt_enc_name}MachineInst')
             )
             class_members.append(cgen.Statement('const OpEncoding inst_'))
+            if owns_dpp_extension:
+                extension_word_capacity = max(
+                    [1, *inst_enc.implied_literal_ops.values()]
+                )
+                if any(
+                    name.startswith('has_lit64')
+                    for name, _ in inst_enc.enc_conds
+                ):
+                    extension_word_capacity = max(extension_word_capacity, 2)
+                raw_word_count = (
+                    (inst_enc.bit_cnt + 31) // 32 + extension_word_capacity
+                )
+                class_members.append(
+                    cgen.Statement(
+                        f'std::array<uint32_t, {raw_word_count}> raw_words_{{}}'
+                    )
+                )
             if inst_enc.has_implied_literal_ops:
                 class_members.append(cgen.Statement('uint32_t literal_ = 0'))
             # FLAT encoding bases need an owned string for the dynamic mnemonic.
@@ -2361,6 +2401,7 @@ class CodeGenerator:
                 ),
                 ('rocjitsu/isa/instruction.h', False),
                 (encoding_helper_header, False),
+                ('array', True),
                 ('cstdint', True),
                 ('string', True),
                 ('string_view', True),
@@ -2394,6 +2435,7 @@ class CodeGenerator:
                 f'rocjitsu/isa/arch/amdgpu/{self.isa_spec.arch_name}/encodings.h',
                 False,
             ),
+            ('cstring', True),
             ('string', True),
         ]
         class_impl_file = CppFile(
