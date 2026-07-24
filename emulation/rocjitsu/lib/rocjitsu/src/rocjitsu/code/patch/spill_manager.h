@@ -168,7 +168,8 @@ struct VgprSpillSequence {
   }
 };
 
-/// @brief Reserve slots and encode a gfx1201 VGPR spill/fill sequence.
+/// @brief Reserve slots and encode a CDNA3, CDNA4, RDNA4, or gfx1250 VGPR
+/// spill/fill sequence.
 ///
 /// @returns A complete sequence, or nullopt for an unsupported architecture,
 /// invalid VGPR range, unencodable slot, or capacity failure. On failure
@@ -184,8 +185,9 @@ struct VgprSpillSequence {
 /// stack kernels: save the current frame base, set it to the stack top,
 /// advance the top by the temporary frame size, then reverse those operations
 /// after filling the VGPRs. The SCC value is restored before guest code runs.
-/// No descriptor growth is needed because the loader already
-/// allocates the kernel's dynamic stack.
+/// The encoding is available for CDNA3, CDNA4, RDNA4, and gfx1250. No
+/// descriptor growth is needed because the loader already allocates the
+/// kernel's dynamic stack.
 [[nodiscard]] std::optional<VgprSpillSequence> build_dynamic_stack_vgpr_spill_sequence(
     uint16_t vgpr_base, uint16_t vgpr_count, uint16_t stack_top_sgpr, uint16_t frame_base_sgpr,
     uint16_t saved_frame_base_sgpr, uint16_t saved_scc_sgpr, rj_code_arch_t arch);

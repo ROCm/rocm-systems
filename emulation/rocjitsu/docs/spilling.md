@@ -32,9 +32,9 @@ The reusable implementation provides:
 - a monotonic allocator for ranges in a kernel private segment;
 - stable, idempotent register-to-slot assignment;
 - transactional reservation of a multi-register window;
-- fixed-offset save and restore sequences for ordinary VGPRs on gfx942,
-  gfx950, gfx1201, and gfx1250;
-- site-local dynamic-stack frame sequences on those targets;
+- fixed-offset save and restore sequences for ordinary VGPRs on the CDNA3,
+  CDNA4, RDNA4, and gfx1250 architecture classes;
+- site-local dynamic-stack frame sequences on those architecture classes;
 - kernel-descriptor private-size updates.
 
 It does not provide:
@@ -86,9 +86,9 @@ the resulting common extent. `SpillManager` does not discover those owners.
 ## Fixed-offset sequences
 
 `build_vgpr_spill_sequence()` supports ordinary B32 VGPR windows on
-gfx942, gfx950, gfx1201, and gfx1250. It reserves stable slots and returns
-separate target-native save and restore word sequences plus the resulting
-private-segment size.
+the CDNA3, CDNA4, RDNA4, and gfx1250 architecture classes. It reserves stable
+slots and returns separate target-native save and restore word sequences plus
+the resulting private-segment size.
 
 Conceptually, the emitted sequence is:
 
@@ -171,13 +171,13 @@ intercept kernel loads or dispatches.
 | Capability | Current state |
 |---|---|
 | Stable private slots | SGPR, VGPR, and AccVGPR identities can be assigned storage. |
-| Fixed-offset save/restore | Ordinary B32 VGPR windows on gfx942, gfx950, gfx1201, and gfx1250. |
-| Dynamic-stack save/restore | Ordinary B32 VGPR windows on gfx942, gfx950, gfx1201, and gfx1250, with a caller-proven stack convention and scalar saves. |
+| Fixed-offset save/restore | Ordinary B32 VGPR windows on the CDNA3, CDNA4, RDNA4, and gfx1250 architecture classes. |
+| Dynamic-stack save/restore | Ordinary B32 VGPR windows on those architecture classes, with a caller-proven stack convention and scalar saves. |
 | Descriptor growth | Fixed and dynamic private backing, including zero-to-nonzero growth. |
 | AMDGPU metadata notes | Deliberately untouched; they are not a ROCR runtime authority. |
 | SGPR save/restore | Not implemented. |
 | AccVGPR save/restore | Not implemented. |
-| Other GPU targets | Not implemented by this backend. |
+| Other architecture classes | Not implemented by this backend. |
 
 Slot assignment for a register class does not imply a save and restore emitter
 exists for that class.
@@ -206,6 +206,9 @@ The implementation is in:
 - `lib/rocjitsu/src/rocjitsu/code/patch/cdna3_instrumentation_builder.h`;
 - `lib/rocjitsu/src/rocjitsu/code/patch/cdna4_instrumentation_builder.h`;
 - `lib/rocjitsu/src/rocjitsu/code/patch/rdna4_instrumentation_builder.h`.
+
+gfx1250 spill encodings use the shared RDNA4-family builder; the separate
+gfx1250 builder supplies probe-body instructions outside this backend.
 
 Focused tests are in `tests/patch/spill_manager_test.cpp`, with instruction
 encoding coverage in the target-specific `*_instrumentation_builder_test.cpp`

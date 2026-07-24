@@ -113,7 +113,8 @@ analysis establishes that this recipe applies. InlineShadow supports the
 recipe on every admitted target. Record/Replay and Sampled support it on
 CDNA3/CDNA4 when every owner of the spilled site uses a dynamic stack. This is
 an implementation boundary rather than an ISA limitation: the non-Inline
-frame-save and scalar-window layouts are not yet wired for RDNA4-family targets.
+frame-save and scalar-window layouts are not yet wired for RDNA4-family
+targets (`bd-1w9.28`).
 
 ConSan supplies safe scalar save registers, preserves SCC and the incoming
 frame, borrows the VGPR window, and restores all state before resuming guest
