@@ -155,6 +155,10 @@ Each component groups tests into per-feature subdirectories (`<component>/<featu
 A feature gets its own subdirectory even for a single test. A `placeholder_test.cc` holds a feature
 directory until its first real test lands.
 
+`system/` is the exception: it is a flat component (the component *is* the feature), so its tests
+live directly under `functional/system/` with no per-feature leaf. Unit tests are likewise flat,
+sitting directly under `unit/<component>/`.
+
 The names below are suggestions that mirror the Python suite's `test_<feature>.py` files. Sharing
 names lets a feature line up across both suites. Adapt them as the APIs warrant.
 
