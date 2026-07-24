@@ -81,6 +81,11 @@ if(PROFILER_HUB_ENABLE_COVERAGE)
     profiler_hub_add_coverage_flags(profiler-hub_unit_tests)
 endif()
 
+# -pthread is critical for gtest TLS symbols under the amd-llvm (clang/lld) toolchain.
+# clang/lld does not implicitly link libpthread the way gcc did. Matches the hipfile sibling.
+target_compile_options(profiler-hub_unit_tests PRIVATE -pthread)
+target_link_options(profiler-hub_unit_tests PRIVATE -pthread)
+
 # TheRock's ASAN build forces -shared-libsan fleet-wide, but amd-llvm provides no
 # loadable shared asan runtime (only static libclang_rt.asan.a). Force this target
 # to link the static runtime so it builds. It still cannot RUN under ASAN:
