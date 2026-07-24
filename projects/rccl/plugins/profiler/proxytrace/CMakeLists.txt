@@ -35,10 +35,13 @@ target_include_directories(rccl-profiler-proxytrace PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${RCCL_ROOT}/src/include/plugin
     ${RCCL_ROOT}/src/include
+    ${CMAKE_BINARY_DIR}/include
+    ${ROCM_PATH}/include
 )
 
 target_compile_definitions(rccl-profiler-proxytrace PRIVATE
     RCCL_PROXYTRACE_PLUGIN_BUILD
+    __HIP_PLATFORM_AMD__
 )
 
 target_compile_features(rccl-profiler-proxytrace PRIVATE cxx_std_17)
@@ -47,6 +50,11 @@ target_compile_options(rccl-profiler-proxytrace PRIVATE -Wall -Wextra)
 
 # fmt-header-only supplies the fmt include directory and FMT_HEADER_ONLY=1.
 target_link_libraries(rccl-profiler-proxytrace PRIVATE fmt::fmt-header-only)
+
+# Ensure nccl.h is generated before we compile (in-tree build only).
+if(NOT PROXYTRACE_STANDALONE AND TARGET rccl)
+    add_dependencies(rccl-profiler-proxytrace rccl)
+endif()
 
 # Match the legacy Makefile output name: librccl-profiler-proxytrace.so
 set_target_properties(rccl-profiler-proxytrace PROPERTIES
@@ -57,6 +65,6 @@ set_target_properties(rccl-profiler-proxytrace PROPERTIES
 
 if(NOT PROXYTRACE_STANDALONE)
     set_target_properties(rccl-profiler-proxytrace PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 endif()
