@@ -47,7 +47,13 @@ jobs:
       BUILD_DIR: /tmp/amdsmi-build
 
     steps:
+      # rocm-systems is a large monorepo; the wheel gate only needs the amdsmi
+      # project and this workflow, so sparse-checkout keeps the fetch cheap.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          sparse-checkout: |
+            projects/amdsmi
+            .github/workflows
 
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -106,6 +112,15 @@ jobs:
             exit 1
           fi
           printf 'Python wheel built: %s\n' "${wheels[@]}"
+          echo "WHEEL=${wheels[0]}" >> "$GITHUB_ENV"
+
+      - name: Install and import the wheel
+        run: |
+          set -euo pipefail
+          # Prove the wheel is installable and loads its bundled library, not
+          # just that the file exists. No GPU needed for import.
+          "$PY_BUILD" -m pip install "$WHEEL"
+          "$PY_BUILD" -c "import amdsmi; print('import amdsmi OK from', amdsmi.__file__)"
           echo "Build gate passed"
 
   # Single job covering every distro + package format. The build-time logic
