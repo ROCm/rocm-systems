@@ -1805,6 +1805,212 @@ TEST(HsaHooksUnitTest, AutoA0PatchesBypassLoadEntries) {
   OnUnload();
 }
 
+// Consolidated fail-closed coverage matrix for the auto-A0 load routing policy.
+//
+// The security-relevant property is binary per case: an object is either handed
+// to the underlying loader (kForward) or refused before the loader is reached
+// (kRefuse). Refusing means no untranslated code reaches the agent. The three
+// public load entries are keyed on different dimensions, so each has its own
+// table; together they assert every (entry x agent-class [x bytes]) combination
+// lands on the intended side of the accept/reject line. The exact error codes
+// are pinned by the dedicated per-case tests above; this matrix locks the policy
+// against a future edit silently flipping one cell.
+TEST(HsaHooksUnitTest, AutoA0FailClosedCoverageMatrix) {
+  enum class Agent { kA0, kUnknownRevision, kConfirmedNonA0, kNonGfx1250 };
+  enum class Bytes { kValidGfx1250, kNonGfx1250, kMissing };
+  // kRefuse: loader never reached. kForwardOriginal: loader sees the caller's own
+  // (untranslated) reader -- safe only when the object is not a B0-on-A0 target.
+  // kTranslated: loader sees a *different* reader (the translated ELF) -- the only
+  // way B0 gfx1250 bytes may reach an A0 agent.
+  enum class Outcome { kRefuse, kForwardOriginal, kTranslated };
+
+  // Apply an agent class to the fakes and return the agent handle to load onto.
+  auto setup_agent = [](Agent a) -> hsa_agent_t {
+    g_fake_gfx1250_revision_query_fails = false;
+    g_fake_gfx1250_asic_revision = 0;
+    switch (a) {
+    case Agent::kA0:
+      return kGfx1250Agent; // gfx1250, revision 0
+    case Agent::kUnknownRevision:
+      g_fake_gfx1250_revision_query_fails = true; // gfx1250, unreadable stepping
+      return kGfx1250Agent;
+    case Agent::kConfirmedNonA0:
+      g_fake_gfx1250_asic_revision = 7; // gfx1250, nonzero (e.g. real B0)
+      return kGfx1250Agent;
+    case Agent::kNonGfx1250:
+      return kHostAgent;
+    }
+    return kHostAgent;
+  };
+
+  // --- Agent code-object load (the reader seam): agent-class x bytes. ---
+  struct AgentLoadCase {
+    const char *name;
+    Agent agent;
+    Bytes bytes;
+    Outcome expect;
+  };
+  // A0: a gfx1250 object is routed into translation -- a header-only ELF (no
+  //     loadable code sections) is rejected by the code-object parser, so the
+  //     load fails closed rather than forwarding untranslated B0; a non-gfx1250
+  //     object is not ours and forwards the original; missing bytes refuse.
+  //     (A *successful* translated load is exercised by the dedicated per-case
+  //     tests with real fixtures; here the security property is that gfx1250
+  //     bytes on A0 never reach the loader as the caller's own reader.)
+  // UnknownRevision: refuse everything (stepping might be A0), before byte
+  //     inspection -- no untranslated object reaches a possible-A0 agent.
+  // ConfirmedNonA0 / NonGfx1250: never a translation target -> always forward the
+  //     original untouched (including gfx1250 bytes: e.g. B0-on-B0 stays native).
+  const AgentLoadCase agent_cases[] = {
+      {"A0+gfx1250", Agent::kA0, Bytes::kValidGfx1250, Outcome::kRefuse},
+      {"A0+nonGfx1250", Agent::kA0, Bytes::kNonGfx1250, Outcome::kForwardOriginal},
+      {"A0+missing", Agent::kA0, Bytes::kMissing, Outcome::kRefuse},
+      {"unknown+gfx1250", Agent::kUnknownRevision, Bytes::kValidGfx1250, Outcome::kRefuse},
+      {"unknown+nonGfx1250", Agent::kUnknownRevision, Bytes::kNonGfx1250, Outcome::kRefuse},
+      {"unknown+missing", Agent::kUnknownRevision, Bytes::kMissing, Outcome::kRefuse},
+      {"nonA0+gfx1250", Agent::kConfirmedNonA0, Bytes::kValidGfx1250, Outcome::kForwardOriginal},
+      {"nonA0+nonGfx1250", Agent::kConfirmedNonA0, Bytes::kNonGfx1250, Outcome::kForwardOriginal},
+      {"nonA0+missing", Agent::kConfirmedNonA0, Bytes::kMissing, Outcome::kForwardOriginal},
+      {"nonGfx1250+gfx1250", Agent::kNonGfx1250, Bytes::kValidGfx1250, Outcome::kForwardOriginal},
+      {"nonGfx1250+nonGfx1250", Agent::kNonGfx1250, Bytes::kNonGfx1250, Outcome::kForwardOriginal},
+      {"nonGfx1250+missing", Agent::kNonGfx1250, Bytes::kMissing, Outcome::kForwardOriginal},
+  };
+
+  for (const AgentLoadCase &c : agent_cases) {
+    SCOPED_TRACE(c.name);
+    reset_pool_blocker(false);
+    reset_agent_blocker(false);
+    reset_queue_fakes();
+    OnUnload();
+    clear_runtime_config_path(); // auto-A0 mode
+
+    FakeApiTable api;
+    ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+    const hsa_agent_t agent = setup_agent(c.agent);
+    g_fake_load_agent_calls = 0;
+    g_last_load_reader = {};
+
+    // The memory reader stores a NON-owning pointer to these bytes, so `image`
+    // must outlive the load call below (kept in this loop-body scope).
+    std::vector<uint8_t> image;
+    hsa_code_object_reader_t reader{0xBEEF}; // unregistered handle for kMissing
+    if (c.bytes != Bytes::kMissing) {
+      const uint32_t mach = c.bytes == Bytes::kValidGfx1250
+                                ? rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250
+                                : rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942;
+      const auto header = make_amdgpu_elf_header(mach);
+      image.assign(reinterpret_cast<const uint8_t *>(&header),
+                   reinterpret_cast<const uint8_t *>(&header) + sizeof(header));
+      reader = register_code_object(api, image);
+    }
+
+    const hsa_status_t status = api.core.hsa_executable_load_agent_code_object_fn(
+        kFakeExecutable, agent, reader, nullptr, nullptr);
+    switch (c.expect) {
+    case Outcome::kRefuse:
+      EXPECT_NE(status, HSA_STATUS_SUCCESS);
+      EXPECT_EQ(g_fake_load_agent_calls, 0);
+      break;
+    case Outcome::kForwardOriginal:
+      EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+      EXPECT_EQ(g_fake_load_agent_calls, 1);
+      EXPECT_EQ(g_last_load_reader.handle, reader.handle); // caller's own reader
+      break;
+    case Outcome::kTranslated:
+      EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+      EXPECT_EQ(g_fake_load_agent_calls, 1);
+      EXPECT_NE(g_last_load_reader.handle, reader.handle); // a translated reader
+      break;
+    }
+    OnUnload();
+  }
+  g_fake_gfx1250_revision_query_fails = false;
+  g_fake_gfx1250_asic_revision = 0;
+
+  // --- Deprecated direct load (sized handle, no readable extent): agent-class. ---
+  // Refuse A0 / unknown-revision (cannot bound-read to translate); forward the
+  // confirmed non-A0 and non-gfx1250 agents.
+  struct DeprecatedCase {
+    const char *name;
+    Agent agent;
+    Outcome expect;
+  };
+  const DeprecatedCase deprecated_cases[] = {
+      {"A0", Agent::kA0, Outcome::kRefuse},
+      {"unknown", Agent::kUnknownRevision, Outcome::kRefuse},
+      {"nonA0", Agent::kConfirmedNonA0, Outcome::kForwardOriginal},
+      {"nonGfx1250", Agent::kNonGfx1250, Outcome::kForwardOriginal},
+  };
+  for (const DeprecatedCase &c : deprecated_cases) {
+    SCOPED_TRACE(std::string("deprecated:") + c.name);
+    reset_pool_blocker(false);
+    reset_agent_blocker(false);
+    reset_queue_fakes();
+    OnUnload();
+    clear_runtime_config_path(); // auto-A0 mode
+
+    FakeApiTable api;
+    ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+    const hsa_agent_t agent = setup_agent(c.agent);
+    g_fake_load_deprecated_calls = 0;
+
+    hsa_code_object_t code_object{0x9999};
+    const hsa_status_t status =
+        api.core.hsa_executable_load_code_object_fn(kFakeExecutable, agent, code_object, nullptr);
+    if (c.expect == Outcome::kForwardOriginal) {
+      EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+      EXPECT_EQ(g_fake_load_deprecated_calls, 1);
+    } else {
+      EXPECT_NE(status, HSA_STATUS_SUCCESS);
+      EXPECT_EQ(g_fake_load_deprecated_calls, 0);
+    }
+    OnUnload();
+  }
+  g_fake_gfx1250_revision_query_fails = false;
+  g_fake_gfx1250_asic_revision = 0;
+
+  // --- Agent-less program load: keyed on whether an A0 target exists at all. ---
+  // (No per-call agent and no byte inspection: the whole system enumeration is
+  // the dimension.) An A0 (or possible-A0) present -> refuse; none -> forward.
+  struct ProgramCase {
+    const char *name;
+    hsa_status_t (*iterate)(hsa_status_t (*)(hsa_agent_t, void *), void *);
+    bool a0_present; // when true, the gfx1250 agent it enumerates is A0
+    Outcome expect;
+  };
+  const ProgramCase program_cases[] = {
+      {"a0-present", fake_iterate_agents_with_gfx1250, true, Outcome::kRefuse},
+      {"no-a0", fake_iterate_agents, false, Outcome::kForwardOriginal},
+  };
+  for (const ProgramCase &c : program_cases) {
+    SCOPED_TRACE(std::string("program:") + c.name);
+    reset_pool_blocker(false);
+    reset_agent_blocker(false);
+    reset_queue_fakes();
+    OnUnload();
+    clear_runtime_config_path(); // auto-A0 mode
+
+    FakeApiTable api;
+    api.core.hsa_iterate_agents_fn = c.iterate;
+    ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+    g_fake_gfx1250_asic_revision = c.a0_present ? 0 : 7; // enumerated gfx1250 is A0 or not
+    g_fake_load_program_calls = 0;
+
+    hsa_code_object_reader_t reader{0x1234};
+    const hsa_status_t status = api.core.hsa_executable_load_program_code_object_fn(
+        kFakeExecutable, reader, nullptr, nullptr);
+    if (c.expect == Outcome::kForwardOriginal) {
+      EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+      EXPECT_EQ(g_fake_load_program_calls, 1);
+    } else {
+      EXPECT_NE(status, HSA_STATUS_SUCCESS);
+      EXPECT_EQ(g_fake_load_program_calls, 0);
+    }
+    OnUnload();
+  }
+  g_fake_gfx1250_asic_revision = 0;
+}
+
 // Query the AMD loader vendor table through the (patched) core entry.
 hsa_ven_amd_loader_1_03_pfn_t query_vendor_table(FakeApiTable &api) {
   hsa_ven_amd_loader_1_03_pfn_t table{};
