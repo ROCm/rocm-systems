@@ -20,10 +20,10 @@ loglevel: 20
 membw_analysis: false
 ml_api_trace: false
 mode: profile
-name: vcopy_pcsampling
+name: vcopy_pc_sampling_only
 no_native_tool: false
 no_roof: false
-output_directory: /app/projects/rocprofiler-compute/workloads/vcopy_pcsampling/MI300X_A1
+output_directory: /app/projects/rocprofiler-compute/workloads/vcopy_pc_sampling_only/MI350
 overwrite: false
 pc_sampling: true
 pc_sampling_interval: 65536

@@ -39,7 +39,15 @@ from utils.parser import (
 )
 from utils.utils_common import is_only_pc_sampling
 
-PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI300X_A1"
+PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI350"
+PC_SAMPLING_CAPTURE_PID = 3359178
+PC_SAMPLING_CAPTURE_ROW_COUNT = 19
+PC_SAMPLING_CAPTURE_SAMPLE_COUNT = 934
+PC_SAMPLING_CAPTURE_DISPATCH_COUNT = 3
+PC_SAMPLING_SOURCE_SNAPSHOTS = (
+    "app/projects/rocprofiler-compute/sample/vcopy.cpp",
+    "rocm/include/hip/amd_detail/amd_hip_runtime.h",
+)
 
 PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 INST_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_"
@@ -2001,6 +2009,48 @@ def test_calc_dispatch_data_stitches_pc_sampling_tool_records(
 # ═══════════════════════════════════════════════════════════════
 
 
+def test_pc_sampling_workload_capture_shape() -> None:
+    """Keep the checked-in capture aligned with PID-scoped MI350 output."""
+    workload_path = Path(PC_SAMPLING_WORKLOAD)
+    result_name = f"{PC_SAMPLING_CAPTURE_PID}_ps_file_results.json"
+    code_object_name = f"{PC_SAMPLING_CAPTURE_PID}_code_obj_info.json"
+    expected_top_level = {
+        result_name,
+        code_object_name,
+        "log.txt",
+        "profiling_config.yaml",
+        "src",
+        "sysinfo.csv",
+    }
+
+    assert {path.name for path in workload_path.iterdir()} == expected_top_level
+    assert not (workload_path / "ps_file_results.json").exists()
+
+    tool_data_records = load_pc_sampling_results(str(workload_path))
+    assert len(tool_data_records) == 1
+    tool_data = tool_data_records[0]
+    assert tool_data["metadata"]["pid"] == PC_SAMPLING_CAPTURE_PID
+    assert tool_data["buffer_records"]["pc_sample_stochastic"]
+    assert (
+        len(tool_data["buffer_records"]["kernel_dispatch"])
+        == PC_SAMPLING_CAPTURE_DISPATCH_COUNT
+    )
+
+    sysinfo = pd.read_csv(workload_path / "sysinfo.csv")
+    assert len(sysinfo) == 1
+    assert sysinfo.at[0, "gpu_model"] == "MI350"
+    assert sysinfo.at[0, "gpu_arch"] == "gfx950"
+
+    source_snapshots = tuple(
+        sorted(
+            path.relative_to(workload_path / "src").as_posix()
+            for path in (workload_path / "src").rglob("*")
+            if path.is_file()
+        )
+    )
+    assert source_snapshots == PC_SAMPLING_SOURCE_SNAPSHOTS
+
+
 def test_pc_sampling_analyze_basic(
     binary_handler_analyze_rocprof_compute,
     capsys,
@@ -2142,17 +2192,17 @@ def test_pc_sampling_analyze_database_output(
                 conn,
             )
             db_dispatch_count = conn.execute(
-                "SELECT dispatch_count FROM compute_kernel_view"
+                "SELECT SUM(dispatch_count) FROM compute_kernel_view"
             ).fetchone()[0]
             db_dispatch_process_ids = conn.execute(
-                "SELECT DISTINCT pid FROM compute_dispatch"
+                "SELECT DISTINCT pid FROM compute_dispatch ORDER BY pid"
             ).fetchall()
         finally:
             conn.close()
         assert counts["compute_code_object_store"] > 0
         # Only sampled offsets carry a sample state; the dispatched kernels' full
         # disassembly is added as extra lines, so lines outnumber states.
-        assert state_count == 14
+        assert state_count == PC_SAMPLING_CAPTURE_ROW_COUNT
         assert line_count > state_count
         # Un-dispatched ISA is never stored, so no line is left un-attributed.
         assert attributed == line_count
@@ -2160,12 +2210,14 @@ def test_pc_sampling_analyze_database_output(
         # No duplicate ISA: sampled offsets are not re-inserted.
         assert duplicate_offsets == 0
         # inst_type is a per-sample class, so its counts sum to the sample total.
-        assert state_total == 390
+        assert state_total == PC_SAMPLING_CAPTURE_SAMPLE_COUNT
         assert inst_sample_total == state_total
-        assert len(db_pc_sampling) == 14
-        assert db_pc_sampling["count"].sum() == 390
-        assert db_dispatch_count == 3
-        assert db_dispatch_process_ids == [(1429079,)]
+        assert len(db_pc_sampling) == PC_SAMPLING_CAPTURE_ROW_COUNT
+        assert db_pc_sampling["count"].sum() == PC_SAMPLING_CAPTURE_SAMPLE_COUNT
+        assert db_pc_sampling["kernel_name"].str.contains("vecCopy").all()
+        assert db_pc_sampling["source"].fillna("").str.contains("vcopy.cpp").any()
+        assert db_dispatch_count == PC_SAMPLING_CAPTURE_DISPATCH_COUNT
+        assert db_dispatch_process_ids == [(PC_SAMPLING_CAPTURE_PID,)]
     finally:
         common.clean_output_dir(True, str(workload_dir))
 
@@ -2195,10 +2247,10 @@ def test_pc_sampling_analyze_csv_output(
         csv_dir = workload_dir / csv_name
         csv_pc_sampling = pd.read_csv(csv_dir / "pc_sampling.csv")
         csv_kernel = pd.read_csv(csv_dir / "kernel.csv")
-        assert len(csv_pc_sampling) == 14
-        assert csv_pc_sampling["count"].sum() == 390
+        assert len(csv_pc_sampling) == PC_SAMPLING_CAPTURE_ROW_COUNT
+        assert csv_pc_sampling["count"].sum() == PC_SAMPLING_CAPTURE_SAMPLE_COUNT
         assert "pid" not in csv_pc_sampling.columns
-        assert csv_kernel.iloc[0]["dispatch_count"] == 3
+        assert csv_kernel["dispatch_count"].sum() == PC_SAMPLING_CAPTURE_DISPATCH_COUNT
     finally:
         common.clean_output_dir(True, str(workload_dir))
 
