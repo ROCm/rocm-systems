@@ -237,7 +237,7 @@ The demuxer is deleted once decoding is done.
 
   .. code:: shell
 
-    export ROCM_PATH=<path to your ROCm installation>
+    export ROCM_PATH=path_to_rocm_installation
 
 .. |videodecode| replace:: ``videodecode.cpp``
 .. _videodecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples/videoDecode/videodecode.cpp

@@ -12,7 +12,7 @@ To run the samples, you'll need to set the ``ROCM_PATH`` to point to the locatio
 
 .. code:: shell
 
-  export ROCM_PATH=<path to your ROCm installation>
+  export ROCM_PATH=path_to_rocm_installation
  
 
 FFmpeg development libraries must be installed to build and run samples that use FFmpeg for either demultiplexing or decoding:

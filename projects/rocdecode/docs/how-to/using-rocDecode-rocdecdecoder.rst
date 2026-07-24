@@ -249,7 +249,7 @@ Once decoding is complete, ``rocDecDestroyVideoParser()`` needs to be called to 
 
   .. code:: shell
 
-    export ROCM_PATH=<path to your ROCm installation>
+    export ROCM_PATH=path_to_rocm_installation
 
 .. |rocdecdecode| replace:: ``rocdecdecode``
 .. _rocdecdecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples/rocdecDecode/README.md
