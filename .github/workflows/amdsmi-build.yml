@@ -50,7 +50,6 @@ jobs:
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
-    continue-on-error: true
     strategy:
       max-parallel: 10
       fail-fast: false
