@@ -874,6 +874,13 @@ def _workloads_for_target(target: str) -> tuple[Workload, ...]:
     )
 
 
+def _workload_for_target(target: str, workload_id: str) -> Workload:
+    workload = WORKLOAD_BY_ID[workload_id]
+    if workload.targets is not None and target not in workload.targets:
+        raise ValidationError(f"{target} manifest excludes workload: {workload_id}")
+    return workload
+
+
 def _target_fault_families(target: str, workload: Workload) -> tuple[str, ...]:
     if target == "gfx1250" and workload.id in (
         "tp1-prefill",
@@ -1120,6 +1127,8 @@ def _resolved_workload(target: str, workload: Workload) -> Workload:
 
 
 def _fault_families(target: str, workload: Workload) -> tuple[str, ...]:
+    # Boundary helpers accept canonical registry rows and resolve target
+    # overrides exactly once, including fields future overrides may add.
     return _target_fault_families(target, _resolved_workload(target, workload))
 
 
@@ -1436,7 +1445,9 @@ def _doctor(
         if workload_ids is None
         else workload_ids
     )
-    workloads = tuple(WORKLOAD_BY_ID[workload_id] for workload_id in selected_ids)
+    workloads = tuple(
+        _workload_for_target(target, workload_id) for workload_id in selected_ids
+    )
     paths = _required_paths(workspace, workloads)
     path_checks = {
         label: {
@@ -1528,6 +1539,7 @@ def _clean_environment(
     target: str | None = None,
 ) -> dict[str, str]:
     if target is not None:
+        # Keep environment derivation coherent with future target overrides.
         workload = _resolved_workload(target, workload)
     environment = {
         key: value
@@ -2359,7 +2371,7 @@ def _fault_inventory_environment(family: str) -> dict[str, str]:
 def _inventory(args: argparse.Namespace) -> int:
     workspace = _workspace_from_environment()
     target = _target(args)
-    workload = WORKLOAD_BY_ID[args.workload]
+    workload = _workload_for_target(target, args.workload)
     if not _doctor(workspace, target, (workload.id,))["ok"]:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
     root = args.artifact_root.resolve() / workload.id / "inventory"
@@ -2739,7 +2751,7 @@ def _explain_contract(
     workloads = []
     script = str(Path(__file__).resolve())
     for workload_id in workload_ids:
-        workload = WORKLOAD_BY_ID[workload_id]
+        workload = _workload_for_target(target, workload_id)
         effective_workload = _effective_workload(target, workload)
         output_root = Path("$ARTIFACT_ROOT") / workload.id
         commands = {}
@@ -3035,7 +3047,7 @@ def _fault_acceptance(result: dict, policy: dict) -> tuple[bool, list[str]]:
 def _fault(args: argparse.Namespace) -> int:
     workspace = _workspace_from_environment()
     target = _target(args)
-    workload = WORKLOAD_BY_ID[args.workload]
+    workload = _workload_for_target(target, args.workload)
     if not _doctor(workspace, target, (workload.id,))["ok"]:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
     if not args.allow_destructive:
@@ -3223,7 +3235,7 @@ def _fault(args: argparse.Namespace) -> int:
 def _run(args: argparse.Namespace) -> int:
     workspace = _workspace_from_environment()
     target = _target(args)
-    workload = WORKLOAD_BY_ID[args.workload]
+    workload = _workload_for_target(target, args.workload)
     timeout = args.timeout if args.timeout is not None else workload.run_timeout_seconds
     doctor = _doctor(workspace, target, (workload.id,))
     if not doctor["ok"]:
@@ -3389,6 +3401,9 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     try:
         target = _target(args)
+        requested_workload = getattr(args, "workload", "all")
+        if requested_workload != "all":
+            _workload_for_target(target, requested_workload)
         if args.command == "manifest":
             result = _manifest(target)
             if args.json:
@@ -3400,17 +3415,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         workspace = _workspace_from_environment()
         if args.command == "explain":
-            target_workload_ids = tuple(
-                workload.id for workload in _workloads_for_target(target)
-            )
             if args.workload == "all":
-                workload_ids = target_workload_ids
-            elif args.workload in target_workload_ids:
-                workload_ids = (args.workload,)
-            else:
-                raise ValidationError(
-                    f"{target} manifest excludes workload: {args.workload}"
+                workload_ids = tuple(
+                    workload.id for workload in _workloads_for_target(target)
                 )
+            else:
+                workload_ids = (args.workload,)
             profiles = PROFILE_IDS if args.profile == "all" else (args.profile,)
             result = _explain_contract(
                 workspace,

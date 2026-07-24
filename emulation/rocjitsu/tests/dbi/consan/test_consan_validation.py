@@ -196,34 +196,58 @@ class ConSanValidationTest(unittest.TestCase):
                     ],
                 )
 
-    def test_explain_rejects_workload_excluded_by_target_manifest(self) -> None:
+    def test_cli_rejects_workload_excluded_by_target_manifest(self) -> None:
         with temporary_root() as workspace:
-            error = io.StringIO()
-            with (
-                mock.patch.dict(
-                    os.environ,
-                    {validation.WORKSPACE_ENV: str(workspace)},
-                    clear=False,
-                ),
-                redirect_stderr(error),
-            ):
-                self.assertEqual(
-                    validation.main(
-                        [
-                            "--target",
-                            "gfx942",
-                            "explain",
-                            "--workload",
-                            "pytorch-rdna4-compiled-softmax",
-                            "--json",
-                        ]
-                    ),
-                    2,
-                )
-        self.assertIn(
-            "gfx942 manifest excludes workload: " "pytorch-rdna4-compiled-softmax",
-            error.getvalue(),
-        )
+            commands = (
+                ["doctor", "--workload", "pytorch-rdna4-compiled-softmax"],
+                ["explain", "--workload", "pytorch-rdna4-compiled-softmax"],
+                [
+                    "run",
+                    "--workload",
+                    "pytorch-rdna4-compiled-softmax",
+                    "--phase",
+                    "clean",
+                    "--artifact-root",
+                    str(workspace / "run"),
+                ],
+                [
+                    "inventory",
+                    "--workload",
+                    "pytorch-rdna4-compiled-softmax",
+                    "--artifact-root",
+                    str(workspace / "inventory"),
+                ],
+                [
+                    "fault",
+                    "--workload",
+                    "pytorch-rdna4-compiled-softmax",
+                    "--spec",
+                    str(workspace / "fault.json"),
+                    "--fault",
+                    "fault-0",
+                    "--artifact-root",
+                    str(workspace / "fault"),
+                ],
+            )
+            for command in commands:
+                with self.subTest(command=command[0]):
+                    error = io.StringIO()
+                    with (
+                        mock.patch.dict(
+                            os.environ,
+                            {validation.WORKSPACE_ENV: str(workspace)},
+                            clear=False,
+                        ),
+                        redirect_stderr(error),
+                    ):
+                        self.assertEqual(
+                            validation.main(["--target", "gfx942", *command]),
+                            2,
+                        )
+                    self.assertIn(
+                        "gfx942 manifest excludes workload: pytorch-rdna4-compiled-softmax",
+                        error.getvalue(),
+                    )
 
     def test_gfx950_manifest_resolves_cdna4_native_workloads(self) -> None:
         manifest = validation._manifest("gfx950")
