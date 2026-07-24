@@ -397,6 +397,8 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
     return ExpandResult::failed("gfx1250 regular-Scale 32x16 FP4 operands are not VGPR ranges");
   }
   const bool src2_is_vgpr = matrix.src2 >= kVgprEncoding;
+  const uint16_t scale_src0 = static_cast<uint16_t>(scale.src0 - kVgprEncoding);
+  const uint16_t scale_src1 = static_cast<uint16_t>(scale.src1 - kVgprEncoding);
   const uint16_t src0 = static_cast<uint16_t>(matrix.src0 - kVgprEncoding);
   const uint16_t src1 = static_cast<uint16_t>(matrix.src1 - kVgprEncoding);
   const uint16_t src2 = src2_is_vgpr ? static_cast<uint16_t>(matrix.src2 - kVgprEncoding) : 0;
@@ -422,6 +424,8 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
   const uint16_t shared_b = physical(*src1_bank, src1);
   if (overlaps(first_dst, kHalfDwords, upper_a, kHalfDwords) ||
       overlaps(first_dst, kHalfDwords, shared_b, kHalfDwords) ||
+      overlaps(first_dst, kHalfDwords, physical(*src0_bank, scale_src0), 1) ||
+      overlaps(first_dst, kHalfDwords, physical(*src1_bank, scale_src1), 1) ||
       (src2_is_vgpr &&
        overlaps(first_dst, kHalfDwords,
                 physical(*src2_bank, static_cast<uint16_t>(src2 + kHalfDwords)), kHalfDwords))) {
@@ -432,8 +436,13 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
   const bool dst_crosses = static_cast<uint32_t>(matrix.vdst) + kHalfDwords > 0xffu;
   const bool src0_crosses = static_cast<uint32_t>(src0) + kHalfDwords > 0xffu;
   const bool src2_crosses = src2_is_vgpr && static_cast<uint32_t>(src2) + kHalfDwords > 0xffu;
-  if ((dst_crosses && *dst_bank == 3) || (src0_crosses && *src0_bank == 3) ||
-      (src2_crosses && *src2_bank == 3)) {
+  if (src0_crosses) {
+    // The prefix scale and matrix A share the SRC0 bank selector. Advancing
+    // that selector for upper A would silently retarget the shared scale VGPR.
+    return ExpandResult::failed(
+        "gfx1250 regular-Scale 32x16 FP4 split cannot preserve scale A across an A bank crossing");
+  }
+  if ((dst_crosses && *dst_bank == 3) || (src2_crosses && *src2_bank == 3)) {
     return ExpandResult::failed(
         "gfx1250 regular-Scale 32x16 FP4 split exceeds the VGPR address space");
   }
@@ -444,11 +453,10 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
   words.reserve(12);
   uint8_t current_mode = original_mode;
   for (uint16_t half = 0; half < 2; ++half) {
-    if (half != 0 && (dst_crosses || src0_crosses || src2_crosses)) {
-      const uint8_t upper_mode =
-          static_cast<uint8_t>((*src0_bank + (src0_crosses ? 1u : 0u)) | (*src1_bank << 2) |
-                               ((*src2_bank + (src2_crosses ? 1u : 0u)) << 4) |
-                               ((*dst_bank + (dst_crosses ? 1u : 0u)) << 6));
+    if (half != 0 && (dst_crosses || src2_crosses)) {
+      const uint8_t upper_mode = static_cast<uint8_t>(
+          *src0_bank | (*src1_bank << 2) | ((*src2_bank + (src2_crosses ? 1u : 0u)) << 4) |
+          ((*dst_bank + (dst_crosses ? 1u : 0u)) << 6));
       append_gfx1250_vgpr_msb_transition(words, current_mode, upper_mode);
     }
 
@@ -476,7 +484,7 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
     replacement[0] |= uint32_t{1} << 14; // matrix B: FP4
     append_words(words, replacement);
   }
-  if (dst_crosses || src0_crosses || src2_crosses)
+  if (dst_crosses || src2_crosses)
     append_gfx1250_vgpr_msb_transition(words, current_mode, original_mode);
   return ExpandResult::success(std::move(words));
 }
@@ -1181,7 +1189,7 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
   }
 
   const std::optional<uint16_t> scale_sgpr = liveness.find_free_sgpr(&inst);
-  if (!scale_sgpr || *scale_sgpr > 105) {
+  if (!scale_sgpr) {
     return ExpandResult::failed("gfx1250 K=128 WMMA could not allocate a dead neutral-scale SGPR");
   }
 

@@ -1800,8 +1800,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
     std::array<std::optional<StashedPcHalf>, REGISTER_SET_MAX_SGPRS> read_halves;
     std::set<uint16_t> active_read_halves;
 
-    const auto physical_vgpr = [&](uint16_t low,
-                                   unsigned bank_shift) -> std::optional<uint16_t> {
+    const auto physical_vgpr = [&](uint16_t low, unsigned bank_shift) -> std::optional<uint16_t> {
       if (!state.vgpr_msb_imm)
         return std::nullopt;
       const uint8_t bank = static_cast<uint8_t>((*state.vgpr_msb_imm >> bank_shift) & 0x3u);
@@ -1823,16 +1822,22 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
 
       if (facts.getpc_sdst && *facts.getpc_sdst < kMaxTrackedSgprPair) {
         const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
-        builders.set_builder(
-            *facts.getpc_sdst,
-            PcValue{.offset = static_cast<int64_t>(next_offset),
-                    .source_getpc_offset = inst.src_loc(),
-                    .source_recovery_begin_offset = next_offset,
-                    .source_recovery_end_offset = next_offset});
+        builders.set_builder(*facts.getpc_sdst, PcValue{.offset = static_cast<int64_t>(next_offset),
+                                                        .source_getpc_offset = inst.src_loc(),
+                                                        .source_recovery_begin_offset = next_offset,
+                                                        .source_recovery_end_offset = next_offset});
         continue;
       }
       if (try_apply_pair_update(ctx, index, builders))
         continue;
+
+      if (facts.call_sdst) {
+        // A direct call can clobber any caller-saved VGPR before its
+        // fallthrough continuation executes. The temporary CFG has no
+        // context-sensitive return edge, so no pre-call lane stash is proven
+        // to survive into either successor.
+        state.slots.clear();
+      }
 
       if (mnemonic == "v_writelane_b32") {
         const auto dst = operand_register(inst.dst_operand(0), RegClass::VGPR);
@@ -1857,8 +1862,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
             // The destination bank is unknown. It may overwrite any physical
             // register with this low selector, so invalidate all four banks.
             std::erase_if(state.slots, [&](const auto &item) {
-              return (item.first.vgpr & 0xffu) == (dst->index & 0xffu) &&
-                     item.first.lane == *lane;
+              return (item.first.vgpr & 0xffu) == (dst->index & 0xffu) && item.first.lane == *lane;
             });
           }
         }
