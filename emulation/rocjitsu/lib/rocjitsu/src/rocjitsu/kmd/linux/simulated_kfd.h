@@ -322,9 +322,7 @@ private:
   /// WAVE_STOP_REASON_MEMORY_VIOLATION); returns true, else false.
   bool on_wave_memory_violation(amdgpu::Wavefront &wf, uint64_t addr, bool is_write);
 
-  /// @brief Toggle the per-access debugger checks on every compute unit. Set
-  /// true while any debug session is active so undebugged runs pay no
-  /// per-access cost (ComputeUnitCore::set_debug_active).
+  /// @brief Toggle per-access debugger checks on every compute unit.
   void set_debug_active_on_all_cus(bool active);
 
   /// @brief Serialize all debug-halted waves of a queue into its CWSR area.
