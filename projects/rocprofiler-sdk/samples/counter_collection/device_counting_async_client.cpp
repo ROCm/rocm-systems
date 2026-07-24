@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -289,11 +289,17 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
         rocprofiler_start_context(get_client_ctx());
         while(exit_toggle().load() == false)
         {
-            rocprofiler_sample_device_counting_service(get_client_ctx(),
-                                                       {.value = count},
-                                                       ROCPROFILER_COUNTER_FLAG_NONE,
-                                                       nullptr,
-                                                       nullptr);
+            auto status = rocprofiler_sample_device_counting_service(get_client_ctx(),
+                                                                     {.value = count},
+                                                                     ROCPROFILER_COUNTER_FLAG_ASYNC,
+                                                                     nullptr,
+                                                                     nullptr);
+            if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                continue;
+            }
+            ROCPROFILER_CALL(status, "Could not sample");
             count++;
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }

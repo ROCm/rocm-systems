@@ -32,6 +32,11 @@ else()
 endif()
 
 find_package(rocprofiler-sdk REQUIRED)
+if(BUILD_TESTING)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    find_program(ROCPROFILER_SAMPLE_PYTEST_EXECUTABLE NAMES pytest)
+    mark_as_advanced(ROCPROFILER_SAMPLE_PYTEST_EXECUTABLE)
+endif()
 
 add_library(counter-collection-buffer-client SHARED)
 target_sources(counter-collection-buffer-client PRIVATE buffered_client.cpp client.hpp)
@@ -191,7 +196,11 @@ target_link_libraries(counter-collection-device-profiling
 rocprofiler_samples_get_preload_env(PRELOAD_ENV
                                     counter-collection-device-profiling-client)
 
-set(counter-collection-functional-counter-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}")
+set(counter-collection-device-profiling-output
+    "${CMAKE_CURRENT_BINARY_DIR}/counter-collection-device-profiling-async.log")
+set(counter-collection-device-profiling-env
+    "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}"
+    "ROCPROFILER_SAMPLE_OUTPUT_FILE=${counter-collection-device-profiling-output}")
 
 add_test(NAME counter-collection-device-profiling
          COMMAND $<TARGET_FILE:counter-collection-device-profiling>)
@@ -203,9 +212,15 @@ set_tests_properties(
                LABELS
                "samples"
                ENVIRONMENT
-               "${counter-collection-functional-counter-env}"
+               "${counter-collection-device-profiling-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               "counter-collection-device-profiling-async"
+               RESOURCE_LOCK
+               "rocprofiler_device_counting_pmc"
+               ATTACHED_FILES_ON_FAIL
+               "${counter-collection-device-profiling-output}"
                DISABLED
                "${IS_THREAD_SANITIZER}")
 
@@ -226,7 +241,11 @@ target_link_libraries(
 rocprofiler_samples_get_preload_env(PRELOAD_ENV
                                     counter-collection-device-profiling-sync-client)
 
-set(counter-collection-functional-counter-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}")
+set(counter-collection-device-profiling-sync-output
+    "${CMAKE_CURRENT_BINARY_DIR}/counter-collection-device-profiling-sync.log")
+set(counter-collection-device-profiling-sync-env
+    "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}"
+    "ROCPROFILER_SAMPLE_OUTPUT_FILE=${counter-collection-device-profiling-sync-output}")
 
 add_test(NAME counter-collection-device-profiling-sync
          COMMAND $<TARGET_FILE:counter-collection-device-profiling-sync>)
@@ -238,8 +257,50 @@ set_tests_properties(
                LABELS
                "samples"
                ENVIRONMENT
-               "${counter-collection-functional-counter-env}"
+               "${counter-collection-device-profiling-sync-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               "counter-collection-device-profiling-sync"
+               RESOURCE_LOCK
+               "rocprofiler_device_counting_pmc"
+               ATTACHED_FILES_ON_FAIL
+               "${counter-collection-device-profiling-sync-output}"
                DISABLED
                "${IS_THREAD_SANITIZER}")
+
+if(BUILD_TESTING)
+    configure_file(validate.py validate.py COPYONLY)
+
+    if(ROCPROFILER_SAMPLE_PYTEST_EXECUTABLE)
+        set(counter-collection-device-profiling-validator
+            "${ROCPROFILER_SAMPLE_PYTEST_EXECUTABLE}" -x -v
+            "${CMAKE_CURRENT_BINARY_DIR}/validate.py")
+    else()
+        set(counter-collection-device-profiling-validator
+            "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_BINARY_DIR}/validate.py")
+    endif()
+
+    add_test(NAME counter-collection-device-profiling-validate
+             COMMAND ${counter-collection-device-profiling-validator})
+
+    set_tests_properties(
+        counter-collection-device-profiling-validate
+        PROPERTIES
+            TIMEOUT
+            120
+            LABELS
+            "samples;validation"
+            WORKING_DIRECTORY
+            "${CMAKE_CURRENT_BINARY_DIR}"
+            ENVIRONMENT
+            "ROCPROFILER_SAMPLE_ASYNC_OUTPUT_FILE=${counter-collection-device-profiling-output};ROCPROFILER_SAMPLE_SYNC_OUTPUT_FILE=${counter-collection-device-profiling-sync-output}"
+            FIXTURES_REQUIRED
+            "counter-collection-device-profiling-async;counter-collection-device-profiling-sync"
+            FAIL_REGULAR_EXPRESSION
+            "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+            ATTACHED_FILES_ON_FAIL
+            "${counter-collection-device-profiling-output};${counter-collection-device-profiling-sync-output}"
+            DISABLED
+            "${IS_THREAD_SANITIZER}")
+endif()

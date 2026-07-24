@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -85,7 +85,8 @@ public:
 
     // Sample the counter values for a set of counters, returns the records in the out parameter.
     rocprofiler_status_t sample_counter_values(const std::vector<std::string>&            counters,
-                                               std::vector<rocprofiler_counter_record_t>& out);
+                                               std::vector<rocprofiler_counter_record_t>& out,
+                                               rocprofiler_user_data_t user_data);
 
     // Get the available agents on the system
     static std::vector<rocprofiler_agent_v0_t> get_available_agents();
@@ -203,7 +204,8 @@ counter_sampler::get_record_dimensions(const rocprofiler_counter_record_t& rec)
 
 rocprofiler_status_t
 counter_sampler::sample_counter_values(const std::vector<std::string>&            counters,
-                                       std::vector<rocprofiler_counter_record_t>& out)
+                                       std::vector<rocprofiler_counter_record_t>& out,
+                                       rocprofiler_user_data_t                    user_data)
 {
     auto profile_cached = cached_profiles_.find(counters);
     if(profile_cached == cached_profiles_.end())
@@ -243,7 +245,7 @@ counter_sampler::sample_counter_values(const std::vector<std::string>&          
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     size_t out_size = out.size();
     auto   status   = rocprofiler_sample_device_counting_service(
-        ctx_, {}, ROCPROFILER_COUNTER_FLAG_NONE, out.data(), &out_size);
+        ctx_, user_data, ROCPROFILER_COUNTER_FLAG_NONE, out.data(), &out_size);
     rocprofiler_stop_context(ctx_);
     out.resize(out_size);
     return status;
@@ -356,9 +358,11 @@ std::thread*                     sampler_thread = nullptr;
 }  // namespace
 
 int
-tool_init(rocprofiler_client_finalize_t fini_func, void*)
+tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 {
-    finalize = fini_func;
+    finalize            = fini_func;
+    auto* output_stream = static_cast<std::ostream*>(user_data);
+    if(!output_stream) throw std::runtime_error{"nullptr to output stream"};
 
     std::atexit([]() {
         if(client_id) finalize(*client_id);
@@ -375,35 +379,35 @@ tool_init(rocprofiler_client_finalize_t fini_func, void*)
     // Use the first agent found
     sampler = std::make_shared<counter_sampler>(agents[0].id);
 
-    sampler_thread = new std::thread{[=]() {
+    sampler_thread = new std::thread{[output_stream]() {
         size_t                                    count = 1;
         std::vector<rocprofiler_counter_record_t> records;
         while(sampler && exit_toggle().load() == false)
         {
-            auto status = sampler->sample_counter_values({"SQ_WAVES"}, records);
+            auto status = sampler->sample_counter_values({"SQ_WAVES"}, records, {.value = count});
             if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED)
             {
                 std::clog << "HSA not loaded yet....\n";
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 continue;
             }
-            std::clog << "Sample " << count << ":\n";
+            *output_stream << "Sample " << count << ":\n";
             if(status == ROCPROFILER_STATUS_SUCCESS)
             {
                 for(const auto& record : records)
                 {
                     if(!sampler) break;
                     auto recname = sampler->decode_record_name(record);
-                    std::clog << "\tCounter: " << record.id << " Name: " << recname
-                              << " Value: " << record.counter_value
-                              << " User data: " << record.user_data.value << "\n";
+                    *output_stream << "\tCounter: " << record.id << " Name: " << recname
+                                   << " Value: " << record.counter_value
+                                   << " User data: " << record.user_data.value << "\n";
                     if(count == 1)
                     {
                         if(!sampler) break;
                         auto dims = sampler->get_record_dimensions(record);
                         for(const auto& [name, pos] : dims)
                         {
-                            std::clog << "\t\tDimension Name: " << name << ": " << pos << "\n";
+                            *output_stream << "\t\tDimension Name: " << name << ": " << pos << "\n";
                         }
                     }
                 }
