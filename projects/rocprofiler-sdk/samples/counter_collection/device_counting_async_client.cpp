@@ -208,6 +208,8 @@ build_profile_for_agent(rocprofiler_agent_id_t agent)
         }
     }
 
+    if(collect_counters.empty()) return {.handle = 0};
+
     rocprofiler_counter_config_id_t profile = {.handle = 0};
     ROCPROFILER_CALL(rocprofiler_create_counter_config(
                          agent, collect_counters.data(), collect_counters.size(), &profile),
@@ -221,6 +223,13 @@ exit_toggle()
 {
     static std::atomic<bool> exit_toggle = false;
     return exit_toggle;
+}
+
+std::thread*&
+sampler_thread()
+{
+    static std::thread* thread = nullptr;
+    return thread;
 }
 
 int
@@ -246,7 +255,12 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
             throw std::runtime_error{"unexpected rocprofiler agent version"};
         auto* agents_v = static_cast<std::vector<rocprofiler_agent_v0_t>*>(udata);
         for(size_t i = 0; i < num_agents; ++i)
-            agents_v->emplace_back(*static_cast<const rocprofiler_agent_v0_t*>(agents_arr[i]));
+        {
+            const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents_arr[i]);
+            if(agent->type == ROCPROFILER_AGENT_TYPE_GPU && agent->runtime_visibility.hsa &&
+               agent->runtime_visibility.hip)
+                agents_v->emplace_back(*agent);
+        }
         return ROCPROFILER_STATUS_SUCCESS;
     };
 
@@ -263,30 +277,39 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
     ROCPROFILER_CALL(rocprofiler_assign_callback_thread(get_buffer(), client_thread),
                      "failed to assign thread for buffer");
 
-    // Construct the profiles in advance for each agent that is a GPU
-    for(const auto& agent : agents)
-    {
-        if(agent.type == ROCPROFILER_AGENT_TYPE_GPU)
-        {
-            get_profile_cache().emplace(agent.id.handle, build_profile_for_agent(agent.id));
-            expected_agent() = agent.id;
-            break;
-        }
-    }
-
     if(agents.empty())
     {
         std::cerr << "No agents found" << std::endl;
         return 1;
     }
 
+    auto profile     = build_profile_for_agent(agents.front().id);
+    expected_agent() = agents.front().id;
+    if(profile.handle == 0)
+    {
+        auto* output_stream = static_cast<std::ostream*>(user_data);
+        *output_stream << "Device counting unavailable: no hardware counters\n";
+        return 0;
+    }
+    get_profile_cache().emplace(agents.front().id.handle, profile);
+
     ROCPROFILER_CALL(rocprofiler_configure_device_counting_service(
                          get_client_ctx(), get_buffer(), expected_agent(), set_profile, nullptr),
                      "Could not setup buffered service");
 
-    std::thread([=]() {
-        size_t count = 1;
-        rocprofiler_start_context(get_client_ctx());
+    sampler_thread() = new std::thread([=]() {
+        size_t count        = 1;
+        auto   start_status = rocprofiler_start_context(get_client_ctx());
+        if(start_status == ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS)
+        {
+            auto* output_stream = static_cast<std::ostream*>(user_data);
+            *output_stream << "Device counting unavailable: no hardware counters\n";
+            exit_toggle().store(false);
+            return;
+        }
+        if(start_status != ROCPROFILER_STATUS_SUCCESS &&
+           start_status != ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED)
+            ROCPROFILER_CALL(start_status, "Could not start context");
         while(exit_toggle().load() == false)
         {
             auto status = rocprofiler_sample_device_counting_service(get_client_ctx(),
@@ -299,12 +322,13 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 continue;
             }
+            if(status == ROCPROFILER_STATUS_ERROR_FINALIZED) break;
             ROCPROFILER_CALL(status, "Could not sample");
             count++;
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
         exit_toggle().store(false);
-    }).detach();
+    });
 
     // no errors
     return 0;
@@ -316,15 +340,20 @@ tool_fini(void* user_data)
     std::clog << "In tool fini\n" << std::flush;
 
     exit_toggle().store(true);
-    while(exit_toggle().load() == true)
-    {};
+    if(sampler_thread() && sampler_thread()->joinable()) sampler_thread()->join();
 
     rocprofiler_stop_context(get_client_ctx());
-    ROCPROFILER_CALL(rocprofiler_flush_buffer(get_buffer()), "buffer flush");
+    auto flush_status = rocprofiler_flush_buffer(get_buffer());
+    if(flush_status != ROCPROFILER_STATUS_SUCCESS &&
+       flush_status != ROCPROFILER_STATUS_ERROR_FINALIZED)
+        ROCPROFILER_CALL(flush_status, "buffer flush");
 
     auto* output_stream = static_cast<std::ostream*>(user_data);
     *output_stream << std::flush;
     if(output_stream != &std::cout && output_stream != &std::cerr) delete output_stream;
+
+    delete sampler_thread();
+    sampler_thread() = nullptr;
 
     std::clog << "Completed tool fini\n" << std::flush;
 }

@@ -225,6 +225,11 @@ counter_sampler::sample_counter_values(const std::vector<std::string>&          
             gpu_counters.push_back(it->second);
             expected_size += get_counter_size(it->second);
         }
+        if(gpu_counters.empty())
+        {
+            out.clear();
+            return ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS;
+        }
         ROCPROFILER_CALL(rocprofiler_create_counter_config(
                              agent_, gpu_counters.data(), gpu_counters.size(), &profile),
                          "Could not create profile");
@@ -240,14 +245,21 @@ counter_sampler::sample_counter_values(const std::vector<std::string>&          
         std::cerr << "Caught exception: " << e.what() << "\n";
         return ROCPROFILER_STATUS_ERROR;
     }
-    profile_ = profile_cached->second;
-    rocprofiler_start_context(ctx_);
+    profile_          = profile_cached->second;
+    auto start_status = rocprofiler_start_context(ctx_);
+    if(start_status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        out.clear();
+        return start_status;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     size_t out_size = out.size();
     auto   status   = rocprofiler_sample_device_counting_service(
         ctx_, user_data, ROCPROFILER_COUNTER_FLAG_NONE, out.data(), &out_size);
-    rocprofiler_stop_context(ctx_);
+    auto stop_status = rocprofiler_stop_context(ctx_);
     out.resize(out_size);
+    if(status == ROCPROFILER_STATUS_SUCCESS && stop_status != ROCPROFILER_STATUS_SUCCESS)
+        return stop_status;
     return status;
 }
 
@@ -265,7 +277,9 @@ counter_sampler::get_available_agents()
         for(size_t i = 0; i < num_agents; ++i)
         {
             const auto* rocp_agent = static_cast<const rocprofiler_agent_v0_t*>(agents_arr[i]);
-            if(rocp_agent->type == ROCPROFILER_AGENT_TYPE_GPU) agents_v->emplace_back(*rocp_agent);
+            if(rocp_agent->type == ROCPROFILER_AGENT_TYPE_GPU &&
+               rocp_agent->runtime_visibility.hsa && rocp_agent->runtime_visibility.hip)
+                agents_v->emplace_back(*rocp_agent);
         }
         return ROCPROFILER_STATUS_SUCCESS;
     };
@@ -392,28 +406,32 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 continue;
             }
-            *output_stream << "Sample " << count << ":\n";
-            if(status == ROCPROFILER_STATUS_SUCCESS)
+            if(status == ROCPROFILER_STATUS_ERROR_FINALIZED) break;
+            if(status == ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS)
             {
-                for(const auto& record : records)
+                *output_stream << "Device counting unavailable: no hardware counters\n";
+                break;
+            }
+            ROCPROFILER_CALL(status, "Could not sample");
+            *output_stream << "Sample " << count << ":\n";
+            for(const auto& record : records)
+            {
+                if(!sampler) break;
+                auto recname = sampler->decode_record_name(record);
+                *output_stream << "\tCounter: " << record.id << " Name: " << recname
+                               << " Value: " << record.counter_value
+                               << " User data: " << record.user_data.value << "\n";
+                if(!dimensions_written)
                 {
                     if(!sampler) break;
-                    auto recname = sampler->decode_record_name(record);
-                    *output_stream << "\tCounter: " << record.id << " Name: " << recname
-                                   << " Value: " << record.counter_value
-                                   << " User data: " << record.user_data.value << "\n";
-                    if(!dimensions_written)
+                    auto dims = sampler->get_record_dimensions(record);
+                    for(const auto& [name, pos] : dims)
                     {
-                        if(!sampler) break;
-                        auto dims = sampler->get_record_dimensions(record);
-                        for(const auto& [name, pos] : dims)
-                        {
-                            *output_stream << "\t\tDimension Name: " << name << ": " << pos << "\n";
-                        }
+                        *output_stream << "\t\tDimension Name: " << name << ": " << pos << "\n";
                     }
                 }
-                if(!records.empty()) dimensions_written = true;
             }
+            if(!records.empty()) dimensions_written = true;
             count++;
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
@@ -432,13 +450,12 @@ tool_fini(void* user_data)
     client_id = nullptr;
 
     exit_toggle().store(true);
-    while(exit_toggle().load() == true)
-    {};
-
-    sampler->stop();
-    sampler->flush();
-
-    sampler_thread->join();
+    if(sampler_thread && sampler_thread->joinable()) sampler_thread->join();
+    if(sampler)
+    {
+        sampler->stop();
+        sampler->flush();
+    }
 
     auto* output_stream = static_cast<std::ostream*>(user_data);
     *output_stream << std::flush;
