@@ -523,12 +523,10 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
     case rcclAddonAlgos_t::RCCL_CE_REGISTERED:
       *algoName = "CE";
       break;
+    // Fabric variants all report "DDA"; the protocol column distinguishes
+    // LL / LL128 / Simple, so the name needn't repeat it.
     case rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL:
-      *algoName = "DDA-LL";
-      break;
     case rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128:
-      *algoName = "DDA-LL128";
-      break;
     case rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM:
       *algoName = "DDA";
       break;
