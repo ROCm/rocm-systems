@@ -103,6 +103,9 @@ Tester::Tester(TesterArguments args) : args(args) {
   CHECK_HIP(hipGetDevice(&device_id));
   CHECK_HIP(hipGetDeviceProperties(&deviceProps, device_id));
   wf_size = deviceProps.warpSize;
+  if (args.num_wf > 0) {
+    this->args.wg_size = wf_size * args.num_wf;
+  }
   num_warps = (args.wg_size - 1) / wf_size + 1;
   CHECK_HIP(hipStreamCreate(&stream));
   CHECK_HIP(hipEventCreate(&start_event));
