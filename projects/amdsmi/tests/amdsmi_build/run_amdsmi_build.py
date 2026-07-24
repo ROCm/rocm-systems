@@ -966,13 +966,14 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
         log_dir=cfg.log_dir,
     )
 
-    # Prove the pip install takes priority over any coexisting system copy.
-    # For Python scripting the deliberately pip-installed module must win: a
-    # user who `pip install`s amdsmi wants that version, not the system one.
-    # `pip show` reports where pip put the wheel; assert `import amdsmi`
-    # actually resolves there (and not to the /opt/rocm system share copy),
-    # otherwise a system module is shadowing the pip install. Accepting "any
-    # valid path" (the old check) would pass even when the system copy wins.
+    # Prove the pip install takes priority over any coexisting system copy for
+    # plain Python scripting: a user who `pip install`s amdsmi wants that
+    # version. `pip show` reports where pip put the wheel; assert `import
+    # amdsmi` resolves there. Clear PYTHONPATH first: the CI container and a
+    # ROCm install both point PYTHONPATH at /opt/rocm/share/amd_smi, which
+    # unconditionally precedes site-packages, so leaving it set would test the
+    # environment's path config rather than the package. A bare interpreter
+    # (no PYTHONPATH) is the real scripting scenario where pip must win.
     priority_check = (
         "import os, subprocess, amdsmi\n"
         "out = subprocess.check_output(['python3', '-m', 'pip', 'show', 'amdsmi'], text=True)\n"
@@ -988,10 +989,12 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
         "'the /opt/rocm system copy shadowed the pip install: ' + p\n"
         "print('PASS: pip install takes priority for scripting')\n"
     )
+    priority_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     run_command(
         ["python3", "-c", priority_check],
         name="wheel-priority-check",
         cwd=Path("/tmp"),
+        env=priority_env,
         retries=1,
         log_dir=cfg.log_dir,
     )
