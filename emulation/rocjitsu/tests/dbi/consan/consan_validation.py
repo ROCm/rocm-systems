@@ -878,8 +878,11 @@ def _fault_families(target: str, workload: Workload) -> tuple[str, ...]:
         "tp1-decode-combined",
     ):
         return ("barrier-move",)
-    if target == "gfx950" and workload.id in ("streamk-arrival", "tree-atomic-or"):
-        # CDNA4 compiler atomics encode ordering through surrounding cache and
+    if target in ("gfx942", "gfx950") and workload.id in (
+        "streamk-arrival",
+        "tree-atomic-or",
+    ):
+        # CDNA compiler atomics encode ordering through surrounding cache and
         # wait operations, but have no gfx12-style instruction scope field.
         return ("atomic-weaken-order",)
     return workload.fault_families
@@ -888,7 +891,69 @@ def _fault_families(target: str, workload: Workload) -> tuple[str, ...]:
 # Workload IDs describe target-independent validation roles.  Native test
 # binaries and gtest suites are target-specific implementation details.  Keep
 # the gfx1201 spellings above as the historical/default contract and resolve
-# gfx950 to the corresponding CDNA4 artifacts at the validation boundary.
+# gfx942/gfx950 to the corresponding CDNA artifacts at the validation boundary.
+GFX942_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
+    "d128-block": {
+        "relative_path": (
+            "hip-moi-build/tests/hip_moi_instrumented_cdna3_d128_attention_block_test"
+        ),
+        "clean_filter": "HipMoiCdna3D128AttentionBlock.*",
+        "overhead_filter": (
+            "HipMoiCdna3D128AttentionBlock." "SampledFastContextMatchesHostReference"
+        ),
+    },
+    "d128-pressure": {
+        "relative_path": (
+            "hip-moi-build/tests/"
+            "hip_moi_instrumented_cdna3_d128_attention_pressure_test"
+        ),
+        "clean_filter": "HipMoiCdna3D128AttentionPressure.*",
+        "overhead_filter": (
+            "HipMoiCdna3D128AttentionPressure."
+            "FullKvDoubleBufferedExactContextMatchesHostReference"
+        ),
+    },
+    "wmma-attention": {
+        "relative_path": (
+            "hip-moi-build/tests/hip_moi_instrumented_cdna3_mfma_attention_block_test"
+        ),
+        "clean_filter": "HipMoiCdna3MfmaAttentionBlock.*",
+        "overhead_filter": "HipMoiCdna3MfmaAttentionBlock.ExactContextMatchesHostReference",
+    },
+    "streamk-arrival": {
+        "relative_path": (
+            "hip-moi-build/tests/"
+            "hip_moi_instrumented_cdna3_mfma_streamk_arrival_counter_test"
+        ),
+        "clean_filter": (
+            "HipMoiCdna3MfmaStreamKArrivalCounter." "AcqRelFetchAddOrdersMfmaPartials"
+        ),
+        "overhead_filter": (
+            "HipMoiCdna3MfmaStreamKArrivalCounter." "AcqRelFetchAddOrdersMfmaPartials"
+        ),
+    },
+    "tree-atomic-or": {
+        "relative_path": (
+            "hip-moi-build/tests/"
+            "hip_moi_instrumented_cdna3_mfma_streamk_tree_atomic_or_test"
+        ),
+        "clean_filter": (
+            "HipMoiCdna3MfmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersMfmaPartials"
+        ),
+        "overhead_filter": (
+            "HipMoiCdna3MfmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersMfmaPartials"
+        ),
+    },
+    # Keep the row visible and let doctor report the missing target-native
+    # artifact until hip-moi provides the semantically equivalent workload.
+    "jakub-attention": {
+        "relative_path": "hip-moi-build/tests/hip_moi_reference_cdna3_jakub_matmul",
+        "clean_filter": "SafeFp16Packed/JakubCdna3MatmulReference.MatchesHostReference/*",
+        "overhead_filter": "SafeFp16Packed/JakubCdna3MatmulReference.MatchesHostReference/*",
+    },
+}
+
+
 GFX950_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
     "d128-block": {
         "relative_path": (
@@ -1032,6 +1097,7 @@ def _resolved_workload(target: str, workload: Workload) -> Workload:
     if workload.kind != "gtest":
         return workload
     overrides = {
+        "gfx942": GFX942_WORKLOAD_OVERRIDES,
         "gfx950": GFX950_WORKLOAD_OVERRIDES,
         "gfx1250": GFX1250_WORKLOAD_OVERRIDES,
     }.get(target)

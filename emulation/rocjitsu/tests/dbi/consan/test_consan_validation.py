@@ -200,6 +200,46 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertNotIn("rdna4", native_spellings.lower())
 
+    def test_gfx942_manifest_resolves_cdna3_native_workloads(self) -> None:
+        manifest = validation._manifest("gfx942")
+        workloads = {workload["id"]: workload for workload in manifest["workloads"]}
+        self.assertEqual(
+            workloads["d128-block"]["relative_path"],
+            (
+                "hip-moi-build/tests/"
+                "hip_moi_instrumented_cdna3_d128_attention_block_test"
+            ),
+        )
+        self.assertEqual(
+            workloads["wmma-attention"]["clean_filter"],
+            "HipMoiCdna3MfmaAttentionBlock.*",
+        )
+        self.assertEqual(
+            workloads["d128-block"]["overhead_filter"],
+            ("HipMoiCdna3D128AttentionBlock." "SampledFastContextMatchesHostReference"),
+        )
+        self.assertEqual(
+            workloads["jakub-attention"]["relative_path"],
+            "hip-moi-build/tests/hip_moi_reference_cdna3_jakub_matmul",
+        )
+        native_spellings = json.dumps(
+            [
+                workloads[workload_id]
+                for workload_id in validation.GFX942_WORKLOAD_OVERRIDES
+            ]
+        )
+        self.assertNotIn("rdna4", native_spellings.lower())
+        self.assertNotIn("cdna4", native_spellings.lower())
+
+    def test_gfx942_doctor_checks_resolved_cdna3_executables(self) -> None:
+        with temporary_root() as workspace:
+            with mock.patch.object(validation.shutil, "which", return_value="/tool"):
+                doctor = validation._doctor(workspace, "gfx942")
+        d128 = doctor["paths"]["workload:d128-block:executable"]
+        self.assertTrue(d128["path"].endswith("cdna3_d128_attention_block_test"))
+        jakub = doctor["paths"]["workload:jakub-attention:executable"]
+        self.assertTrue(jakub["path"].endswith("hip_moi_reference_cdna3_jakub_matmul"))
+
     def test_gfx950_doctor_checks_resolved_cdna4_executables(self) -> None:
         with temporary_root() as workspace:
             with mock.patch.object(validation.shutil, "which", return_value="/tool"):
@@ -242,6 +282,16 @@ class ConSanValidationTest(unittest.TestCase):
         self,
     ) -> None:
         expected_filters = {
+            "gfx942": {
+                "streamk-arrival": (
+                    "HipMoiCdna3MfmaStreamKArrivalCounter."
+                    "AcqRelFetchAddOrdersMfmaPartials"
+                ),
+                "tree-atomic-or": (
+                    "HipMoiCdna3MfmaStreamKTreeAtomicOr."
+                    "AcqRelBitmaskOrdersMfmaPartials"
+                ),
+            },
             "gfx1201": {
                 "streamk-arrival": (
                     "HipMoiRdna4WmmaStreamKArrivalCounter."
@@ -276,6 +326,7 @@ class ConSanValidationTest(unittest.TestCase):
         # Reconstruct paths independently of the override tables so this test
         # catches a wrong target-resolved Stream-K executable spelling.
         executable_prefixes = {
+            "gfx942": "hip-moi-build/tests/hip_moi_instrumented_cdna3_mfma_",
             "gfx1201": "hip-moi-build/tests/hip_moi_instrumented_rdna4_wmma_",
             "gfx950": "hip-moi-build/tests/hip_moi_instrumented_cdna4_mfma_",
             "gfx1250": (
@@ -542,17 +593,19 @@ class ConSanValidationTest(unittest.TestCase):
             model_environment,
         )
 
-    def test_gfx950_cdna4_atomics_only_admit_order_faults(self) -> None:
-        for workload_id in ("streamk-arrival", "tree-atomic-or"):
-            workload = validation.WORKLOAD_BY_ID[workload_id]
-            self.assertEqual(
-                validation._fault_families("gfx950", workload),
-                ("atomic-weaken-order",),
-            )
-            self.assertEqual(
-                validation._fault_families("gfx1201", workload),
-                ("atomic-weaken-order", "atomic-weaken-scope"),
-            )
+    def test_cdna_atomics_only_admit_order_faults(self) -> None:
+        for target in ("gfx942", "gfx950"):
+            for workload_id in ("streamk-arrival", "tree-atomic-or"):
+                with self.subTest(target=target, workload=workload_id):
+                    workload = validation.WORKLOAD_BY_ID[workload_id]
+                    self.assertEqual(
+                        validation._fault_families(target, workload),
+                        ("atomic-weaken-order",),
+                    )
+                    self.assertEqual(
+                        validation._fault_families("gfx1201", workload),
+                        ("atomic-weaken-order", "atomic-weaken-scope"),
+                    )
 
     def test_pytorch_gfx1250_runs_both_variants_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-tdm-descriptor-add"]

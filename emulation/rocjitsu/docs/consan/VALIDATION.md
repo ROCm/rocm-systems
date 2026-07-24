@@ -1,7 +1,8 @@
 # ConSan Validation
 
-This guide explains the reproducible experiment behind the support table in
-[STATUS_RDNA4.md](STATUS_RDNA4.md). The executable authority is
+This guide explains the reproducible experiment behind the per-target support
+ledgers: [gfx942](STATUS_CDNA3.md), [gfx950](STATUS_CDNA4.md),
+[gfx1201](STATUS_RDNA4.md), and [gfx1250](STATUS_GFX1250.md). The executable authority is
 [`consan_validation.py`](../../tests/dbi/consan/consan_validation.py): it owns the
 workload manifest, instrumentation profiles, commands, timeouts, knob hygiene,
 coverage gates, overhead calculation, and fault-containment policy. Prefer a
@@ -11,7 +12,7 @@ script change with tests over copying another command into this document.
 [SPILLING.md](SPILLING.md) explains ConSan's resource-policy integration, the
 reusable backend is documented in
 [AMDGPU register spilling](../spilling.md), and
-[STATUS_RDNA4.md](STATUS_RDNA4.md) is the concise published result ledger.
+the target-specific status files above are the published result ledgers.
 
 The status table began as a cumulative ledger: its rows were promoted at
 different frozen checkpoints and some predated today's stronger completeness
