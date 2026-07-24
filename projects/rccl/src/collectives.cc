@@ -189,6 +189,7 @@ RCCL_PARAM(DdaLL, "DDA_LL", 1);
 RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));       // 32 KiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 1);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
+RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
 // Returns true when the DDA fast path should be attempted for a collective
 // with the given total byte count.  gfx942Default is the per-collective
@@ -605,9 +606,10 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   // Let the symmetric kernel take priority when the user registered these
   // buffers as symmetric windows; otherwise fall through to CE / DDA.
-  bool symEligible = (op == ncclSum) && isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype,
-                                                                   count, sendbuff, recvbuff);
-
+  // If CE AllReduce is forced, prefer CE over the symmetric kernel for in-range sizes.
+  size_t msgBytes = count * ncclTypeSize(datatype);
+  bool symEligible = symEligible = (op == ncclSum) && isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype,
+                                                       count, sendbuff, recvbuff);
   // CE AllReduce
   // Disable CE AllReduce while this comm has live graph-captured plans. Per-call
   // capture checks are not enough because CE AR can still deadlock on eager
@@ -617,24 +619,22 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   bool ceCapturing = ncclCudaGraphValid(ceGraph);
   rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
   bool ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
-  if (!symEligible && ceArGraphAllowed && rcclUseCeAllReduce(comm, count, datatype, op) &&
-      comm->ceColl.ceARTmpBuf != NULL) {
+  bool ceAllReduceAllowed = ceArGraphAllowed && rcclUseCeAllReduce(comm, count, datatype, op);
+  if (ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
     if (count == 0) return ncclSuccess;
     INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu datatype=%d op=%d rank=%d/%d", count, (int)datatype, (int)op,
-         comm->rank, comm->nRanks);
+      comm->rank, comm->nRanks);
     return ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream);
   }
   // Pass the decision to taskAppend() via info to avoid recomputing it.
   info.ceCapturing = ceCapturing;
   info.ceArGraphAllowed = ceArGraphAllowed;
   info.ceGraphDecisionValid = true;
-  size_t msgBytes = count * ncclTypeSize(datatype);
   // gfx1250 DDA fabric AR is bounded by rcclDdaEnabled (RCCL_DDA_THRESHOLD) and
   // the per-tier thresholds, so it may claim the full range; the CE min-size cap
   // only applies to the other arches' DDA paths.
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  if (!symEligible && rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608) &&
-      (ddaFabricArch1250 || msgBytes < NCCL_CE_AR_MIN_MSG_BYTES)) {
+  if (!symEligible && rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608) && !ceAllReduceAllowed) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       // Small-message fast lane: LL protocol (no GPU barrier).
       if (rcclParamDdaLL() && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLLThreshold() &&

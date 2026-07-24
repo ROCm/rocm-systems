@@ -45,6 +45,7 @@ RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
 RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 1);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
+RCCL_PARAM_DECLARE(ForceCeAllReduce);
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
 RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
@@ -589,6 +590,7 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
 
 bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
   static int enabled = rcclParamCeAllReduce();
+  static int force = rcclParamForceCeAllReduce();
   if (!enabled) {
     // Log once per process, not on every eligibility check (called per AllReduce).
     static bool warnedDisabled = false;
@@ -606,13 +608,22 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
   // count must divide evenly so every rank owns an equal shard.
   if (count == 0 || count % (size_t)comm->nRanks != 0) return false;
 
-  // Total message must fit within the pre-allocated staging buffer.
   size_t msgBytes = count * ncclTypeSize(datatype);
-  if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES || msgBytes < NCCL_CE_AR_MIN_MSG_BYTES) return false;
+  if (force) {
+    if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) return false;
+    comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  }
+  if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) return false;
 
+  if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO) return false;
+  
   // Only standard reduction ops with a simple kernel implementation.
   // ncclAvg (maps to SumPostDiv) and user-defined PreMulSum fall back to ring.
+#if NCCL_CE_REDUCE_ALL_OPS
   if (op != ncclSum && op != ncclProd && op != ncclMin && op != ncclMax) return false;
+#else
+  if (op != ncclSum) return false;
+#endif
 
   // Float8 types require specialised handling not yet implemented for CE AR.
   if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) return false;

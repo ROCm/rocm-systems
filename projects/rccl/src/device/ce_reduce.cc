@@ -29,6 +29,12 @@ THE SOFTWARE.
 
 #include "nccl.h"
 
+// NCCL_CE_REDUCE_ALL_OPS=0 (default): Sum-only reduce kernels.
+// NCCL_CE_REDUCE_ALL_OPS=1 (BUILD_CE_REDUCE_ALL_OPS=ON): also Prod/Min/Max.
+#ifndef NCCL_CE_REDUCE_ALL_OPS
+#define NCCL_CE_REDUCE_ALL_OPS 0
+#endif
+
 // *********************************************************************************
 // VecTrait<T>
 //   LoadT     : 16-byte HIP vector used for a single memory transaction
@@ -236,6 +242,7 @@ ncclResult_t ncclCeLaunchLocalReduce(const void* tmpBuf, void* output, int nRank
   case ncclSum:
     redOp = 0;
     break;
+#if NCCL_CE_REDUCE_ALL_OPS
   case ncclProd:
     redOp = 1;
     break;
@@ -245,6 +252,7 @@ ncclResult_t ncclCeLaunchLocalReduce(const void* tmpBuf, void* output, int nRank
   case ncclMax:
     redOp = 3;
     break;
+#endif
   default:
     return ncclInvalidArgument;
   }
@@ -256,16 +264,8 @@ ncclResult_t ncclCeLaunchLocalReduce(const void* tmpBuf, void* output, int nRank
   (int)std::min((size_t)46, (chunkElems / VecTrait<T>::W + (size_t)threads * VecTrait<T>::GpuUnroll - 1) / \
                               ((size_t)threads * VecTrait<T>::GpuUnroll))
 
-#define NCCL_CE_LAUNCH_VEC(T) \
-  do { \
-    constexpr int UnrollFactor = VecTrait<T>::GpuUnroll; \
-    const int _blocks = NCCL_CE_VEC_BLOCKS(T); \
-    (void)hipGetLastError(); \
-    switch (redOp) { \
-    case 0: \
-      hipLaunchKernelGGL((ncclCeLocalReduceKernelVec<T, 0, UnrollFactor>), dim3(_blocks), dim3(threads), 0, stream, \
-                         (const T*)tmpBuf, (T*)output, nRanks, chunkElems); \
-      break; \
+#if NCCL_CE_REDUCE_ALL_OPS
+#define NCCL_CE_LAUNCH_VEC_REDOP_CASES(T) \
     case 1: \
       hipLaunchKernelGGL((ncclCeLocalReduceKernelVec<T, 1, UnrollFactor>), dim3(_blocks), dim3(threads), 0, stream, \
                          (const T*)tmpBuf, (T*)output, nRanks, chunkElems); \
@@ -277,7 +277,22 @@ ncclResult_t ncclCeLaunchLocalReduce(const void* tmpBuf, void* output, int nRank
     case 3: \
       hipLaunchKernelGGL((ncclCeLocalReduceKernelVec<T, 3, UnrollFactor>), dim3(_blocks), dim3(threads), 0, stream, \
                          (const T*)tmpBuf, (T*)output, nRanks, chunkElems); \
+      break;
+#else
+#define NCCL_CE_LAUNCH_VEC_REDOP_CASES(T)
+#endif
+
+#define NCCL_CE_LAUNCH_VEC(T) \
+  do { \
+    constexpr int UnrollFactor = VecTrait<T>::GpuUnroll; \
+    const int _blocks = NCCL_CE_VEC_BLOCKS(T); \
+    (void)hipGetLastError(); \
+    switch (redOp) { \
+    case 0: \
+      hipLaunchKernelGGL((ncclCeLocalReduceKernelVec<T, 0, UnrollFactor>), dim3(_blocks), dim3(threads), 0, stream, \
+                         (const T*)tmpBuf, (T*)output, nRanks, chunkElems); \
       break; \
+    NCCL_CE_LAUNCH_VEC_REDOP_CASES(T) \
     } \
     hipError_t _e = hipGetLastError(); \
     if (_e != hipSuccess) { \

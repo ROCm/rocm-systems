@@ -28,6 +28,12 @@
 #define NCCL_CE_AR_MAX_MSG_BYTES (256ull * 1024 * 1024)
 #define NCCL_CE_AR_MIN_MSG_BYTES (4ull * 1024 * 1024)
 
+// 0 (default): CE AllReduce reduce kernels are Sum-only.
+// 1: also build/run Prod/Min/Max (BUILD_CE_REDUCE_ALL_OPS=ON).
+#ifndef NCCL_CE_REDUCE_ALL_OPS
+#define NCCL_CE_REDUCE_ALL_OPS 0
+#endif
+
 struct ncclCeColl {
   uint8_t* baseUCSymReadyPtr;
   uint8_t* baseUCSymComplPtr;

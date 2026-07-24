@@ -3620,6 +3620,8 @@ static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
 }
 
 RCCL_PARAM(ForceCe, "FORCE_CE", 1);
+RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 0);
+RCCL_PARAM_DECLARE(CeAllReduce);
 // Converts `info` to a task and adds it to `comm->planner`. The exception is with
 // single rank communicators, collectives are issued as `ncclMemcpyAsync`s and
 // thus don't need a task.
@@ -3684,29 +3686,38 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // Without this trigger, CE AllReduce-only workloads would never initialize
       // the CE runtime (ceARTmpBuf stays NULL).
       if (!ceCapturing && ncclCeImplemented(info->coll, info->op, info->datatype) && comm->symmetricSupport &&
-          comm->nNodes == 1 && comm->ceColl.baseUCSymReadyPtr == NULL && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
+          comm->nNodes == 1 && (comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO || rcclParamForceCeAllReduce()) && 
+          comm->ceColl.baseUCSymReadyPtr == NULL && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
         struct ncclCeInitTask* ceTask;
         NCCLCHECK(ncclCalloc(&ceTask, 1));
         ceTask->comm = comm;
         ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
         ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
       }
-      // enable ce allreduce for allreduce with size >= 4MB and <= 256MB
+      // enable ce allreduce for allreduce with size <= 256MB
       // Size gate for CE AllReduce: ceARTmpBuf is sized for at most
       // NCCL_CE_AR_MAX_MSG_BYTES total bytes.
-      bool ceAllReduceFits = true;
+      bool ceAllReduceFits = false;
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
       bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       if (info->coll == ncclFuncAllReduce) {
-        if (!ceArGraphAllowed || !rcclUseCeAllReduce(comm, info->count, info->datatype, info->op)) {
-          ceAvailable = false;
-        } else {
+#if NCCL_CE_REDUCE_ALL_OPS
+        const bool ceAllReduceOpSupported = (info->op == ncclSum || info->op == ncclProd ||
+                                             info->op == ncclMin || info->op == ncclMax);
+#else
+        const bool ceAllReduceOpSupported = (info->op == ncclSum);
+#endif
+        if (!ceArGraphAllowed || !ceAllReduceOpSupported || !rcclUseCeAllReduce(comm, info->count, info->datatype, info->op)) {
+          ceAvailable = false; 
+        } else if (ceAllReduceOpSupported) {
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || totalBytes < (size_t)NCCL_CE_AR_MIN_MSG_BYTES) {
+          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || !rcclParamForceCeAllReduce()) {
             ceAllReduceFits = false;
-            INFO(NCCL_COLL, "CE AllReduce: msg %zu B range (%zu, %zu) B, falling back to standard NCCL AllReduce",
-                 totalBytes, (size_t)NCCL_CE_AR_MIN_MSG_BYTES, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
+            INFO(NCCL_COLL, "CE AllReduce: forced %d, msg %zu Max %zu B, falling back to standard NCCL AllReduce",
+                 rcclParamForceCeAllReduce(), totalBytes, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
+          } else {
+            ceAllReduceFits = true;
           }
         }
       }
@@ -3715,19 +3726,18 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool CeScratchAvailable =
         !ceCapturing && ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
-      if (rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg &&
+      if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment) {
+        INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
+        NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
+                                   opDev));
+      } else if (rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg &&
           winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr &&
           recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
         INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);
         NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr, comm->ddaScratch,
                                    comm->ddaPeerPtrsHost, opDev));
-      } else if (ceAllReduceFits && ceAvailable && !hasSysmemSegment) {
-        INFO(NCCL_INIT, "Taking CE collective path for AllReduce");
-        NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
-                                   opDev));
-      } else if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment &&
-                 ceAllReduceFits) {
-        INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
+      } else if (ceAllReduceFits && !hasSysmemSegment) {
+        INFO(NCCL_INIT, "Taking CE collective path for AllReduce: RCCL_FORCE_CE_ALLREDUCE is set to %d", rcclParamForceCeAllReduce());
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                    opDev));
         // Append kernel-based collective
