@@ -264,6 +264,24 @@ public:
     };
     static constexpr uint32_t kMaxAddressWatches = 4;
     AddressWatch address_watches[kMaxAddressWatches];
+
+    /// @brief Return a bit for every hardware watch slot matching an access.
+    /// @details A single access may overlap multiple programmed watch ranges.
+    /// Hardware reports all of them concurrently in TRAPSTS, allowing the
+    /// debugger to associate every logical watchpoint with the same stop.
+    [[nodiscard]] constexpr uint32_t matching_address_watch_slots(uint64_t access_address,
+                                                                  uint32_t bytes,
+                                                                  uint32_t access_mode,
+                                                                  uint32_t all_access_mode) const {
+      uint32_t slots = 0;
+      for (uint32_t slot = 0; slot < kMaxAddressWatches; ++slot) {
+        const auto &watch = address_watches[slot];
+        if ((watch.mode == all_access_mode || watch.mode == access_mode) &&
+            watch.overlaps(access_address, bytes))
+          slots |= uint32_t{1} << slot;
+      }
+      return slots;
+    }
   };
 
   /// @brief Per-page translation entry, mirroring HW PTE fields.

@@ -121,6 +121,18 @@ public:
 
   uint32_t fetch32(uint64_t addr, uint32_t vmid = 0) const { return read32(addr, vmid); }
 
+  bool is_fetchable(uint64_t addr, uint32_t vmid = 0) const {
+    if (is_mapped(addr, vmid) || simdojo::SparseMemory::has_page(addr))
+      return true;
+    pid_t pid = client_pid_for_vmid(vmid);
+    if (pid <= 0)
+      return false;
+    uint8_t byte = 0;
+    iovec local{&byte, sizeof(byte)};
+    iovec remote{reinterpret_cast<void *>(addr), sizeof(byte)};
+    return process_vm_readv(pid, &local, 1, &remote, 1, 0) == sizeof(byte);
+  }
+
   /// @brief Read a contiguous range from simulated GPU memory.
   /// @details Handles each page through mapped host memory, client memory, or
   /// sparse backing memory.

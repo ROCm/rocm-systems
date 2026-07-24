@@ -28,6 +28,12 @@
 
 namespace rocjitsu {
 namespace amdgpu {
+bool InstructionComputeUnitView::signal_queue_exception(uint32_t queue_id, uint32_t process_id,
+                                                        uint64_t status) {
+  auto *cp = raw_cu().command_processor();
+  return cp && cp->signal_queue_exception(queue_id, process_id, status);
+}
+
 uint32_t Wavefront::debug_read_sgpr(uint32_t reg) const {
   return cu_.read_sgpr(sgpr_alloc_.base + reg);
 }
@@ -159,6 +165,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
   wf->exec_ = wf_size_ == 64 ? ~0ULL : (1ULL << wf_size_) - 1;
   wf->vcc_ = 0;
   wf->m0_ = 0;
+  wf->set_status_raw(0);
   wf->set_apertures(shared_aperture_base_, shared_aperture_limit_, private_aperture_base_,
                     private_aperture_limit_);
   wf->state_ = WfState::RUNNING;
@@ -357,6 +364,13 @@ void ComputeUnitCore::update_wf_states() {
 void ComputeUnitCore::issue_instruction(Wavefront *active) {
   uint32_t vmid = active->process_id();
 
+  if (vmid != 0 && !memory_->is_fetchable(active->pc, vmid)) {
+    if (memory_violation_handler_ && memory_violation_handler_(*active, active->pc, false))
+      return;
+    active->halt();
+    return;
+  }
+
   rj_code_binary_inst_t words[4];
   for (int i = 0; i < 4; ++i)
     words[i] = memory_->fetch32(active->pc + i * 4, vmid);
@@ -391,6 +405,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   int inst_size_signed = inst->size();
   assert(inst_size_signed > 0 && "instruction size must be positive");
   auto inst_size = static_cast<uint64_t>(inst_size_signed);
+  const uint32_t trapsts_before = active->trapsts();
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
     if (active->num_vgprs_ > 0) {
@@ -439,6 +454,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
         active->set_ttmp(14, static_cast<uint32_t>(config->tma));
         active->set_ttmp(15, static_cast<uint32_t>(config->tma >> 32));
         active->set_trap_id(trap_id);
+        active->set_trap_saved_status(active->status_raw());
         active->set_trap_saved_exec(active->exec());
         active->set_trap_interrupt_sent(false);
         active->set_in_trap_handler(true);
@@ -542,6 +558,14 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 
   active->pc += inst_size;
 
+  constexpr uint32_t kAluExceptionTrapstsMask = 0x7fu;
+  constexpr uint32_t kAluExceptionModeShift = 12;
+  const uint32_t new_alu_causes = (active->trapsts() & ~trapsts_before) & kAluExceptionTrapstsMask;
+  const uint32_t enabled_alu_causes = (active->mode_raw() >> kAluExceptionModeShift) & 0x7fu;
+  if ((new_alu_causes & enabled_alu_causes) != 0 && alu_exception_handler_ &&
+      alu_exception_handler_(*active))
+    return;
+
   // s_rfe follows the same target-minus-size convention as other control-flow
   // instructions. Publish the handler-driven stop only after the common PC
   // increment has produced the architectural return PC for CWSR serialization.
@@ -558,7 +582,9 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     if (memory_violation_handler_) {
       const uint32_t vmid = active->process_id();
       for (uint64_t addr : dbg_addrs) {
-        if (!memory_->is_mapped(addr, vmid) &&
+        const bool shared_address =
+            addr >= active->shared_aperture_base() && addr <= active->shared_aperture_limit();
+        if (!shared_address && !memory_->is_mapped(addr, vmid) &&
             memory_violation_handler_(*active, addr, dbg_is_write))
           return; // wave stopped on a memory fault
       }

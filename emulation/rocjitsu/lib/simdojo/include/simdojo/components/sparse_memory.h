@@ -187,6 +187,13 @@ public:
     return count;
   }
 
+  /// @brief Return whether the page containing @p addr has sparse backing.
+  bool has_page(uint64_t addr) const {
+    const auto &stripe = page_stripes_[stripe_index(addr)];
+    std::shared_lock<std::shared_mutex> lock(stripe.mutex);
+    return stripe.pages.contains(addr >> PAGE_SHIFT);
+  }
+
 private:
   static constexpr size_t NUM_PAGE_STRIPES = 1024;
 

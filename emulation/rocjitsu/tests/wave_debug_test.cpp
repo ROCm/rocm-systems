@@ -16,8 +16,10 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <map>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace {
@@ -149,6 +151,46 @@ TEST(WaveDebugTest, TrapHandlerRestoresInterruptedExecBeforeReporting) {
 
   ASSERT_TRUE(wf->debug_halted());
   EXPECT_EQ(wf->exec(), kInterruptedExec);
+}
+
+TEST(WaveDebugTest, UnmappedInstructionFetchReportsMemoryViolationAtBranchTarget) {
+  WaveDebugFixture fx;
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint64_t kBranchTarget = 0x100;
+  std::vector<uint8_t> kernel_page(amdgpu::GpuMemory::PAGE_SIZE);
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
+                                                              amdgpu::Mtype::RW};
+  fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
+
+  fx.gpu_mem.write32(kKernelAddr, 0xBE801D00u, kProcessId); // s_setpc_b64 s[0:1]
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+  wf->set_process_id(kProcessId);
+  fx.cu->write_sgpr(wf->sgpr_alloc().base, static_cast<uint32_t>(kBranchTarget));
+  fx.cu->write_sgpr(wf->sgpr_alloc().base + 1, 0);
+
+  uint64_t fault_address = 0;
+  fx.cu->set_memory_violation_handler(
+      [&](amdgpu::Wavefront &faulting_wave, uint64_t address, bool is_write) {
+        EXPECT_EQ(&faulting_wave, wf);
+        EXPECT_FALSE(is_write);
+        fault_address = address;
+        faulting_wave.debug_trap(0);
+        return true;
+      });
+
+  fx.cu->step();
+  EXPECT_EQ(wf->pc, kBranchTarget);
+  EXPECT_FALSE(wf->debug_halted());
+
+  fx.cu->step();
+  EXPECT_EQ(fault_address, kBranchTarget);
+  EXPECT_TRUE(wf->debug_halted());
+  EXPECT_EQ(wf->pc, kBranchTarget);
+
+  fx.gpu_mem.unregister_process(kProcessId);
 }
 
 // Linked gfx950 code forms helper addresses as GETPC plus a signed rel32
@@ -609,6 +651,124 @@ TEST(WaveDebugTest, CwsrDeserializeRecoversSerializedWaveState) {
         EXPECT_EQ(out[i].vgprs[r * 64 + l], in[i].vgprs[r * 64 + l])
             << "wave " << i << " vgpr " << r << " lane " << l;
   }
+}
+
+TEST(WaveDebugTest, CwsrBulkCodecMatchesDwordCodecAndPublishesHeaderLast) {
+  constexpr uint64_t kCtxBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x40000;
+  std::vector<kmd::CwsrWaveState> waves = {make_wave(0xCC01, 0x4000), make_wave(0xCC02, 0x4080)};
+
+  std::map<uint64_t, uint32_t> dwords;
+  const auto reference =
+      kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, waves,
+                                [&](uint64_t address, uint32_t value) { dwords[address] = value; });
+  ASSERT_TRUE(reference.ok);
+
+  std::vector<uint8_t> bulk_image(reference.wave_state_offset);
+  std::vector<std::pair<uint64_t, size_t>> writes;
+  const auto bulk = kmd::serialize_queue_cwsr_bulk(
+      kCtxBase, kAreaSize, waves, [&](uint64_t address, std::span<const uint8_t> bytes) {
+        writes.emplace_back(address, bytes.size());
+        const size_t offset = static_cast<size_t>(address - kCtxBase);
+        ASSERT_LE(offset + bytes.size(), bulk_image.size());
+        std::memcpy(bulk_image.data() + offset, bytes.data(), bytes.size());
+      });
+  ASSERT_TRUE(bulk.ok);
+  EXPECT_EQ(bulk.control_stack_offset, reference.control_stack_offset);
+  EXPECT_EQ(bulk.control_stack_size, reference.control_stack_size);
+  EXPECT_EQ(bulk.wave_state_offset, reference.wave_state_offset);
+  EXPECT_EQ(bulk.wave_state_size, reference.wave_state_size);
+  EXPECT_EQ(bulk.debug_offset, reference.debug_offset);
+  EXPECT_EQ(bulk.debug_size, reference.debug_size);
+
+  ASSERT_EQ(writes.size(), 2u);
+  EXPECT_EQ(writes[0].first, kCtxBase + reference.control_stack_offset);
+  EXPECT_EQ(writes[0].second, reference.wave_state_offset - reference.control_stack_offset);
+  EXPECT_EQ(writes[1], (std::pair<uint64_t, size_t>{kCtxBase, 10 * sizeof(uint32_t)}));
+
+  for (uint32_t offset = 0; offset < reference.wave_state_offset; offset += sizeof(uint32_t)) {
+    uint32_t actual = 0;
+    std::memcpy(&actual, bulk_image.data() + offset, sizeof(actual));
+    auto expected = dwords.find(kCtxBase + offset);
+    EXPECT_EQ(actual, expected == dwords.end() ? 0u : expected->second) << "offset " << offset;
+  }
+}
+
+TEST(WaveDebugTest, CwsrBulkDeserializeRoundTripsAndRejectsCorruptHeader) {
+  constexpr uint64_t kCtxBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x40000;
+  std::vector<kmd::CwsrWaveState> input = {make_wave(0xDD01, 0x5000), make_wave(0xDD02, 0x5080)};
+  input[1].mode = 1u << 11;
+
+  std::vector<uint8_t> image(kAreaSize);
+  ASSERT_TRUE(kmd::serialize_queue_cwsr_bulk(kCtxBase, kAreaSize, input,
+                                             [&](uint64_t address, std::span<const uint8_t> bytes) {
+                                               std::memcpy(image.data() + (address - kCtxBase),
+                                                           bytes.data(), bytes.size());
+                                             })
+                  .ok);
+
+  auto geometry_only = [&] {
+    std::vector<kmd::CwsrWaveState> states(input.size());
+    for (size_t index = 0; index < input.size(); ++index) {
+      states[index].num_sgprs = input[index].num_sgprs;
+      states[index].num_vgprs = input[index].num_vgprs;
+    }
+    return states;
+  };
+  auto read_block = [&](uint64_t address, std::span<uint8_t> bytes) {
+    std::memcpy(bytes.data(), image.data() + (address - kCtxBase), bytes.size());
+  };
+
+  auto output = geometry_only();
+  ASSERT_TRUE(kmd::deserialize_queue_cwsr_bulk(kCtxBase, kAreaSize, output, read_block));
+  ASSERT_EQ(output.size(), input.size());
+  for (size_t index = 0; index < input.size(); ++index) {
+    EXPECT_EQ(output[index].pc, input[index].pc);
+    EXPECT_EQ(output[index].exec, input[index].exec);
+    EXPECT_EQ(output[index].vcc, input[index].vcc);
+    EXPECT_EQ(output[index].mode, input[index].mode);
+    EXPECT_EQ(output[index].wave_id, input[index].wave_id);
+    EXPECT_EQ(output[index].group_ids, input[index].group_ids);
+    EXPECT_EQ(output[index].sgprs, input[index].sgprs);
+    EXPECT_EQ(output[index].vgprs, input[index].vgprs);
+  }
+
+  image[8] ^= 1;
+  output = geometry_only();
+  EXPECT_FALSE(kmd::deserialize_queue_cwsr_bulk(kCtxBase, kAreaSize, output, read_block));
+}
+
+TEST(WaveDebugTest, CwsrBulkCodecUsesConstantBlockOperationsAtFullScale) {
+  constexpr uint64_t kCtxBase = 0x400000000ULL;
+  constexpr uint32_t kWaveCount = 1024;
+  constexpr uint32_t kAreaSize = 80 * 1024 * 1024;
+  std::vector<kmd::CwsrWaveState> waves(kWaveCount);
+  for (uint32_t index = 0; index < kWaveCount; ++index) {
+    auto &wave = waves[index];
+    wave.pc = 0x1000 + index * 4;
+    wave.wave_id = index + 1;
+    wave.group_ids[0] = index / 4;
+    wave.wave_in_group = index % 4;
+    wave.queue_packet_id = 1;
+    wave.num_sgprs = 106;
+    wave.num_vgprs = 256;
+    wave.sgprs.resize(wave.num_sgprs, index);
+    wave.vgprs.resize(static_cast<size_t>(wave.num_vgprs) * 64, index);
+  }
+
+  size_t write_calls = 0;
+  size_t bytes_written = 0;
+  const auto layout = kmd::serialize_queue_cwsr_bulk(kCtxBase, kAreaSize, waves,
+                                                     [&](uint64_t, std::span<const uint8_t> bytes) {
+                                                       ++write_calls;
+                                                       bytes_written += bytes.size();
+                                                     });
+  ASSERT_TRUE(layout.ok);
+  EXPECT_EQ(write_calls, 2u);
+  EXPECT_EQ(bytes_written,
+            layout.wave_state_offset - layout.control_stack_offset + 10 * sizeof(uint32_t));
+  EXPECT_GT(layout.wave_state_size, 64u * 1024u * 1024u);
 }
 
 } // namespace

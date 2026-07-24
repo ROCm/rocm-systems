@@ -1528,10 +1528,12 @@ TEST(CuFactoryTest, CdnaAccVgprsAreClearedOnRedispatch) {
     const uint32_t acc_last = acc0 + kCdnaAccVgprsPerWf - 1;
     cu->write_vgpr(acc0, 0, 0xFFFFFFFFu);
     cu->write_vgpr(acc_last, 0, 0xDEADBEEFu);
+    wf->set_status_raw(0xFFFFFFFFu);
 
     wf->halt();
     wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf, nullptr);
+    EXPECT_EQ(wf->status_raw(), 0u);
 
     EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET, 0), 0u);
     EXPECT_EQ(

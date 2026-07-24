@@ -55,6 +55,7 @@ public:
   void request_functional_yield();
   bool handle_sendmsg(Wavefront &wf, uint32_t message);
   void notify_trap_complete(Wavefront &wf);
+  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
 
 private:
   uint32_t read_sgpr(uint32_t reg_idx) const;

@@ -8416,6 +8416,7 @@ class CodeGenerator:
             '#include "rocjitsu/vm/amdgpu/mem_state.h"',
             '#include "rocjitsu/vm/amdgpu/register_access.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             *simd_extra_includes(),
             '#include "util/data_types.h"',
@@ -8439,9 +8440,28 @@ class CodeGenerator:
                 f'[[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {{'
             )
             probe = simd_probe_line(mnemonic, true16_vop3=is_true16_vop3)
+            alu_classifiers = {
+                'v_mul_f32_vop2': 'classify_mul_f32_vop2',
+                'v_mul_f32_vop3': 'classify_mul_f32_vop3',
+                'v_sqrt_f32_vop1': 'classify_sqrt_f32_vop1',
+                'v_sqrt_f32_vop3': 'classify_sqrt_f32_vop3',
+                'v_div_fixup_f32_vop3': 'classify_div_fixup_f32_exceptions',
+                'v_rcp_iflag_f32_vop1': 'classify_rcp_iflag_f32_exceptions',
+                'v_rcp_iflag_f32_vop3': 'classify_rcp_iflag_f32_exceptions',
+            }
+            classifier = alu_classifiers.get(mnemonic)
+            if classifier is not None:
+                lines.append(f'  uint32_t alu_causes = {classifier}(inst, wf);')
             if probe is not None:
-                lines.append(probe)
+                if classifier is None:
+                    lines.append(probe)
+                else:
+                    lines.append('  if (!(wf.mode_raw() & kAluExceptionModeMask)) {')
+                    lines.append(probe.replace('  ', '    ', 1))
+                    lines.append('  }')
             lines.append(prefixed_body)
+            if classifier is not None:
+                lines.append('  wf.set_trapsts(wf.trapsts() | alu_causes);')
             lines.append('}')
             lines.append('')
 

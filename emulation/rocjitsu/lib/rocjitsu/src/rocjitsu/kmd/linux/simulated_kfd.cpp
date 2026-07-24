@@ -480,6 +480,8 @@ void SimulatedKfd::init_command_processors_locked() {
         });
         cu->set_illegal_inst_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_illegal_instruction(wf); });
+        cu->set_alu_exception_handler(
+            [this](amdgpu::Wavefront &wf) { return on_wave_alu_exception(wf); });
         cu->set_memory_violation_handler(
             [this](amdgpu::Wavefront &wf, uint64_t address, bool is_write) {
               return on_wave_memory_violation(wf, address, is_write);
@@ -1766,6 +1768,14 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     // amd_queue_t base: write_pointer_address points to write_dispatch_id.
     if (!hw.is_sdma)
       hw.queue_desc_va = args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
+    if (!hw.is_sdma && args->ctx_save_restore_address != 0) {
+      constexpr uint32_t kErrorReasonOffset = 6 * sizeof(uint32_t);
+      constexpr uint32_t kErrorEventIdOffset = kErrorReasonOffset + sizeof(uint64_t);
+      hw.exception_status_va = target_cp->read_process_memory64(
+          args->ctx_save_restore_address + kErrorReasonOffset, proc.process_id());
+      hw.exception_event_id = static_cast<uint32_t>(target_cp->read_process_memory64(
+          args->ctx_save_restore_address + kErrorEventIdOffset, proc.process_id()));
+    }
     if (hw.is_sdma && !daemon_mode_) {
       auto *wptr = reinterpret_cast<uint64_t *>(args->write_pointer_address);
       auto *rptr = reinterpret_cast<uint64_t *>(args->read_pointer_address);
@@ -1816,7 +1826,7 @@ int SimulatedKfd::update_queue_ioctl(KfdProcess &proc, void *arg) {
     if (g.soc)
       g.soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
         cp->update_queue(args->queue_id, proc.process_id(), args->ring_base_address,
-                         args->ring_size);
+                         args->ring_size, args->queue_percentage);
       });
   {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
@@ -2272,9 +2282,11 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
   state.m0 = wf.m0();
   state.mode = wf.mode_raw();
   state.trapsts = wf.trapsts();
-  state.saved_status_halt = (raw_status >> 13) & 1u;
-  state.status = raw_status | (1u << 13);
+  const uint32_t interrupted_status =
+      wf.trap_interrupt_sent() ? wf.trap_saved_status() : raw_status;
+  state.saved_status_halt = (interrupted_status >> 13) & 1u;
   state.wave_stopped = wf.debug_halted();
+  state.status = state.wave_stopped ? raw_status | (1u << 13) : raw_status & ~(1u << 13);
   state.trap_id = wf.trap_id();
   state.wave_id = wf.debug_wave_id();
   state.group_ids = {wf.wg_id(), 0u, 0u};
@@ -2316,12 +2328,12 @@ void SimulatedKfd::raise_debug_event(const std::shared_ptr<KfdProcess> &proc, ui
   queue.mask |= report_mask;
 }
 
-void SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id,
+bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id,
                                                uint32_t gpu_id, uint64_t ctx_base,
                                                uint32_t ctx_size) {
   auto *gpu = find_gpu(gpu_id);
   if (!gpu || !gpu->soc || ctx_base == 0)
-    return;
+    return false;
 
   std::vector<kmd::CwsrWaveState> waves;
   gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
@@ -2337,7 +2349,7 @@ void SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
     }
   });
   if (waves.empty())
-    return;
+    return false;
 
   std::sort(waves.begin(), waves.end(), [](const auto &lhs, const auto &rhs) {
     if (lhs.queue_packet_id != rhs.queue_packet_id)
@@ -2354,31 +2366,34 @@ void SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
     waves[index].is_last_in_group =
         index + 1 == waves.size() || !same_group(waves[index], waves[index + 1]);
   }
-
   auto *memory = gpu->soc->memory();
-  kmd::serialize_queue_cwsr(ctx_base, ctx_size, waves, [&](uint64_t address, uint32_t value) {
-    memory->write32(address, value, process_id);
-  });
+  const auto layout = kmd::serialize_queue_cwsr_bulk(
+      ctx_base, ctx_size, waves, [&](uint64_t address, std::span<const uint8_t> bytes) {
+        memory->write_block(address, bytes, process_id);
+      });
+  if (!layout.ok)
+    return false;
 
   uint64_t oldest_packet = UINT64_MAX;
   for (const auto &wave : waves)
     oldest_packet = std::min<uint64_t>(oldest_packet, wave.queue_packet_id);
   auto proc = find_process(process_id);
   if (!proc)
-    return;
+    return false;
   uint64_t read_pointer = 0;
   uint64_t write_pointer = 0;
   {
     std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
     auto queue = proc->queue_snapshot_map_.find(queue_id);
     if (queue == proc->queue_snapshot_map_.end())
-      return;
+      return false;
     read_pointer = queue->second.read_pointer_address;
     write_pointer = queue->second.write_pointer_address;
   }
   if (read_pointer != 0 && write_pointer != 0 &&
       oldest_packet < memory->read64(write_pointer, process_id))
     memory->write64(read_pointer, oldest_packet, process_id);
+  return true;
 }
 
 void SimulatedKfd::on_wave_trap_complete(amdgpu::Wavefront &wave) {
@@ -2397,7 +2412,6 @@ void SimulatedKfd::on_wave_trap_complete(amdgpu::Wavefront &wave) {
   }
 
   uint64_t ctx_base = 0;
-  uint32_t ctx_size = 0;
   uint32_t gpu_id = 0;
   {
     std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
@@ -2405,15 +2419,15 @@ void SimulatedKfd::on_wave_trap_complete(amdgpu::Wavefront &wave) {
     if (queue == proc->queue_snapshot_map_.end())
       return;
     ctx_base = queue->second.ctx_save_restore_address;
-    ctx_size = queue->second.ctx_save_restore_area_size;
     gpu_id = queue->second.gpu_id;
   }
   if (ctx_base == 0)
     return;
 
-  if (queue_has_running_waves(process_id, queue_id, gpu_id, &wave))
-    return;
-  report_wave_stopped(proc, queue_id, gpu_id, ctx_base, ctx_size);
+  // A trap interrupt is wave-local: hardware reports it without waiting for
+  // every peer in the queue to stop. The debugger's ensuing SUSPEND_QUEUES
+  // request publishes the authoritative full-queue CWSR snapshot.
+  notify_debug_event(proc, queue_id, gpu_id);
 }
 
 std::optional<amdgpu::ComputeUnitCore::TrapHandlerConfig>
@@ -2471,32 +2485,16 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
   return true;
 }
 
-bool SimulatedKfd::queue_has_running_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
-                                           const amdgpu::Wavefront *exclude) {
-  auto *gpu = find_gpu(gpu_id);
-  if (!gpu || !gpu->soc)
-    return false;
-  bool running = false;
-  gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
-    for (auto *cu : cp->compute_units()) {
-      cu->with_wave_state_locked([&] {
-        for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
-          auto *wave = cu->wf(slot);
-          if (wave != exclude && wave->process_id() == process_id && wave->queue_id() == queue_id &&
-              !wave->debug_paused() && wave->state() != amdgpu::WfState::HALTED)
-            running = true;
-        }
-      });
-    }
-  });
-  return running;
-}
-
 void SimulatedKfd::report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                        uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size,
                                        uint64_t exception_mask) {
-  const pid_t target_pid = proc->client_pid();
   serialize_queue_debug_waves(proc->process_id(), queue_id, gpu_id, ctx_base, ctx_size);
+  notify_debug_event(proc, queue_id, gpu_id, exception_mask);
+}
+
+void SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+                                      uint32_t gpu_id, uint64_t exception_mask) {
+  const pid_t target_pid = proc->client_pid();
   raise_debug_event(proc, queue_id, gpu_id, exception_mask);
 
   // Duplicate under the session lock so DISABLE/reaping cannot close and reuse
@@ -2520,7 +2518,6 @@ bool SimulatedKfd::on_wave_single_step_complete(amdgpu::Wavefront &wave) {
   if (!proc)
     return false;
   uint64_t ctx_base = 0;
-  uint32_t ctx_size = 0;
   uint32_t gpu_id = 0;
   {
     std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
@@ -2528,7 +2525,6 @@ bool SimulatedKfd::on_wave_single_step_complete(amdgpu::Wavefront &wave) {
     if (queue == proc->queue_snapshot_map_.end())
       return false;
     ctx_base = queue->second.ctx_save_restore_address;
-    ctx_size = queue->second.ctx_save_restore_area_size;
     gpu_id = queue->second.gpu_id;
   }
   if (ctx_base == 0)
@@ -2539,9 +2535,15 @@ bool SimulatedKfd::on_wave_single_step_complete(amdgpu::Wavefront &wave) {
   // is the public stop-reason bit rocm-dbgapi consumes before the next resume.
   constexpr uint32_t kTrapAfterInstMask = 1u << 25;
   wave.set_trapsts(wave.trapsts() | kTrapAfterInstMask);
-  if (queue_has_running_waves(wave.process_id(), wave.queue_id(), gpu_id, &wave))
-    return true;
-  report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size);
+  // Single-step completion is wave-specific. Report it even if another wave
+  // in the queue is running; rocm-dbgapi will suspend the queue before reading
+  // its CWSR state. Deferring until every peer stops can lose the event forever
+  // when a peer runs to normal completion without entering a debug callback.
+  // Like hardware's trap interrupt, notification does not itself save the
+  // queue. The debugger's ensuing SUSPEND_QUEUES request publishes one stable,
+  // authoritative CWSR snapshot instead of redundantly serializing every
+  // resident wave here first.
+  notify_debug_event(proc, wave.queue_id(), gpu_id);
   return true;
 }
 
@@ -2550,30 +2552,19 @@ bool SimulatedKfd::on_wave_watchpoint(amdgpu::Wavefront &wave, uint64_t address,
   auto proc = find_process(wave.process_id());
   if (!proc)
     return false;
-  int matched_slot = -1;
+  uint32_t matched_slots = 0;
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(proc->client_pid());
     if (session == debug_sessions_.end() || !session->second.enabled)
       return false;
-    for (uint32_t slot = 0; slot < KfdProcess::DebugSession::kMaxAddressWatches; ++slot) {
-      const auto &watch = session->second.address_watches[slot];
-      if (!watch.active)
-        continue;
-      const bool mode_matches =
-          watch.mode == KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ALL ||
-          (is_atomic && watch.mode == KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ATOMIC) ||
-          (!is_atomic && is_write && watch.mode == KFD_DBG_TRAP_ADDRESS_WATCH_MODE_NONREAD) ||
-          (!is_atomic && !is_write && watch.mode == KFD_DBG_TRAP_ADDRESS_WATCH_MODE_READ);
-      if (!mode_matches)
-        continue;
-      if (watch.overlaps(address, bytes)) {
-        matched_slot = static_cast<int>(slot);
-        break;
-      }
-    }
+    const uint32_t access_mode = is_atomic  ? KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ATOMIC
+                                 : is_write ? KFD_DBG_TRAP_ADDRESS_WATCH_MODE_NONREAD
+                                            : KFD_DBG_TRAP_ADDRESS_WATCH_MODE_READ;
+    matched_slots = session->second.matching_address_watch_slots(
+        address, bytes, access_mode, KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ALL);
   }
-  if (matched_slot < 0)
+  if (matched_slots == 0)
     return false;
 
   uint64_t ctx_base = 0;
@@ -2593,7 +2584,11 @@ bool SimulatedKfd::on_wave_watchpoint(amdgpu::Wavefront &wave, uint64_t address,
 
   static constexpr uint32_t kTrapstsBits[] = {1u << 7, 1u << 12, 1u << 13, 1u << 14};
   constexpr uint32_t kModeExcpEnAddrWatch = 1u << 19;
-  wave.set_trapsts(wave.trapsts() | kTrapstsBits[matched_slot]);
+  uint32_t trapsts = wave.trapsts();
+  for (uint32_t slot = 0; slot < KfdProcess::DebugSession::kMaxAddressWatches; ++slot)
+    if ((matched_slots & (uint32_t{1} << slot)) != 0)
+      trapsts |= kTrapstsBits[slot];
+  wave.set_trapsts(trapsts);
   wave.set_mode_raw(wave.mode_raw() | kModeExcpEnAddrWatch);
   wave.debug_trap(0);
   report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size);
@@ -2661,6 +2656,36 @@ bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t, b
   wave.debug_trap(0);
   report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size,
                       KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION));
+  return true;
+}
+
+bool SimulatedKfd::on_wave_alu_exception(amdgpu::Wavefront &wave) {
+  auto proc = find_process(wave.process_id());
+  if (!proc)
+    return false;
+  {
+    std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+    auto session = debug_sessions_.find(proc->client_pid());
+    if (session == debug_sessions_.end() || !session->second.enabled)
+      return false;
+  }
+  uint64_t ctx_base = 0;
+  uint32_t ctx_size = 0;
+  uint32_t gpu_id = 0;
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    auto queue = proc->queue_snapshot_map_.find(wave.queue_id());
+    if (queue == proc->queue_snapshot_map_.end())
+      return false;
+    ctx_base = queue->second.ctx_save_restore_address;
+    ctx_size = queue->second.ctx_save_restore_area_size;
+    gpu_id = queue->second.gpu_id;
+  }
+  if (ctx_base == 0)
+    return false;
+  wave.debug_trap(0);
+  report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size,
+                      KFD_EC_MASK(EC_QUEUE_WAVE_MATH_ERROR));
   return true;
 }
 
@@ -2769,26 +2794,51 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
         });
       }
     });
-    bool restored = false;
+    bool restored = stopped.empty();
     if (!stopped.empty() && context.base != 0) {
       auto *memory = gpu->soc->memory();
-      restored =
-          kmd::deserialize_queue_cwsr(context.base, context.size, states, [&](uint64_t address) {
-            return memory->read32(address, proc->process_id());
+      restored = kmd::deserialize_queue_cwsr_bulk(
+          context.base, context.size, states, [&](uint64_t address, std::span<uint8_t> bytes) {
+            memory->read_block(address, bytes, proc->process_id());
           });
     }
     std::unordered_set<amdgpu::ComputeUnitCore *> wake;
     if (restored) {
+      std::vector<size_t> matches;
+      matches.reserve(states.size());
+      std::vector<bool> matched(stopped.size());
       for (const auto &state : states) {
-        auto wave = std::find_if(stopped.begin(), stopped.end(), [&](const auto *candidate) {
-          return candidate->aql_packet_id() == state.queue_packet_id &&
-                 candidate->wg_id() == state.group_ids[0] &&
-                 candidate->wave_in_group() == state.wave_in_group;
-        });
-        if (wave == stopped.end())
-          continue;
-        const size_t index = static_cast<size_t>(std::distance(stopped.begin(), wave));
-        owners[index]->with_wave_state_locked([&] { apply_cwsr_to_wave(**wave, state); });
+        auto find_match = [&](bool by_wave_id) {
+          for (size_t index = 0; index < stopped.size(); ++index) {
+            if (matched[index])
+              continue;
+            const auto *candidate = stopped[index];
+            if (by_wave_id ? state.wave_id != 0 && candidate->debug_wave_id() == state.wave_id
+                           : candidate->debug_wave_id() == 0 &&
+                                 candidate->aql_packet_id() == state.queue_packet_id &&
+                                 candidate->wg_id() == state.group_ids[0] &&
+                                 candidate->wave_in_group() == state.wave_in_group)
+              return index;
+          }
+          return stopped.size();
+        };
+        size_t index = find_match(true);
+        if (index == stopped.size())
+          index = find_match(false);
+        if (index == stopped.size()) {
+          restored = false;
+          break;
+        }
+        matched[index] = true;
+        matches.push_back(index);
+      }
+      restored = restored && matches.size() == stopped.size();
+      if (restored) {
+        for (size_t state_index = 0; state_index < states.size(); ++state_index) {
+          const size_t wave_index = matches[state_index];
+          owners[wave_index]->with_wave_state_locked(
+              [&] { apply_cwsr_to_wave(*stopped[wave_index], states[state_index]); });
+        }
       }
     }
     for (size_t index = 0; index < stopped.size(); ++index) {
@@ -2810,7 +2860,10 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
     });
     for (auto *cu : wake)
       cu->schedule_work_async();
-    ++resumed;
+    if (restored)
+      ++resumed;
+    else
+      queue_ids[context.request_index] |= kQueueError;
   }
   return static_cast<int>(resumed);
 }
@@ -2870,11 +2923,15 @@ int SimulatedKfd::suspend_debug_queues(KfdProcess *proc, uint32_t *queue_ids, ui
         });
       }
     });
+    bool serialized = newly_suspended == 0;
     if (newly_suspended > 0 && queue.info.ctx_save_restore_address != 0)
-      serialize_queue_debug_waves(process_id, queue.queue_id, queue.info.gpu_id,
-                                  queue.info.ctx_save_restore_address,
-                                  queue.info.ctx_save_restore_area_size);
-    ++suspended;
+      serialized = serialize_queue_debug_waves(process_id, queue.queue_id, queue.info.gpu_id,
+                                               queue.info.ctx_save_restore_address,
+                                               queue.info.ctx_save_restore_area_size);
+    if (serialized)
+      ++suspended;
+    else
+      queue_ids[queue.request_index] |= kQueueError;
   }
   return static_cast<int>(suspended);
 }
@@ -3341,6 +3398,19 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
     return debug_query_exception_info(target_pid, args->query_exception_info);
   case KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT: {
+    const auto &event = args->send_runtime_event;
+    if (event.exception_mask != 0 &&
+        (event.exception_mask & KFD_EC_MASK(EC_PROCESS_RUNTIME)) == 0) {
+      auto *gpu = find_gpu(event.gpu_id);
+      if (!gpu || !gpu->soc)
+        return -ENODEV;
+      bool delivered = false;
+      gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+        delivered |= cp->signal_queue_exception(event.queue_id, target_proc->process_id(),
+                                                event.exception_mask);
+      });
+      return delivered ? 0 : -ENOENT;
+    }
     std::lock_guard<std::mutex> runtime_lock(runtime_handshake_mutex_);
     runtime_acked_.insert(target_pid);
     runtime_handshake_cv_.notify_all();

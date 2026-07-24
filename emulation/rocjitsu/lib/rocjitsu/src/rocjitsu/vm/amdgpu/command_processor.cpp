@@ -495,6 +495,31 @@ void CommandProcessor::register_queue(HwQueue queue) {
     ensure_doorbell_monitor();
 }
 
+bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t process_id,
+                                              uint64_t status) {
+  uint64_t exception_status_va = 0;
+  uint32_t exception_event_id = 0;
+  {
+    std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
+    auto queue = std::find_if(hw_queues_.begin(), hw_queues_.end(), [&](const HwQueue &candidate) {
+      return candidate.queue_id == queue_id && candidate.process_id == process_id;
+    });
+    if (queue == hw_queues_.end() || queue->exception_status_va == 0)
+      return false;
+    exception_status_va = queue->exception_status_va;
+    exception_event_id = queue->exception_event_id;
+  }
+
+  memory_->write64(exception_status_va, status, process_id);
+  if (interrupt_cb_)
+    interrupt_cb_(process_id, exception_event_id);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  while (memory_->read64(exception_status_va, process_id) == status &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  return true;
+}
+
 void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) {
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
   for (size_t i = 0; i < hw_queues_.size(); ++i) {
@@ -511,14 +536,33 @@ void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) 
 }
 
 void CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
-                                    uint32_t ring_size) {
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-  for (auto &q : hw_queues_) {
-    if (q.queue_id == queue_id && q.process_id == process_id) {
-      q.ring_base_va = ring_base_va;
-      q.ring_size = ring_size;
-      break;
+                                    uint32_t ring_size, uint32_t queue_percentage) {
+  const bool suspended = queue_percentage == 0;
+  bool changed = false;
+  {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    for (auto &q : hw_queues_) {
+      if (q.queue_id == queue_id && q.process_id == process_id) {
+        q.ring_base_va = ring_base_va;
+        q.ring_size = ring_size;
+        changed = q.runtime_suspended != suspended;
+        q.runtime_suspended = suspended;
+        break;
+      }
     }
+  }
+  if (!changed)
+    return;
+  for (auto *cu : cus_) {
+    cu->with_wave_state_locked([&] {
+      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+        auto *wave = cu->wf(slot);
+        if (!wave->is_halted() && wave->process_id() == process_id && wave->queue_id() == queue_id)
+          wave->set_debug_suspended(suspended);
+      }
+    });
+    if (!suspended)
+      cu->schedule_work_async();
   }
 }
 
@@ -794,7 +838,8 @@ HwQueueState *CommandProcessor::schedule_next_queue() {
   for (size_t i = 0; i < new_queue_states_.size(); ++i) {
     size_t idx = (start + i) % new_queue_states_.size();
     auto &qs = new_queue_states_[idx];
-    if (hw_queues_[idx].is_sdma || hw_queues_[idx].debug_suspended)
+    if (hw_queues_[idx].is_sdma || hw_queues_[idx].debug_suspended ||
+        hw_queues_[idx].runtime_suspended)
       continue;
     if (qs.next_dispatch_idx < qs.entries.size()) {
       next_queue_idx_ = (idx + 1) % new_queue_states_.size();
@@ -1526,7 +1571,7 @@ void CommandProcessor::arm_stall_recheck(simdojo::Tick now) {
 void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdojo::Tick now) {
   if (!memory_)
     return;
-  if (queue.debug_suspended) {
+  if (queue.debug_suspended || queue.runtime_suspended) {
     // A command-processor event can race a debugger suspension even when this
     // queue has no new packets. Do not turn that stale event into an endless
     // resume/event chain: request a resume pass only when packet fetch really
@@ -1981,7 +2026,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
     fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
   // Process any new non-kernel entries (barriers with total_wgs==0).
   for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
-    if (hw_queues_[qi].debug_suspended)
+    if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
       continue;
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {

@@ -71,10 +71,13 @@ struct HwQueue {
   bool host_accessible = false;
   bool is_sdma = false;
   bool debug_suspended = false;
+  bool runtime_suspended = false;
   /// A command-processor pass observed this queue while its debugger gate was closed.
   /// Cleared on resume after scheduling one pass to process the deferred work.
   bool debug_work_deferred = false;
   uint64_t queue_desc_va = 0;
+  uint64_t exception_status_va = 0;
+  uint32_t exception_event_id = 0;
   /// CP-private monotonic fetch cursor: the next ring index to fetch. Normally
   /// tracks read_ptr_va exactly, but stays ahead of it while the debugger holds
   /// the queue's read_dispatch_id at a trapped dispatch (so packets are not
@@ -154,8 +157,14 @@ public:
   void register_queue(HwQueue queue);
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
   void update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
-                    uint32_t ring_size);
+                    uint32_t ring_size, uint32_t queue_percentage);
   void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended);
+  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
+  uint64_t read_process_memory64(uint64_t address, uint32_t process_id) const {
+    return memory_ && memory_->is_fetchable(address, process_id)
+               ? memory_->read64(address, process_id)
+               : 0;
+  }
 
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
@@ -216,6 +225,14 @@ public:
       return candidate.queue_id == queue_id && candidate.process_id == process_id;
     });
     return queue != hw_queues_.end() && queue->debug_suspended;
+  }
+
+  [[nodiscard]] bool queue_runtime_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    auto queue = std::find_if(hw_queues_.begin(), hw_queues_.end(), [&](const auto &candidate) {
+      return candidate.queue_id == queue_id && candidate.process_id == process_id;
+    });
+    return queue != hw_queues_.end() && queue->runtime_suspended;
   }
 
   /// @brief Test-only count of executed command-processor doorbell passes.

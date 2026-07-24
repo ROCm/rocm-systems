@@ -216,6 +216,8 @@ public:
   void set_memory_violation_handler(MemoryViolationHandler cb) {
     memory_violation_handler_ = std::move(cb);
   }
+  using AluExceptionHandler = std::function<bool(Wavefront &wf)>;
+  void set_alu_exception_handler(AluExceptionHandler cb) { alu_exception_handler_ = std::move(cb); }
   void set_debug_active(bool active) { debug_active_.store(active, std::memory_order_relaxed); }
 
   /// @brief Set the command processor for WG completion notification.
@@ -666,6 +668,7 @@ protected:
   WatchpointHandler watchpoint_handler_;
   IllegalInstHandler illegal_inst_handler_;
   MemoryViolationHandler memory_violation_handler_;
+  AluExceptionHandler alu_exception_handler_;
   std::atomic<bool> debug_active_{false};
   CommandProcessor *cp_ = nullptr;
 
@@ -746,7 +749,8 @@ public:
       last_quantum_executed_ = 0;
       for (uint32_t i = 0; i < kFunctionalQuantum && step(); ++i) {
         ++last_quantum_executed_;
-        if (std::exchange(functional_yield_requested_, false))
+        if (debug_active_.load(std::memory_order_relaxed) ||
+            std::exchange(functional_yield_requested_, false))
           break;
       }
     } else {

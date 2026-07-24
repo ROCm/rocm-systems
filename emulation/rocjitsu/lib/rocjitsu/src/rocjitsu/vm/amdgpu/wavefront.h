@@ -492,6 +492,8 @@ public:
 
   bool trap_interrupt_sent() const { return trap_interrupt_sent_; }
   void set_trap_interrupt_sent(bool value) { trap_interrupt_sent_ = value; }
+  uint32_t trap_saved_status() const { return trap_saved_status_; }
+  void set_trap_saved_status(uint32_t value) { trap_saved_status_ = value; }
   uint64_t trap_saved_exec() const { return trap_saved_exec_; }
   void set_trap_saved_exec(uint64_t value) { trap_saved_exec_ = value; }
 
@@ -616,6 +618,7 @@ public:
     trapsts_ = 0;
     in_trap_handler_ = false;
     trap_interrupt_sent_ = false;
+    trap_saved_status_ = 0;
     trap_saved_exec_ = 0;
     debug_halted_ = false;
     debug_suspended_ = false;
@@ -687,6 +690,7 @@ private:
   uint32_t trapsts_ = 0;             ///< Trap status register (EXCP flags).
   bool in_trap_handler_ = false;     ///< Executing the configured trap-handler shader.
   bool trap_interrupt_sent_ = false; ///< Handler issued MSG_INTERRUPT for this entry.
+  uint32_t trap_saved_status_ = 0;   ///< Interrupted STATUS restored after handler completion.
   uint64_t trap_saved_exec_ = 0;     ///< Interrupted EXEC restored after handler completion.
   bool debug_halted_ = false;        ///< Stopped by the debugger (skipped by scheduler).
   bool debug_suspended_ = false;     ///< Queue-suspended for a stable CWSR snapshot.
