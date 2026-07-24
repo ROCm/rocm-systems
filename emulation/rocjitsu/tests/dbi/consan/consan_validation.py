@@ -1109,6 +1109,7 @@ GFX1250_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
 
 
 def _resolved_workload(target: str, workload: Workload) -> Workload:
+    """Materialize one target's command overrides from a canonical registry row."""
     if workload.kind != "gtest":
         return workload
     overrides = {
@@ -3398,6 +3399,11 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     try:
         target = _target(args)
+        # Reject cheap target/input mismatches before requiring a configured
+        # workspace. Handlers repeat this guard to protect direct entry calls.
+        requested_workload = getattr(args, "workload", "all")
+        if requested_workload != "all":
+            _workload_for_target(target, requested_workload)
         if args.command == "manifest":
             result = _manifest(target)
             if args.json:

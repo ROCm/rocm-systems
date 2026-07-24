@@ -249,6 +249,29 @@ class ConSanValidationTest(unittest.TestCase):
                         error.getvalue(),
                     )
 
+    def test_cli_reports_target_exclusion_before_missing_workspace(self) -> None:
+        error = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            redirect_stderr(error),
+        ):
+            self.assertEqual(
+                validation.main(
+                    [
+                        "--target",
+                        "gfx942",
+                        "doctor",
+                        "--workload",
+                        "pytorch-rdna4-compiled-softmax",
+                    ]
+                ),
+                2,
+            )
+        self.assertIn(
+            "gfx942 manifest excludes workload: pytorch-rdna4-compiled-softmax",
+            error.getvalue(),
+        )
+
     def test_gfx950_manifest_resolves_cdna4_native_workloads(self) -> None:
         manifest = validation._manifest("gfx950")
         workloads = {workload["id"]: workload for workload in manifest["workloads"]}
