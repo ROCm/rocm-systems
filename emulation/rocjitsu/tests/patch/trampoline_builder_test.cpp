@@ -3,7 +3,7 @@
 
 #include "rocjitsu/code/patch/trampoline_builder.h"
 
-#include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/rj_code.h"
 

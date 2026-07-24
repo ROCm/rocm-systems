@@ -4,8 +4,8 @@
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
 
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"

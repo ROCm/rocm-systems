@@ -17,6 +17,7 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/dbt/encoding_translator.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_cdna3.h"
@@ -56,7 +57,6 @@
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/dbt/waitcnt_translator.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
