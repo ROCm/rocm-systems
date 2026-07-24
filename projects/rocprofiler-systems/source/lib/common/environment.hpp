@@ -17,7 +17,6 @@
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
-#include <exception>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -420,7 +419,7 @@ remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
 
 /// @brief Build the default colon-delimited library search-path list.
 ///
-/// Concatenates the process's @c PATH, @c LD_LIBRARY_PATH, @c LIBRARY_PATH and
+/// Concatenates the process's @c ROCPROFSYS_PATH, @c LD_LIBRARY_PATH, @c LIBRARY_PATH and
 /// @c PWD environment variables (in that order), followed by the current
 /// directory @c "." , into a single @c ':' -delimited string.
 /// @return Colon-delimited search paths; never empty (always ends with @c "." ).

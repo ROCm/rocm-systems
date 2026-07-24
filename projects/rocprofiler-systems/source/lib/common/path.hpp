@@ -5,7 +5,6 @@
 
 #include "common/defines.h"
 #include "common/delimit.hpp"
-#include "common/env_vars.hpp"
 #include <spdlog/fmt/fmt.h>
 
 #include <cstdint>

@@ -268,6 +268,25 @@ TEST_F(PathTest, IsDirectory_NonexistentPath)
 
 TEST_F(PathTest, IsDirectory_EmptyPath) { EXPECT_FALSE(is_directory("")); }
 
+TEST_F(PathTest, IsDirectory_AcceptsTrailingSlash)
+{
+    EXPECT_TRUE(is_directory(m_test_dir + "/"));
+}
+
+TEST_F(PathTest, IsDirectory_RelativePath)
+{
+    const std::string subdir_name = "isdir_relative_dir";
+    create_subdir(subdir_name);  // Creates in m_test_dir.
+
+    char saved_cwd[PATH_MAX];
+    ASSERT_NE(getcwd(saved_cwd, sizeof(saved_cwd)), nullptr);
+    ASSERT_EQ(chdir(m_test_dir.c_str()), 0);
+
+    EXPECT_TRUE(is_directory(subdir_name));
+
+    ASSERT_EQ(chdir(saved_cwd), 0);
+}
+
 TEST_F(PathTest, GetRocprofsysRoot_ReturnsNonEmptyAbsolute)
 {
     std::string root = get_rocprofsys_root();

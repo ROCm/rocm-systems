@@ -3,22 +3,16 @@
 
 #pragma once
 
-#include "common/defines.h"
-#include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
 #include <spdlog/fmt/fmt.h>
 
-#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
-#include <fstream>
-#include <ios>
 #include <link.h>
 #include <linux/limits.h>
 #include <string>
-#include <string_view>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -88,7 +82,7 @@ get_environ(int _verbose, std::string _search_paths = {},
         _search_paths = fmt::format("{}:{}", _omnilib_dl_path, _search_paths);
     }
 
-    if(delimit(_search_paths, ":").empty())
+    if(_search_paths.find_first_not_of(':') == std::string::npos)
     {
         _search_paths = get_default_lib_search_paths();
     }

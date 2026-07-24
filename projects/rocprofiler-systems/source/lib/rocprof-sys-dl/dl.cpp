@@ -196,14 +196,29 @@ const char* _rocprofsys_dl_dlopen_descr = "RTLD_LAZY | RTLD_LOCAL";
 /// This class contains function pointers for rocprof-sys's instrumentation functions
 struct ROCPROFSYS_INTERNAL_API indirect
 {
+    /**
+     * Delegating constructor that uses the default lib search paths.
+     * @param _omnilib The path to the omnilib.
+     * @param _userlib The path to the userlib.
+     * @param _dllib The path to the dllib.
+     */
     ROCPROFSYS_INLINE indirect(const std::string& _omnilib, const std::string& _userlib,
                                const std::string& _dllib)
-    : m_omnilib{ common::path::find_path(_omnilib, _rocprofsys_dl_verbose,
-                                         common::get_default_lib_search_paths()) }
-    , m_dllib{ common::path::find_path(_dllib, _rocprofsys_dl_verbose,
-                                       common::get_default_lib_search_paths()) }
-    , m_userlib{ common::path::find_path(_userlib, _rocprofsys_dl_verbose,
-                                         common::get_default_lib_search_paths()) }
+    : indirect{ _omnilib, _userlib, _dllib, common::get_default_lib_search_paths() }
+    {}
+
+    /**
+     * Constructor that uses the provided lib search paths.
+     * @param _omnilib The path to the omnilib.
+     * @param _userlib The path to the userlib.
+     * @param _dllib The path to the dllib.
+     * @param _lib_paths The lib search paths.
+     */
+    ROCPROFSYS_INLINE indirect(const std::string& _omnilib, const std::string& _userlib,
+                               const std::string& _dllib, const std::string& _lib_paths)
+    : m_omnilib{ common::path::find_path(_omnilib, _rocprofsys_dl_verbose, _lib_paths) }
+    , m_dllib{ common::path::find_path(_dllib, _rocprofsys_dl_verbose, _lib_paths) }
+    , m_userlib{ common::path::find_path(_userlib, _rocprofsys_dl_verbose, _lib_paths) }
     {
         if(_rocprofsys_dl_verbose >= 1)
         {
