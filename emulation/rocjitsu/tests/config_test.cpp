@@ -635,9 +635,7 @@ TEST(ConfigLoaderTest, RejectsEmptyResolvedGpuIdLineForEnabledDbt) {
 }
 
 TEST(ConfigLoaderTest, LoadsDbtRuntimeConfigHandoffFromInvocationDirectory) {
-  const std::filesystem::path runtime =
-      std::filesystem::temp_directory_path() / "rocjitsu_runtime_config_handoff_test";
-  std::filesystem::create_directories(runtime);
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-handoff-");
   const auto config_file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": true,
@@ -646,10 +644,10 @@ TEST(ConfigLoaderTest, LoadsDbtRuntimeConfigHandoffFromInvocationDirectory) {
         }
       })");
   {
-    std::ofstream handoff(runtime / "config_path");
+    std::ofstream handoff(std::filesystem::path(runtime.path()) / "config_path");
     handoff << config_file.path() << "\n28851\n";
   }
-  ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.string());
+  ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
 
   const std::optional<config::DbtGuestConfig> loaded =
       config::load_dbt_guest_config_from_runtime_config();
@@ -657,7 +655,6 @@ TEST(ConfigLoaderTest, LoadsDbtRuntimeConfigHandoffFromInvocationDirectory) {
   ASSERT_TRUE(loaded);
   EXPECT_TRUE(loaded->enabled);
   EXPECT_EQ(loaded->host.gpu_id, 28851u);
-  std::filesystem::remove_all(runtime);
 }
 
 TEST(ConfigLoaderTest, RejectsEmptyDbtExecutionBackend) {
