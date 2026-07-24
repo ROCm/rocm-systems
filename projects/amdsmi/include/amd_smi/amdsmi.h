@@ -5737,7 +5737,7 @@ amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle process
  *
  *  @param[in] telem_id The telemetry item ID for which the name is requested
  *
- *  @param[in] telem_name The telemetry item name
+ *  @param[out] telem_name The telemetry item name
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
