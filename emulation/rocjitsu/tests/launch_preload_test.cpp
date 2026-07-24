@@ -241,6 +241,22 @@ TEST(RocmVisibilityTest, NormalizesSelectedDbtHostToClientDeviceZero) {
   EXPECT_EQ("1,0", normalized->value);
 }
 
+TEST(RocmVisibilityTest, SelectsDbtHostFromClientVisibleGpusBeforeNormalization) {
+  const auto visible =
+      rocjitsu::cli::effective_visible_gpus(test_gpus(), std::nullopt, "1", std::nullopt);
+  const auto automatic = rocjitsu::cli::select_host_gpu(visible, 0, 90402);
+  ASSERT_EQ(rocjitsu::cli::HostSelectionStatus::Selected, automatic.status);
+  EXPECT_EQ(101u, automatic.gpu_id);
+
+  const auto normalized = rocjitsu::cli::normalized_client_visible_devices(
+      test_gpus(), std::nullopt, "1", std::nullopt, automatic.gpu_id);
+  ASSERT_TRUE(normalized);
+  EXPECT_EQ("1", normalized->value);
+
+  const auto hidden_explicit = rocjitsu::cli::select_host_gpu(visible, 100, 90402);
+  EXPECT_EQ(rocjitsu::cli::HostSelectionStatus::ExplicitGpuHidden, hidden_explicit.status);
+}
+
 TEST(RocmVisibilityTest, ExpandsRocrSelectionWithGuestOrdinal) {
   const auto expanded = rocjitsu::cli::expanded_rocr_visible_devices(test_gpus(), "GPU-2222");
   ASSERT_TRUE(expanded);

@@ -48,6 +48,7 @@ std::vector<VisibleGpu> effective_visible_gpus(const std::vector<VisibleGpu> &to
                                                std::optional<std::string_view> hip_visible,
                                                std::optional<std::string_view> cuda_visible);
 
+/// @param first_gpu_id GPU selected from effective_visible_gpus() using the same selectors.
 std::optional<VisibilityOverride> normalized_client_visible_devices(
     const std::vector<VisibleGpu> &topology, std::optional<std::string_view> rocr_visible,
     std::optional<std::string_view> hip_visible, std::optional<std::string_view> cuda_visible,
