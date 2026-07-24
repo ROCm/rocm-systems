@@ -362,6 +362,8 @@ endfunction()
 # shared manifest. The included file only defines registration helpers; calls
 # remain near the generic facilities they extend.
 include(consan/CMakeLists.txt)
+# These suites run prebuilt binaries through the simulator, so registration is
+# intentionally independent of the host HIP compiler and runtime gates below.
 rj_add_consan_gfx942_hip_moi_sim_tests()
 
 # --- Unit / integration test suite ---
