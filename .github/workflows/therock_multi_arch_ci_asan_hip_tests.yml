@@ -16,8 +16,19 @@ name: TheRock Multi-Arch CI ASAN (hip-tests only)
 
 on:
   push:
+    paths:
+      - projects/hip
+      - projects/clr
     branches:
       - users/dlytovch/hip-tests-asan
+      - develop
+  pull_request:
+    paths:
+      - projects/hip
+      - projects/clr
+    types:
+      - opened
+      - synchronized
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -63,7 +74,7 @@ jobs:
 
   setup:
     needs: resolve_baseline
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@8a40b91dd8b90460831d3a5e1cdd73d4066d5a85
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@2e7c190b99caa226a8644eda6eca720b3db102d5 # 2026-07-22
     with:
       build_variant: "host-asan"
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950' }}
@@ -71,7 +82,7 @@ jobs:
       prebuilt_stages: "math-libs,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg"
       baseline_run_id: ${{ needs.resolve_baseline.outputs.baseline_run_id }}
       repository: ROCm/TheRock
-      ref: "8a40b91dd8b90460831d3a5e1cdd73d4066d5a85"
+      ref: "2e7c190b99caa226a8644eda6eca720b3db102d5" # 2026-07-22
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   linux_build_and_test:
@@ -82,7 +93,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@8a40b91dd8b90460831d3a5e1cdd73d4066d5a85
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@2e7c190b99caa226a8644eda6eca720b3db102d5 # 2026-07-22
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -91,7 +102,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: "8a40b91dd8b90460831d3a5e1cdd73d4066d5a85"
+      ref: "2e7c190b99caa226a8644eda6eca720b3db102d5" # 2026-07-22
     permissions:
       contents: read
       id-token: write
@@ -109,7 +120,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: "8a40b91dd8b90460831d3a5e1cdd73d4066d5a85"
+          ref: "2e7c190b99caa226a8644eda6eca720b3db102d5" # 2026-07-22
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
