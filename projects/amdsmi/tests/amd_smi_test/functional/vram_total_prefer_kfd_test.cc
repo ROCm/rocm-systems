@@ -86,8 +86,8 @@ TEST(AmdSmiVramTotalPreferKfdTest, ApuCarveoutPrefersKfd) {
   EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(true, kApuCarveout, "SPX", kApuUnified));
 }
 
-// Regression guard for MI300X SPX: sysfs and KFD report the same value, so the
-// final clause is false and the sysfs value is kept. Confirmed on hardware.
+// MI300X SPX: sysfs and KFD report the same value, so the final clause is
+// false and the sysfs value is kept. Values confirmed on hardware.
 TEST(AmdSmiVramTotalPreferKfdTest, Mi300xSpxAgreeingSourcesKeepsSysfs) {
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kMi300xSpxTotal, "SPX", kMi300xSpxTotal));
 }
