@@ -2627,6 +2627,7 @@ bool SimulatedKfd::on_wave_illegal_instruction(amdgpu::Wavefront &wave) {
     return false;
   constexpr uint32_t kTrapstsIllegalInst = 1u << 11;
   wave.set_trapsts(wave.trapsts() | kTrapstsIllegalInst);
+  wave.set_fatal_exception_pending(true);
   wave.debug_trap(0);
   report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size,
                       KFD_EC_MASK(EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION));
@@ -2871,12 +2872,14 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
     }
     for (size_t index = 0; index < stopped.size(); ++index) {
       owners[index]->with_wave_state_locked([&] {
+        const bool fatal_exception_pending = stopped[index]->fatal_exception_pending();
         // A malformed or stale CWSR image must not strand a temporarily
         // suspended wave after the queue gate is released. Architecturally
         // halted waves remain halted until their CWSR record says otherwise.
-        stopped[index]->set_debug_suspended(false);
+        stopped[index]->set_debug_suspended(fatal_exception_pending);
         if (!stopped[index]->debug_halted() && !stopped[index]->is_halted())
-          wake.insert(owners[index]);
+          if (!fatal_exception_pending)
+            wake.insert(owners[index]);
       });
     }
     // Keep the queue-level launch gate closed until every resident wave has

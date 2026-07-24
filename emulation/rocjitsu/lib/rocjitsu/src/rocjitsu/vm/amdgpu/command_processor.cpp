@@ -517,6 +517,16 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
   while (memory_->read64(exception_status_va, process_id) == status &&
          std::chrono::steady_clock::now() < deadline)
     std::this_thread::yield();
+
+  for (auto *cu : cus_) {
+    cu->with_wave_state_locked([&] {
+      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+        auto *wave = cu->wf(slot);
+        if (!wave->is_halted() && wave->process_id() == process_id && wave->queue_id() == queue_id)
+          wave->set_debug_suspended(true);
+      }
+    });
+  }
   return true;
 }
 

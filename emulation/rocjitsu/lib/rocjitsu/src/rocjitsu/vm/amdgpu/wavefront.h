@@ -524,6 +524,8 @@ public:
   bool debug_suspended() const { return debug_suspended_; }
   void set_debug_suspended(bool v) { debug_suspended_ = v; }
   bool debug_paused() const { return debug_halted_ || debug_suspended_; }
+  bool fatal_exception_pending() const { return fatal_exception_pending_; }
+  void set_fatal_exception_pending(bool pending) { fatal_exception_pending_ = pending; }
 
   /// @brief Whether a future debugger resume should request single-step mode.
   bool debug_single_step() const { return single_step_; }
@@ -629,6 +631,7 @@ public:
     trap_saved_exec_ = 0;
     debug_halted_ = false;
     debug_suspended_ = false;
+    fatal_exception_pending_ = false;
     single_step_ = false;
     trap_id_ = 0;
     debug_wave_id_ = 0;
@@ -702,9 +705,10 @@ private:
   uint64_t trap_saved_exec_ = 0;     ///< Interrupted EXEC restored after handler completion.
   bool debug_halted_ = false;        ///< Stopped by the debugger (skipped by scheduler).
   bool debug_suspended_ = false;     ///< Queue-suspended for a stable CWSR snapshot.
-  bool single_step_ = false;         ///< Execute one instruction on resume, then re-stop.
-  uint32_t trap_id_ = 0;             ///< Trap id from the last s_trap (breakpoint = 1).
-  uint64_t debug_wave_id_ = 0;       ///< Stable debugger wave id (TTMP4:5); 0 until assigned.
+  bool fatal_exception_pending_ = false;
+  bool single_step_ = false;   ///< Execute one instruction on resume, then re-stop.
+  uint32_t trap_id_ = 0;       ///< Trap id from the last s_trap (breakpoint = 1).
+  uint64_t debug_wave_id_ = 0; ///< Stable debugger wave id (TTMP4:5); 0 until assigned.
 
 public:
   uint32_t trace_inst_count_ = 0; ///< Debug: instruction count for trace.
