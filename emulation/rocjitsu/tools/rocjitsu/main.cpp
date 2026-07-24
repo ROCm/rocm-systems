@@ -172,30 +172,6 @@ std::string find_interposer_lib() { return find_runtime_lib("librocjitsu.so"); }
 
 std::string find_hooks_lib() { return find_runtime_lib("librocjitsu_hooks.so"); }
 
-bool write_config_file(const std::string &config_path,
-                       const rocjitsu::config::DbtGuestConfig &dbt_guest, pid_t pid) {
-  auto cfg_file = rpc_invocation_config_file_path(pid);
-  std::filesystem::create_directories(std::filesystem::path(cfg_file).parent_path());
-  const std::string temp_file = cfg_file + ".tmp";
-  std::ofstream ofs(temp_file);
-  if (!ofs)
-    return false;
-  ofs << config_path << '\n';
-  if (dbt_guest.enabled)
-    ofs << dbt_guest.host.gpu_id << '\n';
-  ofs.close();
-  if (!ofs.good()) {
-    std::filesystem::remove(temp_file);
-    return false;
-  }
-
-  std::error_code rename_error;
-  std::filesystem::rename(temp_file, cfg_file, rename_error);
-  if (rename_error)
-    std::filesystem::remove(temp_file);
-  return !rename_error;
-}
-
 void cleanup_runtime_files(pid_t pid) {
   std::error_code error;
   std::filesystem::remove_all(rpc_invocation_runtime_dir(pid), error);
@@ -577,7 +553,7 @@ int main(int argc, char *argv[]) {
       return 1;
     }
   } else {
-    if (!write_config_file(abs_config, dbt_guest_config, my_pid)) {
+    if (!rocjitsu::config::write_dbt_runtime_config_handoff(abs_config, dbt_guest_config, my_pid)) {
       std::cerr << "rocjitsu: failed to write config file\n";
       cleanup_runtime_files(my_pid);
       return 1;

@@ -14,6 +14,8 @@
 #include <string>
 #include <string_view>
 
+#include <sys/types.h>
+
 namespace rocjitsu::fb {
 struct DbtGuestConfig;
 } // namespace rocjitsu::fb
@@ -109,6 +111,11 @@ DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path);
 /// @throws std::runtime_error when @p value is not a nonzero KFD gpu_id.
 void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view value,
                                     std::string_view source);
+
+/// @brief Atomically write the per-invocation runtime config handoff.
+/// @returns false when the handoff cannot be written or published.
+bool write_dbt_runtime_config_handoff(const std::string &config_path, const DbtGuestConfig &config,
+                                      pid_t pid);
 
 /// @brief Parse the config path and optional resolved GPU ID from a runtime handoff.
 /// @returns std::nullopt when the first line does not contain a config path.

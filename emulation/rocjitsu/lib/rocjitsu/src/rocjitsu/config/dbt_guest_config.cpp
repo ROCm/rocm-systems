@@ -165,6 +165,30 @@ void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view val
   config.host.gpu_id = gpu_id;
 }
 
+bool write_dbt_runtime_config_handoff(const std::string &config_path, const DbtGuestConfig &config,
+                                      pid_t pid) {
+  const std::string handoff_file = rpc_invocation_config_file_path(pid);
+  std::filesystem::create_directories(std::filesystem::path(handoff_file).parent_path());
+  const std::string temp_file = handoff_file + ".tmp";
+  std::ofstream output(temp_file);
+  if (!output)
+    return false;
+  output << config_path << '\n';
+  if (config.enabled)
+    output << config.host.gpu_id << '\n';
+  output.close();
+  if (!output.good()) {
+    std::filesystem::remove(temp_file);
+    return false;
+  }
+
+  std::error_code rename_error;
+  std::filesystem::rename(temp_file, handoff_file, rename_error);
+  if (rename_error)
+    std::filesystem::remove(temp_file);
+  return !rename_error;
+}
+
 std::optional<DbtRuntimeConfigHandoff> parse_dbt_runtime_config_handoff(std::string_view contents) {
   const size_t first_newline = contents.find('\n');
   std::string_view config_path = contents.substr(0, first_newline);

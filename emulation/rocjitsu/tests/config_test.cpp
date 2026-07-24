@@ -622,6 +622,25 @@ TEST(ConfigLoaderTest, ParsesRuntimeConfigHandoff) {
   EXPECT_FALSE(config::parse_dbt_runtime_config_handoff("\n28851\n"));
 }
 
+TEST(ConfigLoaderTest, RoundTripsRuntimeConfigHandoff) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-round-trip-");
+  ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  config::DbtGuestConfig dbt;
+  dbt.enabled = true;
+  dbt.host.gpu_id = 28851;
+
+  ASSERT_TRUE(config::write_dbt_runtime_config_handoff("/tmp/config.json", dbt, getpid()));
+  std::ifstream handoff(rocjitsu::rpc_invocation_config_file_path(getpid()));
+  const std::string contents((std::istreambuf_iterator<char>(handoff)),
+                             std::istreambuf_iterator<char>());
+  const auto parsed = config::parse_dbt_runtime_config_handoff(contents);
+
+  ASSERT_TRUE(parsed);
+  EXPECT_EQ(parsed->config_path, "/tmp/config.json");
+  ASSERT_TRUE(parsed->resolved_gpu_id);
+  EXPECT_EQ(*parsed->resolved_gpu_id, "28851");
+}
+
 TEST(ConfigLoaderTest, RejectsEmptyResolvedGpuIdLineForEnabledDbt) {
   const auto handoff = config::parse_dbt_runtime_config_handoff("/tmp/config.json\n\n");
   ASSERT_TRUE(handoff);
