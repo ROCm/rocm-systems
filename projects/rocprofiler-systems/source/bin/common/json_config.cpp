@@ -336,7 +336,7 @@ resolve_schema_config(const nlohmann::json& config)
                 if(runtimes.contains("shmem") && runtimes["shmem"].contains("enabled") &&
                    runtimes["shmem"]["enabled"].get<bool>())
                 {
-                    result[std::string{ env_vars::USE_SHMEM }] = "true";
+                    result[std::string{ env_vars::USE_OPENSHMEM }] = "true";
                 }
                 if(runtimes.contains("ucx") && runtimes["ucx"].contains("enabled") &&
                    runtimes["ucx"]["enabled"].get<bool>())
@@ -490,7 +490,7 @@ std::string
 expand_rocm_domain_shorthand(const std::string& shorthand)
 {
     using entry = std::pair<std::string_view, std::string_view>;
-    static constexpr std::array<entry, 12> shortcuts = { {
+    static constexpr std::array<entry, 13> shortcuts = { {
         { "hip", "hip_runtime_api" },
         { "hip_runtime", "hip_runtime_api" },
         { "hip_compiler", "hip_compiler_api" },
@@ -503,6 +503,7 @@ expand_rocm_domain_shorthand(const std::string& shorthand)
         { "marker", "marker_api" },
         { "roctx", "marker_api" },
         { "rccl", "rccl_api" },
+        { "hipfile", "hipfile_api" },
     } };
 
     auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
@@ -826,7 +827,7 @@ export_domain_parallel(nlohmann::json&                           config,
         { env_vars::USE_OMPT, "openmp" },
         { env_vars::USE_KOKKOSP, "kokkos" },
         { env_vars::USE_RCCLP, "rccl" },
-        { env_vars::USE_SHMEM, "shmem" },
+        { env_vars::USE_OPENSHMEM, "shmem" },
         { env_vars::USE_UCX, "ucx" },
     } };
 

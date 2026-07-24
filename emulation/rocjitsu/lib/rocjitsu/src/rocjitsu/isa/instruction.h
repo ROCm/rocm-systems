@@ -297,6 +297,9 @@ protected:
   std::string_view mnemonic_;
 };
 
+/// @brief Return a callback from the per-ISA backend active during decoding.
+Instruction::ExecuteFn current_instruction_execute(size_t instruction_id) noexcept;
+
 /// @brief Abstract class that holds static ISA state for a specific instruction instance.
 ///
 /// @details Provides a typed execute() taking the ISA-specific context. Subclasses override
@@ -326,37 +329,9 @@ public:
     };
   }
 
-  /// @brief Return the execution callback installed by an optional execution
-  /// translation unit.
-  ///
-  /// @details Model and execution objects must be co-linked into the same
-  /// image. The slot is image-local C++ state, not a registration ABI between
-  /// independently loaded shared libraries. Execution translation units
-  /// register their callbacks during static initialization, before any
-  /// instruction is decoded. Model-only images omit those translation units
-  /// and intentionally observe a null callback.
-  /// @tparam Derived Concrete generated instruction type.
-  /// @returns The registered execution trampoline, or null in a model-only
-  /// image.
-  template <typename Derived> static ExecuteFn registered_exec_fn() {
-    return exec_fn_slot<Derived>();
-  }
-
-  /// @brief Install a concrete instruction's execution trampoline.
-  /// @tparam Derived Concrete generated instruction type.
-  /// @returns True so the helper can initialize a namespace-scope registrar.
-  template <typename Derived> static bool register_exec_fn() {
-    exec_fn_slot<Derived>() = make_exec_fn<Derived>();
-    return true;
-  }
-
-private:
-  /// @brief Return the image-local dispatch slot for one instruction type.
-  /// @tparam Derived Concrete generated instruction type.
-  /// @returns Mutable slot populated during execution-TU static initialization.
-  template <typename Derived> static ExecuteFn &exec_fn_slot() {
-    static ExecuteFn fn = nullptr;
-    return fn;
+  /// @brief Select a callback from the active immutable per-ISA table.
+  static ExecuteFn selected_exec_fn(size_t instruction_id) {
+    return current_instruction_execute(instruction_id);
   }
 };
 

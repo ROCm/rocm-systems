@@ -1847,12 +1847,12 @@ template <typename Inst, typename UnOp>
 }
 
 /// VOP3 f16 unary SIMD fast path. Mirrors the scalar body's
-/// f16_to_f32 -> abs/neg -> op -> omod/clamp -> f32_to_f16 chain. The generic
+/// f16_to_f32 -> abs/neg -> op -> omod/clamp -> f32_to_f16_mode chain. The generic
 /// form reads the low source half and zero-extends the full destination dword;
 /// the true16 form selects the source half and writes the selected destination
 /// half per the ISA's op_sel[3] policy.
 /// All steps bit-exact per the f16 VOP3 cmp slice's widening probe (f16_to_f32
-/// + f32_to_f16 verified exhaustive incl. NaN payload).
+/// + f32_to_f16_mode verified against the scalar helper incl. NaN payload).
 template <bool True16, typename Inst, typename UnOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_unary_vop3_fp16_simd(Inst &inst, Wavefront &wf, UnOp un_op) {
@@ -1882,7 +1882,7 @@ template <bool True16, typename Inst, typename UnOp>
       const auto in = util::f16_to_f32_simd(raw);
       const auto a = apply_vop3_src_mod_f32<0>(in, abs, neg);
       const auto r = apply_vop3_dst_mod_f32(un_op(a), omod, clamp);
-      const auto out_half = util::f32_to_f16_simd(r);
+      const auto out_half = util::f32_to_f16_mode_simd(r, wf.fp16_ovfl());
       auto prev = dst.template load_native<T>(base);
       auto out = (opsel & 0x8u) ? ((prev & util::broadcast<T>(0x0000ffffu)) | (out_half << 16))
                                 : ((prev & util::broadcast<T>(0xffff0000u)) | out_half);
@@ -1900,7 +1900,7 @@ template <bool True16, typename Inst, typename UnOp>
       const auto in = util::f16_to_f32_simd(raw);
       const auto a = apply_vop3_src_mod_f32<0>(in, abs, neg);
       const auto r = apply_vop3_dst_mod_f32(un_op(a), omod, clamp);
-      const auto out = util::f32_to_f16_simd(r) & util::broadcast<T>(0xffffu);
+      const auto out = util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()) & util::broadcast<T>(0xffffu);
       dst.template store_native<T>(base, out, chunk);
     }
   }
@@ -2080,7 +2080,7 @@ template <typename Inst, typename FmaOp>
 
 /// VOP3 f16 ternary SIMD fast path. Mirrors the scalar f16 chain across three
 /// sources: widen each via util::f16_to_f32_simd, apply f32 abs/neg, run
-/// `tern_op` on native<float>, apply omod/clamp, narrow via f32_to_f16_simd.
+/// `tern_op` on native<float>, apply omod/clamp, narrow via f32_to_f16_mode_simd.
 /// The generic form zero-extends the full destination dword; the true16 form
 /// selects all source halves and writes the selected destination half per the
 /// ISA's op_sel[3] policy.
@@ -2122,7 +2122,7 @@ template <bool True16, typename Inst, typename FmaOp>
       const auto b = apply_vop3_src_mod_f32<1>(util::f16_to_f32_simd(b_raw), abs, neg);
       const auto c = apply_vop3_src_mod_f32<2>(util::f16_to_f32_simd(c_raw), abs, neg);
       const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
-      const auto out_half = util::f32_to_f16_simd(r);
+      const auto out_half = util::f32_to_f16_mode_simd(r, wf.fp16_ovfl());
       auto prev = dst.template load_native<T>(base);
       auto out = (opsel & 0x8u) ? ((prev & util::broadcast<T>(0x0000ffffu)) | (out_half << 16))
                                 : ((prev & util::broadcast<T>(0xffff0000u)) | out_half);
@@ -2143,7 +2143,7 @@ template <bool True16, typename Inst, typename FmaOp>
       const auto b = apply_vop3_src_mod_f32<1>(util::f16_to_f32_simd(b_raw), abs, neg);
       const auto c = apply_vop3_src_mod_f32<2>(util::f16_to_f32_simd(c_raw), abs, neg);
       const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
-      const auto out = util::f32_to_f16_simd(r) & util::broadcast<T>(0xffffu);
+      const auto out = util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()) & util::broadcast<T>(0xffffu);
       dst.template store_native<T>(base, out, chunk);
     }
   }
@@ -2291,7 +2291,8 @@ template <bool True16, typename Inst, typename FmaOp>
     const auto b = apply_vop3_src_mod_f32<1>(util::f16_to_f32_simd(b_raw), abs, neg);
     const auto c = util::f16_to_f32_simd(c_raw); // accumulator, no modifier
     const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
-    const auto out_half = util::f32_to_f16_simd(r) & util::broadcast<T>(0xffffu);
+    const auto out_half =
+        util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()) & util::broadcast<T>(0xffffu);
     auto out = out_half;
     if constexpr (True16) {
       if (opsel & 0x8u)
@@ -2997,7 +2998,7 @@ template <FmaMixDst DstMode, typename Inst>
       const uint64_t chunk = (exec >> base) & chunk_full;
       if (chunk == 0)
         continue;
-      U h = util::f32_to_f16_simd(compute_result(base)); // low16 = f16, high16 zero
+      U h = util::f32_to_f16_mode_simd(compute_result(base), wf.fp16_ovfl());
       U prev = dst.template load_native<uint32_t>(base);
       U packed;
       if constexpr (DstMode == FmaMixDst::F16_LO) {
@@ -3158,8 +3159,8 @@ template <typename Inst, typename Op>
       b_hi = std::bit_cast<F>(std::bit_cast<U>(b_hi) ^ kSignBit);
     const F r_lo = op(a_lo, b_lo);
     const F r_hi = op(a_hi, b_hi);
-    const U h_lo = util::f32_to_f16_simd(r_lo);
-    const U h_hi = util::f32_to_f16_simd(r_hi);
+    const U h_lo = util::f32_to_f16_mode_simd(r_lo, wf.fp16_ovfl());
+    const U h_hi = util::f32_to_f16_mode_simd(r_hi, wf.fp16_ovfl());
     const U packed = h_lo | (h_hi << 16);
     dst.template store_native<uint32_t>(base, packed, chunk);
   }
@@ -3230,8 +3231,8 @@ template <typename Inst, typename Op>
       c_hi = std::bit_cast<F>(std::bit_cast<U>(c_hi) ^ kSignBit);
     const F r_lo = op(a_lo, b_lo, c_lo);
     const F r_hi = op(a_hi, b_hi, c_hi);
-    const U h_lo = util::f32_to_f16_simd(r_lo);
-    const U h_hi = util::f32_to_f16_simd(r_hi);
+    const U h_lo = util::f32_to_f16_mode_simd(r_lo, wf.fp16_ovfl());
+    const U h_hi = util::f32_to_f16_mode_simd(r_hi, wf.fp16_ovfl());
     const U packed = h_lo | (h_hi << 16);
     dst.template store_native<uint32_t>(base, packed, chunk);
   }
