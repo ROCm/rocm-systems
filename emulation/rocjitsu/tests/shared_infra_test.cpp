@@ -1264,6 +1264,41 @@ TEST(L1VectorCacheTest, UcDwordx4RoundTripPreservesVectorTransaction) {
   EXPECT_EQ(std::memcmp(load_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1)), 0);
 }
 
+TEST(L1VectorCacheTest, ScratchDwordCrossesInterleaveBoundary) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x7A01;
+  constexpr uint32_t kScratchStride = 64 * sizeof(uint32_t);
+  constexpr uint32_t kInitialValue = 0x55443322;
+  constexpr uint32_t kStoredValue = 0x87654321;
+  mem.write8(kAddr, 0x22);
+  mem.write8(kAddr + 1, 0x33);
+  mem.write8(kAddr + 2, 0x44);
+  mem.write8((kAddr & ~uint64_t{3}) + kScratchStride, 0x55);
+
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  std::array<uint8_t, 64 * sizeof(uint32_t)> bytes{};
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE, /*vmid=*/0, kScratchStride);
+  uint32_t value = 0;
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  EXPECT_EQ(value, kInitialValue);
+
+  std::memcpy(bytes.data(), &kStoredValue, sizeof(kStoredValue));
+  l1.store(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+           amdgpu::Mtype::UC, /*non_temporal=*/false, cdna3::Isa::WF_SIZE, /*vmid=*/0,
+           kScratchStride);
+  EXPECT_EQ(mem.read8(kAddr), 0x21);
+  EXPECT_EQ(mem.read8(kAddr + 1), 0x43);
+  EXPECT_EQ(mem.read8(kAddr + 2), 0x65);
+  EXPECT_EQ(mem.read8((kAddr & ~uint64_t{3}) + kScratchStride), 0x87);
+}
+
 TEST(L1VectorCacheTest, UcDwordx4CoalescesAdjacentLanes) {
   amdgpu::GpuMemory mem("test_mem");
   amdgpu::L2Cache l2("test_l2");

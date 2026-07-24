@@ -195,10 +195,15 @@ void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t ele
     uint32_t lane = std::countr_zero(remaining);
     remaining &= remaining - 1;
     uint64_t base = addrs[lane];
-    for (uint32_t e = 0; e < num_elems; ++e) {
-      uint64_t ea = base + e * astride;
-      read_bytes(ea, dst + lane * stride + e * elem_size, elem_size, mtype, non_temporal,
-                 request_l1_bypass, vmid);
+    uint32_t copied = 0;
+    while (copied < stride) {
+      const uint32_t byte_in_dword = static_cast<uint32_t>((base + copied) & 3);
+      const uint32_t chunk = std::min(stride - copied, 4 - byte_in_dword);
+      const uint64_t ea =
+          (base & ~uint64_t{3}) + ((base & 3) + copied) / 4 * astride + byte_in_dword;
+      read_bytes(ea, dst + lane * stride + copied, chunk, mtype, non_temporal, request_l1_bypass,
+                 vmid);
+      copied += chunk;
     }
   }
 }
@@ -226,9 +231,14 @@ void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t el
     uint32_t lane = std::countr_zero(remaining);
     remaining &= remaining - 1;
     uint64_t base = addrs[lane];
-    for (uint32_t e = 0; e < num_elems; ++e) {
-      uint64_t ea = base + e * astride;
-      write_bytes(ea, src + lane * stride + e * elem_size, elem_size, mtype, non_temporal, vmid);
+    uint32_t copied = 0;
+    while (copied < stride) {
+      const uint32_t byte_in_dword = static_cast<uint32_t>((base + copied) & 3);
+      const uint32_t chunk = std::min(stride - copied, 4 - byte_in_dword);
+      const uint64_t ea =
+          (base & ~uint64_t{3}) + ((base & 3) + copied) / 4 * astride + byte_in_dword;
+      write_bytes(ea, src + lane * stride + copied, chunk, mtype, non_temporal, vmid);
+      copied += chunk;
     }
   }
 }
