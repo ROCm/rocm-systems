@@ -92,20 +92,19 @@ yet counted as physical gfx950 or instrumentation acceptance evidence.
 
 ## RocJitsu test-corpus expansion
 
-The source-built kernel survey below was recorded at historical corpus
-revision `aa54cc86c9eb`.  The current workspace corpus at revision
-`f88d4583022d` preserves those rows and also packages the bounded,
-runtime-generated gfx950 Tensile row described below.  The older pre-generated
-Tensile artifact tree remains gfx1250-only and may not be relabeled as gfx950
-evidence; gfx950 code objects are generated from the checked-in gfx950 YAML.
-Every source-built cell below remains gray until the case has an independent
-oracle, a retained target-native inventory, and a standard-profile clean run
-for that flavor.
+The source-built kernel survey below began at historical corpus revision
+`aa54cc86c9eb`.  The current workspace corpus at revision `f88d4583022d` also
+enables bounded gfx950 HIP Stream-K cases and packages the runtime-generated
+gfx950 Tensile row described below.  The older pre-generated Tensile artifact
+tree remains gfx1250-only and may not be relabeled as gfx950 evidence; gfx950
+code objects are generated from the checked-in gfx950 YAML.  Every source-built
+cell below remains gray until the case has an independent oracle, a retained
+target-native inventory, and a standard-profile clean run for that flavor.
 
-The gfx950 corpus configuration enables HIP matmul, HipKittens, and rocBLAS.
-It has no run-time skip list.  It currently skips compilation of the large
-4096³ HIP matmul case and both four-wave FP8 HipKittens cases; those are useful
-planned rows, not runnable evidence.
+The gfx950 corpus configuration enables HIP matmul, HipKittens, HIP Stream-K,
+and rocBLAS.  It has no run-time skip list.  It currently skips compilation of
+the large 4096³ HIP matmul case and both four-wave FP8 HipKittens cases; those
+are useful planned rows, not runnable evidence.
 
 ### Corpus executable audit
 
@@ -114,12 +113,13 @@ planned rows, not runnable evidence.
 | `hip_matmul_matmul::m128_n128_k128` | **Runnable and smoke-passed** | `corpus/kernels/cases/hip-matmul/matmul/case.json`; executable `rocjitsu-test-corpus-build/kernels-gfx950-hip-matmul/cases/hip-matmul/hip_matmul_matmul`; `-m 128 -n 128 -k 128`, `FIXED_ITERATIONS=1`.  All three selected MFMA/shared-memory kernels pass correctness on the physical gfx950. |
 | `hipkittens_gemm_bf16fp32_16x32::m256_n256_k256` | **Environment-blocked before compilation** | A fresh gfx950-only configure reaches the case but fails `find_package(OpenMP REQUIRED)`: the host Clang probe cannot find `omp.h`, and no Clang OpenMP development package is installed.  No source compilation or ConSan run has occurred. |
 | FP8/MXFP8 four-wave HipKittens rows | **Compile-disabled** | Both exact case JSON files exist, but `corpus/kernels/configs/gfx950.json` lists them in `skip_compile_tests`. |
-| `hip_streamk_simple::m256_n256_k256` and `hip_streamk_two_tile::m256_n256_k256` | **Environment-blocked before gfx950 source assessment** | Exact source/oracle definitions exist and both case manifests currently declare only gfx942.  A fresh gfx950 configure additionally fails because the workspace TheRock distribution has neither `rocthrustConfig.cmake` nor rocThrust headers; the runner genuinely uses Thrust containers and algorithms. |
+| `hip_streamk_simple::m256_n256_k256` and `hip_streamk_two_tile::m256_n256_k256` | **Metadata-enabled; environment-blocked before compilation** | At corpus revision `f88d4583022d`, the gfx950 config enables HIP Stream-K and both case manifests declare gfx950.  Each exact oracle uses one run, finite-result validation, and a bounded grid.  The current workspace TheRock distribution still has neither `rocthrustConfig.cmake` nor rocThrust headers, so no gfx950 build or ConSan profile has run. |
 | `rocblas_sgemm` exact cases | **Runnable and baseline-passed** | A dedicated gfx950 build now provides `rocjitsu-test-corpus-build/kernels-gfx950-rocblas/cases/rocblas/rocblas_sgemm`.  `RocblasGemmTest.Square_64x64` passes its physical-device baseline in 183 ms; the bounded strict Record/Replay assessment below records the current instrumentation frontier. |
 
-HIP-matmul and rocBLAS are runnable today.  The other rows are retained as
-explicit enablement work and may not be counted as current gfx950 execution
-evidence.
+HIP-matmul and rocBLAS are runnable today.  HIP Stream-K is metadata-enabled
+but not build-qualified in the current workspace; the other rows are retained
+as explicit enablement work.  None may be counted as current gfx950 ConSan
+execution evidence.
 
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Why it matters and next proof |
 |---|---|---|---|---|---|---|
@@ -127,8 +127,8 @@ evidence.
 | P0 | `hipkittens_gemm_bf16fp32_16x32::m256_n256_k256` | 🩶 Environment-blocked before compilation | 🩶 Environment-blocked before compilation | 🩶 Environment-blocked before compilation | 🩶 Environment-blocked before compilation | Explicit gfx950 case with dynamic LDS, wide DS reads/writes, direct global-to-LDS traffic, a deep barrier schedule, and MFMA.  Fresh configure evidence in `rocjitsu-test-corpus-build/kernels-gfx950-hipkittens-reassess-20260722` stops at missing Clang OpenMP headers/runtime (`omp.h`); no baseline or ConSan profile has run. |
 | P1 | `hipkittens_gemm_fp8fp32_4wave::m256_n256_k256` | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | Explicit gfx950 four-wave FP8 case; currently listed in `skip_compile_tests`.  Remove that corpus-level blocker only after recording the compiler failure or confirming a current toolchain build, then inventory its LDS/barrier shapes. |
 | P1 | `hipkittens_gemm_mxfp8_4wave::m256_n256_k256` | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | Explicit gfx950 four-wave microscaling GEMM; also currently compile-skipped.  It is the closest packaged low-precision companion to the BF16 row. |
-| P1 | `hip_streamk_simple::m256_n256_k256` gfx950 port | 🩶 Environment-blocked before target assessment | 🩶 Environment-blocked before target assessment | 🩶 Environment-blocked before target assessment | 🩶 Environment-blocked before target assessment | Source contains double-buffered LDS, workgroup barriers, and release-store/acquire-load cross-workgroup publication.  Fresh configure evidence in `rocjitsu-test-corpus-build-gfx950-streamk-assess` stops at missing rocThrust configuration and headers before source compilation; metadata also currently admits only gfx942. |
-| P1 | `hip_streamk_two_tile::m256_n256_k256` gfx950 port | 🩶 Environment-blocked before target assessment | 🩶 Environment-blocked before target assessment | 🩶 Environment-blocked before target assessment | 🩶 Environment-blocked before target assessment | Adds two-tile ownership and repeated global publication/consumption to the same LDS and ordered-atomic structure.  It shares the missing rocThrust configure blocker with the simple case and remains a separate denominator after dependency and target enablement. |
+| P1 | `hip_streamk_simple::m256_n256_k256` gfx950 port | 🩶 Metadata-enabled; build blocked | 🩶 Metadata-enabled; build blocked | 🩶 Metadata-enabled; build blocked | 🩶 Metadata-enabled; build blocked | Source contains double-buffered LDS, workgroup barriers, and release-store/acquire-load cross-workgroup publication.  Corpus revision `f88d4583022d` enables the bounded gfx950 case, but fresh configure evidence in `rocjitsu-test-corpus-build-gfx950-streamk-assess` stops at missing rocThrust configuration and headers before source compilation. |
+| P1 | `hip_streamk_two_tile::m256_n256_k256` gfx950 port | 🩶 Metadata-enabled; build blocked | 🩶 Metadata-enabled; build blocked | 🩶 Metadata-enabled; build blocked | 🩶 Metadata-enabled; build blocked | Adds two-tile ownership and repeated global publication/consumption to the same LDS and ordered-atomic structure.  Corpus revision `f88d4583022d` enables its bounded gfx950 oracle; it shares the missing rocThrust configure blocker with the simple case and remains a separate denominator after dependency enablement. |
 | P2 | `rocblas_sgemm` compact exact cases | 🩶 Baseline exact; profile unassessed | 🟥 The exact `Square_64x64` baseline passes, but strict Record/Replay rejects the 7,240,872-byte rocBLAS object before the oracle: a code-object-global persistent owner/epoch tuple cannot fit the heterogeneous per-kernel CDNA4 AccVGPR boundaries | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | One-repetition artifacts `consan-gfx950-rocblas-sgemm-rr-assessment-20260722/run.log` and `run-verbose.log`; preflight finds 49,435 access ranges and 2,558,464 barrier records before strict policy terminates with exit code 92.  Per-owner persistent tuples are a medium-sized gap, so this bounded red row is not an easy-cell candidate. |
 
 ### gfx950 Tensile follow-on
@@ -227,10 +227,10 @@ instrumentation acceptance evidence.
 | Physical dispatch smoke | On 2026-07-22, workspace TheRock `rocminfo` reports MI355X / `gfx950:sramecc+:xnack-`.  Five native CDNA4 hip-moi host-reference tests pass in 92--188 ms, and corpus `hip_matmul` m128³ passes correctness for all three selected MFMA/shared-memory kernels.  Separately, all six target-native hip-moi executables, including both Jakub parameterizations, pass 14/14 tests through the gfx950 RocJITsu simulator. |
 | Validation corpus | `iree-test-suites` `49f46d6d4370e5aa0a6367751474e20c6c4e95c0`; required Sharktank assets present; LFS fsck clean |
 | Validation doctor | The target-aware registry and workload-scoped doctor resolve all six native hip-moi roles through the explicit `hip-moi-build-gfx950-tests` build tree, including the Jakub counterpart. |
-| RocJitsu test corpus | `rocjitsu-test-corpus` `f88d4583022d438ea72fb82c0e89143ccbf61843`; gfx950 enables source-built HIP matmul, HipKittens, and rocBLAS cases and packages the bounded `gfx950_sk_sgemm_streamk` runtime row.  Its historical pre-generated Tensile artifact tree remains gfx1250-only. |
-| gfx950 Tensile source pool | `rocm-libraries` `c2fafc16393d0ce47a0a5801d827d43f0d3714a4`; this historical 36-YAML survey supplied the reduced, packaged `gfx950_sk_sgemm_streamk` row.  The remaining source pool is not part of the validation denominator. |
+| RocJitsu test corpus | `rocjitsu-test-corpus` `f88d4583022d438ea72fb82c0e89143ccbf61843`; gfx950 enables source-built HIP matmul, HipKittens, HIP Stream-K, and rocBLAS cases and packages the bounded `gfx950_sk_sgemm_streamk` runtime row.  Its historical pre-generated Tensile artifact tree remains gfx1250-only. |
+| gfx950 Tensile source pool | The 36-YAML pool was surveyed and the bounded Stream-K candidate selected at `rocm-libraries` `c2fafc16393d0ce47a0a5801d827d43f0d3714a4`; the packaged `gfx950_sk_sgemm_streamk` row was reduced from `a8f0845f87ab50adc3dc8d0edd86693cb31065b1`.  The remaining source pool is not part of the validation denominator. |
 | PyTorch discovery | The gfx1250-only thin-wheel mismatch is diagnosed and isolated.  The separate official nightly environment passes `torch.arange` plus all six portable one-repetition exact oracles on gfx950.  Workload-scoped doctor confirms gfx950 numeric dispatch and exact-hook mapping. |
-| Registry boundary | The six portable PyTorch rows, native hip-moi roles, and bounded Tensile row are executable validation IDs for gfx950.  The remaining source-built corpus rows stay planned expansion until they are built and registered. |
+| Registry boundary | The six portable PyTorch rows and native hip-moi roles are registered validation IDs for gfx950.  The bounded Tensile row is an external corpus executable denominator, not yet a `consan_validation.py` workload.  The remaining source-built corpus rows stay planned expansion until they are built and registered. |
 
 ## Implementation evidence
 
