@@ -81,7 +81,7 @@ rocprofiler_add_unit_test(
     ENVIRONMENT
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:$ENV{LD_LIBRARY_PATH}"
         RESOURCE_LOCK
-        "rocprofiler_kernel_replay_snapshot"
+        "rocprofiler_kernel_replay"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 # Localized context control is pure host logic (thread-local override state) with no GPU
