@@ -36,14 +36,28 @@ common_moi_private_owner_shift(std::span<const uint8_t> image,
   return common_shift;
 }
 
-[[nodiscard]] std::optional<uint32_t>
-common_moi_private_owner_offset(const ConSanResult &result, const ResolvedMoiScratchPlan &resources,
-                                std::vector<std::string> &warnings) {
+struct MoiPrivateRecordOwnerPlan {
+  uint32_t offset = 0;
+  uint16_t shift = 0;
+  uint32_t private_state_end = 0;
+};
+
+[[nodiscard]] bool moi_record_uses_private_owner(const ConSanOptions &options) {
+  return options.moi_init_owner_epoch && options.automatic_moi_private_epoch &&
+         options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId && !options.moi_owner_vgpr &&
+         !options.moi_persistent_owner_sgpr;
+}
+
+[[nodiscard]] std::optional<MoiPrivateRecordOwnerPlan>
+resolve_moi_private_record_owner(std::span<const uint8_t> image, const ConSanResult &result,
+                                 const ResolvedMoiScratchPlan &resources,
+                                 std::vector<std::string> &warnings) {
   std::optional<uint32_t> common_offset;
+  std::optional<uint32_t> common_state_end;
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
     const auto owner_patch =
         std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-          return patch.persistent_owner_private_offset &&
+          return patch.persistent_owner_private_offset && patch.persistent_private_state_end &&
                  std::ranges::find(patch.owner_descriptor_file_offsets, descriptor_offset) !=
                      patch.owner_descriptor_file_offsets.end();
         });
@@ -56,11 +70,22 @@ common_moi_private_owner_offset(const ConSanResult &result, const ResolvedMoiScr
       warnings.emplace_back("ConSan MOI shared private owner has incompatible state offsets");
       return std::nullopt;
     }
+    if (common_state_end && *common_state_end != *owner_patch->persistent_private_state_end) {
+      warnings.emplace_back("ConSan MOI shared private owner has incompatible state sizes");
+      return std::nullopt;
+    }
     common_offset = owner_patch->persistent_owner_private_offset;
+    common_state_end = owner_patch->persistent_private_state_end;
   }
-  if (!common_offset)
+  if (!common_offset || !common_state_end) {
     warnings.emplace_back("ConSan MOI private owner requires an owning kernel descriptor");
-  return common_offset;
+    return std::nullopt;
+  }
+  const auto common_shift = common_moi_private_owner_shift(image, resources, warnings);
+  if (!common_shift)
+    return std::nullopt;
+  return MoiPrivateRecordOwnerPlan{
+      .offset = *common_offset, .shift = *common_shift, .private_state_end = *common_state_end};
 }
 
 struct MoiRecordOwnerDerivation {

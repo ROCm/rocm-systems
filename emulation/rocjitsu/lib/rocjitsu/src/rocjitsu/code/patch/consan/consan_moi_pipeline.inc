@@ -57,8 +57,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     ConSanMoiAtomicAddressPlan address_plan;
     std::optional<VgprSpillSequence> spill;
     std::optional<InlineSgprSpillSequence> scalar_spill;
-    std::optional<uint32_t> private_owner_offset;
-    std::optional<uint16_t> private_owner_shift;
+    std::optional<MoiPrivateRecordOwnerPlan> private_owner;
   };
   std::vector<PlannedFenceRecord> selected;
   MoiResourcePlanningState resource_state(bytes, arch, options, result);
@@ -142,26 +141,6 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
         continue;
       active_resources.original_private_segment_size = active_private_size;
     }
-    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
-      spill = build_moi_spill_sequence(result, active_resources, options, spill_managers, arch,
-                                       result.warnings);
-      if (!spill)
-        continue;
-      note_spill_descriptor_requirements(private_requirements, active_resources, *spill);
-    }
-    if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
-      scalar_spill = build_inline_sgpr_spill_sequence(
-          active_resources, candidate_options, spill_managers, arch, result.warnings,
-          active_resources.original_private_segment_size, /*spill_count=*/4u);
-      if (!scalar_spill)
-        continue;
-      for (uint64_t descriptor_offset : active_resources.owner_descriptor_file_offsets) {
-        auto [it, inserted] =
-            private_requirements.emplace(descriptor_offset, scalar_spill->total_private_bytes);
-        if (!inserted)
-          it->second = std::max(it->second, scalar_spill->total_private_bytes);
-      }
-    }
     const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
         candidate.communication_site, resources->base, resources->count, resources->source, arch);
     if (!address_plan.supported()) {
@@ -176,22 +155,40 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       if (!candidate.kernel_descriptor_file_offset)
         continue;
     }
-    std::optional<uint32_t> private_owner_offset;
-    std::optional<uint16_t> private_owner_shift;
-    if (candidate_options.automatic_moi_private_epoch &&
-        candidate_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId &&
-        !candidate_options.moi_owner_vgpr && !candidate_options.moi_persistent_owner_sgpr) {
-      private_owner_offset =
-          common_moi_private_owner_offset(result, active_resources, result.warnings);
-      private_owner_shift =
-          common_moi_private_owner_shift(bytes, active_resources, result.warnings);
-      if (!private_owner_offset || !private_owner_shift)
+    std::optional<MoiPrivateRecordOwnerPlan> private_owner;
+    if (moi_record_uses_private_owner(candidate_options)) {
+      private_owner =
+          resolve_moi_private_record_owner(bytes, result, active_resources, result.warnings);
+      if (!private_owner)
         continue;
+    }
+    const uint32_t private_layout_base = private_owner
+                                             ? private_owner->private_state_end
+                                             : active_resources.original_private_segment_size;
+    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
+      spill = build_moi_spill_sequence(result, active_resources, options, spill_managers, arch,
+                                       result.warnings, private_layout_base);
+      if (!spill)
+        continue;
+      note_spill_descriptor_requirements(private_requirements, active_resources, *spill);
+    }
+    if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
+      scalar_spill = build_inline_sgpr_spill_sequence(active_resources, candidate_options,
+                                                      spill_managers, arch, result.warnings,
+                                                      private_layout_base, /*spill_count=*/4u);
+      if (!scalar_spill)
+        continue;
+      for (uint64_t descriptor_offset : active_resources.owner_descriptor_file_offsets) {
+        auto [it, inserted] =
+            private_requirements.emplace(descriptor_offset, scalar_spill->total_private_bytes);
+        if (!inserted)
+          it->second = std::max(it->second, scalar_spill->total_private_bytes);
+      }
     }
     note_descriptor_requirements(descriptor_requirements, active_resources);
     note_moi_sgpr_requirements(scalar_requirements, active_resources, candidate_options, arch);
     selected.push_back({std::move(candidate), active_resources, address_plan, std::move(spill),
-                        std::move(scalar_spill), private_owner_offset, private_owner_shift});
+                        std::move(scalar_spill), private_owner});
   }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan MOI fence record patch found no patchable fences");
@@ -340,7 +337,11 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
             ? layout.fence_record_capacity
             : record_count,
         layout.fence_records_offset, cave_text_offset, return_text_offset, std::nullopt,
-        displaced_tail_words, planned.private_owner_offset, planned.private_owner_shift,
+        displaced_tail_words,
+        planned.private_owner ? std::optional<uint32_t>(planned.private_owner->offset)
+                              : std::nullopt,
+        planned.private_owner ? std::optional<uint16_t>(planned.private_owner->shift)
+                              : std::nullopt,
         result.errors);
     if (!cave_words)
       return;
@@ -362,7 +363,11 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
                 : record_count,
             layout.fence_records_offset, cave_text_offset, return_text_offset,
             static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u),
-            /*displaced_tail_words=*/{}, planned.private_owner_offset, planned.private_owner_shift,
+            /*displaced_tail_words=*/{},
+            planned.private_owner ? std::optional<uint32_t>(planned.private_owner->offset)
+                                  : std::nullopt,
+            planned.private_owner ? std::optional<uint16_t>(planned.private_owner->shift)
+                                  : std::nullopt,
             result.errors);
         if (!cave_words)
           return;
@@ -530,7 +535,10 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.scratch_vgpr = planned.resources.base;
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
-    info.persistent_owner_private_offset = planned.private_owner_offset;
+    if (planned.private_owner) {
+      info.persistent_owner_private_offset = planned.private_owner->offset;
+      info.persistent_private_state_end = planned.private_owner->private_state_end;
+    }
     if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;
       info.required_private_segment_size = planned.spill->total_private_bytes;

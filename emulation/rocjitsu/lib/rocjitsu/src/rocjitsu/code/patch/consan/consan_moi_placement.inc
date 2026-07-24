@@ -3088,7 +3088,8 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
       });
   const bool needs_record_replay_workgroup_key =
       (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-      options.moi_engine == ConSanMoiEngine::RecordReplay && options.moi_track_atomics;
+      options.moi_engine == ConSanMoiEngine::RecordReplay && options.moi_track_atomics &&
+      !options.moi_persistent_workgroup_key_sgpr;
   const bool needs_workgroup_key = needs_inline_workgroup_key || needs_record_replay_workgroup_key;
   // Sampled access probes execute after arbitrary guest instructions. Their
   // owner must therefore come from entry-captured persistent state even when
