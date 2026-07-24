@@ -32,20 +32,21 @@ not bypass liveness, ownership, or overlap checks, and ordinary runs do not
 require them.
 
 The ordinary-VGPR architectural limit is 256. ConSan does not implement a
-general SGPR spill stack. Record/Replay and InlineShadow do have a narrower
-private-memory recipe that preserves a fixed transient scalar probe window:
-each borrowed uniform SGPR is copied through one spill-managed VGPR, stored per
-lane, reloaded, and restored with `v_readfirstlane_b32`. On gfx1201 and gfx1250,
-InlineShadow can select that recipe automatically when no 28-register dead
-window exists. Scalar state needed before that save or after its restore—most
-notably indirect-router PC, key, and SCC state—must still come from registers
-proved dead at every routed site. A probe fails explicitly when neither that
-bounded recipe nor a safe ordinary window exists.
+general SGPR spill stack. It does have a narrower private-memory recipe for
+selected Record/Replay, Sampled, and InlineShadow probes that preserves a fixed
+transient scalar window: each borrowed uniform SGPR is copied through one
+spill-managed VGPR, stored per lane, reloaded, and restored with
+`v_readfirstlane_b32`. The planner selects that recipe only when it can also
+find owner-compatible indirect-router PC, key, call-return, and SCC state.
+Those router registers are needed outside the saved window and must therefore
+be dead or fresh at every routed site. A probe fails explicitly when neither
+the bounded recipe nor a safe ordinary window exists.
 
 Hardware dispatch identity normally occupies a persistent SGPR pair. If a
-gfx1201 InlineShadow or Sampled owner has no such pair, emitted probes can use
-the report's frozen literal dispatch identity instead. This removes persistent
-scalar pressure but does not solve transient or indirect-router allocation.
+RDNA4-family InlineShadow or Sampled owner has no such pair, emitted probes can
+use the report's frozen literal dispatch identity instead. This removes
+persistent scalar pressure but does not solve transient or indirect-router
+allocation.
 
 SuperCollider's indirect path reserves disjoint scalar state above the owning
 kernel's maximum referenced SGPR: VCC preservation, an SCC save, and an aligned
@@ -105,20 +106,26 @@ closed.
 ## Dynamic-stack integration
 
 The supported dynamic-stack path uses a target-specific compiler convention in
-which `s32` is the stack top and `s33` is the current frame base. InlineShadow
-access probes use the shared backend's site-local dynamic frame only after
-ownership analysis establishes that this recipe applies.
+which `s32` is the stack top and `s33` is the current frame base. A spill-backed
+probe uses the shared backend's site-local dynamic frame only after ownership
+analysis establishes that this recipe applies. InlineShadow supports the
+recipe on every admitted target. Record/Replay and Sampled support it on
+CDNA3/CDNA4 when every owner of the spilled site uses a dynamic stack.
 
 ConSan supplies safe scalar save registers, preserves SCC and the incoming
 frame, borrows the VGPR window, and restores all state before resuming guest
-code. Automatic scalar allocation excludes `s32:s33`, whose implicit stack
-roles need not appear as decoded operands.
+code. The engine-specific scalar window reserves a frame-base save slot, and
+automatic scalar allocation excludes `s32:s33`, whose implicit stack roles
+need not appear as decoded operands. This path applies to access, atomic, and
+synchronization probes that receive a spill-backed resource plan.
 
 The descriptor and dispatch packet grow by the maximum added frame depth so
 the runtime allocates backing storage. The emitted scratch accesses remain
-relative to the runtime frame. The supported recipe currently applies only to
-InlineShadow access probes; other dynamic-stack spill consumers and mixed
-fixed/dynamic shared ownership are rejected.
+relative to the runtime frame. Fixed-offset private owner/epoch state cannot
+be used by a dynamic-stack owner; the planner instead selects owner-compatible
+VGPR state or, on CDNA, a scalar persistent tuple. Mixed fixed/dynamic shared
+ownership is rejected because one emitted helper cannot safely use two frame
+recipes.
 
 ## Code-object and dispatch transaction
 
@@ -150,15 +157,16 @@ from removing private-size mutation.
 
 | Probe family | Current resource path |
 |---|---|
-| Record/replay access probes | Dead, fresh-growth, and spill-backed VGPR windows. |
-| Sampled access probes | Dead, fresh-growth, and spill-backed VGPR windows. |
-| InlineShadow access probes | Dead, fresh-growth, and spill-backed VGPR windows, including private-epoch fallback. |
-| Reachable shared helpers | One all-owner-compatible dead, fresh, or common spill plan. |
+| Record/replay access probes | Dead, fresh-growth, and spill-backed VGPR windows; dynamic-stack spill on CDNA3/CDNA4. |
+| Sampled access probes | Dead, fresh-growth, and spill-backed VGPR windows; dynamic-stack spill on CDNA3/CDNA4. |
+| InlineShadow access probes | Dead, fresh-growth, and spill-backed VGPR windows on every admitted target; fixed-stack owners may use the private-epoch fallback. |
+| Reachable shared helpers | One all-owner-compatible dead, fresh, or common spill plan; a dynamic spill requires every owner to be dynamic. |
+| Persistent owner/epoch/key state | Owner-compatible VGPR tuples, fixed-stack private state where supported, or CDNA scalar tuples for dynamic full-VGPR owners. |
 | Private-epoch entry/barrier temporaries | Saved and restored through the target-specific private path. |
-| Dynamic scalar state | Dead/fresh descriptor-backed windows, plus bounded private-memory preservation for Record/Replay and InlineShadow transient probe windows. Indirect-router scalars must still be dead/fresh. |
-| Barrier and atomic VGPR temporaries | Dead, fresh-growth, and spill-backed common plans. |
+| Transient scalar state | Component-local dead/fresh windows, plus bounded private-memory preservation for supported Record/Replay, Sampled, and InlineShadow probes. Indirect-router scalars remain dead/fresh. |
+| Barrier and atomic VGPR temporaries | Dead, fresh-growth, and spill-backed common plans, including the engine/target dynamic-stack matrix above. |
 | General SGPR or AccVGPR spilling | Not implemented. |
-| Dynamic-stack kernels | Supported InlineShadow access recipe; other spill consumers fail closed. |
+| Dynamic-stack kernels | InlineShadow on all admitted targets; Record/Replay and Sampled on CDNA3/CDNA4; unsupported engine/target or mixed-owner combinations fail closed. |
 | Unresolved indirect ownership | Not instrumented. |
 
 This is narrower than a compiler register allocator. It is the semantically
@@ -177,7 +185,9 @@ examples include:
 - dynamic-stack use outside the supported recipe;
 - incompatible owner wave sizes;
 - branch, cave, or relocated-prefix placement failure; and
-- unsupported target or register class.
+- unsupported target or register class; and
+- decoded access forms without an instrumentation lowering, currently including
+  `flat_load_d16_b16`, reported as `unsupported_mnemonic`.
 
 The HSA log distinguishes explicit, dead, descriptor-growth, spill, and
 unsupported plans. It reports planned and emitted spill bytes, site kind,
