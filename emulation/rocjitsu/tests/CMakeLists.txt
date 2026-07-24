@@ -1055,7 +1055,9 @@ target_include_directories(
 target_link_libraries(
     hsa_hooks_unit_test
     PRIVATE
-        rocjitsu_hooks
+        # Link the test-instrumented hook DSO (exports rj_test_*); the shipped
+        # rocjitsu_hooks never carries those symbols.
+        rocjitsu_hooks_testable
         ${RJ_OBJECT_LIBS}
         util
         flatbuffers

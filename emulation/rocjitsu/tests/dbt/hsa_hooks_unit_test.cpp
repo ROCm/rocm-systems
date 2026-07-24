@@ -64,6 +64,15 @@ uint32_t g_fake_gfx1250_asic_revision = 0;
 // When true, fake_agent_get_info fails the ASIC_REVISION query for kGfx1250Agent,
 // simulating a gfx1250 device whose stepping cannot be read (unknown revision).
 bool g_fake_gfx1250_revision_query_fails = false;
+// Controls how the ISA query fails for kGfx1250Agent, to exercise the
+// kUnknownTarget path (ISA unreadable => might be A0 => fail closed).
+enum class IsaQueryFailure {
+  kNone,       ///< ISA query succeeds normally.
+  kIterate,    ///< hsa_agent_iterate_isas returns an error.
+  kNameLength, ///< HSA_ISA_INFO_NAME_LENGTH lookup errors inside the callback.
+  kName,       ///< HSA_ISA_INFO_NAME lookup errors inside the callback.
+};
+IsaQueryFailure g_fake_gfx1250_isa_query_failure = IsaQueryFailure::kNone;
 constexpr hsa_amd_memory_pool_t kGuestPool{10};
 constexpr hsa_amd_memory_pool_t kHostPool{20};
 constexpr hsa_amd_memory_pool_t kHostKernargPool{21};
@@ -132,6 +141,9 @@ std::string g_fake_symbol_name = "oversized_kernel.kd";
 int g_fake_load_agent_calls = 0;
 hsa_agent_t g_last_load_agent{};
 hsa_code_object_reader_t g_last_load_reader{};
+// When set, fake_executable_load_agent_code_object returns this error instead of
+// success, to exercise the auto-A0 retention rollback on a failed lower load.
+hsa_status_t g_fake_load_agent_status = HSA_STATUS_SUCCESS;
 // Maps a memory-reader handle to the exact bytes it was created over, so a test
 // can recover the image the loader saw for a substituted (snapshot) reader and
 // assert byte-equality with the source. Populated by the fake memory-reader
@@ -246,14 +258,27 @@ hsa_status_t HSA_API fake_agent_iterate_isas(hsa_agent_t agent,
     return callback(kGuestIsa, data);
   if (agent.handle == kHostAgent.handle)
     return callback(kHostIsa, data);
-  if (agent.handle == kGfx1250Agent.handle)
+  if (agent.handle == kGfx1250Agent.handle) {
+    if (g_fake_gfx1250_isa_query_failure == IsaQueryFailure::kIterate)
+      return HSA_STATUS_ERROR; // iteration itself errors -> unknown target
     return callback(kGfx1250Isa, data);
+  }
   return HSA_STATUS_ERROR_INVALID_AGENT;
 }
 
 hsa_status_t HSA_API fake_isa_get_info_alt(hsa_isa_t isa, hsa_isa_info_t attribute, void *value) {
   if (value == nullptr)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // Simulate a name-query failure for the gfx1250 ISA to exercise kUnknownTarget.
+  if (isa.handle == kGfx1250Isa.handle) {
+    if (attribute == HSA_ISA_INFO_NAME_LENGTH &&
+        g_fake_gfx1250_isa_query_failure == IsaQueryFailure::kNameLength)
+      return HSA_STATUS_ERROR;
+    if (attribute == HSA_ISA_INFO_NAME &&
+        g_fake_gfx1250_isa_query_failure == IsaQueryFailure::kName)
+      return HSA_STATUS_ERROR;
+  }
 
   const char *name = isa_name(isa);
   if (name[0] == '\0')
@@ -444,6 +469,8 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
     g_last_load_bytes = it->second;
   else
     g_last_load_bytes.clear();
+  if (g_fake_load_agent_status != HSA_STATUS_SUCCESS)
+    return g_fake_load_agent_status; // simulate a lower-loader failure
   if (loaded_code_object != nullptr)
     loaded_code_object->handle = 77;
   return HSA_STATUS_SUCCESS;
@@ -825,6 +852,8 @@ void reset_queue_fakes() {
   g_next_memory_reader_handle = 2;
   g_memory_reader_bytes.clear();
   g_last_load_bytes.clear();
+  g_fake_gfx1250_isa_query_failure = IsaQueryFailure::kNone;
+  g_fake_load_agent_status = HSA_STATUS_SUCCESS;
   g_fake_queue_packets = {};
   g_fake_queue = {};
   g_last_queue_create_agent = {};
@@ -1753,6 +1782,48 @@ TEST(HsaHooksUnitTest, AutoA0LoadWithUnknownRevisionFailsClosed) {
   OnUnload();
 }
 
+// In auto-A0 mode, an agent whose ISA query *fails* (iteration or name lookup
+// errors) is not a confirmed non-gfx1250 agent -- it might be A0. Such a load
+// must fail closed, never forward the object unchanged. Covers all three ISA
+// query failure points.
+TEST(HsaHooksUnitTest, AutoA0LoadWithUnreadableIsaFailsClosed) {
+  struct Case {
+    const char *name;
+    IsaQueryFailure failure;
+  };
+  const Case cases[] = {
+      {"iterate", IsaQueryFailure::kIterate},
+      {"name-length", IsaQueryFailure::kNameLength},
+      {"name", IsaQueryFailure::kName},
+  };
+  for (const Case &c : cases) {
+    SCOPED_TRACE(c.name);
+    reset_pool_blocker(false);
+    reset_agent_blocker(false);
+    reset_queue_fakes();
+    OnUnload();
+    clear_runtime_config_path(); // auto-A0 mode
+
+    FakeApiTable api;
+    ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+    g_fake_gfx1250_isa_query_failure = c.failure; // ISA unreadable -> unknown target
+    g_fake_load_agent_calls = 0;
+
+    // Valid gfx1250 bytes: the refusal is attributable to the unreadable ISA, not
+    // to missing/invalid source bytes.
+    const auto header = make_amdgpu_elf_header(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250);
+    std::vector<uint8_t> image(reinterpret_cast<const uint8_t *>(&header),
+                               reinterpret_cast<const uint8_t *>(&header) + sizeof(header));
+    hsa_code_object_reader_t reader = register_code_object(api, image);
+
+    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_ERROR_INVALID_AGENT);
+    EXPECT_EQ(g_fake_load_agent_calls, 0);
+    OnUnload();
+  }
+}
+
 // In auto-A0 mode a confirmed non-A0 gfx1250 agent (nonzero revision, e.g. real
 // B0) is not a translation target: its loads forward to the loader unchanged.
 TEST(HsaHooksUnitTest, AutoA0ForwardsConfirmedNonA0Gfx1250Agent) {
@@ -1844,6 +1915,35 @@ TEST(HsaHooksUnitTest, AutoA0SnapshotRetainedUntilExecutableDestroy) {
   // The snapshot backing ROCR's alias is retained at executable scope.
   EXPECT_GE(rj_test_retained_translation_count(kFakeExecutable.handle), 1u);
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(kFakeExecutable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 0u);
+  OnUnload();
+}
+
+// The snapshot retention is reserved before the lower loader commits, then rolled
+// back if that load fails -- so a failed forwarded load leaves no retained
+// storage behind (no leak) and reports the failure.
+TEST(HsaHooksUnitTest, AutoA0SnapshotRetentionRolledBackOnLoadFailure) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_fake_gfx1250_asic_revision = 0;
+  g_fake_load_agent_status = HSA_STATUS_ERROR_INVALID_ISA; // lower load fails
+
+  const auto header = make_amdgpu_elf_header(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942);
+  std::vector<uint8_t> image(reinterpret_cast<const uint8_t *>(&header),
+                             reinterpret_cast<const uint8_t *>(&header) + sizeof(header));
+  hsa_code_object_reader_t reader = register_code_object(api, image);
+
+  ASSERT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 0u);
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_ISA);
+  // Rolled back: nothing retained for the executable after a failed load.
   EXPECT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 0u);
   OnUnload();
 }

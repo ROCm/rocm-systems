@@ -138,6 +138,25 @@ enum HookLogLevel : int {
   kLogDebug = 3,
 };
 
+/// @brief Run a cleanup callable when the guard leaves scope (RAII).
+///
+/// @details Small local scope-exit helper so cleanup on every early-return /
+/// exception path is expressed once. The callable must be noexcept-friendly.
+template <typename Fn> class ScopeGuard {
+public:
+  explicit ScopeGuard(Fn fn) : fn_(std::move(fn)) {}
+  ScopeGuard(const ScopeGuard &) = delete;
+  ScopeGuard &operator=(const ScopeGuard &) = delete;
+  ~ScopeGuard() { fn_(); }
+
+private:
+  Fn fn_;
+};
+
+template <typename Fn> [[nodiscard]] ScopeGuard<Fn> make_scope_guard(Fn fn) {
+  return ScopeGuard<Fn>(std::move(fn));
+}
+
 std::atomic<int> g_log_level{kLogDisabled};
 std::atomic<bool> g_signal_backtrace_enabled{false};
 std::atomic<bool> g_signal_backtrace_installed{false};
@@ -866,6 +885,49 @@ public:
     map_[executable.handle].push_back(std::move(bytes));
   }
 
+  /// @brief Retain @p bytes without allowing an allocation failure to propagate.
+  ///
+  /// @details Called *before* the lower loader commits, so the potentially
+  /// throwing map/vector growth cannot escape the HSA C ABI after the executable
+  /// has already been mutated. Returns false on allocation failure; the caller
+  /// then fails closed before committing. Roll back with @ref unretain if the
+  /// subsequent lower load fails.
+  [[nodiscard]] bool try_retain(hsa_executable_t executable,
+                                std::shared_ptr<const std::vector<uint8_t>> bytes) noexcept {
+    if (bytes == nullptr)
+      return true; // nothing to retain is not a failure
+    try {
+      std::lock_guard lock(mutex_);
+      map_[executable.handle].push_back(std::move(bytes));
+      return true;
+    } catch (...) {
+      return false;
+    }
+  }
+
+  /// @brief Remove one retained buffer instance for @p executable (rollback).
+  ///
+  /// @details Removes the entry whose storage pointer matches @p bytes, undoing a
+  /// prior @ref try_retain when the lower load ultimately failed. noexcept.
+  void unretain(hsa_executable_t executable,
+                const std::shared_ptr<const std::vector<uint8_t>> &bytes) noexcept {
+    if (bytes == nullptr)
+      return;
+    std::lock_guard lock(mutex_);
+    auto it = map_.find(executable.handle);
+    if (it == map_.end())
+      return;
+    auto &buffers = it->second;
+    for (auto b = buffers.begin(); b != buffers.end(); ++b) {
+      if (b->get() == bytes.get()) {
+        buffers.erase(b);
+        break;
+      }
+    }
+    if (buffers.empty())
+      map_.erase(it);
+  }
+
   /// @brief Release every translated buffer retained for @p executable.
   void erase_executable(hsa_executable_t executable) {
     std::lock_guard lock(mutex_);
@@ -1503,12 +1565,25 @@ RjHsaLayer &layer() {
   return state;
 }
 
-/// @brief Read the first ISA name advertised by @p agent, or empty on failure.
+/// @brief Result of reading an agent's first ISA name.
+///
+/// @details `ok` distinguishes a *successful* query (whose `name` may still be
+/// empty if the agent genuinely advertises no ISA, e.g. a CPU) from a *failed*
+/// query (iteration or name lookup errored). The caller must not treat a failed
+/// query as "not gfx1250": on an A0 agent that would fail open.
+struct AgentIsaName {
+  bool ok = false;  ///< True only if the ISA name was read without error.
+  std::string name; ///< The first ISA name; meaningful only when @ref ok.
+};
+
+/// @brief Read the first ISA name advertised by @p agent.
 ///
 /// @details Uses the saved (unpatched) ISA-iteration entries so detection runs
 /// against ROCR's real values regardless of any presentation overlay installed
-/// on the patched table. Mirrors ROCr hotswap's GetAgentIsaName.
-[[nodiscard]] std::string agent_first_isa_name(hsa_agent_t agent) {
+/// on the patched table. Mirrors ROCr hotswap's GetAgentIsaName. Returns
+/// `ok == false` when the ISA getters are unavailable, iteration errors, or a
+/// name lookup fails -- the query result is then unknown, not "no ISA".
+[[nodiscard]] AgentIsaName agent_first_isa_name(hsa_agent_t agent) {
   auto *iterate_isas = layer().agent_iterate_isas();
   auto *isa_get_info = layer().isa_get_info_alt();
   if (!iterate_isas || !isa_get_info)
@@ -1517,18 +1592,24 @@ RjHsaLayer &layer() {
   struct IsaNameData {
     decltype(hsa_isa_get_info_alt) *get_info;
     std::string name;
-  } data{isa_get_info, {}};
+    bool read_error = false; ///< Set if a name lookup errored inside the callback.
+  } data{isa_get_info, {}, false};
 
-  iterate_isas(
+  // INFO_BREAK => a name was read; SUCCESS with no break => iterated cleanly but
+  // no ISA was found (a legitimate empty result); anything else => query error.
+  const hsa_status_t iter_status = iterate_isas(
       agent,
       [](hsa_isa_t isa, void *arg) -> hsa_status_t {
         auto *out = static_cast<IsaNameData *>(arg);
         uint32_t len = 0;
-        if (out->get_info(isa, HSA_ISA_INFO_NAME_LENGTH, &len) != HSA_STATUS_SUCCESS || len == 0)
+        if (out->get_info(isa, HSA_ISA_INFO_NAME_LENGTH, &len) != HSA_STATUS_SUCCESS || len == 0) {
+          out->read_error = true;
           return HSA_STATUS_ERROR;
+        }
         out->name.resize(len);
         if (out->get_info(isa, HSA_ISA_INFO_NAME, out->name.data()) != HSA_STATUS_SUCCESS) {
           out->name.clear();
+          out->read_error = true;
           return HSA_STATUS_ERROR;
         }
         if (!out->name.empty() && out->name.back() == '\0')
@@ -1536,7 +1617,14 @@ RjHsaLayer &layer() {
         return HSA_STATUS_INFO_BREAK;
       },
       &data);
-  return data.name;
+
+  if (data.read_error)
+    return {}; // a name lookup failed inside the callback -> unknown
+  if (iter_status == HSA_STATUS_INFO_BREAK)
+    return {.ok = true, .name = std::move(data.name)}; // read a name
+  if (iter_status == HSA_STATUS_SUCCESS)
+    return {.ok = true, .name = {}}; // iterated cleanly, agent has no ISA
+  return {};                         // iteration itself errored -> unknown
 }
 
 /// @brief Extract the gfx processor token (e.g. "gfx1250") from an HSA ISA name.
@@ -1555,16 +1643,18 @@ RjHsaLayer &layer() {
 
 /// @brief gfx1250 stepping classification for auto-A0 policy decisions.
 ///
-/// @details Deliberately tri-state (plus a "not gfx1250" case) so callers never
-/// have to collapse "definitely not A0" and "could not tell" into one bit. The
-/// auto-A0 load path must fail *closed* on @ref kUnknownRevision: a gfx1250 agent
-/// whose stepping we cannot read might be A0, and forwarding raw B0 text onto A0
-/// silicon is exactly what this feature exists to prevent.
+/// @details Deliberately multi-state so callers never have to collapse
+/// "definitely not A0" and "could not tell" into one bit. The auto-A0 load path
+/// must fail *closed* on @ref kUnknownRevision and @ref kUnknownTarget: an agent
+/// that might be A0 -- because either its stepping or its very ISA could not be
+/// read -- must never receive forwarded raw B0 text, which is exactly what this
+/// feature exists to prevent.
 enum class Gfx1250Stepping : uint8_t {
-  kNotGfx1250,      ///< Not a gfx1250 agent (or ISA could not be determined).
+  kNotGfx1250,      ///< Confirmed not a gfx1250 agent (ISA read OK, not gfx1250).
   kA0,              ///< gfx1250 with ASIC revision 0.
   kNotA0,           ///< gfx1250 with a nonzero ASIC revision (e.g. real B0).
   kUnknownRevision, ///< gfx1250 but the ASIC revision query failed.
+  kUnknownTarget,   ///< The agent's ISA could not be read at all (might be A0).
 };
 
 /// @brief Classify @p agent as a gfx1250 stepping.
@@ -1573,18 +1663,22 @@ enum class Gfx1250Stepping : uint8_t {
 /// the ASIC revision: A0 == 0. Mirrors ROCr hotswap's
 /// IsHotswapSupportedGfxRevision (gfx1250 && asic_revision == 0). Reads the saved
 /// (unpatched) agent entries so the result reflects real silicon, not any
-/// presentation overlay. A non-gfx1250 agent (or one whose ISA cannot be read)
-/// is @ref kNotGfx1250 -- not our concern. A gfx1250 agent whose revision query
-/// fails is @ref kUnknownRevision, which the load path treats as fail-closed.
-/// NOTE: the "A0 == asic_revision 0" mapping is taken from ROCr hotswap; confirm
-/// against real A0/B0 hardware in testing.
+/// presentation overlay. An agent whose ISA query *fails* is @ref kUnknownTarget
+/// (fail-closed) -- distinct from one that reads cleanly as non-gfx1250
+/// (@ref kNotGfx1250, safe to forward). A gfx1250 agent whose revision query
+/// fails is @ref kUnknownRevision, also fail-closed. NOTE: the "A0 ==
+/// asic_revision 0" mapping is taken from ROCr hotswap; confirm against real
+/// A0/B0 hardware in testing.
 [[nodiscard]] Gfx1250Stepping classify_gfx1250_stepping(hsa_agent_t agent) {
   auto *get_info = layer().agent_get_info();
   if (!get_info)
-    return Gfx1250Stepping::kNotGfx1250;
+    return Gfx1250Stepping::kUnknownTarget;
 
-  if (gfx_target_of_isa_name(agent_first_isa_name(agent)) != "gfx1250")
-    return Gfx1250Stepping::kNotGfx1250;
+  const AgentIsaName isa = agent_first_isa_name(agent);
+  if (!isa.ok)
+    return Gfx1250Stepping::kUnknownTarget; // could not read the ISA -> might be A0
+  if (gfx_target_of_isa_name(isa.name) != "gfx1250")
+    return Gfx1250Stepping::kNotGfx1250; // read cleanly, confirmed not gfx1250
 
   uint32_t asic_revision = 0;
   if (get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION),
@@ -1628,6 +1722,7 @@ enum class Gfx1250Stepping : uint8_t {
         switch (classify_gfx1250_stepping(agent)) {
         case Gfx1250Stepping::kA0:
         case Gfx1250Stepping::kUnknownRevision:
+        case Gfx1250Stepping::kUnknownTarget:
           *static_cast<bool *>(arg) = true;
           return HSA_STATUS_INFO_BREAK; // stop early; one possible-A0 is enough
         case Gfx1250Stepping::kNotA0:
@@ -4309,13 +4404,28 @@ load_snapshot_for_auto_a0(hsa_executable_t executable, hsa_agent_t agent,
                 static_cast<int>(status));
     return status;
   }
+  // Destroy the transient reader on every exit path (ROCR copies segment payloads
+  // during the load, so the reader is disposable afterwards; the retained bytes
+  // back ROCR's elf_data alias to executable destroy).
+  auto reader_guard = make_scope_guard([&] {
+    CodeObjectReaderRegistry::instance().remove(snapshot_reader);
+    if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
+      (void)original_destroy(snapshot_reader);
+  });
+
+  // Retain the snapshot BEFORE the lower loader commits: its map/vector growth can
+  // throw, and an exception must not escape after the executable is mutated. If the
+  // retention allocation fails, refuse without committing.
+  if (!TranslatedExecutableRegistry::instance().try_retain(executable, snapshot)) {
+    log_message(kLogInfo, "auto-A0: could not retain snapshot storage; refusing the load");
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
 
   status = original_load(executable, agent, snapshot_reader, options, loaded_code_object);
-  if (status == HSA_STATUS_SUCCESS)
-    TranslatedExecutableRegistry::instance().retain(executable, snapshot);
-  CodeObjectReaderRegistry::instance().remove(snapshot_reader);
-  if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
-    (void)original_destroy(snapshot_reader);
+  if (status != HSA_STATUS_SUCCESS) {
+    // The load did not commit; drop the pre-reserved retention entry.
+    TranslatedExecutableRegistry::instance().unretain(executable, snapshot);
+  }
   return status;
 }
 
@@ -4381,33 +4491,37 @@ load_translated_for_auto_a0(const HookConfig &config, hsa_executable_t executabl
     return HSA_STATUS_ERROR;
   }
 
+  auto translated_owned =
+      std::make_shared<const std::vector<uint8_t>>(std::move(translated.elf_bytes));
   hsa_code_object_reader_t translated_reader{};
-  hsa_status_t status = create_owned_memory_reader(
-      std::make_shared<const std::vector<uint8_t>>(std::move(translated.elf_bytes)),
-      &translated_reader);
+  hsa_status_t status = create_owned_memory_reader(translated_owned, &translated_reader);
   if (status != HSA_STATUS_SUCCESS) {
     log_message(kLogInfo, "auto-A0: failed to create translated reader: %d",
                 static_cast<int>(status));
     return status;
   }
+  // Destroy the transient reader on every exit path.
+  auto reader_guard = make_scope_guard([&] {
+    CodeObjectReaderRegistry::instance().remove(translated_reader);
+    if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
+      (void)original_destroy(translated_reader);
+  });
+
+  // ROCR's loader retains references into the translated bytes (symbol/PC/DWARF
+  // views used later by the debugger and profiler), aliasing them until the
+  // executable is destroyed. Reserve that retention BEFORE the lower loader
+  // commits so the potentially-throwing allocation cannot escape the HSA C ABI
+  // after the executable is mutated; roll it back if the load fails.
+  if (!TranslatedExecutableRegistry::instance().try_retain(executable, translated_owned)) {
+    log_message(kLogInfo, "auto-A0: could not retain translated storage; refusing the load");
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
 
   status = original_load(executable, agent, translated_reader, options, loaded_code_object);
   log_message(kLogVerbose, "auto-A0: translated load agent=%llu status=%d",
               static_cast<unsigned long long>(agent.handle), static_cast<int>(status));
-
-  // ROCR's loader retains references into the translated bytes (symbol/PC/DWARF
-  // views used later by the debugger and profiler). On success, hand ownership
-  // of the storage to the executable so it outlives this short-lived reader; it
-  // is released when the executable is destroyed. On failure nothing is retained
-  // and the storage is freed with the reader below.
-  if (status == HSA_STATUS_SUCCESS) {
-    CodeObjectReaderRegistry::ReaderBytes captured =
-        CodeObjectReaderRegistry::instance().lookup(translated_reader);
-    TranslatedExecutableRegistry::instance().retain(executable, captured.owned);
-  }
-  CodeObjectReaderRegistry::instance().remove(translated_reader);
-  if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
-    (void)original_destroy(translated_reader);
+  if (status != HSA_STATUS_SUCCESS)
+    TranslatedExecutableRegistry::instance().unretain(executable, translated_owned);
   return status;
 }
 
@@ -4424,12 +4538,14 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
       return load_translated_for_auto_a0(*config, executable, agent, code_object_reader, options,
                                          loaded_code_object, original_load);
     case Gfx1250Stepping::kUnknownRevision:
-      // The agent is gfx1250 but its stepping is unreadable, so it *might* be A0.
-      // Forwarding the object could execute raw B0 text on A0 silicon -- refuse
-      // rather than fail open. A confirmed non-A0 gfx1250 (kNotA0) or a
-      // non-gfx1250 agent (kNotGfx1250) falls through to the normal path below.
+    case Gfx1250Stepping::kUnknownTarget:
+      // The agent might be A0 -- either it is gfx1250 with an unreadable stepping,
+      // or its ISA could not be read at all. Forwarding the object could execute
+      // raw B0 text on A0 silicon, so refuse rather than fail open. A confirmed
+      // non-A0 gfx1250 (kNotA0) or a confirmed non-gfx1250 agent (kNotGfx1250)
+      // falls through to the normal path below.
       log_message(kLogInfo,
-                  "auto-A0: gfx1250 agent=%llu has an unreadable ASIC revision; refusing the load",
+                  "auto-A0: agent=%llu might be A0 (unreadable stepping or ISA); refusing the load",
                   static_cast<unsigned long long>(agent.handle));
       return HSA_STATUS_ERROR_INVALID_AGENT;
     case Gfx1250Stepping::kNotA0:
@@ -4689,15 +4805,17 @@ hsa_status_t HSA_API rj_executable_load_code_object(hsa_executable_t executable,
 
   // The deprecated direct load passes a raw code-object handle with no readable
   // extent, so the hook cannot bound-read the ELF to translate it (or even to
-  // classify its source). If the target agent is A0 (or a gfx1250 whose stepping
-  // is unreadable and might be A0), fail closed. Confirmed non-A0 / non-gfx1250
-  // agents forward unchanged. Auto-A0 only (simulation does not patch this).
+  // classify its source). If the target agent might be A0 -- confirmed A0, a
+  // gfx1250 with an unreadable stepping, or an agent whose ISA could not be read
+  // at all -- fail closed. Confirmed non-A0 / non-gfx1250 agents forward
+  // unchanged. Auto-A0 only (simulation does not patch this).
   if (auto config = layer().config(); config && config->mode == HookMode::kAutoA0) {
     switch (classify_gfx1250_stepping(agent)) {
     case Gfx1250Stepping::kA0:
     case Gfx1250Stepping::kUnknownRevision:
+    case Gfx1250Stepping::kUnknownTarget:
       log_message(kLogInfo,
-                  "auto-A0: refusing deprecated direct code-object load on gfx1250 agent=%llu; "
+                  "auto-A0: refusing deprecated direct code-object load on possible-A0 agent=%llu; "
                   "the sized ABI cannot be safely translated",
                   static_cast<unsigned long long>(agent.handle));
       return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
