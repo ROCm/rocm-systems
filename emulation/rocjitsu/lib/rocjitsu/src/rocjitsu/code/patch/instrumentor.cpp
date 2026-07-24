@@ -110,10 +110,12 @@ std::string reg_name(RegisterRef ref) {
 
 // Largest positive byte offset encodable in the scratch store/load offset field,
 // per arch. 0 means the arch has no scratch spill emitter (spilling unsupported).
-// The fields are signed, so the cap is the positive half: CDNA4 writes the 12-bit
-// FLAT offset (pad_12 left 0), RDNA4 has a signed 24-bit VSCRATCH ioffset.
+// The fields are signed, so the cap is the positive half: the CDNA FLAT path
+// writes the 12-bit offset (pad_12 left 0), RDNA4 has a signed 24-bit VSCRATCH
+// ioffset.
 uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
   switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA3:
   case ROCJITSU_CODE_ARCH_CDNA4:
     return 0xFFF; // 12-bit, pad_12 = 0
   case ROCJITSU_CODE_ARCH_RDNA4:

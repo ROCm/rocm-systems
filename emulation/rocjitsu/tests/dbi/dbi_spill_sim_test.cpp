@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 /// @file dbi_spill_sim_test.cpp
-/// @brief Simulator end-to-end for DBI VGPR and SGPR register spilling on CDNA4
-/// (gfx950, wave64) and RDNA4 (gfx1200, wave32).
+/// @brief Simulator end-to-end for DBI VGPR and SGPR register spilling on CDNA3
+/// (gfx942, wave64), CDNA4 (gfx950, wave64), and RDNA4 (gfx1200, wave32).
 ///
 /// The static InstrumentorProbeSpill.* tests (tests/patch/instrumentor_test.cpp)
 /// prove the patched ELF *contains* the scratch store/load/wait bracket and the
@@ -34,10 +34,10 @@
 #include "embedded_schema.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -167,9 +167,9 @@ private:
 };
 
 //==============================================================================
-// VGPR / SGPR spill, executed on CDNA4 (gfx950, wave64) and RDNA4 (gfx1200,
-// wave32). The two arches share one base fixture each; the DbiCdna4*/DbiRdna4*
-// fixtures are thin wrappers selecting the arch config.
+// VGPR / SGPR spill, executed on CDNA3 (gfx942, wave64), CDNA4 (gfx950, wave64),
+// and RDNA4 (gfx1200, wave32). The arches share one base fixture each; the
+// DbiCdna3*/DbiCdna4*/DbiRdna4* fixtures are thin wrappers selecting the arch config.
 //==============================================================================
 
 // Per-arch knobs for a spill sim fixture: the sim/config arch string, the code
@@ -181,6 +181,8 @@ struct SpillSimArch {
   uint32_t wave_size;
 };
 
+inline constexpr SpillSimArch kCdna3SpillArch{"cdna3", ROCJITSU_CODE_ARCH_CDNA3,
+                                              EF_AMDGPU_MACH_AMDGCN_GFX942, /*wave_size=*/64};
 inline constexpr SpillSimArch kCdna4SpillArch{"cdna4", ROCJITSU_CODE_ARCH_CDNA4,
                                               EF_AMDGPU_MACH_AMDGCN_GFX950, /*wave_size=*/64};
 inline constexpr SpillSimArch kRdna4SpillArch{"rdna4", ROCJITSU_CODE_ARCH_RDNA4,
@@ -276,6 +278,10 @@ protected:
   uint32_t patched_scratch_ = 0;
 };
 
+class DbiCdna3VgprSpillSimFixture : public DbiVgprSpillSimBase {
+protected:
+  DbiCdna3VgprSpillSimFixture() : DbiVgprSpillSimBase(kCdna3SpillArch) {}
+};
 class DbiCdna4VgprSpillSimFixture : public DbiVgprSpillSimBase {
 protected:
   DbiCdna4VgprSpillSimFixture() : DbiVgprSpillSimBase(kCdna4SpillArch) {}
@@ -285,6 +291,12 @@ protected:
   DbiRdna4VgprSpillSimFixture() : DbiVgprSpillSimBase(kRdna4SpillArch) {}
 };
 
+TEST_F(DbiCdna3VgprSpillSimFixture, SpilledVgprSurvivesClobberingProbe) {
+  expect_spilled_vgpr_survives();
+}
+TEST_F(DbiCdna3VgprSpillSimFixture, MissingRestoreLeavesVgprClobbered) {
+  expect_missing_restore_clobbers_vgpr();
+}
 TEST_F(DbiCdna4VgprSpillSimFixture, SpilledVgprSurvivesClobberingProbe) {
   expect_spilled_vgpr_survives();
 }
@@ -395,6 +407,10 @@ protected:
   uint32_t patched_scratch_ = 0;
 };
 
+class DbiCdna3SgprSpillSimFixture : public DbiSgprSpillSimBase {
+protected:
+  DbiCdna3SgprSpillSimFixture() : DbiSgprSpillSimBase(kCdna3SpillArch) {}
+};
 class DbiCdna4SgprSpillSimFixture : public DbiSgprSpillSimBase {
 protected:
   DbiCdna4SgprSpillSimFixture() : DbiSgprSpillSimBase(kCdna4SpillArch) {}
@@ -404,6 +420,12 @@ protected:
   DbiRdna4SgprSpillSimFixture() : DbiSgprSpillSimBase(kRdna4SpillArch) {}
 };
 
+TEST_F(DbiCdna3SgprSpillSimFixture, SpilledSgprSurvivesClobberingProbe) {
+  expect_spilled_sgpr_survives();
+}
+TEST_F(DbiCdna3SgprSpillSimFixture, MissingReadlaneLeavesSgprClobbered) {
+  expect_missing_readlane_clobbers_sgpr();
+}
 TEST_F(DbiCdna4SgprSpillSimFixture, SpilledSgprSurvivesClobberingProbe) {
   expect_spilled_sgpr_survives();
 }
@@ -418,10 +440,11 @@ TEST_F(DbiRdna4SgprSpillSimFixture, MissingReadlaneLeavesSgprClobbered) {
 }
 
 //==============================================================================
-// EXEC preservation + full-mask spilling on CDNA4 (wave64) and RDNA4 (wave32). The
-// partial-EXEC-mask scenario is wave-size-specific, so it rides a per-arch config
-// (ExecSimArch) with thin DbiCdna4*/DbiRdna4* wrappers. Only EXEC is runtime-
-// observable; VCC/M0 are static-only (InstrumentorProbeSpill.*Preserves*).
+// EXEC preservation + full-mask spilling on CDNA3 (wave64), CDNA4 (wave64), and
+// RDNA4 (wave32). The partial-EXEC-mask scenario is wave-size-specific, so it rides
+// a per-arch config (ExecSimArch) with thin DbiCdna3*/DbiCdna4*/DbiRdna4* wrappers.
+// Only EXEC is runtime-observable; VCC/M0 are static-only
+// (InstrumentorProbeSpill.*Preserves*).
 //
 // wave32 caveat: EXEC save/restore + full-mask toggle stay wave64-shaped
 // (s_mov_b64); on wave32 the extra EXEC_HI write is harmless (EXEC_LO round-trips).
@@ -442,6 +465,15 @@ struct ExecSimArch {
   std::vector<uint32_t> set_partial_mask;
   std::vector<uint32_t> restore_full_mask;
 };
+
+// CDNA3 wave64: clear exec_hi -> lanes 0..31; restore with exec_hi = -1.
+[[nodiscard]] inline ExecSimArch cdna3_exec_arch() {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
+  return {kCdna3SpillArch,
+          /*active_lanes=*/32,
+          {build_s_mov_b32(/*exec_hi=*/127, /*inline 0=*/128, kArch)},
+          {build_s_mov_b32(/*exec_hi=*/127, kScalarInlineNegOne, kArch)}};
+}
 
 // CDNA4 wave64: clear exec_hi -> lanes 0..31; restore with exec_hi = -1.
 [[nodiscard]] inline ExecSimArch cdna4_exec_arch() {
@@ -574,6 +606,10 @@ protected:
   std::vector<uint32_t> patched_text_;
 };
 
+class DbiCdna3ExecPreserveSimFixture : public DbiExecPreserveSimBase {
+protected:
+  DbiCdna3ExecPreserveSimFixture() : DbiExecPreserveSimBase(cdna3_exec_arch()) {}
+};
 class DbiCdna4ExecPreserveSimFixture : public DbiExecPreserveSimBase {
 protected:
   DbiCdna4ExecPreserveSimFixture() : DbiExecPreserveSimBase(cdna4_exec_arch()) {}
@@ -583,6 +619,12 @@ protected:
   DbiRdna4ExecPreserveSimFixture() : DbiExecPreserveSimBase(rdna4_exec_arch()) {}
 };
 
+TEST_F(DbiCdna3ExecPreserveSimFixture, PreservedExecSurvivesClobberingProbe) {
+  expect_preserved_exec_survives();
+}
+TEST_F(DbiCdna3ExecPreserveSimFixture, MissingExecRestoreLeavesAllLanesClobbered) {
+  expect_missing_exec_restore_clobbers_all();
+}
 TEST_F(DbiCdna4ExecPreserveSimFixture, PreservedExecSurvivesClobberingProbe) {
   expect_preserved_exec_survives();
 }
@@ -598,7 +640,7 @@ TEST_F(DbiRdna4ExecPreserveSimFixture, MissingExecRestoreLeavesAllLanesClobbered
 
 //==============================================================================
 // Full-mask spilling: an EXEC-widening probe must not corrupt inactive-lane
-// spilled registers. Executed on CDNA4 (wave64) and RDNA4 (wave32).
+// spilled registers. Executed on CDNA3 (wave64), CDNA4 (wave64), and RDNA4 (wave32).
 //==============================================================================
 
 // Spill a live VGPR (v2) at an anchor under a partial EXEC mask, with a probe that
@@ -705,6 +747,10 @@ protected:
   uint32_t patched_scratch_ = 0;
 };
 
+class DbiCdna3ExecWidenSpillSimFixture : public DbiExecWidenSpillSimBase {
+protected:
+  DbiCdna3ExecWidenSpillSimFixture() : DbiExecWidenSpillSimBase(cdna3_exec_arch()) {}
+};
 class DbiCdna4ExecWidenSpillSimFixture : public DbiExecWidenSpillSimBase {
 protected:
   DbiCdna4ExecWidenSpillSimFixture() : DbiExecWidenSpillSimBase(cdna4_exec_arch()) {}
@@ -714,6 +760,12 @@ protected:
   DbiRdna4ExecWidenSpillSimFixture() : DbiExecWidenSpillSimBase(rdna4_exec_arch()) {}
 };
 
+TEST_F(DbiCdna3ExecWidenSpillSimFixture, FullMaskSpillSurvivesExecWideningProbe) {
+  expect_full_mask_spill_survives();
+}
+TEST_F(DbiCdna3ExecWidenSpillSimFixture, MissingStoreFullMaskLosesHighLanes) {
+  expect_missing_store_full_mask_loses_high_lanes();
+}
 TEST_F(DbiCdna4ExecWidenSpillSimFixture, FullMaskSpillSurvivesExecWideningProbe) {
   expect_full_mask_spill_survives();
 }
