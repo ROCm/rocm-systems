@@ -302,7 +302,7 @@ int main(int argc, char **argv) {
         for (auto& img : decode_info_per_thread[i].output_images) {
             for (int n = 0; n < ROCJPEG_MAX_COMPONENT; n++) {
                 if (img.channel[n] != nullptr) {
-                    (void)hipFree((void*)img.channel[n]);
+                    CHECK_HIP(hipFree((void*)img.channel[n]));
                     img.channel[n] = nullptr;
                 }
             }
