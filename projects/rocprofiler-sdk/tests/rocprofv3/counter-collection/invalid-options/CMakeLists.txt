@@ -12,7 +12,7 @@ find_package(rocprofiler-sdk REQUIRED)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-invalid-options
-    TEST_PATHS validate.py
+    TEST_PATHS test_invalid_options.py
     COPY conftest.py pmc_groups.json
     CONFIG pytest.ini
     ARGS --rocprofv3 $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc-groups-input
