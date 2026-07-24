@@ -316,8 +316,8 @@ struct ConSanOptions {
   /// Internal per-owner assignments used when one CDNA4 code-object-wide
   /// tuple cannot remain below every compiler-defined AccVGPR boundary.
   std::vector<ConSanMoiPersistentVgprAssignment> moi_persistent_vgpr_assignments;
-  /// Internal marker set when a full CDNA4 ordinary-VGPR bank forces Inline
-  /// persistent wave identity into uniform scalar state instead.
+  /// Internal marker set when a full CDNA ordinary-VGPR bank forces
+  /// persistent MOI wave identity into uniform scalar state instead.
   bool automatic_moi_persistent_sgprs = false;
   std::vector<ConSanMoiPrologueScratchVgprAssignment> moi_prologue_scratch_vgpr_assignments;
   /// Internal marker set when inline shadow derives owner at each probe and
@@ -410,9 +410,10 @@ struct ConSanOptions {
   std::optional<uint16_t> moi_dispatch_id_sgpr;
   std::optional<uint16_t> moi_owner_vgpr;
   std::optional<uint16_t> moi_epoch_vgpr;
-  /// InlineShadow-only uniform persistent state. The owner is the wave ID
-  /// captured from the entry workitem ID; epoch and workgroup key are uniform
-  /// for every lane and therefore do not require ordinary VGPR residency.
+  /// Uniform persistent state used when a dynamic-stack MOI owner has no
+  /// ordinary-VGPR tuple available below its compiler-defined accumulator
+  /// boundary. The owner is the wave ID captured from the entry workitem ID;
+  /// epoch and workgroup key are uniform for every lane.
   std::optional<uint16_t> moi_persistent_owner_sgpr;
   std::optional<uint16_t> moi_persistent_epoch_sgpr;
   std::optional<uint16_t> moi_persistent_workgroup_key_sgpr;
@@ -450,6 +451,10 @@ struct ConSanOptions {
   uint32_t moi_runtime_sample_offset = 0;
   uint32_t report_marker = 1;
 };
+
+[[nodiscard]] inline bool moi_uses_scalar_persistent_state(const ConSanOptions &options) {
+  return options.moi_persistent_owner_sgpr && options.moi_persistent_epoch_sgpr;
+}
 
 /// Process-local exact-one budget for repeated dynamic loads of one stable
 /// fault-site identity. The caller serializes observe() with code-object load

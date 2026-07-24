@@ -782,10 +782,6 @@ candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
       std::max(spill_address_snapshot_count, flat_offset_address_count));
 }
 
-[[nodiscard]] bool moi_uses_scalar_persistent_state(const ConSanOptions &options) {
-  return options.moi_persistent_owner_sgpr && options.moi_persistent_epoch_sgpr;
-}
-
 [[nodiscard]] uint16_t direct_sampled_scratch_count(const ConSanOptions &options,
                                                     const ConSanMoiCandidate &candidate) {
   const uint16_t base_scratch_count = options.moi_sampled_check ? 7u : 5u;
@@ -3434,12 +3430,20 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
                 scalar_owners.push_back(descriptor_offset);
             }
           }
+          // This pair crosses arbitrary guest code. Start beyond both every
+          // statically named operand and every owner's original allocation:
+          // scalar-relative s_movrel access is valid only within that original
+          // allocation, so descriptor growth cannot expose the new tuple to
+          // the guest. The candidate filter below separately preserves the
+          // physical-VCC location before and after that growth.
           uint32_t first = 0u;
           for (const ConSanCandidateResourcePlan &scalar_plan : result.resource_plans) {
             if (scalar_plan.source == ConSanRegisterAllocationSource::Unsupported ||
                 scalar_plan.owner_descriptor_file_offsets.empty())
               continue;
-            first = std::max<uint32_t>(first, scalar_plan.max_referenced_sgpr_count);
+            first = std::max<uint32_t>(
+                first, std::max<uint16_t>(scalar_plan.max_referenced_sgpr_count,
+                                          scalar_plan.current_sgpr_count));
           }
           const uint16_t scalar_limit = moi_ordinary_sgpr_limit(arch);
           const auto unavailable = [&](uint16_t base) {

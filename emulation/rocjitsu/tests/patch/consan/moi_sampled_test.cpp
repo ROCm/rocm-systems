@@ -1438,6 +1438,18 @@ TEST(ConSanMoi, Cdna4SampledAtomicMaterializesAddressWithDynamicScalarState) {
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> cave =
       text_words_at_offset(patched, atomic_patch->trampoline_offset, atomic_patch->trampoline_size);
+  constexpr uint16_t kAtomicOwnerScratchOffset = 6u;
+  constexpr uint16_t kAtomicEpochScratchOffset = 7u;
+  EXPECT_NE(std::ranges::find(
+                cave, build_v_mov_b32_e32(static_cast<uint16_t>(*atomic_patch->scratch_vgpr +
+                                                                kAtomicOwnerScratchOffset),
+                                          *result.resolved_moi_persistent_owner_sgpr, kArch)),
+            cave.end());
+  EXPECT_NE(std::ranges::find(
+                cave, build_v_mov_b32_e32(static_cast<uint16_t>(*atomic_patch->scratch_vgpr +
+                                                                kAtomicEpochScratchOffset),
+                                          *result.resolved_moi_persistent_epoch_sgpr, kArch)),
+            cave.end());
   EXPECT_NE(
       std::ranges::find(cave, build_v_mov_b32_e32(saved_address, vector_source_vgpr(0u), kArch)),
       cave.end());
@@ -2018,6 +2030,10 @@ TEST(ConSanMoi, CdnaSampledSynchronizationSpillsThroughDynamicStackFrame) {
     // Preserve a relocatable ABI prefix for the owner/epoch prologue before
     // the first site consumes its own trampoline anchor.
     std::copy(guest->begin(), guest->end(), text_words.begin() + 1u);
+    // s_movrels_b32 s0, s2: the dynamically indexed source may address any
+    // scalar in the original allocation, so persistent state must be placed
+    // in a descriptor-grown tail rather than a statically unreferenced hole.
+    text_words[8] = 0xBE802A02u;
     text_words[400] = *barrier;
     text_words.back() = build_s_endpgm(target.arch);
     std::vector<uint8_t> bytes =
@@ -2032,6 +2048,10 @@ TEST(ConSanMoi, CdnaSampledSynchronizationSpillsThroughDynamicStackFrame) {
       // v12 starts the accumulator bank, leaving no persistent VGPR pair
       // above the guest's v10:v11 operands.
       AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 2u);
+      // Forty SGPRs leave low statically unnamed holes that s_movrel can
+      // nonetheless address. The scalar-persistent pair must start at s40.
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                      kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 4u);
     });
 
     ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
@@ -2052,6 +2072,7 @@ TEST(ConSanMoi, CdnaSampledSynchronizationSpillsThroughDynamicStackFrame) {
     EXPECT_FALSE(result.moi_private_epoch_automatic);
     EXPECT_TRUE(result.resolved_moi_persistent_owner_sgpr);
     EXPECT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
+    EXPECT_GE(*result.resolved_moi_persistent_owner_sgpr, 40u);
     EXPECT_FALSE(result.resolved_moi_owner_vgpr);
     EXPECT_FALSE(result.resolved_moi_epoch_vgpr);
     EXPECT_FALSE(result.resolved_moi_sample_sequence_vgpr);
@@ -2067,11 +2088,34 @@ TEST(ConSanMoi, CdnaSampledSynchronizationSpillsThroughDynamicStackFrame) {
         result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
     ASSERT_NE(access, result.patches.end());
     ASSERT_NE(sync, result.patches.end());
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    ASSERT_TRUE(access->scratch_vgpr);
+    const auto access_plan =
+        std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+          return plan.site_kind == ConSanResourceSiteKind::Access &&
+                 plan.text_offset == access->anchor_offset;
+        });
+    ASSERT_NE(access_plan, result.resource_plans.end());
+    ASSERT_GE(access_plan->scratch_vgpr_count, 2u);
+    const uint16_t access_owner_vgpr =
+        static_cast<uint16_t>(*access->scratch_vgpr + access_plan->scratch_vgpr_count - 1u);
+    const uint16_t access_epoch_vgpr = static_cast<uint16_t>(access_owner_vgpr - 1u);
+    const std::vector<uint32_t> access_cave =
+        text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
+    EXPECT_NE(std::ranges::find(access_cave,
+                                build_v_mov_b32_e32(access_owner_vgpr,
+                                                    *result.resolved_moi_persistent_owner_sgpr,
+                                                    target.arch)),
+              access_cave.end());
+    EXPECT_NE(std::ranges::find(access_cave,
+                                build_v_mov_b32_e32(access_epoch_vgpr,
+                                                    *result.resolved_moi_persistent_epoch_sgpr,
+                                                    target.arch)),
+              access_cave.end());
     ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
     const uint16_t saved_frame_sgpr =
         static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 8u);
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
-    ASSERT_TRUE(patched.is_valid());
     for (const ConSanPatchInfo *patch : {&*access, &*sync}) {
       EXPECT_GT(patch->spilled_vgpr_count, 0u);
       EXPECT_GT(patch->required_private_segment_size, 0u);
