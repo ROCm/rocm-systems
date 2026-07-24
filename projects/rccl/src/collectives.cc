@@ -190,6 +190,17 @@ RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));       // 32 KiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 1);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
 
+// AllReduce-only LL128 sub-tiering (gfx1250). The shared DdaLL128Threshold above
+// still bounds LL128 for the other collectives; AllReduce instead splits its
+// LL128 range in two:
+//   size <= DdaLL128ArThreshold         -> LL128 flag-synced (in-line flag word)
+//   size <= DdaLL128ArWarpsyncThreshold -> LL128 warpsync (full-line + barrier)
+//   otherwise                           -> Simple
+// The warpsync variant has no counterpart for the other collectives.
+RCCL_PARAM(DdaLL128ArThreshold, "DDA_LL128_AR_THRESHOLD", (size_t)(2097152)); // 2 MiB
+RCCL_PARAM(DdaLL128ArWarpsync, "DDA_LL128_AR_WARPSYNC", 1);
+RCCL_PARAM(DdaLL128ArWarpsyncThreshold, "DDA_LL128_AR_WARPSYNC_THRESHOLD", (size_t)(33554432)); // 32 MiB
+
 // Returns true when the DDA fast path should be attempted for a collective
 // with the given total byte count.  gfx942Default is the per-collective
 // threshold for gfx942 (MI300).  gfx950Default optionally caps MI350; when 0,
@@ -645,11 +656,28 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
         return ncclSuccess;
       }
       // Mid-size fast lane: LL128 protocol (128B lines, no GPU barrier).
-      if (rcclParamDdaLL128() && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLL128Threshold() &&
+      if (rcclParamDdaLL128() && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLL128ArThreshold() &&
           ncclAllReduceDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
              comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
         NCCLCHECK(ncclAllReduceDdaFabricLL128(sendbuff, recvbuff, count, datatype, op, comm, stream));
+        return ncclSuccess;
+      }
+      // Larger-message fast lane: LL128 warpsync (full-line + barrier) variant.
+      if (rcclParamDdaLL128ArWarpsync() &&
+          (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLL128ArWarpsyncThreshold() &&
+          ncclAllReduceDdaFabricLL128WarpsyncEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+        INFO(NCCL_COLL,
+             "AllReduce: taking DDA fabric LL128 warpsync path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+             comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
+        NCCLCHECK(ncclAllReduceDdaFabricLL128Warpsync(
+            sendbuff,
+            recvbuff,
+            count,
+            datatype,
+            op,
+            comm,
+            stream));
         return ncclSuccess;
       }
       if (ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {

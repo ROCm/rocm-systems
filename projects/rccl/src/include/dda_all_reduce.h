@@ -40,4 +40,23 @@ bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
 ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                          ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
+// LL128 warpsync fabric path (larger-message lane, 128B full-line payload synced
+// by a per-warp arrival barrier). AllReduce-only.
+bool ncclAllReduceDdaFabricLL128WarpsyncEligible(
+    ncclComm* comm,
+    const void* sendbuff,
+    void* recvbuff,
+    size_t count,
+    ncclDataType_t datatype,
+    ncclRedOp_t op);
+
+ncclResult_t ncclAllReduceDdaFabricLL128Warpsync(
+    const void* sendbuff,
+    void* recvbuff,
+    size_t count,
+    ncclDataType_t datatype,
+    ncclRedOp_t op,
+    ncclComm* comm,
+    cudaStream_t stream);
+
 #endif
