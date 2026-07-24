@@ -6,11 +6,10 @@ FROM ubuntu:24.04
 
 #Example build: from a github pull
 #docker build -f Dockerfile-rccl-gin-gda -t rccl-gingda713 --build-arg GPU_TARGETS=gfx950  .
-#--build-arg ROCSHMEM_CACHE_BUST=N: increase N to force pull rocSHMEM and rebuilding
-#--build-arg RCCL_CACHE_BUST=N: increase N to force pull RCCL and RCCL-test and rebuilding
+#--build-arg CACHE_BUST=N: increase N to force pull/copy sources and rebuilding
 #--build-arg ROCSHMEM_BRANCH=users/abouteiller/gin-stage2 (RCCL_BRANCH): pull and build that specific branch from github
 # Example build: from local sources, CWD in the rocm-systems pull
-#docker build -f Dockerfile-rccl-gin-gda -t rccl-gingda713 --build-arg GPU_TARGETS=gfx950 --build-arg ROCSHMEM_CACHE_BUST=5 --build-arg USE_LOCAL_SRC=1  .
+#docker build -f Dockerfile-rccl-gin-gda -t rccl-gingda713 --build-arg GPU_TARGETS=gfx950 --build-arg CACHE_BUST=5 --build-arg USE_LOCAL_SRC=1  .
 
 # Example command lines:
 #docker run -it --rm --shm-size 64G   --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host   --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged  rccl-gingda mpirun -n 8 -mca pml ob1 -mca btl ^openib -x RCCL_ROCSHMEM_ENABLE=0 -x RCCL_ROCSHMEM_THRESHOLD=$((128*1024*1024)) -x NCCL_DEBUG=VERSION -x NCCL_GIN_ENABLE=1 -x NCCL_GIN_TYPE=2 -x NCCL_DEBUG_SUBSYS=INIT,NET -x NCCL_CUMEM_ENABLE=1 -x RCCL_ENABLE_INTRANET=1  -x NCCL_DMABUF_ENABLE=1 -x NCCL_MSCCL_ENABLE=0 -x HSA_NO_SCRATCH_RECLAIM=1 rccl-tests/alltoall_perf -b 128 -e 128M -f 2 -g 1 -R 2 -D 3 -A 1
@@ -26,11 +25,12 @@ RUN mkdir -p ${SRC}
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y sudo wget curl gpg ca-certificates
+# Install RoCM
 RUN mkdir --parents --mode=0755 /etc/apt/keyrings \
  && wget https://repo.amd.com/rocm/packages/gpg/rocm.gpg -O - | gpg --dearmor | tee /etc/apt/keyrings/amdrocm.gpg > /dev/null \
  && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages-multi-arch/ubuntu2404 stable main" > /etc/apt/sources.list.d/rocm.list
 RUN apt-get update \
- && apt-get install -y amdrocm-core7.13-gfx950 amdrocm-core7.13-gfx942 amdrocm-core-dev7.13 amdrocm-developer-tools7.13 amdrocm-runtime-dev \
+ && apt-get install -y amdrocm-core7.14-gfx1250 amdrocm-core7.14-gfx950 amdrocm-core7.14-gfx942 amdrocm-core-dev7.14 amdrocm-developer-tools7.14 amdrocm-runtime-dev \
  && ln -s /opt/rocm/core/.info /opt/rocm/.info
 
 ## install dependencies
@@ -85,35 +85,6 @@ RUN apt-get update \
 ## Set ROCm path
 ENV ROCM_PATH=/opt/rocm
 
-# Workaround: ROCm 7.13 hsakmtTargets.cmake hardcodes RHEL CI build paths:
-#   /usr/lib64/libc.so and -L/__w/rockrel/.../libdrm search path.
-# Symlink libc and libdrm/libdrm_amdgpu so the linker can find them.
-RUN mkdir -p /usr/lib64 \
- && ln -sf /usr/lib/x86_64-linux-gnu/libc.so /usr/lib64/libc.so \
- && ln -sf ${ROCM_PATH}/lib/rocm_sysdeps/lib/libdrm.so /usr/lib/x86_64-linux-gnu/libdrm.so \
- && ln -sf ${ROCM_PATH}/lib/rocm_sysdeps/lib/libdrm_amdgpu.so /usr/lib/x86_64-linux-gnu/libdrm_amdgpu.so
-
-# OPTIONAL: Setup ssh (only needed to use mpirun launch method, e.g., rocshmem functional tests)
-# The following block is OPTIONAL and can be commented out if you only want to run 1-node testing
-# Note: all deployed containers must share the SAME KEY!
-#   Same docker image build must be deployed on all nodes (docker save, docker load)
-ARG SSH_PORT=2222
-RUN ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
-# Alternative: comment line above, uncomment lines below:
-#   import an invariant ssh-key from outside the docker (so you can build the docker on each nodes)
-#COPY id_ed25519 /root/.ssh/id_ed25519
-#COPY id_ed25519.pub /root/.ssh/id_ed25519.pub
-RUN cat ~/.ssh/id_ed25519.pub >~/.ssh/authorized_keys && \
-    sed -i "s/#Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config && \
-    mkdir -p /run/sshd && ssh-keygen -A && \
-    echo " StrictHostKeyChecking=accept-new" >>/root/.ssh/config
-CMD ["sh", "-c", "\
-        set -e; \
-        rocshmem/bin/rocshmem_info \
-     && echo \"Starting SSH server for mpiexec with OMPI_MCA_plm_rsh_arg=$OMPI_MCA_plm_rsh_args\" \
-     && exec /usr/sbin/sshd -D"]
-# End of ssh setup
-
 # We use MPI only as a launcher, any MPI will do, use system install
 ## Install UCX
 #ENV UCX_INSTALL_PREFIX=/opt/ucx
@@ -150,36 +121,37 @@ RUN cd rdma-perftest \
  && ./configure --enable-rocm --with-rocm=/opt/rocm \
  && make -j 8 #install
 
-## rccl repo
-ARG ROCM_REPO=https://github.com/ROCm/rocm-systems.git
-
 ## AMD GPU Targets
 ARG GPU_TARGETS=gfx950
+
+# DEBUG_BUILD=1: build all components with debug symbols (-g, Debug).
+ARG DEBUG_BUILD=0
+
+# If USE_LOCAL_SRC=0: pull that branch from that repo and use it to build.
+ARG ROCM_REPO=https://github.com/ROCm/rocm-systems.git
+ARG BRANCH=users/abouteiller/gin-stage2
 
 # USE_LOCAL_SRC=1: use the CWD worktree instead of cloning from ROCM_REPO.
 # Build with:  docker build --build-arg USE_LOCAL_SRC=1 ...  from the repo root.
 # projects/ always exists even in a sparse checkout, so COPY never fails;
 # individual subdirs are checked in shell before use.
 ARG USE_LOCAL_SRC=0
-
-# DEBUG_BUILD=1: build all components with debug symbols (-g, Debug).
-ARG DEBUG_BUILD=0
-
+# Set CACHE_BUST to a new value to force reloading the sources and rebuild (in
+# case docker build didn't autodetect it needed to)
+ARG CACHE_BUST=1 ROCSHMEM_CACHE_BUST='' RCCL_CACHE_BUST=''
+RUN echo "cache bust: ${CACHE_BUST} ${ROCSHMEM_CACHE_BUST} ${RCCL_CACHE_BUST}"
 ## All projects share a mono-repo layout under ${SRC}/projects/ so that
 ## cmake auto-detect (CMAKE_SOURCE_DIR/../..) finds sibling projects.
 ## install.sh --rocshmem-gin builds rocshmem from source automatically.
-
-ARG BRANCH=users/abouteiller/gin-stage2
-ARG CACHE_BUST=1
-RUN echo "cache bust: ${CACHE_BUST}"
+##
+## rocshmem + rccl are COPYed and built first; rccl-tests is COPYed separately
+## so that changes to rccl-tests don't invalidate the rccl/rocshmem build layers.
+ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl
 COPY projects/rocshmem/   /tmp/local/projects/rocshmem/
 COPY projects/rccl/       /tmp/local/projects/rccl/
-COPY projects/rccl-tests/ /tmp/local/projects/rccl-tests/
-ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl
-ENV ONLY_FUNCS="SendRecv|AlltoAllPivot|AlltoAllGda|AlltoAllvGda"
 RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
       mkdir -p ${SRC}/projects && \
-      for proj in rocshmem rccl rccl-tests; do \
+      for proj in rocshmem rccl; do \
         [ -d /tmp/local/projects/$proj ] || { echo "ERROR: projects/$proj not in build context"; exit 1; }; \
         find /tmp/local/projects/$proj -name CMakeCache.txt -delete && \
         find /tmp/local/projects/$proj -name CMakeFiles -type d -exec rm -rf {} + 2>/dev/null; \
@@ -196,20 +168,16 @@ RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
 
 ## building RCCL (builds rocshmem from source via --rocshmem-gin)
 RUN cd ${SRC}/projects/rccl \
- && sed -i \
-       's/if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks\/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576)/if (comm->enableRocshmem)/' \
-       src/rccl_wrap.cc
-RUN cd ${SRC}/projects/rccl \
  && ./install.sh --amdgpu_targets=${GPU_TARGETS} --prefix=${RCCL_INSTALL_PREFIX} \
       --no-device-linker --no_clean --rocshmem-gin \
       --cmake-options "-DROCSHMEM_CMAKE_OPTIONS=-DBUILD_DEBUG_TRACE_DEVICE=ON -DBUILD_DEBUG_DEVICE=ON -DBUILD_DEBUG_TRACE_HOST=ON" \
       $([ "${DEBUG_BUILD}" = "1" ] && echo "--debug")
 
-# Workaround: hipify renames core.h->core_tmp.h but gin headers still include ../core.h
-RUN RCCL_BUILD_DIR=$([ "${DEBUG_BUILD}" = "1" ] && echo "debug" || echo "release") \
- && ln -sf core_tmp.h ${SRC}/projects/rccl/build/${RCCL_BUILD_DIR}/include/nccl_device/core.h \
- && ln -sf ../hipify/src/include/nccl_tuner.h ${SRC}/projects/rccl/build/${RCCL_BUILD_DIR}/include/nccl_tuner.h \
- && cp -r ${SRC}/projects/rccl/build/${RCCL_BUILD_DIR}/include/* ${RCCL_INSTALL_PREFIX}/include/
+## Copy rccl-tests separately so edits don't rebuild rccl/rocshmem
+COPY projects/rccl-tests/ /tmp/local/projects/rccl-tests/
+RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
+      cp -r /tmp/local/projects/rccl-tests ${SRC}/projects/rccl-tests; \
+    fi
 
 ## building RCCL-Tests
 # ROCSHMEM_INSTALL_DIR points to the ExternalProject install created by --rocshmem-gin
@@ -217,10 +185,34 @@ RUN mkdir -p rccl-tests \
     && cd rccl-tests \
     && cmake $([ "${DEBUG_BUILD}" = "1" ] && echo "-DCMAKE_BUILD_TYPE=Debug" || echo "-DCMAKE_BUILD_TYPE=Release") \
        -DUSE_MPI=ON -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM=ON \
+       -DRCCL_ROOT="${RCCL_INSTALL_PREFIX}" \
        -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" \
        -DGPU_TARGETS=${GPU_TARGETS} \
        ${SRC}/projects/rccl-tests \
     && make -j16
+
+
+
+# OPTIONAL: Setup ssh (only needed to use mpirun launch method, e.g., rocshmem functional tests)
+# The following block is OPTIONAL and can be commented out if you only want to run 1-node testing
+# Note: all deployed containers must share the SAME KEY!
+#   Same docker image build must be deployed on all nodes (docker save, docker load)
+ARG SSH_PORT=2222
+RUN ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
+# Alternative: comment line above, uncomment lines below:
+#   import an invariant ssh-key from outside the docker (so you can build the docker on each nodes)
+#COPY id_ed25519 /root/.ssh/id_ed25519
+#COPY id_ed25519.pub /root/.ssh/id_ed25519.pub
+RUN cat ~/.ssh/id_ed25519.pub >~/.ssh/authorized_keys && \
+    sed -i "s/#Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config && \
+    mkdir -p /run/sshd && ssh-keygen -A && \
+    echo " StrictHostKeyChecking=accept-new" >>/root/.ssh/config
+CMD ["sh", "-c", "\
+        set -e; \
+        rocshmem/bin/rocshmem_info \
+     && echo \"Starting SSH server for mpiexec with OMPI_MCA_plm_rsh_arg=$OMPI_MCA_plm_rsh_args\" \
+     && exec /usr/sbin/sshd -D"]
+# End of ssh setup
 
 ## set environment variables
 ENV PATH="${MPI_INSTALL_PREFIX}/bin:${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${PATH}"
