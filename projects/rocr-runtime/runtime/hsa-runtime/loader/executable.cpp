@@ -2247,14 +2247,21 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   const std::string presentedGfx = EnvGfxName("HSA_HOTSWAP_PRESENT_ISA");
   const bool presentationMode =
       !rocr::hotswap::IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE") && !presentedGfx.empty();
+  const std::string executionGfx = ExecutionGfxName(agent);
   std::string hotswapTargetGfx;
-  std::string hotswapTargetFailure;
-  if (!ResolveHotSwapPresentationTarget(
-          presentationMode, EnvGfxName("HSA_HOTSWAP_TARGET"),
-          EnvGfxName("HSA_HOTSWAP_ISA_OVERRIDE"), ExecutionGfxName(agent),
-          hotswapTargetGfx, hotswapTargetFailure)) {
-    logger_ << "LoaderError: " << hotswapTargetFailure << "\n";
-    return HSA_STATUS_ERROR_INVALID_ISA_NAME;
+  if (presentationMode) {
+    if (executionGfx.empty()) {
+      logger_ << "LoaderError: HotSwap target agent has no physical execution ISA\n";
+      return HSA_STATUS_ERROR_INVALID_ISA_NAME;
+    }
+    // The physical agent, not mutable environment state, is authoritative.
+    hotswapTargetGfx = executionGfx;
+  } else {
+    hotswapTargetGfx = EnvGfxName("HSA_HOTSWAP_TARGET");
+    if (hotswapTargetGfx.empty())
+      hotswapTargetGfx = EnvGfxName("HSA_HOTSWAP_ISA_OVERRIDE");
+    if (hotswapTargetGfx.empty() || hotswapTargetGfx == "1")
+      hotswapTargetGfx = executionGfx;
   }
 
   if (CurrentHotSwapLoadingTranslatedTarget) {

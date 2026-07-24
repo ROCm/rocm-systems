@@ -278,6 +278,7 @@ option(ROCR_BUILD_HOTSWAP_UNIT_TESTS
   ${ROCR_ENABLE_HOTSWAP_COMGR_ADAPTER})
 if(ROCR_BUILD_HOTSWAP_UNIT_TESTS)
   add_executable(hotswap-runtime-unit-tests
+    core/runtime/isa.cpp
     tests/hotswap_runtime_test.cpp)
   target_include_directories(hotswap-runtime-unit-tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

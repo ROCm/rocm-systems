@@ -99,6 +99,19 @@
       - | 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Allow HotSwap on supported GPU and ASIC revisions.
         | Any other non-empty value: Disable HotSwap and use the original code object load path.
 
+    * - | ``HSA_HOTSWAP_PRESENT_ISA``
+        | Presents a source ISA to applications while HotSwap translates code objects to the physical execution ISA. Requires a runtime built with the HotSwap COMGR adapter and an explicit execution target.
+        | Presentation mode currently requires a homogeneous GPU system. Runtime initialization fails if any GPU agent constructed by ROCr does not match the configured target.
+      - None
+      - A supported source ISA or target ID, for example ``gfx1250``.
+
+    * - | ``HSA_HOTSWAP_TARGET``
+        | Declares the expected physical execution ISA for presentation mode. ROCr validates this canonical target ID against every GPU agent it constructs; translation uses the agent's physical execution ISA.
+        | The processor and any explicitly specified XNACK or SRAMECC features must match the physical agent. Omitted features accept either setting.
+        | For compatibility, ``HSA_HOTSWAP_ISA_OVERRIDE`` is used only when ``HSA_HOTSWAP_TARGET`` is unset.
+      - None
+      - A supported canonical target ID, for example ``gfx942``.
+
     * - | ``HSA_HOTSWAP_VERBOSE``
         | Enables HotSwap diagnostic logging to stderr.
       - ``0``

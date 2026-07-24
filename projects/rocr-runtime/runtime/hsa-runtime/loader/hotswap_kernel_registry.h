@@ -167,32 +167,6 @@ inline bool PatchHotSwapTranslatedDispatch(
   return true;
 }
 
-// Resolves the execution (target) gfx to translate toward. In presentation mode
-// an explicit HSA_HOTSWAP_TARGET/ISA_OVERRIDE is required; otherwise it defaults
-// to the device's physical execution ISA.
-inline bool ResolveHotSwapPresentationTarget(
-    bool presentation_mode, const std::string& target_env,
-    const std::string& override_env, const std::string& execution_gfx,
-    std::string& target_gfx, std::string& failure) {
-  target_gfx = !target_env.empty() ? target_env : override_env;
-  if (presentation_mode) {
-    if (target_gfx.empty() || target_gfx == "0" || target_gfx == "1") {
-      failure =
-          "HSA_HOTSWAP_TARGET must name the execution ISA when "
-          "HSA_HOTSWAP_PRESENT_ISA is set";
-      target_gfx.clear();
-      return false;
-    }
-    failure.clear();
-    return true;
-  }
-
-  if (target_gfx.empty() || target_gfx == "0" || target_gfx == "1")
-    target_gfx = execution_gfx;
-  failure.clear();
-  return true;
-}
-
 inline std::string ResolveLazyHotSwapCacheDir(const char* lazy_cache_dir,
                                               const char* shared_cache_dir) {
   if (lazy_cache_dir && lazy_cache_dir[0]) return lazy_cache_dir;

@@ -436,41 +436,71 @@ void TestSegmentSizePatchRefusesTargetLdsOverflow() {
 }
 
 void TestPresentationTargetRequiresExplicitTarget() {
-  std::string target;
+  const rocr::core::Isa* executionIsa = rocr::core::IsaRegistry::GetIsa(
+      "amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-");
+  EXPECT_TRUE(executionIsa != nullptr);
+  if (!executionIsa) return;
+
   std::string failure;
-  EXPECT_FALSE(rocr::amd::hsa::loader::ResolveHotSwapPresentationTarget(
-      true, "", "", "gfx942", target, failure));
-  EXPECT_TRUE(target.empty());
+  EXPECT_FALSE(rocr::hotswap::ValidateHotSwapPresentationTarget(
+      "", "", *executionIsa, failure));
   EXPECT_TRUE(failure.find("HSA_HOTSWAP_TARGET") != std::string::npos);
 
-  failure.clear();
-  EXPECT_FALSE(rocr::amd::hsa::loader::ResolveHotSwapPresentationTarget(
-      true, "", "1", "gfx942", target, failure));
-  EXPECT_TRUE(target.empty());
+  EXPECT_FALSE(rocr::hotswap::ValidateHotSwapPresentationTarget(
+      "1", "", *executionIsa, failure));
   EXPECT_TRUE(failure.find("HSA_HOTSWAP_TARGET") != std::string::npos);
 }
 
-void TestPresentationTargetUsesExplicitTarget() {
-  std::string target;
+void TestPresentationTargetMustMatchPhysicalExecutionIsa() {
+  const rocr::core::Isa* gfx942 = rocr::core::IsaRegistry::GetIsa(
+      "amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-");
+  const rocr::core::Isa* gfx950 = rocr::core::IsaRegistry::GetIsa(
+      "amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-");
+  EXPECT_TRUE(gfx942 != nullptr);
+  EXPECT_TRUE(gfx950 != nullptr);
+  if (!gfx942 || !gfx950) return;
+
   std::string failure;
-  EXPECT_TRUE(rocr::amd::hsa::loader::ResolveHotSwapPresentationTarget(
-      true, "gfx942", "", "gfx950", target, failure));
-  EXPECT_EQ(target, std::string("gfx942"));
+  EXPECT_TRUE(rocr::hotswap::ValidateHotSwapPresentationTarget(
+      "amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-", "", *gfx942,
+      failure));
   EXPECT_TRUE(failure.empty());
 
-  EXPECT_TRUE(rocr::amd::hsa::loader::ResolveHotSwapPresentationTarget(
-      true, "", "gfx950", "gfx942", target, failure));
-  EXPECT_EQ(target, std::string("gfx950"));
+  EXPECT_TRUE(rocr::hotswap::ValidateHotSwapPresentationTarget(
+      "", "gfx942", *gfx942, failure));
   EXPECT_TRUE(failure.empty());
+
+  // A single configured target cannot match both physical processors.
+  EXPECT_FALSE(rocr::hotswap::ValidateHotSwapPresentationTarget(
+      "gfx942", "", *gfx950, failure));
+  EXPECT_TRUE(failure.find("gfx942") != std::string::npos);
+  EXPECT_TRUE(failure.find("gfx950") != std::string::npos);
 }
 
-void TestNonPresentationTargetCanUseExecutionFallback() {
-  std::string target;
+void TestPresentationTargetRejectsInvalidIsa() {
+  const rocr::core::Isa* executionIsa = rocr::core::IsaRegistry::GetIsa(
+      "amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-");
+  EXPECT_TRUE(executionIsa != nullptr);
+  if (!executionIsa) return;
+
   std::string failure;
-  EXPECT_TRUE(rocr::amd::hsa::loader::ResolveHotSwapPresentationTarget(
-      false, "", "", "gfx942", target, failure));
-  EXPECT_EQ(target, std::string("gfx942"));
-  EXPECT_TRUE(failure.empty());
+  EXPECT_FALSE(rocr::hotswap::ValidateHotSwapPresentationTarget(
+      "not-an-isa", "", *executionIsa, failure));
+  EXPECT_TRUE(failure.find("not-an-isa") != std::string::npos);
+  EXPECT_TRUE(failure.find("not recognized") != std::string::npos);
+}
+
+void TestPresentationTargetRejectsFeatureMismatch() {
+  const rocr::core::Isa* executionIsa = rocr::core::IsaRegistry::GetIsa(
+      "amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-");
+  EXPECT_TRUE(executionIsa != nullptr);
+  if (!executionIsa) return;
+
+  std::string failure;
+  EXPECT_FALSE(rocr::hotswap::ValidateHotSwapPresentationTarget(
+      "gfx942:sramecc+:xnack+", "", *executionIsa, failure));
+  EXPECT_TRUE(failure.find("gfx942:sramecc+:xnack+") != std::string::npos);
+  EXPECT_TRUE(failure.find("gfx942:sramecc+:xnack-") != std::string::npos);
 }
 
 void TestLazyCacheDirUsesDedicatedOverride() {
@@ -539,8 +569,9 @@ int main() {
   TestSegmentSizePatchRefusesUnderflow();
   TestSegmentSizePatchRefusesTargetLdsOverflow();
   TestPresentationTargetRequiresExplicitTarget();
-  TestPresentationTargetUsesExplicitTarget();
-  TestNonPresentationTargetCanUseExecutionFallback();
+  TestPresentationTargetMustMatchPhysicalExecutionIsa();
+  TestPresentationTargetRejectsInvalidIsa();
+  TestPresentationTargetRejectsFeatureMismatch();
   TestLazyCacheDirUsesDedicatedOverride();
   TestLazyCacheDirUsesSharedSubdirectory();
   TestLazyCacheDirCanRemainDisabled();

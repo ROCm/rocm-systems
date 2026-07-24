@@ -104,6 +104,17 @@ namespace rocr {
 namespace AMD {
 const uint64_t CP_DMA_DATA_TRANSFER_CNT_MAX = (1 << 26);
 
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+static void RejectHotSwapPresentation(const std::string& reason) {
+  const std::string description =
+      "HotSwap presentation initialization failed: " + reason + ".";
+  fprintf(stderr, "HSA Error: %s\n", description.c_str());
+  // INVALID_ISA only skips this agent. Emit the diagnostic here and use a
+  // generic error to fail initialization globally.
+  throw AMD::hsa_exception(HSA_STATUS_ERROR, "");
+}
+#endif
+
 GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xnack_mode,
                    uint32_t index, core::DriverType driver_type)
     : GpuAgentInt(node, driver_type),
@@ -225,6 +236,14 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   }
 #else
   if (PresentIsaRequested) {
+    const std::string target_env = os::GetEnvVar("HSA_HOTSWAP_TARGET");
+    const std::string override_env =
+        os::GetEnvVar("HSA_HOTSWAP_ISA_OVERRIDE");
+    std::string target_failure;
+    if (!rocr::hotswap::ValidateHotSwapPresentationTarget(
+            target_env, override_env, *isa_, target_failure))
+      RejectHotSwapPresentation(target_failure);
+
     std::string PresentName(PresentIsa);
     if (PresentName.rfind("amdgcn-amd-amdhsa--", 0) != 0)
       PresentName = "amdgcn-amd-amdhsa--" + PresentName;
