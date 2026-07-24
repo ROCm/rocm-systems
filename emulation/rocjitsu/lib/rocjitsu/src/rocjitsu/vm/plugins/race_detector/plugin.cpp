@@ -195,8 +195,8 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
       oss << ", lane " << v.lane;
     oss << "]\n";
 
-    MarkedPc read_mark{pc, v.wave, v.lane};
-    oss << formatTrace(ws->trace, ws->disasm->to_map(), conflict, read_mark);
+    MarkedPc access_mark{pc, v.wave, v.lane};
+    oss << formatTrace(ws->trace, ws->disasm->to_map(), conflict, access_mark);
 
     {
       std::lock_guard<std::mutex> lock(report_mutex_);
@@ -213,12 +213,14 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
             kernel_name_iter == dispatch_kernel_names_.end()
                 ? KernelNames{kUnknownKernelIdentity, kUnknownKernelIdentity}
                 : kernel_name_iter->second;
-        sink().write(
-            std::format("RACE kernel={} symbol={} dispatch={} type={} reg={} wave={} lane={} "
-                        "wg={},{},{} "
-                        "conflict=unknown\n{}END_RACE\n",
-                        kernel_names.name, kernel_names.symbol, dispatch_id, space, v.index, v.wave,
-                        v.lane, v.workgroupId.x, v.workgroupId.y, v.workgroupId.z, oss.str()));
+        const char *access = v.isWrite ? "write" : "read";
+        sink().write(std::format(
+            "RACE kernel={} symbol={} dispatch={} type={} access={} reg={} wave={} "
+            "lane={} "
+            "wg={},{},{} "
+            "conflict=unknown\n{}END_RACE\n",
+            kernel_names.name, kernel_names.symbol, dispatch_id, space, access, v.index, v.wave,
+            v.lane, v.workgroupId.x, v.workgroupId.y, v.workgroupId.z, oss.str()));
       }
     }
   };
@@ -329,6 +331,14 @@ void RaceDetectorPlugin::onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint
   assert(s && s->race_state);
   uint32_t logical_reg = physical_reg - wf->vgpr_alloc().base;
   s->race_state->checkVgprReadLanes(static_cast<int>(logical_reg), lane_mask, byte_mask);
+}
+
+void RaceDetectorPlugin::onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
+                                                uint64_t lane_mask, uint8_t byte_mask) {
+  auto *s = get_state(wf);
+  assert(s && s->race_state);
+  uint32_t logical_reg = physical_reg - wf->vgpr_alloc().base;
+  s->race_state->checkVgprWriteLanes(static_cast<int>(logical_reg), lane_mask, byte_mask);
 }
 
 void RaceDetectorPlugin::onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) {
