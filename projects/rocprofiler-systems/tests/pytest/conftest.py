@@ -289,6 +289,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "decode",
         "videodecode",
         "jpegdecode",
+        "hipfile",
         "rocprof_binary",
         "rocprof_config",
         "xgmi",
