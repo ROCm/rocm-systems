@@ -21,7 +21,8 @@
     "ainic": {
       "NCCL_SOCKET_IFNAME": "eno0",
       "RCCL_AINIC_ROCE": "1",
-      "IONIC_LOCKFREE": "all"
+      "IONIC_LOCKFREE": "all",
+      "NCCL_IB_HCA": "rdma,roce"
     }
   },
   "build_configuration": {

@@ -21,6 +21,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -31,6 +32,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -41,6 +43,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -51,6 +54,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -61,6 +65,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -71,6 +76,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -81,6 +87,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -91,6 +98,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -101,6 +109,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -111,6 +120,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -121,6 +131,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -131,6 +142,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -141,6 +153,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -151,6 +164,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -161,6 +175,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -171,6 +186,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -181,6 +197,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -191,6 +208,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -201,6 +219,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -211,6 +230,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -221,6 +241,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -231,6 +252,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -240,6 +262,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -249,6 +272,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -274,6 +298,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -285,6 +311,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -296,6 +324,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -307,6 +337,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -318,6 +350,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -329,6 +363,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -340,6 +376,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -351,6 +389,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -362,6 +402,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -373,6 +415,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -384,6 +428,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -395,6 +441,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -406,6 +454,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -417,6 +467,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -428,6 +480,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -439,6 +493,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -450,6 +506,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -461,6 +519,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -472,6 +532,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -483,6 +545,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -494,6 +558,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -505,6 +571,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -516,6 +584,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -527,6 +597,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -538,6 +610,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -549,6 +623,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -560,6 +636,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -578,6 +656,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -589,6 +669,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -600,6 +682,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -610,6 +694,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -620,6 +706,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -631,6 +719,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -642,6 +732,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -652,6 +744,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -662,6 +755,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -673,6 +767,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -684,6 +780,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -695,6 +793,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -706,6 +806,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
   static const bool execute_registered_;
 };
 
@@ -715,6 +817,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -725,6 +828,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -735,6 +840,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -745,6 +852,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -755,6 +864,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -765,6 +876,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -775,6 +888,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -785,6 +900,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -795,6 +912,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand dsmem;
   static const bool execute_registered_;
 };
 
@@ -805,6 +924,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -815,6 +936,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -825,6 +948,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -835,6 +960,9 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -845,6 +973,9 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -855,6 +986,9 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -865,6 +999,9 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -875,6 +1012,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -885,6 +1023,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -895,6 +1034,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -905,6 +1045,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 
@@ -915,6 +1056,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
   static const bool execute_registered_;
 };
 

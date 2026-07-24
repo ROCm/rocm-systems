@@ -1359,11 +1359,21 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       scope.translation->virtual_lds_lowering.base_sgpr_spill_per_use =
           virtual_lds_base->spill_per_use;
       if (virtual_lds_base->spill_per_use) {
-        const uint32_t pointer_spill = kernel_context.reserve_persistent_semantic_spill_dwords(2);
+        const auto pointer_spill = kernel_context.reserve_persistent_semantic_spill_dwords(2);
+        if (!pointer_spill) {
+          auto failure = make_kernel_failure(
+              DiagnosticKind::ResourceLimit,
+              "virtual LDS backing-pointer spill offset overflows the 32-bit private segment",
+              layout.source_entry);
+          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                  text_relocations_begin, data_relocations_begin))
+            continue;
+          return leave_unchanged();
+        }
         kernel_context.virtual_lds_base_pointer_spilled = true;
-        kernel_context.virtual_lds_base_pointer_spill_offset = pointer_spill;
+        kernel_context.virtual_lds_base_pointer_spill_offset = *pointer_spill;
         scope.translation->virtual_lds_lowering.base_pointer_spilled = true;
-        scope.translation->virtual_lds_lowering.base_pointer_spill_offset = pointer_spill;
+        scope.translation->virtual_lds_lowering.base_pointer_spill_offset = *pointer_spill;
       }
       if (!append_virtual_lds_entry_prologue(*scope.translation, guest_arch_, host_arch_)) {
         auto failure = make_kernel_failure(

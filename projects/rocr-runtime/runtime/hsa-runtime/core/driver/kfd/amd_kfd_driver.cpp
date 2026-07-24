@@ -42,11 +42,13 @@
 
 #include "core/inc/amd_kfd_driver.h"
 
+#if defined(__linux__) || defined(__FreeBSD__)
+    #include <sys/ioctl.h>
+    #include <link.h>
+#endif
+
 #if defined(__linux__)
-#include <amdgpu_drm.h>
-#include <link.h>
-#include <sys/ioctl.h>
-#include <fcntl.h>
+    #include <amdgpu_drm.h>
 #endif
 
 #include "hsakmt/hsakmt.h"

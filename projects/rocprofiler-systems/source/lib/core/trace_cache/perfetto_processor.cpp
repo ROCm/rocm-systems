@@ -866,7 +866,8 @@ perfetto_processor_t::handle(const region_sample& _rs)
          try_category(category::rocm_marker_api{}) ||
          try_category(category::rocm_ompt_api{}) || try_category(category::rocm_rccl{}) ||
          try_category(category::rocm_rocdecode_api{}) ||
-         try_category(category::rocm_rocjpeg_api{}) || try_category(category::ucx{}) ||
+         try_category(category::rocm_rocjpeg_api{}) ||
+         try_category(category::rocm_rocshmem_api{}) || try_category(category::ucx{}) ||
          try_category(category::shmem{}) || try_category(category::vaapi{}));
 
     if(!dispatched)
