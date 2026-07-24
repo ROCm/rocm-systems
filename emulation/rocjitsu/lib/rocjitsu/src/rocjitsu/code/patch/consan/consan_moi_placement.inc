@@ -1183,41 +1183,36 @@ struct MoiResourcePlanningState {
   return owners;
 }
 
-[[nodiscard]] std::optional<std::vector<const MoiKernelResourceContext *>>
+struct MoiScalarOwnerContextResolution {
+  std::vector<const MoiKernelResourceContext *> contexts;
+  uint32_t tail_floor = 0;
+};
+
+[[nodiscard]] std::optional<MoiScalarOwnerContextResolution>
 resolve_moi_scalar_owner_contexts(const MoiResourcePlanningState &state,
                                   std::span<const uint64_t> owners) {
-  // The callers place state only for a nonempty, fully resolved owner set.
-  // Empty owners and any planning inconsistency therefore share the explicit
-  // fail-closed nullopt contract. Owners and contexts come from the same
-  // parsed ConSanResult, so descriptor-resolution failure is an internal
-  // consistency guard rather than a separately inducible code-object state.
-  if (!state.valid || owners.empty())
+  std::vector<consan_detail::ScalarOwnerContextSummary> summaries;
+  summaries.reserve(state.contexts.size());
+  for (const MoiKernelResourceContext &context : state.contexts) {
+    summaries.push_back({
+        .descriptor_file_offset =
+            context.kernel ? std::optional{context.kernel->descriptor_file_offset} : std::nullopt,
+        .current_sgpr_count = context.current_sgpr_count,
+        .max_referenced_sgpr_count = context.max_referenced_sgpr_count,
+        .descriptor_valid = context.descriptor_valid,
+    });
+  }
+  const auto resolved =
+      consan_detail::resolve_scalar_owner_contexts(state.valid, summaries, owners);
+  if (!resolved)
     return std::nullopt;
-  std::vector<const MoiKernelResourceContext *> contexts;
-  contexts.reserve(owners.size());
-  for (uint64_t descriptor_offset : owners) {
-    const auto context =
-        std::ranges::find_if(state.contexts, [&](const MoiKernelResourceContext &candidate) {
-          return candidate.kernel != nullptr &&
-                 candidate.kernel->descriptor_file_offset == descriptor_offset;
-        });
-    if (context == state.contexts.end() || context->kernel == nullptr ||
-        !context->descriptor_valid) {
-      return std::nullopt;
-    }
-    contexts.push_back(&*context);
-  }
-  return contexts;
-}
 
-[[nodiscard]] uint32_t
-moi_scalar_persistent_tail_floor(std::span<const MoiKernelResourceContext *const> contexts) {
-  uint32_t first = 0u;
-  for (const MoiKernelResourceContext *context : contexts) {
-    first = std::max<uint32_t>(
-        first, std::max<uint16_t>(context->max_referenced_sgpr_count, context->current_sgpr_count));
-  }
-  return first;
+  MoiScalarOwnerContextResolution result;
+  result.contexts.reserve(resolved->context_indices.size());
+  for (size_t context_index : resolved->context_indices)
+    result.contexts.push_back(&state.contexts[context_index]);
+  result.tail_floor = resolved->tail_floor;
+  return result;
 }
 
 [[nodiscard]] bool moi_relocatable_host_preserves_transient_sgprs(
@@ -3195,12 +3190,13 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
       const std::vector<uint64_t> scalar_owners = moi_scalar_owner_descriptors(result);
       const auto resolved_contexts = resolve_moi_scalar_owner_contexts(scalar_state, scalar_owners);
       const std::vector<const MoiKernelResourceContext *> scalar_contexts =
-          resolved_contexts.value_or(std::vector<const MoiKernelResourceContext *>{});
+          resolved_contexts ? resolved_contexts->contexts
+                            : std::vector<const MoiKernelResourceContext *>{};
       // Per-context allocation floors and VCC checks are intentionally
       // stricter than the former plan-min scan. Resolution failure leaves the
       // candidate range empty so placement fails closed.
-      const uint32_t first = resolved_contexts ? moi_scalar_persistent_tail_floor(scalar_contexts)
-                                               : moi_ordinary_sgpr_limit(arch);
+      const uint32_t first =
+          resolved_contexts ? resolved_contexts->tail_floor : moi_ordinary_sgpr_limit(arch);
       const auto unavailable = [&](uint16_t base) {
         if ((options.moi_exec_save_sgpr &&
              range_overlaps(base, scalar_count, *options.moi_exec_save_sgpr,
@@ -3456,7 +3452,8 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
                 "ConSan MOI could not resolve every scalar-state owner descriptor");
             return false;
           }
-          const std::vector<const MoiKernelResourceContext *> &scalar_contexts = *resolved_contexts;
+          const std::vector<const MoiKernelResourceContext *> &scalar_contexts =
+              resolved_contexts->contexts;
           std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch;
           prologue_scratch.reserve(scalar_contexts.size());
           for (const MoiKernelResourceContext *context : scalar_contexts) {
@@ -3498,7 +3495,7 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
           // allocation, so descriptor growth cannot expose the new tuple to
           // the guest. The candidate filter below separately preserves the
           // physical-VCC location before and after that growth.
-          const uint32_t first = moi_scalar_persistent_tail_floor(scalar_contexts);
+          const uint32_t first = resolved_contexts->tail_floor;
           const uint16_t scalar_limit = moi_ordinary_sgpr_limit(arch);
           const auto unavailable = [&](uint16_t base) {
             if ((options.moi_exec_save_sgpr &&

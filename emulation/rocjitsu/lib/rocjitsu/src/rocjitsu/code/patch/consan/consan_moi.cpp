@@ -53,6 +53,31 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 
+std::optional<consan_detail::ScalarOwnerContextResolution>
+consan_detail::resolve_scalar_owner_contexts(bool planning_state_valid,
+                                             std::span<const ScalarOwnerContextSummary> contexts,
+                                             std::span<const uint64_t> owners) {
+  if (!planning_state_valid || owners.empty())
+    return std::nullopt;
+
+  ScalarOwnerContextResolution resolution;
+  resolution.context_indices.reserve(owners.size());
+  for (uint64_t descriptor_offset : owners) {
+    const auto context = std::ranges::find(contexts, descriptor_offset,
+                                           &ScalarOwnerContextSummary::descriptor_file_offset);
+    if (context == contexts.end() || !context->descriptor_file_offset ||
+        !context->descriptor_valid) {
+      return std::nullopt;
+    }
+    resolution.context_indices.push_back(
+        static_cast<size_t>(std::distance(contexts.begin(), context)));
+    resolution.tail_floor =
+        std::max<uint32_t>(resolution.tail_floor, std::max(context->max_referenced_sgpr_count,
+                                                           context->current_sgpr_count));
+  }
+  return resolution;
+}
+
 bool consan_detail::validate_scalar_state_temporaries(const ConSanOptions &options,
                                                       std::string_view consumer,
                                                       std::vector<std::string> &errors) {

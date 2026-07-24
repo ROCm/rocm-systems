@@ -7,15 +7,14 @@
 namespace rocjitsu {
 namespace {
 
-TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
-  {
-    ConSanOptions disabled;
-    std::vector<std::string> errors;
-    EXPECT_TRUE(
-        consan_detail::validate_scalar_state_temporaries(disabled, "test consumer", errors));
-    EXPECT_TRUE(errors.empty());
-  }
+TEST(ConSanMoi, ScalarPersistentTemporaryValidationIsNoopWhenDisabled) {
+  ConSanOptions disabled;
+  std::vector<std::string> errors;
+  EXPECT_TRUE(consan_detail::validate_scalar_state_temporaries(disabled, "test consumer", errors));
+  EXPECT_TRUE(errors.empty());
+}
 
+TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
   for (uint32_t present_mask = 0u; present_mask < 3u; ++present_mask) {
     SCOPED_TRACE(present_mask);
     ConSanOptions options;
@@ -42,6 +41,40 @@ TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
   std::vector<std::string> errors;
   EXPECT_TRUE(consan_detail::validate_scalar_state_temporaries(valid, "test consumer", errors));
   EXPECT_TRUE(errors.empty());
+}
+
+TEST(ConSanMoi, ScalarOwnerContextResolutionFailsClosedAndComputesTailFloor) {
+  using Summary = consan_detail::ScalarOwnerContextSummary;
+  const std::array contexts = {
+      Summary{.descriptor_file_offset = 0x10u,
+              .current_sgpr_count = 40u,
+              .max_referenced_sgpr_count = 48u,
+              .descriptor_valid = true},
+      Summary{.descriptor_file_offset = 0x20u,
+              .current_sgpr_count = 80u,
+              .max_referenced_sgpr_count = 72u,
+              .descriptor_valid = true},
+  };
+  constexpr std::array<uint64_t, 2> kOwners = {0x20u, 0x10u};
+
+  const auto resolved = consan_detail::resolve_scalar_owner_contexts(true, contexts, kOwners);
+
+  ASSERT_TRUE(resolved);
+  EXPECT_EQ(resolved->context_indices, (std::vector<size_t>{1u, 0u}));
+  EXPECT_EQ(resolved->tail_floor, 80u);
+
+  EXPECT_FALSE(consan_detail::resolve_scalar_owner_contexts(false, contexts, kOwners));
+  EXPECT_FALSE(
+      consan_detail::resolve_scalar_owner_contexts(true, contexts, std::span<const uint64_t>{}));
+  constexpr std::array<uint64_t, 1> kMissingOwner = {0x30u};
+  EXPECT_FALSE(consan_detail::resolve_scalar_owner_contexts(true, contexts, kMissingOwner));
+
+  std::array invalid_contexts = contexts;
+  invalid_contexts[1].descriptor_valid = false;
+  EXPECT_FALSE(consan_detail::resolve_scalar_owner_contexts(true, invalid_contexts, kOwners));
+  invalid_contexts[1].descriptor_valid = true;
+  invalid_contexts[1].descriptor_file_offset = std::nullopt;
+  EXPECT_FALSE(consan_detail::resolve_scalar_owner_contexts(true, invalid_contexts, kOwners));
 }
 
 TEST(ConSanMoi, Cdna4HeterogeneousOwnersKeepUsableComponentAcrossMoiEngines) {
