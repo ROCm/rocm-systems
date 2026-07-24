@@ -1397,6 +1397,56 @@ TEST(HsaHooksUnitTest, DoesNotDetectNonGfx1250AgentAsA0) {
   EXPECT_FALSE(rj_test_agent_is_gfx1250_a0(kHostAgent.handle));
 }
 
+// Read an agent's ASIC revision through the (possibly patched) core table.
+uint32_t query_asic_revision(FakeApiTable &api, hsa_agent_t agent) {
+  uint32_t revision = 0xFFFFFFFFu;
+  EXPECT_EQ(api.core.hsa_agent_get_info_fn(
+                agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION), &revision),
+            HSA_STATUS_SUCCESS);
+  return revision;
+}
+
+// In auto-A0 mode the hook overlays a synthetic B0 ASIC revision on a detected
+// A0 gfx1250 agent so the stack above selects B0 code objects, while leaving
+// non-A0 agents untouched.
+TEST(HsaHooksUnitTest, PresentsSyntheticB0RevisionForA0AgentInAutoA0Mode) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  OnUnload();
+  clear_runtime_config_path(); // no config -> auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+
+  // Real A0 agent (revision 0) is presented as B0 (nonzero synthetic revision).
+  g_fake_gfx1250_asic_revision = 0;
+  const uint32_t presented = query_asic_revision(api, kGfx1250Agent);
+  EXPECT_NE(presented, 0u);
+
+  // A gfx1250 agent that is not A0 (already B0) is forwarded unchanged.
+  g_fake_gfx1250_asic_revision = 7;
+  EXPECT_EQ(query_asic_revision(api, kGfx1250Agent), 7u);
+
+  g_fake_gfx1250_asic_revision = 0;
+  OnUnload();
+}
+
+// The overlay is auto-A0 only: in simulation mode (config present) even an A0
+// gfx1250 agent's revision is forwarded unchanged.
+TEST(HsaHooksUnitTest, DoesNotPresentB0RevisionInSimulationMode) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  OnUnload();
+  write_runtime_config_path(); // config present -> simulation mode
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  g_fake_gfx1250_asic_revision = 0;
+  EXPECT_EQ(query_asic_revision(api, kGfx1250Agent), 0u);
+}
+
 TEST(HsaHooksUnitTest, VirtualLdsSymbolInfoReportsNormalDescriptorUntilPacketFallback) {
   using rocr::llvm::amdhsa::kernel_descriptor_t;
 

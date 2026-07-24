@@ -860,6 +860,9 @@ hsa_status_t HSA_API rj_agent_iterate_isas(hsa_agent_t agent,
                                            hsa_status_t (*callback)(hsa_isa_t isa, void *data),
                                            void *data);
 
+/// @brief Present a synthetic B0 identity for A0 agents in auto-A0 mode.
+hsa_status_t HSA_API rj_agent_get_info(hsa_agent_t agent, hsa_agent_info_t attribute, void *value);
+
 /// @brief Create real host queues when the application asks for a guest queue.
 hsa_status_t HSA_API rj_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
                                      void (*callback)(hsa_status_t, hsa_queue_t *, void *),
@@ -1057,7 +1060,6 @@ void clear_virtual_lds_dispatch_queues();
 /// - `field` is the HSA table function-pointer field to save.
 /// - `type` is the exact function-pointer type stored in `original_<name>_`.
 #define RJ_HSA_SAVED_ONLY_ENTRIES(X)                                                               \
-  X(agent_get_info, core_, true, hsa_agent_get_info_fn, decltype(hsa_agent_get_info) *)            \
   X(isa_get_info_alt, core_, true, hsa_isa_get_info_alt_fn, decltype(hsa_isa_get_info_alt) *)      \
   X(queue_load_write_index_relaxed, core_, true, hsa_queue_load_write_index_relaxed_fn,            \
     decltype(hsa_queue_load_write_index_relaxed) *)                                                \
@@ -1089,6 +1091,8 @@ void clear_virtual_lds_dispatch_queues();
     decltype(hsa_iterate_agents) *)                                                                \
   X(agent_iterate_isas, core_, true, false, hsa_agent_iterate_isas_fn, rj_agent_iterate_isas,      \
     decltype(hsa_agent_iterate_isas) *)                                                            \
+  X(agent_get_info, core_, true, false, hsa_agent_get_info_fn, rj_agent_get_info,                  \
+    decltype(hsa_agent_get_info) *)                                                                \
   X(queue_create, core_, true, false, hsa_queue_create_fn, rj_queue_create,                        \
     decltype(hsa_queue_create) *)                                                                  \
   X(queue_destroy, core_, true, false, hsa_queue_destroy_fn, rj_queue_destroy,                     \
@@ -1456,6 +1460,16 @@ RjHsaLayer &layer() {
     return false;
   return asic_revision == 0;
 }
+
+/// @brief Synthetic ASIC revision presented for a B0 gfx1250 identity.
+///
+/// @details Auto-A0 presents a B0 gfx1250 identity on the real A0 agent so the
+/// stack above selects and loads B0 code objects, which the hook then translates
+/// to A0. A0 and B0 share the gfx1250 ISA string, so only the ASIC revision
+/// distinguishes them. PLACEHOLDER: the real B0 revision must be read from B0
+/// silicon; 1 is used as "the first stepping after A0" until confirmed in
+/// hardware testing (paired with the A0==0 assumption in agent_is_gfx1250_a0).
+constexpr uint32_t kSyntheticGfx1250B0AsicRevision = 1;
 
 /// @brief Parse a uint32_t from a NUL-terminated sysfs text value.
 [[nodiscard]] bool parse_u32_text(const char *text, uint32_t *out) {
@@ -3196,6 +3210,31 @@ hsa_status_t HSA_API rj_agent_iterate_isas(hsa_agent_t agent,
   log_message(kLogDebug, "agent_iterate_isas agent=%llu",
               static_cast<unsigned long long>(agent.handle));
   return original(agent, callback, data);
+}
+
+hsa_status_t HSA_API rj_agent_get_info(hsa_agent_t agent, hsa_agent_info_t attribute, void *value) {
+  auto *original = layer().agent_get_info();
+  if (!original)
+    return HSA_STATUS_ERROR;
+
+  // Auto-A0 presents a B0 gfx1250 identity on the real A0 agent so the stack
+  // above selects and loads B0 code objects (which the hook then translates to
+  // A0). Only the ASIC revision distinguishes A0 from B0 -- the ISA string and
+  // every other query stay the real agent's values, and the real handle is used
+  // for all execution. Overlay only the revision, and only for detected A0
+  // agents in auto-A0 mode; everything else forwards unchanged.
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION) &&
+      value != nullptr) {
+    auto config = layer().config();
+    if (config && config->mode == HookMode::kAutoA0 && agent_is_gfx1250_a0(agent)) {
+      *static_cast<uint32_t *>(value) = kSyntheticGfx1250B0AsicRevision;
+      log_message(kLogDebug, "agent_get_info presenting B0 asic_revision for A0 agent=%llu",
+                  static_cast<unsigned long long>(agent.handle));
+      return HSA_STATUS_SUCCESS;
+    }
+  }
+
+  return original(agent, attribute, value);
 }
 
 hsa_status_t HSA_API rj_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
