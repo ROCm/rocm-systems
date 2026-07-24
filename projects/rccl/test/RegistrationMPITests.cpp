@@ -680,6 +680,12 @@ protected:
         ASSERT_GE(numHostSegments, 0);
         ASSERT_LE(numHostSegments, numSegments);
 
+#if ROCM_VERSION < 71200
+        // hipMemLocationTypeHost is unavailable before ROCm 7.12; leave buf.totalSize 0
+        // so callers GTEST_SKIP() instead of failing at compile or runtime.
+        if (numHostSegments > 0) return;
+#endif
+
         hipMemAllocationProp devProp = {};
         devProp.type                = hipMemAllocationTypePinned;
         devProp.location.type       = hipMemLocationTypeDevice;
@@ -688,7 +694,11 @@ protected:
 
         hipMemAllocationProp hostProp = {};
         hostProp.type                = hipMemAllocationTypePinned;
+#if ROCM_VERSION >= 71200
         hostProp.location.type       = hipMemLocationTypeHost;
+#else
+        hostProp.location.type       = hipMemLocationTypeDevice; // unused (numHostSegments == 0)
+#endif
         hostProp.location.id         = 0;
         hostProp.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
 
