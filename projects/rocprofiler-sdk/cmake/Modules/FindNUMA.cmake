@@ -21,13 +21,11 @@
 find_path(
     NUMA_INCLUDE_DIR
     NAMES numa.h
-    PATHS ${ROCM_PATH}/lib/rocm_sysdeps/include $ENV{ROCM_PATH}/lib/rocm_sysdeps/include
-)
+    PATHS ${ROCM_PATH}/lib/rocm_sysdeps/include $ENV{ROCM_PATH}/lib/rocm_sysdeps/include)
 find_library(
     NUMA_LIBRARIES
     NAMES numa
-    PATHS ${ROCM_PATH}/lib/rocm_sysdeps/lib $ENV{ROCM_PATH}/lib/rocm_sysdeps/lib
-)
+    PATHS ${ROCM_PATH}/lib/rocm_sysdeps/lib $ENV{ROCM_PATH}/lib/rocm_sysdeps/lib)
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(NUMA DEFAULT_MSG NUMA_LIBRARIES NUMA_INCLUDE_DIR)
@@ -35,11 +33,8 @@ find_package_handle_standard_args(NUMA DEFAULT_MSG NUMA_LIBRARIES NUMA_INCLUDE_D
 if(NUMA_FOUND AND NOT TARGET numa::numa)
     add_library(numa::numa UNKNOWN IMPORTED)
     set_target_properties(
-        numa::numa
-        PROPERTIES
-            IMPORTED_LOCATION "${NUMA_LIBRARIES}"
-            INTERFACE_INCLUDE_DIRECTORIES "${NUMA_INCLUDE_DIR}"
-    )
+        numa::numa PROPERTIES IMPORTED_LOCATION "${NUMA_LIBRARIES}"
+                              INTERFACE_INCLUDE_DIRECTORIES "${NUMA_INCLUDE_DIR}")
 endif()
 
 mark_as_advanced(NUMA_LIBRARIES NUMA_INCLUDE_DIR)
