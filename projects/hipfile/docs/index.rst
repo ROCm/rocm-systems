@@ -20,13 +20,13 @@ hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
       * :doc:`Install hipFile <install/install>`
       * :doc:`Build hipFile from source <install/build-from-source>`
       * :doc:`Install the hipFile Python bindings <install/python-bindings>`
-      * :doc:`Check system compatibility <install/checking-system-compatibility>`
 
 .. grid:: 2
    :gutter: 3
 
    .. grid-item-card:: How to
 
+      * :doc:`Check for fastpath compatibility <how-to/checking-system-compatibility>`
       * :doc:`Register a file and GPU buffer for GPU I/O <how-to/register-file-and-buffer>`
       * :doc:`Benchmark hipFile with fio <how-to/use-with-fio>`
       * :doc:`Use the hipFile Python API <how-to/use-python-api>`
