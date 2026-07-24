@@ -236,6 +236,7 @@ if(BUILD_TESTS)
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
       IommuPassthrough_test.cpp
+      MatchSubnetTests.cpp
       MiscTests.cpp
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
