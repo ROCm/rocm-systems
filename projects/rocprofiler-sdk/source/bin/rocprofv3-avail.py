@@ -605,7 +605,7 @@ def main(argv=None):
     if args.command:
         try:
             args.func(args)
-        except OSError as error:
+        except (AttributeError, OSError) as error:
             avail.fatal_error(f"Unable to load rocprofv3-avail library: {error}")
 
 

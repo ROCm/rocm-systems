@@ -1802,7 +1802,7 @@ def run(app_args, args, **kwargs):
                 output_formatter,
                 app_env,
             )
-        except OSError as error:
+        except (AttributeError, OSError) as error:
             fatal_error(f"Could not resolve list-avail output path: {error}")
 
     if not args.output_format:
