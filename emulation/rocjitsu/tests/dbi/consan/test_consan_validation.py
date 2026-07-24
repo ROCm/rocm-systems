@@ -238,7 +238,7 @@ class ConSanValidationTest(unittest.TestCase):
             ),
         )
 
-    def test_streamk_filters_pin_exact_ordering_oracles_and_fault_fallback(
+    def test_streamk_fault_commands_resolve_native_executables_and_ordering_oracles(
         self,
     ) -> None:
         expected_filters = {
@@ -273,6 +273,8 @@ class ConSanValidationTest(unittest.TestCase):
                 ),
             },
         }
+        # Reconstruct paths independently of the override tables so this test
+        # catches a wrong target-resolved Stream-K executable spelling.
         executable_prefixes = {
             "gfx1201": "hip-moi-build/tests/hip_moi_instrumented_rdna4_wmma_",
             "gfx950": "hip-moi-build/tests/hip_moi_instrumented_cdna4_mfma_",
