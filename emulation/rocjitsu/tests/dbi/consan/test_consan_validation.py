@@ -192,6 +192,18 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["jakub-attention"]["relative_path"],
             "hip-moi-build/tests/hip_moi_reference_cdna4_jakub_matmul",
         )
+        self.assertEqual(
+            workloads["streamk-arrival"]["fault_families"],
+            ("atomic-weaken-order",),
+        )
+        self.assertEqual(
+            workloads["pytorch-scatter-reduce"]["fault_families"],
+            ("atomic-weaken-order",),
+        )
+        self.assertEqual(
+            workloads["pytorch-torch-histc"]["fault_families"],
+            ("barrier-drop", "atomic-weaken-order"),
+        )
         native_spellings = json.dumps(
             [
                 workloads[workload_id]
@@ -226,6 +238,8 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["streamk-arrival"]["fault_families"],
             ("atomic-weaken-order",),
         )
+        self.assertEqual(workloads["d128-pressure"]["overhead_processes"], 1)
+        self.assertEqual(workloads["clip-bf16"]["overhead_processes"], 1)
         native_spellings = json.dumps(
             [
                 workloads[workload_id]
@@ -280,6 +294,10 @@ class ConSanValidationTest(unittest.TestCase):
                 "hip-moi-build-gfx1250-tests/tests/"
                 "hip_moi_reference_gfx1250_jakub_matmul"
             ),
+        )
+        self.assertEqual(
+            workloads["tp1-prefill"]["fault_families"],
+            ("barrier-move",),
         )
 
     def test_streamk_fault_commands_resolve_native_executables_and_ordering_oracles(
@@ -562,6 +580,20 @@ class ConSanValidationTest(unittest.TestCase):
             workload.overhead_processes,
         )
 
+    def test_gfx942_explain_uses_the_effective_outer_process_count(self) -> None:
+        audit = validation._explain_contract(
+            Path("/workspace"),
+            "gfx942",
+            ("d128-pressure", "clip-bf16"),
+            validation.PROFILE_IDS,
+            None,
+            allow_reference=False,
+        )
+        for workload in audit["workloads"]:
+            with self.subTest(workload=workload["id"]):
+                self.assertEqual(workload["commands"]["clean"]["processes"], 1)
+                self.assertEqual(workload["commands"]["overhead"]["processes"], 1)
+
     def test_active_architecture_qwen_overhead_uses_one_repetition(self) -> None:
         workload = validation.WORKLOAD_BY_ID["qwen-prefill"]
         for target in ("gfx942", "gfx950", "gfx1250"):
@@ -589,19 +621,27 @@ class ConSanValidationTest(unittest.TestCase):
     def test_native_cdna_scrubs_software_model_environment_without_changing_gfx1250(
         self,
     ) -> None:
-        workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]
         model_environment = {
             name: f"configured-{name}" for name in validation.SOFTWARE_MODEL_ENVIRONMENT
         }
         with mock.patch.dict(os.environ, model_environment, clear=False):
             native_cdna = {
                 target: validation._clean_environment(
-                    None, workload, Path("/workspace/hook.so"), target
+                    None,
+                    validation.WORKLOAD_BY_ID[workload_id],
+                    Path("/workspace/hook.so"),
+                    target,
                 )
-                for target in ("gfx942", "gfx950")
+                for target, workload_id in (
+                    ("gfx942", "qwen-prefill"),
+                    ("gfx950", "pytorch-torch-mode"),
+                )
             }
             gfx1250 = validation._clean_environment(
-                None, workload, Path("/workspace/hook.so"), "gfx1250"
+                None,
+                validation.WORKLOAD_BY_ID["pytorch-torch-mode"],
+                Path("/workspace/hook.so"),
+                "gfx1250",
             )
         for target, environment in native_cdna.items():
             with self.subTest(target=target):
