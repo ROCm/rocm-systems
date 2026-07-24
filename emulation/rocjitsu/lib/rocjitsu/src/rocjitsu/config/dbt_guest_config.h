@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace rocjitsu::fb {
 struct DbtGuestConfig;
@@ -39,7 +40,7 @@ enum class DbtSiliconRevision {
 /// @brief Host target selected for DBT translation and execution.
 struct DbtHostConfig {
   std::string isa;     ///< Host ISA used for DBT output and ROCR execution.
-  uint32_t gpu_id = 0; ///< Host KFD topology gpu_id; 0 matches topology to isa.
+  uint32_t gpu_id = 0; ///< Host KFD topology gpu_id; 0 selects the first ISA match.
   DbtExecutionBackend backend = DbtExecutionBackend::Hardware; ///< Hardware or simulator execution.
   std::string simulator_config_path; ///< Optional external simulator host config.
 };
@@ -62,6 +63,12 @@ struct DbtGuestConfig {
   DbtSiliconRevision guest_revision = DbtSiliconRevision::Unspecified;
   /// @brief Host silicon revision for DBT output; Unspecified otherwise.
   DbtSiliconRevision host_revision = DbtSiliconRevision::Unspecified;
+};
+
+/// @brief Parsed per-invocation config handoff shared by child runtime layers.
+struct DbtRuntimeConfigHandoff {
+  std::string config_path;
+  std::optional<std::string> resolved_gpu_id;
 };
 
 /// @brief Resolve the simulator host config selected by a DBT guest config.
@@ -95,6 +102,17 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest);
 /// sections.
 /// @throws std::runtime_error on file I/O, parse errors, or invalid config.
 DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path);
+
+/// @brief Apply the launcher's resolved GPU to an automatic DBT host config.
+/// @details Child processes read this value from the second line of the
+/// per-invocation config handoff. Explicit nonzero config values remain authoritative.
+/// @throws std::runtime_error when @p value is not a nonzero KFD gpu_id.
+void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view value,
+                                    std::string_view source);
+
+/// @brief Parse the config path and optional resolved GPU ID from a runtime handoff.
+/// @returns std::nullopt when the first line does not contain a config path.
+std::optional<DbtRuntimeConfigHandoff> parse_dbt_runtime_config_handoff(std::string_view contents);
 
 /// @brief Load only dbt_guest from the rocjitsu child-process runtime config file.
 ///

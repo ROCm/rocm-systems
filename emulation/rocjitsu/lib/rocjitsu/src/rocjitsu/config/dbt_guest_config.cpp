@@ -10,6 +10,7 @@
 #include "flatbuffers/idl.h"
 #include "simulation_config_generated.h"
 
+#include <charconv>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -150,6 +151,39 @@ DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
       false);
 }
 
+void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view value,
+                                    std::string_view source) {
+  if (!config.enabled || config.host.gpu_id != 0)
+    return;
+
+  uint32_t gpu_id = 0;
+  const char *begin = value.data();
+  const char *end = begin + value.size();
+  auto [ptr, error] = std::from_chars(begin, end, gpu_id);
+  if (error != std::errc{} || ptr != end || gpu_id == 0)
+    throw std::runtime_error(std::string(source) + " must contain a nonzero KFD gpu_id");
+  config.host.gpu_id = gpu_id;
+}
+
+std::optional<DbtRuntimeConfigHandoff> parse_dbt_runtime_config_handoff(std::string_view contents) {
+  const size_t first_newline = contents.find('\n');
+  std::string_view config_path = contents.substr(0, first_newline);
+  if (!config_path.empty() && config_path.back() == '\r')
+    config_path.remove_suffix(1);
+  if (config_path.empty())
+    return std::nullopt;
+
+  std::optional<std::string> resolved_gpu_id;
+  if (first_newline != std::string_view::npos) {
+    std::string_view second_line = contents.substr(first_newline + 1);
+    if (!second_line.empty()) {
+      const size_t second_newline = second_line.find_first_of("\r\n");
+      resolved_gpu_id = second_line.substr(0, second_newline);
+    }
+  }
+  return DbtRuntimeConfigHandoff{std::string(config_path), std::move(resolved_gpu_id)};
+}
+
 std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
   // Try the handoff tiers in priority order, opening the first that exists:
   //   1. $ROCJITSU_INVOCATION_DIR/config_path — the launcher exports this dir before
@@ -176,11 +210,15 @@ std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
   if (!file.is_open())
     return std::nullopt;
 
-  std::string path;
-  std::getline(file, path);
-  if (path.empty())
+  const std::string contents((std::istreambuf_iterator<char>(file)),
+                             std::istreambuf_iterator<char>());
+  std::optional<DbtRuntimeConfigHandoff> handoff = parse_dbt_runtime_config_handoff(contents);
+  if (!handoff)
     return std::nullopt;
-  return load_dbt_guest_config_from_file(path);
+  DbtGuestConfig config = load_dbt_guest_config_from_file(handoff->config_path);
+  if (handoff->resolved_gpu_id)
+    apply_resolved_dbt_host_gpu_id(config, *handoff->resolved_gpu_id, "runtime config handoff");
+  return config;
 }
 
 } // namespace config

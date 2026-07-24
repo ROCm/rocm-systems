@@ -26,6 +26,16 @@ running on A0 host) is rejected unless both revisions are set, because the
 required A0 workarounds cannot otherwise be selected. For every other target the
 machine ID already identifies the silicon, so these fields stay `unspecified`.
 
+For either execution backend, `host_gpu_id: 0` selects the first `host_isa`
+match in the effective ROCm-visible device order for that backend's topology.
+The launcher applies
+`ROCR_VISIBLE_DEVICES` first, including numeric reordering and UUID prefixes,
+then `HIP_VISIBLE_DEVICES` or its `CUDA_VISIBLE_DEVICES` fallback. It atomically
+publishes the config path and resolved KFD GPU ID in the per-invocation handoff,
+so the KFD interposer and HSA hook consume one choice without a private
+environment variable. Set a nonzero `host_gpu_id` to pin a particular GPU; the
+launcher rejects the pin if standard ROCm visibility settings hide that device.
+
 ## High Level Flow
 
 User:
@@ -61,9 +71,15 @@ Underneath:
    keeps applications that choose the first GPU on the guest path while leaving
    the host agent alive for execution.
 
-   If `ROCR_VISIBLE_DEVICES` is set, the launcher expands it so the selected
-   host ordinal and appended guest ordinal both remain visible to ROCR before
-   the HSA hook applies this public shadowing.
+   If `ROCR_VISIBLE_DEVICES` is set, the launcher preserves its selected order
+   and expands it with the appended guest ordinal so both sides remain visible
+   internally before the HSA hook applies public shadowing. Because CLR applies
+   `HIP_VISIBLE_DEVICES` or `CUDA_VISIBLE_DEVICES` after HSA agent iteration,
+   the launcher normalizes an existing client selector to equivalent numeric
+   ordinals after ROCR filtering. This keeps host UUID selection meaningful
+   after the host's public identity is replaced by the guest. OpenCL's
+   `GPU_DEVICE_ORDINAL` remains owned by the client runtime and is not used to
+   choose the DBT host.
 
 2. Guest-facing discovery stays guest-shaped.
 

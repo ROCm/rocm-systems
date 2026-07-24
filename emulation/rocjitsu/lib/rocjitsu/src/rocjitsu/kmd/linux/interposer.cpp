@@ -160,12 +160,12 @@ int kfd_ioctl_ret(int r) {
   return r;
 }
 
-/// @brief Read the child-process rocjitsu config path from @p cfg_file.
+/// @brief Read the child-process rocjitsu config handoff from @p cfg_file.
 ///
-/// @details The launcher writes the config path to a runtime file (per-PID
-/// invocation directory) that the interposer reads back for both local
-/// simulation and DBT guest mode.
-std::optional<std::string> child_config_path(const std::string &cfg_file) {
+/// @details The first line is the config path. DBT launches include the resolved
+/// host KFD gpu_id on the second line.
+std::optional<rocjitsu::config::DbtRuntimeConfigHandoff>
+child_config_handoff(const std::string &cfg_file) {
   char cfg_buf[4096]{};
   auto &real = rocjitsu::libc_passthrough();
   int cfg_fd = real.openat(AT_FDCWD, cfg_file.c_str(), O_RDONLY, 0);
@@ -177,9 +177,8 @@ std::optional<std::string> child_config_path(const std::string &cfg_file) {
   if (n <= 0)
     return std::nullopt;
 
-  while (n > 0 && (cfg_buf[n - 1] == '\n' || cfg_buf[n - 1] == '\r'))
-    cfg_buf[--n] = '\0';
-  return std::string(cfg_buf);
+  return rocjitsu::config::parse_dbt_runtime_config_handoff(
+      std::string_view(cfg_buf, static_cast<size_t>(n)));
 }
 
 void *raw_mmap_syscall(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
@@ -1161,31 +1160,34 @@ public:
       cfg_candidates.push_back(invocation_runtime_dir() + "/config_path");
       cfg_candidates.push_back(rocjitsu::rpc_invocation_config_file_path(getpid()));
       cfg_candidates.push_back(rocjitsu::rpc_default_config_file_path());
-      std::optional<std::string> cfg_path;
+      std::optional<rocjitsu::config::DbtRuntimeConfigHandoff> handoff;
       std::string tried_last;
       for (const auto &candidate : cfg_candidates) {
         if (candidate == tried_last)
           continue; // Skip a duplicate tier (e.g. env unset collapses 1 and 2).
         tried_last = candidate;
-        cfg_path = child_config_path(candidate);
-        if (cfg_path)
+        handoff = child_config_handoff(candidate);
+        if (handoff)
           break;
       }
-      if (!cfg_path) {
+      if (!handoff) {
         util::Logger::debug_print("rocjitsu: no child config path");
         in_construction = false;
         return nullptr;
       }
 
       try {
-        auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(*cfg_path);
+        auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(handoff->config_path);
+        if (handoff->resolved_gpu_id)
+          rocjitsu::config::apply_resolved_dbt_host_gpu_id(dbt_guest, *handoff->resolved_gpu_id,
+                                                           "runtime config handoff");
         if (dbt_guest.enabled) {
           LinuxKfd *execution_driver = nullptr;
           const bool simulator_backend =
               dbt_guest.host.backend == rocjitsu::config::DbtExecutionBackend::Simulator;
           if (simulator_backend) {
             const std::string host_config_path = rocjitsu::config::resolve_dbt_host_config_path(
-                *cfg_path, dbt_guest.host.simulator_config_path);
+                handoff->config_path, dbt_guest.host.simulator_config_path);
             if (!create_local_vm(host_config_path)) {
               in_construction = false;
               return nullptr;
@@ -1212,13 +1214,14 @@ public:
           in_construction = false;
           return driver;
         }
+
+        if (!create_local_vm(handoff->config_path)) {
+          in_construction = false;
+          return nullptr;
+        }
       } catch (const std::exception &e) {
         util::Logger::debug_print("rocjitsu: failed to load child config: ", e.what());
         destroy_local_vm();
-        in_construction = false;
-        return nullptr;
-      }
-      if (!create_local_vm(*cfg_path)) {
         in_construction = false;
         return nullptr;
       }

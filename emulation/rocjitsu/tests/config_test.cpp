@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
 #include "rocjitsu/vm/virtual_machine.h"
@@ -26,10 +27,12 @@ RJ_DIAGNOSTIC_POP
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -48,6 +51,26 @@ std::filesystem::path write_temp_config(std::string_view name, std::string_view 
   out << json;
   return path;
 }
+
+class ScopedEnvironmentVariable {
+public:
+  ScopedEnvironmentVariable(const char *name, const std::string &value) : name_(name) {
+    if (const char *original = std::getenv(name))
+      original_ = original;
+    setenv(name_.c_str(), value.c_str(), 1);
+  }
+
+  ~ScopedEnvironmentVariable() {
+    if (original_)
+      setenv(name_.c_str(), original_->c_str(), 1);
+    else
+      unsetenv(name_.c_str());
+  }
+
+private:
+  std::string name_;
+  std::optional<std::string> original_;
+};
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
   std::string json = CONFIG_DIR_PATH + "/gfx950_cdna4.json";
@@ -560,6 +583,104 @@ TEST(ConfigLoaderTest, LoadsExplicitHardwareDbtBackendConfig) {
   std::filesystem::remove(path);
 
   EXPECT_EQ(dbt.host.backend, config::DbtExecutionBackend::Hardware);
+}
+
+TEST(ConfigLoaderTest, AppliesResolvedDbtHostGpuId) {
+  config::DbtGuestConfig automatic;
+  automatic.enabled = true;
+  automatic.host.backend = config::DbtExecutionBackend::Hardware;
+  config::DbtGuestConfig explicit_id = automatic;
+  explicit_id.host.gpu_id = 8716;
+  config::DbtGuestConfig simulator = automatic;
+  simulator.host.backend = config::DbtExecutionBackend::Simulator;
+
+  config::apply_resolved_dbt_host_gpu_id(automatic, "28851", "test handoff");
+  config::apply_resolved_dbt_host_gpu_id(explicit_id, "28851", "test handoff");
+  config::apply_resolved_dbt_host_gpu_id(simulator, "28851", "test handoff");
+
+  EXPECT_EQ(automatic.host.gpu_id, 28851u);
+  EXPECT_EQ(explicit_id.host.gpu_id, 8716u);
+  EXPECT_EQ(simulator.host.gpu_id, 28851u);
+}
+
+TEST(ConfigLoaderTest, RejectsInvalidResolvedDbtHostGpuId) {
+  const std::array<std::string_view, 5> invalid_values = {"", "0", "not-a-number", "28851 trailing",
+                                                          "4294967296"};
+  for (std::string_view value : invalid_values) {
+    config::DbtGuestConfig dbt;
+    dbt.enabled = true;
+    EXPECT_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, value, "test handoff"),
+                 std::runtime_error)
+        << value;
+  }
+}
+
+TEST(ConfigLoaderTest, ExplicitDbtHostGpuIdOverridesResolvedHandoff) {
+  config::DbtGuestConfig dbt;
+  dbt.enabled = true;
+  dbt.host.gpu_id = 8716;
+
+  EXPECT_NO_THROW(
+      config::apply_resolved_dbt_host_gpu_id(dbt, "invalid-but-ignored", "test handoff"));
+  EXPECT_EQ(dbt.host.gpu_id, 8716u);
+}
+
+TEST(ConfigLoaderTest, ParsesRuntimeConfigHandoff) {
+  const auto dbt = config::parse_dbt_runtime_config_handoff("/tmp/config.json\r\n28851\r\n");
+  ASSERT_TRUE(dbt);
+  EXPECT_EQ(dbt->config_path, "/tmp/config.json");
+  ASSERT_TRUE(dbt->resolved_gpu_id);
+  EXPECT_EQ(*dbt->resolved_gpu_id, "28851");
+
+  const auto non_dbt = config::parse_dbt_runtime_config_handoff("/tmp/config.json");
+  ASSERT_TRUE(non_dbt);
+  EXPECT_EQ(non_dbt->config_path, "/tmp/config.json");
+  EXPECT_FALSE(non_dbt->resolved_gpu_id);
+
+  const auto newline_terminated = config::parse_dbt_runtime_config_handoff("/tmp/config.json\n");
+  ASSERT_TRUE(newline_terminated);
+  EXPECT_FALSE(newline_terminated->resolved_gpu_id);
+  EXPECT_FALSE(config::parse_dbt_runtime_config_handoff("\n28851\n"));
+}
+
+TEST(ConfigLoaderTest, RejectsEmptyResolvedGpuIdLineForEnabledDbt) {
+  const auto handoff = config::parse_dbt_runtime_config_handoff("/tmp/config.json\n\n");
+  ASSERT_TRUE(handoff);
+  ASSERT_TRUE(handoff->resolved_gpu_id);
+
+  config::DbtGuestConfig dbt;
+  dbt.enabled = true;
+  EXPECT_THROW(
+      config::apply_resolved_dbt_host_gpu_id(dbt, *handoff->resolved_gpu_id, "test handoff"),
+      std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, LoadsDbtRuntimeConfigHandoffFromInvocationDirectory) {
+  const std::filesystem::path runtime =
+      std::filesystem::temp_directory_path() / "rocjitsu_runtime_config_handoff_test";
+  std::filesystem::create_directories(runtime);
+  const std::filesystem::path config_path =
+      write_temp_config("rocjitsu_runtime_dbt_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942"
+        }
+      })");
+  {
+    std::ofstream handoff(runtime / "config_path");
+    handoff << config_path.string() << "\n28851\n";
+  }
+  ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.string());
+
+  const std::optional<config::DbtGuestConfig> loaded =
+      config::load_dbt_guest_config_from_runtime_config();
+
+  ASSERT_TRUE(loaded);
+  EXPECT_TRUE(loaded->enabled);
+  EXPECT_EQ(loaded->host.gpu_id, 28851u);
+  std::filesystem::remove(config_path);
+  std::filesystem::remove_all(runtime);
 }
 
 TEST(ConfigLoaderTest, RejectsEmptyDbtExecutionBackend) {
