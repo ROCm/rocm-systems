@@ -203,7 +203,7 @@ set(counter-collection-device-profiling-env
     "ROCPROFILER_SAMPLE_OUTPUT_FILE=${counter-collection-device-profiling-output}")
 
 add_test(NAME counter-collection-device-profiling
-         COMMAND $<TARGET_FILE:counter-collection-device-profiling>)
+         COMMAND $<TARGET_FILE:counter-collection-device-profiling> 50000 50 1)
 
 set_tests_properties(
     counter-collection-device-profiling
@@ -248,7 +248,7 @@ set(counter-collection-device-profiling-sync-env
     "ROCPROFILER_SAMPLE_OUTPUT_FILE=${counter-collection-device-profiling-sync-output}")
 
 add_test(NAME counter-collection-device-profiling-sync
-         COMMAND $<TARGET_FILE:counter-collection-device-profiling-sync>)
+         COMMAND $<TARGET_FILE:counter-collection-device-profiling-sync> 50000 50 1)
 
 set_tests_properties(
     counter-collection-device-profiling-sync
