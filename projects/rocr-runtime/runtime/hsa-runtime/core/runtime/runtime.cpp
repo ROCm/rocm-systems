@@ -147,39 +147,46 @@ hsa_status_t Runtime::Acquire() {
 }
 
 hsa_status_t Runtime::Release() {
-  std::lock_guard<std::mutex> boot(bootstrap_lock());
+  bool wait_for_hotswap_writer = false;
+  {
+    std::lock_guard<std::mutex> boot(bootstrap_lock());
 
-  if (runtime_singleton_ == nullptr) return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    if (runtime_singleton_ == nullptr) return HSA_STATUS_ERROR_NOT_INITIALIZED;
 
-  if (runtime_singleton_->ref_count_-- == 1) {
-    auto system_event_handlers = runtime_singleton_->GetSystemEventHandlers();
+    if (runtime_singleton_->ref_count_-- == 1) {
+      auto system_event_handlers = runtime_singleton_->GetSystemEventHandlers();
 
-    if (!system_event_handlers.empty()) {
-      hsa_amd_event_t system_shutdown_event = {} ;
-      system_shutdown_event.event_type = HSA_AMD_SYSTEM_SHUTDOWN_EVENT;
-      /* Remaining fields hsa_amd_event_t are empty */
+      if (!system_event_handlers.empty()) {
+        hsa_amd_event_t system_shutdown_event = {};
+        system_shutdown_event.event_type = HSA_AMD_SYSTEM_SHUTDOWN_EVENT;
+        /* Remaining fields hsa_amd_event_t are empty */
 
-      for (auto& callback : system_event_handlers) {
-        callback.first(&system_shutdown_event, callback.second);
+        for (auto& callback : system_event_handlers) {
+          callback.first(&system_shutdown_event, callback.second);
+        }
       }
-    }
 
 #if defined(SANITIZER_AMDGPU)
-    // Drain the sanitizer quarantine before Unload() frees and unmaps device
-    // memory. Otherwise device allocations still quarantined here become
-    // dangling chunks in the sanitizer's process-global device allocator.
-    __sanitizer_purge_allocator();
+      // Drain the sanitizer quarantine before Unload() frees and unmaps device
+      // memory. Otherwise device allocations still quarantined here become
+      // dangling chunks in the sanitizer's process-global device allocator.
+      __sanitizer_purge_allocator();
 #endif
 
-    // Release all registered memory, then unload backends
-    runtime_singleton_->Unload();
+      // Release all registered memory, then unload backends.
+      runtime_singleton_->Unload();
+      wait_for_hotswap_writer = true;
+    }
+
+    if (runtime_singleton_->ref_count_ == 0) {
+      delete runtime_singleton_;
+      runtime_singleton_ = nullptr;
+    }
   }
 
-  if (runtime_singleton_->ref_count_ == 0) {
-    delete runtime_singleton_;
-    runtime_singleton_ = nullptr;
+  if (wait_for_hotswap_writer) {
+    hotswap::HotswapCacheWaitForShutdown();
   }
-
   return HSA_STATUS_SUCCESS;
 }
 
@@ -2671,16 +2678,12 @@ hsa_status_t Runtime::Load() {
   }
 #endif
 
-  // Start the hotswap disk-cache background writer (no-op if unsupported or
-  // disabled). Paired with HotswapCacheShutdown() in Unload().
-  hotswap::HotswapCacheStartup();
-
   return HSA_STATUS_SUCCESS;
 }
 
 void Runtime::Unload() {
-  // Drain and stop the hotswap disk-cache writer before teardown so pending
-  // persists complete (no-op if it was never started).
+  // Discard queued cache writes without waiting under the bootstrap lock.
+  // Runtime::Release() joins at most the write already in progress afterward.
   hotswap::HotswapCacheShutdown();
 
   // Close IPC socket server. Capture thread handle under lock to avoid race

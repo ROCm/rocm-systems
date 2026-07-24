@@ -43,6 +43,7 @@
 #ifndef HSA_RUNTIME_CORE_INC_HOTSWAP_HPP_
 #define HSA_RUNTIME_CORE_INC_HOTSWAP_HPP_
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -167,6 +168,19 @@ struct RetargetCacheMetrics {
   size_t in_flight_entries = 0;
 };
 
+using DiskCacheDigest = std::array<uint8_t, 32>;
+
+struct DiskCacheMetrics {
+  uint64_t queued_tasks = 0;
+  uint64_t queued_bytes = 0;
+  uint64_t peak_queued_tasks = 0;
+  uint64_t peak_queued_bytes = 0;
+  uint64_t dropped_tasks = 0;
+  uint64_t dropped_bytes = 0;
+  uint64_t completed_tasks = 0;
+  uint64_t completed_bytes = 0;
+};
+
 class ContentRetargetCache final {
  public:
   using Producer = std::function<RetargetOperationResult(const SourceSnapshotRef& source)>;
@@ -274,12 +288,13 @@ hsa_status_t LoadAgentCodeObjectWithHotswap(
     hsa_loaded_code_object_t* loaded_code_object,
     const LoadAgentCodeObjectCallbacks& callbacks);
 
-// Lifecycle hooks for the background disk-cache writer thread. Called by the
-// ROCr Runtime: HotswapCacheStartup() from Runtime::Load(), and
-// HotswapCacheShutdown() from Runtime::Unload(). Both are idempotent and safe
-// to call when the disk cache is unsupported/disabled (they become no-ops).
-void HotswapCacheStartup();
+// Requests that the lazily-created disk writer stop and discards queued work.
+// Runtime::Unload() calls this while serialized by the bootstrap lock.
 void HotswapCacheShutdown();
+// Joins at most the write already in progress. Runtime::Release() calls this
+// after releasing the bootstrap lock.
+void HotswapCacheWaitForShutdown();
+DiskCacheMetrics GetDiskCacheMetrics();
 
 #ifdef ROCR_HOTSWAP_TESTING
 std::optional<RewriteDecision> DecideHotswapRewriteForTesting(const AgentGfxRevision& gfx,
@@ -287,20 +302,36 @@ std::optional<RewriteDecision> DecideHotswapRewriteForTesting(const AgentGfxRevi
                                                               const std::string& target_isa,
                                                               const RewriteOptions& options);
 bool HotswapRewriteWithOptionsAvailableForTesting();
+bool ComgrCacheIdentifierAvailableForTesting();
+void SetComgrCacheFingerprintForTesting(const DiskCacheDigest* fingerprint);
 void ForceRetargetCodeObjectFailureForTesting(bool force);
+DiskCacheDigest DigestBytesForTesting(const void* data, size_t size);
+DiskCacheDigest ComputeRetargetCacheDigestForTesting(const void* elf_data, size_t elf_size,
+                                                     const std::string& source_isa,
+                                                     const std::string& target_isa,
+                                                     bool entry_trampolines, bool strict_mode,
+                                                     const DiskCacheDigest& comgr_fingerprint);
 // Synchronously writes a disk cache entry under `dir` (bypasses the async
 // writer). Returns false if disk cache support is compiled out.
-bool DiskCacheWriteForTesting(const std::string& dir, uint64_t key, uint64_t salt,
+bool DiskCacheWriteForTesting(const std::string& dir, const DiskCacheDigest& key,
+                              const DiskCacheDigest& comgr_fingerprint,
                               const std::vector<uint8_t>& payload);
 // Reads a disk cache entry; returns true and fills `out_payload` on a validated
 // hit, false on miss/mismatch/unsupported.
-bool DiskCacheReadForTesting(const std::string& dir, uint64_t key, uint64_t salt,
+bool DiskCacheReadForTesting(const std::string& dir, const DiskCacheDigest& key,
+                             const DiskCacheDigest& comgr_fingerprint,
                              std::vector<uint8_t>* out_payload);
-// Drives the async DiskWriter: start, enqueue `n` writes, Stop() (must drain
-// all before joining), then count readable-back entries. Returns that count
-// (== n if the drain-at-shutdown path is correct), or -1 if unsupported.
-int DiskWriterDrainRoundTripForTesting(const std::string& dir, int n,
-                                       const std::vector<uint8_t>& payload);
+std::string DiskCachePathForTesting(const std::string& dir, const DiskCacheDigest& key,
+                                    const DiskCacheDigest& comgr_fingerprint);
+bool DiskWriterConstructedForTesting();
+void ConfigureDiskWriterForTesting(size_t max_tasks, size_t max_bytes);
+bool EnqueueDiskWriteForTesting(const std::string& dir, const DiskCacheDigest& key,
+                                const DiskCacheDigest& comgr_fingerprint,
+                                const std::vector<uint8_t>& payload);
+void BlockDiskWritesForTesting(bool block);
+bool WaitForDiskWriterIdleForTesting(uint64_t timeout_milliseconds);
+bool DiskCacheEnabledForTesting();
+void ResetDiskWriterForTesting();
 #endif
 
 }  // namespace hotswap

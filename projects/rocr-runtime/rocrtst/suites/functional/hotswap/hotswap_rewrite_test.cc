@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -211,6 +212,7 @@ void ResetRuntimeTestEnv() {
   g_fake_hsa_env = FakeHsaEnv{};
   g_fake_env_vars.clear();
   rocr::hotswap::ResetAgentGfxRevisionCache();
+  rocr::hotswap::SetComgrCacheFingerprintForTesting(nullptr);
   rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(false);
 }
 
@@ -886,160 +888,302 @@ class ScopedTempDir {
  private:
   std::string path_;
 };
+
+rocr::hotswap::DiskCacheDigest TestDigest(uint8_t seed) {
+  rocr::hotswap::DiskCacheDigest digest{};
+  for (size_t i = 0; i < digest.size(); ++i) {
+    digest[i] = static_cast<uint8_t>(seed + i);
+  }
+  return digest;
+}
+
+std::string DigestToHexForTesting(const rocr::hotswap::DiskCacheDigest& digest) {
+  static constexpr char kHex[] = "0123456789abcdef";
+  std::string result;
+  result.reserve(digest.size() * 2);
+  for (uint8_t byte : digest) {
+    result.push_back(kHex[byte >> 4]);
+    result.push_back(kHex[byte & 0xf]);
+  }
+  return result;
+}
+
+class ScopedDiskWriterReset {
+ public:
+  ScopedDiskWriterReset() { rocr::hotswap::ResetDiskWriterForTesting(); }
+  ~ScopedDiskWriterReset() {
+    rocr::hotswap::SetComgrCacheFingerprintForTesting(nullptr);
+    rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(false);
+    rocr::hotswap::ResetDiskWriterForTesting();
+  }
+};
 }  // namespace
+
+TEST(RetargetDiskCache, Blake2b256MatchesKnownVector) {
+  EXPECT_EQ(DigestToHexForTesting(rocr::hotswap::DigestBytesForTesting(nullptr, 0)),
+            "0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8");
+  constexpr char kAbc[] = "abc";
+  EXPECT_EQ(DigestToHexForTesting(rocr::hotswap::DigestBytesForTesting(kAbc, sizeof(kAbc) - 1)),
+            "bddd813c634239723171ef3fee98579b94964e3bb1cb3e427262c8c068d52319");
+  const std::vector<uint8_t> multi_block(129, 'a');
+  EXPECT_EQ(DigestToHexForTesting(
+                rocr::hotswap::DigestBytesForTesting(multi_block.data(), multi_block.size())),
+            "2f64744a6de0d2c0b56e64cf6e29a5aaa255010d415d51c75ccc82f73dccd865");
+}
+
+TEST(RetargetDiskCache, CacheDigestCoversCanonicalInputs) {
+  const std::vector<uint8_t> source = {1, 2, 3, 4};
+  const auto fingerprint = TestDigest(0x20);
+  const auto base = rocr::hotswap::ComputeRetargetCacheDigestForTesting(
+      source.data(), source.size(), "source", "target", false, false, fingerprint);
+  auto changed_source = source;
+  changed_source.back() ^= 1;
+
+  EXPECT_NE(base,
+            rocr::hotswap::ComputeRetargetCacheDigestForTesting(
+                changed_source.data(), changed_source.size(), "source", "target", false, false,
+                fingerprint));
+  EXPECT_NE(base,
+            rocr::hotswap::ComputeRetargetCacheDigestForTesting(
+                source.data(), source.size(), "source-2", "target", false, false, fingerprint));
+  EXPECT_NE(base,
+            rocr::hotswap::ComputeRetargetCacheDigestForTesting(
+                source.data(), source.size(), "source", "target-2", false, false, fingerprint));
+  EXPECT_NE(base,
+            rocr::hotswap::ComputeRetargetCacheDigestForTesting(
+                source.data(), source.size(), "source", "target", true, false, fingerprint));
+  EXPECT_NE(base,
+            rocr::hotswap::ComputeRetargetCacheDigestForTesting(
+                source.data(), source.size(), "source", "target", false, true, fingerprint));
+  EXPECT_NE(base,
+            rocr::hotswap::ComputeRetargetCacheDigestForTesting(
+                source.data(), source.size(), "source", "target", false, false, TestDigest(0x21)));
+}
 
 TEST(RetargetDiskCache, WriteThenReadRoundTrips) {
   ScopedTempDir tmp;
   const std::string& dir = tmp.str();
+  const auto key = TestDigest(0x10);
+  const auto fingerprint = TestDigest(0x80);
   std::vector<uint8_t> payload = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x11, 0x22};
-  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, /*key=*/0xABC,
-                                                      /*salt=*/0x555, payload));
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, key, fingerprint, payload));
   std::vector<uint8_t> out;
-  ASSERT_TRUE(
-      rocr::hotswap::DiskCacheReadForTesting(dir, 0xABC, 0x555, &out));
+  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, key, fingerprint, &out));
   EXPECT_EQ(out, payload);
 }
 
-TEST(RetargetDiskCache, SaltMismatchIsMiss) {
+TEST(RetargetDiskCache, ComgrFingerprintMismatchIsMiss) {
   ScopedTempDir tmp;
   const std::string& dir = tmp.str();
+  const auto key = TestDigest(1);
+  const auto first_fingerprint = TestDigest(2);
+  const auto second_fingerprint = TestDigest(3);
   std::vector<uint8_t> payload = {1, 2, 3, 4};
-  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 0x1, 0xAAAA, payload));
-  // Reading with a different salt (simulating a toolchain change) must miss.
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, key, first_fingerprint, payload));
   std::vector<uint8_t> out;
-  EXPECT_FALSE(rocr::hotswap::DiskCacheReadForTesting(dir, 0x1, 0xBBBB, &out));
-  // Correct salt still hits.
-  EXPECT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 0x1, 0xAAAA, &out));
+  EXPECT_FALSE(rocr::hotswap::DiskCacheReadForTesting(dir, key, second_fingerprint, &out));
+  EXPECT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, key, first_fingerprint, &out));
 }
 
 TEST(RetargetDiskCache, MissingEntryIsMiss) {
   ScopedTempDir tmp;
-  const std::string& dir = tmp.str();
   std::vector<uint8_t> out;
-  EXPECT_FALSE(rocr::hotswap::DiskCacheReadForTesting(dir, 0xDEADBEEF, 0x1, &out));
+  EXPECT_FALSE(
+      rocr::hotswap::DiskCacheReadForTesting(tmp.str(), TestDigest(4), TestDigest(5), &out));
 }
 
 TEST(RetargetDiskCache, DistinctKeysDoNotCollide) {
   ScopedTempDir tmp;
   const std::string& dir = tmp.str();
+  const auto first_key = TestDigest(6);
+  const auto second_key = TestDigest(7);
+  const auto fingerprint = TestDigest(8);
   std::vector<uint8_t> a = {0xAA, 0xAA};
   std::vector<uint8_t> b = {0xBB, 0xBB, 0xBB};
-  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 1, 0x9, a));
-  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 2, 0x9, b));
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, first_key, fingerprint, a));
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, second_key, fingerprint, b));
   std::vector<uint8_t> out;
-  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 1, 0x9, &out));
+  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, first_key, fingerprint, &out));
   EXPECT_EQ(out, a);
-  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 2, 0x9, &out));
+  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, second_key, fingerprint, &out));
   EXPECT_EQ(out, b);
 }
 
 TEST(RetargetDiskCache, OverwriteSameKeyIsIdempotent) {
   ScopedTempDir tmp;
   const std::string& dir = tmp.str();
+  const auto key = TestDigest(9);
+  const auto fingerprint = TestDigest(10);
   std::vector<uint8_t> v1 = {1, 1, 1};
   std::vector<uint8_t> v2 = {2, 2, 2, 2, 2};
-  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 7, 0x3, v1));
-  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, 7, 0x3, v2));
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, key, fingerprint, v1));
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, key, fingerprint, v2));
   std::vector<uint8_t> out;
-  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, 7, 0x3, &out));
+  ASSERT_TRUE(rocr::hotswap::DiskCacheReadForTesting(dir, key, fingerprint, &out));
   EXPECT_EQ(out, v2);
 }
 
-// Exercises the real async DiskWriter: many enqueued writes must ALL be
-// persisted, including the drain-at-shutdown path in Stop(). This is the
-// concurrency logic the adversarial review flagged (lost-task-at-shutdown).
-TEST(RetargetDiskCache, AsyncWriterDrainsAllOnShutdown) {
+TEST(RetargetDiskCache, CorruptPayloadIsRejected) {
   ScopedTempDir tmp;
   const std::string& dir = tmp.str();
-  // Enqueue many sizeable writes so a good fraction are still queued when Stop()
-  // is entered, exercising the drain-at-shutdown path rather than only the
-  // already-drained happy path.
-  std::vector<uint8_t> payload(64 * 1024, 0x7E);
-  constexpr int kN = 512;
-  const int found =
-      rocr::hotswap::DiskWriterDrainRoundTripForTesting(dir, kN, payload);
-  EXPECT_EQ(found, kN);  // every enqueued write survived start->enqueue->stop
+  const auto key = TestDigest(11);
+  const auto fingerprint = TestDigest(12);
+  const std::vector<uint8_t> payload(4096, 0x5a);
+  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, key, fingerprint, payload));
+
+  const std::string path = rocr::hotswap::DiskCachePathForTesting(dir, key, fingerprint);
+  std::fstream file(path, std::ios::in | std::ios::out | std::ios::binary);
+  ASSERT_TRUE(file.is_open());
+  file.seekg(-1, std::ios::end);
+  char byte = 0;
+  file.read(&byte, 1);
+  ASSERT_TRUE(file.good());
+  byte ^= 1;
+  file.seekp(-1, std::ios::end);
+  file.write(&byte, 1);
+  file.close();
+
+  std::vector<uint8_t> out;
+  EXPECT_FALSE(rocr::hotswap::DiskCacheReadForTesting(dir, key, fingerprint, &out));
 }
 
-// Integration: when the disk tier is consulted inside the single-flight
-// producer, a burst of concurrent readers of the same content coalesces onto
-// ONE producer, which does ONE disk read; the N-1 waiters share its result.
-// This proves disk I/O is single-flighted, not repeated per reader.
-TEST(RetargetDiskCache, DiskHitIsSingleFlighted) {
+TEST(RetargetDiskCache, ShutdownWithoutUseDoesNotConstructWriter) {
+  ScopedDiskWriterReset writer_reset;
+  EXPECT_FALSE(rocr::hotswap::DiskWriterConstructedForTesting());
+  rocr::hotswap::HotswapCacheShutdown();
+  rocr::hotswap::HotswapCacheWaitForShutdown();
+  EXPECT_FALSE(rocr::hotswap::DiskWriterConstructedForTesting());
+}
+
+TEST(RetargetDiskCache, DefaultOnWithOptionalKillSwitch) {
+  ResetRuntimeTestEnv();
+  EXPECT_TRUE(rocr::hotswap::DiskCacheEnabledForTesting());
+  g_fake_env_vars["HSA_HOTSWAP_DISK_CACHE"] = "0";
+  EXPECT_FALSE(rocr::hotswap::DiskCacheEnabledForTesting());
+  ResetRuntimeTestEnv();
+}
+
+TEST(RetargetDiskCache, QueueTaskLimitDropsBeforeUnboundedRetention) {
+  ScopedDiskWriterReset writer_reset;
   ScopedTempDir tmp;
-  const std::string& dir = tmp.str();
+  constexpr size_t kPayloadSize = 64 * 1024;
+  const std::vector<uint8_t> payload(kPayloadSize, 0x7e);
+  const auto fingerprint = TestDigest(13);
+  rocr::hotswap::ConfigureDiskWriterForTesting(2, 3 * kPayloadSize);
+  rocr::hotswap::BlockDiskWritesForTesting(true);
 
-  // Pre-populate a disk entry the producer will read back.
-  constexpr uint64_t kKey = 0x1234ABCD;
-  constexpr uint64_t kSalt = 0x99887766ULL;
-  const std::vector<uint8_t> payload(4096, 0x5A);
-  ASSERT_TRUE(rocr::hotswap::DiskCacheWriteForTesting(dir, kKey, kSalt, payload));
+  EXPECT_TRUE(
+      rocr::hotswap::EnqueueDiskWriteForTesting(tmp.str(), TestDigest(14), fingerprint, payload));
+  EXPECT_TRUE(
+      rocr::hotswap::EnqueueDiskWriteForTesting(tmp.str(), TestDigest(15), fingerprint, payload));
+  EXPECT_FALSE(
+      rocr::hotswap::EnqueueDiskWriteForTesting(tmp.str(), TestDigest(16), fingerprint, payload));
 
-  rocr::hotswap::ContentRetargetCache cache;
-  const rocr::hotswap::RetargetCacheKey key{
-      "amdgcn-amd-amdhsa--gfx1250:src", "amdgcn-amd-amdhsa--gfx1250:tgt", false,
-      false};
-  const std::vector<unsigned char> source(1024, 0x21);
+  const auto before_shutdown = rocr::hotswap::GetDiskCacheMetrics();
+  EXPECT_EQ(before_shutdown.queued_tasks, 2u);
+  EXPECT_EQ(before_shutdown.queued_bytes, 2 * kPayloadSize);
+  EXPECT_EQ(before_shutdown.peak_queued_tasks, 2u);
+  EXPECT_EQ(before_shutdown.peak_queued_bytes, 2 * kPayloadSize);
+  EXPECT_EQ(before_shutdown.dropped_tasks, 1u);
 
-  constexpr int kThreads = 8;
-  std::atomic<int> disk_reads{0};
-  // Block the leader's producer until every other thread has registered as a
-  // waiter, so the burst genuinely coalesces (N-1 waiters) rather than letting
-  // the leader finish before the others enter and be served as ready hits.
-  std::atomic<bool> release_producer{false};
-  auto producer =
-      [&](const rocr::hotswap::SourceSnapshotRef& snapshot)
-      -> rocr::hotswap::RetargetOperationResult {
-    while (!release_producer.load(std::memory_order_acquire)) {
-      std::this_thread::yield();
-    }
-    // The disk read the real producer would do; single-flight guarantees only
-    // the leader runs this.
-    std::vector<uint8_t> out;
-    const bool hit =
-        rocr::hotswap::DiskCacheReadForTesting(dir, kKey, kSalt, &out);
-    disk_reads.fetch_add(1, std::memory_order_relaxed);
-    if (!hit) return {{}, rocr::hotswap::RetargetError::kComgrFailure};
-    rocr::hotswap::OwnedElfBuffer bytes(std::malloc(out.size()), &std::free);
-    if (!bytes) return {{}, rocr::hotswap::RetargetError::kOutOfResources};
-    std::memcpy(bytes.get(), out.data(), out.size());
-    // MUST carry the snapshot so GetOrCompute's identity check accepts it.
-    return {std::make_shared<const rocr::hotswap::RetargetedElf>(
-                std::move(bytes), out.size(), snapshot),
-            rocr::hotswap::RetargetError::kNone};
-  };
+  const auto start = std::chrono::steady_clock::now();
+  rocr::hotswap::HotswapCacheShutdown();
+  const auto request_duration = std::chrono::steady_clock::now() - start;
+  rocr::hotswap::HotswapCacheWaitForShutdown();
+  EXPECT_LT(request_duration, std::chrono::seconds(1));
+  const auto after_shutdown = rocr::hotswap::GetDiskCacheMetrics();
+  EXPECT_EQ(after_shutdown.queued_tasks, 0u);
+  EXPECT_EQ(after_shutdown.queued_bytes, 0u);
+  EXPECT_EQ(after_shutdown.dropped_tasks, 3u);
+}
 
-  std::vector<std::thread> threads;
-  std::vector<rocr::hotswap::RetargetOperationResult> results(kThreads);
-  for (int i = 0; i < kThreads; ++i) {
-    threads.emplace_back([&, i] {
-      results[i] = cache.GetOrCompute(source.data(), source.size(),
-                                      /*reader_id=*/i + 1, key, producer);
-    });
+TEST(RetargetDiskCache, QueueByteLimitDropsBeforeUnboundedRetention) {
+  ScopedDiskWriterReset writer_reset;
+  ScopedTempDir tmp;
+  constexpr size_t kPayloadSize = 64 * 1024;
+  const std::vector<uint8_t> payload(kPayloadSize, 0x7e);
+  const auto fingerprint = TestDigest(17);
+  rocr::hotswap::ConfigureDiskWriterForTesting(3, 2 * kPayloadSize);
+  rocr::hotswap::BlockDiskWritesForTesting(true);
+
+  EXPECT_TRUE(
+      rocr::hotswap::EnqueueDiskWriteForTesting(tmp.str(), TestDigest(18), fingerprint, payload));
+  EXPECT_TRUE(
+      rocr::hotswap::EnqueueDiskWriteForTesting(tmp.str(), TestDigest(19), fingerprint, payload));
+  EXPECT_FALSE(
+      rocr::hotswap::EnqueueDiskWriteForTesting(tmp.str(), TestDigest(20), fingerprint, payload));
+
+  const auto before_shutdown = rocr::hotswap::GetDiskCacheMetrics();
+  EXPECT_EQ(before_shutdown.queued_tasks, 2u);
+  EXPECT_EQ(before_shutdown.queued_bytes, 2 * kPayloadSize);
+  EXPECT_EQ(before_shutdown.peak_queued_tasks, 2u);
+  EXPECT_EQ(before_shutdown.peak_queued_bytes, 2 * kPayloadSize);
+  EXPECT_EQ(before_shutdown.dropped_tasks, 1u);
+
+  rocr::hotswap::HotswapCacheShutdown();
+  rocr::hotswap::HotswapCacheWaitForShutdown();
+  const auto after_shutdown = rocr::hotswap::GetDiskCacheMetrics();
+  EXPECT_EQ(after_shutdown.queued_tasks, 0u);
+  EXPECT_EQ(after_shutdown.queued_bytes, 0u);
+  EXPECT_EQ(after_shutdown.dropped_tasks, 3u);
+}
+
+TEST(RetargetDiskCache, ConcurrentShutdownWaitersAreSafe) {
+  ScopedDiskWriterReset writer_reset;
+  ScopedTempDir tmp;
+  const std::vector<uint8_t> payload(64 * 1024, 0x7e);
+  rocr::hotswap::ConfigureDiskWriterForTesting(1, payload.size());
+  rocr::hotswap::BlockDiskWritesForTesting(true);
+  ASSERT_TRUE(rocr::hotswap::EnqueueDiskWriteForTesting(tmp.str(), TestDigest(21), TestDigest(22),
+                                                        payload));
+
+  rocr::hotswap::HotswapCacheShutdown();
+  std::thread first_waiter([] { rocr::hotswap::HotswapCacheWaitForShutdown(); });
+  std::thread second_waiter([] { rocr::hotswap::HotswapCacheWaitForShutdown(); });
+  first_waiter.join();
+  second_waiter.join();
+
+  const auto metrics = rocr::hotswap::GetDiskCacheMetrics();
+  EXPECT_EQ(metrics.queued_tasks, 0u);
+  EXPECT_EQ(metrics.queued_bytes, 0u);
+}
+
+TEST(RetargetDiskCache, ProductionColdWriteThenHitWithoutComgrRewrite) {
+  ResetRuntimeTestEnv();
+  ScopedDiskWriterReset writer_reset;
+  ScopedTempDir tmp;
+  if (!rocr::hotswap::ComgrCacheIdentifierAvailableForTesting()) {
+    const auto fingerprint = TestDigest(0x60);
+    rocr::hotswap::SetComgrCacheFingerprintForTesting(&fingerprint);
   }
-  // Wait until the leader is running the producer and the other N-1 threads have
-  // registered as waiters, then release the leader.
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (cache.WaiterCountForTesting(source.data(), source.size(), key) <
-             static_cast<size_t>(kThreads - 1) &&
-         std::chrono::steady_clock::now() < deadline) {
-    std::this_thread::yield();
-  }
-  release_producer.store(true, std::memory_order_release);
-  for (auto& t : threads) t.join();
+  g_fake_env_vars["XDG_CACHE_HOME"] = tmp.str();
+  g_fake_hsa_env.asic_revision = 0;
 
-  const rocr::hotswap::RetargetCacheMetrics metrics = cache.SnapshotMetrics();
-  EXPECT_EQ(disk_reads.load(std::memory_order_relaxed), 1);  // one disk read
-  EXPECT_EQ(metrics.producer_calls, 1u);
-  EXPECT_EQ(metrics.producer_failures, 0u);
-  EXPECT_EQ(metrics.coalesced_results, static_cast<uint64_t>(kThreads - 1));
-  const void* first = nullptr;
-  for (const auto& r : results) {
-    ASSERT_TRUE(r.succeeded());
-    if (!first) first = r.elf->data();
-    EXPECT_EQ(r.elf->data(), first);  // all share one buffer
-  }
+  rocr::hotswap::ContentRetargetCache first_cache;
+  auto first_view = MakeRealCodeObjectView();
+  first_view.retarget_cache = &first_cache;
+  LoadRecorder first_load;
+  ASSERT_EQ(rocr::hotswap::LoadAgentCodeObjectWithHotswap(MakeTestExecutable(0x601),
+                                                          MakeTestAgent(), first_view, nullptr,
+                                                          nullptr, MakeLoadCallbacks(&first_load)),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(first_load.calls.size(), 1u);
+  ASSERT_EQ(first_load.calls[0].path, LoadPath::kRewritten);
+  ASSERT_TRUE(rocr::hotswap::WaitForDiskWriterIdleForTesting(/*timeout_ms=*/10000));
+  EXPECT_EQ(rocr::hotswap::GetDiskCacheMetrics().completed_tasks, 1u);
+  first_load.retained_owners.clear();
+
+  rocr::hotswap::ContentRetargetCache second_cache;
+  auto second_view = MakeRealCodeObjectView();
+  second_view.retarget_cache = &second_cache;
+  LoadRecorder second_load;
+  rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(true);
+  ASSERT_EQ(rocr::hotswap::LoadAgentCodeObjectWithHotswap(MakeTestExecutable(0x602),
+                                                          MakeTestAgent(), second_view, nullptr,
+                                                          nullptr, MakeLoadCallbacks(&second_load)),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(second_load.calls.size(), 1u);
+  EXPECT_EQ(second_load.calls[0].path, LoadPath::kRewritten);
 }
 #endif  // POSIX
 
