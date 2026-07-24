@@ -11,6 +11,15 @@
 
 #include "ibvsymbols.h"
 
+// buildIbvSymbols() is compiled into this test target (it is hidden-visibility
+// in librccl and therefore not linkable from here). It resolves the libibverbs
+// path via ncclGetEnv(), which is likewise hidden in librccl. Provide the same
+// behavior as RCCL's built-in default env plugin
+// (src/plugin/env/env_v1.cc: ncclEnvGetEnv -> std::getenv) so the unit under
+// test reads the process environment directly, without linking the env-plugin
+// machinery.
+const char* ncclGetEnv(const char* name) { return std::getenv(name); }
+
 namespace RcclUnitTesting
 {
   // Whitebox coverage for the NCCL_IBVERBS_LIB dynamic-loader override in
