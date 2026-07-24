@@ -65,6 +65,14 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_aql_queue.h"
 
+#ifdef __FreeBSD__
+#include <pthread_np.h>
+#define GET_THREAD_ID() pthread_getthreadid_np()
+#elif defined(__linux__)
+#include <sys/syscall.h>
+#define GET_THREAD_ID() syscall(SYS_gettid)
+#endif
+
 constexpr char SNAPSHOT_INFO_ALIGNMENT = 0x8;
 constexpr uint32_t LOAD_ALIGNMENT_SHIFT = 4;
 constexpr uint32_t NOTE_ALIGNMENT_SHIFT = 2;
@@ -107,7 +115,7 @@ std::string substitute_core_pattern(const std::string& pattern) {
        (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 30))
     pid_t tid = gettid();
 #else
-  pid_t tid = static_cast<pid_t>(syscall(SYS_gettid));
+  pid_t tid = static_cast<pid_t>(GET_THREAD_ID());
 #endif
   time_t now = time(nullptr);
   // Get hostname
@@ -312,16 +320,17 @@ static hsa_status_t build_lightweight_coredump_ranges(MemoryRegionFilter& filter
       AMD::AqlQueue* aql_queue = static_cast<AMD::AqlQueue*>(q);
 
       // We need to capture the queue amd_queue_t for the debugger.
-      debug_print("Added aql_queue_t range: %#p - %#p (size: %zu)\n",
-                  &aql_queue->amd_queue_, &aql_queue->amd_queue_ + 1,
+      debug_print("Added aql_queue_t range: %#" PRIx64 " - %#" PRIx64 " (size: %zu)\n",
+                  reinterpret_cast<uint64_t>(&aql_queue->amd_queue_),
+                  reinterpret_cast<uint64_t>(&aql_queue->amd_queue_ + 1),
                   sizeof(aql_queue->amd_queue_));
       filter.add_range(reinterpret_cast<uint64_t>(&aql_queue->amd_queue_),
                        sizeof(aql_queue->amd_queue_));
 
       // Same goes for the ring buffer.
-      debug_print("Added ring buffer range: %#p - %#p (size: %zu)\n",
-                  aql_queue->amd_queue_.hsa_queue.base_address,
-                  static_cast<void*>(aql_queue->amd_queue_.hsa_queue.base_address)
+      debug_print("Added ring buffer range: %#" PRIx64 " - %#" PRIx64 " (size: %zu)\n",
+                  reinterpret_cast<uint64_t>(aql_queue->amd_queue_.hsa_queue.base_address),
+                  reinterpret_cast<uint64_t>(aql_queue->amd_queue_.hsa_queue.base_address)
                     + aql_queue->amd_queue_.hsa_queue.size * sizeof(hsa_kernel_dispatch_packet_t),
                   aql_queue->amd_queue_.hsa_queue.size * sizeof(hsa_kernel_dispatch_packet_t));
       filter.add_range(reinterpret_cast<uint64_t>(aql_queue->amd_queue_.hsa_queue.base_address),
@@ -334,9 +343,9 @@ static hsa_status_t build_lightweight_coredump_ranges(MemoryRegionFilter& filter
         return HSA_STATUS_ERROR;
       }
 
-      debug_print("Added CWSR area range: %#p - %#p (size: %zu)\n",
-                  queue_info.SaveAreaHeader,
-                  static_cast<void*>(queue_info.SaveAreaHeader) + queue_info.SaveAreaSizeInBytes,
+      debug_print("Added CWSR area range: %#" PRIx64 " - %#" PRIx64 " (size: %zu)\n",
+                  reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader),
+                  reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader) + queue_info.SaveAreaSizeInBytes,
                   queue_info.SaveAreaSizeInBytes);
       filter.add_range(reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader),
                        queue_info.SaveAreaSizeInBytes);

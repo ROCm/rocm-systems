@@ -1725,6 +1725,167 @@ TEST(HsaHooksUnitTest, QueueDoorbellRaisesPacketPrivateSizeFromDescriptor) {
   EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
 }
 
+TEST(HsaHooksUnitTest, MultiProducerDoorbellRewritesEarlierPublishedPacket) {
+  using rocr::llvm::amdhsa::kernel_descriptor_t;
+
+  // Fallback (non-intercept) multi-producer path: a producer publishes two ready
+  // packets and rings once with the FINAL packet id. Packet 0 needs virtual-LDS
+  // rewriting, packet 1 does not. The doorbell must rewrite the whole published
+  // range [next_packet_id, id], not just the named packet -- otherwise packet 0
+  // reaches the command processor as an oversized (host-faulting) launch and the
+  // frontier advances past it so the scanner skips it too.
+  reset_pool_blocker(false);
+  reset_queue_fakes();
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  hsa_queue_t *queue = nullptr;
+  ASSERT_EQ(api.core.hsa_queue_create_fn(kGuestAgent, 4, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, 0,
+                                         0, &queue),
+            HSA_STATUS_SUCCESS);
+  ASSERT_NE(queue, nullptr);
+
+  kernel_descriptor_t normal_descriptor{};
+  kernel_descriptor_t virtual_descriptor{};
+  normal_descriptor.group_segment_fixed_size = 70000; // exceeds host LDS -> sidecar
+  virtual_descriptor.private_segment_fixed_size = 96;
+  auto registration = register_virtual_lds_kernel_for_test(
+      api, normal_descriptor, virtual_descriptor, normal_descriptor.group_segment_fixed_size);
+  (void)registration;
+
+  // Packet 0: the oversized virtual-LDS dispatch that must be rewritten.
+  auto &oversized = g_fake_queue_packets[0];
+  oversized.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+  oversized.kernel_object = reinterpret_cast<uintptr_t>(&normal_descriptor);
+  oversized.group_segment_size = normal_descriptor.group_segment_fixed_size;
+  oversized.workgroup_size_x = 64;
+  oversized.workgroup_size_y = 1;
+  oversized.workgroup_size_z = 1;
+  oversized.grid_size_x = 64;
+  oversized.grid_size_y = 1;
+  oversized.grid_size_z = 1;
+
+  // Packet 1: an ordinary below-threshold dispatch (no rewrite needed).
+  auto &ordinary = g_fake_queue_packets[1];
+  ordinary.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+  ordinary.kernel_object = 0; // no registered virtual-LDS metadata
+  ordinary.group_segment_size = 0;
+  ordinary.workgroup_size_x = 64;
+  ordinary.grid_size_x = 64;
+
+  // Ring once with the FINAL packet id (1).
+  api.core.hsa_signal_store_relaxed_fn(queue->doorbell_signal, 1);
+
+  // Packet 0 was rewritten to the virtual descriptor (range covered), not left
+  // on its oversized normal descriptor.
+  EXPECT_EQ(oversized.kernel_object, reinterpret_cast<uintptr_t>(&virtual_descriptor));
+  EXPECT_EQ(oversized.group_segment_size, 0u);
+  EXPECT_FALSE(g_fake_allocation_sizes.empty());
+
+  EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+}
+
+TEST(HsaHooksUnitTest, MultiProducerHoleCloseAdvancesFrontierAcrossReadySuffix) {
+  using rocr::llvm::amdhsa::kernel_descriptor_t;
+
+  // Regression for the stranded-frontier bug: on a size-4 multi-producer queue an
+  // out-of-order ring publishes a ready suffix ABOVE an unready hole, the hole
+  // later closes, and a subsequent batch must not skip a packet.
+  //
+  //   1. next_packet_id = 0. Slot 0 (packet 0) is INVALID (hole); packets 1..3 are
+  //      ready. A producer rings with id 3. The range [0,4) rewrites 1..3, but the
+  //      cursor cannot pass the hole at 0 -- it must REMEMBER 1..3 as ready.
+  //   2. Packet 0 closes (becomes ready) and rings with id 0. The cursor must now
+  //      catch up across the remembered 1..3 -> next_packet_id = 4, NOT 1.
+  //   3. Packets 4 and 5 are published and a producer rings once with id 5. Only
+  //      when the cursor is at 4 does 5 - 4 = 1 < size take the range path and
+  //      rewrite packet 4. If the cursor were stranded at 1, 5 - 1 = 4 == size
+  //      would fall to the single-packet path and packet 4 (needing a virtual-LDS
+  //      rewrite) would reach the command processor as an oversized launch.
+  reset_pool_blocker(false);
+  reset_queue_fakes();
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  hsa_queue_t *queue = nullptr;
+  ASSERT_EQ(api.core.hsa_queue_create_fn(kGuestAgent, 4, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, 0,
+                                         0, &queue),
+            HSA_STATUS_SUCCESS);
+  ASSERT_NE(queue, nullptr);
+
+  kernel_descriptor_t normal_descriptor{};
+  kernel_descriptor_t virtual_descriptor{};
+  normal_descriptor.group_segment_fixed_size = 70000; // exceeds host LDS -> sidecar
+  virtual_descriptor.private_segment_fixed_size = 96;
+  auto registration = register_virtual_lds_kernel_for_test(
+      api, normal_descriptor, virtual_descriptor, normal_descriptor.group_segment_fixed_size);
+  (void)registration;
+
+  const auto make_oversized = [&](uint32_t slot) {
+    auto &packet = g_fake_queue_packets[slot];
+    packet = {};
+    packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+    packet.kernel_object = reinterpret_cast<uintptr_t>(&normal_descriptor);
+    packet.group_segment_size = normal_descriptor.group_segment_fixed_size;
+    packet.workgroup_size_x = 64;
+    packet.workgroup_size_y = 1;
+    packet.workgroup_size_z = 1;
+    packet.grid_size_x = 64;
+    packet.grid_size_y = 1;
+    packet.grid_size_z = 1;
+  };
+  const auto make_ordinary = [&](uint32_t slot) {
+    auto &packet = g_fake_queue_packets[slot];
+    packet = {};
+    packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+    packet.kernel_object = 0; // no registered virtual-LDS metadata
+    packet.workgroup_size_x = 64;
+    packet.workgroup_size_y = 1;
+    packet.workgroup_size_z = 1;
+    packet.grid_size_x = 64;
+    packet.grid_size_y = 1;
+    packet.grid_size_z = 1;
+  };
+  const auto make_invalid = [&](uint32_t slot) {
+    auto &packet = g_fake_queue_packets[slot];
+    packet = {};
+    packet.header = HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE;
+  };
+
+  // Phase 1: slot 0 (packet 0) is an unready hole; packets 1..3 are ready ordinary
+  // dispatches. Ring with the final published id (3).
+  make_invalid(0);
+  make_ordinary(1);
+  make_ordinary(2);
+  make_ordinary(3);
+  api.core.hsa_signal_store_relaxed_fn(queue->doorbell_signal, 3);
+  // The hole blocks the cursor, so no virtual-LDS rewrite happened yet.
+  EXPECT_TRUE(g_fake_allocation_sizes.empty());
+
+  // Phase 2: the hole closes (packet 0 becomes a ready ordinary dispatch) and its
+  // producer rings with id 0. The cursor must catch up across the remembered ready
+  // suffix 1..3 and land at 4.
+  make_ordinary(0);
+  api.core.hsa_signal_store_relaxed_fn(queue->doorbell_signal, 0);
+  EXPECT_TRUE(g_fake_allocation_sizes.empty());
+
+  // Phase 3: packets 4 (slot 0) and 5 (slot 1) are published; packet 4 is the
+  // oversized virtual-LDS dispatch. Ring once with the final id (5).
+  make_oversized(0); // packet 4 -> slot 4 % 4 == 0
+  make_ordinary(1);  // packet 5 -> slot 5 % 4 == 1
+  api.core.hsa_signal_store_relaxed_fn(queue->doorbell_signal, 5);
+
+  // Packet 4 was rewritten to the virtual descriptor -- it was NOT skipped.
+  EXPECT_EQ(g_fake_queue_packets[0].kernel_object,
+            reinterpret_cast<uintptr_t>(&virtual_descriptor));
+  EXPECT_EQ(g_fake_queue_packets[0].group_segment_size, 0u);
+  EXPECT_FALSE(g_fake_allocation_sizes.empty());
+
+  EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+}
+
 TEST(HsaHooksUnitTest, VirtualLdsRewriteWorksWithoutLoadedCodeObjectOutput) {
   using rocr::llvm::amdhsa::kernel_descriptor_t;
 

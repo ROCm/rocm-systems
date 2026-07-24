@@ -32,7 +32,6 @@ option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
 option(ENABLE_SPIRV "Build hip-tests for SPIRV" OFF)
 option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON)
 option(STANDALONE_TESTS "Generate standalone executable per source file" OFF)
-option(ENABLE_OOB_TESTS "Build OOB tests, deliberately wrong inputs" ON)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -124,9 +123,7 @@ if(NOT DEFINED THEROCK_SANITIZER)
 endif()
 
 set(ASAN_CONFIG_DEF)
-set(HIP_TESTS_ASAN_ENABLED OFF)
 if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-  set(HIP_TESTS_ASAN_ENABLED ON)
   message(STATUS "Building catch tests with Address Sanitizer options")
   # If user is building hip-tests standalone (without TheRock) and wants to turn on sanitizer
   # We append the flags manually, otherwise we use TheRock's CXX flags which already should have

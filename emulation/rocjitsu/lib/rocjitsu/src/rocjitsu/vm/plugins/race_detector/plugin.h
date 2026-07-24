@@ -90,7 +90,9 @@ struct RaceWavefrontState : WavefrontState {
 
 class RaceDetectorPlugin : public ExecutionPlugin {
 public:
-  RaceDetectorPlugin();
+  /// @param config_json Plugin configuration object as a JSON string (unused;
+  ///        this plugin takes no configuration). May be null.
+  explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
@@ -125,6 +127,11 @@ private:
     }
   };
 
+  struct KernelNames {
+    std::string name;
+    std::string symbol;
+  };
+
   RaceWavefrontState *get_state(const amdgpu::Wavefront &wf) {
     return static_cast<RaceWavefrontState *>(wf.plugin_state(slot_index()));
   }
@@ -138,6 +145,7 @@ private:
 
   std::mutex report_mutex_;
   std::set<std::pair<uint32_t, uint64_t>> observed_races_;
+  std::unordered_map<uint32_t, KernelNames> dispatch_kernel_names_;
 };
 
 } // namespace rocjitsu::plugins::race_detector
