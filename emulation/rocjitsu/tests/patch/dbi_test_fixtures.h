@@ -6,8 +6,8 @@
 ///        probe/spill tests: a single-kernel target ELF (with a discoverable `.kd`
 ///        descriptor) and a probe ELF exporting one function symbol, plus small
 ///        readback helpers. The generic `make_amdgpu_*` cores take an ELF machine
-///        flag; `make_gfx950_*` (CDNA4) and `make_gfx1200_*` (RDNA4) are thin
-///        wrappers over them.
+///        flag; `make_gfx942_*` (CDNA3), `make_gfx950_*` (CDNA4), and
+///        `make_gfx1200_*` (RDNA4) are thin wrappers over them.
 ///
 /// These mirror the in-file helpers in tests/patch/instrumentor_test.cpp (which
 /// documents that duplicating self-contained ELF builders across test slices is
@@ -238,6 +238,14 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(const std::vector<uint32_t> &
 
   std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
   return image;
+}
+
+// CDNA3 (gfx942) single-kernel target ELF.
+inline std::vector<uint8_t> make_gfx942_kernel_elf(const std::vector<uint32_t> &text_words,
+                                                   uint32_t private_bytes,
+                                                   uint32_t granulated_sgpr_count = 3) {
+  return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count,
+                                EF_AMDGPU_MACH_AMDGCN_GFX942);
 }
 
 // CDNA4 (gfx950) single-kernel target ELF.
@@ -493,6 +501,12 @@ inline std::vector<uint8_t> make_amdgpu_probe_elf(std::string_view symbol,
 
   std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
   return image;
+}
+
+// CDNA3 (gfx942) probe ELF.
+inline std::vector<uint8_t> make_gfx942_probe_elf(std::string_view symbol,
+                                                  const std::vector<uint32_t> &body_words) {
+  return make_amdgpu_probe_elf(symbol, body_words, EF_AMDGPU_MACH_AMDGCN_GFX942);
 }
 
 // CDNA4 (gfx950) probe ELF.
