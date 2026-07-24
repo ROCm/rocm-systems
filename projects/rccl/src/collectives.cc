@@ -200,6 +200,10 @@ RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 
 RCCL_PARAM(DdaLL128ArThreshold, "DDA_LL128_AR_THRESHOLD", (size_t)(2097152)); // 2 MiB
 RCCL_PARAM(DdaLL128ArWarpsync, "DDA_LL128_AR_WARPSYNC", 1);
 RCCL_PARAM(DdaLL128ArWarpsyncThreshold, "DDA_LL128_AR_WARPSYNC_THRESHOLD", (size_t)(33554432)); // 32 MiB
+// Within the AllReduce warpsync tier, selects the kernel/launcher variant:
+//   0 (default) -> LL128 warpsync (ncclAllReduceDdaFabricLL128Warpsync)
+//   1           -> simple warpsync (ncclAllReduceDdaFabricSimpleWarpsync)
+RCCL_PARAM(DdaArSimpleWarpsync, "DDA_AR_SIMPLE_WARPSYNC", 1);
 
 // Returns true when the DDA fast path should be attempted for a collective
 // with the given total byte count.  gfx942Default is the per-collective
@@ -663,22 +667,28 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
         NCCLCHECK(ncclAllReduceDdaFabricLL128(sendbuff, recvbuff, count, datatype, op, comm, stream));
         return ncclSuccess;
       }
-      // Larger-message fast lane: LL128 warpsync (full-line + barrier) variant.
+      // Larger-message fast lane: warpsync (full-line + barrier) variant. A CVAR
+      // (RCCL_DDA_AR_SIMPLE_WARPSYNC) selects the simple_warpsync kernel over the
+      // LL128 warpsync one; both share the same threshold and eligibility.
       if (rcclParamDdaLL128ArWarpsync() &&
-          (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLL128ArWarpsyncThreshold() &&
-          ncclAllReduceDdaFabricLL128WarpsyncEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-        INFO(NCCL_COLL,
-             "AllReduce: taking DDA fabric LL128 warpsync path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-             comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
-        NCCLCHECK(ncclAllReduceDdaFabricLL128Warpsync(
-            sendbuff,
-            recvbuff,
-            count,
-            datatype,
-            op,
-            comm,
-            stream));
-        return ncclSuccess;
+          (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLL128ArWarpsyncThreshold()) {
+        const bool useSimpleWarpsync = rcclParamDdaArSimpleWarpsync();
+        const bool warpsyncEligible =
+            useSimpleWarpsync
+                ? ncclAllReduceDdaFabricSimpleWarpsyncEligible(comm, sendbuff, recvbuff, count, datatype, op)
+                : ncclAllReduceDdaFabricLL128WarpsyncEligible(comm, sendbuff, recvbuff, count, datatype, op);
+        if (warpsyncEligible) {
+          INFO(NCCL_COLL,
+               "AllReduce: taking DDA fabric %s warpsync path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+               useSimpleWarpsync ? "simple" : "LL128", comm->nRanks, comm->nNodes, count, (int)datatype,
+               count * ncclTypeSize(datatype));
+          if (useSimpleWarpsync) {
+            NCCLCHECK(ncclAllReduceDdaFabricSimpleWarpsync(sendbuff, recvbuff, count, datatype, op, comm, stream));
+          } else {
+            NCCLCHECK(ncclAllReduceDdaFabricLL128Warpsync(sendbuff, recvbuff, count, datatype, op, comm, stream));
+          }
+          return ncclSuccess;
+        }
       }
       if (ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         INFO(NCCL_COLL, "AllReduce: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",

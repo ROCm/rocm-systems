@@ -59,4 +59,23 @@ ncclResult_t ncclAllReduceDdaFabricLL128Warpsync(
     ncclComm* comm,
     cudaStream_t stream);
 
+// simple_warpsync fabric path: a copy of the LL128 warpsync path, selectable at
+// runtime via RCCL_DDA_AR_SIMPLE_WARPSYNC. AllReduce-only.
+bool ncclAllReduceDdaFabricSimpleWarpsyncEligible(
+    ncclComm* comm,
+    const void* sendbuff,
+    void* recvbuff,
+    size_t count,
+    ncclDataType_t datatype,
+    ncclRedOp_t op);
+
+ncclResult_t ncclAllReduceDdaFabricSimpleWarpsync(
+    const void* sendbuff,
+    void* recvbuff,
+    size_t count,
+    ncclDataType_t datatype,
+    ncclRedOp_t op,
+    ncclComm* comm,
+    cudaStream_t stream);
+
 #endif
