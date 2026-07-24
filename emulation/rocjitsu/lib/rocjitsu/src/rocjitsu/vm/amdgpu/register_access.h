@@ -125,10 +125,7 @@ class RegisterAccess {
   }
 
 public:
-  enum class PostWriteTransform : uint8_t {
-    None,
-    ClampF32,
-  };
+  using PostWriteTransform = uint32_t (*)(uint32_t);
 
   class OperandReadView {
   public:
@@ -508,6 +505,17 @@ public:
 
     [[nodiscard]] bool has_storage() const { return storage_.lo != nullptr; }
 
+    [[nodiscard]] uint64_t lane(uint32_t lane) const {
+      assert((storage_.lo || scalar_fallback_) && "OperandRead64View has no source");
+      uint64_t value = storage_.lo
+                           ? uint64_t{(*storage_.lo)[lane]} | (uint64_t{(*storage_.hi)[lane]} << 32)
+                           : scalar_fallback();
+      if (byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask)
+        return value;
+      uint64_t dword_mask = RegisterAccess::byte_bit_mask(byte_mask_);
+      return value & (dword_mask | (dword_mask << 32));
+    }
+
     template <typename T> [[nodiscard]] util::native<T> load_native(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint64_t), "load_native expects 64-bit lanes");
       assert((storage_.lo || scalar_fallback_) && "OperandRead64View has no source");
@@ -819,45 +827,11 @@ public:
     mutable_cu().notify_vgpr_write(&wf, *physical_reg, uint64_t{1} << lane, observed_byte_mask);
     const uint32_t bit_mask = byte_bit_mask(update_byte_mask);
     uint32_t merged = ((*storage)[lane] & ~bit_mask) | (value & bit_mask);
-    if (post_transform == PostWriteTransform::ClampF32) {
-      float result = std::bit_cast<float>(merged);
-      merged = std::bit_cast<uint32_t>(std::clamp(result, 0.0f, 1.0f));
-    }
+    if (post_transform)
+      merged = post_transform(merged);
     (*storage)[lane] = merged;
   }
 
-  /// @brief Apply declarative masked writes to a 64-bit VGPR pair.
-  ///
-  /// Update masks and observed masks are independent for each physical dword.
-  /// The optional post-write transform applies to the merged low dword.
-  void write_lane64_masked(const Operand &op, uint32_t lane, uint64_t value,
-                           uint8_t low_update_byte_mask, uint8_t high_update_byte_mask,
-                           uint8_t low_observed_byte_mask, uint8_t high_observed_byte_mask,
-                           PostWriteTransform low_post_transform) const {
-    Wavefront &wf = mutable_wavefront();
-    VgprStoragePair64 storage = op.simd_vgpr_storage64_mut(wf);
-    auto physical_reg = op.simd_vgpr_base_mut(wf);
-    if (!storage.lo || !physical_reg)
-      throw std::logic_error("transformed 64-bit operand write requires a VGPR destination");
-
-    if (low_observed_byte_mask != 0)
-      mutable_cu().notify_vgpr_write(&wf, *physical_reg, uint64_t{1} << lane,
-                                     low_observed_byte_mask);
-    if (high_observed_byte_mask != 0)
-      mutable_cu().notify_vgpr_write(&wf, *physical_reg + 1, uint64_t{1} << lane,
-                                     high_observed_byte_mask);
-
-    const uint32_t low_bit_mask = byte_bit_mask(low_update_byte_mask);
-    const uint32_t high_bit_mask = byte_bit_mask(high_update_byte_mask);
-    (*storage.lo)[lane] =
-        ((*storage.lo)[lane] & ~low_bit_mask) | (static_cast<uint32_t>(value) & low_bit_mask);
-    (*storage.hi)[lane] = ((*storage.hi)[lane] & ~high_bit_mask) |
-                          (static_cast<uint32_t>(value >> 32) & high_bit_mask);
-    if (low_post_transform == PostWriteTransform::ClampF32) {
-      float result = std::bit_cast<float>((*storage.lo)[lane]);
-      (*storage.lo)[lane] = std::bit_cast<uint32_t>(std::clamp(result, 0.0f, 1.0f));
-    }
-  }
   void write_lane64(const Operand &op, uint32_t lane, uint64_t value) const {
     op.write_lane64(mutable_wavefront(), lane, value);
   }
@@ -1019,8 +993,16 @@ public:
   [[nodiscard]] VgprReadWriteRegion readwrite_vgpr_region(uint32_t physical_base,
                                                           uint32_t reg_count, uint64_t lane_mask,
                                                           uint8_t byte_mask = 0xF) const {
-    return VgprReadWriteRegion(read_vgpr_region(physical_base, reg_count, lane_mask, byte_mask),
-                               write_vgpr_region(physical_base, reg_count, lane_mask));
+    return readwrite_vgpr_region(physical_base, reg_count, lane_mask, byte_mask, byte_mask);
+  }
+
+  [[nodiscard]] VgprReadWriteRegion readwrite_vgpr_region(uint32_t physical_base,
+                                                          uint32_t reg_count, uint64_t lane_mask,
+                                                          uint8_t read_byte_mask,
+                                                          uint8_t write_byte_mask) const {
+    return VgprReadWriteRegion(
+        read_vgpr_region(physical_base, reg_count, lane_mask, read_byte_mask),
+        write_vgpr_region(physical_base, reg_count, lane_mask, write_byte_mask));
   }
 
 private:

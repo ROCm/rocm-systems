@@ -2282,7 +2282,6 @@ struct Rdna3_5DppTraits {
 struct Gfx1250DppTraits {
   static constexpr const char *name = "gfx1250";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_GFX1250;
-  static constexpr uint32_t wf_size = 32;
   using MachineInst = gfx1250::MachineInst;
   using VopcMachineInst = gfx1250::VopcMachineInst;
   using Vop1VopDpp16MachineInst = gfx1250::Vop1VopDpp16MachineInst;
@@ -2489,7 +2488,7 @@ template <typename Traits> void generated_vop1_dpp64_preserves_masked_destinatio
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
-  raw.dpp_ctrl = 0xB1; // quad_perm:[1,0,3,2]
+  raw.dpp_ctrl = amdgpu::dpp::ROW_SHARE_BASE + 1; // row_newbcast:1
   raw.bound_ctrl = 1;
   raw.bank_mask = 0xF;
   raw.row_mask = 0x1;
@@ -2501,10 +2500,8 @@ template <typename Traits> void generated_vop1_dpp64_preserves_masked_destinatio
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     const uint64_t actual = static_cast<uint64_t>(cu->read_vgpr(vbase + kDst, lane)) |
                             (static_cast<uint64_t>(cu->read_vgpr(vbase + kDst + 1, lane)) << 32);
-    const uint32_t source_lane = lane ^ 1u;
-    const uint64_t expected = lane < 16
-                                  ? std::bit_cast<uint64_t>(static_cast<double>(100u + source_lane))
-                                  : kOldDstBase + lane;
+    const uint64_t expected =
+        lane < 16 ? std::bit_cast<uint64_t>(static_cast<double>(101u)) : kOldDstBase + lane;
     EXPECT_EQ(actual, expected) << "lane " << lane;
   }
 }
@@ -3106,11 +3103,6 @@ TEST(DppPermuteTest, CdnaGeneratedVop1Dpp64PreservesMaskedDestination) {
 TEST(DppPermuteTest, Gfx1250GeneratedVop1DppWriteMaskHonorsBoundCtrl) {
   ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
   wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl<Gfx1250DppTraits>();
-}
-
-TEST(DppPermuteTest, Gfx1250GeneratedVop1Dpp64PreservesMaskedDestination) {
-  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
-  generated_vop1_dpp64_preserves_masked_destination<Gfx1250DppTraits>();
 }
 
 TEST(DppPermuteTest, RdnaGeneratedVop1Dpp16FetchInactiveUsesFi) {

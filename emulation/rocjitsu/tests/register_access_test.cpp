@@ -240,6 +240,38 @@ TEST(RegisterAccessTest, MaskedLaneWritePreservesBytesWithoutSyntheticRead) {
   EXPECT_EQ(fx.cu->read_vgpr_storage(reg, 3), 0xAABB33DDu);
 }
 
+TEST(RegisterAccessTest, PartialByteReadWriteRegionUsesDeclaredReadAndWriteMasks) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  uint32_t reg = fx.vgpr_base() + 10;
+  fx.cu->write_vgpr(reg, 3, 0xAABBCCDDu);
+
+  RegisterAccess regs(*fx.cu);
+  auto symmetric =
+      regs.readwrite_vgpr_region(reg, /*reg_count=*/1, /*lane_mask=*/1u << 3, /*byte_mask=*/0b0010);
+  EXPECT_EQ(symmetric.read().lane(0, 3), 0x0000CC00u);
+  symmetric.write().set_lane(0, 3, 0x11223344u);
+  EXPECT_EQ(fx.cu->read_vgpr_storage(reg, 3), 0xAABB33DDu);
+  ASSERT_EQ(fx.plugin->reads.size(), 1u);
+  EXPECT_EQ(fx.plugin->reads[0].byte_mask, 0b0010);
+  ASSERT_EQ(fx.plugin->writes.size(), 1u);
+  EXPECT_EQ(fx.plugin->writes[0].byte_mask, 0b0010);
+
+  fx.plugin->reads.clear();
+  fx.plugin->writes.clear();
+  fx.cu->write_vgpr(reg, 3, 0xAABBCCDDu);
+  auto asymmetric = regs.readwrite_vgpr_region(reg, /*reg_count=*/1, /*lane_mask=*/1u << 3,
+                                               /*read_byte_mask=*/0b0010,
+                                               /*write_byte_mask=*/0b1100);
+  EXPECT_EQ(asymmetric.read().lane(0, 3), 0x0000CC00u);
+  asymmetric.write().set_lane(0, 3, 0x11223344u);
+  EXPECT_EQ(fx.cu->read_vgpr_storage(reg, 3), 0x1122CCDDu);
+  ASSERT_EQ(fx.plugin->reads.size(), 1u);
+  EXPECT_EQ(fx.plugin->reads[0].byte_mask, 0b0010);
+  ASSERT_EQ(fx.plugin->writes.size(), 1u);
+  EXPECT_EQ(fx.plugin->writes[0].byte_mask, 0b1100);
+}
+
 TEST(RegisterAccessTest, Scalar64ReadObservesBothRegisters) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);

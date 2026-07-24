@@ -7602,6 +7602,17 @@ class CodeGenerator:
                             assert all(
                                 not o.fieldless for o in _src_input_ops[:2]
                             ), f'{inst.name}: DPP/SDWA permute source is fieldless'
+                            _dpp_src0_byte_mask_arg = ''
+                            if (
+                                body_true16_vop3
+                                and _src_input_ops
+                                and _src_input_ops[0].size == 16
+                            ):
+                                _dpp_src0_byte_mask_arg = (
+                                    ',\n'
+                                    '        amdgpu::dpp::true16_source_byte_mask(\n'
+                                    '            amdgpu::vop3_opsel(inst_), 0)'
+                                )
                             _is_vopc = enc.enc_name.upper() == 'ENC_VOPC'
                             _is_cmpx_vopc = (
                                 _is_vopc
@@ -7689,13 +7700,13 @@ class CodeGenerator:
                                     '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
                                     '    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_,\n'
                                     '        dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_, dpp_fi_,\n'
-                                    '        dpp_src0_, wf);\n'
+                                    f'        dpp_src0_, wf{_dpp_src0_byte_mask_arg});\n'
                                 )
                             if not _reads_all_outputs and _supports_dpp8_encoding:
                                 _dpp_preamble += (
                                     '  if (amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
                                     '    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_,\n'
-                                    '        dpp_src0_, wf);\n'
+                                    f'        dpp_src0_, wf{_dpp_src0_byte_mask_arg});\n'
                                 )
                             if _has_sdwa_encoding:
                                 # src1 permute references the field-bearing second

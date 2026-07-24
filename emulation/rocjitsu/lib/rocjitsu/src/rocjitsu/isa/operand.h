@@ -227,8 +227,8 @@ private:
 public:
   /// @brief Set a delegate operand that overrides read methods.
   ///
-  /// @details Used by DPP/SDWA substitution to redirect reads through a
-  /// DppOperand without changing the member variable's type.
+  /// @details Supports temporary source substitution without changing the
+  /// concrete operand member type.
   void set_delegate(Operand *d) { delegate_ = d; }
   void clear_delegate() { delegate_ = nullptr; }
   Operand *delegate() const { return delegate_; }
@@ -535,26 +535,33 @@ private:
                                     uint8_t byte_mask) const override;
 };
 
-/// @brief DPP-aware operand proxy that applies lane permutation on read.
+/// @brief Operand backed by instruction-scoped staged lane values.
 ///
-/// Wraps a regular VGPR operand and overrides read_lane() to return
-/// pre-permuted values. Constructed by the VOP1/VOP2 encoding base when
-/// DPP is detected (src0 == 250). The pre-permuted values are computed
-/// once at construction time.
-class DppOperand : public Operand {
+/// Holds source values prepared before semantic execution, including lane
+/// permutations and sub-dword selection.
+class StagedOperand : public Operand {
 public:
   static constexpr int MAX_LANES = 64;
 
-  DppOperand() = default;
+  StagedOperand() = default;
 
-  /// @brief Construct from a source operand + pre-permuted data.
+  /// @brief Construct from 32-bit staged lane values.
   /// @param base The underlying operand (for name/size/scalar reads).
-  /// @param data Pre-permuted lane values (one per lane).
+  /// @param data Staged values (one per lane).
   /// @param lane_count Number of valid lanes.
-  DppOperand(const Operand &base, const uint32_t *data, int lane_count)
+  StagedOperand(const Operand &base, const uint32_t *data, int lane_count)
       : Operand(base.size_bits_, base.encoding_value_), lane_count_(lane_count) {
     for (int i = 0; i < lane_count && i < MAX_LANES; ++i)
-      data_[i] = data[i];
+      data_lo_[i] = data[i];
+  }
+
+  /// @brief Construct from 64-bit staged lane values.
+  StagedOperand(const Operand &base, const uint64_t *data, int lane_count)
+      : Operand(base.size_bits_, base.encoding_value_), lane_count_(lane_count) {
+    for (int i = 0; i < lane_count && i < MAX_LANES; ++i) {
+      data_lo_[i] = static_cast<uint32_t>(data[i]);
+      data_hi_[i] = static_cast<uint32_t>(data[i] >> 32);
+    }
   }
 
   std::string name() const override { return "dpp_src"; }
@@ -563,37 +570,55 @@ public:
 
 private:
   uint32_t read_lane(const amdgpu::Wavefront & /*wf*/, uint32_t lane) const override {
-    return (lane < static_cast<uint32_t>(lane_count_)) ? data_[lane] : 0;
+    return (lane < static_cast<uint32_t>(lane_count_)) ? data_lo_[lane] : 0;
   }
 
-  uint32_t read_scalar(const amdgpu::Wavefront & /*wf*/) const override { return data_[0]; }
+  uint64_t read_lane64(const amdgpu::Wavefront & /*wf*/, uint32_t lane) const override {
+    if (lane >= static_cast<uint32_t>(lane_count_))
+      return 0;
+    return uint64_t{data_lo_[lane]} | (uint64_t{data_hi_[lane]} << 32);
+  }
+
+  uint32_t read_scalar(const amdgpu::Wavefront & /*wf*/) const override { return data_lo_[0]; }
+
+  uint64_t read_scalar64(const amdgpu::Wavefront & /*wf*/) const override {
+    return uint64_t{data_lo_[0]} | (uint64_t{data_hi_[0]} << 32);
+  }
 
   void read_lane_chunk(const amdgpu::Wavefront & /*wf*/, uint32_t lane_base, uint32_t count,
                        uint32_t *out) const override {
     uint32_t lanes = static_cast<uint32_t>(lane_count_);
     for (uint32_t i = 0; i < count; ++i) {
       uint32_t l = lane_base + i;
-      out[i] = (l < lanes) ? data_[l] : 0u;
+      out[i] = (l < lanes) ? data_lo_[l] : 0u;
     }
   }
 
-  /// The pre-permuted lane data is held in a `MAX_LANES`-wide `uint32_t` array
-  /// that is bit-layout-identical to `VgprStorage` (`simdojo::VectorReg<64,
-  /// uint32_t>` — a `std::array<uint32_t,64>` with the layout `static_assert`
-  /// enforced in `ComputeUnitCore::raw_vgpr_reg`). Unused lanes are zero (the
-  /// EXEC mask gates them off in the glue), so the whole array is a valid
-  /// read-only register view. The cast targets the forward-declared
-  /// `VgprStorage`; the glue dereferences it where the full type is visible.
+  /// @brief Expose staged low dwords as read-only SIMD storage.
   const amdgpu::VgprStorage *
   simd_vgpr_storage_impl(const amdgpu::Wavefront & /*wf*/) const override {
-    static_assert(sizeof(data_) == MAX_LANES * sizeof(uint32_t),
-                  "DppOperand data_ must be layout-compatible with VgprStorage");
-    return reinterpret_cast<const amdgpu::VgprStorage *>(&data_);
+    static_assert(sizeof(data_lo_) == MAX_LANES * sizeof(uint32_t),
+                  "StagedOperand low data must be layout-compatible with VgprStorage");
+    return reinterpret_cast<const amdgpu::VgprStorage *>(&data_lo_);
   }
 
-  uint32_t data_[MAX_LANES]{};
+  amdgpu::ConstVgprStoragePair64
+  simd_vgpr_storage64_impl(const amdgpu::Wavefront & /*wf*/) const override {
+    static_assert(sizeof(data_hi_) == MAX_LANES * sizeof(uint32_t),
+                  "StagedOperand high data must be layout-compatible with VgprStorage");
+    return {
+        reinterpret_cast<const amdgpu::VgprStorage *>(&data_lo_),
+        reinterpret_cast<const amdgpu::VgprStorage *>(&data_hi_),
+    };
+  }
+
+  uint32_t data_lo_[MAX_LANES]{};
+  uint32_t data_hi_[MAX_LANES]{};
   int lane_count_ = 0;
 };
+
+// Compatibility name used by generated encoding members.
+using DppOperand = StagedOperand;
 
 } // namespace rocjitsu
 
