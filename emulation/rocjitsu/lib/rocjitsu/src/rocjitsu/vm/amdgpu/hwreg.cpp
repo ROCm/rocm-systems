@@ -317,8 +317,9 @@ template <size_t N> constexpr HwregTable make_table(const HwregDescriptor (&entr
 
 HwregTable table_for_arch(rj_code_arch_t arch) {
   /*
-   * New ISA families should add the architecture's shader HWREG inventory,
-   * modeled state mapping, and user/trap privilege policy here.
+   * \NPI new ISA architecture: define its own HwregDescriptor table with the \
+   * shader HWREG inventory, modeled state, and privilege policy, then add an \
+   * explicit case here.
    */
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
