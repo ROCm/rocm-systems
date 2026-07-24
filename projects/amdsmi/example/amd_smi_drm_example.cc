@@ -732,12 +732,12 @@ int main() {
             }
             amdsmi_memory_partition_type_t updatePartition =
                 static_cast<amdsmi_memory_partition_type_t>(partition);
-            auto ret_set =
-                amdsmi_set_gpu_memory_partition_mode(processor_handles[device_index], updatePartition);
+            auto ret_set = amdsmi_set_gpu_memory_partition_mode(processor_handles[device_index],
+                                                                updatePartition);
             amdsmi_status_code_to_string(ret_set, &err_str);
             if (ret_set == AMDSMI_STATUS_SUCCESS) {
               PRINT_AMDSMI_RET(ret_set)
-              std::cout << "    Output of amdsmi_set_gpu_memory_partition:\n";
+              std::cout << "    Output of amdsmi_set_gpu_memory_partition_mode:\n";
             }
             std::cout << "\tamdsmi_set_gpu_memory_partition_mode(" << gpu_number << ", "
                       << memoryPartitionString(updatePartition) << "): " << err_str << "\n\n";
@@ -837,7 +837,7 @@ int main() {
         amdsmi_status_code_to_string(ret_set, &err_str);
         if (ret_set == AMDSMI_STATUS_SUCCESS) {
           PRINT_AMDSMI_RET(ret_set)
-          std::cout << "    Output of amdsmi_set_gpu_memory_partition:\n";
+          std::cout << "    Output of amdsmi_set_gpu_memory_partition_mode:\n";
         }
         std::cout << "\tamdsmi_set_gpu_memory_partition_mode(" << gpu_number << ", "
                   << memoryPartitionString(orig_partition) << "): " << err_str << "\n\n";
