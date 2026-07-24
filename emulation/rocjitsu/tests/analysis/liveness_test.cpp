@@ -362,16 +362,22 @@ TEST(GeneratedInstDefUse, MubufCmpswapReturnUsesElementWidthAndTargetGate) {
   }
 }
 
-TEST(RegisterSetAnalysis, IgnoresSpecialRegisterClasses) {
+TEST(RegisterSetAnalysis, SpecialClassesAreHeldButCarryNoOrdinaryLanes) {
   RegisterSet set;
   set.expand({RegClass::EXEC, 0, 2});
   set.expand({RegClass::SCC, 0, 1});
   set.expand({RegClass::FLAT_SCRATCH, 0, 2});
 
-  EXPECT_TRUE(set.none());
-  EXPECT_FALSE(set.contains({RegClass::EXEC, 0, 1}));
-  EXPECT_FALSE(set.contains({RegClass::SCC, 0, 1}));
-  EXPECT_FALSE(set.contains({RegClass::FLAT_SCRATCH, 0, 2}));
+  // Special classes are singleton members, not dropped.
+  EXPECT_FALSE(set.none());
+  EXPECT_TRUE(set.has_specials());
+  EXPECT_TRUE(set.contains({RegClass::EXEC, 0, 1}));
+  EXPECT_TRUE(set.contains({RegClass::SCC, 0, 1}));
+  EXPECT_TRUE(set.contains({RegClass::FLAT_SCRATCH, 0, 2}));
+
+  // But they contribute no ordinary lanes and vanish under ordinary_only().
+  EXPECT_EQ(set.ordinary_size(), 0u);
+  EXPECT_TRUE(set.ordinary_only().none());
 }
 
 TEST(RegisterSetAnalysis, GeneratedCdna4OperandsMapTrackedRegisterRefs) {
@@ -405,12 +411,29 @@ TEST(RegisterSetAnalysis, Cdna4WritelaneDestinationIsUseAndDef) {
 }
 
 // ---------------------------------------------------------------------------
-// Architectural special-register + memory effect API. These effects are
-// represented separately from RegisterSet so they never enter ordinary
-// scratch-allocation liveness.
+// Architectural special-register + memory effect API. Special registers are
+// singleton members of the same RegisterSet as ordinary registers; consumers
+// that drive scratch-allocation liveness project them out with ordinary_only().
 // ---------------------------------------------------------------------------
 
-TEST(SpecialRegisterSetAnalysis, ClassifiesSpecialVersusOrdinaryClasses) {
+// Collect a set's special members in ascending RegClass order, so a test can
+// assert the *exact* set of special registers an instruction reads or writes,
+// not just membership.
+std::vector<RegClass> specials_in(const RegisterSet &set) {
+  std::vector<RegClass> classes;
+  set.for_each_special([&](RegClass c) { classes.push_back(c); });
+  return classes;
+}
+
+// Expected special-register list, sorted to match specials_in()'s ascending
+// iteration order.
+std::vector<RegClass> special_regs(std::initializer_list<RegClass> classes) {
+  std::vector<RegClass> sorted(classes);
+  std::ranges::sort(sorted);
+  return sorted;
+}
+
+TEST(RegisterSetSpecial, ClassifiesSpecialVersusOrdinaryClasses) {
   EXPECT_FALSE(is_special_reg_class(RegClass::SGPR));
   EXPECT_FALSE(is_special_reg_class(RegClass::VGPR));
   EXPECT_FALSE(is_special_reg_class(RegClass::ACC_VGPR));
@@ -423,122 +446,112 @@ TEST(SpecialRegisterSetAnalysis, ClassifiesSpecialVersusOrdinaryClasses) {
   EXPECT_TRUE(is_special_reg_class(RegClass::PC));
 }
 
-TEST(SpecialRegisterSetAnalysis, InsertContainsSizeEmpty) {
-  SpecialRegisterSet s;
-  EXPECT_TRUE(s.empty());
-  EXPECT_EQ(s.size(), 0u);
+TEST(RegisterSetSpecial, OrdinaryAndSpecialInsertionCoexist) {
+  RegisterSet s;
+  s.expand({RegClass::SGPR, 4, 2});
+  s.expand({RegClass::EXEC, 0, 1});
+  s.expand({RegClass::VCC, 0, 1});
 
-  s.insert(RegClass::EXEC);
-  s.insert(RegClass::VCC);
-  s.insert(RegClass::EXEC); // idempotent
-
-  EXPECT_FALSE(s.empty());
-  EXPECT_EQ(s.size(), 2u);
-  EXPECT_TRUE(s.contains(RegClass::EXEC));
-  EXPECT_TRUE(s.contains(RegClass::VCC));
-  EXPECT_FALSE(s.contains(RegClass::SCC));
+  // size() counts ordinary lanes plus special singletons; ordinary_size() sees
+  // only the two SGPR lanes.
+  EXPECT_EQ(s.ordinary_size(), 2u);
+  EXPECT_EQ(s.size(), 4u);
+  EXPECT_TRUE(s.has_specials());
+  EXPECT_TRUE(s.contains({RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(s.contains({RegClass::EXEC, 0, 1}));
+  EXPECT_EQ(specials_in(s), special_regs({RegClass::EXEC, RegClass::VCC}));
 }
 
-TEST(SpecialRegisterSetAnalysis, IgnoresOrdinaryRegisterClasses) {
-  SpecialRegisterSet s;
-  s.insert(RegClass::SGPR);
-  s.insert(RegClass::VGPR);
-  s.insert(RegClass::ACC_VGPR);
+TEST(RegisterSetSpecial, SpecialMembershipIgnoresIndexAndWidth) {
+  // Special classes are singletons: any index/width refers to the same member.
+  RegisterSet s;
+  s.expand({RegClass::EXEC, 42, 8});
+  EXPECT_TRUE(s.contains({RegClass::EXEC, 0, 1}));
+  EXPECT_TRUE(s.contains({RegClass::EXEC, 99, 2}));
+  EXPECT_EQ(s.size(), 1u);
 
-  EXPECT_TRUE(s.empty());
-  EXPECT_FALSE(s.contains(RegClass::SGPR));
+  s.erase({RegClass::EXEC, 7, 4});
+  EXPECT_FALSE(s.contains({RegClass::EXEC, 0, 1}));
+  EXPECT_TRUE(s.none());
 }
 
-TEST(SpecialRegisterSetAnalysis, UnionIntersectsEquality) {
-  SpecialRegisterSet a;
-  a.insert(RegClass::EXEC);
-  SpecialRegisterSet b;
-  b.insert(RegClass::VCC);
+TEST(RegisterSetSpecial, FullIterationEmitsCanonicalSpecialRefs) {
+  RegisterSet s;
+  s.expand({RegClass::VGPR, 1, 1});
+  s.expand({RegClass::PC, 5, 2});
 
-  EXPECT_FALSE(a.intersects(b));
+  // for_each visits the ordinary lane first, then the special as a canonical
+  // {cls, 0, 1} ref regardless of the index/width it was inserted with.
+  std::vector<RegisterRef> seen;
+  s.for_each([&](RegisterRef r) { seen.push_back(r); });
+  ASSERT_EQ(seen.size(), 2u);
+  EXPECT_EQ(seen[0], (RegisterRef{RegClass::VGPR, 1, 1}));
+  EXPECT_EQ(seen[1], (RegisterRef{RegClass::PC, 0, 1}));
 
-  const SpecialRegisterSet u = a | b;
-  EXPECT_EQ(u.size(), 2u);
-  EXPECT_TRUE(u.intersects(a));
-  EXPECT_TRUE(u.intersects(b));
-
-  a |= b;
-  EXPECT_EQ(a, u);
+  // for_each_ordinary skips the special member entirely.
+  std::vector<RegisterRef> ordinary;
+  s.for_each_ordinary([&](RegisterRef r) { ordinary.push_back(r); });
+  EXPECT_EQ(ordinary, (std::vector<RegisterRef>{{RegClass::VGPR, 1, 1}}));
 }
 
-TEST(SpecialRegisterSetAnalysis, ForEachVisitsAscendingClassOrder) {
-  SpecialRegisterSet s;
-  s.insert(RegClass::PC);
-  s.insert(RegClass::EXEC);
-  s.insert(RegClass::M0);
+TEST(RegisterSetSpecial, OrdinaryOnlyDropsSpecialMembers) {
+  RegisterSet s;
+  s.expand({RegClass::SGPR, 3, 1});
+  s.expand({RegClass::SCC, 0, 1});
 
-  std::vector<RegClass> seen;
-  s.for_each([&](RegClass c) { seen.push_back(c); });
-
-  EXPECT_EQ(seen, (std::vector<RegClass>{RegClass::EXEC, RegClass::M0, RegClass::PC}));
+  const RegisterSet ordinary = s.ordinary_only();
+  EXPECT_FALSE(ordinary.has_specials());
+  EXPECT_EQ(ordinary.size(), 1u);
+  EXPECT_TRUE(ordinary.contains({RegClass::SGPR, 3, 1}));
+  EXPECT_TRUE(s.has_specials()); // source unchanged
 }
 
-TEST(SpecialRegisterSetAnalysis, ForEachOnEmptySetNeverInvokesCallback) {
-  SpecialRegisterSet s;
-  int calls = 0;
-  s.for_each([&](RegClass) { ++calls; });
-  EXPECT_EQ(calls, 0);
+TEST(RegisterSetSpecial, SetAlgebraSpansOrdinaryAndSpecial) {
+  RegisterSet a;
+  a.expand({RegClass::SGPR, 0, 1});
+  a.expand({RegClass::EXEC, 0, 1});
+  RegisterSet b;
+  b.expand({RegClass::SGPR, 1, 1});
+  b.expand({RegClass::EXEC, 0, 1});
+  b.expand({RegClass::VCC, 0, 1});
+
+  EXPECT_TRUE(a.intersects(b)); // shared EXEC
+
+  const RegisterSet u = a | b;
+  EXPECT_EQ(u.size(), 4u); // s0, s1, EXEC, VCC
+  EXPECT_EQ(specials_in(u), special_regs({RegClass::EXEC, RegClass::VCC}));
+
+  const RegisterSet i = a & b;
+  EXPECT_EQ(specials_in(i), special_regs({RegClass::EXEC}));
+  EXPECT_FALSE(i.contains({RegClass::SGPR, 0, 1})); // s0 only in a
+
+  const RegisterSet d = b - a; // removes shared EXEC; keeps VCC and s1
+  EXPECT_EQ(specials_in(d), special_regs({RegClass::VCC}));
+  EXPECT_TRUE(d.contains({RegClass::SGPR, 1, 1}));
+
+  RegisterSet cleared = u;
+  cleared.clear_class(RegClass::EXEC);
+  EXPECT_EQ(specials_in(cleared), special_regs({RegClass::VCC}));
+  EXPECT_EQ(cleared.ordinary_size(), 2u); // clear_class(special) leaves ordinary intact
 }
 
-TEST(SpecialRegisterSetAnalysis, HighBitClassesRoundTrip) {
-  // TTMP and PC occupy the highest RegClass bit positions, where a uint16_t
-  // truncation bug in bit()/for_each would first surface.
-  SpecialRegisterSet s;
-  s.insert(RegClass::TTMP);
-  s.insert(RegClass::PC);
-
-  EXPECT_EQ(s.size(), 2u);
-  EXPECT_TRUE(s.contains(RegClass::TTMP));
-  EXPECT_TRUE(s.contains(RegClass::PC));
-
-  std::vector<RegClass> seen;
-  s.for_each([&](RegClass c) { seen.push_back(c); });
-  EXPECT_EQ(seen, (std::vector<RegClass>{RegClass::TTMP, RegClass::PC}));
+TEST(RegisterSetSpecial, EqualityDistinguishesSpecialMembership) {
+  RegisterSet a;
+  a.expand({RegClass::SGPR, 0, 1});
+  RegisterSet b = a;
+  EXPECT_EQ(a, b);
+  b.expand({RegClass::EXEC, 0, 1});
+  EXPECT_NE(a, b); // the special mask participates in equality
 }
 
-TEST(SpecialRegisterSetAnalysis, OrdinaryClassNeverAliasesSpecialBits) {
-  // SGPR maps to bit 0; inserting EXEC must not make an ordinary class appear
-  // present. Guards the raw-value bit indexing against aliasing.
-  SpecialRegisterSet s;
-  s.insert(RegClass::EXEC);
-  EXPECT_FALSE(s.contains(RegClass::SGPR));
-  EXPECT_FALSE(s.contains(RegClass::VGPR));
-  EXPECT_FALSE(s.contains(RegClass::ACC_VGPR));
-}
-
-TEST(SpecialRegisterSetAnalysis, SelfUnionIsIdentity) {
-  SpecialRegisterSet s;
-  s.insert(RegClass::EXEC);
-  s.insert(RegClass::VCC);
-  const SpecialRegisterSet before = s;
-  s |= s;
-  EXPECT_EQ(s, before);
-}
-
-TEST(SpecialRegisterSetAnalysis, HoldsWhatRegisterSetIgnores) {
-  // The special classes RegisterSet drops (see IgnoresSpecialRegisterClasses)
-  // are exactly what SpecialRegisterSet tracks, and the two are independent:
-  // recording special effects never perturbs ordinary scratch liveness.
-  RegisterSet ordinary;
-  ordinary.expand({RegClass::SGPR, 4, 2});
-  const size_t ordinary_size = ordinary.size();
-
-  SpecialRegisterSet special;
-  special.insert(RegClass::EXEC);
-  special.insert(RegClass::SCC);
-  special.insert(RegClass::FLAT_SCRATCH);
-
-  EXPECT_EQ(special.size(), 3u);
-  EXPECT_EQ(ordinary.size(), ordinary_size); // unchanged by special inserts
-
-  // RegisterSet still refuses to store special classes.
-  ordinary.expand({RegClass::EXEC, 0, 2});
-  EXPECT_EQ(ordinary.size(), ordinary_size);
+TEST(RegisterSetSpecial, HighValuedTtmpAndPcMaskBitsRoundTrip) {
+  // TTMP and PC are the highest RegClass values, where a mask-width bug would
+  // first surface.
+  RegisterSet s;
+  s.expand({RegClass::TTMP, 0, 1});
+  s.expand({RegClass::PC, 0, 1});
+  EXPECT_EQ(specials_in(s), special_regs({RegClass::TTMP, RegClass::PC}));
+  EXPECT_FALSE(s.contains({RegClass::SGPR, 0, 1})); // no aliasing onto bit 0
 }
 
 TEST(MemoryEffectsAnalysis, DefaultsToNoEffect) {
@@ -550,53 +563,45 @@ TEST(MemoryEffectsAnalysis, DefaultsToNoEffect) {
 }
 
 TEST(InstDefUseSpecialEffects, SpecialAndMemoryDefaultEmpty) {
-  // Constructing InstDefUse from a decoded instruction leaves special/memory
-  // effects empty while ordinary def/use extraction is unchanged.
+  // A decoded instruction with only ordinary operands reports no special
+  // members and no memory effect; ordinary def/use extraction is unchanged.
   TestInstruction inst("test_sp", {{RegClass::SGPR, 4, 1}}, {{RegClass::VGPR, 0, 1}});
   InstDefUse du(inst);
 
   EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 4, 1}));
   EXPECT_TRUE(du.uses.contains({RegClass::VGPR, 0, 1}));
-  EXPECT_TRUE(du.special_defs.empty());
-  EXPECT_TRUE(du.special_uses.empty());
+  EXPECT_FALSE(du.defs.has_specials());
+  EXPECT_FALSE(du.uses.has_specials());
   EXPECT_FALSE(du.memory.any());
 }
 
-TEST(InstDefUseSpecialEffects, SpecialEffectsDoNotEnterScratchLiveness) {
-  // A future consumer (DBT/DBI) can record special and memory effects on
-  // InstDefUse but doing so must not change the ordinary defs/uses that
-  // drive scratch allocation.
+TEST(InstDefUseSpecialEffects, SpecialMembersStayOutOfOrdinaryProjection) {
+  // Special singletons live in defs/uses alongside ordinary registers, but the
+  // ordinary projection that drives scratch allocation is unaffected.
   TestInstruction inst("test_sp", {{RegClass::SGPR, 4, 1}}, {});
   InstDefUse du(inst);
-  const size_t defs_size = du.defs.size();
 
-  du.special_defs.insert(RegClass::EXEC);
-  du.special_uses.insert(RegClass::VCC);
+  du.defs.expand({RegClass::EXEC, 0, 1});
+  du.uses.expand({RegClass::VCC, 0, 1});
   du.memory.reads = true;
   du.memory.global = true;
 
-  EXPECT_EQ(du.defs.size(), defs_size);
-  EXPECT_TRUE(du.special_defs.contains(RegClass::EXEC));
-  EXPECT_TRUE(du.special_uses.contains(RegClass::VCC));
+  EXPECT_EQ(du.defs.ordinary_size(), 1u);
+  EXPECT_TRUE(du.defs.ordinary_only().contains({RegClass::SGPR, 4, 1}));
+  EXPECT_FALSE(du.defs.ordinary_only().has_specials());
+  EXPECT_TRUE(du.defs.contains({RegClass::EXEC, 0, 1}));
+  EXPECT_TRUE(du.uses.contains({RegClass::VCC, 0, 1}));
   EXPECT_TRUE(du.memory.any());
-}
-
-// Build a SpecialRegisterSet from a list so a test can assert the *exact* set of
-// special registers an instruction reads or writes, not just membership.
-SpecialRegisterSet special_regs(std::initializer_list<RegClass> classes) {
-  SpecialRegisterSet s;
-  for (RegClass c : classes)
-    s.insert(c);
-  return s;
 }
 
 TEST(SpecialEffectAnalysis, SaveexecReportsExecAndSccFromDecodedOperands) {
   // Real decoded instruction: s_and_saveexec_b64 s[0:1], s[0:1] (CDNA4). Its
-  // fieldless special operands drive the InstDefUse special sets by direction:
-  //   dst EXEC + dst SCC  -> special_defs
-  //   src EXEC (old exec) -> special_uses
-  // while the ordinary sdst/ssrc0 SGPRs stay in the ordinary defs/uses that feed
-  // scratch allocation. Special effects never enter ordinary RegisterSet liveness.
+  // fieldless special operands become singleton members of defs/uses by
+  // direction:
+  //   dst EXEC + dst SCC  -> special members of defs
+  //   src EXEC (old exec) -> special member of uses
+  // while the ordinary sdst/ssrc0 SGPRs stay in the same sets as ordinary
+  // members. The ordinary projection (ordinary_only) sees only the SGPRs.
   const uint32_t words[] = {0xBE802000u, 0x00000000u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
@@ -606,16 +611,17 @@ TEST(SpecialEffectAnalysis, SaveexecReportsExecAndSccFromDecodedOperands) {
 
   InstDefUse du(*inst);
 
-  EXPECT_EQ(du.special_defs, special_regs({RegClass::EXEC, RegClass::SCC}));
-  EXPECT_EQ(du.special_uses, special_regs({RegClass::EXEC}));
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::EXEC, RegClass::SCC}));
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::EXEC}));
 
   // Ordinary sdst/ssrc0 (s[0:1]) still tracked as ordinary registers.
   EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 0, 2}));
   EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 0, 2}));
 
-  // Special registers do not leak into ordinary scratch liveness.
-  EXPECT_FALSE(du.defs.contains({RegClass::EXEC, 0, 1}));
-  EXPECT_FALSE(du.defs.contains({RegClass::SCC, 0, 1}));
+  // EXEC/SCC are members of du.defs but stay out of the ordinary projection
+  // that feeds scratch allocation.
+  EXPECT_TRUE(du.defs.contains({RegClass::EXEC, 0, 1}));
+  EXPECT_FALSE(du.defs.ordinary_only().has_specials());
 }
 
 TEST(SpecialEffectAnalysis, OrdinaryInstructionReportsNoSpecialEffects) {
@@ -628,8 +634,8 @@ TEST(SpecialEffectAnalysis, OrdinaryInstructionReportsNoSpecialEffects) {
   ASSERT_NE(inst, nullptr);
 
   InstDefUse du(*inst);
-  EXPECT_TRUE(du.special_defs.empty());
-  EXPECT_TRUE(du.special_uses.empty());
+  EXPECT_FALSE(du.defs.has_specials());
+  EXPECT_FALSE(du.uses.has_specials());
 }
 
 // Decode-time special-effect coverage for the hidden-side-effect instruction
@@ -650,8 +656,8 @@ TEST(SpecialEffectAnalysis, CmpxWritesVccAndExecOnCdna) {
   ASSERT_EQ(inst->mnemonic(), "v_cmpx_eq_f32_e32");
 
   InstDefUse du(*inst);
-  EXPECT_EQ(du.special_defs, special_regs({RegClass::EXEC, RegClass::VCC}));
-  EXPECT_TRUE(du.special_uses.empty());
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::EXEC, RegClass::VCC}));
+  EXPECT_FALSE(du.uses.has_specials());
 }
 
 TEST(SpecialEffectAnalysis, CmpxWritesExecOnlyOnGfx1250) {
@@ -664,8 +670,8 @@ TEST(SpecialEffectAnalysis, CmpxWritesExecOnlyOnGfx1250) {
   ASSERT_EQ(inst->mnemonic(), "v_cmpx_eq_f32_e32");
 
   InstDefUse du(*inst);
-  EXPECT_EQ(du.special_defs, special_regs({RegClass::EXEC}));
-  EXPECT_TRUE(du.special_uses.empty());
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::EXEC}));
+  EXPECT_FALSE(du.uses.has_specials());
 }
 
 // RDNA CMPX is EXEC-only like gfx1250 (and unlike CDNA), tested directly on an
@@ -680,8 +686,8 @@ TEST(SpecialEffectAnalysis, CmpxWritesExecOnlyOnRdna) {
   ASSERT_EQ(inst->mnemonic(), "v_cmpx_eq_f32_e32");
 
   InstDefUse du(*inst);
-  EXPECT_EQ(du.special_defs, special_regs({RegClass::EXEC}));
-  EXPECT_TRUE(du.special_uses.empty());
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::EXEC}));
+  EXPECT_FALSE(du.uses.has_specials());
 }
 
 // s_cbranch_{scc,vcc,exec}* read a special condition register and branch. The
@@ -696,8 +702,8 @@ TEST(SpecialEffectAnalysis, CbranchSccIsSpecialSccUse) {
   ASSERT_EQ(inst->mnemonic(), "s_cbranch_scc0");
 
   InstDefUse du(*inst);
-  EXPECT_EQ(du.special_uses, special_regs({RegClass::SCC}));
-  EXPECT_TRUE(du.special_defs.empty());
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::SCC}));
+  EXPECT_FALSE(du.defs.has_specials());
 }
 
 TEST(SpecialEffectAnalysis, CbranchVccIsSpecialVccUse) {
@@ -710,8 +716,8 @@ TEST(SpecialEffectAnalysis, CbranchVccIsSpecialVccUse) {
   ASSERT_EQ(inst->mnemonic(), "s_cbranch_vccz");
 
   InstDefUse du(*inst);
-  EXPECT_EQ(du.special_uses, special_regs({RegClass::VCC}));
-  EXPECT_TRUE(du.special_defs.empty());
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::VCC}));
+  EXPECT_FALSE(du.defs.has_specials());
 }
 
 TEST(SpecialEffectAnalysis, CbranchExecIsSpecialExecUse) {
@@ -724,8 +730,8 @@ TEST(SpecialEffectAnalysis, CbranchExecIsSpecialExecUse) {
   ASSERT_EQ(inst->mnemonic(), "s_cbranch_execz");
 
   InstDefUse du(*inst);
-  EXPECT_EQ(du.special_uses, special_regs({RegClass::EXEC}));
-  EXPECT_TRUE(du.special_defs.empty());
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::EXEC}));
+  EXPECT_FALSE(du.defs.has_specials());
 }
 
 // VOP2 carry reads and writes VCC implicitly. The mnemonic differs by ISA
@@ -742,8 +748,8 @@ TEST(SpecialEffectAnalysis, Vop2CarryCdnaAddcUsesAndDefsVcc) {
   ASSERT_EQ(inst->mnemonic(), "v_addc_co_u32_e32");
 
   InstDefUse du(*inst);
-  EXPECT_EQ(du.special_defs, special_regs({RegClass::VCC}));
-  EXPECT_EQ(du.special_uses, special_regs({RegClass::VCC}));
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::VCC}));
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::VCC}));
   EXPECT_TRUE(du.defs.contains({RegClass::VGPR, 2, 1})); // ordinary vdst still tracked
 }
 
@@ -758,8 +764,8 @@ TEST(SpecialEffectAnalysis, Vop2CarryGfx1250AddCoCiUsesAndDefsVcc) {
   ASSERT_EQ(inst->mnemonic(), "v_add_co_ci_u32_e32");
 
   InstDefUse du(*inst);
-  EXPECT_EQ(du.special_defs, special_regs({RegClass::VCC}));
-  EXPECT_EQ(du.special_uses, special_regs({RegClass::VCC}));
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::VCC}));
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::VCC}));
 }
 
 // PC family: getpc reads PC (writes an ordinary SGPR pair), setpc writes PC
@@ -774,8 +780,8 @@ TEST(SpecialEffectAnalysis, GetpcReadsPc) {
   ASSERT_EQ(inst->mnemonic(), "s_getpc_b64");
 
   InstDefUse du(*inst);
-  EXPECT_EQ(du.special_uses, special_regs({RegClass::PC}));
-  EXPECT_TRUE(du.special_defs.empty());
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::PC}));
+  EXPECT_FALSE(du.defs.has_specials());
   EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 8, 2}));
 }
 
@@ -789,8 +795,8 @@ TEST(SpecialEffectAnalysis, SetpcWritesPc) {
   ASSERT_EQ(inst->mnemonic(), "s_setpc_b64");
 
   InstDefUse du(*inst);
-  EXPECT_EQ(du.special_defs, special_regs({RegClass::PC}));
-  EXPECT_TRUE(du.special_uses.empty());
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::PC}));
+  EXPECT_FALSE(du.uses.has_specials());
   EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 8, 2}));
 }
 
@@ -804,8 +810,8 @@ TEST(SpecialEffectAnalysis, ScallReadsAndWritesPc) {
   ASSERT_EQ(inst->mnemonic(), "s_call_b64");
 
   InstDefUse du(*inst);
-  EXPECT_EQ(du.special_defs, special_regs({RegClass::PC}));
-  EXPECT_EQ(du.special_uses, special_regs({RegClass::PC}));
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::PC}));
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::PC}));
   EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 8, 2}));
 }
 
@@ -822,9 +828,48 @@ TEST(SpecialEffectAnalysis, MemoryPseudoOperandProducesNoSpecialEffect) {
   ASSERT_EQ(inst->mnemonic(), "buffer_load_b32");
 
   InstDefUse du(*inst);
-  EXPECT_TRUE(du.special_defs.empty());
-  EXPECT_TRUE(du.special_uses.empty());
+  EXPECT_FALSE(du.defs.has_specials());
+  EXPECT_FALSE(du.uses.has_specials());
   EXPECT_FALSE(du.memory.any());
+}
+
+// Liveness models ordinary scratch registers only: an instruction's special
+// def/use appears in InstDefUse but must never reach BlockLiveness or
+// live_before(), which drive scratch allocation.
+TEST(SpecialEffectLiveness, SpecialEffectsAreAbsentFromOrdinaryLiveness) {
+  // s_and_saveexec_b64 s[0:1], s[0:1] defs {s[0:1], EXEC, SCC} and uses
+  // {s[0:1], EXEC}; s_endpgm terminates the single block.
+  std::vector<uint32_t> words = {
+      0xBE802000u, // s_and_saveexec_b64 s[0:1], s[0:1]
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(blocks.empty());
+
+  BasicBlock *entry = block_starting_at(blocks, 0);
+  ASSERT_NE(entry, nullptr);
+  auto &insts = entry->instructions();
+  ASSERT_NE(insts.begin(), insts.end());
+  const Instruction &saveexec = *insts.begin();
+  ASSERT_EQ(saveexec.mnemonic(), "s_and_saveexec_b64");
+
+  // InstDefUse records the special effects.
+  const InstDefUse du(saveexec);
+  EXPECT_TRUE(du.defs.contains({RegClass::EXEC, 0, 1}));
+  EXPECT_TRUE(du.defs.contains({RegClass::SCC, 0, 1}));
+  EXPECT_TRUE(du.uses.contains({RegClass::EXEC, 0, 1}));
+
+  // Liveness projects them out of every ordinary set.
+  const LivenessAnalysis liveness = analyze_scope(blocks);
+  const BlockLiveness &bl = liveness.block_liveness(*entry);
+  EXPECT_FALSE(bl.live_in.has_specials());
+  EXPECT_FALSE(bl.live_out.has_specials());
+  EXPECT_FALSE(bl.gen.has_specials());
+  EXPECT_FALSE(bl.kill.has_specials());
+  EXPECT_FALSE(liveness.live_before(saveexec).has_specials());
 }
 
 TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {

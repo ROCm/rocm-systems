@@ -97,10 +97,10 @@ public:
   /// @details Returns the special RegClass (EXEC/VCC/SCC/M0/PC) for a fieldless
   /// architectural special operand, or nullopt for everything else. This is the
   /// special-register counterpart of to_register_ref(): special registers are
-  /// singletons tracked by SpecialRegisterSet, deliberately kept out of the
-  /// ordinary SGPR/VGPR/AccVGPR RegisterSet liveness that drives scratch
-  /// allocation. ISA-specific subclasses override this from the generated
-  /// fieldless operand policy effect column; the base returns nullopt.
+  /// recorded as singleton members of a RegisterSet, which scratch-allocation
+  /// liveness projects out with ordinary_only() so they never look allocatable.
+  /// ISA-specific subclasses override this from the generated fieldless operand
+  /// policy effect column; the base returns nullopt.
   [[nodiscard]] virtual std::optional<RegClass> to_special_reg_class() const;
 
   /// @brief Raw encoding value from the instruction binary.

@@ -56,7 +56,9 @@ void dfs_reverse_post_order(const BasicBlock &start,
 }
 
 [[nodiscard]] RegisterSet kill_defs(const InstDefUse &du) {
-  RegisterSet kills = du.defs;
+  // Ordinary registers only: special singletons (EXEC/VCC/...) live in du.defs
+  // but are not part of scratch-allocation liveness and must not become kills.
+  RegisterSet kills = du.defs.ordinary_only();
   // Predicated defs and EXEC-masked vector defs preserve old values on at least
   // one path or lane. Until EXEC state is tracked at each program point, those
   // writes cannot be treated as unconditional liveness kills.
@@ -184,7 +186,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, const LivenessAnalysisOp
         ++requested_live_before_by_block[i];
       InstDefUse du(inst, gfx1250_vgpr_msb_.get());
       RegisterSet kills = kill_defs(du);
-      RegisterSet upward_uses = du.uses;
+      RegisterSet upward_uses = du.uses.ordinary_only();
       upward_uses -= state.kill;
       state.gen |= upward_uses;
       state.kill |= kills;
@@ -254,7 +256,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, const LivenessAnalysisOp
       InstDefUse du(*inst, gfx1250_vgpr_msb_.get());
       RegisterSet kills = kill_defs(du);
       live -= kills;
-      live |= du.uses;
+      live |= du.uses.ordinary_only();
       if (!filter_live_before || requested_live_before.contains(inst)) {
         live_before_.emplace(inst, live);
         if (filter_live_before && --remaining_requested == 0)

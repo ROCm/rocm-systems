@@ -82,7 +82,7 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
     if (auto ref = op->to_register_ref())
       add_def(*this, inst, *op, *ref, vgpr_msb);
     else if (auto sc = op->to_special_reg_class())
-      special_defs.insert(*sc);
+      defs.expand(RegisterRef{*sc, 0, 1}); // singleton special def
   }
   inst.implicit_defs(defs);
 
@@ -93,7 +93,7 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
     if (auto ref = op->to_register_ref())
       expand_operand_register(uses, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Use);
     else if (auto sc = op->to_special_reg_class())
-      special_uses.insert(*sc);
+      uses.expand(RegisterRef{*sc, 0, 1}); // singleton special use
   }
   inst.implicit_uses(uses);
 }

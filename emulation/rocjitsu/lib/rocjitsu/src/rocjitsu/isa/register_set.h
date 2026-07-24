@@ -4,10 +4,11 @@
 /// @file register_set.h
 /// @brief Register references and register sets for ISA-level register files.
 ///
-/// @details Tracks scalar registers, vector registers, and AccVGPRs. Other
-/// architectural register classes may appear in decoded metadata, but they are
-/// ignored by RegisterSet until there is a concrete consumer for
-/// special-register liveness.
+/// @details Tracks the ordinary indexed register files (SGPR, VGPR, AccVGPR) as
+/// per-index bitsets and the architectural special registers (EXEC, VCC, SCC,
+/// M0, FLAT_SCRATCH, TTMP, PC) as a compact singleton mask in the same set.
+/// Consumers that only reason about allocatable/indexed registers (scratch
+/// liveness, spilling) project the special members out with `ordinary_only()`.
 
 #pragma once
 
@@ -49,29 +50,29 @@ inline constexpr size_t REGISTER_SET_ALLOCATABLE_SGPRS =
 /// labels, waitcnt immediates, message IDs, and other non-register values should
 /// not produce a RegisterRef.
 /// @details The first three classes (SGPR, VGPR, ACC_VGPR) are ordinary
-/// indexed register files tracked by `RegisterSet`. The remainder are
+/// indexed register files with a per-index bitset. The remainder are
 /// architectural special registers: they are singletons (there is one EXEC,
-/// one SCC, ...), are not used for scratch allocation, and are represented by
-/// `SpecialRegisterSet` rather than `RegisterSet`. `is_special_reg_class()`
-/// distinguishes the two groups; keep the ordinary classes first so that
-/// predicate stays a simple partition.
+/// one SCC, ...), are not used for scratch allocation, and are stored in a
+/// compact membership mask. `is_special_reg_class()` distinguishes the two
+/// groups; keep the ordinary classes first so that predicate stays a simple
+/// partition.
 enum class RegClass : uint8_t {
-  SGPR,         ///< Scalar general-purpose register, indexed as sN. Tracked by RegisterSet.
-  VGPR,         ///< Vector general-purpose register, indexed as vN. Tracked by RegisterSet.
-  ACC_VGPR,     ///< CDNA accumulator VGPR, indexed as accN. Tracked by RegisterSet.
-  EXEC,         ///< EXEC mask. Special register; tracked by SpecialRegisterSet, not RegisterSet.
-  VCC,          ///< VCC condition mask. Special register; tracked by SpecialRegisterSet.
-  SCC,          ///< Scalar condition code bit. Special register; tracked by SpecialRegisterSet.
-  M0,           ///< M0 special scalar register. Special register; tracked by SpecialRegisterSet.
-  FLAT_SCRATCH, ///< Flat-scratch base pair. Special register; tracked by SpecialRegisterSet.
-  TTMP,         ///< Trap-temporary registers. Special register; tracked by SpecialRegisterSet.
-  PC, ///< Program counter/control-flow dep. Special register; tracked by SpecialRegisterSet.
+  SGPR,         ///< Scalar general-purpose register, indexed as sN. Ordinary, per-index.
+  VGPR,         ///< Vector general-purpose register, indexed as vN. Ordinary, per-index.
+  ACC_VGPR,     ///< CDNA accumulator VGPR, indexed as accN. Ordinary, per-index.
+  EXEC,         ///< EXEC mask. Special singleton register.
+  VCC,          ///< VCC condition mask. Special singleton register.
+  SCC,          ///< Scalar condition code bit. Special singleton register.
+  M0,           ///< M0 special scalar register. Special singleton register.
+  FLAT_SCRATCH, ///< Flat-scratch base pair. Special singleton register.
+  TTMP,         ///< Trap-temporary registers. Special singleton register.
+  PC,           ///< Program counter/control-flow dep. Special singleton register.
 };
 
 /// @brief True if @p cls is an architectural special register (EXEC, VCC, SCC,
 /// M0, FLAT_SCRATCH, TTMP, PC) rather than an ordinary indexed register file
-/// (SGPR, VGPR, ACC_VGPR). Special registers live in `SpecialRegisterSet`;
-/// ordinary ones live in `RegisterSet`.
+/// (SGPR, VGPR, ACC_VGPR). Special registers are singletons held in the set's
+/// special mask; ordinary ones occupy per-index bitsets.
 [[nodiscard]] constexpr bool is_special_reg_class(RegClass cls) {
   switch (cls) {
   case RegClass::EXEC:
@@ -107,31 +108,52 @@ struct RegisterRef {
 /// @brief Per-class register set used for def/use and liveness dataflow.
 ///
 /// @details A RegisterSet can represent an instruction's use set, def set,
-/// basic-block live-in/live-out set, or live-before/live-after set. Set
-/// operations are member-wise across tracked register classes, so SGPR, VGPR,
-/// and AccVGPR lanes stay disjoint.
+/// basic-block live-in/live-out set, or live-before/live-after set. It stores
+/// the ordinary indexed classes (SGPR, VGPR, AccVGPR) as per-index bitsets and
+/// the architectural special registers (EXEC, VCC, ...) as a singleton
+/// membership mask. Set operations are member-wise, so the ordinary classes
+/// and the special mask all stay disjoint.
+///
+/// @details Special classes are singleton resources: `expand`, `erase`, and
+/// `contains` ignore a special `RegisterRef`'s index/width and act on the
+/// class as a whole, and full iteration emits a canonical `{cls, 0, 1}` ref
+/// per present special class. The general APIs (`size`, `none`, `for_each`)
+/// describe the full set; consumers that reason only about allocatable/indexed
+/// registers use the ordinary views (`ordinary_size`, `for_each_ordinary`,
+/// `ordinary_only`) so singleton special state never looks spillable or indexed.
 class RegisterSet {
 public:
-  /// @brief Add every 32-bit register lane covered by `ref`.
+  /// @brief Add `ref`. For ordinary classes this marks every 32-bit lane it
+  /// covers; for special classes it marks the singleton (index/width ignored).
   void expand(RegisterRef ref);
 
-  /// @brief Remove every 32-bit register lane covered by `ref`.
+  /// @brief Remove `ref`. For ordinary classes this clears every lane it
+  /// covers; for special classes it clears the singleton (index/width ignored).
   void erase(RegisterRef ref);
 
-  /// @brief Remove all tracked registers in one register class.
+  /// @brief Remove every register in one class (ordinary bitset or special bit).
   void clear_class(RegClass cls);
 
-  /// @brief Return true if every lane covered by `ref` is present.
+  /// @brief Return true if `ref` is present. For ordinary classes every covered
+  /// lane must be present; for special classes only membership is checked.
   [[nodiscard]] bool contains(RegisterRef ref) const;
 
-  /// @brief Return true when no register class contains any live bits.
+  /// @brief Return true when neither the ordinary bitsets nor the special mask
+  /// hold any member.
   [[nodiscard]] bool none() const;
 
-  /// @brief Return the total number of single-lane registers tracked across
-  ///        all classes (SGPR + VGPR + AccVGPR).
+  /// @brief Total number of members: ordinary single-lane registers plus
+  /// distinct special singletons.
   [[nodiscard]] size_t size() const;
 
-  /// @brief Return true if any register lane is present in both sets.
+  /// @brief Number of ordinary single-lane registers only (SGPR + VGPR +
+  /// AccVGPR), excluding special singletons. Use this for scratch/slot sizing.
+  [[nodiscard]] size_t ordinary_size() const;
+
+  /// @brief True if any special singleton is present.
+  [[nodiscard]] bool has_specials() const { return special_regs_ != 0; }
+
+  /// @brief Return true if any member is present in both sets (ordinary or special).
   [[nodiscard]] bool intersects(const RegisterSet &rhs) const;
 
   RegisterSet &operator|=(const RegisterSet &rhs);
@@ -153,12 +175,27 @@ public:
 
   friend bool operator==(const RegisterSet &, const RegisterSet &) = default;
 
-  /// @brief Invoke @p f with each tracked single-lane register in the set.
+  /// @brief Return a copy holding only the ordinary members; special singletons
+  /// are dropped. This is the projection scratch/liveness/spill consumers use.
+  [[nodiscard]] RegisterSet ordinary_only() const {
+    RegisterSet copy = *this;
+    copy.special_regs_ = 0;
+    return copy;
+  }
+
+  /// @brief Invoke @p f with each member of the full set.
   ///
-  /// @details Visits SGPRs, then VGPRs, then AccVGPRs in ascending index
-  /// order. Each yielded RegisterRef has @c width=1 — multi-lane refs that
-  /// were inserted via @c expand are visited as their constituent lanes.
+  /// @details Visits ordinary SGPRs, VGPRs, then AccVGPRs in ascending index
+  /// order (each as a @c width=1 RegisterRef), then each present special class
+  /// in ascending `RegClass` order as a canonical `{cls, 0, 1}` ref.
   template <typename F> void for_each(F &&f) const {
+    for_each_ordinary(f);
+    for_each_special([&](RegClass cls) { f(RegisterRef{cls, 0, 1}); });
+  }
+
+  /// @brief Invoke @p f with each ordinary single-lane register (SGPR, VGPR,
+  /// AccVGPR) in ascending index order. Special singletons are not visited.
+  template <typename F> void for_each_ordinary(F &&f) const {
     for (size_t i = 0; i < sgprs_.size(); ++i) {
       if (sgprs_.test(i))
         f(RegisterRef{RegClass::SGPR, static_cast<uint16_t>(i), 1});
@@ -173,61 +210,10 @@ public:
     }
   }
 
-private:
-  std::bitset<REGISTER_SET_MAX_SGPRS> sgprs_;
-  std::bitset<REGISTER_SET_MAX_VGPRS> vgprs_;
-  std::bitset<REGISTER_SET_MAX_ACC_VGPRS> acc_vgprs_;
-};
-
-/// @brief A set of architectural special registers (EXEC, VCC, SCC, M0, PC,
-/// FLAT_SCRATCH, TTMP).
-///
-/// @details Special registers are singletons — there is exactly one EXEC, one
-/// SCC, and so on, with no meaningful index or width — so membership is the
-/// only state, and this set stores just a class-membership bitmask rather than
-/// per-index bitsets. It is deliberately a separate type from `RegisterSet`
-/// so DBT and DBI can handle them accordingly.
-class SpecialRegisterSet {
-public:
-  /// @brief Add a special-register class. Ordinary register classes
-  /// (SGPR/VGPR/ACC_VGPR) are ignored — those belong in `RegisterSet`, and
-  /// silently dropping them mirrors how `RegisterSet` ignores special classes.
-  void insert(RegClass cls) {
-    if (is_special_reg_class(cls))
-      mask_ |= bit(cls);
-  }
-
-  /// @brief True if @p cls is present. Only meaningful for special classes;
-  /// ordinary classes are never members and always return false.
-  [[nodiscard]] bool contains(RegClass cls) const { return (mask_ & bit(cls)) != 0; }
-
-  /// @brief True when no special register is present.
-  [[nodiscard]] bool empty() const { return mask_ == 0; }
-
-  /// @brief Number of distinct special registers present.
-  [[nodiscard]] size_t size() const { return static_cast<size_t>(std::popcount(mask_)); }
-
-  /// @brief True if any special register is present in both sets.
-  [[nodiscard]] bool intersects(const SpecialRegisterSet &rhs) const {
-    return (mask_ & rhs.mask_) != 0;
-  }
-
-  SpecialRegisterSet &operator|=(const SpecialRegisterSet &rhs) {
-    mask_ |= rhs.mask_;
-    return *this;
-  }
-
-  friend SpecialRegisterSet operator|(SpecialRegisterSet lhs, const SpecialRegisterSet &rhs) {
-    lhs |= rhs;
-    return lhs;
-  }
-
-  friend bool operator==(const SpecialRegisterSet &, const SpecialRegisterSet &) = default;
-
-  /// @brief Invoke @p f with each present special register class, in ascending
+  /// @brief Invoke @p f with each present special class, in ascending
   /// `RegClass` value order.
-  template <typename F> void for_each(F &&f) const {
-    uint16_t bits = mask_;
+  template <typename F> void for_each_special(F &&f) const {
+    uint16_t bits = special_regs_;
     while (bits != 0) {
       const auto i = static_cast<uint8_t>(std::countr_zero(bits));
       f(static_cast<RegClass>(i));
@@ -236,19 +222,24 @@ public:
   }
 
 private:
-  static constexpr uint16_t bit(RegClass cls) {
+  /// @brief Mask bit for a special class. Only valid for special classes.
+  static constexpr uint16_t special_bit(RegClass cls) {
     return static_cast<uint16_t>(1u << static_cast<uint8_t>(cls));
   }
 
-  // The bitmask indexes bits by raw RegClass value, so every class must fit in
-  // `mask_`. If RegClass ever grows past the mask width, widen `mask_` (and the
-  // shift base in `bit`) rather than silently truncating membership.
+  // The special mask indexes bits by raw RegClass value, so every class must
+  // fit in `special_regs_`. If RegClass ever grows past the mask width, widen
+  // it (and the shift base in `special_bit`) rather than truncating membership.
   static_assert(static_cast<uint8_t>(RegClass::PC) < 16,
-                "SpecialRegisterSet mask_ must hold a bit for every RegClass value");
+                "special_regs_ must hold a bit for every RegClass value");
 
-  /// @brief Bit `static_cast<uint8_t>(cls)` set iff special class `cls`
-  /// present. Only special-class bits are ever set (see `insert`).
-  uint16_t mask_ = 0;
+  std::bitset<REGISTER_SET_MAX_SGPRS> sgprs_;
+  std::bitset<REGISTER_SET_MAX_VGPRS> vgprs_;
+  std::bitset<REGISTER_SET_MAX_ACC_VGPRS> acc_vgprs_;
+
+  /// @brief Bit `static_cast<uint8_t>(cls)` set iff special class `cls` is
+  /// present. Only special-class bits are ever set (see `expand`).
+  uint16_t special_regs_ = 0;
 };
 
 } // namespace rocjitsu

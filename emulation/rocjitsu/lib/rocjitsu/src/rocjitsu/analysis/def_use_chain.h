@@ -10,14 +10,12 @@
 /// determines which register class and index are involved. Instruction
 /// subclasses may also report hidden register effects through implicit hooks.
 ///
-/// Ordinary register-file effects (SGPR/VGPR/AccVGPR) live in `defs`/`uses`
-/// and drive scratch-allocation liveness. Architectural special-register
-/// effects (EXEC/VCC/SCC/M0/PC/...) and memory effects are exposed on separate
-/// members (`special_defs`/`special_uses`, `memory`) so consumers can query
-/// them without those effects ever entering ordinary liveness. Those separate
-/// members are currently always empty and will be populated once generated
-/// operands report special/memory effects; the ordinary `defs`/`uses` behavior
-/// is unchanged.
+/// `defs`/`uses` hold both ordinary register-file effects (SGPR/VGPR/AccVGPR)
+/// and architectural special-register effects (EXEC/VCC/SCC/M0/PC/...) in one
+/// RegisterSet each. Special registers are singleton members of that set;
+/// consumers that drive scratch-allocation liveness project them out with
+/// `RegisterSet::ordinary_only()` so special state never looks allocatable.
+/// Memory effects are summarized separately in `memory`.
 
 #pragma once
 
@@ -30,12 +28,12 @@ class Gfx1250VgprMsbAnalysis;
 
 /// @brief Memory-effect summary for one decoded instruction.
 ///
-/// @details A coarse description of what memory an instruction touches. Not
-/// currently used. Present now so `InstDefUse` has a stable shape for DBT/DBI
-/// consumers. All flags default to false (no memory effect).
+/// @details A coarse description of what memory an instruction touches. No
+/// operand currently populates these flags, so every field is false today;
+/// the summary exists so `InstDefUse` has a stable shape for DBT/DBI consumers.
 ///
-/// TODO: Update when OPR_GPUMEM, OPR_DSMEM, and OPR_FLAT_SCRATCH become
-/// avaialable.
+/// TODO: Populate from OPR_GPUMEM, OPR_DSMEM, and OPR_FLAT_SCRATCH operands
+/// once memory pseudo-operands report their effects.
 struct MemoryEffects {
   bool reads = false;   ///< Reads memory.
   bool writes = false;  ///< Writes memory.
@@ -57,11 +55,9 @@ public:
   /// @param inst Decoded instruction whose operands have stable lifetimes.
   InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vgpr_msb = nullptr);
 
-  RegisterSet defs;                ///< Ordinary registers overwritten by the instruction.
-  RegisterSet uses;                ///< Ordinary registers read before the instruction writes defs.
-  SpecialRegisterSet special_defs; ///< Special registers (EXEC/VCC/SCC/M0/PC/...) written.
-  SpecialRegisterSet special_uses; ///< Special registers read.
-  MemoryEffects memory;            ///< Memory-effect summary.
+  RegisterSet defs;     ///< Registers written (ordinary lanes + special singletons).
+  RegisterSet uses;     ///< Registers read before defs (ordinary lanes + special singletons).
+  MemoryEffects memory; ///< Memory-effect summary.
   bool has_exec_masked_vector_def = false; ///< True if any vector def is predicated by EXEC.
   bool has_predicated_def = false;         ///< True if defs preserve old values on some paths.
 };

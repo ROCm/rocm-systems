@@ -4,6 +4,7 @@
 #include "rocjitsu/isa/register_set.h"
 
 #include <algorithm>
+#include <bit>
 
 namespace rocjitsu {
 
@@ -47,6 +48,8 @@ void RegisterSet::expand(RegisterRef ref) {
     set_range(acc_vgprs_, ref.index, width);
     break;
   default:
+    // Special singleton: index/width are meaningless, so just set its bit.
+    special_regs_ |= special_bit(ref.cls);
     break;
   }
 }
@@ -64,6 +67,7 @@ void RegisterSet::erase(RegisterRef ref) {
     reset_range(acc_vgprs_, ref.index, width);
     break;
   default:
+    special_regs_ &= static_cast<uint16_t>(~special_bit(ref.cls));
     break;
   }
 }
@@ -80,6 +84,7 @@ void RegisterSet::clear_class(RegClass cls) {
     acc_vgprs_.reset();
     break;
   default:
+    special_regs_ &= static_cast<uint16_t>(~special_bit(cls));
     break;
   }
 }
@@ -94,23 +99,32 @@ bool RegisterSet::contains(RegisterRef ref) const {
   case RegClass::ACC_VGPR:
     return contains_range(acc_vgprs_, ref.index, width);
   default:
-    return false;
+    return (special_regs_ & special_bit(ref.cls)) != 0;
   }
 }
 
-bool RegisterSet::none() const { return sgprs_.none() && vgprs_.none() && acc_vgprs_.none(); }
+bool RegisterSet::none() const {
+  return sgprs_.none() && vgprs_.none() && acc_vgprs_.none() && special_regs_ == 0;
+}
 
-size_t RegisterSet::size() const { return sgprs_.count() + vgprs_.count() + acc_vgprs_.count(); }
+size_t RegisterSet::size() const {
+  return ordinary_size() + static_cast<size_t>(std::popcount(special_regs_));
+}
+
+size_t RegisterSet::ordinary_size() const {
+  return sgprs_.count() + vgprs_.count() + acc_vgprs_.count();
+}
 
 bool RegisterSet::intersects(const RegisterSet &rhs) const {
   return (sgprs_ & rhs.sgprs_).any() || (vgprs_ & rhs.vgprs_).any() ||
-         (acc_vgprs_ & rhs.acc_vgprs_).any();
+         (acc_vgprs_ & rhs.acc_vgprs_).any() || (special_regs_ & rhs.special_regs_) != 0;
 }
 
 RegisterSet &RegisterSet::operator|=(const RegisterSet &rhs) {
   sgprs_ |= rhs.sgprs_;
   vgprs_ |= rhs.vgprs_;
   acc_vgprs_ |= rhs.acc_vgprs_;
+  special_regs_ |= rhs.special_regs_;
   return *this;
 }
 
@@ -118,6 +132,7 @@ RegisterSet &RegisterSet::operator&=(const RegisterSet &rhs) {
   sgprs_ &= rhs.sgprs_;
   vgprs_ &= rhs.vgprs_;
   acc_vgprs_ &= rhs.acc_vgprs_;
+  special_regs_ &= rhs.special_regs_;
   return *this;
 }
 
@@ -125,6 +140,7 @@ RegisterSet &RegisterSet::operator-=(const RegisterSet &rhs) {
   subtract(sgprs_, rhs.sgprs_);
   subtract(vgprs_, rhs.vgprs_);
   subtract(acc_vgprs_, rhs.acc_vgprs_);
+  special_regs_ &= static_cast<uint16_t>(~rhs.special_regs_);
   return *this;
 }
 
