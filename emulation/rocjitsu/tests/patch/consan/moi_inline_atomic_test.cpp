@@ -1414,45 +1414,56 @@ TEST(ConSanMoi, VglobalAddressMaterializationPreservesSpecialStateAndSignedOffse
   ASSERT_EQ(inventory.kernels.front().atomic_sites.size(), 1u);
   ConSanAtomicSite site = inventory.kernels.front().atomic_sites.front();
   site.raw_ioffset = -4;
-  const ConSanMoiAtomicAddressPlan plan = plan_consan_moi_atomic_address(
-      site, /*scratch_vgpr=*/8, /*scratch_vgpr_count=*/5,
-      ConSanRegisterAllocationSource::DescriptorGrowth, ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(plan.supported()) << consan_moi_atomic_address_support_name(plan.support);
-  EXPECT_EQ(plan.signed_byte_offset, -4);
 
   constexpr uint16_t kVccSave = 80;
   constexpr uint16_t kSccSave = 82;
-  const auto words = build_consan_moi_atomic_address_materialization(plan, kVccSave, kSccSave,
-                                                                     ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(words);
-  ASSERT_EQ(words->size(), 17u);
-  const auto save_scc =
-      build_rdna4_s_cselect_b32(kSccSave, scalar_positive_inline_u32(1),
-                                scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto save_vcc = build_s_mov_b64(kVccSave, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto add_vaddr = build_v_add_u64_vgpr_offset(
-      plan.result_address_vgpr, plan.input_address_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto add_negative =
-      build_v_add_u64_signed_i24(plan.result_address_vgpr, -4, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, kVccSave, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto restore_scc =
-      build_rdna4_s_cmp_lg_u32(kSccSave, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(save_scc);
-  ASSERT_TRUE(save_vcc);
-  ASSERT_TRUE(add_vaddr);
-  ASSERT_TRUE(add_negative);
-  ASSERT_TRUE(restore_vcc);
-  ASSERT_TRUE(restore_scc);
-  EXPECT_EQ((*words)[0], *save_scc);
-  EXPECT_EQ((*words)[1], *save_vcc);
-  EXPECT_EQ((*words)[2],
-            build_v_mov_b32_e32(plan.result_address_vgpr, 4u, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_EQ((*words)[3],
-            build_v_mov_b32_e32(plan.result_address_vgpr + 1u, 5u, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_TRUE(std::equal(add_vaddr->begin(), add_vaddr->end(), words->begin() + 4));
-  EXPECT_TRUE(std::equal(add_negative->begin(), add_negative->end(), words->begin() + 9));
-  EXPECT_EQ((*words)[15], *restore_vcc);
-  EXPECT_EQ((*words)[16], *restore_scc);
+  struct RdnaFamilyTarget {
+    rj_code_arch_t arch;
+    std::string_view label;
+  };
+  constexpr std::array<RdnaFamilyTarget, 2> kTargets = {{
+      {ROCJITSU_CODE_ARCH_RDNA4, "gfx1201/rdna4"},
+      {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250"},
+  }};
+  for (const RdnaFamilyTarget &target : kTargets) {
+    SCOPED_TRACE(target.label);
+    const ConSanMoiAtomicAddressPlan plan = plan_consan_moi_atomic_address(
+        site, /*scratch_vgpr=*/8, /*scratch_vgpr_count=*/5,
+        ConSanRegisterAllocationSource::DescriptorGrowth, target.arch);
+    ASSERT_TRUE(plan.supported()) << consan_moi_atomic_address_support_name(plan.support);
+    EXPECT_EQ(plan.signed_byte_offset, -4);
+
+    const auto words =
+        build_consan_moi_atomic_address_materialization(plan, kVccSave, kSccSave, target.arch);
+    const auto save_scc = build_rdna4_s_cselect_b32(kSccSave, scalar_positive_inline_u32(1),
+                                                    scalar_positive_inline_u32(0), target.arch);
+    const auto save_vcc = build_s_mov_b64(kVccSave, kRdna4VccLo, target.arch);
+    const auto add_vaddr =
+        build_v_add_u64_vgpr_offset(plan.result_address_vgpr, plan.input_address_vgpr, target.arch);
+    const auto add_negative = build_v_add_u64_signed_i24(plan.result_address_vgpr, -4, target.arch);
+    const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, kVccSave, target.arch);
+    const auto restore_scc =
+        build_rdna4_s_cmp_lg_u32(kSccSave, scalar_positive_inline_u32(0), target.arch);
+    ASSERT_TRUE(words);
+    ASSERT_TRUE(save_scc);
+    ASSERT_TRUE(save_vcc);
+    ASSERT_TRUE(add_vaddr);
+    ASSERT_TRUE(add_negative);
+    ASSERT_TRUE(restore_vcc);
+    ASSERT_TRUE(restore_scc);
+
+    std::vector<uint32_t> expected = {
+        *save_scc,
+        *save_vcc,
+        build_v_mov_b32_e32(plan.result_address_vgpr, 4u, target.arch),
+        build_v_mov_b32_e32(plan.result_address_vgpr + 1u, 5u, target.arch),
+    };
+    expected.insert(expected.end(), add_vaddr->begin(), add_vaddr->end());
+    expected.insert(expected.end(), add_negative->begin(), add_negative->end());
+    expected.push_back(*restore_vcc);
+    expected.push_back(*restore_scc);
+    EXPECT_EQ(*words, expected);
+  }
 }
 
 TEST(ConSanMoi, DisplacedVectorOnlyVglobalMaterializesGuestPairAndSignedOffset) {
