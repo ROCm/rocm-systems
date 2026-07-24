@@ -176,6 +176,15 @@ void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target)
 }
 
 //==============================================================================
+// Machine flag <-> ISA architecture
+//==============================================================================
+
+TEST(AmdGpuElfMachineFlags, MapsGfx1250ArchitectureInBothDirections) {
+  EXPECT_EQ(arch_for_elf_mach(EF_AMDGPU_MACH_AMDGCN_GFX1250), ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_EQ(elf_mach_for_arch(ROCJITSU_CODE_ARCH_GFX1250), EF_AMDGPU_MACH_AMDGCN_GFX1250);
+}
+
+//==============================================================================
 // Machine flag -> target_id (one test per supported target)
 //==============================================================================
 
