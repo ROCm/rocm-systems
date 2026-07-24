@@ -12,7 +12,9 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <ctime>
 #include <fstream>
+#include <regex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -193,6 +195,27 @@ TEST_F(logger_test, logger_instance_returns_valid_logger)
     auto pid_marker = "P:" + std::to_string(getpid());
     EXPECT_NE(captured.find(pid_marker), std::string::npos)
         << "PID not found in stdout. Captured: " << captured;
+}
+
+TEST_F(logger_test, logger_output_has_well_formed_local_timestamp)
+{
+    // Creating the logger primes glibc's timezone cache via tzset() so the
+    // spdlog "%H:%M:%S.%e" pattern renders a valid local-time stamp through
+    // localtime_r on every emitted line (including on hot sampler threads).
+    auto& logger = rocprofsys::logger_t::instance();
+
+    // tzset() must have populated the timezone name globals.
+    ASSERT_NE(tzname[0], nullptr);
+
+    testing::internal::CaptureStdout();
+    logger.info("timestamp_probe_marker");
+    logger.flush();
+    auto captured = testing::internal::GetCapturedStdout();
+
+    // Expect a "[HH:MM:SS.mmm]" prefix produced by the localtime formatting path.
+    const std::regex timestamp_pattern{ R"(\[\d{2}:\d{2}:\d{2}\.\d{3}\])" };
+    EXPECT_TRUE(std::regex_search(captured, timestamp_pattern))
+        << "No well-formed local timestamp in log output. Captured: " << captured;
 }
 
 TEST_F(logger_test, logger_instance_is_singleton)
