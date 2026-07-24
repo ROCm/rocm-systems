@@ -60,6 +60,7 @@ TEST(ConSanInstructionBuilder, RejectsInvalidInlineAtomicAddressOperands) {
   EXPECT_FALSE(build_v_add_u64_vgpr_offset(255, 0, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(build_v_add_u64_vgpr_offset(0, 0, ROCJITSU_CODE_ARCH_RDNA3));
   EXPECT_FALSE(build_v_add_u64_signed_i24(255, 0, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(build_v_add_u64_signed_i24(0, -(1 << 23) - 1, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(build_v_add_u64_signed_i24(0, 1 << 23, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(build_v_add_u64_signed_i24(0, 0, ROCJITSU_CODE_ARCH_RDNA3));
 }

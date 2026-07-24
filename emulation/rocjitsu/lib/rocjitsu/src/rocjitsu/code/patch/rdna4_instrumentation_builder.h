@@ -284,7 +284,8 @@ build_v_add_u64_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr, rj_code
                                          {.vdst = static_cast<uint8_t>(address_vgpr),
                                           .sdst = kVccLo,
                                           .src0 = vector_source_vgpr(offset_vgpr),
-                                          .src1 = vector_source_vgpr(address_vgpr)})
+                                          .src1 = vector_source_vgpr(address_vgpr),
+                                          .src2 = scalar_positive_inline_u32(0)})
           : pack_vop3(rdna4::kVAddCoU32Vop3SdstEnc, static_cast<uint8_t>(address_vgpr),
                       vector_source_vgpr(offset_vgpr), vector_source_vgpr(address_vgpr), 0, kVccLo);
   const auto high =
@@ -339,7 +340,8 @@ build_v_add_u64_signed_i24(uint16_t address_vgpr, int32_t displacement, rj_code_
                                                       {.vdst = static_cast<uint8_t>(address_vgpr),
                                                        .sdst = kVccLo,
                                                        .src0 = low_displacement,
-                                                       .src1 = vector_source_vgpr(address_vgpr)})
+                                                       .src1 = vector_source_vgpr(address_vgpr),
+                                                       .src2 = scalar_positive_inline_u32(0)})
                        : pack_vop3(rdna4::kVAddCoU32Vop3SdstEnc, static_cast<uint8_t>(address_vgpr),
                                    kVopLiteralSource, vector_source_vgpr(address_vgpr), 0, kVccLo);
   const auto high =

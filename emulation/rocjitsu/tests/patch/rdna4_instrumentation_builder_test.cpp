@@ -683,6 +683,8 @@ TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
   EXPECT_EQ(std::string_view(low->mnemonic()), "v_add_co_u32");
   EXPECT_EQ(std::string_view(wait->mnemonic()), "s_wait_alu");
   EXPECT_EQ(std::string_view(high->mnemonic()), "v_add_co_ci_u32");
+  EXPECT_EQ((*address_add)[0], 0xd7006a08u);
+  EXPECT_EQ((*address_add)[1], 0x0202110au);
 
   const auto readfirstlane =
       build_v_readfirstlane_b32(/*sdst=*/78, /*vsrc=*/90, ROCJITSU_CODE_ARCH_GFX1250);
@@ -705,7 +707,8 @@ TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
       gfx1250::kVAddCoU32Vop3SdstEnc, {.vdst = 8,
                                        .sdst = 106,
                                        .src0 = scalar_positive_inline_u32(16),
-                                       .src1 = vector_source_vgpr(8)});
+                                       .src1 = vector_source_vgpr(8),
+                                       .src2 = scalar_positive_inline_u32(0)});
   EXPECT_EQ((*cell_offset)[0], expected_offset_low[0]);
   EXPECT_EQ((*cell_offset)[1], expected_offset_low[1]);
   EXPECT_EQ((*cell_offset)[2], build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
@@ -713,17 +716,52 @@ TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
   EXPECT_EQ(std::string_view(offset_high->mnemonic()), "v_add_co_ci_u32");
 }
 
-TEST(InstructionBuilder, BuildGfx1250SignedI24AddPinsNegativeInlineAndLiteralFallback) {
+TEST(InstructionBuilder, BuildGfx1250SignedI24AddPinsInlineAndLiteralBoundaries) {
+  constexpr uint16_t kScalarInlineNegativeBase = 192;
+  constexpr uint16_t kScalarInlineNegativeOne = 193;
   struct DisplacementCase {
     std::string_view label;
     int32_t displacement;
     uint16_t low_source;
-    uint32_t low_extension;
     uint16_t high_source;
+    std::array<uint32_t, 6> expected;
   };
-  constexpr std::array<DisplacementCase, 2> kCases = {{
-      {"negative inline", -4, 196, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), 193},
-      {"positive literal fallback", 65, kVopLiteralSource, 65u, scalar_positive_inline_u32(0)},
+  constexpr std::array<DisplacementCase, 7> kCases = {{
+      {"signed-24 minimum",
+       -(1 << 23),
+       kVopLiteralSource,
+       kScalarInlineNegativeOne,
+       {0xd7006a08u, 0x020210ffu, 0xff800000u, 0xbf88fffdu, 0xd5206a09u, 0x01aa12c1u}},
+      {"first negative literal",
+       -17,
+       kVopLiteralSource,
+       kScalarInlineNegativeOne,
+       {0xd7006a08u, 0x020210ffu, 0xffffffefu, 0xbf88fffdu, 0xd5206a09u, 0x01aa12c1u}},
+      {"last negative inline",
+       -16,
+       kScalarInlineNegativeBase - (-16),
+       kScalarInlineNegativeOne,
+       {0xd7006a08u, 0x020210d0u, 0xbf800000u, 0xbf88fffdu, 0xd5206a09u, 0x01aa12c1u}},
+      {"representative negative inline",
+       -4,
+       kScalarInlineNegativeBase - (-4),
+       kScalarInlineNegativeOne,
+       {0xd7006a08u, 0x020210c4u, 0xbf800000u, 0xbf88fffdu, 0xd5206a09u, 0x01aa12c1u}},
+      {"last positive inline",
+       64,
+       scalar_positive_inline_u32(64),
+       scalar_positive_inline_u32(0),
+       {0xd7006a08u, 0x020210c0u, 0xbf800000u, 0xbf88fffdu, 0xd5206a09u, 0x01aa1280u}},
+      {"first positive literal",
+       65,
+       kVopLiteralSource,
+       scalar_positive_inline_u32(0),
+       {0xd7006a08u, 0x020210ffu, 0x00000041u, 0xbf88fffdu, 0xd5206a09u, 0x01aa1280u}},
+      {"signed-24 maximum",
+       (1 << 23) - 1,
+       kVopLiteralSource,
+       scalar_positive_inline_u32(0),
+       {0xd7006a08u, 0x020210ffu, 0x007fffffu, 0xbf88fffdu, 0xd5206a09u, 0x01aa1280u}},
   }};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
@@ -733,20 +771,9 @@ TEST(InstructionBuilder, BuildGfx1250SignedI24AddPinsNegativeInlineAndLiteralFal
     const auto words = build_v_add_u64_signed_i24(
         /*address_vgpr=*/8, test_case.displacement, ROCJITSU_CODE_ARCH_GFX1250);
     ASSERT_TRUE(words);
-    const auto expected_low = gfx1250::build_vop3_sdst_enc(
-        gfx1250::kVAddCoU32Vop3SdstEnc,
-        {.vdst = 8, .sdst = 106, .src0 = test_case.low_source, .src1 = vector_source_vgpr(8)});
-    const auto expected_high = gfx1250::build_vop3_sdst_enc(gfx1250::kVAddCoCiU32Vop3SdstEnc,
-                                                            {.vdst = 9,
-                                                             .sdst = 106,
-                                                             .src0 = test_case.high_source,
-                                                             .src1 = vector_source_vgpr(9),
-                                                             .src2 = 106});
-    EXPECT_EQ((*words)[0], expected_low[0]);
-    EXPECT_EQ((*words)[1], expected_low[1]);
-    EXPECT_EQ((*words)[2], test_case.low_extension);
-    EXPECT_EQ((*words)[4], expected_high[0]);
-    EXPECT_EQ((*words)[5], expected_high[1]);
+    EXPECT_EQ(*words, test_case.expected);
+    EXPECT_EQ((*words)[1] & 0x1ffu, test_case.low_source);
+    EXPECT_EQ((*words)[5] & 0x1ffu, test_case.high_source);
 
     std::unique_ptr<Instruction> low(decoder->decode(words->data()));
     std::unique_ptr<Instruction> wait(decoder->decode(words->data() + 3));
