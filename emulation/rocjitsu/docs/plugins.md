@@ -87,6 +87,38 @@ The `ExecutionPlugin` interface (`execution_plugin.h`) defines hooks
 that the compute unit and command processor call during execution.
 Multiple plugins can be active simultaneously via `ExecutionPluginGroup`.
 
+### VGPR observation precision
+
+`onAmdgpuWriteVgprLanes` observes instruction-level VGPR destinations rather
+than VM/runtime storage writes. Memory-pipeline completion and internal
+destination-preservation merges deliberately bypass the hook.
+
+The current implementation does not provide precise write masks for DPP
+instructions or for sub-dword SDWA destinations using `UNUSED_PRESERVE`:
+
+- DPP execution may report EXEC lanes that are later preserved by row/bank or
+  `BOUND_CTRL` masking.
+- Partial-preserve SDWA execution may report a full-dword write even though
+  unselected destination bytes are preserved.
+
+DPP restoration and SDWA destination merging use raw storage, so they do not
+emit additional synthetic callbacks. The remaining semantic callback is still
+conservative. Read observation is also not precise for these encodings: DPP
+source staging may report the full source wave, and partial SDWA source staging
+may report broader lane or byte effects than the instruction architecturally
+uses.
+
+Plugins that require exact register hazards must classify DPP and partial SDWA
+instructions from the before-execute callback and ignore their VGPR read and
+write callbacks. The runtime does not suppress these callbacks automatically.
+This gives unsupported instructions false-negative coverage rather than
+allowing conservative callbacks to become false-positive diagnostics.
+Ordinary, 64-bit, and packed 16-bit destinations remain supported.
+
+Precise DPP/SDWA observation is deferred to an execution refactor that will
+report architectural register effects directly instead of staging broad reads,
+executing broad writes, and repairing preserved state afterward.
+
 
 ## Adding a new plugin
 

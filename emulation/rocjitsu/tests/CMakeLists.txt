@@ -525,6 +525,32 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_add_gtest_tests(gfx1250_b0_to_a0_library_test)
 endif()
 
+# --- CLI launcher preload tests ---
+
+add_executable(launch_preload_test launch_preload_test.cpp)
+target_link_libraries(
+    launch_preload_test
+    PRIVATE rocjitsu_cli_launch_preload GTest::gtest_main
+)
+if(RJ_ENABLE_ASAN AND RJ_SANITIZER_USE_SHARED)
+    target_compile_definitions(
+        launch_preload_test
+        PRIVATE
+            RJ_EXPECT_SHARED_ASAN_RUNTIME=1
+            RJ_EXPECTED_SHARED_ASAN_RUNTIME="${RJ_ASAN_SHARED_LIBRARY}"
+    )
+endif()
+if(RJ_ENABLE_TSAN AND RJ_SANITIZER_USE_SHARED)
+    target_compile_definitions(
+        launch_preload_test
+        PRIVATE
+            RJ_EXPECT_SHARED_TSAN_RUNTIME=1
+            RJ_EXPECTED_SHARED_TSAN_RUNTIME="${RJ_TSAN_SHARED_LIBRARY}"
+    )
+endif()
+rj_configure_target(launch_preload_test TEST)
+rj_add_gtest_tests(launch_preload_test)
+
 # --- DBI probe fixture test ---
 # Loads a real amdclang++-compiled rj_nop_probe device ELF and exercises the
 # probe symbol resolver against it. Needs the compiled fixture (amdclang++ +
@@ -720,8 +746,15 @@ if("120001" IN_LIST RJ_KFD_GFX_TARGET_VERSIONS)
     set(RJ_HAS_GFX1201_GPU TRUE)
 endif()
 
+set(RJ_SANITIZER_PRELOAD_PREFIX "")
+if(RJ_ASAN_SHARED_LIBRARY)
+    set(RJ_SANITIZER_PRELOAD_PREFIX "${RJ_ASAN_SHARED_LIBRARY}:")
+elseif(RJ_TSAN_SHARED_LIBRARY)
+    set(RJ_SANITIZER_PRELOAD_PREFIX "${RJ_TSAN_SHARED_LIBRARY}:")
+endif()
+
 set(RJ_KMD_PRELOAD_ENV
-    "LD_PRELOAD=$<TARGET_FILE:rocjitsu_shared>"
+    "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:rocjitsu_shared>"
     "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4.json"
 )
 
@@ -915,19 +948,20 @@ if(RJ_INSTALL_TESTS)
     )
 endif()
 
-# Keep rocjitsu first in LD_PRELOAD. The loader maps it before
-# early_mmap_preload, but runs early_mmap_preload's constructor before
-# init_interposer(). That constructor calls mmap/munmap early enough to exercise
-# the pre-init fallback; verifying the exact path directly would require adding
-# observable test state to the interposer.
+# Keep rocjitsu before early_mmap_preload in LD_PRELOAD (after any shared
+# sanitizer runtimes). The loader maps rocjitsu first, but runs
+# early_mmap_preload's constructor before init_interposer(). That constructor
+# calls mmap/munmap early enough to exercise the pre-init fallback; verifying the
+# exact path directly would require adding observable test state to the
+# interposer.
 rj_add_test(
     NAME "InterposerTest.EarlyMmapBeforeRocjitsuConstructor"
     COMMAND $<TARGET_FILE:early_mmap_driver>
     ENVIRONMENT
-        "LD_PRELOAD=$<TARGET_FILE:rocjitsu_shared>:$<TARGET_FILE:early_mmap_preload>"
+        "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:rocjitsu_shared>:$<TARGET_FILE:early_mmap_preload>"
     INSTALL_COMMAND "bin/early_mmap_driver"
     INSTALL_ENVIRONMENT
-        "LD_PRELOAD=\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}:bin/${CMAKE_SHARED_LIBRARY_PREFIX}early_mmap_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}:bin/${CMAKE_SHARED_LIBRARY_PREFIX}early_mmap_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
 )
 
 # --- interposer dup/backend bookkeeping test (CLI launcher) ---
@@ -1944,7 +1978,6 @@ if(RJ_ENABLE_HIP_TESTS)
             "${CMAKE_INSTALL_LIBDIR}"
             "${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}"
         )
-
         add_executable(daemon_test daemon_test.cpp)
         target_compile_definitions(
             daemon_test
@@ -1952,6 +1985,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_DAEMON_BIN="$<TARGET_FILE:rocjitsu_bin>"
                 RJ_DAEMON_CONFIG="${RJ_HIP_TEST_CONFIG}"
                 RJ_DAEMON_CONFIG_2GPU="${RJ_HIP_TEST_2GPU_CONFIG}"
+                RJ_DAEMON_SANITIZER_PRELOAD="${RJ_SANITIZER_PRELOAD_PREFIX}"
                 RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_shared>"
                 RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
                 RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
