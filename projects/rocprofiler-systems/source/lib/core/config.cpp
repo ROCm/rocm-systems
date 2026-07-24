@@ -3027,7 +3027,7 @@ std::string
 get_ump_absolute_path()
 {
     auto ensure_dir = [](std::string path) {
-        if(!path.empty() && !tim::filepath::direxists(path))
+        if(!path.empty() && !path::is_directory(path))
         {
             tim::filepath::makedir(path);
         }
