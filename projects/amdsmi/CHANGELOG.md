@@ -32,6 +32,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Optimized `amdsmi_get_gpu_process_list()` to skip redundant KFD topology discovery**.  
   - The per-process KFD lookup rebuilt the entire KFD node topology (an expensive sysfs walk) on every call just to translate the device BDF into its KFD GPU id.
   - The caller already knows this value, so it is now passed through to `gpuvsmi_get_pid_info()`, eliminating one full topology discovery per process per refresh. Falls back to the original discovery path when the id is unavailable.
+- **Flattened the `amdsmi_fabric_info_t` structure and removed `amdsmi_fabric_info_ver_t`**.  
+  - The intermediate `amdsmi_fabric_info_ver_t` type was removed from the public header. Its payload union is now the `fabric_info` member of `amdsmi_fabric_info_t`, and its version field is exposed directly as the top-level `fabric_version` field.
+  - Field access simplifies from `fabric_info.fabric_version.v1.<field>` to `fabric_info.v1.<field>`, and `fabric_info.version` becomes `fabric_version`.
+  - The change is ABI-preserving: field offsets and the overall structure size are unchanged. The Python `amdsmi_get_gpu_fabric_info()` dictionary keys are also unchanged.
 
 ### Resolved Issues
 
