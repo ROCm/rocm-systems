@@ -242,6 +242,16 @@ class ConSanValidationTest(unittest.TestCase):
         self,
     ) -> None:
         expected_filters = {
+            "gfx1201": {
+                "streamk-arrival": (
+                    "HipMoiRdna4WmmaStreamKArrivalCounter."
+                    "AcqRelFetchAddOrdersWmmaPartials"
+                ),
+                "tree-atomic-or": (
+                    "HipMoiRdna4WmmaStreamKTreeAtomicOr."
+                    "AcqRelBitmaskOrdersWmmaPartials"
+                ),
+            },
             "gfx950": {
                 "streamk-arrival": (
                     "HipMoiCdna4MfmaStreamKArrivalCounter."
@@ -274,6 +284,19 @@ class ConSanValidationTest(unittest.TestCase):
                     self.assertEqual(streamk["clean_filter"], expected_filter)
                     self.assertEqual(streamk["overhead_filter"], expected_filter)
                     self.assertIsNone(streamk["fault_filter"])
+                    resolved = validation._resolved_workload(
+                        target, validation.WORKLOAD_BY_ID[workload_id]
+                    )
+                    fault_command = validation._workload_command(
+                        Path("/workspace"),
+                        target,
+                        resolved,
+                        "fault",
+                        Path("/unused"),
+                    )
+                    self.assertEqual(
+                        fault_command[1], f"--gtest_filter={expected_filter}"
+                    )
 
     def test_gfx1250_doctor_checks_target_native_executables(self) -> None:
         with temporary_root() as workspace:
