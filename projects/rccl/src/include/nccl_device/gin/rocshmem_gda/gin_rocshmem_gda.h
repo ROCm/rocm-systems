@@ -51,7 +51,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         uintptr_t sigAddr =
           loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_nofetch((void*)sigAddr, sigRkey, (int64_t)signalOpArg, /*cond=*/0, wf_info);
+        qp->atomic_add((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info);
       } else if (hasCounter) {
         qp->quiet(wf_info);
       }
@@ -98,7 +98,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         uintptr_t sigAddr =
           loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_nofetch((void*)sigAddr, sigRkey, (int64_t)signalOpArg, /*cond=*/0, wf_info);
+        qp->atomic_add((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info);
       }
     }
     coop.sync();
