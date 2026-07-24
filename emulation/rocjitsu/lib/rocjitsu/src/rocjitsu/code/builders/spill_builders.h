@@ -16,7 +16,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "util/except.h"
 
