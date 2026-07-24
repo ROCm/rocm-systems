@@ -27,7 +27,6 @@ RJ_DIAGNOSTIC_POP
 #include <algorithm>
 #include <array>
 #include <bit>
-#include <cassert>
 #include <compare>
 #include <cstddef>
 #include <cstring>
@@ -2456,8 +2455,6 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
         ++sign_vgpr;
       // The spacing check and shared window invariant keep this temporary
       // inside the allocation and below the result pair.
-      assert(sign_vgpr < scratch_end);
-      assert(sign_vgpr < plan.result_address_vgpr);
       add_vaddr = instrumentation::build_v_add_u64_signed_vgpr_offset(plan.result_address_vgpr,
                                                                       offset_vgpr, sign_vgpr, arch);
     } else {

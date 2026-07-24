@@ -1062,6 +1062,7 @@ TEST(ConSanMoi, CdnaVglobalMaterializationSelectsSafeSignScratch) {
 }
 
 TEST(ConSanMoi, AddressMaterializationRejectsMalformedScratchWindows) {
+  // gfx1250 has no VglobalMaterialized recipe.
   constexpr std::array<SampledTarget, 3> kMaterializationTargets = {{
       {ROCJITSU_CODE_ARCH_RDNA4, "gfx1201/rdna4"},
       {ROCJITSU_CODE_ARCH_CDNA3, "gfx942/cdna3"},
@@ -1093,8 +1094,11 @@ TEST(ConSanMoi, AddressMaterializationRejectsMalformedScratchWindows) {
   }};
   for (const SampledTarget &target : kMaterializationTargets) {
     SCOPED_TRACE(target.label);
+    // Positive control: the fixture is valid for each distinct emitter.
     ASSERT_TRUE(build_consan_moi_atomic_address_materialization(
         plan, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, target.arch));
+    // The shared check currently precedes arch dispatch. Exercise every
+    // supported emitter so a future dispatch-specific bypass stays covered.
     for (const MalformedWindow &window : kMalformedWindows) {
       SCOPED_TRACE(window.label);
       ConSanMoiAtomicAddressPlan malformed = plan;
