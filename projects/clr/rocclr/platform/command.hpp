@@ -1683,7 +1683,12 @@ class AccumulateCommand : public Command {
   std::vector<const char*> kernelNames_;
   //! GPU timestamps — one entry per kernel dispatch slot, parallel to
   //! kernelNames_, populated at signal completion time.
-  std::vector<std::pair<uint64_t, uint64_t>> timestamps_;
+  struct KernelTimestamp {
+    uint64_t start;
+    uint64_t end;
+    uint32_t queue_index;  //!< vGPU index of the stream that ran this kernel
+  };
+  std::vector<KernelTimestamp> timestamps_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
   //! When false, the destructor does not destroy hw_events_ (an external owner,
@@ -1726,15 +1731,15 @@ class AccumulateCommand : public Command {
   void addKernelName(const char* name) { kernelNames_.push_back(name); }
 
   //! Add GPU timestamps for one dispatch slot (called at signal completion).
-  void addTimestamps(uint64_t startTs, uint64_t endTs) {
-    timestamps_.push_back({startTs, endTs});
+  void addTimestamps(uint64_t startTs, uint64_t endTs, uint32_t queue_index = UINT32_MAX) {
+    timestamps_.push_back({startTs, endTs, queue_index});
   }
 
   //! Return kernel name pointers (one per dispatch slot)
   const std::vector<const char*>& getKernelNames() const { return kernelNames_; }
 
   //! Return GPU timestamps (one per dispatch slot, populated at signal completion)
-  const std::vector<std::pair<uint64_t, uint64_t>>& getTimestamps() const { return timestamps_; }
+  const std::vector<KernelTimestamp>& getTimestamps() const { return timestamps_; }
 
   //! The command implementation
   virtual void submit(device::VirtualDevice& device) { device.submitAccumulate(*this); }

@@ -825,6 +825,10 @@ graph:
   Unit_hipGraphAddBatchMemOpNode_NegativeTsts:
     <<: *level_2
     tags: [node]
+  Unit_hipGraphBatchMemOpNode_WriteAndWait:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, nvidia]
+    tags: [node]
   Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts:
     <<: *level_2
     tags: [node]
