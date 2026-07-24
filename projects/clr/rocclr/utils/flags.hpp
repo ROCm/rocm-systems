@@ -292,6 +292,9 @@ release(uint, DEBUG_CLR_AQL_DEV_QUEUE, 0,                                     \
 release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \
         "Use MOVDIR64B full-packet writes for AQL + metadata rings"           \
         "(1=enabled (default), 0=non-temporal store path)")                   \
+release(bool, DEBUG_CLR_COOP_CONCURRENT, false,                               \
+        "SW grid.sync ASICs: clear AQL barrier bit on coop dispatches so "     \
+        "independent coop grids can overlap (needs permissive queue scheduling)")
 
 namespace amd {
 

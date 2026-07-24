@@ -5005,8 +5005,13 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
       static_cast<KernelBlitManager&>(queue->blitMgr()).RunGwsInit(workgroups - 1);
     }
 
-    // Sync AQL packets
-    queue->setAqlHeader(dispatchPacketHeader_);
+    // SW grid.sync ASICs with DEBUG_CLR_COOP_CONCURRENT clear the AQL barrier bit
+    // so coop grids can overlap; ordering is kept by the AddExternalSignal chain.
+    if (DEBUG_CLR_COOP_CONCURRENT && !dev().settings().gwsInitSupported_) {
+      queue->setAqlHeader(dispatchPacketHeaderNoSync_);
+    } else {
+      queue->setAqlHeader(dispatchPacketHeader_);
+    }
 
     // Submit kernel to HW
     if (!queue->submitKernelInternal(vcmd.sizes(), vcmd.kernel(), vcmd.parameters(),
