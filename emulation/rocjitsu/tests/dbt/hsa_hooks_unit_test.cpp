@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -23,6 +24,7 @@
 
 #include "hsa/hsa_api_trace_minimal.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/dbt/dbt_provenance.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
@@ -863,6 +865,48 @@ rocjitsu::Elf64_Ehdr make_amdgpu_elf_header(uint32_t mach) {
   header.e_flags = mach;
   header.e_ehsize = sizeof(rocjitsu::Elf64_Ehdr);
   return header;
+}
+
+// Build a minimal, AmdGpuCodeObject-valid gfx1250 ELF carrying a single named
+// PROGBITS section with @p section_bytes. Used to exercise the load path's
+// provenance-note handling without depending on the full translator.
+std::vector<uint8_t> make_gfx1250_elf_with_section(std::string_view section_name,
+                                                   std::span<const uint8_t> section_bytes) {
+  std::string shstr(1, '\0');
+  const uint32_t section_name_offset = static_cast<uint32_t>(shstr.size());
+  shstr.append(section_name);
+  shstr.push_back('\0');
+  const uint32_t shstrtab_name = static_cast<uint32_t>(shstr.size());
+  shstr.append(".shstrtab");
+  shstr.push_back('\0');
+
+  auto header = make_amdgpu_elf_header(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  std::vector<uint8_t> image(sizeof(header));
+  const size_t payload_offset = image.size();
+  write_bytes(image, payload_offset, section_bytes.data(), section_bytes.size());
+  const size_t shstrtab_offset = image.size();
+  write_bytes(image, shstrtab_offset, shstr.data(), shstr.size());
+
+  const size_t section_header_offset = align_up(image.size(), alignof(rocjitsu::Elf64_Shdr));
+  image.resize(section_header_offset);
+
+  std::array<rocjitsu::Elf64_Shdr, 3> sections{}; // [0]=null, [1]=payload, [2]=shstrtab
+  sections[1].sh_name = section_name_offset;
+  sections[1].sh_type = rocjitsu::SHT_PROGBITS;
+  sections[1].sh_offset = payload_offset;
+  sections[1].sh_size = section_bytes.size();
+  sections[2].sh_name = shstrtab_name;
+  sections[2].sh_type = rocjitsu::SHT_STRTAB;
+  sections[2].sh_offset = shstrtab_offset;
+  sections[2].sh_size = shstr.size();
+  write_bytes(image, section_header_offset, sections.data(), sizeof(sections));
+
+  header.e_shoff = section_header_offset;
+  header.e_shentsize = sizeof(rocjitsu::Elf64_Shdr);
+  header.e_shnum = sections.size();
+  header.e_shstrndx = 2;
+  write_struct(image, 0, header);
+  return image;
 }
 
 struct VirtualLdsMetadataForTest {
@@ -1710,6 +1754,94 @@ TEST(HsaHooksUnitTest, AutoA0ForwardsConfirmedNonA0Gfx1250Agent) {
   EXPECT_EQ(g_last_load_reader.handle, reader.handle);
 
   g_fake_gfx1250_asic_revision = 0;
+  OnUnload();
+}
+
+// Idempotence: a gfx1250 object on the A0 agent that already carries a matching
+// B0->A0 provenance note is a previously-translated artifact. It is loaded
+// unchanged (the caller's own reader reaches the loader), not re-translated.
+TEST(HsaHooksUnitTest, AutoA0LoadsObjectWithMatchingProvenanceUnchanged) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_fake_gfx1250_asic_revision = 0;
+  g_fake_load_agent_calls = 0;
+
+  const auto note = rocjitsu::serialize_dbt_provenance(
+      {.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0,
+       .output_revision = rocjitsu::ProcessorRevision::Gfx1250A0});
+  const auto image = make_gfx1250_elf_with_section(rocjitsu::kDbtProvenanceSectionName, note);
+  hsa_code_object_reader_t reader = register_code_object(api, image);
+
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  // Loaded as-is: the loader saw the caller's own reader, not a translated one.
+  EXPECT_EQ(g_fake_load_agent_calls, 1);
+  EXPECT_EQ(g_last_load_reader.handle, reader.handle);
+  OnUnload();
+}
+
+// A gfx1250 object on the A0 agent carrying a malformed provenance note is
+// something the hook cannot reason about -- fail closed (no load, no forward).
+TEST(HsaHooksUnitTest, AutoA0RefusesObjectWithMalformedProvenance) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_fake_gfx1250_asic_revision = 0;
+  g_fake_load_agent_calls = 0;
+
+  // A valid note with its version field corrupted so parse rejects it.
+  auto note = rocjitsu::serialize_dbt_provenance(
+      {.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0,
+       .output_revision = rocjitsu::ProcessorRevision::Gfx1250A0});
+  const uint32_t bad_version = 999;
+  std::memcpy(note.data() + 8, &bad_version, sizeof(bad_version));
+  const auto image = make_gfx1250_elf_with_section(rocjitsu::kDbtProvenanceSectionName, note);
+  hsa_code_object_reader_t reader = register_code_object(api, image);
+
+  EXPECT_NE(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_fake_load_agent_calls, 0);
+  OnUnload();
+}
+
+// A gfx1250 object on the A0 agent carrying a provenance note that records the
+// wrong direction (A0->B0 instead of the expected B0->A0) is refused: it is
+// neither a fresh B0 object nor a matching prior translation.
+TEST(HsaHooksUnitTest, AutoA0RefusesObjectWithWrongDirectionProvenance) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_fake_gfx1250_asic_revision = 0;
+  g_fake_load_agent_calls = 0;
+
+  const auto note = rocjitsu::serialize_dbt_provenance(
+      {.input_revision = rocjitsu::ProcessorRevision::Gfx1250A0,
+       .output_revision = rocjitsu::ProcessorRevision::Gfx1250B0}); // reversed
+  const auto image = make_gfx1250_elf_with_section(rocjitsu::kDbtProvenanceSectionName, note);
+  hsa_code_object_reader_t reader = register_code_object(api, image);
+
+  EXPECT_NE(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGfx1250Agent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_fake_load_agent_calls, 0);
   OnUnload();
 }
 

@@ -21,6 +21,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
+#include "rocjitsu/code/dbt/dbt_provenance.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
@@ -79,6 +80,7 @@ using rocjitsu::arch_for_elf_mach;
 using rocjitsu::arch_lds_bytes;
 using rocjitsu::BinaryTranslator;
 using rocjitsu::BinaryTranslatorOptions;
+using rocjitsu::DbtProvenance;
 using rocjitsu::DiagnosticKind;
 using rocjitsu::DiagnosticSeverity;
 using rocjitsu::EF_AMDGPU_MACH;
@@ -96,6 +98,7 @@ using rocjitsu::ELFCLASS64;
 using rocjitsu::EM_AMDGPU;
 using rocjitsu::has_error_diagnostic;
 using rocjitsu::has_skipped_kernel;
+using rocjitsu::kDbtProvenanceSectionName;
 using rocjitsu::KernargExtensionLayout;
 using rocjitsu::KernargExtensionMetadata;
 using rocjitsu::KernargExtensionPayloadLayout;
@@ -107,10 +110,12 @@ using rocjitsu::kVirtualLdsFlagWorkgroupIdZ;
 using rocjitsu::kVirtualLdsMetadataSectionName;
 using rocjitsu::kVirtualLdsRuntimeStatePayloadName;
 using rocjitsu::make_kernarg_extension_layout;
+using rocjitsu::parse_dbt_provenance;
 using rocjitsu::parse_kernarg_extension_metadata;
 using rocjitsu::parse_virtual_lds_metadata;
 using rocjitsu::plan_virtual_lds_dispatch;
 using rocjitsu::ProcessorRevision;
+using rocjitsu::Section;
 using rocjitsu::SHN_UNDEF;
 using rocjitsu::SHT_NULL;
 using rocjitsu::SHT_STRTAB;
@@ -4257,6 +4262,45 @@ hsa_status_t HSA_API rj_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
   return HSA_STATUS_SUCCESS;
 }
 
+/// @brief Result of inspecting a source object for a DBT provenance note.
+enum class TranslationProvenance {
+  kNone,         ///< No provenance note: a fresh object to translate.
+  kMatches,      ///< A well-formed note attesting the same translation direction.
+  kIncompatible, ///< A malformed note, or one attesting a different direction.
+};
+
+/// @brief Classify a source object by any DBT provenance note it carries.
+///
+/// @details The translator stamps @ref kDbtProvenanceSectionName on every output
+/// attesting the input->output revision pair. Reading it back lets the load path
+/// recognize an already-translated artifact (idempotence). A note whose direction
+/// matches @p input_revision -> @p output_revision means "already done"; a
+/// malformed note or one recording a different direction is @ref kIncompatible so
+/// the caller fails closed rather than trusting an object it cannot reason about.
+[[nodiscard]] TranslationProvenance
+classify_translation_provenance(const AmdGpuCodeObject &object, ProcessorRevision input_revision,
+                                ProcessorRevision output_revision) {
+  const Section *note_section = nullptr;
+  for (const auto &section : object.all_sections()) {
+    if (section->name() == kDbtProvenanceSectionName) {
+      note_section = section.get();
+      break;
+    }
+  }
+  if (note_section == nullptr)
+    return TranslationProvenance::kNone;
+
+  const auto *note_bytes = reinterpret_cast<const uint8_t *>(note_section->data());
+  const std::optional<DbtProvenance> provenance =
+      parse_dbt_provenance(std::span<const uint8_t>(note_bytes, note_section->size()));
+  if (!provenance)
+    return TranslationProvenance::kIncompatible; // present but malformed
+  if (provenance->input_revision == input_revision &&
+      provenance->output_revision == output_revision)
+    return TranslationProvenance::kMatches;
+  return TranslationProvenance::kIncompatible; // records a different direction
+}
+
 /// @brief Eagerly translate a gfx1250 B0 code object to A0 and load it.
 ///
 /// @details The auto-A0 load path. Unlike simulation there is no guest/host
@@ -4265,7 +4309,8 @@ hsa_status_t HSA_API rj_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
 /// comes from the auto-A0 config revisions, matching the sim path's use of
 /// BinaryTranslator. Fails closed: a load with no captured bytes, an invalid
 /// object, a failed translation, or a skipped kernel returns an HSA error rather
-/// than loading untranslated B0 on A0.
+/// than loading untranslated B0 on A0. An object that already carries a matching
+/// provenance note is loaded unchanged (idempotence).
 [[nodiscard]] hsa_status_t
 load_translated_for_auto_a0(const HookConfig &config, hsa_executable_t executable,
                             hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
@@ -4295,6 +4340,26 @@ load_translated_for_auto_a0(const HookConfig &config, hsa_executable_t executabl
   AmdGpuCodeObject source_object(reader_bytes.bytes, reader_bytes.size);
   if (!source_object.is_valid()) {
     log_message(kLogInfo, "auto-A0: source bytes are not a valid AMDGPU code object");
+    return HSA_STATUS_ERROR;
+  }
+
+  // Idempotence: if this object already carries a DBT provenance note attesting
+  // the same B0->A0 translation we would perform, it is a previously-translated
+  // artifact re-entering the load path. Load it unchanged rather than translating
+  // a translation. A note that is present but malformed, or attests a different
+  // direction than the one configured, is not something we can safely reason
+  // about on A0 -- fail closed instead of translating or forwarding it raw.
+  switch (classify_translation_provenance(source_object, translator_options.input_revision,
+                                          translator_options.output_revision)) {
+  case TranslationProvenance::kNone:
+    break; // no note: translate as usual
+  case TranslationProvenance::kMatches:
+    log_message(kLogDebug, "auto-A0: object already carries a matching B0->A0 provenance note; "
+                           "loading without re-translation");
+    return original_load(executable, agent, code_object_reader, options, loaded_code_object);
+  case TranslationProvenance::kIncompatible:
+    log_message(kLogInfo, "auto-A0: object carries a malformed or wrong-direction provenance "
+                          "note; refusing the load");
     return HSA_STATUS_ERROR;
   }
 

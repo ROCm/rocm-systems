@@ -10,6 +10,7 @@ rj_add_object_library(rocjitsu_code
     relocation_function_table.cpp
     rj_code.cpp
     dbt/binary_translator.cpp
+    dbt/dbt_provenance.cpp
     dbt/legalization/gfx1250_b0_to_a0.cpp
     dbt/rj_code_translate.cpp
     dbt/hazard_tracker.cpp

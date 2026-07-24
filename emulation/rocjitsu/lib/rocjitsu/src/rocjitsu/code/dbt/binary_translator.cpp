@@ -8,6 +8,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/dbt/dbt_provenance.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_cdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
@@ -620,6 +621,7 @@ scoped_call_liveness_edges(std::span<BasicBlock *const> blocks, std::span<const 
     std::span<const TextOffsetRelocation> text_relocations,
     std::span<const PcRelativeDataRelocation> data_relocations,
     std::span<const KdTranslation> translations, rj_code_arch_t host_arch, uint32_t target_mach,
+    ProcessorRevision input_revision, ProcessorRevision output_revision,
     std::vector<TranslationDiagnostic> &diagnostics) {
   if (translated_text.size() < original_text_size)
     append_nop_padding(translated_text, original_text_size - translated_text.size(), host_arch);
@@ -803,6 +805,20 @@ scoped_call_liveness_edges(std::span<BasicBlock *const> blocks, std::span<const 
         !patcher.append_nonalloc_section(kVirtualLdsMetadataSectionName, metadata_bytes, 8)) {
       append_error(diagnostics, DiagnosticKind::ResourceLimit,
                    "virtual LDS metadata could not be materialized safely; leaving code object "
+                   "unchanged");
+      return std::nullopt;
+    }
+  }
+
+  // Stamp a provenance note attesting this B0->A0 translation so a later load
+  // can recognize an already-translated object and skip re-translating it
+  // (idempotence). Only emitted when both revisions are known; a blank note is
+  // never written (serialize returns empty for Unspecified).
+  if (const auto provenance_bytes = serialize_dbt_provenance({input_revision, output_revision});
+      !provenance_bytes.empty()) {
+    if (!patcher.append_nonalloc_section(kDbtProvenanceSectionName, provenance_bytes, 8)) {
+      append_error(diagnostics, DiagnosticKind::ResourceLimit,
+                   "DBT provenance note could not be materialized safely; leaving code object "
                    "unchanged");
       return std::nullopt;
     }
@@ -2078,7 +2094,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // and sidecar metadata construction into the per-kernel lowering transaction.
   auto materialized = materialize_translated_code_object(
       std::move(patcher), std::move(translated_text), text.size(), text_relocations,
-      data_relocations, descriptor_translations, host_arch_, target_mach_, result.diagnostics);
+      data_relocations, descriptor_translations, host_arch_, target_mach_, options_.input_revision,
+      options_.output_revision, result.diagnostics);
   if (!materialized)
     return leave_unchanged();
   result.elf_bytes = std::move(*materialized);
