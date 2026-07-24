@@ -129,6 +129,10 @@ std::string g_fake_symbol_name = "oversized_kernel.kd";
 int g_fake_load_agent_calls = 0;
 hsa_agent_t g_last_load_agent{};
 hsa_code_object_reader_t g_last_load_reader{};
+// Records forwarding through the two agent-less/deprecated load entries, so a
+// test can prove they forwarded (no A0 target) vs. were refused (fail-closed).
+int g_fake_load_program_calls = 0;
+int g_fake_load_deprecated_calls = 0;
 constexpr hsa_executable_t kFakeExecutable{123};
 constexpr hsa_executable_symbol_t kFakeKernelSymbol{500};
 
@@ -171,6 +175,19 @@ hsa_status_t HSA_API fake_iterate_agents_host_first(hsa_status_t (*callback)(hsa
   if (status != HSA_STATUS_SUCCESS)
     return status;
   return callback(kGuestAgent, data);
+}
+
+// Enumeration that includes the gfx1250 agent, used to exercise the agent-less
+// load paths' "an A0 (or possible-A0) target exists" fail-closed branch.
+hsa_status_t HSA_API fake_iterate_agents_with_gfx1250(hsa_status_t (*callback)(hsa_agent_t, void *),
+                                                      void *data) {
+  if (callback == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  hsa_status_t status = callback(kHostAgent, data);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+  return callback(kGfx1250Agent, data);
 }
 
 hsa_status_t HSA_API fake_shut_down() {
@@ -408,6 +425,22 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
   g_last_load_reader = reader;
   if (loaded_code_object != nullptr)
     loaded_code_object->handle = 77;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_executable_load_program_code_object(hsa_executable_t,
+                                                              hsa_code_object_reader_t,
+                                                              const char *,
+                                                              hsa_loaded_code_object_t *loaded) {
+  ++g_fake_load_program_calls;
+  if (loaded != nullptr)
+    loaded->handle = 88;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_executable_load_code_object(hsa_executable_t, hsa_agent_t,
+                                                      hsa_code_object_t, const char *) {
+  ++g_fake_load_deprecated_calls;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -676,6 +709,8 @@ struct FakeApiTable {
     core.hsa_code_object_reader_create_from_memory_fn = fake_code_object_reader_create_from_memory;
     core.hsa_code_object_reader_destroy_fn = fake_code_object_reader_destroy;
     core.hsa_executable_load_agent_code_object_fn = fake_executable_load_agent_code_object;
+    core.hsa_executable_load_program_code_object_fn = fake_executable_load_program_code_object;
+    core.hsa_executable_load_code_object_fn = fake_executable_load_code_object;
     core.hsa_executable_destroy_fn = fake_executable_destroy;
     core.hsa_executable_get_symbol_by_name_fn = fake_executable_get_symbol_by_name;
     core.hsa_executable_iterate_agent_symbols_fn = fake_executable_iterate_agent_symbols;
@@ -1675,6 +1710,98 @@ TEST(HsaHooksUnitTest, AutoA0ForwardsConfirmedNonA0Gfx1250Agent) {
   EXPECT_EQ(g_last_load_reader.handle, reader.handle);
 
   g_fake_gfx1250_asic_revision = 0;
+  OnUnload();
+}
+
+// Agent-less program-code-object loads have no unique translation target. In
+// auto-A0 mode, when an A0 (or possible-A0) agent exists in the system, the load
+// is refused (fail-closed) rather than forwarded to the loader with a null agent.
+TEST(HsaHooksUnitTest, AutoA0ProgramLoadRefusedWhenA0Present) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  api.core.hsa_iterate_agents_fn = fake_iterate_agents_with_gfx1250; // A0 present
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_fake_gfx1250_asic_revision = 0; // the gfx1250 agent is A0
+  g_fake_load_program_calls = 0;
+
+  hsa_code_object_reader_t reader{0x1234};
+  EXPECT_EQ(api.core.hsa_executable_load_program_code_object_fn(kFakeExecutable, reader, nullptr,
+                                                                nullptr),
+            HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS);
+  EXPECT_EQ(g_fake_load_program_calls, 0);
+  OnUnload();
+}
+
+// When no A0 target exists (only host/guest agents), an agent-less program load
+// is unambiguous and forwards to the loader unchanged.
+TEST(HsaHooksUnitTest, AutoA0ProgramLoadForwardsWhenNoA0) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api; // default fake_iterate_agents enumerates host+guest, no gfx1250
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_fake_load_program_calls = 0;
+
+  hsa_code_object_reader_t reader{0x1234};
+  EXPECT_EQ(api.core.hsa_executable_load_program_code_object_fn(kFakeExecutable, reader, nullptr,
+                                                                nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_fake_load_program_calls, 1);
+  OnUnload();
+}
+
+// The deprecated direct load passes a raw code-object handle with no readable
+// extent. In auto-A0 mode a load onto an A0 gfx1250 agent is refused (the sized
+// ABI cannot be safely translated); a non-A0/non-gfx1250 agent forwards.
+TEST(HsaHooksUnitTest, AutoA0DeprecatedLoadRefusedOnA0AgentForwardsOtherwise) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_fake_load_deprecated_calls = 0;
+
+  // A0 gfx1250 agent: refused, not forwarded.
+  g_fake_gfx1250_asic_revision = 0;
+  hsa_code_object_t code_object{0x9999};
+  EXPECT_EQ(api.core.hsa_executable_load_code_object_fn(kFakeExecutable, kGfx1250Agent, code_object,
+                                                        nullptr),
+            HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS);
+  EXPECT_EQ(g_fake_load_deprecated_calls, 0);
+
+  // A non-gfx1250 agent is not our target: forwarded unchanged.
+  EXPECT_EQ(api.core.hsa_executable_load_code_object_fn(kFakeExecutable, kHostAgent, code_object,
+                                                        nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_fake_load_deprecated_calls, 1);
+  OnUnload();
+}
+
+// The two fail-closed load entries are patched in auto-A0 (they are part of the
+// narrow manifest); simulation patches them too via the full manifest.
+TEST(HsaHooksUnitTest, AutoA0PatchesBypassLoadEntries) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  clear_runtime_config_path(); // auto-A0 mode
+
+  FakeApiTable api;
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  EXPECT_NE(api.core.hsa_executable_load_program_code_object_fn,
+            fake_executable_load_program_code_object);
+  EXPECT_NE(api.core.hsa_executable_load_code_object_fn, fake_executable_load_code_object);
   OnUnload();
 }
 

@@ -913,6 +913,16 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
     const char *options, hsa_loaded_code_object_t *loaded_code_object);
 
+/// @brief Fail closed on agent-less program loads when an A0 target could consume them.
+hsa_status_t HSA_API rj_executable_load_program_code_object(
+    hsa_executable_t executable, hsa_code_object_reader_t code_object_reader, const char *options,
+    hsa_loaded_code_object_t *loaded_code_object);
+
+/// @brief Fail closed on the deprecated sized direct load when the agent is (possibly) A0.
+hsa_status_t HSA_API rj_executable_load_code_object(hsa_executable_t executable, hsa_agent_t agent,
+                                                    hsa_code_object_t code_object,
+                                                    const char *options);
+
 /// @brief Preserve guest ISA iteration so framework fatbin selection picks guest images.
 hsa_status_t HSA_API rj_agent_iterate_isas(hsa_agent_t agent,
                                            hsa_status_t (*callback)(hsa_isa_t isa, void *data),
@@ -1195,6 +1205,10 @@ void clear_virtual_lds_dispatch_queues();
     decltype(hsa_code_object_reader_destroy) *)                                                    \
   X(load_agent_code_object, core_, true, false, hsa_executable_load_agent_code_object_fn,          \
     rj_executable_load_agent_code_object, decltype(hsa_executable_load_agent_code_object) *)       \
+  X(load_program_code_object, core_, true, true, hsa_executable_load_program_code_object_fn,       \
+    rj_executable_load_program_code_object, decltype(hsa_executable_load_program_code_object) *)   \
+  X(load_code_object, core_, true, true, hsa_executable_load_code_object_fn,                       \
+    rj_executable_load_code_object, decltype(hsa_executable_load_code_object) *)                   \
   X(amd_memory_pool_get_info, amd_ext_, amd_ext_ != nullptr, true,                                 \
     hsa_amd_memory_pool_get_info_fn, rj_amd_memory_pool_get_info,                                  \
     hsa_amd_memory_pool_get_info_fn_t)                                                             \
@@ -1288,6 +1302,8 @@ void clear_virtual_lds_dispatch_queues();
          name == "system_get_major_extension_table" || // vendor-reader capture wrap
          name == "destroy" ||                          // reader lifetime bookkeeping
          name == "load_agent_code_object" ||           // translate at load
+         name == "load_program_code_object" ||         // fail-closed agent-less load
+         name == "load_code_object" ||                 // fail-closed deprecated sized load
          name == "executable_destroy";                 // release retained translated storage
 }
 
@@ -1586,6 +1602,42 @@ enum class Gfx1250Stepping : uint8_t {
 /// full classification instead so it can fail closed on unknown revisions.
 [[nodiscard]] bool agent_is_gfx1250_a0(hsa_agent_t agent) {
   return classify_gfx1250_stepping(agent) == Gfx1250Stepping::kA0;
+}
+
+/// @brief Return true when any agent in the system could be a gfx1250 A0 target.
+///
+/// @details The agent-less load entries (`hsa_executable_load_program_code_object`,
+/// which loads with a null agent, and the deprecated
+/// `hsa_executable_load_code_object`, whose sized reader the hook cannot bound)
+/// have no single translation target. If *any* enumerated agent is A0 -- or is a
+/// gfx1250 whose stepping we cannot read and might therefore be A0 -- an
+/// untranslated B0 object loaded through one of those entries could execute on A0
+/// silicon. This predicate lets those entries fail closed whenever an A0 (or
+/// possible-A0) consumer exists. Enumerates via the saved (unpatched)
+/// `hsa_iterate_agents` so it sees real silicon, not the presentation overlay.
+[[nodiscard]] bool any_agent_could_be_gfx1250_a0() {
+  auto *iterate_agents = layer().iterate_agents();
+  if (iterate_agents == nullptr)
+    // Without enumeration we cannot prove the absence of an A0 target; treat that
+    // as "an A0 might exist" so the agent-less load paths fail closed.
+    return true;
+
+  bool found = false;
+  iterate_agents(
+      [](hsa_agent_t agent, void *arg) -> hsa_status_t {
+        switch (classify_gfx1250_stepping(agent)) {
+        case Gfx1250Stepping::kA0:
+        case Gfx1250Stepping::kUnknownRevision:
+          *static_cast<bool *>(arg) = true;
+          return HSA_STATUS_INFO_BREAK; // stop early; one possible-A0 is enough
+        case Gfx1250Stepping::kNotA0:
+        case Gfx1250Stepping::kNotGfx1250:
+          return HSA_STATUS_SUCCESS;
+        }
+        return HSA_STATUS_SUCCESS;
+      },
+      &found);
+  return found;
 }
 
 /// @brief Synthetic ASIC revision presented for a B0 gfx1250 identity.
@@ -4531,6 +4583,62 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
                                                       std::move(*hook_metadata));
   }
   return status;
+}
+
+hsa_status_t HSA_API rj_executable_load_program_code_object(
+    hsa_executable_t executable, hsa_code_object_reader_t code_object_reader, const char *options,
+    hsa_loaded_code_object_t *loaded_code_object) {
+  auto *original = layer().load_program_code_object();
+  if (original == nullptr)
+    return HSA_STATUS_ERROR;
+
+  // Program code objects load with a *null* agent: the loader skips the
+  // per-agent ISA-compatibility check, so there is no single translation target.
+  // On a system where an A0 (or possible-A0) agent could consume the object,
+  // fail closed rather than let untranslated B0 text reach A0 silicon. When no
+  // A0 target exists the load is unambiguous and forwards unchanged. Simulation
+  // mode does not patch this entry, so this wrapper only runs in auto-A0.
+  if (auto config = layer().config();
+      config && config->mode == HookMode::kAutoA0 && any_agent_could_be_gfx1250_a0()) {
+    log_message(kLogInfo,
+                "auto-A0: refusing agent-less program code-object load (exec=%llu reader=%llu); "
+                "no unique A0 translation target",
+                static_cast<unsigned long long>(executable.handle),
+                static_cast<unsigned long long>(code_object_reader.handle));
+    return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+  }
+
+  return original(executable, code_object_reader, options, loaded_code_object);
+}
+
+hsa_status_t HSA_API rj_executable_load_code_object(hsa_executable_t executable, hsa_agent_t agent,
+                                                    hsa_code_object_t code_object,
+                                                    const char *options) {
+  auto *original = layer().load_code_object();
+  if (original == nullptr)
+    return HSA_STATUS_ERROR;
+
+  // The deprecated direct load passes a raw code-object handle with no readable
+  // extent, so the hook cannot bound-read the ELF to translate it (or even to
+  // classify its source). If the target agent is A0 (or a gfx1250 whose stepping
+  // is unreadable and might be A0), fail closed. Confirmed non-A0 / non-gfx1250
+  // agents forward unchanged. Auto-A0 only (simulation does not patch this).
+  if (auto config = layer().config(); config && config->mode == HookMode::kAutoA0) {
+    switch (classify_gfx1250_stepping(agent)) {
+    case Gfx1250Stepping::kA0:
+    case Gfx1250Stepping::kUnknownRevision:
+      log_message(kLogInfo,
+                  "auto-A0: refusing deprecated direct code-object load on gfx1250 agent=%llu; "
+                  "the sized ABI cannot be safely translated",
+                  static_cast<unsigned long long>(agent.handle));
+      return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+    case Gfx1250Stepping::kNotA0:
+    case Gfx1250Stepping::kNotGfx1250:
+      break;
+    }
+  }
+
+  return original(executable, agent, code_object, options);
 }
 
 } // namespace
