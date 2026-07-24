@@ -43,7 +43,22 @@ The output lists if ``rocprofv3`` supports SPM
       SPM                 :   Supported
       Dimensions          :   DIMENSION_INSTANCE[0:15] DIMENSION_XCC[0:7]
 
-The preceding output shows that the TCC_MISS counter can be sampled. 
+The preceding output shows that the TCC_MISS counter can be sampled.
+
+.. note::
+   For proper functioning, SPM requires AMD GPU Driver version **6.19.14.31400000** or later.
+   Before using SPM, verify the loaded ``amdgpu`` kernel module version.
+
+To check the driver version, use:
+
+.. code-block:: bash
+
+  cat /sys/module/amdgpu/version
+
+  # Example output:
+  # 6.19.14.31400000
+
+You can also check this driver version using ``amd-smi version`` command on DKMS-built systems.
 
 Use the following command to use SPM:
 

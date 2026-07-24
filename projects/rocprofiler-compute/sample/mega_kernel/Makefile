@@ -4,7 +4,7 @@
 # AMD GPU Mega Kernel Unit Test - Makefile
 #
 # Supported offload-arch values (single source for per-arch binaries):
-ARCHES := gfx950 gfx942 gfx90a gfx1150 gfx1151 gfx1152 gfx1201 gfx1200
+ARCHES := gfx950 gfx942 gfx90a gfx1150 gfx1151 gfx1152 gfx1153 gfx1201 gfx1200
 ARCH_BINS := $(addprefix mega_kernel_test_,$(ARCHES))
 #
 #   CDNA (Compute/Datacenter):
@@ -16,6 +16,7 @@ ARCH_BINS := $(addprefix mega_kernel_test_,$(ARCHES))
 #   - Strix Point (RDNA 3.5): gfx1150
 #   - Strix Halo  (RDNA 3.5): gfx1151
 #   - Krackan     (RDNA 3.5): gfx1152
+#   - Gorgon Point (RDNA 3.5): gfx1153
 #
 #   RDNA4 (Consumer):
 #   - RX 9070 XT/9070 (RDNA4): gfx1201
@@ -29,6 +30,7 @@ ARCH_BINS := $(addprefix mega_kernel_test_,$(ARCHES))
 #   make gfx1150  - Build for Strix Point (gfx1150/RDNA3.5)
 #   make gfx1151  - Build for Strix Halo (gfx1151/RDNA3.5)
 #   make gfx1152  - Build for Krackan (gfx1152/RDNA3.5)
+#   make gfx1153  - Build for Gorgon Point (gfx1153/RDNA3.5)
 #   make gfx1201  - Build for RX 9070 XT (gfx1201/RDNA4)
 #   make gfx1200  - Build for RX 9060 (gfx1200/RDNA4)
 #   make all-arch - Build binaries for all ARCHES
@@ -107,6 +109,7 @@ help:
 	@echo "    gfx1150 - Strix Point: WMMA, TEX load/store tests (no CDNA-style FP8/BF8 cvt)"
 	@echo "    gfx1151 - Strix Halo: same as gfx1150"
 	@echo "    gfx1152 - Krackan: same as gfx1150"
+	@echo "    gfx1153 - Gorgon Point: same as gfx1150"
 	@echo ""
 	@echo "  RDNA4 (Consumer):"
 	@echo "    gfx1201 - RX 9070 XT/9070: FP8/BF8 OCP, Async LDS, Wave32 WMMA path"
@@ -120,6 +123,7 @@ help:
 	@echo "  make gfx1150     - Build for Strix Point (gfx1150)"
 	@echo "  make gfx1151     - Build for Strix Halo (gfx1151)"
 	@echo "  make gfx1152     - Build for Krackan (gfx1152)"
+	@echo "  make gfx1153     - Build for Gorgon Point (gfx1153)"
 	@echo "  make gfx1201     - Build for RX 9070 XT (gfx1201/RDNA4)"
 	@echo "  make gfx1200     - Build for RX 9060 (gfx1200/RDNA4)"
 	@echo "  make all-arch    - Build one binary per ARCHES"

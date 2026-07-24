@@ -33,6 +33,7 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unistd.h>
 
 namespace {
 
@@ -370,6 +371,31 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
                                              dbt.guest_device.simd_per_cu);
   EXPECT_EQ(dbt.guest_device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(dbt.guest_device.local_mem_size, 309237645312ULL);
+  // Revisions default to Unspecified when the config omits them.
+  EXPECT_EQ(dbt.guest_revision, config::DbtSiliconRevision::Unspecified);
+  EXPECT_EQ(dbt.host_revision, config::DbtSiliconRevision::Unspecified);
+}
+
+TEST(ConfigLoaderTest, LoadsDbtGuestSiliconRevisions) {
+  // gfx1250 A0/B0 share an ELF machine ID, so the silicon revision is carried in
+  // the DBT guest config out of band. A same-target B0->A0 load selects the A0
+  // workarounds from these fields.
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_dbt_guest_revision_config_test.json", R"({
+      "dbt_guest": {
+        "enabled": true,
+        "guest_isa": "gfx1250",
+        "host_isa": "gfx1250",
+        "guest_revision": "gfx1250_b0",
+        "host_revision": "gfx1250_a0"
+      }
+    })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(path.string());
+  std::filesystem::remove(path);
+
+  EXPECT_EQ(dbt.guest_revision, config::DbtSiliconRevision::Gfx1250B0);
+  EXPECT_EQ(dbt.host_revision, config::DbtSiliconRevision::Gfx1250A0);
 }
 
 TEST(ConfigLoaderTest, RejectsDbtGuestDeviceWithInconsistentSimdCount) {
@@ -938,6 +964,30 @@ TEST(CApiTest, CreateAndDestroyFromString) {
   EXPECT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(handle, nullptr);
   rj_vm_destroy(handle);
+}
+
+TEST(CApiTest, PluginLifecycleDispatchesProfiledShutdownThroughBaseGroup) {
+  const auto sink_dir = std::filesystem::temp_directory_path() /
+                        ("rocjitsu_plugin_lifecycle_" + std::to_string(getpid()));
+  std::filesystem::remove_all(sink_dir);
+  std::filesystem::create_directories(sink_dir);
+
+  rj_vm_t *handle = nullptr;
+  ASSERT_EQ(
+      rj_vm_create((CONFIG_DIR_PATH + "/gfx950_cdna4.json").c_str(), RJ_VM_MODE_DEFAULT, &handle),
+      ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(handle, nullptr);
+
+  const std::string plugin_config = std::format(
+      R"({{"profiled":true,"sinks":{{"types":["file"],"dir":"{}"}}}})", sink_dir.string());
+  ASSERT_EQ(rj_vm_load_plugins(handle, plugin_config.c_str(), nullptr), ROCJITSU_STATUS_SUCCESS);
+  rj_vm_destroy(handle);
+
+  std::ifstream profile(sink_dir / "profile.log");
+  const std::string output{std::istreambuf_iterator<char>(profile),
+                           std::istreambuf_iterator<char>()};
+  EXPECT_NE(output.find("total emulation time"), std::string::npos) << output;
+  std::filesystem::remove_all(sink_dir);
 }
 
 TEST(CApiTest, InvalidArguments) {

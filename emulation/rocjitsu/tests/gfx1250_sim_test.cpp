@@ -1090,6 +1090,10 @@ TEST(Gfx1250SdmaTest, PollMem64UnresolvedAddressDoesNotAdvance) {
   EXPECT_EQ(queue.read_idx(), 0u);
 }
 
+TEST(Gfx1250ExecutionTest, OperandExecutionBackendIsRegistered) {
+  EXPECT_NO_THROW(gfx1250::Operand::require_execution_backend());
+}
+
 TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
@@ -3219,6 +3223,25 @@ TEST(Gfx1250DecodeTest, Vop3SdstLiteralConsumesThreeDwords) {
   EXPECT_EQ(inst->size(), sizeof(words));
 }
 
+TEST(Gfx1250DecodeTest, VFmamkF64ImpliedLiteralConsumesThreeDwords) {
+  const uint32_t words[] = {
+      0x46040504u, // v_fmamk_f64 v[2:3], v[4:5], -30.0, v[2:3]
+      0x00000000u, 0xC1F00000u,
+      0x7E042B02u, // v_cvt_u32_f64_e32 v2, v[2:3]
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> fmamk(decoder->decode(words));
+  ASSERT_NE(fmamk, nullptr);
+  EXPECT_EQ(fmamk->mnemonic(), "v_fmamk_f64_e32");
+  EXPECT_EQ(fmamk->size(), 3 * sizeof(uint32_t));
+
+  std::unique_ptr<Instruction> next(decoder->decode(words + 3));
+  ASSERT_NE(next, nullptr);
+  EXPECT_EQ(next->mnemonic(), "v_cvt_u32_f64_e32");
+}
+
 TEST(Gfx1250DecodeTest, SWaitXcntHasWaitcntMetadata) {
   const uint32_t words[] = {
       0xBFC50000u, // s_wait_xcnt 0
@@ -3245,14 +3268,33 @@ TEST(Gfx1250DecodeTest, BufferOffenUsesSingleVaddrRegister) {
   std::unique_ptr<Instruction> inst(decoder->decode(words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "buffer_load_b128");
-  ASSERT_GE(inst->num_src_operands(), 1);
+  ASSERT_EQ(inst->num_dst_operands(), 1);
+  ASSERT_EQ(inst->num_src_operands(), 4);
+
+  const Operand *vdst = inst->dst_operand(0);
+  ASSERT_NE(vdst, nullptr);
+  EXPECT_FALSE(vdst->is_fieldless());
+  EXPECT_EQ(vdst->name(), "v[32:35]");
 
   const Operand *vaddr = inst->src_operand(0);
   ASSERT_NE(vaddr, nullptr);
+  EXPECT_FALSE(vaddr->is_fieldless());
   EXPECT_EQ(vaddr->size_bits(), 32);
   ASSERT_TRUE(vaddr->to_register_ref().has_value());
   EXPECT_EQ(*vaddr->to_register_ref(), (RegisterRef{RegClass::VGPR, 7, 1}));
-  EXPECT_NE(inst->disassemble().find("v7"), std::string::npos);
+
+  const Operand *gpumem = inst->src_operand(3);
+  ASSERT_NE(gpumem, nullptr);
+  EXPECT_TRUE(gpumem->is_fieldless());
+  EXPECT_EQ(gpumem->size_bits(), 128);
+  EXPECT_FALSE(gpumem->to_register_ref().has_value());
+  // End-to-end: the decoded memory pseudo-operand is inert through the normal
+  // accessors, driven by the capability flags the generated ctor applies.
+  EXPECT_FALSE(gpumem->reads_value());
+  EXPECT_FALSE(gpumem->is_writable());
+  EXPECT_FALSE(gpumem->is_vgpr());
+
+  EXPECT_EQ(inst->disassemble(), "buffer_load_b128 v[32:35], v7, s[4:7], NULL offen");
 }
 
 TEST(Gfx1250DecodeTest, BufferWithoutIdxenOffenDoesNotExposeVaddrRegister) {
@@ -3267,13 +3309,22 @@ TEST(Gfx1250DecodeTest, BufferWithoutIdxenOffenDoesNotExposeVaddrRegister) {
   std::unique_ptr<Instruction> inst(decoder->decode(words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "buffer_load_b128");
-  ASSERT_GE(inst->num_src_operands(), 1);
+  ASSERT_EQ(inst->num_dst_operands(), 1);
+  ASSERT_EQ(inst->num_src_operands(), 4);
 
   const Operand *vaddr = inst->src_operand(0);
   ASSERT_NE(vaddr, nullptr);
+  EXPECT_FALSE(vaddr->is_fieldless());
   EXPECT_EQ(vaddr->size_bits(), 0);
   EXPECT_FALSE(vaddr->to_register_ref().has_value());
-  EXPECT_EQ(inst->disassemble().find("v7"), std::string::npos);
+
+  const Operand *gpumem = inst->src_operand(3);
+  ASSERT_NE(gpumem, nullptr);
+  EXPECT_TRUE(gpumem->is_fieldless());
+  EXPECT_EQ(gpumem->size_bits(), 128);
+  EXPECT_FALSE(gpumem->to_register_ref().has_value());
+
+  EXPECT_EQ(inst->disassemble(), "buffer_load_b128 v[32:35], s[4:7], NULL");
 }
 
 TEST(Gfx1250DecodeTest, WmmaF8f6f4UsesMatrixFormatOperandWidths) {

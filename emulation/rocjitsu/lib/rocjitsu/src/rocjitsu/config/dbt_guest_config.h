@@ -25,6 +25,17 @@ enum class DbtExecutionBackend {
   Simulator, ///< Forward execution-facing operations to a RocJITsu simulated GPU.
 };
 
+/// @brief Silicon revision for a DBT translation side.
+///
+/// @details gfx1250 A0 and B0 share an ELF machine ID but require different
+/// translation workarounds, so the revision is carried out of band. Unspecified
+/// is correct for architectures whose machine ID already identifies the silicon.
+enum class DbtSiliconRevision {
+  Unspecified,
+  Gfx1250A0,
+  Gfx1250B0,
+};
+
 /// @brief Host target selected for DBT translation and execution.
 struct DbtHostConfig {
   std::string isa;     ///< Host ISA used for DBT output and ROCR execution.
@@ -47,6 +58,10 @@ struct DbtGuestConfig {
   int log_level = 0;             ///< DBT hook logging level loaded from the config file.
   bool signal_backtrace = false; ///< Install a best-effort HSA-hook crash backtrace handler.
   KfdDeviceConfig guest_device;  ///< Synthetic guest device appended to KFD topology.
+  /// @brief Guest silicon revision (gfx1250 A0/B0 disambiguation); Unspecified otherwise.
+  DbtSiliconRevision guest_revision = DbtSiliconRevision::Unspecified;
+  /// @brief Host silicon revision for DBT output; Unspecified otherwise.
+  DbtSiliconRevision host_revision = DbtSiliconRevision::Unspecified;
 };
 
 /// @brief Resolve the simulator host config selected by a DBT guest config.
