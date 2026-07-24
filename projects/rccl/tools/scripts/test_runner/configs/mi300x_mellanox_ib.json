@@ -3046,12 +3046,14 @@
         "NCCL_GIN_TYPE": "2",
         "NCCL_GIN_ENABLE": "1",
         "NCCL_CUMEM_ENABLE": "1",
-        "NCCL_ENV_PLUGIN": "none"
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none",
+        "HSA_NO_SCRATCH_RECLAIM": "1"
       },
       "tests": [
         {
           "name": "GIN_DeviceMPI_AllTests",
-          "description": "GIN proxy device-side MPI tests over IB across two nodes",
+          "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall + Phase-1 VA signal coverage)",
           "test_filter": "GinMPIDeviceTests.*",
           "timeout": 600
         },
@@ -3162,6 +3164,147 @@
           "env_variables": {
             "NCCL_GIN_COUNTER_POOL_SIZE": "0x40000000"
           }
+        }
+      ]
+    },
+    "gin_device_signal_phase1": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none",
+        "HSA_NO_SCRATCH_RECLAIM": "1"
+      },
+      "tests": [
+        {
+          "name": "GIN_VASignal_Put",
+          "description": "put + ncclGin_VASignalInc on a dedicated VA signal window; consumer waitSignal",
+          "test_filter": "GinMPIDeviceTests.VASignal_Put"
+        },
+        {
+          "name": "GIN_VASignalAdd_Put",
+          "description": "put + ncclGin_VASignalAdd at non-zero VA offset with NCCL_WIN_STRICT_ORDERING",
+          "test_filter": "GinMPIDeviceTests.VASignalAdd_Put"
+        },
+        {
+          "name": "GIN_VASignal_NoPayload_IncAndAdd",
+          "description": "Zero-byte gin.signal() phases: VASignalInc, VASignalAdd, indexed SignalAdd",
+          "test_filter": "GinMPIDeviceTests.VASignal_NoPayload_IncAndAdd"
+        },
+        {
+          "name": "GIN_VASignal_ReadAndReset",
+          "description": "waitSignal/readSignal/resetSignal on VA and indexed signal cells after remote updates",
+          "test_filter": "GinMPIDeviceTests.VASignal_ReadAndReset"
+        },
+        {
+          "name": "GIN_SignalAdd_PutValue",
+          "description": "putValue inline payload plus indexed ncclGin_SignalAdd",
+          "test_filter": "GinMPIDeviceTests.SignalAdd_PutValue"
+        },
+        {
+          "name": "GIN_SignalInc_MixingRule",
+          "description": "SignalInc/SignalAdd mixing and resetSignal recovery on indexed pool",
+          "test_filter": "GinMPIDeviceTests.SignalInc_MixingRule"
+        },
+        {
+          "name": "GIN_Signal_RollingBits",
+          "description": "waitSignal/readSignal with 32-bit rolling-bit mask on wide counter values",
+          "test_filter": "GinMPIDeviceTests.Signal_RollingBits"
+        },
+        {
+          "name": "GIN_VASignal_StrictOrderingFlag",
+          "description": "gin.signal() + VASignalAdd with NCCL_WIN_STRICT_ORDERING registration",
+          "test_filter": "GinMPIDeviceTests.VASignal_StrictOrderingFlag"
+        },
+        {
+          "name": "GIN_SignalShadow_GetPtr",
+          "description": "getSignalShadowPtr/increaseSignalShadow local indexed shadow table (no network)",
+          "test_filter": "GinMPIDeviceTests.SignalShadow_GetPtr"
+        },
+        {
+          "name": "GIN_SignalPhase1_All",
+          "description": "All Phase-1 GIN device signal coverage tests (VA + indexed + shadow)",
+          "test_filter": "GinMPIDeviceTests.VASignal_*:GinMPIDeviceTests.SignalAdd_PutValue:GinMPIDeviceTests.SignalInc_MixingRule:GinMPIDeviceTests.Signal_RollingBits:GinMPIDeviceTests.SignalShadow_GetPtr",
+          "timeout": 600
+        }
+      ]
+    },
+    "device_api_mpi_lsa": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none",
+        "HSA_NO_SCRATCH_RECLAIM": "1"
+      },
+      "tests": [
+        {
+          "name": "DeviceApiMPI_AllTests_2Rank",
+          "description": "All DeviceApiMPITests on 2 co-located ranks (LSA team non-trivial); Lsa_ReduceSumCopy_DifferentTeams skips (run device_api_mpi_different_teams on 4 ranks)",
+          "test_filter": "DeviceApiMPITests.*",
+          "timeout": 600
+        },
+        {
+          "name": "DeviceApiMPI_Baseline_LocalLsa",
+          "description": "Baseline local/LSA copy and reduce/reduce-copy kernels",
+          "test_filter": "DeviceApiMPITests.Local_*:DeviceApiMPITests.Lsa_Copy:DeviceApiMPITests.Lsa_ReduceSum:DeviceApiMPITests.Lsa_ReduceSumCopy"
+        },
+        {
+          "name": "DeviceApiMPI_GroupA_PointersBarriers",
+          "description": "Group A: ncclGet*Pointer APIs and ncclLsaBarrierSession ordering",
+          "test_filter": "DeviceApiMPITests.Pointer_*:DeviceApiMPITests.Barrier_*"
+        },
+        {
+          "name": "DeviceApiMPI_GroupB_FixedReduceCopy",
+          "description": "Group B: fixed overloads, dtype sweep, coop-thread, in-place, int32 count",
+          "test_filter": "DeviceApiMPITests.Lsa_ReduceSum_SymPtr:DeviceApiMPITests.Lsa_Copy_NonZeroOffset:DeviceApiMPITests.Lsa_ReduceSum_DevCommOverload:DeviceApiMPITests.ReduceCopy_*"
+        },
+        {
+          "name": "DeviceApiMPI_GroupC_LambdaLayouts",
+          "description": "Group C: lambda-based reduce/copy layout variants",
+          "test_filter": "DeviceApiMPITests.Lsa_ReduceSum_LambdaExcludeSelf:DeviceApiMPITests.Lsa_Copy_LambdaScatter:DeviceApiMPITests.Lsa_ReduceSumCopy_LambdaLsaLsa:DeviceApiMPITests.Local_ReduceSum_Lambda"
+        },
+        {
+          "name": "DeviceApiMPI_GroupD_CustomRedOp",
+          "description": "Group D: ncclLsaReduceLsaCopy with test-local Min/Max functors (OpSum-only in headers)",
+          "test_filter": "DeviceApiMPITests.Lsa_ReduceLsaCopy_OpMax:DeviceApiMPITests.Lsa_ReduceLsaCopy_OpMin"
+        }
+      ]
+    },
+    "device_api_mpi_different_teams": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none",
+        "HSA_NO_SCRATCH_RECLAIM": "1"
+      },
+      "tests": [
+        {
+          "name": "DeviceApiMPI_DifferentTeams_5_1e",
+          "description": "ncclLsaReduceSumCopy [5.1e]: full LSA-team sources, ncclTeamInnerFactor(lsa,2) destinations; single-node 4 co-located ranks (even count required)",
+          "test_filter": "DeviceApiMPITests.Lsa_ReduceSumCopy_DifferentTeams",
+          "timeout": 300
         }
       ]
     }
@@ -3751,8 +3894,26 @@
     },
     {
       "name": "GIN Device MPI - Proxy Tests",
-      "description": "GIN proxy device-side MPI tests (put/signal/counter/barrier/alltoall) over IB across two nodes",
+      "description": "GIN proxy device-side MPI tests (put/signal/counter/barrier/alltoall + Phase-1 VA signal) over IB across two nodes",
       "config": "gin_device_mpi",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI - Phase-1 Signal Coverage",
+      "description": "GIN IB PROXY Phase-1 device signal tests: VASignalInc/Add, read/reset, indexed SignalAdd, rolling bits, strict ordering, shadow ptr (2 ranks, cross-node)",
+      "config": "gin_device_signal_phase1",
+      "enabled": true
+    },
+    {
+      "name": "Device API MPI - LSA Reduce/Copy",
+      "description": "DeviceApiMPITests memory/LSA pointer, barrier, reduce/copy, and custom RedOp coverage on 2 co-located ranks (NCCL_CUMEM_ENABLE=1)",
+      "config": "device_api_mpi_lsa",
+      "enabled": true
+    },
+    {
+      "name": "Device API MPI - ReduceSumCopy Different Teams [5.1e]",
+      "description": "ncclLsaReduceSumCopy with different LSA sub-teams (full LSA src, innerFactor dst) on 4 co-located ranks, single node (NCCL_CUMEM_ENABLE=1)",
+      "config": "device_api_mpi_different_teams",
       "enabled": true
     },
     {
