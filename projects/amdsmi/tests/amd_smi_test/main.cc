@@ -38,7 +38,7 @@
 #include "functional/gpu/metrics/gpu_partition_metrics_read.h"
 #include "functional/gpu/metrics/metrics_counter_read.h"
 #include "functional/gpu/metrics/process_info_read.h"
-#include "functional/gpu/metrics/process_list_read_test.h"
+#include "functional/gpu/metrics/process_list_read.h"
 #include "functional/gpu/partition/computepartition_memallocmode_read_write.h"
 #include "functional/gpu/partition/computepartition_read_write.h"
 #include "functional/gpu/partition/memorypartition_read_write.h"
