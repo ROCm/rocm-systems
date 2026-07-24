@@ -54,6 +54,21 @@ file data, CLI args, device responses) is ❌ BLOCKING.
   `pclose(NULL)` when `popen` failed.
 - **VLAs** — runtime-sized stack arrays (`buf[n]`); use a fixed cap or heap.
 - **Math UB** — `log10(0)`/`log(0)` → `-inf`, and `NaN`/`inf` cast to integer.
+- **Use-after-free / dangling pointers** — raw pointer stored after the owning object is
+  destroyed; `std::string::c_str()` / iterator kept past a container modification;
+  object freed then passed to a callback. Use RAII or `std::unique_ptr`.
+- **Double-free** — `free(p)` on an already-freed pointer; `delete` after RAII wrapper
+  also holds the allocation; mismatched `delete` vs `delete[]`.
+- **Integer overflow before size computation** — signed/unsigned arithmetic wrapping
+  before the result is used in `malloc` / `new` / an index (e.g. `size_t n = a + b`
+  where `a + b` wraps). Check with `__builtin_add_overflow` or saturating arithmetic.
+- **Signed integer overflow** — UB when signed arithmetic wraps; compilers can optimize
+  away security checks that rely on wrap-around behaviour.
+- **Pointer arithmetic overflow** — `ptr + offset` where `offset` is attacker-influenced
+  and can wrap past the end of the allocation.
+- **Format string injection** — `printf(user_string)` / `fprintf(f, user_string)` where
+  the format argument is not a string literal; attacker-controlled `%n` writes,
+  `%p`/`%x` memory disclosure. Always use `printf("%s", s)` or `-Wformat-security`.
 
 ### C / C++ — command execution & boundaries
 - **Shell-out** — `popen` / `system` / `exec*` built from a constructed string is
@@ -87,6 +102,14 @@ file data, CLI args, device responses) is ❌ BLOCKING.
 - `sys.getsizeof` where `ctypes.sizeof` is meant; unvalidated sizes / pointer
   arithmetic passed into ctypes / C; hardcoded capacity constants with no
   retry-on-overflow; copy-pasted or wrong enum / exception description strings.
+
+### Python — CLI boundaries & injection
+- **Deserialization of untrusted data** — `pickle.load` / `pickle.loads` on data from a
+  file, socket, or env var; `yaml.load` without `Loader=yaml.SafeLoader`.
+- **`eval` / `exec` on constructed strings** — any call where user input reaches the
+  expression argument; prefer `ast.literal_eval` for data, never `eval` for commands.
+- **Shell injection via `subprocess`** — `subprocess.run(cmd, shell=True)` with
+  unsanitized input. Use a list-form invocation (`shell=False`) and validate args.
 
 ### Generated code
 - **Fix the generator, never the artifact.** `py-interface/amdsmi_wrapper.py` is
