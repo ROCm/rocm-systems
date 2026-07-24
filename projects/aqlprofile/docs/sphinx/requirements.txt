@@ -195,7 +195,7 @@ pyjson5==1.6.9
     # via doxysphinx
 pyjwt[crypto]==2.10.1
     # via pygithub
-pynacl==1.6.0
+pynacl==1.6.2
     # via pygithub
 pyparsing==3.2.3
     # via
