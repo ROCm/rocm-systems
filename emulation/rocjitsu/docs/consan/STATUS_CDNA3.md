@@ -35,11 +35,12 @@ and records a typed reason.
 
 ## Current matrix
 
-Every selected workload remains gray. The validator now resolves gfx942 gtest
-roles only to explicitly named CDNA3 artifacts, but those six hip-moi
-executables do not yet exist in the workspace. The other five workloads have
-not completed a current-tip gfx942 campaign. No status below comes from a
-simulator smoke.
+Every selected workload remains gray. The validator resolves gfx942 gtest
+roles only to explicitly named CDNA3 artifacts, and all six artifacts now
+exist and pass their target-specific suites under the gfx942 simulator. That
+is a build and simulator prerequisite, not physical target qualification. The
+other five workloads have not completed a current-tip gfx942 campaign. No
+status below is promoted from a simulator smoke.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
@@ -48,12 +49,12 @@ simulator smoke.
 | **P1 Sharktank TP1 decode + combined** | 🩶 unassessed | 🩶 unassessed | 🩶 unassessed | 🩶 unassessed |
 | **P2 Sharktank TP2 family** | 🩶 unassessed | 🩶 unassessed | 🩶 unassessed | 🩶 unassessed |
 | **P3 CLIP BF16** | 🩶 unassessed | 🩶 unassessed | 🩶 unassessed | 🩶 unassessed |
-| **P4 hip-moi D128 block attention** | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact |
-| **P4 hip-moi D128 pressure attention** | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact |
-| **P4 hip-moi MFMA attention** | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact |
-| **P4 hip-moi Stream-K arrival** | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact |
-| **P4 hip-moi tree atomic-OR** | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact |
-| **P4 hip-moi Jakub attention** | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact | 🩶 missing CDNA3 artifact |
+| **P4 hip-moi D128 block attention** | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only |
+| **P4 hip-moi D128 pressure attention** | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only |
+| **P4 hip-moi MFMA attention** | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only |
+| **P4 hip-moi Stream-K arrival** | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only |
+| **P4 hip-moi tree atomic-OR** | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only |
+| **P4 hip-moi Jakub attention** | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only | 🩶 simulator prerequisite only |
 
 ## Executable contract
 
@@ -70,13 +71,17 @@ gtest roles deliberately require these target-native definitions:
 | `tree-atomic-or` | `hip_moi_instrumented_cdna3_mfma_streamk_tree_atomic_or_test`; ordering-oracle test only |
 | `jakub-attention` | `hip_moi_reference_cdna3_jakub_matmul`; `SafeFp16Packed/JakubCdna3MatmulReference.MatchesHostReference/*` |
 
-The validator's `doctor` command reports these paths as missing until hip-moi
-provides them. It must never substitute an RDNA4 or CDNA4 executable.
+At hip-moi source revision `ded161ce2577`, the validator's workload-scoped
+`doctor` command resolves all six exact paths from the retained
+`hip-moi-build-gfx942-tests` build. It must never substitute an RDNA4 or CDNA4
+executable.
 
 ## Retained simulator prerequisites
 
 The focused CTest gate currently exercises gfx942 simulator coverage for:
 
+- all 14 tests in the six target-native hip-moi suites, including a build
+  configured for `gfx942:xnack-`;
 - SuperCollider clean execution;
 - flat-LDS and MOI Record/Replay forced spilling;
 - Sampled, Inline Shadow, shared-helper, barrier, and atomic forced spilling;
@@ -98,6 +103,7 @@ Promote one cell only from a retained result bundle at one revision containing:
 7. source, hook, workload, runtime, toolchain, command, and environment
    provenance.
 
-The missing CDNA3 hip-moi artifacts are tracked as explicit enablement work.
-Until they land, this ledger is a fail-closed statement of the gap rather than
-an inference from other architectures.
+The CDNA3 hip-moi artifact enablement is complete and retained under
+`bd-1w9.1.1`. Physical gfx942 execution and four-engine result bundles remain
+open qualification work; this ledger continues to fail closed rather than
+infer those results from simulator or other-target evidence.
