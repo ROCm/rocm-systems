@@ -2357,6 +2357,12 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
     return std::nullopt;
   if (!plan.requires_materialization())
     return std::vector<uint32_t>{};
+  const uint32_t scratch_end = static_cast<uint32_t>(plan.scratch_vgpr) + plan.scratch_vgpr_count;
+  const uint32_t result_end =
+      static_cast<uint32_t>(plan.result_address_vgpr) + plan.result_address_vgpr_count;
+  if (scratch_end > 256u || plan.result_address_vgpr < plan.scratch_vgpr ||
+      result_end > scratch_end)
+    return std::nullopt;
   if (plan.kind == ConSanMoiAtomicAddressKind::LdsByteOffsetToken) {
     if (arch != ROCJITSU_CODE_ARCH_GFX1250 || plan.input_address_vgpr_count != 1u ||
         plan.result_address_vgpr_count != 2u || plan.result_address_vgpr >= 255u ||
@@ -2445,6 +2451,8 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
       uint16_t sign_vgpr = plan.scratch_vgpr;
       if (sign_vgpr == offset_vgpr)
         ++sign_vgpr;
+      if (sign_vgpr >= scratch_end || sign_vgpr >= plan.result_address_vgpr)
+        return std::nullopt;
       add_vaddr = instrumentation::build_v_add_u64_signed_vgpr_offset(plan.result_address_vgpr,
                                                                       offset_vgpr, sign_vgpr, arch);
     } else {

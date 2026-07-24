@@ -1048,12 +1048,22 @@ TEST(ConSanMoi, CdnaVglobalMaterializationSelectsSafeSignScratch) {
     direct.result_address_vgpr = 8u;
     expect_sign_scratch(direct, /*sign_vgpr=*/5u);
 
-    // Externally constructed plans must still provide two words before the pair.
+    // Exactly two words before the pair is the minimum valid spacing.
+    ConSanMoiAtomicAddressPlan boundary = plan;
+    boundary.result_address_vgpr = 6u;
+    expect_sign_scratch(boundary, /*sign_vgpr=*/5u);
+
+    // One word before the pair cannot hold the aliased input and sign scratch.
     ConSanMoiAtomicAddressPlan under_reserved = plan;
     under_reserved.result_address_vgpr = 5u;
-    under_reserved.scratch_vgpr_count = 3u;
     EXPECT_FALSE(build_consan_moi_atomic_address_materialization(
         under_reserved, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, target.arch));
+
+    // The declared scratch window must contain the chosen temporary and pair.
+    ConSanMoiAtomicAddressPlan truncated_window = plan;
+    truncated_window.scratch_vgpr_count = 1u;
+    EXPECT_FALSE(build_consan_moi_atomic_address_materialization(
+        truncated_window, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, target.arch));
   }
 }
 
