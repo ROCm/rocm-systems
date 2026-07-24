@@ -24,11 +24,16 @@ if(NOT hip_FOUND)
     return()
 endif()
 
-# rocSHMEM's installed cmake config calls find_dependency(NUMA), which needs the
-# project's FindNUMA.cmake on the module path. The examples suite is a separate
-# CMake project that does not inherit the top-level CMAKE_MODULE_PATH, so add it
-# here relative to this file.
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../../cmake/Modules)
+# A NUMA-enabled rocSHMEM's installed cmake config calls find_dependency(NUMA)
+# to resolve the numa::numa target its link interface references. TheRock ships
+# that resolver as numa-config.cmake under the nested rocm_sysdeps prefix
+# (<rocm>/lib/rocm_sysdeps/lib/cmake/NUMA), which is not on the default search
+# path. Add it so find_package(rocshmem) can satisfy find_dependency(NUMA).
+foreach(_rocm_root ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm)
+    if(EXISTS "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA")
+        list(PREPEND CMAKE_PREFIX_PATH "${_rocm_root}/lib/rocm_sysdeps")
+    endif()
+endforeach()
 
 # rocSHMEM provides the roc::rocshmem imported target. When built as part of
 # the rocm-systems monorepo the target is already defined; for standalone
