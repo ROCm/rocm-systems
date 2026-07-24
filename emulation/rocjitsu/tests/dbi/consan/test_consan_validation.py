@@ -458,6 +458,21 @@ class ConSanValidationTest(unittest.TestCase):
                 self.assertEqual(executable["path"], str(workspace / relative_path))
                 self.assertTrue(executable["present"])
 
+    def test_gfx942_doctor_rejects_missing_resolved_cdna3_executable(self) -> None:
+        with temporary_root() as workspace:
+            (workspace / "hip-moi").mkdir()
+            hook = (
+                workspace / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
+                "librocjitsu_dbi_hooks.so"
+            )
+            hook.parent.mkdir(parents=True)
+            hook.touch()
+            with mock.patch.object(validation.shutil, "which", return_value="/tool"):
+                doctor = validation._doctor(workspace, "gfx942", ("d128-block",))
+        executable = doctor["paths"]["workload:d128-block:executable"]
+        self.assertFalse(executable["present"])
+        self.assertFalse(doctor["ok"])
+
     def test_gfx950_doctor_checks_resolved_cdna4_executables(self) -> None:
         with temporary_root() as workspace:
             with mock.patch.object(validation.shutil, "which", return_value="/tool"):
