@@ -14,9 +14,9 @@ set(ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_TAG
-    "0e57a383b016cfd75b02e83dfb2adcd55f395b42"
+    "8c3804013766488e2b7eba210e1b01f970245ca3"
     CACHE STRING
-    "Git commit for profiler-hub fallback sparse checkout (pinned to the #8610 merge commit that fixes profiler-hub's export-set and schema-API build failures)"
+    "Git commit for profiler-hub fallback sparse checkout (TEMPORARY: unmerged users/adjordje-amd/profiler-hub-queries-export branch tip, PR #9197, for DNM CI validation only - not for merge)"
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR
