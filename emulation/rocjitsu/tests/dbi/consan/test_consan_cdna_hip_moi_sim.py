@@ -11,11 +11,11 @@ import tempfile
 import unittest
 from unittest import mock
 
-import consan_gfx942_hip_moi_sim as simulator
+import consan_cdna_hip_moi_sim as simulator
 
 
-class Gfx942HipMoiSimulatorTest(unittest.TestCase):
-    def test_registry_uses_exact_build_root_and_totals_fourteen_tests(self) -> None:
+class CdnaHipMoiSimulatorTest(unittest.TestCase):
+    def test_registry_uses_exact_target_build_roots_and_totals(self) -> None:
         self.assertEqual(
             sum(suite.expected_tests for suite in simulator.SUITES),
             simulator.EXPECTED_TESTS,
@@ -24,10 +24,19 @@ class Gfx942HipMoiSimulatorTest(unittest.TestCase):
         self.assertEqual(len(simulator.SUITES), 6)
         self.assertEqual(
             {
-                suite.id: str(simulator._executable_suffix(suite))
-                for suite in simulator.SUITES
+                target_id: (target.build_dir_name, target.default_config_name)
+                for target_id, target in simulator.TARGETS.items()
             },
             {
+                "gfx942": (
+                    "hip-moi-build-gfx942-tests",
+                    "gfx942_cdna3_kmd.json",
+                ),
+                "gfx950": ("hip-moi-build-gfx950-tests", "gfx950_cdna4.json"),
+            },
+        )
+        expected_suffixes = {
+            "gfx942": {
                 "jakub-matmul": "tests/hip_moi_reference_cdna3_jakub_matmul",
                 "mfma-attention": (
                     "tests/hip_moi_instrumented_cdna3_mfma_attention_block_test"
@@ -47,16 +56,47 @@ class Gfx942HipMoiSimulatorTest(unittest.TestCase):
                     "hip_moi_instrumented_cdna3_mfma_streamk_tree_atomic_or_test"
                 ),
             },
-        )
+            "gfx950": {
+                "jakub-matmul": "tests/hip_moi_reference_cdna4_jakub_matmul",
+                "mfma-attention": (
+                    "tests/hip_moi_instrumented_cdna4_mfma_attention_block_test"
+                ),
+                "d128-block": (
+                    "tests/hip_moi_instrumented_cdna4_d128_attention_block_test"
+                ),
+                "d128-pressure": (
+                    "tests/hip_moi_instrumented_cdna4_d128_attention_pressure_test"
+                ),
+                "streamk-arrival": (
+                    "tests/"
+                    "hip_moi_instrumented_cdna4_mfma_streamk_arrival_counter_test"
+                ),
+                "tree-atomic-or": (
+                    "tests/"
+                    "hip_moi_instrumented_cdna4_mfma_streamk_tree_atomic_or_test"
+                ),
+            },
+        }
+        for target_id, expected in expected_suffixes.items():
+            target = simulator.TARGETS[target_id]
+            with self.subTest(target=target_id):
+                self.assertEqual(
+                    {
+                        suite.id: str(simulator._executable_suffix(target, suite))
+                        for suite in simulator.SUITES
+                    },
+                    expected,
+                )
 
     def test_suite_runs_through_rocjitsu_and_checks_passed_count(self) -> None:
+        target = simulator.TARGETS["gfx942"]
         suite = simulator.SUITE_BY_ID["d128-block"]
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             rocjitsu = root / "rocjitsu"
             config = root / "gfx942.json"
-            build = root / simulator.BUILD_DIR_NAME
-            executable = build / simulator._executable_suffix(suite)
+            build = root / target.build_dir_name
+            executable = build / simulator._executable_suffix(target, suite)
             executable.parent.mkdir(parents=True)
             executable.touch()
             rocjitsu.touch()
@@ -71,7 +111,7 @@ class Gfx942HipMoiSimulatorTest(unittest.TestCase):
                 simulator.subprocess, "run", return_value=completed
             ) as run:
                 result = simulator._run_suite(
-                    suite, rocjitsu, config, build, timeout=60.0
+                    target, suite, rocjitsu, config, build, timeout=60.0
                 )
 
         self.assertTrue(result.accepted)
@@ -91,11 +131,12 @@ class Gfx942HipMoiSimulatorTest(unittest.TestCase):
         )
 
     def test_suite_rejects_unexpected_test_count(self) -> None:
+        target = simulator.TARGETS["gfx942"]
         suite = simulator.SUITE_BY_ID["d128-pressure"]
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            build = root / simulator.BUILD_DIR_NAME
-            executable = build / simulator._executable_suffix(suite)
+            build = root / target.build_dir_name
+            executable = build / simulator._executable_suffix(target, suite)
             executable.parent.mkdir(parents=True)
             executable.touch()
             completed = subprocess.CompletedProcess(
@@ -106,6 +147,7 @@ class Gfx942HipMoiSimulatorTest(unittest.TestCase):
             )
             with mock.patch.object(simulator.subprocess, "run", return_value=completed):
                 result = simulator._run_suite(
+                    target,
                     suite,
                     root / "rocjitsu",
                     root / "gfx942.json",
@@ -118,15 +160,16 @@ class Gfx942HipMoiSimulatorTest(unittest.TestCase):
         self.assertEqual(result.error, "expected 4 tests, observed 3")
 
     def test_all_suites_run_and_report_the_aggregate(self) -> None:
+        target = simulator.TARGETS["gfx950"]
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             rocjitsu = root / "rocjitsu"
-            config = root / "gfx942.json"
-            build = root / simulator.BUILD_DIR_NAME
+            config = root / "gfx950.json"
+            build = root / target.build_dir_name
             rocjitsu.touch()
             config.touch()
             for suite in simulator.SUITES:
-                executable = build / simulator._executable_suffix(suite)
+                executable = build / simulator._executable_suffix(target, suite)
                 executable.parent.mkdir(parents=True, exist_ok=True)
                 executable.touch()
 
@@ -148,6 +191,8 @@ class Gfx942HipMoiSimulatorTest(unittest.TestCase):
             ):
                 result = simulator.main(
                     [
+                        "--target",
+                        target.id,
                         "--rocjitsu",
                         str(rocjitsu),
                         "--config",
@@ -159,16 +204,18 @@ class Gfx942HipMoiSimulatorTest(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(run.call_count, 6)
+        self.assertIn("== gfx950 hip-moi simulator summary ==", output.getvalue())
         self.assertIn("total: 14/14 tests", output.getvalue())
 
     def test_single_suite_count_mismatch_fails_the_ctest_entry(self) -> None:
+        target = simulator.TARGETS["gfx942"]
         suite = simulator.SUITE_BY_ID["d128-pressure"]
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             rocjitsu = root / "rocjitsu"
             config = root / "gfx942.json"
-            build = root / simulator.BUILD_DIR_NAME
-            executable = build / simulator._executable_suffix(suite)
+            build = root / target.build_dir_name
+            executable = build / simulator._executable_suffix(target, suite)
             executable.parent.mkdir(parents=True)
             executable.touch()
             rocjitsu.touch()
@@ -190,6 +237,8 @@ class Gfx942HipMoiSimulatorTest(unittest.TestCase):
             ):
                 result = simulator.main(
                     [
+                        "--target",
+                        target.id,
                         "--rocjitsu",
                         str(rocjitsu),
                         "--config",

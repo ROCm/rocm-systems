@@ -57,27 +57,38 @@ reported by `manifest` and `doctor`; it does not require a generic
 `hip-moi-build-gfx950-tests/` for gfx950, and
 `hip-moi-build-gfx1250-tests/` for gfx1250.
 
-### gfx942 hip-moi simulator smoke
+### CDNA hip-moi simulator smoke
 
-The six target-native gfx942 hip-moi executables have a compact simulator gate.
-This single command runs every suite and rejects a result unless all 14 tests
-are observed:
+The gfx942 and gfx950 target-native hip-moi executables share a compact
+simulator gate.  Each target has six suites totaling 14 tests.  The runner
+resolves every executable through that target's validation manifest and rejects
+missing, failed, timed-out, or miscounted suites:
 
 ```sh
-python3 \
-  "$CONSAN_VALIDATION_WORKSPACE_DIR/rocm-systems/emulation/rocjitsu/tests/dbi/consan/consan_gfx942_hip_moi_sim.py" \
-  --rocjitsu "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build/tools/rocjitsu/rocjitsu" \
-  --hip-moi-build "$CONSAN_VALIDATION_WORKSPACE_DIR/hip-moi-build-gfx942-tests"
+for target in gfx942 gfx950; do
+  python3 \
+    "$CONSAN_VALIDATION_WORKSPACE_DIR/rocm-systems/emulation/rocjitsu/tests/dbi/consan/consan_cdna_hip_moi_sim.py" \
+    --target "$target" \
+    --rocjitsu "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build/tools/rocjitsu/rocjitsu" \
+    --hip-moi-build "$CONSAN_VALIDATION_WORKSPACE_DIR/hip-moi-build-$target-tests"
+done
 ```
 
-To expose the same gate as six independently reported CTest entries, configure
-RocJITsu with
-`-DRJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR="$CONSAN_VALIDATION_WORKSPACE_DIR/hip-moi-build-gfx942-tests"`,
-then run:
+To expose both gates as independently reported CTest entries, configure
+RocJITsu with the exact build trees:
+
+```sh
+cmake -S "$CONSAN_VALIDATION_WORKSPACE_DIR/rocm-systems/emulation/rocjitsu" \
+  -B "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build" \
+  -DRJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR="$CONSAN_VALIDATION_WORKSPACE_DIR/hip-moi-build-gfx942-tests" \
+  -DRJ_CONSAN_GFX950_HIP_MOI_BUILD_DIR="$CONSAN_VALIDATION_WORKSPACE_DIR/hip-moi-build-gfx950-tests"
+```
+
+Then run all 12 entries, or narrow the regular expression to one target:
 
 ```sh
 ctest --test-dir "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build" \
-  -R '^ConSanGfx942HipMoiSim\.' --output-on-failure -j1
+  -R '^ConSanGfx(942|950)HipMoiSim\.' --output-on-failure -j1
 ```
 
 For compatibility with the original gfx1201 workspace, it also recognizes

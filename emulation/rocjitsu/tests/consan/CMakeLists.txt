@@ -9,6 +9,11 @@ set(RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR
     CACHE PATH
     "Exact hip-moi-build-gfx942-tests directory for simulator CTest coverage"
 )
+set(RJ_CONSAN_GFX950_HIP_MOI_BUILD_DIR
+    ""
+    CACHE PATH
+    "Exact hip-moi-build-gfx950-tests directory for simulator CTest coverage"
+)
 
 function(rj_add_consan_unit_sources target)
     target_sources(
@@ -160,65 +165,114 @@ function(rj_add_consan_hip_case)
     endif()
 endfunction()
 
-function(rj_add_consan_gfx942_hip_moi_sim_case name suite)
+function(
+    rj_add_consan_cdna_hip_moi_sim_case
+    target_name
+    target
+    build_dir
+    config
+    name
+    suite
+)
     set(_runner
-        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../dbi/consan/consan_gfx942_hip_moi_sim.py"
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../dbi/consan/consan_cdna_hip_moi_sim.py"
     )
+    set(_test_name "ConSan${target_name}HipMoiSim.${name}")
     rj_add_test(
-        NAME "ConSanGfx942HipMoiSim.${name}"
+        NAME "${_test_name}"
         COMMAND
             "${_runner}"
+            --target
+            "${target}"
             --rocjitsu
             "$<TARGET_FILE:rocjitsu_bin>"
             --config
-            "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json"
+            "${CMAKE_SOURCE_DIR}/configs/${config}"
             --hip-moi-build
-            "${RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR}"
+            "${build_dir}"
             --suite
             "${suite}"
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         TIMEOUT 75
-        LABELS consan gfx942 hip-moi simulator
+        LABELS consan "${target}" hip-moi simulator
     )
-    set_property(TEST "ConSanGfx942HipMoiSim.${name}" PROPERTY RUN_SERIAL TRUE)
+    set_property(TEST "${_test_name}" PROPERTY RUN_SERIAL TRUE)
 endfunction()
 
-function(rj_add_consan_gfx942_hip_moi_sim_tests)
-    if(NOT RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR)
+function(
+    rj_add_consan_cdna_hip_moi_sim_tests
+    target_name
+    target
+    option_name
+    build_dir
+    config
+)
+    if(NOT build_dir)
         return()
     endif()
-    if(NOT IS_ABSOLUTE "${RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR}")
-        message(
-            FATAL_ERROR
-            "RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR must be absolute"
-        )
+    if(NOT IS_ABSOLUTE "${build_dir}")
+        message(FATAL_ERROR "${option_name} must be absolute")
     endif()
-    if(NOT IS_DIRECTORY "${RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR}")
-        message(
-            FATAL_ERROR
-            "RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR is not a directory: "
-            "${RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR}"
-        )
+    if(NOT IS_DIRECTORY "${build_dir}")
+        message(FATAL_ERROR "${option_name} is not a directory: ${build_dir}")
     endif()
-    get_filename_component(
-        _build_dir_name
-        "${RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR}"
-        NAME
-    )
-    if(NOT _build_dir_name STREQUAL "hip-moi-build-gfx942-tests")
+    get_filename_component(_build_dir_name "${build_dir}" NAME)
+    set(_expected_build_dir_name "hip-moi-build-${target}-tests")
+    if(NOT _build_dir_name STREQUAL _expected_build_dir_name)
         message(
             FATAL_ERROR
-            "RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR must name "
-            "hip-moi-build-gfx942-tests"
+            "${option_name} must name ${_expected_build_dir_name}"
         )
     endif()
 
-    rj_add_consan_gfx942_hip_moi_sim_case(JakubMatmul jakub-matmul)
-    rj_add_consan_gfx942_hip_moi_sim_case(MfmaAttention mfma-attention)
-    rj_add_consan_gfx942_hip_moi_sim_case(D128Block d128-block)
-    rj_add_consan_gfx942_hip_moi_sim_case(D128Pressure d128-pressure)
-    rj_add_consan_gfx942_hip_moi_sim_case(StreamKArrival streamk-arrival)
-    rj_add_consan_gfx942_hip_moi_sim_case(TreeAtomicOr tree-atomic-or)
+    rj_add_consan_cdna_hip_moi_sim_case(
+        "${target_name}"
+        "${target}"
+        "${build_dir}"
+        "${config}"
+        JakubMatmul
+        jakub-matmul
+    )
+    rj_add_consan_cdna_hip_moi_sim_case(
+        "${target_name}"
+        "${target}"
+        "${build_dir}"
+        "${config}"
+        MfmaAttention
+        mfma-attention
+    )
+    rj_add_consan_cdna_hip_moi_sim_case(
+        "${target_name}"
+        "${target}"
+        "${build_dir}"
+        "${config}"
+        D128Block
+        d128-block
+    )
+    rj_add_consan_cdna_hip_moi_sim_case(
+        "${target_name}"
+        "${target}"
+        "${build_dir}"
+        "${config}"
+        D128Pressure
+        d128-pressure
+    )
+    rj_add_consan_cdna_hip_moi_sim_case(
+        "${target_name}"
+        "${target}"
+        "${build_dir}"
+        "${config}"
+        StreamKArrival
+        streamk-arrival
+    )
+    rj_add_consan_cdna_hip_moi_sim_case(
+        "${target_name}"
+        "${target}"
+        "${build_dir}"
+        "${config}"
+        TreeAtomicOr
+        tree-atomic-or
+    )
 endfunction()
 
 set(RJ_CONSAN_LDS_CLEAN_TEST "ConSanLdsTest.PaddedCleanStoreCompletes")

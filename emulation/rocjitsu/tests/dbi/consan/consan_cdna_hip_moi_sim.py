@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the target-native gfx942 hip-moi suites through the RocJITsu simulator."""
+"""Run target-native CDNA hip-moi suites through the RocJITsu simulator."""
 
 from __future__ import annotations
 
@@ -12,10 +12,15 @@ import sys
 
 import consan_validation
 
-TARGET = "gfx942"
-BUILD_DIR_NAME = "hip-moi-build-gfx942-tests"
 EXPECTED_TESTS = 14
 _PASSED_TESTS = re.compile(r"^\[  PASSED  \] ([0-9]+) tests?\.$", re.MULTILINE)
+
+
+@dataclass(frozen=True)
+class Target:
+    id: str
+    build_dir_name: str
+    default_config_name: str
 
 
 @dataclass(frozen=True)
@@ -45,25 +50,34 @@ SUITES = (
     Suite("tree-atomic-or", "tree-atomic-or", 2),
 )
 SUITE_BY_ID = {suite.id: suite for suite in SUITES}
+TARGETS = {
+    target.id: target
+    for target in (
+        Target("gfx942", "hip-moi-build-gfx942-tests", "gfx942_cdna3_kmd.json"),
+        Target("gfx950", "hip-moi-build-gfx950-tests", "gfx950_cdna4.json"),
+    )
+}
 
 
-def _executable_suffix(suite: Suite) -> Path:
+def _executable_suffix(target: Target, suite: Suite) -> Path:
     relative_path = Path(
         consan_validation.resolved_workload_relative_path(
-            TARGET,
+            target.id,
             suite.workload_id,
         )
     )
     try:
-        return relative_path.relative_to(BUILD_DIR_NAME)
+        return relative_path.relative_to(target.build_dir_name)
     except ValueError as error:
         raise consan_validation.ValidationError(
-            f"{suite.workload_id} must resolve beneath {BUILD_DIR_NAME}: "
+            f"{target.id} {suite.workload_id} must resolve beneath "
+            f"{target.build_dir_name}: "
             f"{relative_path}"
         ) from error
 
 
 def _suite_command(
+    target: Target,
     suite: Suite,
     rocjitsu: Path,
     config: Path,
@@ -74,7 +88,7 @@ def _suite_command(
         "--config",
         str(config),
         "--",
-        str(hip_moi_build / _executable_suffix(suite)),
+        str(hip_moi_build / _executable_suffix(target, suite)),
         "--gtest_brief=1",
     ]
 
@@ -91,13 +105,14 @@ def _print_child_output(completed: subprocess.CompletedProcess[str]) -> None:
 
 
 def _run_suite(
+    target: Target,
     suite: Suite,
     rocjitsu: Path,
     config: Path,
     hip_moi_build: Path,
     timeout: float,
 ) -> SuiteResult:
-    executable = hip_moi_build / _executable_suffix(suite)
+    executable = hip_moi_build / _executable_suffix(target, suite)
     print(
         f"== {suite.id}: {executable.name} "
         f"({suite.expected_tests} expected tests) ==",
@@ -106,7 +121,7 @@ def _run_suite(
     if not executable.is_file():
         return SuiteResult(suite, 0, f"missing executable: {executable}")
 
-    command = _suite_command(suite, rocjitsu, config, hip_moi_build)
+    command = _suite_command(target, suite, rocjitsu, config, hip_moi_build)
     try:
         completed = subprocess.run(
             command,
@@ -142,14 +157,9 @@ def _run_suite(
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--target", choices=tuple(TARGETS), required=True)
     parser.add_argument("--rocjitsu", type=Path, required=True)
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path(__file__).resolve().parents[3]
-        / "configs"
-        / "gfx942_cdna3_kmd.json",
-    )
+    parser.add_argument("--config", type=Path)
     parser.add_argument("--hip-moi-build", type=Path, required=True)
     parser.add_argument("--suite", choices=tuple(SUITE_BY_ID))
     parser.add_argument("--timeout", type=float, default=60.0)
@@ -161,8 +171,19 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    target = TARGETS[args.target]
     rocjitsu = args.rocjitsu.expanduser().resolve()
-    config = args.config.expanduser().resolve()
+    config = (
+        (
+            args.config
+            if args.config is not None
+            else Path(__file__).resolve().parents[3]
+            / "configs"
+            / target.default_config_name
+        )
+        .expanduser()
+        .resolve()
+    )
     hip_moi_build = args.hip_moi_build.expanduser().resolve()
     try:
         if (
@@ -170,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
             or sum(suite.expected_tests for suite in SUITES) != EXPECTED_TESTS
         ):
             raise consan_validation.ValidationError(
-                f"gfx942 suite registry must contain unique IDs for "
+                f"CDNA suite registry must contain unique IDs for "
                 f"{EXPECTED_TESTS} tests"
             )
         if not rocjitsu.is_file():
@@ -181,14 +202,16 @@ def main(argv: list[str] | None = None) -> int:
             raise consan_validation.ValidationError(
                 f"simulator config is missing: {config}"
             )
-        if not hip_moi_build.is_dir() or hip_moi_build.name != BUILD_DIR_NAME:
+        if not hip_moi_build.is_dir() or hip_moi_build.name != target.build_dir_name:
             raise consan_validation.ValidationError(
-                f"--hip-moi-build must name an existing {BUILD_DIR_NAME} directory: "
+                f"--hip-moi-build must name an existing "
+                f"{target.build_dir_name} directory: "
                 f"{hip_moi_build}"
             )
         suites = SUITES if args.suite is None else (SUITE_BY_ID[args.suite],)
         results = tuple(
             _run_suite(
+                target,
                 suite,
                 rocjitsu,
                 config,
@@ -198,10 +221,10 @@ def main(argv: list[str] | None = None) -> int:
             for suite in suites
         )
     except (OSError, consan_validation.ValidationError) as error:
-        print(f"gfx942 hip-moi simulator error: {error}", file=sys.stderr)
+        print(f"{target.id} hip-moi simulator error: {error}", file=sys.stderr)
         return 2
 
-    print("== gfx942 hip-moi simulator summary ==")
+    print(f"== {target.id} hip-moi simulator summary ==")
     for result in results:
         state = "PASS" if result.accepted else "FAIL"
         detail = (

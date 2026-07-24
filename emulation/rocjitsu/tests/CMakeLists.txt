@@ -363,9 +363,22 @@ endfunction()
 # remain near the generic facilities they extend.
 include(consan/CMakeLists.txt)
 # These suites run prebuilt binaries through the simulator. The explicit
-# RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR opt-in therefore registers independently
-# of the host HIP compiler and runtime gates below.
-rj_add_consan_gfx942_hip_moi_sim_tests()
+# target-specific hip-moi build-directory opt-ins therefore register
+# independently of the host HIP compiler and runtime gates below.
+rj_add_consan_cdna_hip_moi_sim_tests(
+    Gfx942
+    gfx942
+    RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR
+    "${RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR}"
+    gfx942_cdna3_kmd.json
+)
+rj_add_consan_cdna_hip_moi_sim_tests(
+    Gfx950
+    gfx950
+    RJ_CONSAN_GFX950_HIP_MOI_BUILD_DIR
+    "${RJ_CONSAN_GFX950_HIP_MOI_BUILD_DIR}"
+    gfx950_cdna4.json
+)
 
 # --- Unit / integration test suite ---
 

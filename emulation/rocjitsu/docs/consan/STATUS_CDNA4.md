@@ -64,10 +64,12 @@ scratch before promotion.
 ### Current-matrix executable audit
 
 The exact validation IDs below are the workload definitions used by
-`consan_validation.py --target gfx950`.  A workload-scoped `doctor` check was
-run for every row on 2026-07-22.  “Runnable” means that all required sources,
-assets, target-native executables, and workspace tools resolve now; it is not
-an instrumentation acceptance claim.
+`consan_validation.py --target gfx950`.  The original workload-scoped `doctor`
+audit ran on 2026-07-22; the Jakub row and complete six-workload hip-moi audit
+were refreshed on 2026-07-23.  “Runnable” means that all required sources,
+assets, target-native executables, and workspace tools resolve in this
+workspace now; it is not an instrumentation acceptance claim or a claim that
+an unpublished companion repository commit is remotely reachable.
 
 | Validation ID | Current gfx950 availability | Exact definition |
 |---|---|---|
@@ -81,7 +83,7 @@ an instrumentation acceptance claim.
 | `wmma-attention` | **Runnable and smoke-passed** | `hip_moi_instrumented_cdna4_mfma_attention_block_test`, `HipMoiCdna4MfmaAttentionBlock.ExactContextMatchesHostReference`; physical gfx950 oracle passes in 142 ms.  The historical validation ID is retained, but the native operation is MFMA rather than WMMA. |
 | `streamk-arrival` | **Runnable and smoke-passed** | `hip_moi_instrumented_cdna4_mfma_streamk_arrival_counter_test`, `HipMoiCdna4MfmaStreamKArrivalCounter.AcqRelFetchAddOrdersMfmaPartials`; physical gfx950 oracle passes in 92 ms. |
 | `tree-atomic-or` | **Runnable and smoke-passed** | `hip_moi_instrumented_cdna4_mfma_streamk_tree_atomic_or_test`, `HipMoiCdna4MfmaStreamKTreeAtomicOr.AcqRelBitmaskOrdersMfmaPartials`; physical gfx950 oracle passes in 101 ms. |
-| `jakub-attention` | **Runnable and simulator-smoke-passed** | `hip_moi_reference_cdna4_jakub_matmul`, `SafeFp16Packed/JakubCdna4MatmulReference.MatchesHostReference/*`; both parameterized cases pass through the gfx950 RocJITsu simulator. |
+| `jakub-attention` | **Locally runnable and simulator-smoke-passed** | hip-moi `288b3c17a7bfd9e28966a754f453fa69cb9616c1` builds `hip_moi_reference_cdna4_jakub_matmul`; `SafeFp16Packed/JakubCdna4MatmulReference.MatchesHostReference/*` passes both parameterized cases through the gfx950 RocJITsu simulator.  That companion commit is not yet contained by a fetched remote ref. |
 
 The five previously available smoke commands use the physical device through
 the workspace TheRock runtime, with software-model environment variables
@@ -211,6 +213,7 @@ instrumentation acceptance evidence.
 | ISA | `amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-` |
 | Driver/runtime | ROCk 6.14.14; workspace TheRock HSA runtime 1.21 |
 | ROCm distribution | `$WORKSPACE_ROOT/TheRock/build/dist/rocm` |
+| hip-moi source | Local commit `288b3c17a7bfd9e28966a754f453fa69cb9616c1` supplies the shared CDNA Jakub source and distinct gfx942/gfx950 targets.  At validation time it is seven commits ahead of `origin/main` and is not contained by a fetched remote ref, so clean remote reproduction requires publishing or otherwise transferring that exact companion commit. |
 | Physical dispatch smoke | On 2026-07-22, workspace TheRock `rocminfo` reports MI355X / `gfx950:sramecc+:xnack-`.  Five native CDNA4 hip-moi host-reference tests pass in 92--188 ms, and corpus `hip_matmul` m128³ passes correctness for all three selected MFMA/shared-memory kernels.  Separately, all six target-native hip-moi executables, including both Jakub parameterizations, pass 14/14 tests through the gfx950 RocJITsu simulator. |
 | Validation corpus | `iree-test-suites` `49f46d6d4370e5aa0a6367751474e20c6c4e95c0`; required Sharktank assets present; LFS fsck clean |
 | Validation doctor | The target-aware registry and workload-scoped doctor resolve all six native hip-moi roles through the explicit `hip-moi-build-gfx950-tests` build tree, including the Jakub counterpart. |
@@ -306,9 +309,11 @@ a ConSan detection.
 
 - 2026-07-23: Added the target-native gfx950 Jakub reference executable and
   resolved all six hip-moi roles through the explicit
-  `hip-moi-build-gfx950-tests` tree.  The six binaries pass 14/14 tests through
-  the RocJITsu gfx950 simulator, including both parameterized Jakub cases.
-  This is simulator baseline evidence only; the Jakub profile cells remain
+  `hip-moi-build-gfx950-tests` tree at hip-moi commit
+  `288b3c17a7bfd9e28966a754f453fa69cb9616c1`.  The shared CDNA simulator gate
+  passes all six binaries and 14/14 tests, including both parameterized Jakub
+  cases.  This is simulator baseline evidence only; the companion commit is
+  not yet present on a fetched remote ref, and the Jakub profile cells remain
   unassessed on physical gfx950 and under ConSan.
 
 - 2026-07-22: Commits `7fbd3b708d`, `cb82107577`, and `cd8230c019`
