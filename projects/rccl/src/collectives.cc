@@ -373,6 +373,8 @@ NCCL_API(ncclResult_t, ncclAlltoAll, const void* sendbuff, void* recvbuff, size_
          ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                ncclComm* comm, cudaStream_t stream) {
+  // NEGATIVE TEST: intentionally break AllToAll to verify CI catches it
+  return ncclInvalidUsage;
   NVTX3_FUNC_WITH_PARAMS(AlltoAll, NcclNvtxParamsAlltoAll,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), datatype));
 
