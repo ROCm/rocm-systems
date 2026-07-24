@@ -617,6 +617,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanOptions &options, rj_code_arch_t arch, uint32_t record_index, uint32_t record_count,
     uint32_t access_record_capacity, std::optional<uint32_t> private_epoch_offset,
+    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI first-light probe requires RJ_CONSAN_TMP_VGPR");
@@ -684,24 +685,52 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   }
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
+  if (private_owner_offset.has_value() != private_owner_shift.has_value()) {
+    errors.emplace_back("ConSan MOI first-light probe has an incomplete private owner plan");
+    return std::nullopt;
+  }
   if (!options.moi_owner_vgpr && !options.moi_persistent_owner_sgpr &&
-      candidate.kernel_descriptor_file_offset) {
-    const auto owner_shift =
-        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
+      (private_owner_offset || candidate.kernel_descriptor_file_offset)) {
+    std::optional<uint16_t> owner_shift = private_owner_shift;
+    if (!owner_shift && candidate.kernel_descriptor_file_offset) {
+      owner_shift =
+          moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
+    }
     if (!owner_shift)
       return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(
         *options.scratch_vgpr + (options.moi_dynamic_access_records ? 4u : 2u));
-    const auto owner_init = instrumentation::build_v_lshrrev_b32(
-        value_vgpr, scalar_positive_inline_u32(*owner_shift), kRdna4WorkitemIdX, arch);
+    if (private_owner_offset) {
+      const auto owner_load =
+          instrumentation::build_private_load_b32(value_vgpr, *private_owner_offset, arch);
+      const auto owner_wait = instrumentation::build_s_wait_private_load0(arch);
+      const auto owner_init = instrumentation::build_v_lshrrev_b32(
+          value_vgpr, scalar_positive_inline_u32(*owner_shift), value_vgpr, arch);
+      if (!owner_load || !owner_wait || !owner_init) {
+        errors.emplace_back(
+            "ConSan MOI first-light probe could not load its persistent workitem-id owner");
+        return std::nullopt;
+      }
+      derived_owner_words.insert(derived_owner_words.end(), owner_load->begin(),
+                                 owner_load->end());
+      derived_owner_words.push_back(*owner_wait);
+      derived_owner_words.push_back(*owner_init);
+    } else {
+      const auto owner_init = instrumentation::build_v_lshrrev_b32(
+          value_vgpr, scalar_positive_inline_u32(*owner_shift), kRdna4WorkitemIdX, arch);
+      if (!owner_init) {
+        errors.emplace_back("ConSan MOI first-light probe could not encode owner derivation");
+        return std::nullopt;
+      }
+      derived_owner_words.push_back(*owner_init);
+    }
     const auto owner_mask = instrumentation::build_v_and_b32_literal(
         value_vgpr, consan_moi_exact_shadow::max_owner, value_vgpr, arch);
-    if (!owner_init || !owner_mask) {
+    if (!owner_mask) {
       errors.emplace_back("ConSan MOI first-light probe could not encode owner derivation");
       return std::nullopt;
     }
     derived_owner_vgpr = value_vgpr;
-    derived_owner_words.push_back(*owner_init);
     derived_owner_words.insert(derived_owner_words.end(), owner_mask->begin(), owner_mask->end());
   }
   const auto persistent_workgroup_sources =

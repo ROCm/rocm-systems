@@ -943,7 +943,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     return std::nullopt;
   }
   if (owner_store) {
-    words.push_back(build_v_mov_b32_e32(scratch_vgpr, kRdna4WorkitemIdX, arch));
+    words.push_back(
+        build_v_mov_b32_e32(scratch_vgpr, vector_source_vgpr(kRdna4WorkitemIdX), arch));
     words.insert(words.end(), owner_store->begin(), owner_store->end());
   }
   if (workgroup_key_store) {

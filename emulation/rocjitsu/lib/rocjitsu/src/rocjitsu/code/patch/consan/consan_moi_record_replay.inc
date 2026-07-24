@@ -83,6 +83,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     std::optional<InlineSgprSpillSequence> scalar_spill;
     std::optional<uint16_t> gfx1250_vgpr_msb_mode;
     std::optional<uint32_t> private_epoch_offset;
+    std::optional<uint32_t> private_owner_offset;
+    std::optional<uint16_t> private_owner_shift;
     uint32_t persistent_private_state_end = 0;
     uint32_t required_private_bytes = 0;
     uint32_t probe_guest_instruction_offset = 0;
@@ -427,24 +429,34 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       continue;
     }
     std::optional<MoiPrivateEpochLayout> private_layout;
+    std::optional<uint16_t> private_owner_shift;
     if (options.automatic_moi_private_epoch) {
+      const bool persist_workitem_owner =
+          options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
       if (resources->owner_descriptor_file_offsets.size() == 1u) {
         const uint64_t descriptor = resources->owner_descriptor_file_offsets.front();
         auto [cached, inserted] =
             private_layout_by_descriptor.try_emplace(descriptor, std::nullopt);
         if (inserted) {
-          cached->second =
-              build_moi_private_epoch_layout(result, *resources, arch, result.warnings);
+          cached->second = build_moi_private_epoch_layout(
+              result, *resources, arch, result.warnings,
+              /*include_owner=*/persist_workitem_owner);
         }
         private_layout = cached->second;
       } else {
-        private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings);
+        private_layout = build_moi_private_epoch_layout(
+            result, *resources, arch, result.warnings,
+            /*include_owner=*/persist_workitem_owner);
       }
+      if (private_layout && private_layout->owner_offset)
+        private_owner_shift = common_moi_private_owner_shift(bytes, *resources, result.warnings);
       if (!private_layout) {
         result.warnings.emplace_back(
             "ConSan MOI first-light probe could not build private epoch state");
         continue;
       }
+      if (private_layout->owner_offset && !private_owner_shift)
+        continue;
     }
     std::optional<VgprSpillSequence> spill;
     if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
@@ -509,6 +521,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     auto words = build_first_light_access_record_words(
         bytes, candidate, candidate_options, arch, 0, 0, layout.access_record_capacity,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
+        private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
         candidate_errors, &probe_guest_instruction_offset);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
@@ -641,6 +654,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     planned.gfx1250_vgpr_msb_mode = candidate.gfx1250_vgpr_msb_mode;
     if (private_layout) {
       planned.private_epoch_offset = private_layout->epoch_offset;
+      planned.private_owner_offset = private_layout->owner_offset;
+      planned.private_owner_shift = private_owner_shift;
       planned.persistent_private_state_end = private_layout->ephemeral_base;
     }
     planned.required_private_bytes = required_private_bytes;
@@ -990,7 +1005,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       auto words = build_first_light_access_record_words(
           bytes, candidate, candidate_options, arch, planned_patch.record_index,
           planned_record_count, layout.access_record_capacity, planned_patch.private_epoch_offset,
-          result.errors);
+          planned_patch.private_owner_offset, planned_patch.private_owner_shift, result.errors);
       if (!words)
         return;
 
@@ -1002,6 +1017,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       info.scratch_vgpr = planned_patch.resources.base;
       info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
       info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
+      info.persistent_owner_private_offset = planned_patch.private_owner_offset;
       if (planned_patch.private_epoch_offset)
         info.persistent_private_state_end = planned_patch.persistent_private_state_end;
       info.required_private_segment_size = planned_patch.required_private_bytes;
@@ -1201,7 +1217,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             return build_first_light_access_record_words(
                 bytes, *planned_patch.candidate, candidate_options, arch,
                 planned_patch.record_index, planned_record_count, layout.access_record_capacity,
-                planned_patch.private_epoch_offset, result.errors);
+                planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
+                planned_patch.private_owner_shift, result.errors);
           },
           [](const PlannedAccessRecordPatch &planned_patch) {
             const ConSanMoiCandidate &candidate = *planned_patch.candidate;
@@ -1214,6 +1231,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             info.owner_descriptor_file_offsets =
                 planned_patch.resources.owner_descriptor_file_offsets;
             info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
+            info.persistent_owner_private_offset = planned_patch.private_owner_offset;
             if (planned_patch.private_epoch_offset)
               info.persistent_private_state_end = planned_patch.persistent_private_state_end;
             info.required_private_segment_size = planned_patch.required_private_bytes;

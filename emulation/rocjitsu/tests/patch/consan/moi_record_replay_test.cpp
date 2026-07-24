@@ -1253,6 +1253,70 @@ TEST(ConSanMoi, Cdna4RecordReplayRecordsDispatchIdentity) {
                               static_cast<uint16_t>(*result.resolved_moi_dispatch_id_sgpr + 1u))));
 }
 
+TEST(ConSanMoi, Cdna3PrivateEpochRecordReplayLoadsEntryOwner) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
+  const auto guest = build_cdna3_ds_store_b32(/*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, kArch);
+  ASSERT_TRUE(guest);
+  std::vector<uint32_t> text_words(320, build_s_nop(0, kArch));
+  text_words[0] = build_v_mov_b32_e32(/*vdst=*/0, vector_source_vgpr(7), kArch);
+  std::ranges::copy(*guest, text_words.begin() + 1);
+  text_words.back() = build_s_endpgm(kArch);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_dynamic_access_records = true;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.moi_init_owner_epoch = true;
+  options.force_private_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0, 8);
+
+  const ConSanResult result =
+      try_patch_consan(make_cdna3_lds_code_object(text_words, "private_entry_owner"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_NE(prologue, result.patches.end());
+  ASSERT_TRUE(access->scratch_vgpr);
+  ASSERT_TRUE(access->persistent_epoch_private_offset);
+  ASSERT_TRUE(access->persistent_owner_private_offset);
+  EXPECT_EQ(prologue->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
+  EXPECT_EQ(prologue->persistent_owner_private_offset, access->persistent_owner_private_offset);
+  EXPECT_EQ(prologue->persistent_private_state_end, access->persistent_private_state_end);
+  ASSERT_TRUE(prologue->scratch_vgpr);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> prologue_words =
+      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+  const uint32_t capture_entry_owner =
+      build_v_mov_b32_e32(*prologue->scratch_vgpr, vector_source_vgpr(/*workitem_id_x=*/0u), kArch);
+  const uint32_t capture_scalar_zero =
+      build_v_mov_b32_e32(*prologue->scratch_vgpr, /*scalar_src=*/0u, kArch);
+  EXPECT_NE(std::ranges::find(prologue_words, capture_entry_owner), prologue_words.end());
+  EXPECT_EQ(std::ranges::find(prologue_words, capture_scalar_zero), prologue_words.end());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
+  const uint16_t owner_vgpr = static_cast<uint16_t>(*access->scratch_vgpr + 4u);
+  const auto owner_load = instrumentation::build_private_load_b32(
+      owner_vgpr, *access->persistent_owner_private_offset, kArch);
+  const auto captured_owner = instrumentation::build_v_lshrrev_b32(
+      owner_vgpr, scalar_positive_inline_u32(6u), owner_vgpr, kArch);
+  const auto live_owner = instrumentation::build_v_lshrrev_b32(
+      owner_vgpr, scalar_positive_inline_u32(6u), /*workitem_id_x=*/0u, kArch);
+  ASSERT_TRUE(owner_load && captured_owner && live_owner);
+  EXPECT_TRUE(contains_subsequence(cave, *owner_load));
+  EXPECT_NE(std::ranges::find(cave, *captured_owner), cave.end());
+  EXPECT_EQ(std::ranges::find(cave, *live_owner), cave.end());
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Cdna4FirstLightProbeDescriptorGrowthUsesEightVgprGranules) {
   const auto guest = build_cdna4_ds_store_b32(
       /*vaddr=*/6, /*vdata=*/7, /*byte_offset=*/4, ROCJITSU_CODE_ARCH_CDNA4);

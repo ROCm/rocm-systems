@@ -45,6 +45,7 @@ function(rj_add_consan_hip_case)
         CONFIG
         TIMEOUT
         PASS_REGEX
+        FAIL_REGEX
     )
     set(_multi_value_args ENVIRONMENT)
     cmake_parse_arguments(
@@ -140,9 +141,13 @@ function(rj_add_consan_hip_case)
     endif()
     # CTest's PASS_REGULAR_EXPRESSION can otherwise override a nonzero GTest
     # exit status. Never let an expected diagnostic hide a failed assertion.
+    set(_case_fail_regex "\\[  FAILED  \\]|FAILED TEST")
+    if(_case_FAIL_REGEX)
+        list(APPEND _case_fail_regex "${_case_FAIL_REGEX}")
+    endif()
     set_property(
         TEST "${_case_NAME}"
-        PROPERTY FAIL_REGULAR_EXPRESSION "\\[  FAILED  \\]|FAILED TEST"
+        PROPERTY FAIL_REGULAR_EXPRESSION "${_case_fail_regex}"
     )
     if(_case_RUN_SERIAL)
         set_property(TEST "${_case_NAME}" PROPERTY RUN_SERIAL TRUE)
@@ -272,6 +277,7 @@ function(rj_add_consan_common_sim_cases)
         TIMEOUT 60
         RUN_SERIAL
         PASS_REGEX "site=access.*source=spill reason=none"
+        FAIL_REGEX "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT requested"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=record-replay"
@@ -279,6 +285,7 @@ function(rj_add_consan_common_sim_cases)
             "RJ_CONSAN_FLAT_PROVENANCE=strict"
             "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
             "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+            "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
             "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
             "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
             "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
