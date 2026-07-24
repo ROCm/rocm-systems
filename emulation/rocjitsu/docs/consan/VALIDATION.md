@@ -45,11 +45,16 @@ The runner expects these paths beneath that root:
 iree-test-suites/
 iree-test-suites-build/
 hip-moi/
-hip-moi-build/
 rocjitsu-test-corpus/
 rocjitsu-test-corpus-build/
 rocjitsu-build/
 ```
+
+For hip-moi rows, the runner requires the exact target-resolved executable
+reported by `manifest` and `doctor`; it does not require a generic
+`hip-moi-build/` alias. Current manifests use `hip-moi-build/` for gfx1201 and
+gfx950, `hip-moi-build-gfx942-tests/` for gfx942, and
+`hip-moi-build-gfx1250-tests/` for gfx1250.
 
 For compatibility with the original gfx1201 workspace, it also recognizes
 `rocjitsu-main-gpu-build/` as the rocJITsu build name. The hook must be at

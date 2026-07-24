@@ -1198,7 +1198,6 @@ def _required_paths(
         paths["iree-test-suites-build"] = workspace / "iree-test-suites-build"
     if any(workload.corpus == "hip-moi" for workload in workloads):
         paths["hip-moi"] = workspace / "hip-moi"
-        paths["hip-moi-build"] = workspace / "hip-moi-build"
     if any(workload.kind == "llama" for workload in workloads):
         paths["rocjitsu-test-corpus"] = workspace / "rocjitsu-test-corpus"
     if any(workload.kind == "tensile" for workload in workloads):

@@ -410,9 +410,6 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("cdna4", native_spellings.lower())
 
     def test_gfx942_doctor_checks_resolved_cdna3_executables(self) -> None:
-        with temporary_root() as workspace:
-            with mock.patch.object(validation.shutil, "which", return_value="/tool"):
-                doctor = validation._doctor(workspace, "gfx942")
         expected_paths = {
             "d128-block": (
                 "hip-moi-build-gfx942-tests/tests/"
@@ -439,10 +436,27 @@ class ConSanValidationTest(unittest.TestCase):
                 "hip_moi_reference_cdna3_jakub_matmul"
             ),
         }
+        with temporary_root() as workspace:
+            (workspace / "hip-moi").mkdir()
+            hook = (
+                workspace / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
+                "librocjitsu_dbi_hooks.so"
+            )
+            hook.parent.mkdir(parents=True)
+            hook.touch()
+            for relative_path in expected_paths.values():
+                executable = workspace / relative_path
+                executable.parent.mkdir(parents=True, exist_ok=True)
+                executable.touch()
+            self.assertFalse((workspace / "hip-moi-build").exists())
+            with mock.patch.object(validation.shutil, "which", return_value="/tool"):
+                doctor = validation._doctor(workspace, "gfx942", tuple(expected_paths))
+        self.assertTrue(doctor["ok"])
         for workload_id, relative_path in expected_paths.items():
             with self.subTest(workload=workload_id):
                 executable = doctor["paths"][f"workload:{workload_id}:executable"]
                 self.assertEqual(executable["path"], str(workspace / relative_path))
+                self.assertTrue(executable["present"])
 
     def test_gfx950_doctor_checks_resolved_cdna4_executables(self) -> None:
         with temporary_root() as workspace:
@@ -610,13 +624,14 @@ class ConSanValidationTest(unittest.TestCase):
             self.assertEqual(validation.main(["--target", "gfx1201", "doctor"]), 0)
         doctor.assert_called_once_with(Path("/workspace"), "gfx1201", None)
 
-    def test_workload_doctor_requires_only_selected_corpus_and_tools(self) -> None:
+    def test_workload_doctor_requires_only_selected_inputs_and_tools(self) -> None:
         with temporary_root() as workspace:
             with mock.patch.object(validation.shutil, "which", return_value="/tool"):
                 doctor = validation._doctor(workspace, "gfx950", ("d128-block",))
         self.assertEqual(doctor["workloads"], ["d128-block"])
         self.assertIn("hip-moi", doctor["paths"])
-        self.assertIn("hip-moi-build", doctor["paths"])
+        self.assertNotIn("hip-moi-build", doctor["paths"])
+        self.assertIn("workload:d128-block:executable", doctor["paths"])
         self.assertNotIn("iree-test-suites", doctor["paths"])
         self.assertNotIn("iree-test-suites-build", doctor["paths"])
         self.assertEqual(doctor["tools"], {"rocminfo": "/tool"})
