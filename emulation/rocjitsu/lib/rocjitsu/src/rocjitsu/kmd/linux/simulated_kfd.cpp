@@ -2289,7 +2289,7 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
   state.status = state.wave_stopped ? raw_status | (1u << 13) : raw_status & ~(1u << 13);
   state.trap_id = wf.trap_id();
   state.wave_id = wf.debug_wave_id();
-  state.group_ids = {wf.wg_id(), 0u, 0u};
+  state.group_ids = wf.wg_coord();
   state.wave_in_group = wf.wave_in_group();
   state.queue_packet_id = wf.aql_packet_id() & 0x1FFFFFFu;
   state.scratch_scoreboard_id = wf.scratch_scoreboard_id();
@@ -2841,7 +2841,7 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
             if (by_wave_id ? state.wave_id != 0 && candidate->debug_wave_id() == state.wave_id
                            : candidate->debug_wave_id() == 0 &&
                                  candidate->aql_packet_id() == state.queue_packet_id &&
-                                 candidate->wg_id() == state.group_ids[0] &&
+                                 candidate->wg_coord() == state.group_ids &&
                                  candidate->wave_in_group() == state.wave_in_group)
               return index;
           }

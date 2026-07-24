@@ -15,6 +15,7 @@
 #include "rocjitsu/vm/plugins/wavefront_state.h"
 #include "rocjitsu/vm/thread_context.h"
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -151,6 +152,8 @@ public:
   /// @brief Return the workgroup ID assigned at dispatch.
   /// @returns Workgroup ID.
   uint32_t wg_id() const { return wg_id_; }
+  const std::array<uint32_t, 3> &wg_coord() const { return wg_coord_; }
+  void set_wg_coord(uint32_t x, uint32_t y, uint32_t z) { wg_coord_ = {x, y, z}; }
 
   /// @brief Return the dispatch ID assigned at dispatch.
   uint32_t dispatch_id() const { return dispatch_id_; }
@@ -592,6 +595,7 @@ public:
   void reset() {
     pc = 0;
     wg_id_ = 0;
+    wg_coord_ = {};
     dispatch_id_ = 0;
     aql_packet_id_ = 0;
     code_load_bias_ = 0;
@@ -652,8 +656,9 @@ protected:
 
   ComputeUnitCore &cu_; ///< Parent CU (permanent, set at construction).
   InstructionComputeUnitView cu_view_;
-  uint32_t wf_id_ = 0;          ///< Slot index within the CU (permanent).
-  uint32_t wg_id_ = 0;          ///< Workgroup ID (set per dispatch).
+  uint32_t wf_id_ = 0; ///< Slot index within the CU (permanent).
+  uint32_t wg_id_ = 0; ///< Workgroup ID (set per dispatch).
+  std::array<uint32_t, 3> wg_coord_{};
   uint32_t dispatch_id_ = 0;    ///< Dispatch ID (set per dispatch, unique per dispatch).
   uint32_t aql_packet_id_ = 0;  ///< AQL ring packet id of the dispatch (debugger correlation).
   uint64_t code_load_bias_ = 0; ///< GPU load bias for code-object-relative call targets.
