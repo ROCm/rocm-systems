@@ -367,6 +367,142 @@ TEST_F(UBR_AllGather, OutOfPlace_MultiNode)
     ASSERT_TRUE(verifyAllGatherResult<T>(recvInfo.buffer, countPerRank, nRanks));
 }
 
+// Direct AllGather + UBR coexistence: Direct AllGather stays default under
+// NCCL_LOCAL_REGISTER; P2P registration is gated per-op on ncclTaskP2p::allowUB.
+class UBR_DirectAllGather : public RegistrationTestBase
+{
+protected:
+    using T = RegTestConfig::DefaultType;
+
+    // Counts straddle the P2P LL<->SIMPLE boundary and the Direct AllGather
+    // threshold, exercising the registered path on both sides of the transition.
+    static std::vector<size_t> sweepCountsPerRank()
+    {
+        return {256, 4 * 1024, 256 * 1024, 4 * 1024 * 1024};
+    }
+
+    // Out-of-place AllGather + verify. registered=true -> UBR path (allowUB=true),
+    // false -> baseline. Reg-handle guards destruct before buffer guards (dereg then free).
+    void runAllGatherOnce(size_t countPerRank, bool registered)
+    {
+        int rank = 0, nRanks = 0;
+        RCCL_TEST_CHECK_GTEST_FAIL(ncclCommUserRank(getActiveCommunicator(), &rank));
+        RCCL_TEST_CHECK_GTEST_FAIL(ncclCommCount(getActiveCommunicator(), &nRanks));
+
+        const size_t sendBytes = countPerRank * sizeof(T);
+        const size_t recvBytes = countPerRank * static_cast<size_t>(nRanks) * sizeof(T);
+
+        void* sendBuf = nullptr;
+        void* recvBuf = nullptr;
+        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&sendBuf, sendBytes));
+        auto sendBufGuard = makeDeviceBufferAutoGuard(sendBuf);
+        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recvBuf, recvBytes));
+        auto recvBufGuard = makeDeviceBufferAutoGuard(recvBuf);
+
+        // Declared after buffer guards so they destruct first; null handle is a
+        // no-op in the deleter, so these stay empty on the baseline path.
+        NcclRegHandleGuard sendRegGuard;
+        NcclRegHandleGuard recvRegGuard;
+        if (registered) {
+            void* sendH = nullptr;
+            void* recvH = nullptr;
+            RCCL_TEST_CHECK_GTEST_FAIL(
+                ncclCommRegister(getActiveCommunicator(), sendBuf, sendBytes, &sendH));
+            RCCL_TEST_CHECK_GTEST_FAIL(
+                ncclCommRegister(getActiveCommunicator(), recvBuf, recvBytes, &recvH));
+            ASSERT_MPI_NE(sendH, nullptr);
+            ASSERT_MPI_NE(recvH, nullptr);
+            sendRegGuard = makeRegHandleGuard(sendH, getActiveCommunicator());
+            recvRegGuard = makeRegHandleGuard(recvH, getActiveCommunicator());
+        }
+
+        initSendBuffer<T>(sendBuf, countPerRank, rank);
+        HIP_TEST_CHECK_GTEST_FAIL(hipMemset(recvBuf, 0, recvBytes));
+
+        RCCL_TEST_CHECK_GTEST_FAIL(
+            ncclAllGather(sendBuf, recvBuf, countPerRank, getNcclDataType<T>(),
+                          getActiveCommunicator(), getActiveStream()));
+        HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(getActiveStream()));
+
+        EXPECT_TRUE(verifyAllGatherResult<T>(recvBuf, countPerRank, nRanks))
+            << "AllGather data incorrect (registered=" << registered
+            << ", countPerRank=" << countPerRank << ")";
+    }
+};
+
+// Registered Direct AllGather across the LL<->SIMPLE transition (intra-node IPC
+// path); 2+ ranks on one node. Net path covered by the _MultiNode variant below.
+TEST_F(UBR_DirectAllGather, UbrSizeSweep)
+{
+    if (!validateTestPrerequisites(RegTestConfig::MIN_RANKS_DEFAULT)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    for (size_t count : sweepCountsPerRank()) {
+        SCOPED_TRACE("countPerRank=" + std::to_string(count));
+        runAllGatherOnce(count, /*registered=*/true);
+    }
+
+    if (isPerRankLoggingEnabled()) {
+        REGLogChecker checker = getLogChecker();
+        TEST_INFO("UbrSizeSweep: %s (log size: %zu bytes)",
+                  checker.getSummary().c_str(), checker.getContentLength());
+        EXPECT_TRUE(checker.hasAnyRegistrationSuccess())
+            << "Expected the UBR registration path to engage for the registered "
+               "Direct AllGather under NCCL_LOCAL_REGISTER=1";
+    }
+}
+
+// Same sweep across nodes (exercises the net/DMA-buf registration path).
+TEST_F(UBR_DirectAllGather, UbrSizeSweep_MultiNode)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_DEFAULT, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 2+ nodes";
+    }
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    for (size_t count : sweepCountsPerRank()) {
+        SCOPED_TRACE("countPerRank=" + std::to_string(count));
+        runAllGatherOnce(count, /*registered=*/true);
+    }
+
+    if (isPerRankLoggingEnabled()) {
+        REGLogChecker checker = getLogChecker();
+        TEST_INFO("UbrSizeSweep_MultiNode: %s (log size: %zu bytes)",
+                  checker.getSummary().c_str(), checker.getContentLength());
+    }
+}
+
+// Before/after in one process: unregistered (allowUB=false) then registered
+// (allowUB=true) AllGather must both be correct; the allowUB gating changes nothing.
+TEST_F(UBR_DirectAllGather, BaselineVsUbrEquivalence)
+{
+    if (!validateTestPrerequisites(RegTestConfig::MIN_RANKS_DEFAULT)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    const size_t countPerRank = RegTestConfig::MEDIUM_COUNT;
+
+    // BEFORE: unregistered (baseline path).
+    runAllGatherOnce(countPerRank, /*registered=*/false);
+
+    // AFTER: registered (UBR path).
+    runAllGatherOnce(countPerRank, /*registered=*/true);
+
+    if (isPerRankLoggingEnabled()) {
+        REGLogChecker checker = getLogChecker();
+        TEST_INFO("BaselineVsUbrEquivalence: %s (log size: %zu bytes)",
+                  checker.getSummary().c_str(), checker.getContentLength());
+        EXPECT_TRUE(checker.hasAnyRegistrationSuccess())
+            << "Expected UBR registration to engage for the registered AllGather "
+               "(allowUB=true) under NCCL_LOCAL_REGISTER=1";
+    }
+}
+
 class UBR_ReduceScatter : public RegistrationTestBase {};
 
 TEST_F(UBR_ReduceScatter, OutOfPlace_MultiNode)
