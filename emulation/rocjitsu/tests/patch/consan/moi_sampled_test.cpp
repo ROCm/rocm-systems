@@ -7,12 +7,12 @@
 namespace rocjitsu {
 namespace {
 
-struct SampledCdnaTarget {
+struct SampledTarget {
   rj_code_arch_t arch;
   std::string_view label;
 };
 
-constexpr std::array<SampledCdnaTarget, 2> kSampledCdnaTargets = {{
+constexpr std::array<SampledTarget, 2> kSampledCdnaTargets = {{
     {ROCJITSU_CODE_ARCH_CDNA3, "gfx942/cdna3"},
     {ROCJITSU_CODE_ARCH_CDNA4, "gfx950/cdna4"},
 }};
@@ -789,7 +789,7 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
   constexpr uint16_t kCasCompareOffset = 4u;
   constexpr uint16_t kCasResultOffset = 5u;
   constexpr uint16_t kSavedAddressOffset = 8u;
-  for (const SampledCdnaTarget &target : kSampledCdnaTargets) {
+  for (const SampledTarget &target : kSampledCdnaTargets) {
     for (bool is_cas : {false, true}) {
       for (bool deferred_acquire : {false, true}) {
         SCOPED_TRACE(testing::Message() << target.label << (is_cas ? " cas" : " add")
@@ -1025,7 +1025,7 @@ TEST(ConSanMoi, CdnaVglobalMaterializationSelectsSafeSignScratch) {
   plan.scratch_vgpr = 4u;
   plan.scratch_vgpr_count = 5u;
   plan.resource_source = ConSanRegisterAllocationSource::SpillRequired;
-  for (const SampledCdnaTarget &target : kSampledCdnaTargets) {
+  for (const SampledTarget &target : kSampledCdnaTargets) {
     SCOPED_TRACE(target.label);
     const auto expect_sign_scratch = [&](const ConSanMoiAtomicAddressPlan &candidate,
                                          uint16_t sign_vgpr) {
@@ -1062,6 +1062,11 @@ TEST(ConSanMoi, CdnaVglobalMaterializationSelectsSafeSignScratch) {
 }
 
 TEST(ConSanMoi, AddressMaterializationRejectsMalformedScratchWindows) {
+  constexpr std::array<SampledTarget, 3> kMaterializationTargets = {{
+      {ROCJITSU_CODE_ARCH_RDNA4, "gfx1201/rdna4"},
+      {ROCJITSU_CODE_ARCH_CDNA3, "gfx942/cdna3"},
+      {ROCJITSU_CODE_ARCH_CDNA4, "gfx950/cdna4"},
+  }};
   ConSanMoiAtomicAddressPlan plan;
   plan.kind = ConSanMoiAtomicAddressKind::VglobalMaterialized;
   plan.support = ConSanMoiAtomicAddressSupport::Supported;
@@ -1071,6 +1076,9 @@ TEST(ConSanMoi, AddressMaterializationRejectsMalformedScratchWindows) {
   plan.signed_byte_offset = 20;
   plan.result_address_vgpr_count = 2u;
   plan.resource_source = ConSanRegisterAllocationSource::SpillRequired;
+  plan.scratch_vgpr = 4u;
+  plan.scratch_vgpr_count = 5u;
+  plan.result_address_vgpr = 7u;
 
   struct MalformedWindow {
     std::string_view label;
@@ -1083,13 +1091,19 @@ TEST(ConSanMoi, AddressMaterializationRejectsMalformedScratchWindows) {
       {"result before scratch", 10u, 7u, 5u},
       {"scratch past VGPR file", 250u, 10u, 254u},
   }};
-  for (const MalformedWindow &window : kMalformedWindows) {
-    SCOPED_TRACE(window.label);
-    plan.scratch_vgpr = window.scratch_vgpr;
-    plan.scratch_vgpr_count = window.scratch_vgpr_count;
-    plan.result_address_vgpr = window.result_address_vgpr;
-    EXPECT_FALSE(build_consan_moi_atomic_address_materialization(
-        plan, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, ROCJITSU_CODE_ARCH_RDNA4));
+  for (const SampledTarget &target : kMaterializationTargets) {
+    SCOPED_TRACE(target.label);
+    ASSERT_TRUE(build_consan_moi_atomic_address_materialization(
+        plan, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, target.arch));
+    for (const MalformedWindow &window : kMalformedWindows) {
+      SCOPED_TRACE(window.label);
+      ConSanMoiAtomicAddressPlan malformed = plan;
+      malformed.scratch_vgpr = window.scratch_vgpr;
+      malformed.scratch_vgpr_count = window.scratch_vgpr_count;
+      malformed.result_address_vgpr = window.result_address_vgpr;
+      EXPECT_FALSE(build_consan_moi_atomic_address_materialization(
+          malformed, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, target.arch));
+    }
   }
 }
 
@@ -1126,7 +1140,7 @@ TEST(ConSanMoi, CdnaSampledVglobalMaterializesVectorAndScalarAddressesInScratchT
           20,
       },
   }};
-  for (const SampledCdnaTarget &target : kSampledCdnaTargets) {
+  for (const SampledTarget &target : kSampledCdnaTargets) {
     SCOPED_TRACE(target.label);
     const auto access = target.arch == ROCJITSU_CODE_ARCH_CDNA3
                             ? build_cdna3_ds_store_b32(
@@ -1846,7 +1860,7 @@ TEST(ConSanMoi, Cdna4Wave64AccvgprBoundarySampledUsesPrivatePersistentState) {
 }
 
 TEST(ConSanMoi, CdnaSampledBarrierUsesPrivatePersistentStateAtAccvgprBoundary) {
-  for (const SampledCdnaTarget &target : kSampledCdnaTargets) {
+  for (const SampledTarget &target : kSampledCdnaTargets) {
     for (uint32_t sample_stride : {1u, 2u}) {
       SCOPED_TRACE(testing::Message() << target.label << " sample_stride=" << sample_stride);
       const auto guest =
