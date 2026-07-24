@@ -11,6 +11,13 @@ add_library(
 
 set_target_properties(rocjitsu_hooks PROPERTIES OUTPUT_NAME rocjitsu_hooks)
 
+# Compile test-only entry points (rj_test_*) into the hook DSO only for the test
+# build so they never appear in a shipped library's public ABI. BUILD_TESTING is
+# the top-level switch that also gates the tests subdirectory.
+if(BUILD_TESTING)
+    target_compile_definitions(rocjitsu_hooks PRIVATE RJ_HOOK_TEST_HOOKS=1)
+endif()
+
 target_include_directories(
     rocjitsu_hooks
     PRIVATE

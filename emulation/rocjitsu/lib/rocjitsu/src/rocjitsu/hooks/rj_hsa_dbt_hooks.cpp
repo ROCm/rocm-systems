@@ -841,6 +841,55 @@ private:
   std::unordered_map<Key, uint64_t, KeyHash> map_;
 };
 
+/// @brief Keeps translated ELF storage alive for the lifetime of its executable.
+///
+/// @details The auto-A0 load path loads a translated code object through a
+/// short-lived reader, but ROCR's loader retains references into those bytes
+/// (symbol/PC/DWARF views the debugger and profiler read later). Freeing the
+/// storage right after load would leave those views dangling, so the owned
+/// buffer is retained here keyed by executable and released when the executable
+/// is destroyed. One executable can load several translated objects. NOTE: the
+/// release currently happens on `hsa_executable_destroy`; ordering it *after* the
+/// profiler-aware destroy chain is the later lifecycle work (plan Sec. 7.4).
+class TranslatedExecutableRegistry {
+public:
+  static TranslatedExecutableRegistry &instance() {
+    static TranslatedExecutableRegistry registry;
+    return registry;
+  }
+
+  /// @brief Retain @p bytes for @p executable until the executable is destroyed.
+  void retain(hsa_executable_t executable, std::shared_ptr<const std::vector<uint8_t>> bytes) {
+    if (bytes == nullptr)
+      return;
+    std::lock_guard lock(mutex_);
+    map_[executable.handle].push_back(std::move(bytes));
+  }
+
+  /// @brief Release every translated buffer retained for @p executable.
+  void erase_executable(hsa_executable_t executable) {
+    std::lock_guard lock(mutex_);
+    map_.erase(executable.handle);
+  }
+
+  /// @brief Release all retained translated storage during hook unload.
+  void clear() {
+    std::lock_guard lock(mutex_);
+    map_.clear();
+  }
+
+  /// @brief Number of translated buffers retained for @p executable (test hook).
+  [[nodiscard]] size_t retained_count(hsa_executable_t executable) {
+    std::lock_guard lock(mutex_);
+    auto it = map_.find(executable.handle);
+    return it == map_.end() ? 0 : it->second.size();
+  }
+
+private:
+  std::mutex mutex_;
+  std::unordered_map<uint64_t, std::vector<std::shared_ptr<const std::vector<uint8_t>>>> map_;
+};
+
 /// @brief Record memory-backed HSA code-object bytes for later DBT translation.
 hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
     const void *code_object, size_t size, hsa_code_object_reader_t *code_object_reader);
@@ -1234,7 +1283,8 @@ void clear_virtual_lds_dispatch_queues();
          name == "create_from_memory" ||               // source-byte capture
          name == "system_get_major_extension_table" || // vendor-reader capture wrap
          name == "destroy" ||                          // reader lifetime bookkeeping
-         name == "load_agent_code_object";             // translate at load
+         name == "load_agent_code_object" ||           // translate at load
+         name == "executable_destroy";                 // release retained translated storage
 }
 
 /// @brief Process-local HSA API table patch state for the rocjitsu DBT tool.
@@ -1321,6 +1371,10 @@ public:
 
     CodeObjectReaderRegistry::instance().clear();
     ExecutableAgentRegistry::instance().clear();
+    // NOTE: released here on hook uninstall to keep test/reload state clean. The
+    // plan's process-lifetime pinning of translated storage across a real
+    // hsa_shut_down (Sec. 7.4/B3) is separate, later lifecycle work.
+    TranslatedExecutableRegistry::instance().clear();
     clear_agent_mapper();
     VirtualLdsRuntimeRegistry::instance().clear();
     clear_virtual_lds_dispatch_queues();
@@ -3544,6 +3598,9 @@ hsa_status_t HSA_API rj_executable_destroy(hsa_executable_t executable) {
   if (!original)
     return HSA_STATUS_ERROR;
   hsa_status_t status = original(executable);
+  // Release translated storage only after the loader has torn the executable
+  // down, so no loader reference into those bytes outlives them.
+  TranslatedExecutableRegistry::instance().erase_executable(executable);
   log_message(kLogVerbose, "executable_destroy status=%d", static_cast<int>(status));
   return status;
 }
@@ -4185,6 +4242,17 @@ load_translated_for_auto_a0(const HookConfig &config, hsa_executable_t executabl
   status = original_load(executable, agent, translated_reader, options, loaded_code_object);
   log_message(kLogVerbose, "auto-A0: translated load agent=%llu status=%d",
               static_cast<unsigned long long>(agent.handle), static_cast<int>(status));
+
+  // ROCR's loader retains references into the translated bytes (symbol/PC/DWARF
+  // views used later by the debugger and profiler). On success, hand ownership
+  // of the storage to the executable so it outlives this short-lived reader; it
+  // is released when the executable is destroyed. On failure nothing is retained
+  // and the storage is freed with the reader below.
+  if (status == HSA_STATUS_SUCCESS) {
+    CodeObjectReaderRegistry::ReaderBytes captured =
+        CodeObjectReaderRegistry::instance().lookup(translated_reader);
+    TranslatedExecutableRegistry::instance().retain(executable, captured.owned);
+  }
   CodeObjectReaderRegistry::instance().remove(translated_reader);
   if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
     (void)original_destroy(translated_reader);
@@ -4472,11 +4540,27 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
 /// in-process reload paths do not retain stale translated ELF buffers.
 extern "C" RJ_HOOK_EXPORT void OnUnload() { layer().uninstall(); }
 
-/// @brief Test-only accessor for gfx1250 A0 detection.
-///
-/// @details Exposes the internal per-agent A0 check so unit tests can drive it
-/// against a fake HSA table. Not part of the public hook ABI; used only by
-/// rocjitsu's own tests. Requires an installed hook (reads the saved entries).
-extern "C" RJ_HOOK_EXPORT bool rj_test_agent_is_gfx1250_a0(uint64_t agent_handle) {
-  return agent_is_gfx1250_a0(hsa_agent_t{agent_handle});
+#if defined(RJ_HOOK_TEST_HOOKS)
+// Test-only entry points, compiled into the hook DSO ONLY for the test build
+// (RJ_HOOK_TEST_HOOKS is defined by CMake when BUILD_TESTING is on). They are
+// never present in a shipped library, so they cannot pollute its public ABI.
+// Prefer driving behavior through the real public entry points and observing
+// via the patched table; these exist only for state that is otherwise not
+// observable from outside (translated-storage retention lifetime).
+
+/// @brief Test-only: number of translated buffers retained for an executable.
+extern "C" RJ_HOOK_EXPORT size_t rj_test_retained_translation_count(uint64_t executable_handle) {
+  return TranslatedExecutableRegistry::instance().retained_count(
+      hsa_executable_t{executable_handle});
 }
+
+/// @brief Test-only: retain a synthetic translated buffer for an executable.
+///
+/// @details Exercises the same registry the auto-A0 load path uses, so tests can
+/// verify retain / free-on-executable-destroy without the production translator.
+extern "C" RJ_HOOK_EXPORT void rj_test_retain_translation(uint64_t executable_handle) {
+  TranslatedExecutableRegistry::instance().retain(
+      hsa_executable_t{executable_handle},
+      std::make_shared<const std::vector<uint8_t>>(std::vector<uint8_t>{0x7f, 'E', 'L', 'F'}));
+}
+#endif // RJ_HOOK_TEST_HOOKS

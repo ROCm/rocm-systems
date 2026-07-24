@@ -38,7 +38,8 @@ RJ_DIAGNOSTIC_POP
 extern "C" bool OnLoad(HsaApiTable *table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char *const *failed_tool_names);
 extern "C" void OnUnload();
-extern "C" bool rj_test_agent_is_gfx1250_a0(uint64_t agent_handle);
+extern "C" size_t rj_test_retained_translation_count(uint64_t executable_handle);
+extern "C" void rj_test_retain_translation(uint64_t executable_handle);
 
 namespace {
 
@@ -392,6 +393,8 @@ hsa_status_t HSA_API fake_system_get_major_extension_table(uint16_t extension,
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t HSA_API fake_executable_destroy(hsa_executable_t) { return HSA_STATUS_SUCCESS; }
+
 hsa_status_t HSA_API fake_executable_load_agent_code_object(
     hsa_executable_t, hsa_agent_t agent, hsa_code_object_reader_t reader, const char *,
     hsa_loaded_code_object_t *loaded_code_object) {
@@ -668,6 +671,7 @@ struct FakeApiTable {
     core.hsa_code_object_reader_create_from_memory_fn = fake_code_object_reader_create_from_memory;
     core.hsa_code_object_reader_destroy_fn = fake_code_object_reader_destroy;
     core.hsa_executable_load_agent_code_object_fn = fake_executable_load_agent_code_object;
+    core.hsa_executable_destroy_fn = fake_executable_destroy;
     core.hsa_executable_get_symbol_by_name_fn = fake_executable_get_symbol_by_name;
     core.hsa_executable_iterate_agent_symbols_fn = fake_executable_iterate_agent_symbols;
     core.hsa_executable_symbol_get_info_fn = fake_executable_symbol_get_info;
@@ -1400,44 +1404,6 @@ TEST(HsaHooksUnitTest, InstallsInAutoA0ModeWhenNoConfigPresent) {
   OnUnload();
 }
 
-// A gfx1250 agent reporting ASIC revision 0 is detected as A0; a nonzero
-// revision (B0 or later) is not. Mirrors ROCr hotswap's
-// IsHotswapSupportedGfxRevision.
-TEST(HsaHooksUnitTest, DetectsGfx1250A0ByAsicRevision) {
-  reset_pool_blocker(false);
-  reset_agent_blocker(false);
-  OnUnload();
-  write_runtime_config_path();
-
-  FakeApiTable api;
-  InstalledHook hook(api);
-  ASSERT_TRUE(hook.installed());
-
-  g_fake_gfx1250_asic_revision = 0;
-  EXPECT_TRUE(rj_test_agent_is_gfx1250_a0(kGfx1250Agent.handle));
-
-  g_fake_gfx1250_asic_revision = 1;
-  EXPECT_FALSE(rj_test_agent_is_gfx1250_a0(kGfx1250Agent.handle));
-
-  g_fake_gfx1250_asic_revision = 0;
-}
-
-// Detection is gfx1250-specific: a non-gfx1250 agent is never A0, even though
-// the guest agent's ISA (gfx950) also has no ASIC-revision attribute.
-TEST(HsaHooksUnitTest, DoesNotDetectNonGfx1250AgentAsA0) {
-  reset_pool_blocker(false);
-  reset_agent_blocker(false);
-  OnUnload();
-  write_runtime_config_path();
-
-  FakeApiTable api;
-  InstalledHook hook(api);
-  ASSERT_TRUE(hook.installed());
-
-  EXPECT_FALSE(rj_test_agent_is_gfx1250_a0(kGuestAgent.handle));
-  EXPECT_FALSE(rj_test_agent_is_gfx1250_a0(kHostAgent.handle));
-}
-
 // Read an agent's ASIC revision through the (possibly patched) core table.
 uint32_t query_asic_revision(FakeApiTable &api, hsa_agent_t agent) {
   uint32_t revision = 0xFFFFFFFFu;
@@ -1467,6 +1433,15 @@ TEST(HsaHooksUnitTest, PresentsSyntheticB0RevisionForA0AgentInAutoA0Mode) {
   // A gfx1250 agent that is not A0 (already B0) is forwarded unchanged.
   g_fake_gfx1250_asic_revision = 7;
   EXPECT_EQ(query_asic_revision(api, kGfx1250Agent), 7u);
+
+  // A non-gfx1250 agent is never presented as B0: the overlay forwards the
+  // query, and the fake reports no ASIC-revision attribute for such agents, so
+  // the hook must not have synthesized a value (it forwards the real error).
+  uint32_t revision = 0xFFFFFFFFu;
+  EXPECT_EQ(
+      api.core.hsa_agent_get_info_fn(
+          kGuestAgent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION), &revision),
+      HSA_STATUS_ERROR_INVALID_ARGUMENT);
 
   g_fake_gfx1250_asic_revision = 0;
   OnUnload();
@@ -1530,6 +1505,47 @@ TEST(HsaHooksUnitTest, SimulationInstallsFullManifest) {
   EXPECT_NE(api.core.hsa_queue_create_fn, fake_queue_create);
   EXPECT_NE(api.core.hsa_signal_store_relaxed_fn, fake_signal_store_relaxed);
   EXPECT_NE(api.core.hsa_agent_get_info_fn, fake_agent_get_info);
+}
+
+// Translated storage retained for an executable is released when that
+// executable is destroyed, not before.
+TEST(HsaHooksUnitTest, ReleasesTranslatedStorageOnExecutableDestroy) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  ASSERT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 0u);
+  rj_test_retain_translation(kFakeExecutable.handle);
+  rj_test_retain_translation(kFakeExecutable.handle);
+  EXPECT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 2u);
+
+  // Destroying the executable through the patched wrapper releases its storage.
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kFakeExecutable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 0u);
+}
+
+// Retained translated storage is dropped when the hook is uninstalled.
+TEST(HsaHooksUnitTest, ReleasesTranslatedStorageOnUnload) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  {
+    InstalledHook hook(api);
+    ASSERT_TRUE(hook.installed());
+    rj_test_retain_translation(kFakeExecutable.handle);
+    EXPECT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 1u);
+  }
+  // InstalledHook's destructor called OnUnload, which clears the registry.
+  EXPECT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 0u);
 }
 
 // Register a code object image and return its reader handle.
