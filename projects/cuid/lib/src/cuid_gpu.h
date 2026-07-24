@@ -41,6 +41,11 @@ struct amdcuid_gpu_info {
   // DRM device node: /sys/class/drm/renderDXXX or /sys/class/drm/cardN
   std::string render_node;
   std::string bdf;
+  // Hardware fingerprint derived from the GIM SMI ASIC serial. Used as a
+  // fallback for GIM-only devices whose sysfs unique_id and PCI config space
+  // are not exposed to userspace.
+  uint64_t gim_fingerprint = 0;
+  bool gim_fingerprint_valid = false;
 };
 
 class CuidGpu : public CuidDevice {

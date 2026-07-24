@@ -45,40 +45,41 @@ set(INC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 find_package(OpenSSL QUIET)
 
 set(CUID_SOURCES
-    src/cuid.cc
-    src/cuid_util.cc
-    src/cuid_device.cc
-    src/cuid_device_manager.cc
-    src/cuid_cpu.cc
-    src/cuid_gpu.cc
-    src/cuid_nic.cc
-    src/cuid_npu.cc
-    src/cuid_platform.cc
-    src/cuid_file.cc
-    src/hmac.cc
-    src/pci_util.cc
-    src/acpi_parser.cc
-    src/smbios_util.cc
-    src/gim_util.cc
+    ${SRC_DIR}/cuid.cc
+    ${SRC_DIR}/cuid_util.cc
+    ${SRC_DIR}/cuid_device.cc
+    ${SRC_DIR}/cuid_device_manager.cc
+    ${SRC_DIR}/cuid_cpu.cc
+    ${SRC_DIR}/cuid_gpu.cc
+    ${SRC_DIR}/cuid_nic.cc
+    ${SRC_DIR}/cuid_npu.cc
+    ${SRC_DIR}/cuid_platform.cc
+    ${SRC_DIR}/cuid_file.cc
+    ${SRC_DIR}/hmac.cc
+    ${SRC_DIR}/pci_util.cc
+    ${SRC_DIR}/acpi_parser.cc
+    ${SRC_DIR}/smbios_util.cc
+    ${SRC_DIR}/gim_util.cc
 )
 
 set(CUID_HEADERS
-    src/cuid_util.h
-    src/cuid_device.h
-    src/cuid_device_manager.h
-    src/cuid_cpu.h
-    src/cuid_gpu.h
-    src/cuid_nic.h
-    src/cuid_npu.h
-    src/cuid_platform.h
-    src/cuid_file.h
-    src/hmac.h
-    src/ipc_protocol.h
-    src/pci_util.h
-    src/acpi_parser.h
-    src/smbios_util.h
-    src/cuid_internal.h
-    src/gim_util.h
+    ${INC_DIR}/amd_cuid.h
+    ${SRC_DIR}/cuid_util.h
+    ${SRC_DIR}/cuid_device.h
+    ${SRC_DIR}/cuid_device_manager.h
+    ${SRC_DIR}/cuid_cpu.h
+    ${SRC_DIR}/cuid_gpu.h
+    ${SRC_DIR}/cuid_nic.h
+    ${SRC_DIR}/cuid_npu.h
+    ${SRC_DIR}/cuid_platform.h
+    ${SRC_DIR}/cuid_file.h
+    ${SRC_DIR}/hmac.h
+    ${SRC_DIR}/ipc_protocol.h
+    ${SRC_DIR}/pci_util.h
+    ${SRC_DIR}/acpi_parser.h
+    ${SRC_DIR}/smbios_util.h
+    ${SRC_DIR}/cuid_internal.h
+    ${SRC_DIR}/gim_util.h
 )
 
 add_library(amdcuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})

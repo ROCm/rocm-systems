@@ -123,7 +123,13 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
         std::string device_path =
             std::string(drm_path) + "/" + card_name + "/device";
         amdcuid_gpu_info info = {};
-        discover_single(&info, device_path, gim_client.get());
+        // Skip partitioned or otherwise unsupported cards; discover_single
+        // leaves `info` untouched in that case, so emplacing it would add a
+        // zero-filled GPU entry.
+        if (discover_single(&info, device_path, gim_client.get()) ==
+            AMDCUID_STATUS_UNSUPPORTED) {
+          continue;
+        }
         if (!info.bdf.empty()) {
           seen_bdfs.insert(info.bdf);
         }
@@ -299,6 +305,14 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
       if (info.header.fields.gpu.pci_class == 0) {
         info.header.fields.gpu.pci_class = 0x0300;
       }
+      // GIM-only devices expose no sysfs unique_id or PCI config space, so
+      // carry the ASIC serial as the hardware fingerprint source.
+      uint64_t parsed_serial = 0;
+      if (cuid::gim::GimClient::parse_asic_serial(asic.asic_serial,
+                                                  parsed_serial)) {
+        info.gim_fingerprint = parsed_serial;
+        info.gim_fingerprint_valid = true;
+      }
     }
   }
 
@@ -317,6 +331,14 @@ CuidGpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
   // for GIM-only PCI directories they live directly under render_node.
   const bool render_node_is_pci_dir =
       m_info.render_node.find("/sys/bus/pci/devices/") == 0;
+
+  // GIM-only devices have no sysfs unique_id or PCI config space; use the
+  // ASIC serial captured during discovery as the fingerprint.
+  if (render_node_is_pci_dir && m_info.gim_fingerprint_valid) {
+    fingerprint = m_info.gim_fingerprint;
+    return AMDCUID_STATUS_SUCCESS;
+  }
+
   const std::string device_attr_prefix =
       render_node_is_pci_dir ? m_info.render_node
                              : (m_info.render_node + "/device");
