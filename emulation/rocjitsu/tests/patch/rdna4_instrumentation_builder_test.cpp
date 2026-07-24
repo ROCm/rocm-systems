@@ -713,6 +713,53 @@ TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
   EXPECT_EQ(std::string_view(offset_high->mnemonic()), "v_add_co_ci_u32");
 }
 
+TEST(InstructionBuilder, BuildGfx1250SignedI24AddPinsNegativeInlineAndLiteralFallback) {
+  struct DisplacementCase {
+    std::string_view label;
+    int32_t displacement;
+    uint16_t low_source;
+    uint32_t low_extension;
+    uint16_t high_source;
+  };
+  constexpr std::array<DisplacementCase, 2> kCases = {{
+      {"negative inline", -4, 196, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), 193},
+      {"positive literal fallback", 65, kVopLiteralSource, 65u, scalar_positive_inline_u32(0)},
+  }};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  for (const DisplacementCase &test_case : kCases) {
+    SCOPED_TRACE(test_case.label);
+    const auto words = build_v_add_u64_signed_i24(
+        /*address_vgpr=*/8, test_case.displacement, ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_TRUE(words);
+    const auto expected_low = gfx1250::build_vop3_sdst_enc(
+        gfx1250::kVAddCoU32Vop3SdstEnc,
+        {.vdst = 8, .sdst = 106, .src0 = test_case.low_source, .src1 = vector_source_vgpr(8)});
+    const auto expected_high = gfx1250::build_vop3_sdst_enc(gfx1250::kVAddCoCiU32Vop3SdstEnc,
+                                                            {.vdst = 9,
+                                                             .sdst = 106,
+                                                             .src0 = test_case.high_source,
+                                                             .src1 = vector_source_vgpr(9),
+                                                             .src2 = 106});
+    EXPECT_EQ((*words)[0], expected_low[0]);
+    EXPECT_EQ((*words)[1], expected_low[1]);
+    EXPECT_EQ((*words)[2], test_case.low_extension);
+    EXPECT_EQ((*words)[4], expected_high[0]);
+    EXPECT_EQ((*words)[5], expected_high[1]);
+
+    std::unique_ptr<Instruction> low(decoder->decode(words->data()));
+    std::unique_ptr<Instruction> wait(decoder->decode(words->data() + 3));
+    std::unique_ptr<Instruction> high(decoder->decode(words->data() + 4));
+    ASSERT_NE(low, nullptr);
+    ASSERT_NE(wait, nullptr);
+    ASSERT_NE(high, nullptr);
+    EXPECT_EQ(std::string_view(low->mnemonic()), "v_add_co_u32");
+    EXPECT_EQ(std::string_view(wait->mnemonic()), "s_wait_alu");
+    EXPECT_EQ(std::string_view(high->mnemonic()), "v_add_co_ci_u32");
+  }
+}
+
 TEST(InstructionBuilder, BuildFlatAtomicAddU32ReturnDeviceScope) {
   const auto words = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/10, /*return_old_value=*/true, /*scope=*/2,
