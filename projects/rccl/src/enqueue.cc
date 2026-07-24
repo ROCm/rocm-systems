@@ -3664,10 +3664,13 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           ceAvailable = false;
         } else if (ceAllReduceOpSupported) {
           // check if we want to force CE AllReduce without symmetric window registration
+          // msgsize needs to be less than or equal to NCCL_CE_AR_MAX_MSG_BYTES
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
           if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || !rcclParamForceCeAllReduce() ||
               !comm->symmetricSupport || comm->nNodes > 1) {
             ceAllReduceFits = false;
+            INFO(NCCL_COLL, "CE AllReduce: forced %d, msg %zu Max %zu B, falling back to standard NCCL AllReduce",
+                 rcclParamForceCeAllReduce(), totalBytes, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
           } else {
             ceAllReduceFits = true;
           }

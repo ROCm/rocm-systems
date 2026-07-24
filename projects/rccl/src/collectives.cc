@@ -558,7 +558,8 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   // may not be ready yet; ncclEnqueueCheck will trigger CE init as a side
   // effect (because ncclCeImplemented now returns true for AllReduce), so the
   // second and all subsequent calls use the CE path.
-  if (ncclGroupDepth == 0 && rcclUseCeAllReduce(comm, count, datatype, op) && comm->ceColl.ceARTmpBuf != NULL) {
+  bool ceAllReduceAllowed = ncclGroupDepth == 0 && rcclUseCeAllReduce(comm, count, datatype, op);
+  if (ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
     if (count == 0) return ncclSuccess;
     struct ncclDevrWindow* recvWin = nullptr;
     NCCLCHECK(ncclDevrFindWindow(comm, recvbuff, &recvWin));
@@ -572,7 +573,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   bool symEligible = (op == ncclSum) && isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype,
                                                                    count, sendbuff, recvbuff);
 
-  if (!symEligible && rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608)) {
+  if (!symEligible && rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608) && !ceAllReduceAllowed) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       if (ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         INFO(NCCL_COLL, "AllReduce: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
