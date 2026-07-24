@@ -4192,9 +4192,14 @@ namespace smi {
 // a multi-partition compute mode (CPX/DPX/TPX/QPX), where sysfs reports the
 // whole device split evenly across partitions and ignores reserved memory; and
 // APUs (e.g. gfx1151 / Strix Halo), where sysfs exposes only the small BIOS VRAM
-// carveout while the GPU addresses the larger unified pool KFD reports. Discrete
-// and SPX GPUs are unaffected: there sysfs and KFD agree, so the final clause is
-// false and the sysfs value is kept.
+// carveout while the GPU addresses the larger unified pool KFD reports.
+//
+// The APU case is detected by size (kfd_total > sysfs_total) rather than a
+// device flag because the driver does not yet expose an APU/integrated marker
+// to user space, so processor_type reports AMD_GPU for both APUs and discrete
+// GPUs. On discrete and SPX GPUs sysfs already reports the real VRAM size,
+// which is not smaller than the KFD FB_PUBLIC bank, so kfd_total > sysfs_total
+// stays false and the sysfs value is kept.
 bool vram_total_prefer_kfd(bool sysfs_read_ok, uint64_t sysfs_total,
                            const std::string& compute_partition, uint64_t kfd_total) {
   if (!sysfs_read_ok || sysfs_total == 0) {
@@ -4264,7 +4269,6 @@ rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_
     if (kfd_total > 0 &&
         amd::smi::vram_total_prefer_kfd(sysfs_read_ok, *total, compute_partition_str, kfd_total)) {
       *total = kfd_total;
-      ret = RSMI_STATUS_SUCCESS;
       ss << __PRETTY_FUNCTION__ << " | inside success fallback... "
          << " | Device #: " << std::to_string(dv_ind)
          << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
