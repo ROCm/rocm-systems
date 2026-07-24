@@ -70,7 +70,13 @@ jobs:
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
+      # rocm-systems is a large monorepo; only the amdsmi project and this
+      # workflow are needed, so sparse-checkout keeps the fetch cheap.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          sparse-checkout: |
+            projects/amdsmi
+            .github/workflows
 
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -85,26 +91,16 @@ jobs:
       - name: Set Project Directory
         run: |
           set -euo pipefail
-          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
-          if [ -z "$TARGET_DIR" ]; then
-            TARGET_DIR=$(find $GITHUB_WORKSPACE -maxdepth 2 -name "CMakeLists.txt" -exec dirname {} \; | head -n 1)
-          fi
-          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
+          # sparse-checkout places the project at a fixed path.
+          echo "PROJECT_DIR=$GITHUB_WORKSPACE/projects/amdsmi" >> $GITHUB_ENV
 
       - name: Run AMDSMI Build and Install
         run: |
           set -euo pipefail
-          SCRIPT=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/tests/amdsmi_build/run_amdsmi_build.py" | head -1)
-          if [ -z "$SCRIPT" ]; then
-            echo "ERROR: run_amdsmi_build.py not found"
-            exit 1
-          fi
-          echo "Using runner script: $SCRIPT"
-
           # The script autodetects package manager, format, and distro
           # quirks (Debian10 archived repos, RHEL10/AlmaLinux8 QA_RPATHS,
           # AzureLinux3 more_itertools, etc.) from /etc/os-release.
-          python3 "$SCRIPT" \
+          python3 "${{ env.PROJECT_DIR }}/tests/amdsmi_build/run_amdsmi_build.py" \
             --project-dir "${{ env.PROJECT_DIR }}" \
             --os-label "${{ matrix.os }}" \
             --test-results-dir "/tmp/test-results-${{ matrix.os }}"
@@ -130,6 +126,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: amd-smi-lib-${{ matrix.package_format }}-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
+          # 99999 is the local (non-release) package version CPack stamps when
+          # ROCM_LIBPATCH_VERSION is unset, so it matches every dev-built package.
           path: |
             ${{ env.PROJECT_DIR }}/build/amd-smi-lib*99999-local${{ matrix.arch_suffix }}
             ${{ env.PROJECT_DIR }}/build/amd-smi-lib-*99999-local*.rpm
@@ -207,49 +205,39 @@ jobs:
           ./amd_smi_drm_ex > "$RESULTS_DIR/amd_smi_drm_ex.log" 2>&1 || echo 'amd_smi_drm_ex failed'
           ./amd_smi_nodrm_ex > "$RESULTS_DIR/amd_smi_nodrm_ex.log" 2>&1 || echo 'amd_smi_nodrm_ex failed'
 
-      - name: Test Results
+      - name: AMDSMI Test Results
         if: always()
-        run: |
-          results_dir="/tmp/test-results-${{ matrix.os }}"
-          # label -> log file; printed in one collapsible group each so the
-          # Actions log stays readable instead of seven near-identical steps.
-          print_log() {
-            echo "::group::$1"
-            cat "$results_dir/$2" 2>/dev/null || echo "No $1"
-            echo "::endgroup::"
-          }
-          print_log "AMDSMI test results"      "amdsmi_tests.log"
-          print_log "Integration test results" "integration_test_output.txt"
-          print_log "Unit test results"        "unit_test_output.txt"
-          print_log "Perf test results"        "perf_test_output.txt"
-          print_log "ABI compat results"       "abi_compat_output.txt"
-          print_log "DRM example results"      "amd_smi_drm_ex.log"
-          print_log "NoDRM example results"    "amd_smi_nodrm_ex.log"
+        run: cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log || echo "No AMDSMI test results"
+
+      - name: Integration Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/integration_test_output.txt || echo "No integration test results"
+
+      - name: Unit Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results"
+
+      - name: Perf Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/perf_test_output.txt || echo "No perf test results"
+
+      - name: ABI Compat Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/abi_compat_output.txt || echo "No ABI compat results"
+
+      - name: Example DRM Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/amd_smi_drm_ex.log || echo "No DRM example results"
+
+      - name: Example NoDRM Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No NoDRM example results"
 
       - name: AMDSMI CI Summary
         if: always()
         run: |
           set -euo pipefail
-          SCRIPT=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/tests/amdsmi_build/run_amdsmi_build.py" | head -1)
-          python3 "$SCRIPT" summarize \
+          python3 "${{ env.PROJECT_DIR }}/tests/amdsmi_build/run_amdsmi_build.py" summarize \
             --results-dir "/tmp/test-results-${{ matrix.os }}" \
             --os-label "${{ matrix.os }}" \
             --summary-file "$GITHUB_STEP_SUMMARY"
-
-      - name: Uninstall
-        if: always()
-        run: |
-          set -euo pipefail
-          case "${{ matrix.package_format }}" in
-            deb) apt remove -y amd-smi-lib || true ;;
-            rpm)
-              case "${{ matrix.os }}" in
-                SLES) zypper remove -y amd-smi-lib || true ;;
-                *) dnf remove -y amd-smi-lib || true ;;
-              esac
-              ;;
-          esac
-          rm -f /usr/local/bin/amd-smi
-          if [ -d /opt/rocm/share/amd_smi ]; then
-            rm -rf /opt/rocm/share/amd_smi
-          fi
