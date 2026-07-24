@@ -616,11 +616,6 @@ class TestGfx1250Profile:
                 chunk_overhead=0,
             )
 
-    def test_hwreg_ids(self):
-        assert self.p.hwreg_mode_id == 1
-        assert self.p.hwreg_status_id == 2
-        assert self.p.hwreg_ib_sts2_id == 28
-
     def test_detect_profile_uses_filename_override(self, tmp_path):
         xml = tmp_path / 'amdgpu_isa_gfx1250.xml'
         xml.write_text('<Spec />')

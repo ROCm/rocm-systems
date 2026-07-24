@@ -27,6 +27,27 @@
 
 namespace rocjitsu {
 
+/// @brief Deleter for owned plugin instances.
+///
+/// Every plugin instance is freed through a destroy function, so allocation and
+/// deallocation always stay on the same side of the plugin ABI boundary. For
+/// plugins loaded across the C ABI, @c destroyFn is the plugin library's
+/// `rocjitsu_plugin_destroy` export. For in-tree plugins created with `new`, it
+/// is a small host trampoline that `delete`s the instance (see
+/// delete_execution_plugin()). The pointer is only ever handed back to the
+/// deleter that created it, and `std::unique_ptr` never invokes the deleter on
+/// a null instance, so no null check is needed here.
+struct PluginDeleter {
+  void (*destroyFn)(void *) = nullptr;
+  void operator()(ExecutionPlugin *p) const { destroyFn(static_cast<void *>(p)); }
+};
+
+/// @brief Owning pointer to a plugin instance with a boundary-aware deleter.
+using OwnedPlugin = std::unique_ptr<ExecutionPlugin, PluginDeleter>;
+
+/// @brief Host destroy trampoline for in-tree plugins created with `new`.
+inline void delete_execution_plugin(void *p) { delete static_cast<ExecutionPlugin *>(p); }
+
 class ExecutionPluginGroup {
 public:
   ExecutionPluginGroup() = default;
@@ -43,7 +64,8 @@ public:
   /// this call gets a FileSink at <dir>/<plugin_name>.log.
   void set_sink_dir(const std::string &dir) { sink_dir_ = dir; }
 
-  bool add(std::unique_ptr<ExecutionPlugin> p) {
+  /// Add a plugin owned with a boundary-aware deleter (see OwnedPlugin).
+  bool add(OwnedPlugin p) {
     if (!p)
       return false;
     for (const auto &existing : plugins_)
@@ -55,16 +77,21 @@ public:
     return true;
   }
 
+  /// Add an in-tree plugin freed with `delete` (host/test convenience).
+  bool add(std::unique_ptr<ExecutionPlugin> p) {
+    return add(OwnedPlugin(p.release(), PluginDeleter{&delete_execution_plugin}));
+  }
+
   uint32_t num_plugins() const { return static_cast<uint32_t>(plugins_.size()); }
   bool empty() const { return plugins_.empty(); }
 
-  // -- Lifecycle (non-virtual) --
-  void onInit() {
+  // -- Lifecycle --
+  virtual void onInit() {
     for (auto &p : plugins_)
       p->onInit();
   }
 
-  void onShutdown() {
+  virtual void onShutdown() {
     for (auto &p : plugins_)
       p->onShutdown();
   }
@@ -182,8 +209,15 @@ protected:
       composite->add(s);
     if (has_file) {
       auto fs = std::make_unique<FileSink>(sink_dir_ + "/" + file_name);
-      composite->add(fs.get());
-      owned_sinks_.push_back(std::move(fs));
+      if (fs->is_open()) {
+        composite->add(fs.get());
+        owned_sinks_.push_back(std::move(fs));
+      } else if (composite->empty()) {
+        // Preserve output when the file was the only requested destination.
+        // Do not add stderr when another configured sink is already usable,
+        // because doing so would unexpectedly duplicate output.
+        composite->add(&StderrSink::instance());
+      }
     }
     auto *result = composite.get();
     owned_sinks_.push_back(std::move(composite));
@@ -200,7 +234,7 @@ private:
       p.sink_ = s;
   }
 
-  std::vector<std::unique_ptr<ExecutionPlugin>> plugins_;
+  std::vector<std::unique_ptr<ExecutionPlugin, PluginDeleter>> plugins_;
 };
 
 } // namespace rocjitsu

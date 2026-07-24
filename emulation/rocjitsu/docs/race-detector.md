@@ -67,10 +67,17 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 # or: amdclang++ -O2 -o /tmp/race_example race_example.hip --offload-arch=gfx950
 ```
 
-Run it under the emulator with `RJ_RACE=1` to enable the race detector:
+Enable the race detector by adding it to the `plugins` section of your
+rocjitsu config file (`my_config.json`):
+
+```json
+{ "plugins": { "race": {} } }
+```
+
+Run it under the emulator:
 
 ```bash
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- /tmp/race_example
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 ```
 
 You should see output:
@@ -98,16 +105,22 @@ Replace the binary path with your application. This works with any ROCm workload
 launchers like `torchrun`, etc.
 
 ```bash
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- ./my_app
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- python my_script.py
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- python my_script.py
 ```
 
-To capture reports to a file instead of stderr, set `RJ_SINKS=file` and
-`RJ_SINK_DIR`:
+To capture reports to a file instead of stderr (useful for CI or
+scripted workflows), add a `sinks` section to your config:
+
+```json
+{
+  "plugins": { "race": {} },
+  "sinks": { "types": ["file"], "dir": "/tmp/output" }
+}
+```
 
 ```bash
-RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- ./my_app
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 # Reports are written to /tmp/output/race.log
 ```
 
@@ -247,14 +260,15 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   multi-workgroup, and mixed counter scenarios.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
 - `hip_race_gfx950_test.hip` and `hip_race_gfx1151_test.hip` — end-to-end HIP
-  kernel tests run under the emulator with `RJ_RACE=1`.
+  kernel tests run under the emulator with the `race` plugin enabled in the
+  config file.
 
 ```bash
 # Core detection tests
 ctest --test-dir build -R "RaceDetector|IntervalSet"
 
-# End-to-end HIP tests (RJ_RACE=1 is set automatically by ctest)
-ctest --test-dir build -R "RaceTest"
+# End-to-end HIP tests (the test config enables the race plugin)
+ctest --test-dir $BUILD_DIR -R "RaceTest"
 ```
 
 ## Limitations

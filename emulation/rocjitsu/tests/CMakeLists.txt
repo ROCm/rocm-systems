@@ -32,6 +32,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_vm_amdgpu
     rocjitsu_plugin_logging
     rocjitsu_plugin_race_detector
+    rocjitsu_plugin_loader
     rocjitsu_vm_risc_v
     rocjitsu_config
     rocjitsu_dbt_config
@@ -331,6 +332,49 @@ endfunction()
 
 # --- Unit / integration test suite ---
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(PLUGIN_LOADER_FIXTURE_DIR
+        "${CMAKE_CURRENT_BINARY_DIR}/plugin_loader_fixtures"
+    )
+    function(rj_add_plugin_loader_fixture name)
+        add_library(
+            plugin_loader_fixture_${name}
+            MODULE
+            plugin_loader_fixture.cpp
+        )
+        target_include_directories(
+            plugin_loader_fixture_${name}
+            PRIVATE
+                ${ROCJITSU_INCLUDE_DIR}
+                ${ROCJITSU_SRC_DIR}
+                ${HSA_INCLUDE_DIR}
+                $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
+                $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
+        )
+        target_compile_definitions(
+            plugin_loader_fixture_${name}
+            PRIVATE PLUGIN_FIXTURE_NAME="${name}" ${ARGN}
+        )
+        set_target_properties(
+            plugin_loader_fixture_${name}
+            PROPERTIES
+                OUTPUT_NAME rocjitsu_plugin_${name}
+                LIBRARY_OUTPUT_DIRECTORY ${PLUGIN_LOADER_FIXTURE_DIR}
+                CXX_VISIBILITY_PRESET hidden
+                VISIBILITY_INLINES_HIDDEN ON
+        )
+        rj_configure_target(plugin_loader_fixture_${name} TEST)
+    endfunction()
+
+    rj_add_plugin_loader_fixture(good)
+    rj_add_plugin_loader_fixture(
+        badabi
+        PLUGIN_FIXTURE_ABI=::rocjitsu::kPluginAbiVersion+1
+    )
+    rj_add_plugin_loader_fixture(missing PLUGIN_FIXTURE_MISSING_DESTROY=1)
+    rj_add_plugin_loader_fixture(duplicate)
+endif()
+
 add_executable(
     rocjitsu_tests
     rvsim_test.cpp
@@ -375,6 +419,7 @@ add_executable(
     instruction_execution_harness_test.cpp
     scalar_scc_test.cpp
     cdna3_predicate_mask_test.cpp
+    scoped_temp_test.cpp
     decode_execute_benchmark.cpp
     util_unique_handle_test.cpp
     util_simd_test.cpp
@@ -427,6 +472,8 @@ add_executable(
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
     simd_correctness/vop3p_dot_simd_correctness_test.cpp
     execution_plugin_test.cpp
+    plugin_config_resolver_test.cpp
+    plugin_loader_test.cpp
     race-detector/race_detector_event_registry_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
@@ -467,7 +514,21 @@ target_link_libraries(
         Threads::Threads
         GTest::gtest_main
 )
+target_include_directories(rocjitsu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 rj_configure_target(rocjitsu_tests TEST)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_definitions(
+        rocjitsu_tests
+        PRIVATE PLUGIN_LOADER_FIXTURE_DIR="${PLUGIN_LOADER_FIXTURE_DIR}"
+    )
+    add_dependencies(
+        rocjitsu_tests
+        plugin_loader_fixture_good
+        plugin_loader_fixture_badabi
+        plugin_loader_fixture_missing
+        plugin_loader_fixture_duplicate
+    )
+endif()
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
 # ./rocjitsu_tests --gtest_filter='*Benchmark*').
@@ -621,6 +682,7 @@ add_executable(
 target_include_directories(
     rj_dbt_translate_smoke_test
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
 )
@@ -907,6 +969,7 @@ target_compile_definitions(
 target_include_directories(
     hsa_hooks_unit_test
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
         ${CMAKE_SOURCE_DIR}/lib/util/include
@@ -1852,7 +1915,7 @@ if(RJ_ENABLE_HIP_TESTS)
         cmake_parse_arguments(
             ARG
             ""
-            "CONFIG;NAME;TIMEOUT"
+            "CONFIG;INSTALL_CONFIG;NAME;TIMEOUT"
             "ENVIRONMENT"
             ${ARGN}
         )
@@ -1862,7 +1925,14 @@ if(RJ_ENABLE_HIP_TESTS)
         if(NOT ARG_NAME)
             set(ARG_NAME ${TEST_CASE})
         endif()
-        get_filename_component(_install_config_name "${ARG_CONFIG}" NAME)
+        if(ARG_INSTALL_CONFIG)
+            set(_install_config "${ARG_INSTALL_CONFIG}")
+        else()
+            get_filename_component(_install_config_name "${ARG_CONFIG}" NAME)
+            set(_install_config
+                "\${RJ_INSTALLED_CONFIG_DIR}/${_install_config_name}"
+            )
+        endif()
         set(_install_env)
         foreach(_env_entry IN LISTS ARG_ENVIRONMENT)
             if(_env_entry MATCHES "^ROCJITSU_HIPKITTENS_KERNEL_DIR=")
@@ -1920,7 +1990,7 @@ if(RJ_ENABLE_HIP_TESTS)
             "-DTEST_EXECUTABLE=bin/${TEST_BIN}"
             "-DTEST_FILTER=${TEST_CASE}"
             "-DTEST_LAUNCHER=\${RJ_INSTALLED_BINDIR}/rocjitsu"
-            "-DTEST_CONFIG=\${RJ_INSTALLED_CONFIG_DIR}/${_install_config_name}"
+            "-DTEST_CONFIG=${_install_config}"
             "-P"
             "rj_run_filtered_gtest.cmake"
         )
@@ -1978,6 +2048,27 @@ if(RJ_ENABLE_HIP_TESTS)
             "${CMAKE_INSTALL_LIBDIR}"
             "${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}"
         )
+
+        # Daemon-mode plugin coverage uses a placeholder sink directory that
+        # the test rewrites to a private runtime path.
+        set(RJ_TEST_SINK_DIR "__RJ_DAEMON_SINK_DIR__")
+        configure_file(
+            ${CMAKE_CURRENT_SOURCE_DIR}/logging/logging_test_config.json.in
+            ${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json
+            @ONLY
+        )
+        if(RJ_INSTALL_TESTS)
+            install(
+                FILES ${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs
+            )
+        endif()
+        _rj_path_from_installed_test_bin(
+            _rj_installed_daemon_logging_config
+            "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
+            "daemon_logging_config.json"
+        )
+
         add_executable(daemon_test daemon_test.cpp)
         target_compile_definitions(
             daemon_test
@@ -1991,6 +2082,8 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
                 RJ_HIP_RCCL_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
                 RJ_INTERPOSER_DUP_BIN="$<TARGET_FILE:interposer_dup_test>"
+                RJ_DAEMON_LOGGING_CONFIG="${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json"
+                RJ_DAEMON_LOGGING_SINK_TOKEN="__RJ_DAEMON_SINK_DIR__"
                 RJ_INSTALLED_DAEMON_BIN="${_rj_installed_rocjitsu_bin}"
                 RJ_INSTALLED_DAEMON_CONFIG="${_rj_installed_daemon_config}"
                 RJ_INSTALLED_DAEMON_CONFIG_2GPU="${_rj_installed_daemon_config_2gpu}"
@@ -1999,6 +2092,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_INSTALLED_HIP_MEMCPY_BIN="hip_memcpy_test"
                 RJ_INSTALLED_HIP_RCCL_BIN="hip_rccl_test"
                 RJ_INSTALLED_INTERPOSER_DUP_BIN="interposer_dup_test"
+                RJ_INSTALLED_DAEMON_LOGGING_CONFIG="${_rj_installed_daemon_logging_config}"
         )
         target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
         add_dependencies(
@@ -2035,6 +2129,16 @@ if(RJ_ENABLE_HIP_TESTS)
                     "--gtest_filter=${TC}"
             )
         endforeach()
+
+        rj_add_test(
+            NAME DaemonTest.LoggingPlugin
+            COMMAND daemon_test --gtest_filter=DaemonPluginTest.LoggingPluginDispatchLogged
+            TIMEOUT 120
+            LABELS daemon
+            INSTALL_COMMAND
+                "bin/daemon_test"
+                "--gtest_filter=DaemonPluginTest.LoggingPluginDispatchLogged"
+        )
 
         # --- RCCL collective test ---
         find_library(RCCL_LIB rccl PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
@@ -2161,13 +2265,38 @@ if(RJ_ENABLE_HIP_TESTS)
         set(LOGGING_RUNTIME_DIR ${LOGGING_SINK_DIR}/runtime)
         file(MAKE_DIRECTORY ${LOGGING_SINK_DIR})
         file(MAKE_DIRECTORY ${LOGGING_RUNTIME_DIR})
+        set(RJ_TEST_SINK_DIR ${LOGGING_SINK_DIR})
+        configure_file(
+            ${CMAKE_CURRENT_SOURCE_DIR}/logging/logging_test_config.json.in
+            ${LOGGING_SINK_DIR}/config.json
+            @ONLY
+        )
+        set(RJ_TEST_SINK_DIR runtime/logging_test_output)
+        set(LOGGING_INSTALLED_CONFIG_DIR
+            ${CMAKE_CURRENT_BINARY_DIR}/install-configs
+        )
+        set(LOGGING_INSTALLED_CONFIG
+            ${LOGGING_INSTALLED_CONFIG_DIR}/logging.json
+        )
+        file(MAKE_DIRECTORY ${LOGGING_INSTALLED_CONFIG_DIR})
+        configure_file(
+            ${CMAKE_CURRENT_SOURCE_DIR}/logging/logging_test_config.json.in
+            ${LOGGING_INSTALLED_CONFIG}
+            @ONLY
+        )
+        if(RJ_INSTALL_TESTS)
+            install(
+                FILES ${LOGGING_INSTALLED_CONFIG}
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs/tests
+            )
+        endif()
         rj_add_hip_test_case(
             hip_logging_test "LoggingTest.dispatch_logged"
+            CONFIG ${LOGGING_SINK_DIR}/config.json
+            INSTALL_CONFIG "\${RJ_INSTALLED_CONFIG_DIR}/tests/logging.json"
             TIMEOUT 30
             ENVIRONMENT
                 "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
-                "RJ_LOG=1"
-                "RJ_SINKS=file"
                 "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
         )
 
@@ -2181,13 +2310,21 @@ if(RJ_ENABLE_HIP_TESTS)
         set(PROFILED_RUNTIME_DIR ${PROFILED_SINK_DIR}/runtime)
         file(MAKE_DIRECTORY ${PROFILED_SINK_DIR})
         file(MAKE_DIRECTORY ${PROFILED_RUNTIME_DIR})
+        if(RJ_INSTALL_TESTS)
+            install(
+                FILES
+                    ${CMAKE_CURRENT_SOURCE_DIR}/logging/profiled_test_config.json
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs/tests
+                RENAME profiled.json
+            )
+        endif()
         rj_add_hip_test_case(
             hip_profiled_plugin_test "ProfiledPluginTest.hook_profile_output"
+            CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/logging/profiled_test_config.json
+            INSTALL_CONFIG "\${RJ_INSTALLED_CONFIG_DIR}/tests/profiled.json"
             TIMEOUT 30
             ENVIRONMENT
                 "ROCJITSU_RUNTIME_DIR=${PROFILED_RUNTIME_DIR}"
-                "RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP=1"
-                "RJ_SINKS=file"
                 "RJ_SINK_DIR=${PROFILED_SINK_DIR}"
         )
 

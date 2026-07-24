@@ -61,7 +61,7 @@ void
 create_directory_for_database_file(const std::string& db_file)
 {
     auto db_dirname = rocprofsys::path::parent_path(db_file);
-    if(!tim::filepath::direxists(db_dirname))
+    if(!rocprofsys::path::is_directory(db_dirname))
     {
         tim::filepath::makedir(db_dirname);
     }
