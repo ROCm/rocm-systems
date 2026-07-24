@@ -63,6 +63,16 @@ struct DebugTopology {
   uint64_t debug_prop = 0;
 };
 
+/// @brief Non-debug capability bits advertised for simulated data-center GPUs.
+inline constexpr uint32_t default_non_debug_capability() {
+  return HSA_CAP_ATS_PRESENT | HSA_CAP_QUEUE_IDLE_EVENT | HSA_CAP_WATCH_POINTS_SUPPORTED |
+         ((4u << HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT) & HSA_CAP_WATCH_POINTS_TOTALBITS_MASK) |
+         ((HSA_CAP_DOORBELL_TYPE_2_0 << HSA_CAP_DOORBELL_TYPE_TOTALBITS_SHIFT) &
+          HSA_CAP_DOORBELL_TYPE_TOTALBITS_MASK) |
+         HSA_CAP_AQL_QUEUE_DOUBLE_MAP | HSA_CAP_MEM_EDCSUPPORTED | HSA_CAP_RASEVENTNOTIFY |
+         HSA_CAP_SRAM_EDCSUPPORTED | HSA_CAP_SVMAPI_SUPPORTED | HSA_CAP_FLAGS_COHERENTHOSTACCESS;
+}
+
 /// @brief Reproduces kfd_topology_set_capabilities() for the simulated GPU
 /// identified by @p gfx_target_version.
 ///
@@ -126,6 +136,23 @@ inline DebugTopology debug_topology_for(uint32_t gfx_target_version) {
   topo.capability |= HSA_CAP_TRAP_DEBUG_FIRMWARE_SUPPORTED;
 
   return topo;
+}
+
+/// @brief Resolve configured topology overrides and the ASIC revision bits.
+inline DebugTopology effective_topology_for(uint32_t gfx_target_version, uint32_t capability,
+                                            uint32_t capability2, uint64_t debug_prop,
+                                            uint32_t revision_id) {
+  const DebugTopology derived = debug_topology_for(gfx_target_version);
+  DebugTopology effective{
+      .capability =
+          capability != 0 ? capability : default_non_debug_capability() | derived.capability,
+      .capability2 = capability2 != 0 ? capability2 : derived.capability2,
+      .debug_prop = debug_prop != 0 ? debug_prop : derived.debug_prop,
+  };
+  effective.capability =
+      (effective.capability & ~HSA_CAP_ASIC_REVISION_MASK) |
+      ((revision_id << HSA_CAP_ASIC_REVISION_SHIFT) & HSA_CAP_ASIC_REVISION_MASK);
+  return effective;
 }
 
 } // namespace rocjitsu::kmd

@@ -2238,6 +2238,8 @@ int SimulatedKfd::debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args 
     e.vendor_id = info.vendor_id;
     e.device_id = info.device_id;
     e.revision_id = info.pci_revision_id;
+    e.subsystem_vendor_id = info.vendor_id;
+    e.subsystem_device_id = info.device_id;
     e.fw_version = info.fw_version;
     e.gfx_target_version = info.gfx_target_version;
     e.simd_count = info.simd_count;
@@ -2247,12 +2249,11 @@ int SimulatedKfd::debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args 
     e.array_count = info.num_shader_engines;
     e.simd_arrays_per_engine = info.num_shader_arrays_per_engine;
     e.num_xcc = info.num_xcc;
-    // Report the same debugger-relevant capability/debug_prop as the sysfs
-    // topology (shared kmd::debug_topology_for), including the ASIC revision.
-    const kmd::DebugTopology dbg = kmd::debug_topology_for(info.gfx_target_version);
-    e.capability = dbg.capability |
-                   ((info.revision_id << HSA_CAP_ASIC_REVISION_SHIFT) & HSA_CAP_ASIC_REVISION_MASK);
-    e.debug_prop = dbg.debug_prop;
+    const kmd::DebugTopology topology =
+        kmd::effective_topology_for(info.gfx_target_version, info.capability, info.capability2,
+                                    info.debug_prop, info.revision_id);
+    e.capability = topology.capability;
+    e.debug_prop = topology.debug_prop;
 
     std::memcpy(out + static_cast<uint64_t>(i) * in_entry_size, &e, args.entry_size);
   }

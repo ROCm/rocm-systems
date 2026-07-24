@@ -122,23 +122,6 @@ void reap_stale_sysfs_dirs() {
 using kmd::debug_topology_for;
 using kmd::DebugTopology;
 
-/// @brief Non-debug capability bits advertised for the data-center compute GPUs
-/// the simulator models.
-///
-/// @details On real hardware these originate from the ASIC's CRAT tables rather
-/// than kfd_topology_set_capabilities(); reproducing per-ASIC CRAT variation is
-/// out of scope, so the simulator advertises the common data-center feature set
-/// (ECC/RAS, ATS, SVM, coherent host access). The version-specific debug bits
-/// are contributed separately by debug_topology_for().
-uint32_t default_non_debug_capability() {
-  return HSA_CAP_ATS_PRESENT | HSA_CAP_QUEUE_IDLE_EVENT | HSA_CAP_WATCH_POINTS_SUPPORTED |
-         ((4u << HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT) & HSA_CAP_WATCH_POINTS_TOTALBITS_MASK) |
-         ((HSA_CAP_DOORBELL_TYPE_2_0 << HSA_CAP_DOORBELL_TYPE_TOTALBITS_SHIFT) &
-          HSA_CAP_DOORBELL_TYPE_TOTALBITS_MASK) |
-         HSA_CAP_AQL_QUEUE_DOUBLE_MAP | HSA_CAP_MEM_EDCSUPPORTED | HSA_CAP_RASEVENTNOTIFY |
-         HSA_CAP_SRAM_EDCSUPPORTED | HSA_CAP_SVMAPI_SUPPORTED | HSA_CAP_FLAGS_COHERENTHOSTACCESS;
-}
-
 } // namespace
 
 Sysfs::~Sysfs() { cleanup(); }
@@ -302,22 +285,8 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   write_file(node_dir + "/gpu_id", gpu_id.str());
   write_file(node_dir + "/name", gpu.marketing_name + "\n");
 
-  const DebugTopology dbg = debug_topology_for(gpu.gfx_target_version);
-
-  uint32_t cap = gpu.capability;
-  if (cap == 0)
-    cap = default_non_debug_capability() | dbg.capability;
-  const uint32_t asic_revision = gpu.revision_id;
-  cap = (cap & ~HSA_CAP_ASIC_REVISION_MASK) |
-        ((asic_revision << HSA_CAP_ASIC_REVISION_SHIFT) & HSA_CAP_ASIC_REVISION_MASK);
-
-  uint32_t cap2 = gpu.capability2;
-  if (cap2 == 0)
-    cap2 = dbg.capability2;
-
-  uint64_t debug_prop = gpu.debug_prop;
-  if (debug_prop == 0)
-    debug_prop = dbg.debug_prop;
+  const DebugTopology topology = kmd::effective_topology_for(
+      gpu.gfx_target_version, gpu.capability, gpu.capability2, gpu.debug_prop, gpu.revision_id);
 
   uint32_t p2p_links = total_gpus > 1 ? total_gpus - 1 : 0;
 
@@ -355,9 +324,9 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "max_engine_clk_ccompute 0\n"
         << "local_mem_size " << gpu.local_mem_size << "\n"
         << "fw_version " << gpu.fw_version << "\n"
-        << "capability " << cap << "\n"
-        << "capability2 " << cap2 << "\n"
-        << "debug_prop " << debug_prop << "\n"
+        << "capability " << topology.capability << "\n"
+        << "capability2 " << topology.capability2 << "\n"
+        << "debug_prop " << topology.debug_prop << "\n"
         << "sdma_fw_version " << gpu.sdma_fw_version << "\n"
         << "unique_id " << gpu.unique_id << "\n"
         << "num_xcc " << gpu.num_xcc << "\n"
@@ -566,6 +535,9 @@ Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t
   gpu.location_id = dev.location_id;
   gpu.domain = dev.domain;
   gpu.hive_id = dev.hive_id;
+  gpu.capability = dev.capability;
+  gpu.capability2 = dev.capability2;
+  gpu.debug_prop = dev.debug_prop;
   gpu.drm_render_minor = dev.drm_render_minor;
   gpu.marketing_name = dev.marketing_name;
   gpu.revision_id = dev.revision_id;

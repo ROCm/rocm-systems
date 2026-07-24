@@ -1406,15 +1406,87 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
   snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&entry);
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
 
+  const rocjitsu::kmd::DebugTopology topology = rocjitsu::kmd::effective_topology_for(
+      loaded_.device.gfx_target_version, loaded_.device.capability, loaded_.device.capability2,
+      loaded_.device.debug_prop, loaded_.device.revision_id);
   EXPECT_EQ(entry.gpu_id, kGpuId);
   EXPECT_EQ(entry.gfx_target_version, 90500u); // gfx950 fixture config
-  EXPECT_TRUE(entry.capability & HSA_CAP_TRAP_DEBUG_SUPPORT);
-  EXPECT_EQ(entry.debug_prop, 0x5d6u); // gfx950 debug_prop
+  EXPECT_EQ(entry.subsystem_vendor_id, loaded_.device.vendor_id);
+  EXPECT_EQ(entry.subsystem_device_id, loaded_.device.device_id);
+  EXPECT_EQ(entry.capability, topology.capability);
+  EXPECT_EQ(entry.debug_prop, topology.debug_prop);
   // rocm-dbgapi's agent_snapshot fatal-errors if any of these are zero.
   EXPECT_NE(entry.simd_count, 0u);
   EXPECT_NE(entry.max_waves_per_simd, 0u);
   EXPECT_NE(entry.array_count, 0u);
   EXPECT_NE(entry.simd_arrays_per_engine, 0u);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesMultipleAgentsWithCallerStride) {
+  constexpr uint32_t kSecondGpuId = kGpuId + 1;
+  rocjitsu::SimulatedKfd multi_gpu_driver({soc_, soc_}, {kGpuId, kSecondGpuId});
+  std::vector<rocjitsu::config::KfdDeviceConfig> devices(2, loaded_.device);
+  devices[1].gpu_id = kSecondGpuId;
+  devices[1].location_id++;
+  devices[1].drm_render_minor++;
+  multi_gpu_driver.setup_topology(devices, soc_->num_xcds());
+  ASSERT_GE(multi_gpu_driver.open(), 0);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = make_debug_fd();
+  ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  constexpr uint32_t kEntryStride = sizeof(kfd_dbg_device_info_entry) + 16;
+  std::array<uint8_t, kEntryStride * 2> buffer{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snapshot.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(buffer.data());
+  snapshot.device_snapshot.num_devices = 1;
+  snapshot.device_snapshot.entry_size = kEntryStride;
+  ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+  EXPECT_EQ(snapshot.device_snapshot.num_devices, 2u);
+  EXPECT_EQ(snapshot.device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry));
+  kfd_dbg_device_info_entry first{};
+  std::memcpy(&first, buffer.data(), sizeof(first));
+  EXPECT_EQ(first.gpu_id, kGpuId);
+  EXPECT_TRUE(std::all_of(buffer.begin() + sizeof(first), buffer.end(),
+                          [](uint8_t byte) { return byte == 0; }));
+
+  snapshot.device_snapshot.num_devices = 2;
+  snapshot.device_snapshot.entry_size = kEntryStride;
+  ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+  kfd_dbg_device_info_entry second{};
+  std::memcpy(&first, buffer.data(), sizeof(first));
+  std::memcpy(&second, buffer.data() + kEntryStride, sizeof(second));
+  EXPECT_EQ(first.gpu_id, kGpuId);
+  EXPECT_EQ(second.gpu_id, kSecondGpuId);
+  EXPECT_EQ(second.location_id, devices[1].location_id);
+
+  std::array<kfd_process_device_apertures, 2> apertures{};
+  kfd_ioctl_get_process_apertures_new_args aperture_args{};
+  aperture_args.kfd_process_device_apertures_ptr = reinterpret_cast<uint64_t>(apertures.data());
+  aperture_args.num_of_nodes = apertures.size();
+  ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, &aperture_args), 0);
+  EXPECT_EQ(aperture_args.num_of_nodes, 2u);
+  EXPECT_EQ(first.lds_base, apertures[0].lds_base);
+  EXPECT_EQ(first.scratch_base, apertures[0].scratch_base);
+  EXPECT_EQ(first.gpuvm_base, apertures[0].gpuvm_base);
+  EXPECT_EQ(second.lds_base, apertures[1].lds_base);
+  EXPECT_EQ(second.scratch_base, apertures[1].scratch_base);
+  EXPECT_EQ(second.gpuvm_base, apertures[1].gpuvm_base);
+
+  multi_gpu_driver.close();
+}
+
+TEST(KfdTopologyTest, EffectiveTopologyDerivesGfx121Capability2) {
+  const rocjitsu::kmd::DebugTopology topology =
+      rocjitsu::kmd::effective_topology_for(120100u, 0, 0, 0, 0);
+
+  EXPECT_NE(topology.capability & HSA_CAP_ATS_PRESENT, 0u);
+  EXPECT_NE(topology.capability2 & HSA_CAP2_TRAP_DEBUG_LDS_OUT_OF_ADDR_RANGE_SUPPORTED, 0u);
 }
 
 } // namespace
