@@ -2417,10 +2417,20 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   return true;
 }
 
+[[nodiscard]] bool
+inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPlan &address_plan,
+                                                 uint16_t scalar_base, uint16_t scalar_count) {
+  return (address_plan.scalar_base_sgpr &&
+          range_overlaps(scalar_base, scalar_count, *address_plan.scalar_base_sgpr, 2u)) ||
+         (address_plan.scalar_offset_sgpr &&
+          range_overlaps(scalar_base, scalar_count, *address_plan.scalar_offset_sgpr, 1u));
+}
+
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_atomic_ordering_cave_words(
     std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &input_options,
-    const VgprSpillSequence *spill, rj_code_arch_t arch, size_t inline_atomic_release_slots_offset,
+    const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
+    rj_code_arch_t arch, size_t inline_atomic_release_slots_offset,
     uint32_t inline_atomic_release_capacity, size_t inline_causal_snapshots_offset,
     uint32_t inline_causal_snapshot_capacity, size_t inline_acquired_token_slots_offset,
     uint32_t inline_acquired_token_capacity, uint64_t cave_text_offset, uint64_t return_text_offset,
@@ -2463,6 +2473,12 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     errors.emplace_back("ConSan MOI inline atomic patch site exceeds ELF bytes");
     return std::nullopt;
   }
+  if (scalar_spill && inline_atomic_scalar_spill_aliases_guest_address(
+                          address_plan, scalar_spill->sgpr_base, scalar_spill->sgpr_count)) {
+    errors.emplace_back(
+        "ConSan MOI inline atomic spill-backed scalar window aliases a guest atomic address input");
+    return std::nullopt;
+  }
 
   const uint64_t slot_base =
       *options.moi_report_buffer_address + inline_atomic_release_slots_offset;
@@ -2479,10 +2495,23 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   const bool is_compare_exchange = consan_atomic_is_compare_exchange(candidate.site);
 
   std::vector<uint32_t> words;
-  words.reserve(candidate.site.size / sizeof(uint32_t) + 96u +
-                (spill ? spill->save_words.size() + spill->restore_words.size() : 0u));
+  words.reserve(
+      candidate.site.size / sizeof(uint32_t) + 96u +
+      (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
+      (scalar_spill ? scalar_spill->save_words.size() + scalar_spill->restore_words.size() : 0u));
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
+  if (scalar_spill)
+    words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
+  const auto append_spill_restore = [&]() {
+    // Scalar restore uses the scratch VGPR window, so restore application
+    // VGPRs only after every spilled SGPR has been reconstructed.
+    if (scalar_spill)
+      words.insert(words.end(), scalar_spill->restore_words.begin(),
+                   scalar_spill->restore_words.end());
+    if (spill)
+      words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
+  };
   if (address_plan.requires_materialization()) {
     const auto special_state = moi_special_state_sgprs(options);
     if (!special_state) {
@@ -2528,8 +2557,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
           "ConSan MOI inline release could not emit a versioned causal transaction");
       return std::nullopt;
     }
-    if (spill)
-      words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
+    append_spill_restore();
     if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
                                               arch)) {
       errors.emplace_back("ConSan MOI inline release could not encode its return");
@@ -2567,8 +2595,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
           "ConSan MOI inline acquire-release could not emit a claimed causal transaction");
       return std::nullopt;
     }
-    if (spill)
-      words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
+    append_spill_restore();
     if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
                                               arch)) {
       errors.emplace_back("ConSan MOI inline acquire-release could not encode its return");
@@ -2718,8 +2745,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
           "ConSan MOI inline release could not emit a versioned causal transaction");
       return std::nullopt;
     }
-    if (spill)
-      words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
+    append_spill_restore();
     if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
                                               arch)) {
       errors.emplace_back("ConSan MOI inline release could not encode its return");
@@ -2741,8 +2767,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     return std::nullopt;
   }
 
-  if (spill)
-    words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
+  append_spill_restore();
   if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
                                             arch)) {
     errors.emplace_back("ConSan MOI inline atomic could not encode its return");

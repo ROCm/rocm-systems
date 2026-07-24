@@ -2622,6 +2622,119 @@ TEST(ConSanMoi, InlineAtomicOrderingAutomaticallyPlansAllRegisterState) {
             2u);
 }
 
+TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
+  const auto release = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto acquire = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/4, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/true, /*scope=*/2,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(release && acquire);
+  std::vector<uint32_t> text_words(800, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  size_t cursor = 0;
+  // Keep sparse scalar values live from the access through both atomics. No
+  // 28-register window is dead, so the Inline router must spill scalar state.
+  text_words[cursor++] = build_s_mov_b32(0, 105u, ROCJITSU_CODE_ARCH_RDNA4);
+  constexpr std::array<uint16_t, 6> kLiveSgprs = {15u, 31u, 47u, 63u, 79u, 95u};
+  for (uint16_t sgpr : kLiveSgprs)
+    text_words[cursor++] =
+        build_s_mov_b32(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+  text_words[cursor++] = 0xD8340000u;
+  text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0
+  constexpr std::array<uint32_t, 3> kGlobalWb = {0xEE0B0000u, 0x00000000u, 0x00000000u};
+  std::copy(kGlobalWb.begin(), kGlobalWb.end(), text_words.begin() + cursor);
+  cursor += kGlobalWb.size();
+  std::copy(release->begin(), release->end(), text_words.begin() + cursor);
+  cursor += release->size();
+  std::copy(acquire->begin(), acquire->end(), text_words.begin() + cursor);
+  cursor += acquire->size();
+  constexpr std::array<uint32_t, 3> kGlobalInv = {0xEE0AC000u, 0x00000000u, 0x00000000u};
+  std::copy(kGlobalInv.begin(), kGlobalInv.end(), text_words.begin() + cursor);
+  cursor += kGlobalInv.size();
+  for (uint16_t sgpr : kLiveSgprs)
+    text_words[cursor++] = build_s_mov_b32(0, sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "inline_atomic_scalar_spill");
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_atomics = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 3u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("automatically assigned spill-backed Inline SGPRs") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
+                               &ConSanPatchInfo::kind),
+            2u);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiInlineAtomicOrdering)
+      continue;
+    ASSERT_TRUE(patch.scratch_vgpr);
+    EXPECT_NE(patch.required_private_segment_size, 0u);
+    const std::vector<uint32_t> cave =
+        text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+    // This fixture starts with no private segment, so the shared scalar spill
+    // allocation begins at byte zero for both mutually exclusive trampolines.
+    const auto first_store = instrumentation::build_private_store_b32(
+        *patch.scratch_vgpr, /*byte_offset=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
+    const auto first_load = instrumentation::build_private_load_b32(
+        *patch.scratch_vgpr, /*byte_offset=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(first_store && first_load);
+    EXPECT_TRUE(contains_subsequence(cave, *first_store));
+    EXPECT_TRUE(contains_subsequence(cave, *first_load));
+    EXPECT_NE(std::ranges::find(cave, build_v_mov_b32_e32(*patch.scratch_vgpr,
+                                                          *result.resolved_moi_exec_save_sgpr,
+                                                          ROCJITSU_CODE_ARCH_RDNA4)),
+              cave.end());
+  }
+}
+
+TEST(ConSanMoi, InlineAtomicScalarSpillRejectsAliasedGuestScalarAddress) {
+  const std::vector<uint8_t> bytes = make_rdna4_ordered_global_atomic_release_acquire_code_object();
+  ASSERT_FALSE(bytes.empty());
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 82u;
+  options.moi_owner_vgpr = 80u;
+  options.moi_epoch_vgpr = 81u;
+  // VGLOBAL reads its address from s[4:5]. An automatic scalar spill may
+  // surround a vector-only FLAT atomic, but it must not clobber this pair.
+  options.moi_exec_save_sgpr = 4u;
+  options.automatic_moi_exec_save_sgprs = true;
+  options.automatic_moi_inline_sgpr_spill = true;
+  options.moi_inline_visible_evidence_sgpr = 40u;
+  options.moi_inline_dispatch_key_sgpr = 41u;
+  options.moi_inline_indirect_pc_sgpr = 42u;
+  options.moi_inline_call_return_sgpr = 44u;
+  options.moi_inline_indirect_scc_sgpr = 46u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 2u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  EXPECT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_EQ(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
+                              &ConSanPatchInfo::kind),
+            result.patches.end());
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("spill-backed scalar window aliases a guest atomic address input") !=
+           std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+}
+
 TEST(ConSanMoi, Gfx1250InlineAtomicOrdersReleaseAndAcquire) {
   const auto release = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
