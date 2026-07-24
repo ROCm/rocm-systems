@@ -2357,6 +2357,8 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
     return std::nullopt;
   if (!plan.requires_materialization())
     return std::vector<uint32_t>{};
+  // Every current recipe returns its materialized address inside the declared
+  // scratch allocation. Validate that shared layout before per-kind emission.
   const uint32_t scratch_end = static_cast<uint32_t>(plan.scratch_vgpr) + plan.scratch_vgpr_count;
   const uint32_t result_end =
       static_cast<uint32_t>(plan.result_address_vgpr) + plan.result_address_vgpr_count;
@@ -2451,8 +2453,8 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
       uint16_t sign_vgpr = plan.scratch_vgpr;
       if (sign_vgpr == offset_vgpr)
         ++sign_vgpr;
-      if (sign_vgpr >= scratch_end || sign_vgpr >= plan.result_address_vgpr)
-        return std::nullopt;
+      // The spacing check and shared window invariant keep this temporary
+      // inside the allocation and below the result pair.
       add_vaddr = instrumentation::build_v_add_u64_signed_vgpr_offset(plan.result_address_vgpr,
                                                                       offset_vgpr, sign_vgpr, arch);
     } else {

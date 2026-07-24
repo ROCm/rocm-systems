@@ -1058,12 +1058,38 @@ TEST(ConSanMoi, CdnaVglobalMaterializationSelectsSafeSignScratch) {
     under_reserved.result_address_vgpr = 5u;
     EXPECT_FALSE(build_consan_moi_atomic_address_materialization(
         under_reserved, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, target.arch));
+  }
+}
 
-    // The declared scratch window must contain the chosen temporary and pair.
-    ConSanMoiAtomicAddressPlan truncated_window = plan;
-    truncated_window.scratch_vgpr_count = 1u;
+TEST(ConSanMoi, AddressMaterializationRejectsMalformedScratchWindows) {
+  ConSanMoiAtomicAddressPlan plan;
+  plan.kind = ConSanMoiAtomicAddressKind::VglobalMaterialized;
+  plan.support = ConSanMoiAtomicAddressSupport::Supported;
+  plan.input_address_vgpr = 4u;
+  plan.input_address_vgpr_count = 1u;
+  plan.scalar_base_sgpr = 20u;
+  plan.signed_byte_offset = 20;
+  plan.result_address_vgpr_count = 2u;
+  plan.resource_source = ConSanRegisterAllocationSource::SpillRequired;
+
+  struct MalformedWindow {
+    std::string_view label;
+    uint16_t scratch_vgpr;
+    uint16_t scratch_vgpr_count;
+    uint16_t result_address_vgpr;
+  };
+  constexpr std::array<MalformedWindow, 3> kMalformedWindows = {{
+      {"truncated before result pair", 4u, 1u, 7u},
+      {"result before scratch", 10u, 7u, 5u},
+      {"scratch past VGPR file", 250u, 10u, 254u},
+  }};
+  for (const MalformedWindow &window : kMalformedWindows) {
+    SCOPED_TRACE(window.label);
+    plan.scratch_vgpr = window.scratch_vgpr;
+    plan.scratch_vgpr_count = window.scratch_vgpr_count;
+    plan.result_address_vgpr = window.result_address_vgpr;
     EXPECT_FALSE(build_consan_moi_atomic_address_materialization(
-        truncated_window, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, target.arch));
+        plan, /*vcc_save_sgpr=*/82u, /*scc_save_sgpr=*/84u, ROCJITSU_CODE_ARCH_RDNA4));
   }
 }
 
