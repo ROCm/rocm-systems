@@ -71,6 +71,39 @@ __device__ __forceinline__ uint64_t ddaLL128LoadWord(const uint64_t* p) {
   return __hip_atomic_load((u64_gptr) const_cast<uint64_t*>(p), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
+// ---- 16B (uint4) system-scope, non-tearing store/load (one line == 4 lanes) ----
+// uint4 variant of the 8B word ops above: moves a whole 16B chunk in a single
+// non-tearing 128-bit system-scope access via the dwordx4 global builtins
+// (gfx942/950/1250), falling back to two 8B relaxed system-scope atomics where
+// the builtins are unavailable (e.g. the host compile pass). Same unfenced,
+// program-order-visibility contract as the scalar version.
+__device__ __forceinline__ void ddaLL128StoreWord(uint4* p, uint4 v) {
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  union { v4u vec; uint4 u4; } u;
+  u.u4 = v;
+  __builtin_amdgcn_global_store_b128((v4u_gptr)p, u.vec, RCCL_SYSTEM_SYNCSCOPE);
+#else
+  u64_gptr q = (u64_gptr)p;
+  const uint64_t* w = reinterpret_cast<const uint64_t*>(&v);
+  //__hip_atomic_store(q + 0, w[0], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  //__hip_atomic_store(q + 1, w[1], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+#endif
+}
+__device__ __forceinline__ uint4 ddaLL128LoadWord(const uint4* p) {
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  union { v4u vec; uint4 u4; } u;
+  u.vec = __builtin_amdgcn_global_load_b128((v4u_gptr)const_cast<uint4*>(p), RCCL_SYSTEM_SYNCSCOPE);
+  return u.u4;
+#else
+  uint4 r;
+  u64_gptr q = (u64_gptr)const_cast<uint4*>(p);
+  uint64_t* w = reinterpret_cast<uint64_t*>(&r);
+  //w[0] = __hip_atomic_load(q + 0, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  //w[1] = __hip_atomic_load(q + 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  return r;
+#endif
+}
+
 // Element-wise add of the T-elements packed into two 8B payload words. An 8B
 // word holds 2 x fp32 or 4 x fp16/bf16; each 4B half is folded with the shared
 // vecElementAdd<T> (which handles the per-type packing), then recombined.
@@ -79,6 +112,19 @@ __device__ __forceinline__ uint64_t ddaLL128AddWord(uint64_t a, uint64_t b) {
   const uint32_t lo = vecElementAdd<T>((uint32_t)a, (uint32_t)b);
   const uint32_t hi = vecElementAdd<T>((uint32_t)(a >> 32), (uint32_t)(b >> 32));
   return ((uint64_t)hi << 32) | (uint64_t)lo;
+}
+
+// uint4 (16B) overload: folds the T-elements packed across all four 4B words.
+// A uint4 holds 8 x fp32 or 16 x fp16/bf16; each 4B lane is folded with the
+// shared vecElementAdd<T> (which handles the per-type packing).
+template <typename T>
+__device__ __forceinline__ uint4 ddaLL128AddWord(uint4 a, uint4 b) {
+  uint4 r;
+  r.x = vecElementAdd<T>(a.x, b.x);
+  r.y = vecElementAdd<T>(a.y, b.y);
+  r.z = vecElementAdd<T>(a.z, b.z);
+  r.w = vecElementAdd<T>(a.w, b.w);
+  return r;
 }
 
 // ---- HIP-graph-safe per-block epoch (shared by all LL/LL128 kernels) ----

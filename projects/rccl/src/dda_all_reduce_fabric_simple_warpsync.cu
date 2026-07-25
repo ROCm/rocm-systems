@@ -126,8 +126,7 @@ bool ncclAllReduceDdaFabricSimpleWarpsyncEligible(
   }
 
   const size_t bytes = count * ncclTypeSize(datatype);
-  // Payload is staged as 8-byte words, so it must be a whole number of words.
-  if (bytes % 8 != 0) {
+  if (bytes % sizeof(TT) != 0) {
     return false;
   }
 

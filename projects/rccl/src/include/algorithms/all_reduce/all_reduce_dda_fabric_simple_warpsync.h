@@ -44,7 +44,8 @@
 
 namespace meta::comms {
 
-using TT = uint64_t;
+//using TT = uint64_t;
+using TT = uint4;
 
 // Front region of every peer's scratch reserved for the barrier flag exchange.
 // Data staging begins at peerScratch + kDdaSimpleWarpsyncArReserveBytes.
@@ -107,8 +108,8 @@ __global__ void ddaAllReduceFlatSimpleWarpsync(
       const int peer = (selfRank + r) % nRanks;
       TT* dst = reinterpret_cast<TT*>(peerScratch[peer]) + kDdaSimpleWarpsyncArReserveWords +
         bankOffsetLines + (size_t)selfRank * slot;
-      dst[tid] = v;
-      //ddaLL128StoreWord(dst + tid, v);
+      //dst[tid] = v;
+      ddaLL128StoreWord(dst + tid, v);
     }
   }
 
@@ -148,8 +149,8 @@ __global__ void ddaAllReduceFlatSimpleWarpsync(
       const int peer = (selfRank + r) % nRanks;
       const TT* src = reinterpret_cast<const TT*>(peerScratch[selfRank]) +
         kDdaSimpleWarpsyncArReserveWords + bankOffsetLines + (size_t)peer * slot;
-      const TT d = src[tid];
-      //const TT d = ddaLL128LoadWord(src + tid);
+      //const TT d = src[tid];
+      const TT d = ddaLL128LoadWord(src + tid);
       acc = ddaLL128AddWord<T>(acc, d);
     }
     out[tid] = acc;
