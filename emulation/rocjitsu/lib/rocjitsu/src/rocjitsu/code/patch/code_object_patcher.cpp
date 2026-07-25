@@ -162,6 +162,430 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   return std::nullopt;
 }
 
+[[nodiscard]] bool image_contains_range(size_t image_size, uint64_t file_offset, uint64_t size);
+
+[[nodiscard]] std::optional<std::string_view> section_name(const std::vector<uint8_t> &image,
+                                                           const Elf64_Ehdr &ehdr,
+                                                           std::span<const Elf64_Shdr> shdrs,
+                                                           size_t index) {
+  if (ehdr.e_shstrndx >= shdrs.size() || index >= shdrs.size())
+    return std::nullopt;
+  const Elf64_Shdr &strings = shdrs[ehdr.e_shstrndx];
+  if (strings.sh_type != SHT_STRTAB ||
+      !image_contains_range(image.size(), strings.sh_offset, strings.sh_size) ||
+      shdrs[index].sh_name >= strings.sh_size) {
+    return std::nullopt;
+  }
+
+  const uint64_t name_offset = strings.sh_offset + shdrs[index].sh_name;
+  const size_t available = static_cast<size_t>(strings.sh_size - shdrs[index].sh_name);
+  const char *name = reinterpret_cast<const char *>(image.data() + name_offset);
+  const size_t length = strnlen(name, available);
+  if (length == available)
+    return std::nullopt;
+  return std::string_view(name, length);
+}
+
+[[nodiscard]] std::optional<uint64_t> read_uleb128(std::span<const uint8_t> bytes, size_t &cursor,
+                                                   size_t end) {
+  uint64_t value = 0;
+  unsigned shift = 0;
+  while (cursor < end) {
+    const uint8_t byte = bytes[cursor++];
+    const uint64_t payload = byte & 0x7fu;
+    if (shift >= 64 || (payload << shift) >> shift != payload)
+      return std::nullopt;
+    value |= payload << shift;
+    if ((byte & 0x80u) == 0)
+      return value;
+    shift += 7;
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] std::optional<int64_t> read_sleb128(std::span<const uint8_t> bytes, size_t &cursor,
+                                                  size_t end) {
+  uint64_t value = 0;
+  unsigned shift = 0;
+  uint8_t byte = 0;
+  do {
+    if (cursor >= end || shift >= 64)
+      return std::nullopt;
+    byte = bytes[cursor++];
+    const uint64_t payload = byte & 0x7fu;
+    if ((payload << shift) >> shift != payload)
+      return std::nullopt;
+    value |= payload << shift;
+    shift += 7;
+  } while ((byte & 0x80u) != 0);
+
+  if ((byte & 0x40u) != 0 && shift < 64)
+    value |= std::numeric_limits<uint64_t>::max() << shift;
+  return static_cast<int64_t>(value);
+}
+
+[[nodiscard]] bool skip_uleb128(std::span<const uint8_t> bytes, size_t &cursor, size_t end) {
+  return read_uleb128(bytes, cursor, end).has_value();
+}
+
+[[nodiscard]] bool skip_sleb128(std::span<const uint8_t> bytes, size_t &cursor, size_t end) {
+  return read_sleb128(bytes, cursor, end).has_value();
+}
+
+[[nodiscard]] bool skip_cfi_expression(std::span<const uint8_t> bytes, size_t &cursor, size_t end) {
+  const auto length = read_uleb128(bytes, cursor, end);
+  if (!length || *length > end - cursor)
+    return false;
+  cursor += static_cast<size_t>(*length);
+  return true;
+}
+
+/// @brief Return whether a CFI program describes one state for the whole FDE.
+///
+/// Descriptorless DBT may change instruction offsets inside a callable. CFI
+/// state that advances at particular PCs would need its own instruction-level
+/// relocation map; range-wide AMDGPU rules can be preserved by relocating only
+/// the FDE start and end. Parse operands rather than byte-scanning so opcodes
+/// embedded in DWARF expressions do not cause false decisions.
+[[nodiscard]] bool cfi_program_is_location_invariant(std::span<const uint8_t> bytes) {
+  size_t cursor = 0;
+  while (cursor < bytes.size()) {
+    const uint8_t opcode = bytes[cursor++];
+    const uint8_t primary = opcode & 0xc0u;
+    if (primary == 0x40u)
+      return false; // DW_CFA_advance_loc
+    if (primary == 0x80u) {
+      if (!skip_uleb128(bytes, cursor, bytes.size()))
+        return false; // DW_CFA_offset
+      continue;
+    }
+    if (primary == 0xc0u)
+      continue; // DW_CFA_restore
+
+    switch (opcode) {
+    case 0x00: // DW_CFA_nop
+    case 0x0a: // DW_CFA_remember_state
+    case 0x0b: // DW_CFA_restore_state
+    case 0x2d: // DW_CFA_GNU_window_save / AArch64 negate_ra_state
+      break;
+    case 0x01: // DW_CFA_set_loc
+    case 0x02: // DW_CFA_advance_loc1
+    case 0x03: // DW_CFA_advance_loc2
+    case 0x04: // DW_CFA_advance_loc4
+      return false;
+    case 0x05: // DW_CFA_offset_extended
+    case 0x09: // DW_CFA_register
+    case 0x0c: // DW_CFA_def_cfa
+    case 0x14: // DW_CFA_val_offset
+    case 0x2f: // DW_CFA_GNU_negative_offset_extended
+      if (!skip_uleb128(bytes, cursor, bytes.size()) ||
+          !skip_uleb128(bytes, cursor, bytes.size())) {
+        return false;
+      }
+      break;
+    case 0x06: // DW_CFA_restore_extended
+    case 0x07: // DW_CFA_undefined
+    case 0x08: // DW_CFA_same_value
+    case 0x0d: // DW_CFA_def_cfa_register
+    case 0x0e: // DW_CFA_def_cfa_offset
+    case 0x2e: // DW_CFA_GNU_args_size
+      if (!skip_uleb128(bytes, cursor, bytes.size()))
+        return false;
+      break;
+    case 0x0f: // DW_CFA_def_cfa_expression
+      if (!skip_cfi_expression(bytes, cursor, bytes.size()))
+        return false;
+      break;
+    case 0x10: // DW_CFA_expression
+    case 0x16: // DW_CFA_val_expression
+      if (!skip_uleb128(bytes, cursor, bytes.size()) ||
+          !skip_cfi_expression(bytes, cursor, bytes.size())) {
+        return false;
+      }
+      break;
+    case 0x11: // DW_CFA_offset_extended_sf
+    case 0x12: // DW_CFA_def_cfa_sf
+    case 0x15: // DW_CFA_val_offset_sf
+      if (!skip_uleb128(bytes, cursor, bytes.size()) ||
+          !skip_sleb128(bytes, cursor, bytes.size())) {
+        return false;
+      }
+      break;
+    case 0x13: // DW_CFA_def_cfa_offset_sf
+      if (!skip_sleb128(bytes, cursor, bytes.size()))
+        return false;
+      break;
+    default:
+      return false;
+    }
+  }
+  return true;
+}
+
+struct EhFrameCie {
+  uint8_t fde_encoding = 0;
+  bool has_augmentation_length = false;
+};
+
+/// @brief Relocate allocated `.eh_frame` FDEs through DBT's text offset map.
+///
+/// The supported AMDGPU form is the linked-HSACO `zR` CIE with
+/// pcrel+sdata4 FDE starts. Function ranges can change size when the FDE program
+/// is range-wide; location-sensitive CFI is accepted only when every mapped
+/// instruction retains its source-relative offset. Unsupported forms fail
+/// closed instead of leaving unwind PCs pointing at stale B0 code.
+[[nodiscard]] bool relocate_eh_frame_fdes(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
+                                          std::span<const Elf64_Shdr> shdrs, size_t text_index,
+                                          uint64_t old_text_size, uint64_t new_text_size,
+                                          std::span<const TextOffsetRelocation> relocations) {
+  if (relocations.empty())
+    return true;
+
+  std::unordered_map<uint64_t, uint64_t> target_by_source;
+  std::unordered_set<uint64_t> conflicting_sources;
+  target_by_source.reserve(relocations.size());
+  for (const TextOffsetRelocation &relocation : relocations) {
+    if (relocation.source_offset > old_text_size || relocation.target_offset > new_text_size)
+      return false;
+    const auto [it, inserted] =
+        target_by_source.try_emplace(relocation.source_offset, relocation.target_offset);
+    if (!inserted && it->second != relocation.target_offset)
+      conflicting_sources.insert(relocation.source_offset);
+  }
+
+  const bool layout_changed = std::ranges::any_of(
+      target_by_source, [](const auto &mapping) { return mapping.first != mapping.second; });
+  if (!layout_changed)
+    return true;
+
+  const Elf64_Shdr &text = shdrs[text_index];
+  if (text.sh_addr > std::numeric_limits<uint64_t>::max() - old_text_size)
+    return false;
+  const uint64_t old_text_end = text.sh_addr + old_text_size;
+
+  for (size_t section_index = 0; section_index < shdrs.size(); ++section_index) {
+    const auto name = section_name(image, ehdr, shdrs, section_index);
+    if (!name)
+      return false;
+    if (*name == ".eh_frame_hdr" && (shdrs[section_index].sh_flags & SHF_ALLOC) != 0)
+      return false;
+    if (*name != ".eh_frame" || (shdrs[section_index].sh_flags & SHF_ALLOC) == 0)
+      continue;
+    // Growing .text shifts an allocated .eh_frame that follows it. Supporting
+    // that case also requires rebasing each pcrel field against the section's
+    // post-insertion address; descriptorless translation is intentionally
+    // bounded to the original executable allocation, so reject the broader
+    // layout mutation until it has an explicit implementation.
+    if (new_text_size != old_text_size)
+      return false;
+
+    const Elf64_Shdr &section = shdrs[section_index];
+    if (section.sh_type != SHT_PROGBITS ||
+        !image_contains_range(image.size(), section.sh_offset, section.sh_size)) {
+      return false;
+    }
+    const auto bytes =
+        std::span<uint8_t>(image.data() + section.sh_offset, static_cast<size_t>(section.sh_size));
+    const auto const_bytes = std::span<const uint8_t>(bytes.data(), bytes.size());
+    std::unordered_map<uint64_t, EhFrameCie> cies;
+    size_t cursor = 0;
+    while (cursor < bytes.size()) {
+      const size_t entry_start = cursor;
+      if (bytes.size() - cursor < sizeof(uint32_t))
+        return false;
+      uint32_t length = 0;
+      std::memcpy(&length, bytes.data() + cursor, sizeof(length));
+      cursor += sizeof(length);
+      if (length == 0) {
+        if (!std::ranges::all_of(bytes.subspan(cursor), [](uint8_t byte) { return byte == 0; }))
+          return false;
+        break;
+      }
+      if (length == std::numeric_limits<uint32_t>::max() || length < sizeof(uint32_t) ||
+          length > bytes.size() - cursor) {
+        return false;
+      }
+      const size_t entry_end = cursor + length;
+      const size_t id_field = cursor;
+      uint32_t cie_pointer = 0;
+      std::memcpy(&cie_pointer, bytes.data() + cursor, sizeof(cie_pointer));
+      cursor += sizeof(cie_pointer);
+
+      if (cie_pointer == 0) {
+        if (cursor >= entry_end)
+          return false;
+        const uint8_t version = bytes[cursor++];
+        if (version != 1)
+          return false;
+        const size_t augmentation_start = cursor;
+        while (cursor < entry_end && bytes[cursor] != 0)
+          ++cursor;
+        if (cursor == entry_end)
+          return false;
+        const std::string_view augmentation(
+            reinterpret_cast<const char *>(bytes.data() + augmentation_start),
+            cursor - augmentation_start);
+        ++cursor;
+        if (!read_uleb128(const_bytes, cursor, entry_end) ||
+            !read_sleb128(const_bytes, cursor, entry_end)) {
+          return false;
+        }
+        if (cursor >= entry_end)
+          return false;
+        ++cursor;
+
+        EhFrameCie cie;
+        if (!augmentation.empty()) {
+          if (augmentation.front() != 'z')
+            return false;
+          cie.has_augmentation_length = true;
+          const auto augmentation_size = read_uleb128(const_bytes, cursor, entry_end);
+          if (!augmentation_size || *augmentation_size > entry_end - cursor)
+            return false;
+          const size_t augmentation_end = cursor + static_cast<size_t>(*augmentation_size);
+          for (const char kind : augmentation.substr(1)) {
+            switch (kind) {
+            case 'R':
+              if (cursor >= augmentation_end)
+                return false;
+              cie.fde_encoding = bytes[cursor++];
+              break;
+            case 'L':
+              if (cursor >= augmentation_end)
+                return false;
+              ++cursor;
+              break;
+            case 'S':
+              break;
+            default:
+              // Personality encodings and vendor augmentation data need a
+              // complete encoded-pointer parser before their FDE layout can be
+              // trusted.
+              return false;
+            }
+          }
+          if (cursor > augmentation_end)
+            return false;
+          cursor = augmentation_end;
+        }
+        cies.emplace(entry_start, cie);
+        cursor = entry_end;
+        continue;
+      }
+
+      if (cie_pointer > id_field)
+        return false;
+      const uint64_t cie_start = id_field - cie_pointer;
+      const auto cie_it = cies.find(cie_start);
+      if (cie_it == cies.end())
+        return false;
+      const EhFrameCie &cie = cie_it->second;
+      constexpr uint8_t kDwEhPePcrelSdata4 = 0x1b;
+      if (cie.fde_encoding != kDwEhPePcrelSdata4 || entry_end - cursor < 2 * sizeof(uint32_t)) {
+        return false;
+      }
+
+      const size_t initial_location_field = cursor;
+      int32_t initial_location_delta = 0;
+      std::memcpy(&initial_location_delta, bytes.data() + cursor, sizeof(initial_location_delta));
+      cursor += sizeof(initial_location_delta);
+      int32_t address_range = 0;
+      const size_t address_range_field = cursor;
+      std::memcpy(&address_range, bytes.data() + cursor, sizeof(address_range));
+      cursor += sizeof(address_range);
+      if (address_range < 0 ||
+          section.sh_addr >
+              static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) - initial_location_field) {
+        return false;
+      }
+      const int64_t field_vaddr = static_cast<int64_t>(section.sh_addr + initial_location_field);
+      if ((initial_location_delta > 0 &&
+           field_vaddr > std::numeric_limits<int64_t>::max() - initial_location_delta) ||
+          (initial_location_delta < 0 &&
+           field_vaddr < std::numeric_limits<int64_t>::min() - initial_location_delta)) {
+        return false;
+      }
+      const int64_t initial_location = field_vaddr + initial_location_delta;
+      if (initial_location < 0)
+        return false;
+      const uint64_t source_vaddr = static_cast<uint64_t>(initial_location);
+      const uint64_t source_range = static_cast<uint32_t>(address_range);
+      if (source_vaddr > std::numeric_limits<uint64_t>::max() - source_range)
+        return false;
+      const uint64_t source_vaddr_end = source_vaddr + source_range;
+
+      if (cie.has_augmentation_length) {
+        const auto augmentation_size = read_uleb128(const_bytes, cursor, entry_end);
+        if (!augmentation_size || *augmentation_size > entry_end - cursor)
+          return false;
+        cursor += static_cast<size_t>(*augmentation_size);
+      }
+
+      const bool starts_in_text = source_vaddr >= text.sh_addr && source_vaddr < old_text_end;
+      const bool overlaps_text = source_vaddr < old_text_end && source_vaddr_end > text.sh_addr;
+      if (!starts_in_text) {
+        if (overlaps_text)
+          return false;
+        cursor = entry_end;
+        continue;
+      }
+      if (source_vaddr_end > old_text_end)
+        return false;
+      const uint64_t source_start = source_vaddr - text.sh_addr;
+      const uint64_t source_end = source_vaddr_end - text.sh_addr;
+      if (conflicting_sources.contains(source_start) || conflicting_sources.contains(source_end)) {
+        return false;
+      }
+      const auto target_start_it = target_by_source.find(source_start);
+      const auto target_end_it = target_by_source.find(source_end);
+      if (target_start_it == target_by_source.end() || target_end_it == target_by_source.end() ||
+          target_end_it->second < target_start_it->second) {
+        return false;
+      }
+      const uint64_t target_start = target_start_it->second;
+      const uint64_t target_end = target_end_it->second;
+      if (target_end > new_text_size)
+        return false;
+
+      bool affine = true;
+      for (const auto &[source, target] : target_by_source) {
+        if (source < source_start || source > source_end)
+          continue;
+        if (conflicting_sources.contains(source) ||
+            source - source_start > target_end - target_start ||
+            target != target_start + (source - source_start)) {
+          affine = false;
+          break;
+        }
+      }
+      if (!affine &&
+          !cfi_program_is_location_invariant(const_bytes.subspan(cursor, entry_end - cursor))) {
+        return false;
+      }
+
+      if (text.sh_addr > std::numeric_limits<uint64_t>::max() - target_start)
+        return false;
+      const uint64_t target_vaddr = text.sh_addr + target_start;
+      if (target_vaddr > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+        return false;
+      const int64_t target_delta = static_cast<int64_t>(target_vaddr) - field_vaddr;
+      if (target_delta < std::numeric_limits<int32_t>::min() ||
+          target_delta > std::numeric_limits<int32_t>::max() ||
+          target_end - target_start > static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
+        return false;
+      }
+      const int32_t encoded_target_delta = static_cast<int32_t>(target_delta);
+      const int32_t encoded_target_range = static_cast<int32_t>(target_end - target_start);
+      std::memcpy(bytes.data() + initial_location_field, &encoded_target_delta,
+                  sizeof(encoded_target_delta));
+      std::memcpy(bytes.data() + address_range_field, &encoded_target_range,
+                  sizeof(encoded_target_range));
+      cursor = entry_end;
+    }
+  }
+  return true;
+}
+
 [[nodiscard]] bool target_supports_wave32(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
@@ -977,6 +1401,10 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
   const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
   if (!text_index) {
     assert(false && "text section header not found");
+    return false;
+  }
+  if (!relocate_eh_frame_fdes(image_, header, shdrs, *text_index, text_size_, new_text.size(),
+                              text_relocations)) {
     return false;
   }
 

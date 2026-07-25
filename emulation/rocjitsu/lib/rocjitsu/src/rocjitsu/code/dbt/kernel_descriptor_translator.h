@@ -339,6 +339,31 @@ struct VirtualLdsPlan {
 /// Inheritance retains the established field syntax while call sites migrate to
 /// narrower component types.
 struct KdTranslation : KernelDescriptorFacts, KernelResourcePlan, KernelEntryPlan, VirtualLdsPlan {
+  /// @brief True when this plan represents ELF STT_FUNC roots rather than a
+  /// hardware-dispatchable AMDHSA kernel descriptor.
+  ///
+  /// Descriptorless callable functions still contain executable ISA and must
+  /// participate in stepping translation. They have no descriptor whose entry
+  /// or resource fields can be rewritten, so BinaryTranslator uses this marker
+  /// to keep their text/relocation transaction separate from descriptor policy.
+  bool descriptorless_callable = false;
+
+  /// @brief Additional externally reachable STT_FUNC entries in one callable scope.
+  ///
+  /// All descriptorless functions in an object are translated as one scope so
+  /// direct calls between them can be relocated without cloning a runtime
+  /// function-pointer target. The first entry remains in
+  /// @ref entry_text_offset; the rest are listed here.
+  std::vector<uint64_t> callable_entry_text_offsets;
+
+  /// @brief One-past-end offsets paired with all callable entries.
+  ///
+  /// The first element corresponds to @ref entry_text_offset and subsequent
+  /// elements correspond to @ref callable_entry_text_offsets. These exact ELF
+  /// STT_FUNC ranges let DBT recognize ABI returns at externally entered roots
+  /// without accepting arbitrary unresolved s_setpc instructions.
+  std::vector<uint64_t> callable_end_text_offsets;
+
   /// @brief False when resource or ABI translation cannot be represented safely.
   bool supported = true;
 

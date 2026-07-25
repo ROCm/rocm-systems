@@ -134,6 +134,372 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
   dst.insert(dst.end(), src.begin(), src.end());
 }
 
+[[nodiscard]] bool image_contains_range(size_t image_size, uint64_t offset, uint64_t size) {
+  return offset <= image_size && size <= image_size - offset;
+}
+
+[[nodiscard]] bool interval_contains(uint64_t outer_begin, uint64_t outer_size,
+                                     uint64_t inner_begin, uint64_t inner_size) {
+  return inner_begin >= outer_begin && inner_begin - outer_begin <= outer_size &&
+         inner_size <= outer_size - (inner_begin - outer_begin);
+}
+
+[[nodiscard]] bool has_suffix(std::string_view value, std::string_view suffix) {
+  return value.size() >= suffix.size() &&
+         value.substr(value.size() - suffix.size(), suffix.size()) == suffix;
+}
+
+struct CallableFunctionRange {
+  uint64_t begin = 0;
+  uint64_t end = 0;
+  std::string name;
+};
+
+/// @brief Exhaustive ELF facts used to distinguish data-only objects from code.
+///
+/// The translator itself currently rewrites one canonical `.text` section, but
+/// deciding that an object has no executable work cannot use that implementation
+/// detail. This analysis independently inspects every executable section,
+/// executable PT_LOAD, executable symbol, descriptor-shaped symbol, and
+/// relocation target. Unsupported executable layouts fail closed instead of
+/// being mistaken for a successful no-op.
+struct ExecutableElfAnalysis {
+  bool valid = false;
+  bool data_only = false;
+  bool canonical_text_supported = false;
+  bool has_kernel_or_descriptor_symbol = false;
+  size_t canonical_text_index = 0;
+  uint64_t canonical_text_offset = 0;
+  uint64_t canonical_text_size = 0;
+  uint64_t canonical_text_vaddr = 0;
+  std::vector<CallableFunctionRange> callable_functions;
+  std::vector<uint64_t> zero_sized_function_entries;
+  std::string error;
+};
+
+[[nodiscard]] ExecutableElfAnalysis analyze_executable_elf(std::span<const uint8_t> image,
+                                                           uint64_t selected_text_offset,
+                                                           uint64_t selected_text_size) {
+  ExecutableElfAnalysis result;
+  auto fail = [&](std::string message) {
+    result.error = std::move(message);
+    return result;
+  };
+
+  if (image.size() < sizeof(Elf64_Ehdr))
+    return fail("code object is too small to contain an ELF header");
+
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+  if (std::memcmp(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE) != 0 ||
+      header.e_ident[EI_CLASS] != ELFCLASS64 || header.e_machine != EM_AMDGPU) {
+    return fail("code object does not contain a supported AMDGPU ELF64 image");
+  }
+  if (header.e_shnum == 0 || header.e_shentsize != sizeof(Elf64_Shdr) ||
+      !image_contains_range(image.size(), header.e_shoff,
+                            static_cast<uint64_t>(header.e_shnum) * sizeof(Elf64_Shdr))) {
+    return fail("code object has an invalid section-header table");
+  }
+
+  std::vector<Elf64_Shdr> sections(header.e_shnum);
+  std::memcpy(sections.data(), image.data() + header.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+  if (header.e_shstrndx >= sections.size()) {
+    return fail("code object has an invalid section-name string table index");
+  }
+  const Elf64_Shdr &shstrtab = sections[header.e_shstrndx];
+  if (shstrtab.sh_type != SHT_STRTAB ||
+      !image_contains_range(image.size(), shstrtab.sh_offset, shstrtab.sh_size)) {
+    return fail("code object has an invalid section-name string table");
+  }
+  const char *section_names = reinterpret_cast<const char *>(image.data() + shstrtab.sh_offset);
+  auto section_name = [&](size_t index) -> std::optional<std::string_view> {
+    if (index >= sections.size() || sections[index].sh_name >= shstrtab.sh_size)
+      return std::nullopt;
+    const uint64_t offset = sections[index].sh_name;
+    const size_t available = static_cast<size_t>(shstrtab.sh_size - offset);
+    const char *name = section_names + offset;
+    const size_t length = strnlen(name, available);
+    if (length == available)
+      return std::nullopt;
+    return std::string_view(name, length);
+  };
+
+  std::vector<size_t> nonempty_executable_sections;
+  std::vector<std::pair<uint64_t, uint64_t>> executable_vaddr_ranges;
+  for (size_t i = 0; i < sections.size(); ++i) {
+    const Elf64_Shdr &section = sections[i];
+    if (section.sh_type != SHT_NOBITS &&
+        !image_contains_range(image.size(), section.sh_offset, section.sh_size)) {
+      return fail("code object has a section payload outside the ELF image");
+    }
+    const auto name = section_name(i);
+    if (!name)
+      return fail("code object has an unterminated or invalid section name");
+    if ((section.sh_flags & SHF_EXECINSTR) == 0 || section.sh_size == 0)
+      continue;
+    nonempty_executable_sections.push_back(i);
+    if (section.sh_addr > std::numeric_limits<uint64_t>::max() - section.sh_size)
+      return fail("code object has an overflowing executable section address range");
+    executable_vaddr_ranges.emplace_back(section.sh_addr, section.sh_size);
+  }
+
+  std::vector<Elf64_Phdr> program_headers;
+  bool has_nonempty_executable_segment = false;
+  if (header.e_phnum != 0) {
+    if (header.e_phentsize != sizeof(Elf64_Phdr) ||
+        !image_contains_range(image.size(), header.e_phoff,
+                              static_cast<uint64_t>(header.e_phnum) * sizeof(Elf64_Phdr))) {
+      return fail("code object has an invalid program-header table");
+    }
+    program_headers.resize(header.e_phnum);
+    std::memcpy(program_headers.data(), image.data() + header.e_phoff,
+                program_headers.size() * sizeof(Elf64_Phdr));
+    for (const Elf64_Phdr &program : program_headers) {
+      if (program.p_type != PT_LOAD)
+        continue;
+      if (!image_contains_range(image.size(), program.p_offset, program.p_filesz))
+        return fail("code object has a PT_LOAD payload outside the ELF image");
+      if ((program.p_flags & PF_X) == 0 || (program.p_filesz == 0 && program.p_memsz == 0))
+        continue;
+      has_nonempty_executable_segment = true;
+      if (program.p_vaddr > std::numeric_limits<uint64_t>::max() - program.p_memsz)
+        return fail("code object has an overflowing executable PT_LOAD address range");
+      executable_vaddr_ranges.emplace_back(program.p_vaddr, program.p_memsz);
+    }
+  }
+
+  if (nonempty_executable_sections.size() == 1) {
+    const size_t index = nonempty_executable_sections.front();
+    const Elf64_Shdr &text = sections[index];
+    const auto name = section_name(index);
+    if (name && *name == ".text" && text.sh_type == SHT_PROGBITS &&
+        text.sh_offset == selected_text_offset && text.sh_size == selected_text_size) {
+      result.canonical_text_supported = true;
+      result.canonical_text_index = index;
+      result.canonical_text_offset = text.sh_offset;
+      result.canonical_text_size = text.sh_size;
+      result.canonical_text_vaddr = text.sh_addr;
+    }
+  }
+
+  // A linked executable object must not hide non-zero instructions in an
+  // executable segment outside the one section DBT rewrites. Zero file padding
+  // is harmless (zero is not a gfx1250 instruction), but any other byte is an
+  // executable payload that would otherwise bypass translation.
+  if (result.canonical_text_supported) {
+    const uint64_t text_file_begin = result.canonical_text_offset;
+    const uint64_t text_file_size = result.canonical_text_size;
+    const uint64_t text_vaddr_begin = result.canonical_text_vaddr;
+    bool text_is_loaded_executable = header.e_type == ET_REL;
+    for (const Elf64_Phdr &program : program_headers) {
+      if (program.p_type != PT_LOAD || (program.p_flags & PF_X) == 0 ||
+          (program.p_filesz == 0 && program.p_memsz == 0)) {
+        continue;
+      }
+      const bool file_contains_text =
+          interval_contains(program.p_offset, program.p_filesz, text_file_begin, text_file_size);
+      const bool text_contains_file =
+          interval_contains(text_file_begin, text_file_size, program.p_offset, program.p_filesz);
+      const bool memory_contains_text =
+          interval_contains(program.p_vaddr, program.p_memsz, text_vaddr_begin, text_file_size);
+      const bool text_contains_memory =
+          interval_contains(text_vaddr_begin, text_file_size, program.p_vaddr, program.p_memsz);
+      if (file_contains_text && memory_contains_text)
+        text_is_loaded_executable = true;
+
+      const uint64_t segment_begin = program.p_offset;
+      const uint64_t segment_end = program.p_offset + program.p_filesz;
+      const uint64_t text_file_end = text_file_begin + text_file_size;
+      const auto contains_nonzero_bytes = [&](uint64_t begin, uint64_t end) {
+        if (begin >= end)
+          return false;
+        return std::ranges::any_of(
+            image.subspan(static_cast<size_t>(begin), static_cast<size_t>(end - begin)),
+            [](uint8_t byte) { return byte != 0; });
+      };
+      // Inspect only the segment gaps around .text. Scanning through the text
+      // body itself made this structural guard needlessly O(code size).
+      const uint64_t prefix_end = std::min(segment_end, text_file_begin);
+      const uint64_t suffix_begin = std::max(segment_begin, text_file_end);
+      if (contains_nonzero_bytes(segment_begin, prefix_end) ||
+          contains_nonzero_bytes(suffix_begin, segment_end)) {
+        result.canonical_text_supported = false;
+      }
+      if (!result.canonical_text_supported)
+        break;
+      // Every executable mapping must describe this .text allocation. A
+      // disjoint or only-partially-overlapping segment is another executable
+      // payload even when its current file bytes happen to be zero.
+      if ((!file_contains_text && !text_contains_file) ||
+          (!memory_contains_text && !text_contains_memory)) {
+        result.canonical_text_supported = false;
+        break;
+      }
+    }
+    if (!text_is_loaded_executable)
+      result.canonical_text_supported = false;
+  }
+
+  bool has_executable_symbol = false;
+  bool has_executable_relocation_target = false;
+  std::unordered_map<uint64_t, CallableFunctionRange> functions_by_start;
+  std::vector<std::vector<Elf64_Sym>> symbol_tables(sections.size());
+  for (size_t i = 0; i < sections.size(); ++i) {
+    const Elf64_Shdr &symtab = sections[i];
+    if (symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM)
+      continue;
+    if (symtab.sh_entsize != sizeof(Elf64_Sym) || symtab.sh_size % sizeof(Elf64_Sym) != 0 ||
+        !image_contains_range(image.size(), symtab.sh_offset, symtab.sh_size) ||
+        symtab.sh_link >= sections.size()) {
+      return fail("code object has an invalid symbol table");
+    }
+    const Elf64_Shdr &strtab = sections[symtab.sh_link];
+    if (strtab.sh_type != SHT_STRTAB ||
+        !image_contains_range(image.size(), strtab.sh_offset, strtab.sh_size)) {
+      return fail("code object has an invalid symbol string table");
+    }
+    const char *strings = reinterpret_cast<const char *>(image.data() + strtab.sh_offset);
+    const size_t count = static_cast<size_t>(symtab.sh_size / sizeof(Elf64_Sym));
+    auto &symbols = symbol_tables[i];
+    symbols.resize(count);
+    std::memcpy(symbols.data(), image.data() + symtab.sh_offset, symtab.sh_size);
+    for (const Elf64_Sym &symbol : symbols) {
+      if (symbol.st_name >= strtab.sh_size)
+        return fail("code object has a symbol name outside its string table");
+      const size_t available = static_cast<size_t>(strtab.sh_size - symbol.st_name);
+      const char *raw_name = strings + symbol.st_name;
+      const size_t name_size = strnlen(raw_name, available);
+      if (name_size == available)
+        return fail("code object has an unterminated symbol name");
+      const std::string_view name(raw_name, name_size);
+      const uint8_t type = elf_symbol_type(symbol.st_info);
+      const bool descriptor_symbol = has_suffix(name, ".kd");
+      if (descriptor_symbol || type == kElfSymbolTypeAmdGpuHsaKernel)
+        result.has_kernel_or_descriptor_symbol = true;
+
+      const bool defined_in_section = symbol.st_shndx != SHN_UNDEF && symbol.st_shndx != SHN_ABS &&
+                                      symbol.st_shndx < sections.size();
+      const bool defined_in_executable_section =
+          defined_in_section && (sections[symbol.st_shndx].sh_flags & SHF_EXECINSTR) != 0;
+      if ((type == kElfSymbolTypeFunc && defined_in_executable_section) ||
+          type == kElfSymbolTypeAmdGpuHsaKernel) {
+        has_executable_symbol = true;
+      }
+      if (type != kElfSymbolTypeFunc || !defined_in_executable_section)
+        continue;
+      if (!result.canonical_text_supported || symbol.st_shndx != result.canonical_text_index) {
+        continue;
+      }
+      const Elf64_Shdr &text = sections[result.canonical_text_index];
+      uint64_t begin = symbol.st_value;
+      if (header.e_type != ET_REL) {
+        if (begin < text.sh_addr)
+          return fail("code object has an STT_FUNC value before .text");
+        begin -= text.sh_addr;
+      }
+      if (symbol.st_size == 0) {
+        if (begin % sizeof(uint32_t) != 0 || begin > text.sh_size)
+          return fail("code object has an invalid zero-sized STT_FUNC entry");
+        // Linked AMDGPU kernel symbols commonly remain zero-sized STT_FUNCs.
+        // Retain the entry for later descriptor corroboration; without a .kd at
+        // the same address, its callable extent and ownership are unknowable.
+        result.zero_sized_function_entries.push_back(begin);
+        continue;
+      }
+      if (begin % sizeof(uint32_t) != 0 || symbol.st_size % sizeof(uint32_t) != 0 ||
+          begin > text.sh_size || symbol.st_size > text.sh_size - begin) {
+        return fail("code object has an STT_FUNC range that cannot be translated safely");
+      }
+      CallableFunctionRange function{
+          .begin = begin, .end = begin + symbol.st_size, .name = std::string(name)};
+      auto [it, inserted] = functions_by_start.try_emplace(begin, function);
+      if (!inserted && it->second.end != function.end)
+        return fail("code object has conflicting STT_FUNC ranges for one entry");
+      if (!inserted && it->second.name.empty() && !function.name.empty())
+        it->second.name = std::move(function.name);
+    }
+  }
+
+  for (size_t i = 0; i < sections.size(); ++i) {
+    const Elf64_Shdr &relocs = sections[i];
+    if (relocs.sh_type != SHT_RELA && relocs.sh_type != SHT_REL)
+      continue;
+    const bool is_rela = relocs.sh_type == SHT_RELA;
+    const size_t entry_size = is_rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel);
+    if (relocs.sh_entsize != entry_size || relocs.sh_size % entry_size != 0 ||
+        !image_contains_range(image.size(), relocs.sh_offset, relocs.sh_size)) {
+      return fail("code object has an invalid relocation section");
+    }
+    const std::vector<Elf64_Sym> *symbols = nullptr;
+    if (relocs.sh_link < symbol_tables.size() && (sections[relocs.sh_link].sh_type == SHT_SYMTAB ||
+                                                  sections[relocs.sh_link].sh_type == SHT_DYNSYM)) {
+      symbols = &symbol_tables[relocs.sh_link];
+    } else if (relocs.sh_link != SHN_UNDEF) {
+      return fail("code object has a relocation section with an invalid symbol table link");
+    }
+    const size_t count = static_cast<size_t>(relocs.sh_size / entry_size);
+    for (size_t j = 0; j < count; ++j) {
+      uint64_t info = 0;
+      int64_t addend = 0;
+      if (is_rela) {
+        Elf64_Rela rela{};
+        std::memcpy(&rela, image.data() + relocs.sh_offset + j * entry_size, sizeof(rela));
+        info = rela.r_info;
+        addend = rela.r_addend;
+      } else {
+        Elf64_Rel rel{};
+        std::memcpy(&rel, image.data() + relocs.sh_offset + j * entry_size, sizeof(rel));
+        info = rel.r_info;
+      }
+      const uint32_t symbol_index = elf_reloc_sym(info);
+      if (symbol_index != 0) {
+        if (symbols == nullptr)
+          return fail("code object has a symbolic relocation without a symbol table");
+        if (symbol_index >= symbols->size())
+          return fail("code object has a relocation with an invalid symbol index");
+        const Elf64_Sym &symbol = (*symbols)[symbol_index];
+        if (symbol.st_shndx < sections.size() &&
+            (sections[symbol.st_shndx].sh_flags & SHF_EXECINSTR) != 0) {
+          has_executable_relocation_target = true;
+        }
+        continue;
+      }
+      if (!is_rela || elf_reloc_type(info) != R_AMDGPU_RELATIVE64 || addend < 0)
+        continue;
+      const uint64_t target = static_cast<uint64_t>(addend);
+      if (std::ranges::any_of(executable_vaddr_ranges, [&](const auto &range) {
+            return target >= range.first && target - range.first < range.second;
+          })) {
+        has_executable_relocation_target = true;
+      }
+    }
+  }
+
+  result.callable_functions.reserve(functions_by_start.size());
+  for (auto &[_, function] : functions_by_start)
+    result.callable_functions.push_back(std::move(function));
+  std::ranges::sort(result.callable_functions, {}, &CallableFunctionRange::begin);
+  std::ranges::sort(result.zero_sized_function_entries);
+  result.zero_sized_function_entries.erase(
+      std::ranges::unique(result.zero_sized_function_entries).begin(),
+      result.zero_sized_function_entries.end());
+  for (size_t i = 1; i < result.callable_functions.size(); ++i) {
+    if (result.callable_functions[i].begin < result.callable_functions[i - 1].end)
+      return fail("code object has overlapping STT_FUNC ranges");
+  }
+
+  const bool has_executable_section = !nonempty_executable_sections.empty();
+  result.data_only = !has_executable_section && !has_nonempty_executable_segment &&
+                     !has_executable_symbol && !result.has_kernel_or_descriptor_symbol &&
+                     !has_executable_relocation_target;
+  if (!result.data_only && !result.canonical_text_supported && result.error.empty()) {
+    result.error =
+        "code object executable content is not confined to one supported non-empty .text section";
+  }
+  result.valid = true;
+  return result;
+}
+
 /// @brief Return a human-readable kernel label for diagnostics.
 ///
 /// @details Some code objects carry empty kernel symbol names. Falling back to
@@ -142,6 +508,8 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
 [[nodiscard]] std::string kernel_label(const KdTranslation &translation) {
   if (!translation.kernel_name.empty())
     return translation.kernel_name;
+  if (translation.descriptorless_callable)
+    return "descriptorless callable functions";
 
   std::ostringstream os;
   os << ".text+0x" << std::hex << translation.entry_text_offset;
@@ -171,9 +539,11 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
 
 [[nodiscard]] std::vector<uint64_t> kernel_entry_offsets(std::span<const KdTranslation> kernels) {
   std::vector<uint64_t> offsets;
-  offsets.reserve(kernels.size());
-  for (const KdTranslation &kernel : kernels)
+  for (const KdTranslation &kernel : kernels) {
     offsets.push_back(kernel.entry_text_offset);
+    offsets.insert(offsets.end(), kernel.callable_entry_text_offsets.begin(),
+                   kernel.callable_entry_text_offsets.end());
+  }
 
   std::ranges::sort(offsets);
   offsets.erase(std::ranges::unique(offsets).begin(), offsets.end());
@@ -185,6 +555,8 @@ kernel_hardware_entry_offsets(std::span<const KdTranslation> kernels) {
   std::vector<uint64_t> offsets;
   offsets.reserve(kernels.size() * 2);
   for (const KdTranslation &kernel : kernels) {
+    if (kernel.descriptorless_callable)
+      continue;
     offsets.push_back(kernel.entry_text_offset);
     if (kernel.has_kernarg_preload_firmware_skip)
       offsets.push_back(kernel.kernarg_preload_firmware_entry_text_offset);
@@ -201,6 +573,10 @@ kernel_hardware_entry_offsets(std::span<const KdTranslation> kernels) {
   offsets.reserve(kernels.size() * 2);
   for (const KdTranslation &kernel : kernels) {
     offsets.push_back(kernel.entry_text_offset);
+    offsets.insert(offsets.end(), kernel.callable_entry_text_offsets.begin(),
+                   kernel.callable_entry_text_offsets.end());
+    offsets.insert(offsets.end(), kernel.callable_end_text_offsets.begin(),
+                   kernel.callable_end_text_offsets.end());
     // AMDHSA kernarg preloading is descriptor-controlled. When
     // kernarg_preload_spec_length is non-zero, compatible CP firmware starts at
     // KERNEL_CODE_ENTRY_BYTE_OFFSET + 256. That address is a real hardware entry,
@@ -228,13 +604,15 @@ struct DescriptorVariantCheckpoint {
 };
 
 [[nodiscard]] uint64_t kernel_scope_key(const KdTranslation &kernel) {
-  assert(kernel.entry_text_offset <= (std::numeric_limits<uint64_t>::max() >> 1) &&
-         "kernel entry offset is too large to pack with variant bit");
-  return (kernel.entry_text_offset << 1) | (kernel.needs_lds_overflow_buf ? 1u : 0u);
+  assert(kernel.entry_text_offset <= (std::numeric_limits<uint64_t>::max() >> 2) &&
+         "kernel entry offset is too large to pack with scope bits");
+  return (kernel.entry_text_offset << 2) | (kernel.descriptorless_callable ? 2u : 0u) |
+         (kernel.needs_lds_overflow_buf ? 1u : 0u);
 }
 
 [[nodiscard]] bool same_kernel_scope_variant(const KdTranslation &lhs, const KdTranslation &rhs) {
   return lhs.entry_text_offset == rhs.entry_text_offset &&
+         lhs.descriptorless_callable == rhs.descriptorless_callable &&
          lhs.needs_lds_overflow_buf == rhs.needs_lds_overflow_buf;
 }
 
@@ -431,6 +809,24 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
   return ordered;
 }
 
+[[nodiscard]] std::vector<std::pair<uint64_t, uint64_t>>
+descriptorless_callable_ranges(const KdTranslation &translation) {
+  std::vector<uint64_t> entries{translation.entry_text_offset};
+  entries.insert(entries.end(), translation.callable_entry_text_offsets.begin(),
+                 translation.callable_entry_text_offsets.end());
+  if (entries.size() != translation.callable_end_text_offsets.size())
+    return {};
+
+  std::vector<std::pair<uint64_t, uint64_t>> ranges;
+  ranges.reserve(entries.size());
+  for (size_t i = 0; i < entries.size(); ++i) {
+    if (translation.callable_end_text_offsets[i] <= entries[i])
+      return {};
+    ranges.emplace_back(entries[i], translation.callable_end_text_offsets[i]);
+  }
+  return ranges;
+}
+
 [[nodiscard]] std::vector<KernelTranslationScope>
 kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                           const BlockOffsetIndex &block_index, std::span<KdTranslation> kernels) {
@@ -441,7 +837,8 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
 
   const BlockPositionIndex block_positions = build_block_position_index(blocks);
   const auto hardware_entries = kernel_hardware_entry_offsets(kernels);
-  std::unordered_set<uint64_t> entry_set(hardware_entries.begin(), hardware_entries.end());
+  std::unordered_set<uint64_t> descriptor_entry_set(hardware_entries.begin(),
+                                                    hardware_entries.end());
   std::vector<KdTranslation *> ordered_kernels;
   ordered_kernels.reserve(kernels.size());
   std::unordered_set<uint64_t> seen_scopes;
@@ -459,9 +856,30 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
   scopes.reserve(ordered_kernels.size());
   for (KdTranslation *kernel : ordered_kernels) {
     BasicBlock *entry = block_for_offset(block_index, kernel->entry_text_offset);
-    if (entry == nullptr)
+    if (entry == nullptr || entry->start_offset() != kernel->entry_text_offset)
       continue;
+    if (kernel->descriptorless_callable) {
+      const auto ranges = descriptorless_callable_ranges(*kernel);
+      if (ranges.empty())
+        continue;
+
+      std::vector<BasicBlock *> callable_blocks;
+      for (const auto &block : blocks) {
+        if (block == nullptr)
+          continue;
+        const bool inside_range = std::ranges::any_of(ranges, [&](const auto &range) {
+          return block->start_offset() >= range.first && block->end_offset() <= range.second;
+        });
+        if (inside_range)
+          callable_blocks.push_back(block.get());
+      }
+      scopes.push_back({kernel, entry, std::move(callable_blocks)});
+      continue;
+    }
+
     std::unordered_set<uint64_t> own_entries{kernel->entry_text_offset};
+    own_entries.insert(kernel->callable_entry_text_offsets.begin(),
+                       kernel->callable_entry_text_offsets.end());
     if (kernel->has_kernarg_preload_firmware_skip) {
       if (block_for_offset(block_index, kernel->kernarg_preload_firmware_entry_text_offset) ==
           nullptr)
@@ -471,9 +889,191 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
 
     scopes.push_back({kernel, entry,
                       reachable_kernel_blocks(blocks, block_index, block_positions, *entry,
-                                              entry_set, own_entries)});
+                                              descriptor_entry_set, own_entries)});
   }
   return scopes;
+}
+
+struct DecodedCallableFunction {
+  CallableFunctionRange function;
+  std::vector<BasicBlock *> blocks;
+};
+
+struct DecodedCallableFunctions {
+  bool valid = false;
+  std::vector<DecodedCallableFunction> functions;
+  std::string error;
+};
+
+/// @brief Prove that every STT_FUNC range is a complete sequence of decoded blocks.
+///
+/// Function begin/end offsets are forced into the BasicBlock leader set before
+/// this check. A gap or block crossing a symbol boundary therefore means that
+/// final-HSACO metadata is not precise enough to relocate the callable safely.
+[[nodiscard]] DecodedCallableFunctions
+decode_callable_function_ranges(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                std::span<const CallableFunctionRange> functions) {
+  DecodedCallableFunctions result;
+  result.functions.reserve(functions.size());
+  for (const CallableFunctionRange &function : functions) {
+    uint64_t cursor = function.begin;
+    std::vector<BasicBlock *> function_blocks;
+    for (const auto &block : blocks) {
+      if (block == nullptr || block->end_offset() <= function.begin)
+        continue;
+      if (block->start_offset() >= function.end)
+        break;
+      if (block->start_offset() != cursor || block->end_offset() > function.end) {
+        result.error = "STT_FUNC range does not describe a complete decoded instruction sequence";
+        return result;
+      }
+      function_blocks.push_back(block.get());
+      cursor = block->end_offset();
+    }
+    if (function_blocks.empty() || cursor != function.end) {
+      result.error = "STT_FUNC range contains undecodable or unaccounted executable bytes";
+      return result;
+    }
+    result.functions.push_back({function, std::move(function_blocks)});
+  }
+  result.valid = true;
+  return result;
+}
+
+[[nodiscard]] bool scope_intersects_function(const KernelTranslationScope &scope,
+                                             const DecodedCallableFunction &function) {
+  return std::ranges::any_of(function.blocks, [&](const BasicBlock *function_block) {
+    return std::ranges::find(scope.blocks, function_block) != scope.blocks.end();
+  });
+}
+
+/// @brief Keep complete STT_FUNC bodies in every descriptor scope that reaches them.
+///
+/// Static CFG recovery can miss an address-taken internal block even though the
+/// linker retained it inside a sized function symbol. Once any part of that
+/// function is owned by a descriptor, its whole declared body inherits that
+/// descriptor's resource contract and must move with the same kernel-local clone.
+void expand_descriptor_scopes_to_complete_functions(
+    std::span<KernelTranslationScope> scopes, std::span<const DecodedCallableFunction> functions) {
+  for (KernelTranslationScope &scope : scopes) {
+    if (scope.translation == nullptr || scope.translation->descriptorless_callable)
+      continue;
+    for (const DecodedCallableFunction &function : functions) {
+      if (!scope_intersects_function(scope, function))
+        continue;
+      scope.blocks.insert(scope.blocks.end(), function.blocks.begin(), function.blocks.end());
+    }
+    std::ranges::sort(scope.blocks, {}, &BasicBlock::start_offset);
+    scope.blocks.erase(std::ranges::unique(scope.blocks).begin(), scope.blocks.end());
+  }
+}
+
+/// @brief Conservative source VGPR allocation envelope for callable-only code.
+///
+/// Final linked HSACO does not retain per-function resource records. For gfx1250
+/// low-bank code, however, any caller capable of executing the source function
+/// must allocate the descriptor granule containing its highest referenced VGPR.
+/// Restricting new dead-register scratch to that same granule preserves the
+/// caller-visible resource contract. Explicit VGPR-MSB changes are rejected by
+/// the caller because their physical-bank dataflow needs a retained linker
+/// resource contract rather than this low-bank inference.
+[[nodiscard]] std::vector<ScratchVgprRangeLimit>
+descriptorless_vgpr_envelopes(const KernelTranslationScope &scope) {
+  std::vector<uint64_t> entries{scope.translation->entry_text_offset};
+  entries.insert(entries.end(), scope.translation->callable_entry_text_offsets.begin(),
+                 scope.translation->callable_entry_text_offsets.end());
+  if (entries.size() != scope.translation->callable_end_text_offsets.size())
+    return {};
+
+  constexpr uint32_t kGfx1250DescriptorVgprGranule = 16;
+  std::vector<ScratchVgprRangeLimit> envelopes;
+  envelopes.reserve(entries.size());
+  for (size_t range_index = 0; range_index < entries.size(); ++range_index) {
+    const uint64_t begin = entries[range_index];
+    const uint64_t end = scope.translation->callable_end_text_offsets[range_index];
+    if (end <= begin)
+      return {};
+
+    uint32_t referenced = 0;
+    for (BasicBlock *block : scope.blocks) {
+      if (block == nullptr)
+        continue;
+      for (const Instruction &inst : block->instructions()) {
+        if (inst.src_loc() < begin || inst.src_loc() >= end)
+          continue;
+        const InstDefUse def_use(inst);
+        const auto account = [&](const RegisterSet &set) {
+          set.for_each([&](RegisterRef ref) {
+            if (ref.cls == RegClass::VGPR)
+              referenced = std::max(referenced, static_cast<uint32_t>(ref.index) + 1u);
+          });
+        };
+        account(def_use.defs);
+        account(def_use.uses);
+      }
+    }
+    referenced = std::max(referenced, kGfx1250DescriptorVgprGranule);
+    const uint32_t envelope =
+        ((referenced + kGfx1250DescriptorVgprGranule - 1u) / kGfx1250DescriptorVgprGranule) *
+        kGfx1250DescriptorVgprGranule;
+    envelopes.push_back({.begin_offset = begin,
+                         .end_offset = end,
+                         .max_free_vgpr = static_cast<uint16_t>(envelope)});
+  }
+  return envelopes;
+}
+
+/// @brief Registers unavailable to scratch code in an HSA callable.
+///
+/// Final HSACO does not retain the LLVM calling convention or function
+/// signature. The ordinary AMDGPU C/Fast/Cold callable ABI can return values in
+/// v0-v31, so every one of those registers must be treated as a possible
+/// external live-out. The striped callee-saved registers must also be preserved
+/// even when the original function never references them and ordinary liveness
+/// therefore cannot see their caller-owned values.
+[[nodiscard]] RegisterSet descriptorless_callable_scratch_reserved_registers() {
+  RegisterSet reserved;
+  reserved.expand({RegClass::VGPR, 0, 32});
+  for (uint16_t base = 40; base <= 248; base = static_cast<uint16_t>(base + 16))
+    reserved.expand({RegClass::VGPR, base, 8});
+
+  reserved.expand({RegClass::SGPR, 30, 10});
+  for (uint16_t base : {48, 64, 80})
+    reserved.expand({RegClass::SGPR, base, 8});
+  reserved.expand({RegClass::SGPR, 96, 10});
+  return reserved;
+}
+
+/// @brief Return whether an instruction can change gfx1250 VGPR bank state.
+///
+/// S_SETREG_B32 changes bank state only when its requested WAVE_MODE slice
+/// intersects MODE[19:12]. The gfx1250 immediate form has an additional
+/// unmasked side effect: any write targeting WAVE_MODE updates all four bank
+/// fields from literal bits [19:12], even when the requested slice is disjoint.
+/// A malformed setreg without its HWREG operand is handled conservatively.
+[[nodiscard]] bool changes_gfx1250_vgpr_bank_state(const Instruction &inst) {
+  const std::string_view mnemonic = inst.mnemonic();
+  if (mnemonic == "s_set_vgpr_msb")
+    return true;
+  if (mnemonic != "s_setreg_b32" && mnemonic != "s_setreg_imm32_b32")
+    return false;
+
+  const Operand *hwreg_operand = inst.dst_operand(0);
+  if (hwreg_operand == nullptr)
+    return true;
+  const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
+  constexpr uint16_t kWaveModeHwreg = 1;
+  if ((hwreg & 0x3fu) != kWaveModeHwreg)
+    return false;
+  if (mnemonic == "s_setreg_imm32_b32")
+    return true;
+
+  const uint16_t begin = static_cast<uint16_t>((hwreg >> 6) & 0x1fu);
+  const uint16_t encoded_width = static_cast<uint16_t>(((hwreg >> 11) & 0x1fu) + 1u);
+  const uint16_t width = std::min<uint16_t>(encoded_width, static_cast<uint16_t>(32u - begin));
+  constexpr uint16_t kVgprMsbBegin = 12;
+  constexpr uint16_t kVgprMsbEnd = 20;
+  return begin < kVgprMsbEnd && kVgprMsbBegin < begin + width;
 }
 
 /// @brief Return whether an instruction is a scalar set-PC through one SGPR pair.
@@ -569,6 +1169,46 @@ scoped_call_return_offsets(std::span<BasicBlock *const> blocks, std::span<const 
   return returns;
 }
 
+/// @brief Recognize ABI returns at externally entered descriptorless functions.
+///
+/// A callable object has no in-object call edge for a function invoked through
+/// a relocated pointer. Accepting every s_setpc would be unsafe, so require an
+/// exact block terminator that reads the AMDGPU ABI return-address pair
+/// SGPR30:31 and is wholly contained in a complete, rooted STT_FUNC range.
+/// Multiple such terminators are valid: optimized functions need not merge all
+/// returns into one final epilogue.
+[[nodiscard]] std::unordered_set<uint64_t>
+descriptorless_callable_return_offsets(const KdTranslation &translation, KernelBlockScope blocks,
+                                       std::span<const uint8_t> text) {
+  std::unordered_set<uint64_t> returns;
+  if (!translation.descriptorless_callable)
+    return returns;
+
+  std::vector<uint64_t> entries{translation.entry_text_offset};
+  entries.insert(entries.end(), translation.callable_entry_text_offsets.begin(),
+                 translation.callable_entry_text_offsets.end());
+  if (entries.size() != translation.callable_end_text_offsets.size())
+    return returns;
+
+  constexpr uint16_t kCallableReturnSgpr = 30;
+  for (size_t i = 0; i < entries.size(); ++i) {
+    const uint64_t begin = entries[i];
+    const uint64_t end = translation.callable_end_text_offsets[i];
+    if (end <= begin)
+      continue;
+    for (BasicBlock *block : blocks) {
+      if (block == nullptr || block->start_offset() < begin || block->end_offset() > end)
+        continue;
+      const Instruction *term = block->terminator();
+      if (term != nullptr &&
+          s_setpc_from_sreg(*term, text_word_at(text, term->src_loc()), kCallableReturnSgpr)) {
+        returns.insert(term->src_loc());
+      }
+    }
+  }
+  return returns;
+}
+
 /// @brief Materialize context-sensitive call edges for liveness.
 ///
 /// @details `BasicBlock` deliberately separates call edges from ordinary CFG
@@ -626,7 +1266,7 @@ scoped_call_liveness_edges(std::span<BasicBlock *const> blocks, std::span<const 
 
   std::unordered_set<uint64_t> applied_descriptors;
   for (const KdTranslation &translation : translations) {
-    if (translation.sidecar_descriptor)
+    if (translation.descriptorless_callable || translation.sidecar_descriptor)
       continue;
     if (!applied_descriptors.insert(translation.descriptor_file_offset).second)
       continue;
@@ -848,12 +1488,20 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   TranslatedCodeObject result;
   result.host_arch = host_arch_;
 
-  CodeObjectPatcher patcher(obj);
   auto leave_unchanged = [&]() {
     const auto *image = reinterpret_cast<const uint8_t *>(obj.image_data());
-    result.elf_bytes.assign(image, image + obj.image_size());
+    if (obj.image_size() != 0)
+      result.elf_bytes.assign(image, image + obj.image_size());
     return result;
   };
+
+  if (obj.image_size() < sizeof(Elf64_Ehdr)) {
+    append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                 "code object is too small to contain an ELF header");
+    return leave_unchanged();
+  }
+
+  CodeObjectPatcher patcher(obj);
 
   // A same-architecture gfx1250 translation is direction-specific: A0 and B0
   // share an ELF machine ID, so both revisions must be given and must select a
@@ -879,12 +1527,42 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
   }
 
-  auto text = patcher.text_bytes();
-  if (text.empty()) {
+  const auto image = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(obj.image_data()),
+                                              obj.image_size());
+  const ExecutableElfAnalysis executable =
+      analyze_executable_elf(image, patcher.text_offset(), patcher.text_size());
+  if (!executable.valid) {
     append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
-                 "code object does not expose a non-empty .text section for translation");
+                 executable.error.empty() ? "code object executable layout is malformed"
+                                          : executable.error);
     return leave_unchanged();
   }
+
+  Elf64_Ehdr header{};
+  std::memcpy(&header, obj.image_data(), sizeof(header));
+  const uint32_t source_mach = header.e_flags & EF_AMDGPU_MACH;
+  if (executable.data_only) {
+    if (guest_arch_ == host_arch_ && source_mach == (target_mach_ & EF_AMDGPU_MACH)) {
+      append_warning(result.diagnostics, DiagnosticKind::DataOnly,
+                     "code object has no executable sections, segments, or callable symbols; "
+                     "leaving unchanged");
+      return leave_unchanged();
+    }
+    append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                 "data-only code object cannot be translated across target architectures");
+    return leave_unchanged();
+  }
+  if (!executable.canonical_text_supported) {
+    append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                 executable.error.empty()
+                     ? "code object executable content is not confined to one supported non-empty "
+                       ".text section"
+                     : executable.error);
+    return leave_unchanged();
+  }
+
+  auto text = patcher.text_bytes();
+  assert(!text.empty() && "supported executable layout must have non-empty .text");
 
   // DBT relocates instructions within .text (compaction, expansion, per-kernel
   // block placement) but does not rewrite relocation places that land inside
@@ -949,14 +1627,30 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return leave_unchanged();
   }
 
-  if (descriptor_translations.empty()) {
+  const bool is_gfx1250_b0_to_a0 = guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                   host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                   options_.input_revision == ProcessorRevision::Gfx1250B0 &&
+                                   options_.output_revision == ProcessorRevision::Gfx1250A0;
+  const bool has_kernel_descriptors = !descriptor_translations.empty();
+  std::unordered_set<uint64_t> descriptor_entries;
+  for (const KdTranslation &translation : descriptor_translations)
+    descriptor_entries.insert(translation.entry_text_offset);
+  const auto uncorroborated_zero_sized_function =
+      std::ranges::find_if(executable.zero_sized_function_entries,
+                           [&](uint64_t entry) { return !descriptor_entries.contains(entry); });
+  if (uncorroborated_zero_sized_function != executable.zero_sized_function_entries.end()) {
     append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
-                 "kernel descriptors are required for kernel-level translation");
+                 "zero-sized STT_FUNC entry is not corroborated by a kernel descriptor",
+                 *uncorroborated_zero_sized_function);
     return leave_unchanged();
   }
 
   const auto relocation_function_tables = discover_relocation_function_tables(obj);
   auto block_leaders = kernel_block_leaders(descriptor_translations, text);
+  for (const CallableFunctionRange &function : executable.callable_functions) {
+    block_leaders.push_back(function.begin);
+    block_leaders.push_back(function.end);
+  }
   for (const RelocationFunctionTable &table : relocation_function_tables) {
     for (const RelocationFunctionPointer &entry : table.entries)
       block_leaders.push_back(entry.target_text_offset);
@@ -977,12 +1671,54 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       discover_relocation_table_dispatches(blocks, relocation_function_tables, text_vaddr);
   const auto relocation_table_calls = attach_relocation_table_call_edges(
       block_index, relocation_function_tables, relocation_table_dispatches);
+
+  const bool needs_instruction_rewrite = std::ranges::any_of(blocks, [&](const auto &block) {
+    if (block == nullptr)
+      return false;
+    return std::ranges::any_of(block->instructions(), [&](const Instruction &inst) {
+      return lookup_legalization(inst) != nullptr ||
+             (semantic_translator_ != nullptr && semantic_translator_->has_expand_rule(inst));
+    });
+  });
+
+  if (!has_kernel_descriptors) {
+    if (executable.callable_functions.empty()) {
+      append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                   "executable .text has neither kernel descriptors nor complete STT_FUNC ranges");
+      return leave_unchanged();
+    }
+    if (!is_gfx1250_b0_to_a0) {
+      append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                   "descriptorless callable translation is only supported for gfx1250 B0-to-A0");
+      return leave_unchanged();
+    }
+    // A descriptorless callable library whose decoded instructions have no B0
+    // erratum candidates needs no address, symbol, unwind, or resource rewrite.
+    // Scan the entire decoded .text before taking this path; the CLI still
+    // performs normal host-decode validation for this executable no-op.
+    if (!needs_instruction_rewrite) {
+      append_warning(result.diagnostics, DiagnosticKind::NothingToTranslate,
+                     "descriptorless executable functions contain no instructions that require "
+                     "rewriting; leaving unchanged");
+      return leave_unchanged();
+    }
+  }
+
+  const DecodedCallableFunctions decoded_callables =
+      decode_callable_function_ranges(blocks, executable.callable_functions);
+  if (!decoded_callables.valid) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 decoded_callables.error + "; leaving code object unchanged");
+    return leave_unchanged();
+  }
+
   auto scopes = kernel_translation_scopes(blocks, block_index, descriptor_translations);
+  expand_descriptor_scopes_to_complete_functions(scopes, decoded_callables.functions);
 
   if (can_emit_sidecar_descriptors) {
     std::vector<KdTranslation> sidecar_variants;
     for (const KernelTranslationScope &scope : scopes) {
-      if (scope.translation == nullptr)
+      if (scope.translation == nullptr || scope.translation->descriptorless_callable)
         continue;
       const uint32_t host_lds_bytes = arch_lds_bytes(host_arch_);
       const bool static_lds_exceeds_host =
@@ -1017,7 +1753,62 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                                      std::make_move_iterator(sidecar_variants.begin()),
                                      std::make_move_iterator(sidecar_variants.end()));
       scopes = kernel_translation_scopes(blocks, block_index, descriptor_translations);
+      expand_descriptor_scopes_to_complete_functions(scopes, decoded_callables.functions);
     }
+  }
+
+  // Any complete STT_FUNC body not owned by a descriptor scope remains
+  // independently callable in the linked image. Translate all such functions
+  // together under the conservative descriptorless ABI/resource contract,
+  // including in mixed kernel-plus-library code objects.
+  std::vector<CallableFunctionRange> independent_callables;
+  for (const DecodedCallableFunction &function : decoded_callables.functions) {
+    const bool descriptor_owned = std::ranges::any_of(scopes, [&](const auto &scope) {
+      return scope.translation != nullptr && !scope.translation->descriptorless_callable &&
+             scope_intersects_function(scope, function);
+    });
+    if (!descriptor_owned && !descriptor_entries.contains(function.function.begin))
+      independent_callables.push_back(function.function);
+  }
+
+  if (!independent_callables.empty()) {
+    if (!is_gfx1250_b0_to_a0) {
+      append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                   "independent STT_FUNC callable translation is only supported for gfx1250 "
+                   "B0-to-A0");
+      return leave_unchanged();
+    }
+
+    KdTranslation callable;
+    callable.descriptorless_callable = true;
+    callable.kernel_name = "descriptorless callable functions";
+    callable.entry_text_offset = independent_callables.front().begin;
+    callable.callable_end_text_offsets.reserve(independent_callables.size());
+    callable.callable_end_text_offsets.push_back(independent_callables.front().end);
+    for (size_t i = 1; i < independent_callables.size(); ++i) {
+      callable.callable_entry_text_offsets.push_back(independent_callables[i].begin);
+      callable.callable_end_text_offsets.push_back(independent_callables[i].end);
+    }
+    // gfx1250 allocates ordinary VGPRs in 16-register descriptor granules. The
+    // exact source envelope is tightened after decode; starting at the minimum
+    // granule prevents an empty/argument-free callable from manufacturing a
+    // zero-register resource contract.
+    callable.target_vgpr_count = 16;
+    callable.target_vgpr_allocation_count = 16;
+    callable.target_sgpr_count = 106;
+    callable.target_wave_size = 32;
+    callable.guest_wavefront_size = 32;
+    callable.host_wavefront_size = 32;
+    descriptor_translations.push_back(std::move(callable));
+
+    scopes = kernel_translation_scopes(blocks, block_index, descriptor_translations);
+    expand_descriptor_scopes_to_complete_functions(scopes, decoded_callables.functions);
+  }
+
+  if (descriptor_translations.empty()) {
+    append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                 "executable .text has no translatable descriptor or STT_FUNC scope");
+    return leave_unchanged();
   }
 
   const size_t expected_scope_count = kernel_translation_scope_count(descriptor_translations);
@@ -1025,6 +1816,62 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
                  "kernel descriptor entry offsets are required to map to decoded text blocks");
     return leave_unchanged();
+  }
+
+  // A callable-only object has no descriptor roots that define which code may
+  // be discarded, so every decoded block must belong to a complete STT_FUNC
+  // range. Descriptor-backed objects may still compact genuinely unreachable,
+  // unreferenced blocks: replace_text() removes those bytes rather than leaving
+  // stale B0 instructions executable, while every retained STT_FUNC range is
+  // proven and owned above.
+  if (!has_kernel_descriptors) {
+    std::unordered_set<const BasicBlock *> covered_blocks;
+    for (const KernelTranslationScope &scope : scopes) {
+      for (const BasicBlock *block : scope.blocks) {
+        if (block != nullptr)
+          covered_blocks.insert(block);
+      }
+    }
+    const auto uncovered = std::ranges::find_if(blocks, [&](const auto &block) {
+      return block != nullptr && !covered_blocks.contains(block.get());
+    });
+    if (uncovered != blocks.end()) {
+      append_error(result.diagnostics, DiagnosticKind::Legalization,
+                   "descriptorless executable .text contains decoded instructions outside "
+                   "complete STT_FUNC ranges",
+                   (*uncovered)->start_offset());
+      return leave_unchanged();
+    }
+  }
+
+  // No descriptor scope may silently absorb an independently callable range.
+  // Such overlap would give one source address two target placements while ELF
+  // symbols, RELATIVE64 addends, and unwind FDEs can name only one. Cross-scope
+  // callable transfers need a dedicated global fixup before that layout is safe.
+  const auto descriptorless_scope =
+      std::ranges::find_if(scopes, [](const KernelTranslationScope &scope) {
+        return scope.translation != nullptr && scope.translation->descriptorless_callable;
+      });
+  if (descriptorless_scope != scopes.end()) {
+    for (const KernelTranslationScope &scope : scopes) {
+      if (scope.translation == nullptr || scope.translation->descriptorless_callable)
+        continue;
+      const bool overlaps = std::ranges::any_of(scope.blocks, [&](const BasicBlock *block) {
+        return std::ranges::find(descriptorless_scope->blocks, block) !=
+               descriptorless_scope->blocks.end();
+      });
+      // Independent-callable discovery excludes every function intersecting a
+      // descriptor scope using the same block identity, so overlap is an
+      // internal construction invariant today. Keep the release-mode check
+      // below as a fail-closed backstop for future scope-building changes.
+      assert(!overlaps && "independent callable scope must be disjoint from descriptor scopes");
+      if (overlaps) {
+        append_error(result.diagnostics, DiagnosticKind::Legalization,
+                     "independently callable STT_FUNC code overlaps a kernel-local translation "
+                     "scope");
+        return leave_unchanged();
+      }
+    }
   }
 
   std::vector<uint8_t> translated_text;
@@ -1200,7 +2047,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       [&](const KernelTranslationScope &scope, KernelFailure failure, size_t output_begin,
           const std::vector<DescriptorVariantCheckpoint> &descriptor_snapshot,
           size_t text_relocations_begin, size_t data_relocations_begin) -> bool {
-    if (!skip_failed_kernels) {
+    if (!skip_failed_kernels || scope.translation->descriptorless_callable) {
       append_error(result.diagnostics, failure.kind, std::move(failure.message),
                    failure.guest_offset, std::move(failure.mnemonic),
                    std::move(failure.required_work));
@@ -1302,6 +2149,52 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     // without precomputing speculative side-region offsets.
     KernelTextLayout layout;
     layout.source_entry = scope.translation->entry_text_offset;
+    std::vector<ScratchVgprRangeLimit> descriptorless_vgpr_limits;
+
+    if (scope.translation->descriptorless_callable) {
+      const auto mode_write = std::ranges::find_if(scope.blocks, [](BasicBlock *block) {
+        if (block == nullptr)
+          return false;
+        return std::ranges::any_of(block->instructions(), changes_gfx1250_vgpr_bank_state);
+      });
+      if (mode_write != scope.blocks.end()) {
+        auto failure = make_kernel_failure(
+            DiagnosticKind::ResourceLimit,
+            "descriptorless callable code changes VGPR-MSB/MODE state, so its physical register "
+            "envelope cannot be proven from final-HSACO metadata");
+        if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                text_relocations_begin, data_relocations_begin))
+          continue;
+        return leave_unchanged();
+      }
+
+      descriptorless_vgpr_limits = descriptorless_vgpr_envelopes(scope);
+      if (descriptorless_vgpr_limits.empty()) {
+        auto failure = make_kernel_failure(
+            DiagnosticKind::ResourceLimit,
+            "descriptorless callable function ranges do not provide complete VGPR resource "
+            "envelopes");
+        if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                text_relocations_begin, data_relocations_begin))
+          continue;
+        return leave_unchanged();
+      }
+      const uint32_t source_vgpr_envelope =
+          std::ranges::max(descriptorless_vgpr_limits, {}, &ScratchVgprRangeLimit::max_free_vgpr)
+              .max_free_vgpr;
+      if (source_vgpr_envelope > 256) {
+        auto failure = make_kernel_failure(
+            DiagnosticKind::ResourceLimit,
+            "descriptorless callable low-bank VGPR envelope exceeds the supported resource "
+            "contract");
+        if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                text_relocations_begin, data_relocations_begin))
+          continue;
+        return leave_unchanged();
+      }
+      scope.translation->target_vgpr_count = source_vgpr_envelope;
+      scope.translation->target_vgpr_allocation_count = source_vgpr_envelope;
+    }
 
     TranslationContext kernel_context(
         scope.translation->target_vgpr_count, scope.translation->target_agpr_count,
@@ -1378,12 +2271,34 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       return leave_unchanged();
     }
     const bool can_use_long_direct_branches =
+        !scope.translation->descriptorless_callable &&
         next_long_branch_sgpr_pair(kernel_context, host_arch_).has_value();
     LivenessAnalysisOptions liveness_options;
     liveness_options.max_free_vgpr =
-        static_cast<uint16_t>(isa_properties(host_arch_).max_addressable_vgprs_per_wf);
+        static_cast<uint16_t>(scope.translation->descriptorless_callable
+                                  ? scope.translation->target_vgpr_count
+                                  : isa_properties(host_arch_).max_addressable_vgprs_per_wf);
     liveness_options.arch = guest_arch_;
     liveness_options.entry_block = scope.entry;
+    if (scope.translation->descriptorless_callable) {
+      liveness_options.scratch_reserved = descriptorless_callable_scratch_reserved_registers();
+      liveness_options.scratch_vgpr_range_limits = descriptorless_vgpr_limits;
+    }
+    std::vector<BasicBlock *> analysis_entries{scope.entry};
+    const auto add_analysis_entry = [&](uint64_t offset) {
+      BasicBlock *entry = block_for_offset(block_index, offset);
+      if (entry != nullptr && entry->start_offset() == offset)
+        analysis_entries.push_back(entry);
+    };
+    if (scope.translation->descriptorless_callable) {
+      for (const uint64_t offset : scope.translation->callable_entry_text_offsets)
+        add_analysis_entry(offset);
+    } else if (scope.translation->has_kernarg_preload_firmware_skip) {
+      add_analysis_entry(scope.translation->kernarg_preload_firmware_entry_text_offset);
+    }
+    std::ranges::sort(analysis_entries);
+    analysis_entries.erase(std::ranges::unique(analysis_entries).begin(), analysis_entries.end());
+    liveness_options.entry_blocks = analysis_entries;
     liveness_options.text = text;
     if (options_.debug_min_free_vgpr)
       liveness_options.min_free_vgpr = *options_.debug_min_free_vgpr;
@@ -1416,8 +2331,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     // one dynamic consumer has multiple recovered targets, no single direct
     // window can preserve semantics; DBT keeps the original indirect consumer
     // and asks the patch layer to rewrite each source-side PC builder once.
-    const std::unordered_set<uint64_t> valid_call_return_offsets =
+    std::unordered_set<uint64_t> valid_call_return_offsets =
         scoped_call_return_offsets(KernelBlockScope(scope.blocks), text);
+    const auto callable_returns = descriptorless_callable_return_offsets(
+        *scope.translation, KernelBlockScope(scope.blocks), text);
+    valid_call_return_offsets.insert(callable_returns.begin(), callable_returns.end());
     struct RecoveredConsumer {
       std::vector<IndirectCallFixup> fixups;
       bool use_transfer_window = false;
@@ -1927,17 +2845,39 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       return leave_unchanged();
     }
 
-    if (kernel_context.required_vgpr_count > kernel_context.num_vgprs)
-      scope.translation->target_vgpr_count = kernel_context.required_vgpr_count;
-    if (kernel_context.required_sgpr_count > kernel_context.num_sgprs)
-      scope.translation->target_sgpr_count = kernel_context.required_sgpr_count;
-    if (kernel_context.required_private_segment_fixed_size >
-        kernel_context.private_segment_fixed_size)
-      scope.translation->target_private_size = kernel_context.required_private_segment_fixed_size;
+    if (scope.translation->descriptorless_callable) {
+      // There is no descriptor to advertise a larger resource request to the
+      // caller. The source callable's decoded low-bank VGPR envelope and the
+      // architecture's fixed callable SGPR set are therefore hard limits, and
+      // descriptorless lowering may not manufacture private spill storage.
+      if (kernel_context.required_vgpr_count > kernel_context.num_vgprs ||
+          kernel_context.required_sgpr_count > kernel_context.num_sgprs ||
+          kernel_context.required_private_segment_fixed_size >
+              kernel_context.private_segment_fixed_size) {
+        auto failure = make_kernel_failure(
+            DiagnosticKind::ResourceLimit,
+            "descriptorless callable lowering requires resources that cannot be advertised "
+            "without a kernel descriptor");
+        if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                text_relocations_begin, data_relocations_begin))
+          continue;
+        return leave_unchanged();
+      }
+    } else {
+      if (kernel_context.required_vgpr_count > kernel_context.num_vgprs)
+        scope.translation->target_vgpr_count = kernel_context.required_vgpr_count;
+      if (kernel_context.required_sgpr_count > kernel_context.num_sgprs)
+        scope.translation->target_sgpr_count = kernel_context.required_sgpr_count;
+      if (kernel_context.required_private_segment_fixed_size >
+          kernel_context.private_segment_fixed_size) {
+        scope.translation->target_private_size = kernel_context.required_private_segment_fixed_size;
+      }
+    }
 
-    if (scope.translation->target_vgpr_count != kernel_context.num_vgprs ||
-        scope.translation->target_sgpr_count != kernel_context.num_sgprs ||
-        scope.translation->target_private_size != kernel_context.private_segment_fixed_size) {
+    if (!scope.translation->descriptorless_callable &&
+        (scope.translation->target_vgpr_count != kernel_context.num_vgprs ||
+         scope.translation->target_sgpr_count != kernel_context.num_sgprs ||
+         scope.translation->target_private_size != kernel_context.private_segment_fixed_size)) {
       // Semantic rules may allocate descriptor-backed scratch registers or
       // per-lane private spill slots beyond the kernel's original resources.
       // Recompute the descriptor with those larger minimums before patching it
@@ -2066,6 +3006,13 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
   if (continue_after_failure && has_error_diagnostic(result.diagnostics))
     return leave_unchanged();
+
+  if (!has_kernel_descriptors && translated_text.size() > text.size()) {
+    append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                 "descriptorless callable translation exceeds the original executable .text "
+                 "allocation");
+    return leave_unchanged();
+  }
 
   // Phase 6 commits the completed translation plan without mixing ELF mutation
   // and sidecar metadata construction into the per-kernel lowering transaction.

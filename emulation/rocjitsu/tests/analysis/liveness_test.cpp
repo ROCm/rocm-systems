@@ -2105,6 +2105,62 @@ TEST(LivenessAnalysis, FindFreeRunHonorsBaseAlignment) {
   EXPECT_EQ(liveness.find_free_run(&use, 4, 94, 4), 96);
 }
 
+TEST(LivenessAnalysis, ScratchAllocationSkipsAbiReservedRegisters) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.scratch_reserved.expand({RegClass::VGPR, 0, 32});
+  options.scratch_reserved.expand({RegClass::VGPR, 40, 8});
+  options.scratch_reserved.expand({RegClass::SGPR, 0, 6});
+  options.scratch_reserved.expand({RegClass::SGPR, 8, 1});
+
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_EQ(liveness.find_free_run(&use, 1), 32);
+  EXPECT_EQ(liveness.find_free_run(&use, 8, 33), 48);
+  EXPECT_EQ(liveness.find_free_sgpr(&use), 6);
+  EXPECT_EQ(liveness.find_free_sgpr_pair(&use), 6);
+}
+
+TEST(LivenessAnalysis, ScratchAllocationHonorsPerFunctionVgprEnvelope) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  constexpr std::array limits = {
+      ScratchVgprRangeLimit{.begin_offset = 0, .end_offset = 4, .max_free_vgpr = 34}};
+
+  LivenessAnalysisOptions options;
+  options.max_free_vgpr = 64;
+  options.scratch_reserved.expand({RegClass::VGPR, 0, 32});
+  options.scratch_vgpr_range_limits = limits;
+
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  const Instruction &outside = *std::next(blocks[0]->instructions().begin());
+  EXPECT_EQ(liveness.find_free_run(&use, 2), 32);
+  EXPECT_EQ(liveness.find_free_run(&use, 3), std::nullopt);
+  EXPECT_EQ(liveness.find_free_run(&outside, 1), std::nullopt);
+}
+
+TEST(LivenessAnalysis, PerFunctionVgprEnvelopeCannotRaiseDestinationLimit) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  constexpr std::array limits = {
+      ScratchVgprRangeLimit{.begin_offset = 0, .end_offset = 4, .max_free_vgpr = 64}};
+
+  LivenessAnalysisOptions options;
+  options.max_free_vgpr = 32;
+  options.scratch_reserved.expand({RegClass::VGPR, 0, 32});
+  options.scratch_vgpr_range_limits = limits;
+
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_EQ(liveness.find_free_run(&use, 1), std::nullopt);
+}
+
 TEST(LivenessAnalysis, ReadWriteSameRegisterIsLiveBeforeInstruction) {
   auto blocks = build_test_blocks({TestOpcode::ReadWriteSgpr4, TestOpcode::End});
   LivenessAnalysis liveness = analyze_scope(blocks);
