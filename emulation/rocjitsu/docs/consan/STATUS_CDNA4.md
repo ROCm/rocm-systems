@@ -160,45 +160,48 @@ gate.
 
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Current evidence |
 |---|---|---|---|---|---|---|
-| P0 | `gfx950_sk_sgemm_streamk` | 🟨 Clean and reviewed exact-one fault qualification pass; the independent generated-code wait hazard remains tracked by `bd-1w9.9.8` | 🟥 Strict load rejection: persistent state placement | 🟥 Strict load rejection: transient state placement | 🟥 Strict load rejection: transient and barrier state placement | All runs used the standard profiles and a 120-second bound.  Every retained log records the driver working directory, exact shell-quoted invocation, and timeout; instrumented logs additionally record the hook and `RJ_*` profile settings. |
+| P0 | `gfx950_sk_sgemm_streamk` | 🟩 Current wait-fixed clean and exact-one fault bundle: exact oracle, complete 82/82 access coverage, zero mismatches, clean containment, and 1.10x paired slowdown | 🟨 Current wait-fixed clean run: exact oracle, complete 82/82 accesses plus 11/11 barriers, complete replay, zero diagnostics, and 1.08x paired slowdown; current exact-one fault bundle missing | 🟨 Current wait-fixed clean run: exact oracle, complete 82/82 accesses plus 11/11 barriers, complete sampled report, zero diagnostics, and 1.19x paired slowdown; current exact-one fault bundle missing | 🟨 Current wait-fixed clean run: exact oracle, complete 82/82 accesses plus 11/11 barriers, complete inline report, zero diagnostics, and 6.08x paired slowdown; current exact-one fault bundle missing | All current runs use rocm-libraries `0a323b7493` and a 120-second bound; instrumented legs use the standard profiles.  Every retained log records the driver working directory, exact shell-quoted invocation, and timeout; instrumented logs additionally record the hook and `RJ_*` profile settings. |
 
 This row is the executable denominator selected from the larger gfx950 YAML
 survey.  Static YAML features alone do not promote or expand that denominator.
-The baseline and SuperCollider runs both pass the exact numeric oracle and
-target-native gfx950 ELF checks.  Their paired host-dominated end-to-end
-elapsed times are 5.024 and 5.601 seconds, respectively (1.11x); this is not a
-kernel-overhead measurement.  SuperCollider discovers, selects, and patches
-all 82 LDS accesses, reports no unsupported or resource-failed sites, and
-finishes with marker zero, no mismatch, and complete report cleanup.
+The current baseline-before, SuperCollider, and baseline-after runs all pass
+the exact numeric oracle and target-native gfx950 ELF checks.  Their
+host-dominated end-to-end elapsed times are 5.107, 5.651, and 5.125 seconds,
+respectively.  The mean of the two baseline legs is 5.116 seconds, giving a
+1.104573885848319 (1.10x rounded) paired ratio; this is not a kernel-overhead
+measurement.  SuperCollider discovers, selects, and patches all 82 LDS
+accesses, reports no unsupported or resource-failed sites, and finishes with
+marker zero, no mismatch, and complete report cleanup.
 
-The reviewed fault bundle selects occurrence zero of the target-native full
+The current fault bundle selects occurrence zero of the target-native full
 `s_barrier` form from a fresh dry-run inventory.  It is the first of 11 such
-sites sharing code-object identity `fnv1a64:9d3b63168a196d96`, at text PC
-`0x10a0`.  Two independent runs require exactly one barrier drop and both record
+sites sharing code-object identity `fnv1a64:89754d9658cf27ec`, at text PC
+`0x10a4`.  Two independent runs require exactly one barrier drop and both record
 `requested=1`, `planned=1`, and `applied=1` while retaining 82/82 access
 patches.  Both exact numerical oracles pass and SuperCollider reports zero
 mismatches, so this is a qualified miss rather than a detector hit.  The
-trials finish in 5.804 and 5.660 seconds under the 120-second bound, with zero
+trials finish in 5.649 and 5.670 seconds under the 120-second bound, with zero
 allocation, read, or cleanup failures and a complete report.  A clean
 post-fault SuperCollider health run then passes the same exact oracle and
-82/82 coverage in 5.762 seconds with complete cleanup.  These are
+82/82 coverage in 5.597 seconds with complete cleanup.  These are
 host-dominated end-to-end timings that include Tensile generation and
 simulator startup; they are not kernel-overhead measurements.
 
 Artifact paths in this section are relative to the workspace root.  The
 paired clean artifacts and retained fault bundle are:
 
-- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-paired-baseline-provenance-20260724`;
-- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-paired-supercollider-provenance-20260724`;
-- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-sc-fault-inventory-20260725`;
-- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-sc-fault-drop-pc10a0-20260725`;
-- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-sc-fault-drop-pc10a0-trial2-20260725`;
-- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-sc-post-fault-health-20260725`.
+- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fix-review-20260725`;
+- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-sc-clean-20260725`;
+- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-sc-paired-20260725`;
+- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-sc-inventory-20260725`;
+- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-sc-fault-trial1-20260725`;
+- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-sc-fault-trial2-20260725`;
+- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-sc-post-fault-health-20260725`.
 
 The checked-in ledger pins rocJITsu
-`b881a768e3cdcef55d6c23399584e9179d2a5e25`, corpus
+`0f79cfc7f7ea3bd1f149c0be4fc662eeb548f97d`, corpus
 `0db836e7bd8c6400b7ffd187d749225899875d7c`, and rocm-libraries
-`a8f0845f87ab50adc3dc8d0edd86693cb31065b1`.  SHA-256 also pins the Tensile
+`0a323b74932c57d6d1a94af4a009dd7676b8f695`.  SHA-256 also pins the Tensile
 config (`3d40a61d238f82aaa6bdd6b9e8fb4d417d8fe94de507bad35ea2da848d581d52`),
 gfx950 simulator config
 (`2f36f532932e5960424b31d9909ead67936168fbd551a125658170d066e0fd49`),
@@ -208,11 +211,15 @@ client wrapper
 (`cf6a90c93cdaadfca898a62ea88edbff737aaf27e6cb9631f35f7dc61fb86ec0`),
 and loaded hook
 `0be89aec2512038d31c389523796e9b755e4d9c0e7422b22b72a3e3cdea8744e`;
+the paired-overhead `summary.json` is
+`f29aa2cb8488c2f0a2d5744af750649cdac6f5cae5f1cb486eb71025a84b126e`;
 the retained runner logs record the exact shell invocation, paths, runtime
-environment, target, and generated gfx950 ELF checks.  The row remains yellow
-only because every run also reproduces the independent scalar-load wait hazard
-tracked by `bd-1w9.9.8`; the SuperCollider fault-bundle gate itself is
-complete.
+environment, target, and generated gfx950 ELF checks, while only instrumented
+logs contain hook and `RJ_*` settings.  The three MOI cells remain yellow only
+because their clean bundles do not yet include current-producer exact-one
+fault qualification, tracked by `bd-1w9.42`.  The SuperCollider cell is
+complete and the independent scalar-load wait hazard tracked by
+`bd-1w9.9.8` is closed.
 
 A separate generator cleanup for `bd-1w9.9.5` is pinned at rocm-libraries
 `a4d052933951130bb6776f6ea39d4b7b87c4cad3`.  It keeps the
@@ -331,33 +338,81 @@ resolved without a reviewer rerun or Curator pass.  The final fixes therefore
 have focused/full test and audit coverage, but not an independent rebuttal
 review pass.
 
-The three MOI profiles fail closed before the numeric oracle executes:
+The `bd-1w9.9.8` producer fix is pinned at rocm-libraries
+`0a323b74932c57d6d1a94af4a009dd7676b8f695`.  The shared grouped-GEMM
+user-argument loader now builds supplemental fixed-slot reloads into their own
+module and derives one `s_waitcnt lgkmcnt(0)` dependency boundary from whether
+that module and an actual non-preloaded prefix load are both present.  The
+rule is therefore tied to emitted production loads rather than a target,
+register number, test selector, or hand-maintained list of current argument
+types.  A focused construction-level regression covers Beta-only, ScaleA-only,
+ScaleB-only, combined Beta-plus-scales, no-supplemental-load, and no-in-flight-
+prefix cases plus the fixed-slot offset contract.  It passes 10/10; the
+complete TensileLite unit gate passes 1,206 tests with 202 skips and one
+expected failure.
 
-- Record/Replay inventories 82 accesses and 11 barriers and plans a
-  462,544-byte report.  It assigns dispatch identity to `s96:s97`, but cannot
-  place a fresh EXEC-save window or persistent scalar owner/epoch state below
-  the CDNA AccVGPR boundary.  Strict policy rejects the load with exit code 92.
-  The retained artifact root is
-  `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-record-replay-provenance-20260724`;
-  implementation is tracked by `bd-1w9.9.6`.
-- Sampled plans 106,448 bytes and 656 banks/watchpoints and assigns persistent
-  owner/epoch state to `v44:v45`.  It cannot place the EXEC-save window or
-  owner-local transient scalar state, so all 82 accesses and 11 barriers fail
-  placement/lowering with zero patches.  Strict policy rejects the load with
-  exit code 92.  The artifact root is
-  `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-sampled-provenance-20260724`.
-- Inline Shadow plans 12,598,640 bytes, including 8,192 inline-LDS bytes,
-  524,288 exact shadow entries, and 64 release/snapshot/token records.  It
-  assigns persistent owner/epoch/workgroup-key state to `v44:v46`, but cannot
-  place the EXEC-save/transient state or a compatible barrier epoch.  All 82
-  accesses and 11 barriers fail placement/lowering with zero patches, and
-  strict policy rejects the load with exit code 92.  The artifact root is
-  `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-inline-shadow-provenance-20260724`.
+The regenerated `TensileLibrary_gfx950.co` now contains
+`s_waitcnt lgkmcnt(0)` between the overlapping
+`s_load_dwordx8 s[40:47]` prefix and `s_load_dword s45` Beta reload.
+Waitcheck reports zero diagnostics for that library and both xnack helper
+HSACOs, and the exact numerical oracle passes in 5.741 seconds.  The retained
+artifact root is
+`rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fix-review-20260725`.
+Its `results.csv`, runner log, waitcheck log, dependency disassembly, and full
+unit log hashes are
+`05db297d454686c8c062ae9c1be97355cc4f7d3b2ac7b8efa4024508ad2aa938`,
+`3dd09ec194176595310bf410b678975d3cfcee903706cdab0eb58011a0c021fc`,
+`805f6874a3dd5d6ad7ae4bf68367311fa2a3660b0b166bedf9bc365e8fa3c6d9`,
+`440bdb3d2207a4302dd5f7d30b543dd83acc5b65c9d7ee992c57e8cba3619f0d`,
+and
+`708575d2fe14d621ea36315b4e10030e65f1440f2c3ac800863240bac4aeef00`.
+Exactly one four-reviewer local round covered original head `c4dbaf1a70b4`;
+all seven comments were addressed in amended head `0a323b74932c`, resolved,
+and approved without a reviewer rerun or Curator pass.
 
-The shared Sampled/Inline placement work is tracked by `bd-1w9.9.7`.  Every
-instrumented profile also reports one preflight scalar-load wait hazard in the
-generated Tensile kernel (`.text+0x42c` to `.text+0x444`); that independent
-code-generation-versus-analysis question is tracked by `bd-1w9.9.8`.
+The current producer also passes every strict MOI clean profile:
+
+- Record/Replay patches all 82 accesses and 11 barriers with 187 total
+  patches.  Its 462,544-byte primary report contains 82/82 visible access
+  records with none dropped; replay processes all 82, reports no conflict,
+  overflow, unsupported record, or diagnostic, and returns report memory to
+  zero.  The exact numerical oracle passes in 6.217 seconds, or 1.08x the
+  paired baseline.  The retained artifact root is
+  `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-record-replay-20260725`;
+  its `results.csv` and runner log hashes are
+  `2050e8a39b0ab05c732b082160797d078fcb0906ce696934e03f9baf9650809b`
+  and
+  `58bec76890115c7a1d9b100eb3d6629ee3aaf41c4b069b7fe7232297b6524efb`.
+- Sampled patches all 82 accesses and 11 barriers with 187 total patches.  Its
+  106,448-byte primary report provisions 656 banks/watchpoints, records eight
+  visible sampled windows, and reports no dropped window, stale/incomplete/
+  changed/malformed snapshot, conflict, unsupported synchronization, or
+  diagnostic.  Cleanup returns report memory to zero.  The exact numerical
+  oracle passes in 6.840 seconds, or 1.19x the paired baseline.  The retained
+  artifact root is
+  `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-sampled-20260725`;
+  its `results.csv` and runner log hashes are
+  `62d9c89c778ac4dacc14cd496d6de877ec9f7d4c7a56faf88225c3049421cb7f`
+  and
+  `103c4f60ad152b9405dad280a85fd5b1dcd20d5a94c10cf8ac2d27853697ff48`.
+- Inline Shadow patches all 82 accesses and 11 barriers with 176 total
+  patches.  Its 12,598,640-byte primary report includes 8,192 inline-LDS
+  bytes, 524,288 exact-shadow entries, and 64 release/snapshot/token records.
+  Runtime records 465,408 events and 18,432 visible exact-shadow entries with
+  no incomplete, changed, malformed, unsupported, overflow, or diagnostic
+  outcome.  Cleanup returns report memory to zero.  The exact numerical oracle
+  passes in 34.912 seconds, or 6.08x the paired baseline.  The retained
+  artifact root is
+  `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-inline-shadow-20260725`;
+  its `results.csv` and runner log hashes are
+  `e62e702fc4795502fbbbc9265547f2de91a56d9cfb3db194745a8553be47da1e`
+  and
+  `8e10768f80b2cdc8268b201271cf092e1e3ed780ca641b4332cd15bd76ca413c`.
+
+The cumulative placement work is closed under `bd-1w9.9.6` and
+`bd-1w9.9.7`.  The producer fix for `bd-1w9.9.8` makes all three generated
+code objects waitcheck-clean at this same revision; none of the four current
+instrumented runs reports the historical scalar-load dependency hazard.
 
 ## PyTorch expansion
 
@@ -514,6 +569,18 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-25: Completed `bd-1w9.9.8` at rocm-libraries `0a323b7493`.
+  The general grouped-user-argument loader now retires real non-preloaded
+  prefix loads before any emitted fixed-slot reload; it does not hard-code the
+  observed SGPR range, target, PC, or test.  The regenerated gfx950 library
+  emits the required `lgkmcnt(0)` boundary and all three final code objects are
+  waitcheck-clean.  The focused regression, complete unit gate, and exact
+  numerical oracle pass.  Fresh standard-profile runs at the same producer
+  revision also pass all four clean profiles with complete 82/82 access plus
+  11/11 barrier coverage for every MOI engine.  SuperCollider's exact-one
+  selector and containment bundle were re-frozen after the machine-code
+  change.
 
 - 2026-07-25: Closed `bd-1w9.9.13` after a source audit and debug-loaded rerun
   disproved the suspected fail-open numeric runner.  TensileLite intentionally
