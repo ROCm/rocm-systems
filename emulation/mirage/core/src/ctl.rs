@@ -424,6 +424,14 @@ impl MirageCtl for FileCtl {
                     nix::unistd::Pid::from_raw(pid),
                     nix::sys::signal::Signal::SIGKILL,
                 );
+                // Do not return while the host can still be tearing down
+                // emulator-owned files under the launcher's runtime directory.
+                for _ in 0..50 {
+                    if !process_alive(pid) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
             }
         }
 

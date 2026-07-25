@@ -316,6 +316,12 @@ For example, the following is a valid configuration:
 
    ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api,rocjpeg_api
 
+Add ``hipfile_api`` to trace the hipFILE (GPU-direct storage) API:
+
+.. code-block:: shell
+
+   ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,hipfile_api
+
 
 For KFD event tracing, first check whether your GPU supports XNACK by running
 ``rocminfo | grep xnack``. If the output contains ``xnack-``, XNACK is available

@@ -5417,7 +5417,10 @@ def amdsmi_get_utilization_count(
             counter_type = "AMDSMI_COARSE_GRAIN_GPU_ACTIVITY"
         if counter_type == "AMDSMI_UTILIZATION_COUNTER_LAST":
             counter_type = "AMDSMI_FINE_DECODER_ACTIVITY"
-        result.append({"type": counter_type, "value": util_counter_list[index].value})
+        counter_value = _validate_if_max_uint(
+            util_counter_list[index].value, MaxUIntegerTypes.UINT64_T
+        )
+        result.append({"type": counter_type, "value": counter_value})
 
     return result
 
@@ -7114,7 +7117,18 @@ def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_busy_percent(processor_handle, ctypes.byref(gpu_busy_percent))
     )
-    return gpu_busy_percent.value
+    return _validate_if_max_uint(gpu_busy_percent.value, MaxUIntegerTypes.UINT32_T)
+
+
+def amdsmi_get_vcn_busy_percent(processor_handle: processor_handle_t):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    vcn_busy_percent = ctypes.c_uint32(0)
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_vcn_busy_percent(processor_handle, ctypes.byref(vcn_busy_percent))
+    )
+    return vcn_busy_percent.value
 
 
 # Memory Size Management Functions

@@ -197,8 +197,8 @@ int main(int argc, char **argv) {
                 viddec = new RocVideoDecoder(device_id, file_data.mem_type, rocdec_codec_id, file_data.b_force_zero_latency, file_data.p_crop_rect, file_data.b_extract_sei_messages, file_data.disp_delay);
             }
             if(!viddec->CodecSupported(device_id, rocdec_codec_id, demuxer.GetBitDepth())) {
-                std::cerr << "Codec not supported on GPU, skipping this file!" << std::endl;
-                continue;
+                std::cerr << "Error: Codec not supported on GPU for " << file_data.in_file << "!" << std::endl;
+                return 1;
             }
             if (viddec && file_data.b_flush_last_frames) viddec->SetReconfigParams(&reconfig_params);
             std::string device_name, gcn_arch_name;
@@ -249,6 +249,10 @@ int main(int argc, char **argv) {
 
             n_frame += viddec->GetNumOfFlushedFrames();
             std::cout << "info: Total frame decoded: " << n_frame << std::endl;
+            if (n_frame == 0) {
+                std::cerr << "Error: No frames were decoded for " << file_data.in_file << "!" << std::endl;
+                return 1;
+            }
             if (!file_data.dump_output_frames) {
                 std::cout << "info: avg decoding time per frame (ms): " << total_dec_time / n_frame << std::endl;
                 std::cout << "info: avg FPS: " << (n_frame / total_dec_time) * 1000 << std::endl;

@@ -12,10 +12,7 @@ namespace {
 bool enableCollTrace() {
   const char* colltraceEnable = ncclGetEnv("RCCL_LATENCY_PROFILER");
   if (colltraceEnable != NULL) {
-    INFO(
-        NCCL_INIT,
-        "RCCL_LATENCY_PROFILER set by environment to %s.",
-        colltraceEnable);
+    INFO(NCCL_INIT, "RCCL_LATENCY_PROFILER set by environment to %s.", colltraceEnable);
     if (strcmp(colltraceEnable, "1") == 0) {
       return true;
     }
@@ -42,22 +39,15 @@ ncclResult_t collTraceDestroy(ncclComm* comm) {
   return ncclSuccess;
 }
 
-ncclResult_t collTraceRecordStartEvent(
-    ncclComm* comm,
-    cudaStream_t launchStream,
-    CollTraceEvent* event) {
+ncclResult_t collTraceRecordStartEvent(ncclComm* comm, cudaStream_t launchStream, CollTraceEvent* event) {
   if (comm->ctrace && event) {
-    CUDACHECK(
-        cudaEventRecord(event->start.get()->getCudaEvent(), launchStream));
+    CUDACHECK(cudaEventRecord(event->start.get()->getCudaEvent(), launchStream));
   }
   return ncclSuccess;
 }
 
-ncclResult_t collTraceRecordEndEvent(
-    ncclComm* comm,
-    ncclKernelPlan* plan,
-    cudaStream_t launchStream,
-    std::unique_ptr<CollTraceEvent> event) {
+ncclResult_t collTraceRecordEndEvent(ncclComm* comm, ncclKernelPlan* plan, cudaStream_t launchStream,
+                                     std::unique_ptr<CollTraceEvent> event) {
   if (comm->ctrace && event) {
     CUDACHECK(cudaEventRecord(event->stop.get()->getCudaEvent(), launchStream));
     comm->ctrace->enqueueEvent(std::move(event));
@@ -67,15 +57,13 @@ ncclResult_t collTraceRecordEndEvent(
 
 CollTraceInfo parseCollInfoFromCollTask(const ncclTaskColl& collTask) {
   return CollTraceInfo{
-      .opName = std::string{ncclFuncToString(collTask.func)},
-      .dataType = std::string{ncclDatatypeToString(collTask.datatype)},
-      .count = (int64_t)collTask.count,
+    .opName = std::string{ncclFuncToString(collTask.func)},
+    .dataType = std::string{ncclDatatypeToString(collTask.datatype)},
+    .count = (int64_t)collTask.count,
   };
 }
 
-std::shared_ptr<CollTraceInfo> parseCollInfoFromNcclKernelPlan(
-    ncclKernelPlan& plan,
-    cudaStream_t stream) {
+std::shared_ptr<CollTraceInfo> parseCollInfoFromNcclKernelPlan(ncclKernelPlan& plan, cudaStream_t stream) {
   if (plan.comm == nullptr || plan.comm->ctrace == nullptr) {
     return nullptr;
   }
@@ -89,10 +77,8 @@ std::shared_ptr<CollTraceInfo> parseCollInfoFromNcclKernelPlan(
   return std::make_shared<CollTraceInfo>(collInfo);
 }
 
-std::unique_ptr<CollTraceEvent> collTraceAquireEventCommon(
-    ncclComm* comm,
-    CollTraceEvent::EventType type,
-    cudaStream_t stream) {
+std::unique_ptr<CollTraceEvent> collTraceAquireEventCommon(ncclComm* comm, CollTraceEvent::EventType type,
+                                                           cudaStream_t stream) {
   if (!comm->ctrace) {
     return nullptr;
   }
@@ -104,9 +90,7 @@ std::unique_ptr<CollTraceEvent> collTraceAquireEventCommon(
   }
   if (graph.graph != nullptr) {
     // We are in a cuda graph, this is currently unsupported
-    WARN(
-        "COLLTRACE: does not support cuda graph. Collectives from comm %lx will be skipped",
-        comm->commHash);
+    WARN("COLLTRACE: does not support cuda graph. Collectives from comm %lx will be skipped", comm->commHash);
     return nullptr;
   }
   auto event = comm->ctrace->createEvent(type);
@@ -117,9 +101,7 @@ std::unique_ptr<CollTraceEvent> collTraceAquireEventCommon(
   return event;
 }
 
-std::unique_ptr<CollTraceEvent> collTraceAquireEventBaseline(
-    ncclKernelPlan* plan,
-    cudaStream_t stream) {
+std::unique_ptr<CollTraceEvent> collTraceAquireEventBaseline(ncclKernelPlan* plan, cudaStream_t stream) {
   auto collPtr = parseCollInfoFromNcclKernelPlan(*plan, stream);
   if (collPtr == nullptr) {
     return nullptr;
@@ -129,8 +111,7 @@ std::unique_ptr<CollTraceEvent> collTraceAquireEventBaseline(
     return nullptr;
   }
 
-  auto event =
-      collTraceAquireEventCommon(comm, CollTraceEvent::EventType::COMM, stream);
+  auto event = collTraceAquireEventCommon(comm, CollTraceEvent::EventType::COMM, stream);
   if (event == nullptr) {
     WARN("COLLTRACE: failed to aquire event");
     return nullptr;

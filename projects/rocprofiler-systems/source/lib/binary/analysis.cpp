@@ -13,6 +13,7 @@
 
 #include "analysis.hpp"
 #include "binary_info.hpp"
+#include "common/path.hpp"
 #include "core/binary/address_range.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/common.hpp"
@@ -136,7 +137,7 @@ get_binary_info(const std::vector<std::string>&  _files,
     // and do not process the libraries outside of the binary scope
     auto _filter = [&_satisfies_binary_filter](const procfs::maps& _v) {
         if(_v.pathname.empty()) return false;
-        auto _path = filepath::realpath(_v.pathname, nullptr, false);
+        auto _path = path::realpath(_v.pathname);
         return (filepath::exists(_path) && _satisfies_binary_filter(_path));
     };
 
@@ -146,7 +147,7 @@ get_binary_info(const std::vector<std::string>&  _files,
         auto _exists = std::set<std::string>{};
         for(const auto& itr : _files)
         {
-            auto _filename = filepath::realpath(itr, nullptr, false);
+            auto _filename = path::realpath(itr);
             if(filepath::exists(_filename) && _satisfies_binary_filter(_filename) &&
                _exists.find(_filename) == _exists.end())
             {
@@ -206,7 +207,7 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
             auto _insert_exclude_range = [&_maps,
                                           &_exclude_range_v](const std::string& _v) {
                 auto _base_v = std::string_view{ filepath::basename(_v) };
-                auto _real_v = filepath::realpath(_v);
+                auto _real_v = path::realpath(_v);
                 for(const auto& mitr : _maps)
                 {
                     if(std::string_view{ filepath::basename(mitr.pathname) } == _base_v ||

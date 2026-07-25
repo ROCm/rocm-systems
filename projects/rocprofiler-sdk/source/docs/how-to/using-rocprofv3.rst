@@ -317,6 +317,78 @@ Here are the contents of ``kernel_trace.csv`` file:
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
 
+HIP graph attribution
++++++++++++++++++++++
+
+When profiling HIP graphs, ``rocprofv3`` can attribute individual GPU
+operations back to the specific graph node that produced them. This enables
+consumers to group dispatches across many graph launches by source node and
+to track per-node statistics over a workload's lifetime.
+
+Graph attribution is emitted by direct JSON output and by the rocpd database.
+For kernel dispatches and memory copies, the graph fields are:
+
+* ``graph_exec_id``: process-monotonic ID assigned per ``hipGraphExec_t``.
+  Zero for operations that did not originate from a graph launch.
+* ``graph_node_id``: 0-based ordinal within a single ``hipGraphLaunch`` call.
+  Zero for non-graph operations.
+
+In direct JSON output, these fields appear as top-level siblings of
+``stream_id``. In rocpd, they are stored on the kernel-dispatch and
+memory-copy tables and exposed through rocpd post-processing. Direct
+``rocprofv3`` CSV, OTF2, and Perfetto output do not carry graph attribution;
+use rocpd conversion for those formats.
+
+A new ``--hip-graph-trace`` flag enables a separate
+``graph_launch`` JSON/rocpd record containing one row per successful
+``hipGraphLaunch`` call, including ``graph_exec_id``,
+``kernel_dispatch_count``, agent, and launch timestamps. This flag is
+independent of ``--kernel-trace`` -- the launch summary records are emitted
+regardless of whether kernel-dispatch tracing is subscribed. Since HIP graphs
+are part of the HIP runtime, ``--hip-graph-trace`` is automatically enabled by
+``--hip-trace`` and ``--hip-runtime-trace`` unless explicitly disabled. For
+CSV, OTF2, and Perfetto views of graph launches, collect rocpd output and
+convert it with the rocpd tools.
+
+Determinism contract
+^^^^^^^^^^^^^^^^^^^^
+
+The ``graph_node_id`` value identifies the same source node across launches of
+the same ``hipGraphExec_t`` **if and only if** all of the following hold:
+
+1. Segmented scheduling is in use (default; suppressed by
+   ``DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=0``).
+2. ``AMD_DIRECT_DISPATCH=1`` (default on Linux).
+3. The same host thread is the sole launcher of that ``hipGraphExec_t``.
+4. The graph has not been updated via ``hipGraphExecUpdate`` between launches.
+
+Outside these conditions, attribution may be missing entirely for some or
+all dispatches produced by the launch. The tool maintains the per-thread
+attribution state on the thread that calls ``hipGraphLaunch``; if HIP's
+underlying scheduling writes AQL packets from a different host thread
+(e.g., the classic-path command-processor thread when
+``AMD_DIRECT_DISPATCH=0``, or any worker thread under non-segmented
+scheduling), those packets do not see the attribution state and their
+records are produced with zero ``graph_exec_id`` / ``graph_node_id``
+fields. ``Kernel_Dispatch_Count`` on the ``HIP_GRAPH`` summary record
+may then under-report the actual count. Consumers cannot distinguish
+missing-attribution rows from genuinely non-graph rows.
+
+Limitations
+^^^^^^^^^^^
+
+* On AMD HIP, in-graph memcpy operations are typically dispatched as blit
+  kernels (``__amd_rocclr_copyBuffer``) and surface as kernel dispatches
+  rather than memory-copy records. They are still attributed (via the
+  kernel-dispatch path) but appear as kernel-dispatch records, not
+  memory-copy records.
+* ``graph_exec_id`` is per-``hipGraphExec_t``. Two ``hipGraphInstantiate``
+  calls on the same source ``hipGraph_t`` produce different IDs; consumers
+  wanting cross-instantiation grouping must track that separately.
+* Child graphs nested via ``hipGraphAddChildGraphNode`` are attributed to the
+  outer launch's ``graph_exec_id``; the inner graph's instantiation ID is not
+  surfaced.
+
 Memory copy trace
 +++++++++++++++++++
 
@@ -503,6 +575,49 @@ Here are the contents of ``rocjpeg_api_trace.csv`` file:
    :file: /data/rocjpeg_api_trace.csv
    :widths: 10,10,10,10,10,20,20
    :header-rows: 1
+
+rocSHMEM trace
+++++++++++++++
+
+`rocSHMEM <https://rocm.docs.amd.com/projects/rocshmem/en/latest/>`_ is an intra-kernel networking library that provides GPU-centric networking through an OpenSHMEM-like interface. This option traces the rocSHMEM host-stream API (the ``rocshmem_*_on_stream`` routines that enqueue communication and synchronization operations on a HIP stream).
+
+.. note::
+
+   rocSHMEM tracing requires rocSHMEM to be built with rocprofiler-register support (the ``USE_ROCPROFILER_REGISTER`` build option, enabled by default). See the `rocSHMEM build documentation <https://rocm.docs.amd.com/projects/rocshmem/en/latest/build.html>`_ for details.
+
+.. code-block:: shell
+
+    rocprofv3 --rocshmem-trace -- <application_path>
+
+rocSHMEM is emitted directly only to the JSON and ``rocpd`` (default) output formats. CSV, Perfetto (``.pftrace``), and OTF2 output are produced from the rocpd database via ``rocpd convert``. ``--rocshmem-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
+
+.. code-block:: shell
+
+    rocprofv3 --rocshmem-trace -- <application_path>
+    rocpd convert -i out_results.db --output-format csv
+
+The conversion generates a ``rocshmem_api_trace.csv`` file. Here are its contents:
+
+.. csv-table:: rocSHMEM trace
+   :file: /data/rocshmem_api_trace.csv
+   :widths: 10,10,10,10,10,20,20
+   :header-rows: 1
+
+Perfetto will also show rocSHMEM API arguments. Pointers will not be dereferenced and only the address will be displayed.
+
+hipFILE trace
++++++++++++++
+
+`hipFILE <https://github.com/ROCm/rocm-systems/tree/develop/projects/hipfile>`_ is a GPU-aware file I/O library for HIP applications. This option traces the hipFILE API.
+
+.. code-block:: shell
+
+    rocprofv3 --hipfile-trace --output-format json rocpd -- <application_path>
+
+The above command stores hipFILE API records in the JSON results file and the rocpd database file.
+
+The hipFILE records include API arguments. Pointers are not dereferenced unless argument
+iteration is configured to do so.
 
 OMPT trace
 ++++++++++
@@ -1730,6 +1845,17 @@ Here are the properties of the JSON output schema:
                - **size** *(integer, required)*: Size of the rocDecode API record.
                - **kind** *(integer, required)*: Kind of the rocDecode API.
                - **operation** *(integer, required)*: Operation of the rocDecode API.
+               - **correlation_id** *(object, required)*: Correlation ID information.
+                  - **internal** *(integer, required)*: Internal correlation ID.
+                  - **external** *(integer, required)*: External correlation ID.
+               - **start_timestamp** *(integer, required)*: Start timestamp.
+               - **end_timestamp** *(integer, required)*: End timestamp.
+               - **thread_id** *(integer, required)*: Thread ID.
+         - **hipfile_api** *(array)*: hipFILE API records.
+            - **Items** *(object)*
+               - **size** *(integer, required)*: Size of the hipFILE API record.
+               - **kind** *(integer, required)*: Kind of the hipFILE API.
+               - **operation** *(integer, required)*: Operation of the hipFILE API.
                - **correlation_id** *(object, required)*: Correlation ID information.
                   - **internal** *(integer, required)*: Internal correlation ID.
                   - **external** *(integer, required)*: External correlation ID.

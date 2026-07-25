@@ -341,7 +341,7 @@ Configuring thread limits
 
 ROCm Systems Profiler uses a single CMake configuration option to control thread-related memory allocation:
 
-* ``ROCPROFSYS_MAX_THREADS``: Maximum number of threads supported (default if not explicitly set: ``128`` if nproc < 8, otherwise ``pow2_ceil(16 * nproc)``; must be a power of 2)
+* ``ROCPROFSYS_MAX_THREADS``: Maximum number of threads supported (default if not explicitly set: ``2048`` if nproc < 128, otherwise ``pow2_ceil(16 * nproc)``; must be a power of 2)
 
 This setting controls:
 
