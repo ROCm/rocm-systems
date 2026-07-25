@@ -1,0 +1,15 @@
+# Linker version script for the shipped rocjitsu HSA-tools hook DSO.
+#
+# ROCr loads this library via HSA_TOOLS_LIB and only ever calls OnLoad/OnUnload.
+# Everything else -- the rj_code_* C API and every C++/STL template instantiation
+# pulled in from the statically-linked rocjitsu_* object libraries -- is internal
+# and must NOT be part of this plugin's public ABI. -fvisibility=hidden does not
+# hide symbols that come from those static archives, so this script forces
+# everything except the two entry points to local linkage.
+{
+  global:
+    OnLoad;
+    OnUnload;
+  local:
+    *;
+};

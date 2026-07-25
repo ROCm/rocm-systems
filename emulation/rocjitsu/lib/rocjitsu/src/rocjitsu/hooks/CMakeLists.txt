@@ -46,17 +46,37 @@ function(rj_configure_hooks_target target)
     endif()
 endfunction()
 
+# Restrict a hook DSO's exported symbols to exactly @p map_file's global list.
+# ROCr only calls OnLoad/OnUnload; every rj_code_* C-API symbol and STL template
+# instantiation pulled from the statically-linked rocjitsu_* archives would
+# otherwise leak into this plugin's public ABI (-fvisibility=hidden does not hide
+# symbols that originate in static archives). A GNU-ld/lld version script forces
+# everything outside the script's `global:` list to local linkage.
+function(rj_restrict_hook_exports target map_file)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang" AND NOT APPLE)
+        set(script "${CMAKE_CURRENT_SOURCE_DIR}/${map_file}")
+        target_link_options(
+            ${target}
+            PRIVATE "LINKER:--version-script=${script}"
+        )
+        set_target_properties(${target} PROPERTIES LINK_DEPENDS "${script}")
+    endif()
+endfunction()
+
 # Shipped library: NEVER carries the rj_test_* entry points, so a release build's
 # public ABI is clean regardless of BUILD_TESTING. This is the only variant the
-# top-level install rule installs.
+# top-level install rule installs. The version script pins its exports to
+# OnLoad/OnUnload only.
 add_library(rocjitsu_hooks SHARED)
 set_target_properties(rocjitsu_hooks PROPERTIES OUTPUT_NAME rocjitsu_hooks)
 rj_configure_hooks_target(rocjitsu_hooks)
+rj_restrict_hook_exports(rocjitsu_hooks rocjitsu_hooks.map)
 
 # Test-only instrumented copy: identical build plus RJ_HOOK_TEST_HOOKS, which
 # exports the rj_test_* symbols the unit tests link against. It is NOT installed,
 # so the test ABI never ships. The tests link this target instead of the shipped
-# one (see tests/CMakeLists.txt).
+# one (see tests/CMakeLists.txt). Its version script exports OnLoad/OnUnload plus
+# rj_test_* (nothing else leaks).
 if(BUILD_TESTING)
     add_library(rocjitsu_hooks_testable SHARED)
     set_target_properties(
@@ -68,4 +88,5 @@ if(BUILD_TESTING)
         rocjitsu_hooks_testable
         PRIVATE RJ_HOOK_TEST_HOOKS=1
     )
+    rj_restrict_hook_exports(rocjitsu_hooks_testable rocjitsu_hooks_testable.map)
 endif()

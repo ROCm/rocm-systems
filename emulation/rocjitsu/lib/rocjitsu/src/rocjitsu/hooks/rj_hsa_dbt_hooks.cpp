@@ -967,17 +967,33 @@ enum class DeferredTranslationState : uint8_t {
 /// and retains the original source bytes for the DBT run deferred to the first
 /// dispatch. On that first dispatch the source is translated into a **hidden
 /// child executable** (§14.2/§14.3) whose kernel objects replace the proxy's in
-/// the dispatch packet. This is a plain-data record; the registry owns locking.
+/// the dispatch packet.
+///
+/// **Single-flight (§14.4):** the first dispatching thread transitions
+/// `kUnseen -> kTranslating`, runs the (heavy) translation + child create OUTSIDE
+/// the registry lock and this object's own lock, then transitions to
+/// `kReady | kFailed` and notifies waiters. Concurrent dispatchers of the same
+/// object block on @ref cv until the state leaves `kTranslating`. `state`,
+/// `kernel_object_map`, and the ready fields are guarded by @ref mutex; the
+/// immutable inputs (`parent_executable`, `agent`, `source_bytes`) are set once at
+/// record time and read without the lock.
 struct DeferredObject {
   hsa_executable_t parent_executable{}; ///< Executable the app loaded the proxy into.
   hsa_agent_t agent{};                  ///< Physical A0 agent the proxy loaded on.
   std::shared_ptr<const std::vector<uint8_t>> source_bytes; ///< Retained original B0 ELF.
   hsa_loaded_code_object_t proxy_loaded{};                  ///< Proxy's loaded-code-object handle.
+
+  std::mutex mutex;           ///< Guards state / maps / ready fields (per-object).
+  std::condition_variable cv; ///< Signaled when state leaves kTranslating.
   DeferredTranslationState state = DeferredTranslationState::kUnseen;
 
-  // Populated when translation completes (kReady):
+  // Populated when translation completes (kReady), guarded by @ref mutex:
   hsa_executable_t child_executable{}; ///< Hidden executable holding translated A0 code.
   std::shared_ptr<const std::vector<uint8_t>> translated_bytes; ///< Retained translated ELF.
+  /// Proxy kernel_object (KD address in the parent) -> translated kernel_object
+  /// (KD address in the hidden child). The dispatch rewrite (Step 4.2) uses this
+  /// to redirect a proxy dispatch to its translated kernel.
+  std::unordered_map<uint64_t, uint64_t> kernel_object_map;
 };
 
 /// @brief Process-wide registry of lazily-deferred code objects.
@@ -1004,17 +1020,38 @@ public:
     return object;
   }
 
-  /// @brief Find the deferred object for a proxy kernel object handle.
-  ///
-  /// @details Step 4 will resolve a dispatch's proxy `kernel_object` to its
-  /// `DeferredObject` through the kernel-object map; for Step 3 the registry only
-  /// needs `{executable, agent}` lookup to prove records are stored and retrieved.
+  /// @brief Find a deferred object by its {executable, agent} key.
   std::shared_ptr<DeferredObject> find(hsa_executable_t executable, hsa_agent_t agent) {
     std::lock_guard lock(mutex_);
     auto it = map_.find(Key{executable.handle, agent.handle});
     if (it == map_.end() || it->second.empty())
       return nullptr;
     return it->second.front();
+  }
+
+  /// @brief Associate a proxy kernel_object (KD address) with its deferred object.
+  ///
+  /// @details Populated when the runtime queries a proxy kernel's kernel_object
+  /// (the symbol-info path). The dispatch seam then resolves a packet's
+  /// `kernel_object` -> `DeferredObject` in O(1) without knowing the executable.
+  void register_proxy_kernel_object(uint64_t proxy_kernel_object,
+                                    const std::shared_ptr<DeferredObject> &object) {
+    if (proxy_kernel_object == 0 || object == nullptr)
+      return;
+    std::lock_guard lock(mutex_);
+    by_proxy_kernel_object_[proxy_kernel_object] = object;
+  }
+
+  /// @brief Resolve a dispatch packet's proxy kernel_object to its deferred object.
+  ///
+  /// @details Returns nullptr when the kernel_object is not a tracked proxy (an
+  /// ordinary non-lazy dispatch), so the doorbell seam leaves such packets alone.
+  std::shared_ptr<DeferredObject> find_by_proxy_kernel_object(uint64_t proxy_kernel_object) {
+    if (proxy_kernel_object == 0)
+      return nullptr;
+    std::lock_guard lock(mutex_);
+    auto it = by_proxy_kernel_object_.find(proxy_kernel_object);
+    return it == by_proxy_kernel_object_.end() ? nullptr : it->second.lock();
   }
 
   /// @brief Number of deferred objects recorded for @p executable across agents.
@@ -1050,6 +1087,7 @@ public:
   void clear() {
     std::lock_guard lock(mutex_);
     map_.clear();
+    by_proxy_kernel_object_.clear();
   }
 
 private:
@@ -1062,7 +1100,71 @@ private:
 
   std::mutex mutex_;
   std::unordered_map<Key, std::vector<std::shared_ptr<DeferredObject>>, KeyHash> map_;
+  // Reverse index for the dispatch seam. Weak so a destroyed executable's records
+  // (dropped from map_) do not keep a DeferredObject alive here; a stale weak_ptr
+  // resolves to nullptr and the packet is treated as a non-lazy dispatch.
+  std::unordered_map<uint64_t, std::weak_ptr<DeferredObject>> by_proxy_kernel_object_;
 };
+
+/// @brief Outcome of a single-flight materialization attempt.
+enum class MaterializeResult : uint8_t {
+  kReady,  ///< The object is translated and its hidden child is loaded.
+  kFailed, ///< Translation/child-create failed permanently for this object.
+};
+
+/// @brief Run @p produce exactly once for @p object under concurrent dispatch (§14.4).
+///
+/// @details The single-flight state machine. The first thread to observe
+/// `kUnseen` claims the work: it flips to `kTranslating`, releases the object lock,
+/// runs @p produce (the heavy translate + hidden-child create, which MUST NOT be
+/// held under any registry or object lock -- it calls saved HSA APIs and the DBT
+/// core), then re-acquires the lock, publishes `kReady | kFailed`, and notifies
+/// waiters. Concurrent threads that find `kTranslating` wait on the CV until the
+/// state is terminal. `kFailed` is permanent: a failed object never retries and
+/// every later dispatch fails closed (§14.5). @p produce returns true on success
+/// and populates the object's ready fields (child_executable, translated_bytes,
+/// kernel_object_map) itself.
+///
+/// @param object The deferred object; its `mutex`/`cv`/`state` drive single-flight.
+/// @param produce Callable `bool()` run once by the winning thread with NO lock held.
+/// @returns kReady if the object is (now or already) translated, else kFailed.
+template <typename Produce>
+[[nodiscard]] MaterializeResult single_flight_materialize(DeferredObject &object,
+                                                          Produce &&produce) {
+  std::unique_lock lock(object.mutex);
+  for (;;) {
+    switch (object.state) {
+    case DeferredTranslationState::kReady:
+      return MaterializeResult::kReady;
+    case DeferredTranslationState::kFailed:
+      return MaterializeResult::kFailed;
+    case DeferredTranslationState::kTranslating:
+      // Another thread owns the work; wait until it publishes a terminal state.
+      object.cv.wait(lock, [&] { return object.state != DeferredTranslationState::kTranslating; });
+      continue; // Re-check the (now terminal) state at the top.
+    case DeferredTranslationState::kUnseen:
+      object.state = DeferredTranslationState::kTranslating;
+      lock.unlock();
+      bool ok = false;
+      try {
+        ok = produce();
+      } catch (...) {
+        // The DBT core / HSA calls should not throw across here, but a terminal
+        // state must always be published so waiters never hang.
+        ok = false;
+      }
+      lock.lock();
+      object.state = ok ? DeferredTranslationState::kReady : DeferredTranslationState::kFailed;
+      object.cv.notify_all();
+      return ok ? MaterializeResult::kReady : MaterializeResult::kFailed;
+    }
+  }
+}
+
+/// @brief The single-flight producer: translate a deferred object and load its child.
+/// Defined below; forward-declared so the dispatch-seam registry can materialize on
+/// the first dispatch. Runs OUTSIDE any registry/queue lock.
+[[nodiscard]] bool materialize_deferred_object(DeferredObject &object);
 
 /// @brief Record memory-backed HSA code-object bytes for later DBT translation.
 hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
@@ -2830,6 +2932,15 @@ public:
     return registry;
   }
 
+#if defined(RJ_HOOK_TEST_HOOKS)
+  /// @brief Test shim: run the lazy kernel_object rewrite on one packet.
+  static void rewrite_lazy_kernel_object_for_test(hsa_kernel_dispatch_packet_t &packet) {
+    const uint16_t header =
+        std::atomic_ref<uint16_t>(packet.header).load(std::memory_order_acquire);
+    rewrite_lazy_kernel_object(packet, header);
+  }
+#endif
+
   /// @brief Track a real host queue returned to the application.
   void record_queue(hsa_queue_t *queue, hsa_agent_t host_agent,
                     bool uses_packet_interceptor = false) {
@@ -2930,10 +3041,58 @@ public:
     }
   }
 
+  /// @brief Materialize deferred proxy dispatches for a doorbell, holding no lock.
+  ///
+  /// @details Snapshots the target queue's ring pointer + published packet range
+  /// under a brief queue lock, releases it, then runs the (heavy, single-flight)
+  /// translation for every not-yet-ready proxy in that range OUTSIDE the queue
+  /// lock (§14.4). The ring memory stays valid for the read because the queue is
+  /// live while its doorbell is being rung.
+  void materialize_pending_lazy_dispatch_for_doorbell(hsa_signal_t signal,
+                                                      hsa_signal_value_t value) {
+    void *ring_base = nullptr;
+    uint32_t ring_size = 0;
+    uint64_t begin_packet_id = 0;
+    uint64_t end_packet_id = 0;
+    {
+      std::lock_guard lock(mutex_);
+      auto doorbell_it = queues_by_doorbell_.find(signal.handle);
+      if (doorbell_it == queues_by_doorbell_.end())
+        return;
+      auto queue_it = queues_by_ptr_.find(doorbell_it->second);
+      if (queue_it == queues_by_ptr_.end())
+        return;
+      QueueState &qs = queue_it->second;
+      if (qs.queue == nullptr || qs.queue->base_address == nullptr || qs.queue->size == 0)
+        return;
+      if (qs.uses_packet_interceptor)
+        return;
+      const uint64_t packet_id = static_cast<uint64_t>(value);
+      begin_packet_id =
+          (packet_id >= qs.next_packet_id && packet_id - qs.next_packet_id < qs.queue->size)
+              ? qs.next_packet_id
+              : packet_id;
+      end_packet_id = packet_id + 1;
+      // Copy the ring pointer + size out under the lock; do NOT retain a reference
+      // to qs. The app owns the queue's lifetime while ringing its doorbell.
+      ring_base = qs.queue->base_address;
+      ring_size = qs.queue->size;
+    }
+    materialize_pending_lazy_dispatch(ring_base, ring_size, begin_packet_id, end_packet_id);
+  }
+
   /// @brief Rewrite any kernel dispatch packet made visible by this doorbell.
   void rewrite_before_doorbell(hsa_signal_t signal, hsa_signal_value_t value) {
     if (value < 0)
       return;
+
+    // Lazy pre-pass: translate any not-yet-ready proxy dispatch in the newly
+    // published range BEFORE taking the queue lock, because materialization runs
+    // the DBT core + saved HSA APIs and must never hold this mutex (§14.4). This
+    // briefly locks only to snapshot the queue pointer + range, then materializes
+    // unlocked; the locked rewrite below then just swaps kernel_objects O(1).
+    materialize_pending_lazy_dispatch_for_doorbell(signal, value);
+
     std::lock_guard lock(mutex_);
     auto doorbell_it = queues_by_doorbell_.find(signal.handle);
     static std::atomic<uint32_t> doorbell_trace_count{0};
@@ -3488,6 +3647,72 @@ private:
         static_cast<unsigned long long>(prepared.state_address));
   }
 
+  /// @brief Swap a proxy kernel_object for its translated child, if ready.
+  ///
+  /// @details Called from rewrite_packet under the queue lock. Only a fast,
+  /// read-only map lookup runs here (find_by_proxy_kernel_object takes the
+  /// DeferredObjectRegistry lock, never this queue lock). The heavy translation
+  /// happened earlier in the pre-doorbell materialize pass, which runs OUTSIDE
+  /// this lock. A proxy dispatch that is not yet kReady here is left unchanged;
+  /// materialize_pending_lazy_dispatch guarantees it was made ready before the
+  /// doorbell forwards, so this is the common (already-ready) path.
+  static void rewrite_lazy_kernel_object(hsa_kernel_dispatch_packet_t &packet, uint16_t header) {
+    const uint64_t proxy_ko = packet.kernel_object;
+    auto object = DeferredObjectRegistry::instance().find_by_proxy_kernel_object(proxy_ko);
+    if (object == nullptr)
+      return; // Not a tracked proxy: an ordinary non-lazy dispatch.
+
+    uint64_t translated_ko = 0;
+    {
+      std::lock_guard object_lock(object->mutex);
+      if (object->state != DeferredTranslationState::kReady)
+        return; // Not ready (or failed): leave the packet; fail-closed elsewhere.
+      auto it = object->kernel_object_map.find(proxy_ko);
+      if (it == object->kernel_object_map.end())
+        return;
+      translated_ko = it->second;
+    }
+    if (translated_ko == 0 || translated_ko == proxy_ko)
+      return;
+
+    // INVALID->restore sandwich so the CP never reads a half-updated packet.
+    publish_packet_header(packet, make_invalid_packet_header(header));
+    packet.kernel_object = translated_ko;
+    publish_packet_header(packet, header);
+  }
+
+  /// @brief Materialize (translate + load child) any proxy dispatch in a range.
+  ///
+  /// @details Runs BEFORE the queue lock is taken (§14.4): it single-flights the
+  /// translation of every not-yet-ready proxy kernel about to be published, so the
+  /// subsequent locked rewrite_packet only does the O(1) kernel_object swap. The
+  /// heavy work (DBT, child create/load/freeze) must never run under the queue
+  /// mutex. Takes the ring pointer + size by value (captured under the queue lock
+  /// by the caller) so it holds NO reference to the QueueState, which a concurrent
+  /// queue destroy could invalidate. Reads packets from the ring read-only.
+  static void materialize_pending_lazy_dispatch(void *ring_base, uint32_t ring_size,
+                                                uint64_t begin_packet_id, uint64_t end_packet_id) {
+    if (ring_base == nullptr || ring_size == 0)
+      return;
+    auto *packets = static_cast<hsa_kernel_dispatch_packet_t *>(ring_base);
+    for (uint64_t packet_id = begin_packet_id; packet_id < end_packet_id; ++packet_id) {
+      const uint32_t slot = static_cast<uint32_t>(packet_id % ring_size);
+      hsa_kernel_dispatch_packet_t &packet = packets[slot];
+      const uint16_t header =
+          std::atomic_ref<uint16_t>(packet.header).load(std::memory_order_acquire);
+      if (aql_packet_type(header) != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+        continue;
+      auto object =
+          DeferredObjectRegistry::instance().find_by_proxy_kernel_object(packet.kernel_object);
+      if (object == nullptr)
+        continue;
+      // Single-flight: translate exactly once even if several queues/threads reach
+      // this proxy concurrently. Runs outside the queue lock (we hold none here).
+      (void)single_flight_materialize(*object,
+                                      [&] { return materialize_deferred_object(*object); });
+    }
+  }
+
   static void rewrite_packet_range(QueueState &state, uint64_t begin_packet_id,
                                    uint64_t end_packet_id, bool advance_contiguous_cursor) {
     // The HSA queue can contain invalid/no-op holes before later ready dispatches.
@@ -3518,6 +3743,13 @@ private:
       retire_slot_buffers(state, slot);
       return true;
     }
+
+    // Lazy B0->A0: if this packet dispatches a proxy kernel that has already been
+    // translated (the pre-doorbell materialize pass ran outside this lock), swap
+    // its kernel_object for the translated child's. A proxy that is NOT yet ready
+    // was either just materialized by the pre-pass or is genuinely not lazy; the
+    // map lookup is O(1) and read-only, so it is safe under the queue lock.
+    rewrite_lazy_kernel_object(packet, header);
 
     if (slot_buffers.kernarg != nullptr && packet.kernarg_address == slot_buffers.kernarg)
       return true;
@@ -4550,6 +4782,91 @@ create_hidden_child_executable(const std::shared_ptr<const std::vector<uint8_t>>
   return HSA_STATUS_SUCCESS;
 }
 
+/// @brief Read the kernel_object (KD address) for @p kernel_name in @p executable.
+///
+/// @details Uses the saved (unpatched) symbol getters so resolution reflects the
+/// loader's real addresses regardless of any wrappers. Returns 0 when the symbol
+/// or its kernel_object cannot be read.
+[[nodiscard]] uint64_t kernel_object_for(hsa_executable_t executable, hsa_agent_t agent,
+                                         const std::string &kernel_name) {
+  auto *get_symbol = layer().executable_get_symbol_by_name();
+  auto *symbol_get_info = layer().executable_symbol_get_info();
+  if (get_symbol == nullptr || symbol_get_info == nullptr)
+    return 0;
+  const std::string symbol_name = kernel_name + ".kd";
+  hsa_executable_symbol_t symbol{};
+  if (get_symbol(executable, symbol_name.c_str(), &agent, &symbol) != HSA_STATUS_SUCCESS)
+    return 0;
+  uint64_t kernel_object = 0;
+  if (symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object) !=
+      HSA_STATUS_SUCCESS)
+    return 0;
+  return kernel_object;
+}
+
+/// @brief The single-flight producer: translate @p object and load its child.
+///
+/// @details Runs OUTSIDE any registry or queue lock (§14.4): it invokes the DBT
+/// core and several saved HSA APIs, which must not re-enter the hook's locks.
+/// Translates the retained source bytes B0->A0, creates the hidden child
+/// executable (Step 3), then builds the proxy->translated kernel_object map by
+/// resolving each kernel by name in both the parent (proxy) and the child. On
+/// success the object's ready fields are populated and true is returned; on any
+/// failure the child is torn down and false is returned (the single-flight state
+/// machine then marks the object permanently failed, and dispatches fail closed).
+[[nodiscard]] bool materialize_deferred_object(DeferredObject &object) {
+  if (object.source_bytes == nullptr)
+    return false;
+
+  AmdGpuCodeObject source(object.source_bytes->data(), object.source_bytes->size());
+  if (!source.is_valid())
+    return false;
+
+  BinaryTranslatorOptions translator_options;
+  translator_options.skip_failed_kernels = true;
+  translator_options.input_revision = ProcessorRevision::Gfx1250B0;
+  translator_options.output_revision = ProcessorRevision::Gfx1250A0;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250,
+                              /*target_mach=*/0, translator_options);
+  rocjitsu::TranslatedCodeObject translated = translator.translate(source);
+  if (!translated.dispatchable())
+    return false;
+
+  auto translated_owned =
+      std::make_shared<const std::vector<uint8_t>>(std::move(translated.elf_bytes));
+
+  hsa_executable_t child{};
+  if (create_hidden_child_executable(translated_owned, object.agent, object.parent_executable,
+                                     &child) != HSA_STATUS_SUCCESS)
+    return false;
+
+  // Join proxy and child kernels by name to build the dispatch rewrite map.
+  std::unordered_map<uint64_t, uint64_t> kernel_object_map;
+  for (const std::string &kernel_name : source.kernel_names()) {
+    const uint64_t proxy_ko =
+        kernel_object_for(object.parent_executable, object.agent, kernel_name);
+    const uint64_t child_ko = kernel_object_for(child, object.agent, kernel_name);
+    if (proxy_ko == 0 || child_ko == 0) {
+      if (auto *destroy = layer().executable_destroy())
+        (void)destroy(child);
+      return false;
+    }
+    kernel_object_map[proxy_ko] = child_ko;
+  }
+
+  // Publish the ready fields. The single-flight producer runs with object.mutex
+  // held only around the state transition; materialize itself runs unlocked, but
+  // these writes happen-before the kReady store the state machine performs after
+  // produce() returns, so concurrent waiters that observe kReady see them.
+  object.child_executable = child;
+  object.translated_bytes = std::move(translated_owned);
+  object.kernel_object_map = std::move(kernel_object_map);
+  // Retain the translated bytes for the child executable's lifetime, matching the
+  // eager path's contract that ROCR aliases loaded ELF until destroy.
+  TranslatedExecutableRegistry::instance().retain(child, object.translated_bytes);
+  return true;
+}
+
 /// @brief Load a forwarded auto-A0 object from an authoritative hook-owned snapshot.
 ///
 /// @details Used for the auto-A0 branch that forwards an object to the A0 agent
@@ -5122,5 +5439,83 @@ extern "C" RJ_HOOK_EXPORT uint64_t rj_test_create_hidden_child(uint64_t parent_e
                                      &child) != HSA_STATUS_SUCCESS)
     return 0;
   return child.handle;
+}
+
+/// @brief Test-only: hammer single_flight_materialize with @p thread_count threads.
+///
+/// @details Verifies the §14.4 single-flight state machine: the producer must run
+/// exactly once no matter how many threads race the first dispatch, every thread
+/// must observe the same terminal result, and a failure must be permanent. The
+/// producer sleeps briefly so threads genuinely overlap in kTranslating. Returns
+/// the number of times the producer actually ran; the test asserts it is 1 and
+/// that all threads saw the same result. When @p succeed is false the producer
+/// returns failure, so all threads must observe kFailed and a re-run stays failed.
+extern "C" RJ_HOOK_EXPORT unsigned rj_test_single_flight_producer_runs(unsigned thread_count,
+                                                                       bool succeed) {
+  DeferredObject object;
+  std::atomic<unsigned> producer_runs{0};
+  std::atomic<unsigned> ready_count{0};
+  std::atomic<unsigned> failed_count{0};
+
+  auto produce = [&]() -> bool {
+    producer_runs.fetch_add(1, std::memory_order_relaxed);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    return succeed;
+  };
+
+  std::vector<std::thread> threads;
+  threads.reserve(thread_count);
+  for (unsigned i = 0; i < thread_count; ++i) {
+    threads.emplace_back([&] {
+      if (single_flight_materialize(object, produce) == MaterializeResult::kReady)
+        ready_count.fetch_add(1, std::memory_order_relaxed);
+      else
+        failed_count.fetch_add(1, std::memory_order_relaxed);
+    });
+  }
+  for (auto &thread : threads)
+    thread.join();
+
+  // A second call after the terminal state is reached must NOT re-run the producer
+  // (kReady short-circuits; kFailed is permanent).
+  (void)single_flight_materialize(object, produce);
+
+  // Encode the observed invariants so one return value proves all of them:
+  // low 16 bits = producer runs; bit 16 = "all threads agreed with `succeed`".
+  const unsigned agreed = succeed
+                              ? (ready_count.load() == thread_count && failed_count.load() == 0)
+                              : (failed_count.load() == thread_count && ready_count.load() == 0);
+  return producer_runs.load() | (agreed ? 0x10000u : 0u);
+}
+
+/// @brief Test-only: drive the dispatch-seam kernel_object rewrite in isolation.
+///
+/// @details Builds a READY DeferredObject with a single proxy->child kernel_object
+/// mapping, registers the proxy kernel_object in the reverse index, writes a
+/// kernel-dispatch packet carrying @p proxy_ko, runs the doorbell-seam rewrite, and
+/// returns the packet's kernel_object afterward. The full translate/load producer
+/// is exercised elsewhere; this proves the rewrite mechanic (proxy KO in the ring
+/// -> translated KO) without needing the emulator. Returns the rewritten
+/// kernel_object (should equal @p child_ko for a mapped proxy).
+extern "C" RJ_HOOK_EXPORT uint64_t rj_test_lazy_rewrite_kernel_object(uint64_t proxy_ko,
+                                                                      uint64_t child_ko) {
+  auto object = std::make_shared<DeferredObject>();
+  object->parent_executable = hsa_executable_t{0xABC};
+  object->agent = hsa_agent_t{0xDEF};
+  {
+    std::lock_guard lock(object->mutex);
+    object->state = DeferredTranslationState::kReady;
+    object->kernel_object_map[proxy_ko] = child_ko;
+  }
+  DeferredObjectRegistry::instance().record(object);
+  DeferredObjectRegistry::instance().register_proxy_kernel_object(proxy_ko, object);
+
+  // A valid kernel-dispatch header (type field = KERNEL_DISPATCH).
+  hsa_kernel_dispatch_packet_t packet{};
+  packet.header = static_cast<uint16_t>(HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+  packet.kernel_object = proxy_ko;
+
+  VirtualLdsDispatchQueueRegistry::rewrite_lazy_kernel_object_for_test(packet);
+  return packet.kernel_object;
 }
 #endif // RJ_HOOK_TEST_HOOKS

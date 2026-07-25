@@ -49,6 +49,8 @@ extern "C" size_t rj_test_deferred_count(uint64_t executable_handle);
 extern "C" uint64_t rj_test_create_hidden_child(uint64_t parent_executable_handle,
                                                 uint64_t agent_handle, const void *bytes,
                                                 size_t size);
+extern "C" unsigned rj_test_single_flight_producer_runs(unsigned thread_count, bool succeed);
+extern "C" uint64_t rj_test_lazy_rewrite_kernel_object(uint64_t proxy_ko, uint64_t child_ko);
 
 namespace {
 
@@ -1800,6 +1802,43 @@ TEST(HsaHooksUnitTest, HiddenChildRollsBackOnFreezeFailure) {
   EXPECT_EQ(child, 0u) << "child create should fail closed when freeze fails";
   EXPECT_EQ(g_fake_create_alt_calls, 1);
   EXPECT_EQ(g_fake_freeze_calls, 1);
+}
+
+// Single-flight (§14.4): under many threads racing the first dispatch of one
+// deferred object, the translation producer runs EXACTLY once and every thread
+// observes the same successful result. Bit 16 of the return encodes "all threads
+// agreed"; the low bits are the producer run count.
+TEST(HsaHooksUnitTest, SingleFlightRunsProducerExactlyOnceOnSuccess) {
+  const unsigned result =
+      rj_test_single_flight_producer_runs(/*thread_count=*/16, /*succeed=*/true);
+  EXPECT_EQ(result & 0xFFFFu, 1u) << "translation producer ran more than once under contention";
+  EXPECT_NE(result & 0x10000u, 0u) << "not all threads observed the same ready result";
+}
+
+// A failed translation is permanent and single-flight: the producer runs once,
+// every racing thread observes failure, and a later attempt does not re-run it.
+TEST(HsaHooksUnitTest, SingleFlightFailureIsPermanentAndOnce) {
+  const unsigned result =
+      rj_test_single_flight_producer_runs(/*thread_count=*/16, /*succeed=*/false);
+  EXPECT_EQ(result & 0xFFFFu, 1u) << "failed producer ran more than once (should be permanent)";
+  EXPECT_NE(result & 0x10000u, 0u) << "not all threads observed the same failed result";
+}
+
+// The dispatch-seam rewrite mechanic (§14.3): a kernel-dispatch packet carrying a
+// tracked, translated proxy kernel_object has it swapped for the child's
+// kernel_object in place. (Full translate/load producer is proven at full stack.)
+TEST(HsaHooksUnitTest, LazyDispatchRewritesProxyKernelObject) {
+  constexpr uint64_t kProxyKo = 0x5000;
+  constexpr uint64_t kChildKo = 0x9000;
+  const uint64_t rewritten = rj_test_lazy_rewrite_kernel_object(kProxyKo, kChildKo);
+  EXPECT_EQ(rewritten, kChildKo) << "proxy kernel_object was not rewritten to the translated child";
+}
+
+// The rewrite is a no-op when the translated kernel_object equals the proxy's
+// (the identity guard), so a packet is never needlessly re-published.
+TEST(HsaHooksUnitTest, LazyDispatchIdentityMapLeavesPacketUnchanged) {
+  const uint64_t unchanged = rj_test_lazy_rewrite_kernel_object(0x7777, 0x7777);
+  EXPECT_EQ(unchanged, 0x7777u) << "identity map should leave the kernel_object unchanged";
 }
 
 // Register a code object image and return its reader handle.

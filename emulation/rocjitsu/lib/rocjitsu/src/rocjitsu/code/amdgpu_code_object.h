@@ -62,6 +62,13 @@ public:
 
   uint64_t kernel_descriptor_offset(const std::string &kernel_name) const override;
 
+  /// @brief Names of every kernel with a descriptor symbol in this object.
+  ///
+  /// @details Used by lazy translation to join a proxy object's kernels to the
+  /// translated child's kernels by name when building the proxy->translated
+  /// kernel_object map. Order is unspecified.
+  [[nodiscard]] std::vector<std::string> kernel_names() const;
+
   /// @brief Smallest per-wavefront SGPR allocation across this object's kernels.
   ///
   /// @details Decodes each kernel descriptor's `GRANULATED_WAVEFRONT_SGPR_COUNT`

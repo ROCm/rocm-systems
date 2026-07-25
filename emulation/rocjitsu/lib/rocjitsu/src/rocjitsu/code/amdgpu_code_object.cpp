@@ -260,6 +260,16 @@ uint64_t AmdGpuCodeObject::kernel_descriptor_offset(const std::string &kernel_na
   return it != kd_offsets_.end() ? it->second : 0;
 }
 
+std::vector<std::string> AmdGpuCodeObject::kernel_names() const {
+  std::vector<std::string> names;
+  names.reserve(kd_offsets_.size());
+  for (const auto &[name, offset] : kd_offsets_) {
+    (void)offset;
+    names.push_back(name);
+  }
+  return names;
+}
+
 namespace {
 
 // CDNA targets encode the wavefront SGPR count in the descriptor even when the
