@@ -22,6 +22,12 @@ table WavefrontState {
   vgprs: [ubyte];  // Vector register file (raw bytes).
   mode: uint32;     // MODE register.
   wave_sched_mode: uint32; // WAVE_SCHED_MODE register.
+  // Trap-temporary registers (TTMP0-15). These are a separate register file,
+  // not the tail of `sgprs`: the ISA decoder routes scalar selectors 108..123
+  // here. Appended last so older checkpoints still load (the accessor returns
+  // null and the wave restores with TTMPs zeroed, which is what a wave that was
+  // never in a trap handler holds anyway).
+  ttmps: [uint32];
 }
 
 /// Serialized state of a compute unit.

@@ -257,7 +257,8 @@ public:
   /// @brief Called by Wavefront::halt() to decrement the WG refcount.
   /// @details When the refcount reaches zero, all WFs in the WG have halted
   /// and the CP is notified via notify_wg_complete.
-  void release_wf(uint32_t dispatch_id, uint32_t wg_id);
+  void release_wf(uint32_t dispatch_id, uint32_t wg_id,
+                  Wavefront::CpCompletionNotice notice = Wavefront::CpCompletionNotice::Send);
 
   /// @brief Roll back a committed-but-never-run workgroup on a dispatch error.
   /// @details Used to unwind an already-committed cluster peer when a later peer in

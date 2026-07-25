@@ -4676,9 +4676,9 @@ class CodeGenerator:
             return (
                 '  static thread_local uint64_t counter = 0;\n'
                 '  counter += 100;\n'
-                '  uint32_t dst = wf.sgpr_alloc().base + inst_.sdata;\n'
-                '  amdgpu::RegisterAccess(wf).write_sgpr(dst, static_cast<uint32_t>(counter));\n'
-                '  amdgpu::RegisterAccess(wf).write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));'
+                '  const uint32_t dst_sel = inst_.sdata;\n'
+                '  amdgpu::write_scalar_selector(wf, dst_sel, static_cast<uint32_t>(counter));\n'
+                '  amdgpu::write_scalar_selector(wf, dst_sel + 1, static_cast<uint32_t>(counter >> 32));'
             )
 
         if cls == 'gl1_wbinv':
@@ -4866,6 +4866,7 @@ class CodeGenerator:
         nd = sem.num_elems if elem_size == 4 else 1
         L.append('  auto d = std::make_unique<amdgpu::ScalarMemState>();')
         L.append(f'  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;')
+        L.append(f'  d->dst_selector = inst_.sdata;')
         L.append(f'  d->num_dwords = {nd};')
         L.append(f'  d->elem_size = {elem_size};')
         L.append(f'  d->sign_extend = {str(sem.sign_extend).lower()};')
@@ -4893,11 +4894,10 @@ class CodeGenerator:
         L.append('  d->is_load = false;')
         self._append_wait_counter_type(L, 'smem_store')
         L.append(f'  d->mtype = {self._mtype_expr(is_smem=True)};')
-        L.append('  auto &cu = wf.cu();')
-        L.append('  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;')
+        L.append('  const uint32_t sdata_sel = inst_.sdata;')
         L.append(f'  for (uint32_t i = 0; i < {nd}; ++i)')
         L.append(
-            '    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);'
+            '    d->store_data[i] = amdgpu::read_scalar_selector(wf, sdata_sel + i);'
         )
         if self.isa_spec.profile.smem_address_uses_access_size:
             addr_args = 'inst_, wf, d->elem_size * d->num_dwords'

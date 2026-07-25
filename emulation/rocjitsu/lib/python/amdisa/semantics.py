@@ -1133,6 +1133,14 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     if name in ('V_MQSAD_PK_U16_U8', 'V_MQSAD_U32_U8', 'V_QSAD_PK_U16_U8'):
         return InstructionSemantics(name, 'nop')
 
+    # Bit count with accumulate: D.u32 = CountOneBits(S0.u32) + S1.u32. The MR
+    # ISA gives no pseudocode, so the generic stem table below would derive this
+    # as a plain unary popcount and silently drop S1 -- the same shape as the
+    # V_MBCNT_* pair right underneath, which is why it is classified the same
+    # way rather than as a 'vector_unary'.
+    if name == 'V_BCNT_U32_B32':
+        return InstructionSemantics(name, 'vector_bcnt', data_type='u32')
+
     # Masked bit count
     if name == 'V_MBCNT_LO_U32_B32':
         return InstructionSemantics(

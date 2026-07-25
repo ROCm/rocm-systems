@@ -8,6 +8,7 @@
 #include "checkpoint_generated.h"
 #include "flatbuffers/flatbuffers.h"
 
+#include <array>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
@@ -126,10 +127,16 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           auto vgprs_vec =
               builder.CreateVector(cu->raw_vgpr_data(w->vgpr_alloc().base), vgpr_bytes);
 
+          // TTMPs are their own file, so they are not covered by sgprs_vec.
+          std::array<uint32_t, 16> ttmps{};
+          for (uint32_t t = 0; t < ttmps.size(); ++t)
+            ttmps[t] = w->ttmp(t);
+          auto ttmps_vec = builder.CreateVector(ttmps.data(), ttmps.size());
+
           auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(),
                                               w->vcc(), w->m0(), w->is_halted(), w->status_raw(),
                                               sgprs_vec, vgprs_vec, w->mode_raw(),
-                                              w->wave_sched_mode_raw());
+                                              w->wave_sched_mode_raw(), ttmps_vec);
           wf_offsets.push_back(wfs);
         }
 
@@ -259,6 +266,13 @@ LoadedConfig restore_checkpoint(const std::string &path) {
               cu->write_sgpr(wf->sgpr_alloc().base + static_cast<uint32_t>(r),
                              sgprs->Get(static_cast<unsigned>(r)));
             }
+          }
+
+          // Absent on checkpoints written before TTMPs were split out of the
+          // SGPR file; those waves restore with TTMPs zeroed.
+          if (auto *ttmps = wf_state->ttmps()) {
+            for (uint32_t t = 0; t < ttmps->size() && t < 16; ++t)
+              wf->set_ttmp(t, ttmps->Get(t));
           }
 
           if (auto *vgprs = wf_state->vgprs()) {

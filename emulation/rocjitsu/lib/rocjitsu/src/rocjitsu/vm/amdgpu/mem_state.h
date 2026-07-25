@@ -72,6 +72,15 @@ struct ScalarMemState : DynamicInstState {
   ScalarMemState() { tag_ = SCALAR_MEM; }
   uint64_t addr = 0;
   uint32_t dst_reg_base = 0;
+  /// @brief The SDATA operand selector, before it was resolved to a physical
+  /// register.
+  /// @details Selectors 108..123 name the trap-temporary file rather than a
+  /// slot in the wave's SGPR allocation, so the load write-back has to dispatch
+  /// on the selector; dst_reg_base is meaningless for those. The ROCr trap
+  /// handler loads straight into TTMPs (`s_load_dwordx2 ttmp[2:3], ...`), so
+  /// this is a live path, and writing dst_reg_base for one would land outside
+  /// the wave's own allocation.
+  uint32_t dst_selector = 0;
   uint32_t num_dwords = 0;
   uint32_t elem_size = 4;
   bool sign_extend = false;

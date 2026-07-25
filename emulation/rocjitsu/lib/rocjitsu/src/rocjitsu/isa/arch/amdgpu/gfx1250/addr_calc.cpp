@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -151,11 +152,9 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
 
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
                                 uint32_t access_size_bytes) {
-  auto &cu = wf.cu();
   assert(access_size_bytes != 0);
-  uint32_t sbase = wf.sgpr_alloc().base + inst.sbase * 2;
-  uint64_t base = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sbase + 1)) << 32) |
-                  amdgpu::RegisterAccess(cu).read_sgpr(sbase);
+  const uint32_t sbase_sel = inst.sbase * 2;
+  uint64_t base = amdgpu::read_scalar_selector64(wf, sbase_sel);
   int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   uint32_t scale = inst.scale_offset ? access_size_bytes : 1;
   if (has_smem_offset(inst.soffset))
@@ -215,11 +214,11 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
   uint64_t exec = d.exec_mask;
-  uint32_t sb = wf.sgpr_alloc().base + inst.rsrc;
-  uint32_t srd0 = amdgpu::RegisterAccess(cu).read_sgpr(sb);
-  uint32_t srd1 = amdgpu::RegisterAccess(cu).read_sgpr(sb + 1);
-  uint32_t srd2 = amdgpu::RegisterAccess(cu).read_sgpr(sb + 2);
-  uint32_t srd3 = amdgpu::RegisterAccess(cu).read_sgpr(sb + 3);
+  const uint32_t sb_sel = inst.rsrc;
+  uint32_t srd0 = amdgpu::read_scalar_selector(wf, sb_sel);
+  uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);
+  uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
+  uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
   uint64_t base_addr = buffer_base_addr(srd0, srd1);
   uint64_t num_records = buffer_num_records(srd1, srd2, srd3);
   uint32_t stride = buffer_stride(srd3);

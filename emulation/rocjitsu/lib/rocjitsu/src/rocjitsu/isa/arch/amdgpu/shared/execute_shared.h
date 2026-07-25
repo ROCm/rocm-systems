@@ -1919,18 +1919,18 @@ inline void execute_s_memrealtime_smem([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   static thread_local uint64_t counter = 0;
   counter += 100;
-  uint32_t dst = wf.sgpr_alloc().base + inst.inst_.sdata;
-  amdgpu::RegisterAccess(wf).write_sgpr(dst, static_cast<uint32_t>(counter));
-  amdgpu::RegisterAccess(wf).write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));
+  const uint32_t dst_sel = inst.inst_.sdata;
+  amdgpu::write_scalar_selector(wf, dst_sel, static_cast<uint32_t>(counter));
+  amdgpu::write_scalar_selector(wf, dst_sel + 1, static_cast<uint32_t>(counter >> 32));
 }
 
 template <typename Inst>
 inline void execute_s_memtime_smem([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   static thread_local uint64_t counter = 0;
   counter += 100;
-  uint32_t dst = wf.sgpr_alloc().base + inst.inst_.sdata;
-  amdgpu::RegisterAccess(wf).write_sgpr(dst, static_cast<uint32_t>(counter));
-  amdgpu::RegisterAccess(wf).write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));
+  const uint32_t dst_sel = inst.inst_.sdata;
+  amdgpu::write_scalar_selector(wf, dst_sel, static_cast<uint32_t>(counter));
+  amdgpu::write_scalar_selector(wf, dst_sel + 1, static_cast<uint32_t>(counter >> 32));
 }
 
 template <typename Inst>
@@ -3525,15 +3525,16 @@ inline void execute_v_ashrrev_i64_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_bcnt_u32_b32_vop3([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t,
-                               [](auto a) { return util::popcount_u32_simd(a); });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t,
+                                    [](auto a, auto b) { return util::popcount_u32_simd(a) + b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
+    uint32_t bits = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
+    uint32_t accum = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
     sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
-                            static_cast<uint32_t>(std::popcount(
-                                amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))));
+                            static_cast<uint32_t>(std::popcount(bits)) + accum);
   }
 }
 

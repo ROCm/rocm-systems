@@ -81,6 +81,7 @@ def _register_handlers() -> None:
         gen_vector_cmpx,
     )
     from amdisa.codegen.execute.vector_special import (
+        gen_vector_bcnt,
         gen_vector_mbcnt,
         gen_vector_movrel,
         gen_vector_mad_64_32,
@@ -146,6 +147,7 @@ def _register_handlers() -> None:
     )
 
     # Vector special
+    DISPATCH['vector_bcnt'] = lambda c: gen_vector_bcnt(c.dst_ops, c.src_ops)
     DISPATCH['vector_mbcnt'] = lambda c: gen_vector_mbcnt(c.dst_ops, c.src_ops, c.op)
     DISPATCH['vector_movrel'] = lambda c: gen_vector_movrel(
         c.dst_ops, c.src_ops, c.op, c.profile.uses_vgpr_msb_indexing

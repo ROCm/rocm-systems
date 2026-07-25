@@ -577,7 +577,18 @@ public:
   /// When the refcount reaches zero (all WFs in the WG halted), the CU fires
   /// notify_wg_complete to the CP. This is the sole completion detection path —
   /// driven entirely by s_endpgm → end() → halt().
-  void halt();
+  /// @brief Whether halting should tell the command processor the workgroup
+  /// finished.
+  ///
+  /// @details Suppressed only when the CP is already tearing the queue down and
+  /// is holding, or about to take, hw_queue_mutex_. Notifying from there would
+  /// make the caller acquire hw_queue_mutex_ while it holds the CU's wave-state
+  /// lock, which is the reverse of the order handle_doorbell() uses
+  /// (hw_queue_mutex_ -> dispatch_wf -> wave_state_mutex_) and deadlocks the
+  /// two threads against each other.
+  enum class CpCompletionNotice : uint8_t { Send, Suppress };
+
+  void halt(CpCompletionNotice notice = CpCompletionNotice::Send);
 
   /// @brief End program execution. If all memory ops are drained, halts
   /// immediately. Otherwise, transitions to ENDING and lets the memory

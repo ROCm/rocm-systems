@@ -215,13 +215,14 @@ void ComputeUnitCore::maybe_reset_lds_alloc() {
     reset_lds_alloc();
 }
 
-void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id) {
+void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
+                                 Wavefront::CpCompletionNotice notice) {
   auto key = wg_key(dispatch_id, wg_id);
   auto it = active_wgs_.find(key);
   if (it != active_wgs_.end() && --it->second == 0) {
     plugin_group_->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
     active_wgs_.erase(it);
-    if (cp_)
+    if (cp_ && notice == Wavefront::CpCompletionNotice::Send)
       cp_->notify_wg_complete(dispatch_id, wg_id);
   }
   // The whole workgroup's per-WG LDS region can be reclaimed once the CU has fully

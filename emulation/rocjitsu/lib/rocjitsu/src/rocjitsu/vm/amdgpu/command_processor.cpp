@@ -76,11 +76,14 @@ static_assert(kMaxClusterWorkgroups <= kClusterMulticastMaskBits);
 static_assert(kMaxClusterWorkgroups <= 16,
               "TTMP6 cluster max and max-flat-ID fields are 4 bits wide");
 
-// GFX12 launch-state scalar selectors used by compiler-generated workgroup
-// and cluster identity sequences.
-constexpr uint32_t kGfx12Ttmp6 = 114;
-constexpr uint32_t kGfx12Ttmp7 = 115;
-constexpr uint32_t kGfx12Ttmp9 = 117;
+// GFX12 launch-state TTMP indices used by compiler-generated workgroup and
+// cluster identity sequences. These are indices into the wave's trap-temporary
+// file (Wavefront::ttmp()), not SGPR numbers: the shader reaches them through
+// the TTMP operand encodings (scalar selectors 108..123), which the ISA decoder
+// routes to that file rather than to the SGPR allocation.
+constexpr uint32_t kGfx12Ttmp6 = 6;
+constexpr uint32_t kGfx12Ttmp7 = 7;
+constexpr uint32_t kGfx12Ttmp9 = 9;
 
 // LLVM's gfx1250 architected-SGPR ABI maps TTMP6 as seven 4-bit fields:
 // cluster-local XYZ, cluster-max XYZ, and max-flat-ID from low to high bits.
@@ -396,13 +399,6 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   }
   const auto properties = isa_properties(cu->arch());
   if (properties.uses_ttmp_workgroup_ids) {
-    // The simulator aliases TTMP scalar selectors into the wavefront SGPR
-    // block, so the block must include slots through TTMP9.
-    if (cu->config().sgprs_per_wf <= kGfx12Ttmp9) {
-      throw std::runtime_error("TTMP workgroup-ID launch payload requires at least 118 SGPR "
-                               "slots per wavefront");
-    }
-
     // The ordinary TTMP ABI uses grid coordinates. Targets advertising the
     // clustered extension reinterpret these fields below.
     uint32_t ttmp6 = 0;
@@ -433,9 +429,9 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
       ttmp7 = (cluster_grid_z << 16) | cluster_grid_y;
       ttmp9 = grid_wg_id_x / cluster_size_x;
     }
-    cu->write_sgpr(sbase + kGfx12Ttmp6, ttmp6);
-    cu->write_sgpr(sbase + kGfx12Ttmp7, ttmp7);
-    cu->write_sgpr(sbase + kGfx12Ttmp9, ttmp9);
+    wf->set_ttmp(kGfx12Ttmp6, ttmp6);
+    wf->set_ttmp(kGfx12Ttmp7, ttmp7);
+    wf->set_ttmp(kGfx12Ttmp9, ttmp9);
   }
 
   // Workitem IDs per AMDHSA ABI. The SPI decomposes the flat thread index
@@ -628,22 +624,27 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
 }
 
 void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) {
-  // Retire the queue's waves WITHOUT holding hw_queue_mutex_. The engine thread
-  // takes the two locks the other way round: ComputeUnitCore::step() runs the
-  // whole issue loop under the CU's wave-state lock, and a wave reaching
-  // s_endpgm halts from there into ComputeUnitCore::release_wf(), which calls
-  // CommandProcessor::notify_wg_complete() and takes hw_queue_mutex_. Holding
-  // hw_queue_mutex_ across with_wave_state_locked() here would close that cycle
-  // and deadlock a DESTROY_QUEUE ioctl against the engine worker; being
-  // recursive buys nothing, because the two holders are different threads.
-  // signal_queue_exception() and update_queue() below are ordered the same way
-  // for the same reason.
+  // Retire the queue's waves before touching hw_queue_mutex_, and retire them
+  // with the CP completion callback suppressed.
+  //
+  // Both halves matter, because this CP is nested against the CU wave-state
+  // lock in BOTH directions elsewhere:
+  //   - handle_doorbell() holds hw_queue_mutex_ across dispatch_wf(), which
+  //     takes wave_state_mutex_          (hw_queue -> wave_state)
+  //   - a wave reaching s_endpgm halts from inside step(), which holds
+  //     wave_state_mutex_, into release_wf() -> notify_wg_complete(), which
+  //     takes hw_queue_mutex_            (wave_state -> hw_queue)
+  // Taking hw_queue_mutex_ around the loop would deadlock against the first;
+  // letting halt() notify the CP from under the wave-state lock would deadlock
+  // against the second. Suppressing the notice removes this path from the cycle
+  // entirely, and costs nothing: the queue's DispatchEntry bookkeeping is
+  // erased a few lines below anyway.
   for (auto *cu : cus_) {
     cu->with_wave_state_locked([&] {
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
         auto *wave = cu->wf(slot);
         if (!wave->is_halted() && wave->process_id() == process_id && wave->queue_id() == queue_id)
-          wave->halt();
+          wave->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
       }
     });
   }
