@@ -19,7 +19,7 @@ project(rccl-tests LANGUAGES CXX)
 #==================================================================================================
 option(USE_MPI                     "Build RCCL-tests with MPI support."           OFF)
 option(ENABLE_DEVICE_API           "Build with NCCL Device API support (GIN)."    OFF)
-option(ENABLE_ROCSHMEM             "Build with rocshmem GIN backend support."     OFF)
+option(ENABLE_ROCSHMEM_GIN         "Build with rocshmem GIN backend support."     OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -213,7 +213,7 @@ if (ENABLE_DEVICE_API)
     add_definitions(-DENABLE_DEVICE_API)
 endif()
 
-if (ENABLE_ROCSHMEM)
+if (ENABLE_ROCSHMEM_GIN)
     message(STATUS "rocshmem GIN backend support enabled")
     add_definitions(-DENABLE_ROCSHMEM)
     add_definitions(-DENABLE_ROCSHMEM_GIN)
@@ -224,11 +224,11 @@ if (ENABLE_ROCSHMEM)
             set(ROCSHMEM_INSTALL_DIR "${_mono_root}/projects/rccl/ext/rocshmem")
             message(STATUS "rccl-tests: found rocshmem install at ${ROCSHMEM_INSTALL_DIR}")
         else()
-            message(FATAL_ERROR "ENABLE_ROCSHMEM is ON but ROCSHMEM_INSTALL_DIR is not set "
+            message(FATAL_ERROR "ENABLE_ROCSHMEM_GIN is ON but ROCSHMEM_INSTALL_DIR is not set "
                     "and no install found at ${_mono_root}/projects/rccl/ext/rocshmem")
         endif()
     endif()
-    # Device headers include <rocshmem/rocshmem.hpp> when ENABLE_ROCSHMEM is set.
+    # Device headers include <rocshmem/rocshmem.hpp> when ENABLE_ROCSHMEM_GIN is set.
     # The installed copy has rocshmem_config.h alongside rocshmem.hpp;
     # must come before source includes so the generated config is found.
     include_directories(BEFORE ${ROCSHMEM_INSTALL_DIR}/include)
