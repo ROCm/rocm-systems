@@ -481,6 +481,7 @@ if(HAS_GFX1250_DEVICE_KERNELS)
         PRIVATE
             dbt/relocation_function_table_hip_test.cpp
             dbt/gfx1250_auto_a0_e2e_test.cpp
+            dbt/proxy_code_object_test.cpp
     )
     target_compile_definitions(
         rocjitsu_tests
