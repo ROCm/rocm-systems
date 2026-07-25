@@ -2301,10 +2301,27 @@ build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bi
 
 [[nodiscard]] bool has_supported_check_trap_site(const ConSanResult &result, rj_code_arch_t arch) {
   for (const ConSanKernelInfo &kernel : result.kernels) {
-    if (kernel.preflight_action == ConSanPreflightAction::Reject)
-      continue;
-    for (const ConSanLdsSite &site : kernel.lds_sites) {
-      if (is_supported_check_trap_site(site, arch))
+    if (kernel.preflight_action != ConSanPreflightAction::Reject) {
+      for (const ConSanLdsSite &site : kernel.lds_sites) {
+        if (is_supported_check_trap_site(site, arch))
+          return true;
+      }
+    }
+  }
+  for (const ConSanFunctionInfo &function : result.functions) {
+    for (const ConSanLdsSite &site : function.lds_sites) {
+      if (!is_supported_check_trap_site(site, arch) ||
+          site.owner_descriptor_file_offsets.empty())
+        continue;
+      const bool every_owner_is_plannable =
+          std::ranges::all_of(site.owner_descriptor_file_offsets, [&](uint64_t owner) {
+            const auto kernel =
+                std::ranges::find(result.kernels, owner,
+                                  &ConSanKernelInfo::descriptor_file_offset);
+            return kernel != result.kernels.end() &&
+                   kernel->preflight_action != ConSanPreflightAction::Reject;
+          });
+      if (every_owner_is_plannable)
         return true;
     }
   }

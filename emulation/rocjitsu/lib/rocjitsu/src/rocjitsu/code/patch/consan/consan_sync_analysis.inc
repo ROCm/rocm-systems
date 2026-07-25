@@ -3071,8 +3071,16 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
     destination.execution_owners =
         execution_owners_for_offset(owner_scopes, block_index, destination.text_offset);
   }
-  const auto annotate_flat_sites = [&](auto &containers) {
+  const auto annotate_memory_sites = [&](auto &containers) {
     for (auto &container : containers) {
+      for (ConSanLdsSite &site : container.lds_sites) {
+        const auto owners =
+            execution_owners_for_offset(owner_scopes, block_index, site.text_offset);
+        site.owner_descriptor_file_offsets.clear();
+        site.owner_descriptor_file_offsets.reserve(owners.size());
+        for (const ConSanExecutionOwner &owner : owners)
+          site.owner_descriptor_file_offsets.push_back(owner.descriptor_file_offset);
+      }
       for (ConSanFlatSite &site : container.flat_sites) {
         const auto owners =
             execution_owners_for_offset(owner_scopes, block_index, site.text_offset);
@@ -3083,8 +3091,8 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
       }
     }
   };
-  annotate_flat_sites(result.kernels);
-  annotate_flat_sites(result.functions);
+  annotate_memory_sites(result.kernels);
+  annotate_memory_sites(result.functions);
 
   // A large aggregate code object can contain hundreds of thousands of sync
   // events and sequences. Looking up every sequence member with a linear scan

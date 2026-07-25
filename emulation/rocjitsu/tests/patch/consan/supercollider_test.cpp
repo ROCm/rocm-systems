@@ -479,13 +479,17 @@ TEST(ConSan, FlatCheckTrapAllSupportedPolicyIgnoresNominalPatchLimit) {
       0xBFB00000u, // s_endpgm
   };
   const std::array<uint32_t, 32> function_words = {
-      0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
-      0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
-      0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
-      0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
+      0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
+      0xD5810000u,
+      0x00000000u, // v_mov_b32_e64 v0, s0
+      0xD5810001u,
+      0x00000001u, // v_mov_b32_e64 v1, s1
+      0xEC05007Cu, 0x00000002u,
+      0x00000000u, // flat_load_b32 v2, v[0:1]
       0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xEC05007Cu, 0x00000006u, 0x00000000u, // flat_load_b32
-                                                                                    // v6, v[0:1]
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xEC05007Cu, 0x00000006u,
+      0x00000000u, // flat_load_b32
+                   // v6, v[0:1]
       0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
       0xBF800000u, 0xBF800000u, 0xBF800000u,
       0xBFB00000u, // s_endpgm
@@ -3742,6 +3746,9 @@ TEST(ConSan, Gfx1250CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.probe_lds_check_trap = true;
+  options.delay_mode = ConSanDelayMode::SleepVar;
+  options.delay_nops = 1u;
+  options.delay_var_ssrc = 0u;
   options.scratch_vgpr = 3;
 
   const ConSanResult result = try_patch_consan(bytes, options);
@@ -3754,20 +3761,277 @@ TEST(ConSan, Gfx1250CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
   EXPECT_EQ(patch.kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(patch.scratch_vgpr, 3u);
   EXPECT_FALSE(patch.indirect_pc_sgpr.has_value());
+  ASSERT_TRUE(patch.scalar_vcc_spill_sgpr);
+  ASSERT_TRUE(patch.scalar_vcc_spill_vgpr);
+  EXPECT_NE(*patch.scalar_vcc_spill_sgpr, options.delay_var_ssrc);
+  EXPECT_EQ(patch.required_sgpr_count, static_cast<uint16_t>(*patch.scalar_vcc_spill_sgpr + 1u));
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
-  const auto text = patched.text_sections().front();
-  const uint32_t scalar_save =
-      build_v_mov_b32_e32(/*vdst=*/4, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250);
-  const auto scalar_restore =
-      build_v_readfirstlane_b32(/*sdst=*/0, /*vsrc=*/4, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto scalar_save = instrumentation::build_v_writelane_b32(
+      *patch.scalar_vcc_spill_vgpr, *patch.scalar_vcc_spill_sgpr, 0u, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto scalar_restore = instrumentation::build_v_readlane_b32(
+      *patch.scalar_vcc_spill_sgpr, *patch.scalar_vcc_spill_vgpr, 0u, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(scalar_save);
   ASSERT_TRUE(scalar_restore);
+  const auto text = patched.text_sections().front();
   std::vector<uint32_t> body(patch.trampoline_size / sizeof(uint32_t));
   std::memcpy(body.data(), text->data() + patch.trampoline_offset, patch.trampoline_size);
-  EXPECT_NE(std::ranges::find(body, scalar_save), body.end());
-  EXPECT_NE(std::ranges::find(body, *scalar_restore), body.end());
+  EXPECT_TRUE(contains_subsequence(body, *scalar_save));
+  EXPECT_TRUE(contains_subsequence(body, *scalar_restore));
+}
+
+TEST(ConSan, Gfx1250CheckTrapBorrowsAndPreservesS0WhenRuntimeDelayIsDisabled) {
+  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  std::vector<uint32_t> text_words = {load[0], load[1]};
+  for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+    text_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_scalar_vcc_spill_s0");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 3u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.patches.size(), 1u);
+  const ConSanPatchInfo &patch = result.patches.front();
+  EXPECT_EQ(patch.scalar_vcc_spill_sgpr, 0u);
+  ASSERT_TRUE(patch.scalar_vcc_spill_vgpr);
+  EXPECT_EQ(patch.required_sgpr_count, 1u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto scalar_save = instrumentation::build_v_writelane_b32(
+      *patch.scalar_vcc_spill_vgpr, 0u, /*lane=*/0u, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto scalar_restore = instrumentation::build_v_readlane_b32(
+      0u, *patch.scalar_vcc_spill_vgpr, /*lane=*/0u, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(scalar_save && scalar_restore);
+  const std::vector<uint32_t> body =
+      text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+  EXPECT_TRUE(contains_subsequence(body, *scalar_save));
+  EXPECT_TRUE(contains_subsequence(body, *scalar_restore));
+}
+
+TEST(ConSan, Gfx1250SharedLdsVccSpillUsesAllOwnersCommonSgprAllocation) {
+  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  std::vector<uint32_t> helper_words = {load[0], load[1]};
+  for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+    helper_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+
+  TwoKernelSharedFixtureOptions fixture;
+  std::vector<uint8_t> bytes =
+      make_two_kernel_shared_helper_code_object(fixture, ROCJITSU_CODE_ARCH_RDNA4, helper_words);
+  mutate_elf_header(bytes,
+                    [](Elf64_Ehdr &header) { header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1250; });
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto first_owner =
+      std::ranges::find(original.kernels(), "shared_owner_0", &AmdGpuKernelInfo::name);
+  const auto second_owner =
+      std::ranges::find(original.kernels(), "shared_owner_1", &AmdGpuKernelInfo::name);
+  ASSERT_NE(first_owner, original.kernels().end());
+  ASSERT_NE(second_owner, original.kernels().end());
+  const auto set_sgpr_granulation = [&](uint64_t descriptor_offset, uint32_t granulated) {
+    KD descriptor{};
+    std::memcpy(&descriptor, bytes.data() + descriptor_offset, sizeof(descriptor));
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, granulated);
+    std::memcpy(bytes.data() + descriptor_offset, &descriptor, sizeof(descriptor));
+  };
+  set_sgpr_granulation(first_owner->descriptor_file_offset, 3u);
+  set_sgpr_granulation(second_owner->descriptor_file_offset, 0u);
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.delay_mode = ConSanDelayMode::SleepVar;
+  options.delay_nops = 1u;
+  options.delay_var_ssrc = 0u;
+  options.scratch_vgpr = 3u;
+  options.max_patches = 1u;
+  options.test_kernel_name_filter = "shared_owner_0";
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &info) {
+    return info.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
+           info.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_TRUE(patch->scalar_vcc_spill_sgpr);
+  ASSERT_TRUE(patch->scalar_vcc_spill_vgpr);
+  EXPECT_NE(*patch->scalar_vcc_spill_sgpr, options.delay_var_ssrc);
+  ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(patch->owner_descriptor_file_offsets[0], first_owner->descriptor_file_offset);
+  EXPECT_EQ(patch->owner_descriptor_file_offsets[1], second_owner->descriptor_file_offset);
+  // The second owner has only one eight-SGPR granule. The shared body must
+  // borrow a scalar already allocated by both owners and preserve it in the
+  // emitted fixed-lane round trip.
+  EXPECT_LE(patch->required_sgpr_count, 8u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto scalar_save = instrumentation::build_v_writelane_b32(
+      *patch->scalar_vcc_spill_vgpr, *patch->scalar_vcc_spill_sgpr, /*lane=*/0u,
+      ROCJITSU_CODE_ARCH_GFX1250);
+  const auto scalar_restore = instrumentation::build_v_readlane_b32(
+      *patch->scalar_vcc_spill_sgpr, *patch->scalar_vcc_spill_vgpr, /*lane=*/0u,
+      ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(scalar_save && scalar_restore);
+  const std::vector<uint32_t> body =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  EXPECT_TRUE(contains_subsequence(body, *scalar_save));
+  EXPECT_TRUE(contains_subsequence(body, *scalar_restore));
+  for (const auto &[owner_name, expected_granulated] :
+       {std::pair{"shared_owner_0", 3u}, std::pair{"shared_owner_1", 0u}}) {
+    const auto owner = std::ranges::find(patched.kernels(), owner_name, &AmdGpuKernelInfo::name);
+    ASSERT_NE(owner, patched.kernels().end());
+    KD descriptor{};
+    std::memcpy(&descriptor, result.elf_bytes.data() + owner->descriptor_file_offset,
+                sizeof(descriptor));
+    EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
+                              kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT),
+              expected_granulated);
+  }
+}
+
+TEST(ConSan, Gfx1250SharedLdsDeadVccSaveStaysWithinCommonSgprAllocation) {
+  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  const std::array<uint32_t, 3> helper_words = {
+      load[0],
+      load[1],
+      build_s_mov_b32(32u, 32u, ROCJITSU_CODE_ARCH_GFX1250),
+  };
+
+  TwoKernelSharedFixtureOptions fixture;
+  std::vector<uint8_t> bytes =
+      make_two_kernel_shared_helper_code_object(fixture, ROCJITSU_CODE_ARCH_RDNA4, helper_words);
+  mutate_elf_header(bytes,
+                    [](Elf64_Ehdr &header) { header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1250; });
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto first_owner =
+      std::ranges::find(original.kernels(), "shared_owner_0", &AmdGpuKernelInfo::name);
+  const auto second_owner =
+      std::ranges::find(original.kernels(), "shared_owner_1", &AmdGpuKernelInfo::name);
+  ASSERT_NE(first_owner, original.kernels().end());
+  ASSERT_NE(second_owner, original.kernels().end());
+  const auto set_sgpr_granulation = [&](uint64_t descriptor_offset, uint32_t granulated) {
+    KD descriptor{};
+    std::memcpy(&descriptor, bytes.data() + descriptor_offset, sizeof(descriptor));
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, granulated);
+    std::memcpy(bytes.data() + descriptor_offset, &descriptor, sizeof(descriptor));
+  };
+  set_sgpr_granulation(first_owner->descriptor_file_offset, 3u);
+  set_sgpr_granulation(second_owner->descriptor_file_offset, 0u);
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 3u;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &info) {
+    return info.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
+           info.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  EXPECT_FALSE(patch->scalar_vcc_spill_sgpr);
+  EXPECT_EQ(patch->required_sgpr_count, 0u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> body =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  EXPECT_TRUE(contains_subsequence(
+      body, std::array{build_s_mov_b32(0u, kRdna4VccLo, ROCJITSU_CODE_ARCH_GFX1250)}));
+  EXPECT_TRUE(contains_subsequence(
+      body, std::array{build_s_mov_b32(kRdna4VccLo, 0u, ROCJITSU_CODE_ARCH_GFX1250)}));
+  for (const auto &[owner_name, expected_granulated] :
+       {std::pair{"shared_owner_0", 3u}, std::pair{"shared_owner_1", 0u}}) {
+    const auto owner = std::ranges::find(patched.kernels(), owner_name, &AmdGpuKernelInfo::name);
+    ASSERT_NE(owner, patched.kernels().end());
+    KD descriptor{};
+    std::memcpy(&descriptor, result.elf_bytes.data() + owner->descriptor_file_offset,
+                sizeof(descriptor));
+    EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
+                              kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT),
+              expected_granulated);
+  }
+}
+
+TEST(ConSan, Gfx1250SharedLdsAutoScratchUsesAllOwnersAndGrowsEveryDescriptor) {
+  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  const std::array<uint32_t, 2> helper_words = {load[0], load[1]};
+
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.first_vgpr_granulated = 0u;
+  fixture.second_vgpr_granulated = 0u;
+  fixture.first_continuation_live_vgprs = {0u};
+  fixture.second_continuation_live_vgprs = {0u, 3u, 4u, 5u, 6u, 7u};
+  std::vector<uint8_t> bytes =
+      make_two_kernel_shared_helper_code_object(fixture, ROCJITSU_CODE_ARCH_RDNA4, helper_words);
+  mutate_elf_header(bytes,
+                    [](Elf64_Ehdr &header) { header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1250; });
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto first_owner =
+      std::ranges::find(original.kernels(), "shared_owner_0", &AmdGpuKernelInfo::name);
+  const auto second_owner =
+      std::ranges::find(original.kernels(), "shared_owner_1", &AmdGpuKernelInfo::name);
+  ASSERT_NE(first_owner, original.kernels().end());
+  ASSERT_NE(second_owner, original.kernels().end());
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &info) {
+    return info.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
+           info.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_TRUE(patch->scratch_vgpr);
+  EXPECT_EQ(*patch->scratch_vgpr, 8u);
+  ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(patch->owner_descriptor_file_offsets[0], first_owner->descriptor_file_offset);
+  EXPECT_EQ(patch->owner_descriptor_file_offsets[1], second_owner->descriptor_file_offset);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  for (std::string_view owner_name : {"shared_owner_0", "shared_owner_1"}) {
+    const auto owner = std::ranges::find(patched.kernels(), owner_name, &AmdGpuKernelInfo::name);
+    ASSERT_NE(owner, patched.kernels().end());
+    KD descriptor{};
+    std::memcpy(&descriptor, result.elf_bytes.data() + owner->descriptor_file_offset,
+                sizeof(descriptor));
+    EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
+                              kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
+              1u);
+  }
 }
 
 TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {

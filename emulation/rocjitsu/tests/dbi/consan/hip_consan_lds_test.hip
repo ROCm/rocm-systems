@@ -34,6 +34,7 @@ int main(int argc, char **argv) {
 #if defined(__gfx942__) || defined(__gfx950__)
 #define RJ_CONSAN_TEST_WORKGROUP_BARRIER "s_barrier\n\t"
 #define RJ_CONSAN_TEST_DS_STORE_B32 "ds_write_b32 %0, %1\n\t"
+#define RJ_CONSAN_TEST_DS_LOAD_B32 "ds_read_b32 %[loaded], %[lds_addr]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32 "flat_store_dword v[0:1], %0\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED "flat_store_dword v[0:1], %[value]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 "flat_store_byte v[0:1], %0\n\t"
@@ -48,6 +49,7 @@ int main(int argc, char **argv) {
   "s_barrier_signal -1\n\t"                                                                        \
   "s_barrier_wait -1\n\t"
 #define RJ_CONSAN_TEST_DS_STORE_B32 "ds_store_b32 %0, %1\n\t"
+#define RJ_CONSAN_TEST_DS_LOAD_B32 "ds_load_b32 %[loaded], %[lds_addr]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32 "flat_store_b32 v[0:1], %0\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED "flat_store_b32 v[0:1], %[value]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 "flat_store_b8 v[0:1], %0\n\t"
@@ -57,6 +59,14 @@ int main(int argc, char **argv) {
 #define RJ_CONSAN_TEST_FLAT_LOAD_HIGH_I8 "flat_load_d16_hi_i8 %0, v[0:1]\n\t"
 #define RJ_CONSAN_TEST_FLAT_LOAD_WAIT "s_wait_loadcnt_dscnt 0\n\t"
 #define RJ_CONSAN_TEST_SET_VCC_TRUE "v_cmp_eq_u32_e32 %[value], %[value]\n\t"
+#endif
+
+#if defined(__gfx942__) || defined(__gfx950__)
+#define RJ_CONSAN_TEST_KEEP_HIGH_ORDINARY_SGPRS_LIVE ""
+#else
+#define RJ_CONSAN_TEST_KEEP_HIGH_ORDINARY_SGPRS_LIVE                                               \
+  "s_mov_b64 s[102:103], s[102:103]\n\t"                                                           \
+  "s_mov_b64 s[104:105], s[104:105]\n\t"
 #endif
 
 #define RJ_CONSAN_TEST_NOP_CAVE                                                                    \
@@ -144,9 +154,7 @@ int main(int argc, char **argv) {
   "s_mov_b64 s[94:95], s[94:95]\n\t"                                                               \
   "s_mov_b64 s[96:97], s[96:97]\n\t"                                                               \
   "s_mov_b64 s[98:99], s[98:99]\n\t"                                                               \
-  "s_mov_b64 s[100:101], s[100:101]\n\t"                                                           \
-  "s_mov_b64 s[102:103], s[102:103]\n\t"                                                           \
-  "s_mov_b64 s[104:105], s[104:105]\n\t"
+  "s_mov_b64 s[100:101], s[100:101]\n\t" RJ_CONSAN_TEST_KEEP_HIGH_ORDINARY_SGPRS_LIVE
 
 namespace {
 
@@ -280,6 +288,48 @@ padded_zero_exec_flat_lds_store_preserves_scalar_pair_for_instrumentation(uint32
   out[2] = after_lo;
   out[3] = after_hi;
   out[4] = lds[0];
+}
+
+__global__ void
+padded_zero_exec_native_lds_load_preserves_allocated_scalars_for_instrumentation(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  uint32_t loaded = 0;
+  uint32_t before[8] = {};
+  uint32_t after[8] = {};
+  const uint32_t lds_addr = 0;
+  asm volatile("v_mov_b32 %[before0], s0\n\t"
+               "v_mov_b32 %[before1], s1\n\t"
+               "v_mov_b32 %[before2], s2\n\t"
+               "v_mov_b32 %[before3], s3\n\t"
+               "v_mov_b32 %[before4], s4\n\t"
+               "v_mov_b32 %[before5], s5\n\t"
+               "v_mov_b32 %[before6], s6\n\t"
+               "v_mov_b32 %[before7], s7\n\t"
+               "s_mov_b64 vcc, exec\n\t"
+               "s_mov_b64 exec, 0\n\t" RJ_CONSAN_TEST_DS_LOAD_B32 RJ_CONSAN_TEST_NOP_CAVE
+               "s_mov_b64 exec, vcc\n\t" RJ_CONSAN_TEST_KEEP_ORDINARY_SGPRS_LIVE
+               "v_mov_b32 %[after0], s0\n\t"
+               "v_mov_b32 %[after1], s1\n\t"
+               "v_mov_b32 %[after2], s2\n\t"
+               "v_mov_b32 %[after3], s3\n\t"
+               "v_mov_b32 %[after4], s4\n\t"
+               "v_mov_b32 %[after5], s5\n\t"
+               "v_mov_b32 %[after6], s6\n\t"
+               "v_mov_b32 %[after7], s7\n\t"
+               : [loaded] "=&v"(loaded), [before0] "=&v"(before[0]), [before1] "=&v"(before[1]),
+                 [before2] "=&v"(before[2]), [before3] "=&v"(before[3]), [before4] "=&v"(before[4]),
+                 [before5] "=&v"(before[5]), [before6] "=&v"(before[6]), [before7] "=&v"(before[7]),
+                 [after0] "=&v"(after[0]), [after1] "=&v"(after[1]), [after2] "=&v"(after[2]),
+                 [after3] "=&v"(after[3]), [after4] "=&v"(after[4]), [after5] "=&v"(after[5]),
+                 [after6] "=&v"(after[6]), [after7] "=&v"(after[7])
+               : [lds_addr] "v"(lds_addr)
+               : "vcc", "memory");
+  for (uint32_t index = 0; index < 8; ++index) {
+    out[index] = before[index];
+    out[index + 8] = after[index];
+  }
+  out[16] = loaded;
+  asm volatile("" : : "v"(&lds[0]) : "memory");
 }
 
 __global__ __launch_bounds__(128) void padded_cross_wave_flat_lds_store(uint32_t *out) {
@@ -482,6 +532,23 @@ TEST(ConSanLdsTest, ZeroExecFlatSpillPreservesLiveScalarPair) {
   free_device_ptr(d_out);
   EXPECT_EQ(out[0], out[2]);
   EXPECT_EQ(out[1], out[3]);
+}
+
+TEST(ConSanLdsTest, ZeroExecNativeLdsSpillPreservesAllocatedScalars) {
+  constexpr size_t kValues = 17;
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, kValues * sizeof(*d_out)));
+  HIP_ASSERT(hipMemset(d_out, 0, kValues * sizeof(*d_out)));
+
+  padded_zero_exec_native_lds_load_preserves_allocated_scalars_for_instrumentation<<<1, 1>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  std::array<uint32_t, kValues> out{};
+  HIP_ASSERT(hipMemcpy(out.data(), d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  for (size_t index = 0; index < 8; ++index)
+    EXPECT_EQ(out[index], out[index + 8]) << "s" << index;
 }
 
 TEST(ConSanLdsTest, PaddedHighHalfD16FlatLoadsProduceExpectedResults) {

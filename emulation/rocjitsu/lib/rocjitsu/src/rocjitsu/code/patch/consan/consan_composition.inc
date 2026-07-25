@@ -711,11 +711,11 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     build_perturbation_candidate_inventory(result);
     annotate_fault_sites_with_sync_sequences(result);
   } else if (std::ranges::any_of(result.functions, [](const ConSanFunctionInfo &function) {
-               return !function.flat_sites.empty();
+               return !function.lds_sites.empty() || !function.flat_sites.empty();
              })) {
     // SuperCollider's ordinary clean transform does not consume synchronization
-    // semantics. Shared-function flat sites still need kernel ownership, while
-    // kernel-local sites carry their descriptor directly.
+    // semantics. Shared-function memory sites still need kernel ownership,
+    // while kernel-local sites carry their descriptor directly.
     annotate_execution_owners(code_object, *decoder, arch, options, result);
   }
   if (options.fault_dry_run) {

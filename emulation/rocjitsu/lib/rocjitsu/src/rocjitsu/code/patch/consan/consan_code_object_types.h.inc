@@ -146,6 +146,9 @@ struct ConSanLdsSite {
   std::optional<uint16_t> data_vgpr;
   std::optional<uint16_t> second_data_vgpr;
   std::string mnemonic;
+  /// Kernel descriptors whose dispatches can execute this site. Shared
+  /// helpers name every reachable owner after execution-owner analysis.
+  std::vector<uint64_t> owner_descriptor_file_offsets;
 };
 
 struct ConSanFlatSite {
@@ -449,6 +452,9 @@ struct ConSanPatchInfo {
   bool perturbation_composite_atomic_overlap = false;
   bool perturbation_composite_removed_boundary = false;
   std::optional<uint16_t> scratch_vgpr;
+  /// Ordinary scalar borrowed by a spill-backed VCC save. The scalar is
+  /// preserved through scalar_vcc_spill_vgpr and is never a fresh allocation.
+  std::optional<uint16_t> scalar_vcc_spill_sgpr;
   /// VGPR used as a fixed-lane reservoir for a borrowed live scalar VCC-save
   /// pair. Presence proves the patch used the scalar-pressure fallback rather
   /// than a liveness-dead SGPR pair.

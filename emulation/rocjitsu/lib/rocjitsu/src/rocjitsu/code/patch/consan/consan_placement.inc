@@ -674,23 +674,6 @@ choose_scratch_vgpr(const ConSanLdsSite &site, const ConSanOptions &options,
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint16_t>
-choose_vcc_save_sgpr(const Instruction *inst, const LivenessAnalysis *liveness,
-                     std::optional<uint16_t> min_preferred_sgpr, rj_code_arch_t arch) {
-  if (inst == nullptr || liveness == nullptr)
-    return std::nullopt;
-  const auto find_free = [&](uint16_t start) {
-    return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
-               ? liveness->find_free_sgpr_pair(inst, start)
-               : liveness->find_free_sgpr(inst, start);
-  };
-  if (min_preferred_sgpr) {
-    if (auto high_sgpr = find_free(*min_preferred_sgpr))
-      return high_sgpr;
-  }
-  return find_free(0);
-}
-
 [[nodiscard]] std::vector<uint64_t> kernel_entry_offsets(const ConSanResult &result) {
   std::vector<uint64_t> offsets;
   offsets.reserve(result.kernels.size());

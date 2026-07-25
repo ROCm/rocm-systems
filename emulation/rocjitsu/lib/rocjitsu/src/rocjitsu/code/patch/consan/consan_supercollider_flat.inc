@@ -25,16 +25,12 @@ build_flat_check_trap_vcc_move(uint16_t dst_sgpr, uint16_t src_sgpr, rj_code_arc
 
 [[nodiscard]] bool flat_check_trap_sgpr_ranges_overlap(uint16_t lhs_base, uint16_t lhs_width,
                                                        uint16_t rhs_base, uint16_t rhs_width) {
-  return static_cast<uint32_t>(lhs_base) < static_cast<uint32_t>(rhs_base) + rhs_width &&
-         static_cast<uint32_t>(rhs_base) < static_cast<uint32_t>(lhs_base) + lhs_width;
+  return sc_sgpr_ranges_overlap(lhs_base, lhs_width, rhs_base, rhs_width);
 }
 
 [[nodiscard]] std::optional<uint16_t>
 flat_check_trap_delay_source_sgpr(const ConSanOptions &options) {
-  if (options.delay_nops == 0 || options.delay_mode != ConSanDelayMode::SleepVar ||
-      options.delay_var_ssrc >= REGISTER_SET_ALLOCATABLE_SGPRS)
-    return std::nullopt;
-  return options.delay_var_ssrc;
+  return sc_delay_source_sgpr(options);
 }
 
 [[nodiscard]] bool flat_check_trap_overlaps_delay_source(uint16_t base, uint16_t width,

@@ -3,6 +3,71 @@ struct ByteRange {
   uint64_t end = 0;
 };
 
+[[nodiscard]] bool sc_sgpr_ranges_overlap(uint16_t lhs_base, uint16_t lhs_width, uint16_t rhs_base,
+                                          uint16_t rhs_width) {
+  return static_cast<uint32_t>(lhs_base) < static_cast<uint32_t>(rhs_base) + rhs_width &&
+         static_cast<uint32_t>(rhs_base) < static_cast<uint32_t>(lhs_base) + lhs_width;
+}
+
+[[nodiscard]] std::optional<uint16_t> sc_delay_source_sgpr(const ConSanOptions &options) {
+  if (options.delay_nops == 0 || options.delay_mode != ConSanDelayMode::SleepVar ||
+      options.delay_var_ssrc >= REGISTER_SET_ALLOCATABLE_SGPRS)
+    return std::nullopt;
+  return options.delay_var_ssrc;
+}
+
+[[nodiscard]] bool sc_sgpr_range_overlaps_delay_source(uint16_t base, uint16_t width,
+                                                       const ConSanOptions &options) {
+  const auto delay_source = sc_delay_source_sgpr(options);
+  return delay_source && sc_sgpr_ranges_overlap(base, width, *delay_source, 1u);
+}
+
+[[nodiscard]] std::optional<uint16_t> choose_sc_borrowed_scalar_sgpr(uint16_t allocated_sgpr_count,
+                                                                     const ConSanOptions &options) {
+  // This scalar is live and explicitly preserved, so the only constraints are
+  // that every owner already allocates it and that it is not the active
+  // runtime delay source.
+  const uint16_t limit = std::min<uint16_t>(allocated_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
+  for (uint16_t sgpr = 0; sgpr < limit; ++sgpr) {
+    if (!sc_sgpr_range_overlaps_delay_source(sgpr, 1u, options))
+      return sgpr;
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] std::optional<uint16_t> choose_sc_dead_vcc_save_sgpr(
+    const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
+    std::optional<uint16_t> min_preferred_sgpr, uint16_t selection_limit, rj_code_arch_t arch,
+    const ConSanOptions &options) {
+  if (inst == nullptr || owner_liveness.empty() ||
+      std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
+    return std::nullopt;
+  const uint16_t width =
+      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 2u : 1u;
+  const uint16_t limit =
+      std::min<uint16_t>(selection_limit, REGISTER_SET_ALLOCATABLE_SGPRS);
+  const auto find_free = [&](uint16_t start) -> std::optional<uint16_t> {
+    if (width == 2u && (start & 1u) != 0u)
+      ++start;
+    for (uint16_t base = start; static_cast<uint32_t>(base) + width <= limit;
+         base = static_cast<uint16_t>(base + width)) {
+      if (sc_sgpr_range_overlaps_delay_source(base, width, options))
+        continue;
+      const RegisterRef ref{RegClass::SGPR, base, static_cast<uint8_t>(width)};
+      if (std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
+            return !liveness->is_live_before(*inst, ref);
+          }))
+        return base;
+    }
+    return std::nullopt;
+  };
+  if (min_preferred_sgpr) {
+    if (auto high_sgpr = find_free(*min_preferred_sgpr))
+      return high_sgpr;
+  }
+  return find_free(0);
+}
+
 [[nodiscard]] std::optional<uint64_t>
 text_offset_to_file_offset(const AmdGpuCodeObject &code_object, uint64_t text_offset,
                            uint64_t byte_count) {

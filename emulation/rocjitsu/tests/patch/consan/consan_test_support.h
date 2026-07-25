@@ -929,6 +929,8 @@ struct TwoKernelSharedFixtureOptions {
   bool first_wave32 = false;
   bool second_wave32 = false;
   bool first_continuation_uses_v1 = false;
+  std::vector<uint16_t> first_continuation_live_vgprs;
+  std::vector<uint16_t> second_continuation_live_vgprs;
   std::vector<uint16_t> first_continuation_live_sgprs;
   std::vector<uint16_t> second_continuation_live_sgprs;
   bool helper_keeps_v1_v3_live = false;
@@ -952,7 +954,9 @@ std::vector<uint8_t> make_two_kernel_shared_helper_code_object(
   }
   if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
       (architecture_specific_helper.empty() || options.first_wave32 || options.second_wave32 ||
-       options.first_continuation_uses_v1 || !options.first_continuation_live_sgprs.empty() ||
+       options.first_continuation_uses_v1 || !options.first_continuation_live_vgprs.empty() ||
+       !options.second_continuation_live_vgprs.empty() ||
+       !options.first_continuation_live_sgprs.empty() ||
        !options.second_continuation_live_sgprs.empty() || options.helper_keeps_v1_v3_live ||
        options.helper_has_ordinary_memory || options.helper_has_ordered_atomic ||
        options.helper_atomic_acquire_release || options.helper_has_barrier ||
@@ -971,12 +975,16 @@ std::vector<uint8_t> make_two_kernel_shared_helper_code_object(
   if (options.first_continuation_uses_v1) {
     first_kernel.push_back(build_v_mov_b32_e32(/*vdst=*/1, vector_source_vgpr(1), arch));
   }
+  for (uint16_t vgpr : options.first_continuation_live_vgprs)
+    first_kernel.push_back(build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), arch));
   for (uint16_t sgpr : options.first_continuation_live_sgprs) {
     first_kernel.push_back(build_s_mov_b32(/*sdst=*/0, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
   }
   first_kernel.push_back(build_s_endpgm(arch));
   std::vector<uint32_t> second_kernel(options.entry_nop_words + entry_call_words,
                                       build_s_nop(0u, arch));
+  for (uint16_t vgpr : options.second_continuation_live_vgprs)
+    second_kernel.push_back(build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), arch));
   for (uint16_t sgpr : options.second_continuation_live_sgprs) {
     second_kernel.push_back(build_s_mov_b32(/*sdst=*/105, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
   }
