@@ -382,6 +382,7 @@ struct ScalarRegisterOrigin {
 
 struct PrivateComponentKey {
   uint16_t low_sgpr = 0;
+  uint16_t high_sgpr = 0;
   uint32_t low_generation = 0;
   uint32_t high_generation = 0;
   uint32_t byte_offset = 0;
@@ -391,6 +392,7 @@ struct PrivateComponentKey {
 struct PrivateComponentKeyHash {
   [[nodiscard]] size_t operator()(const PrivateComponentKey &key) const {
     size_t value = key.low_sgpr;
+    value = value * 16777619u ^ key.high_sgpr;
     value = value * 16777619u ^ key.low_generation;
     value = value * 16777619u ^ key.high_generation;
     value = value * 16777619u ^ key.byte_offset;
@@ -401,9 +403,15 @@ struct PrivateComponentKeyHash {
 struct FlatPointerTracker {
   std::array<PointerComponentHint, REGISTER_SET_MAX_SGPRS> sgprs{};
   std::array<PointerComponentHint, REGISTER_SET_MAX_VGPRS> vgprs{};
+  std::array<PointerComponentHint, REGISTER_SET_MAX_ACC_VGPRS> acc_vgprs{};
   std::array<uint32_t, REGISTER_SET_MAX_SGPRS> sgpr_generations{};
+  std::array<ScalarRegisterOrigin, REGISTER_SET_MAX_SGPRS> sgpr_value_origins{};
   std::array<ScalarRegisterOrigin, REGISTER_SET_MAX_VGPRS> vgpr_scalar_origins{};
+  std::array<ScalarRegisterOrigin, REGISTER_SET_MAX_ACC_VGPRS> acc_vgpr_scalar_origins{};
   std::unordered_map<uint32_t, PointerComponentHint> vgpr_lane_components;
+  std::unordered_map<uint32_t, ScalarRegisterOrigin> vgpr_lane_scalar_origins;
+  std::unordered_map<uint32_t, PointerComponentHint> acc_vgpr_lane_components;
+  std::unordered_map<uint32_t, ScalarRegisterOrigin> acc_vgpr_lane_scalar_origins;
   // Keyed by (scratch scalar-base selector, signed immediate byte offset).
   // This deliberately models only address-static scratch traffic. Dynamic
   // vaddr scratch accesses cannot provide an exact stack-slot identity.
@@ -495,8 +503,10 @@ void clear_components(std::array<PointerComponentHint, N> &components, RegisterR
 void clear_components(FlatPointerTracker &tracker, RegisterRef ref) {
   if (ref.cls == RegClass::SGPR) {
     const size_t end = std::min(tracker.sgprs.size(), static_cast<size_t>(ref.index) + ref.width);
-    for (size_t index = ref.index; index < end; ++index)
+    for (size_t index = ref.index; index < end; ++index) {
       ++tracker.sgpr_generations[index];
+      tracker.sgpr_value_origins[index] = {};
+    }
     clear_components(tracker.sgprs, ref);
   } else if (ref.cls == RegClass::VGPR) {
     clear_components(tracker.vgprs, ref);
@@ -508,6 +518,24 @@ void clear_components(FlatPointerTracker &tracker, RegisterRef ref) {
       const uint32_t vgpr = entry.first >> 6u;
       return vgpr >= ref.index && vgpr < end;
     });
+    std::erase_if(tracker.vgpr_lane_scalar_origins, [&](const auto &entry) {
+      const uint32_t vgpr = entry.first >> 6u;
+      return vgpr >= ref.index && vgpr < end;
+    });
+  } else if (ref.cls == RegClass::ACC_VGPR) {
+    clear_components(tracker.acc_vgprs, ref);
+    const size_t end = std::min(tracker.acc_vgpr_scalar_origins.size(),
+                                static_cast<size_t>(ref.index) + ref.width);
+    for (size_t index = ref.index; index < end; ++index)
+      tracker.acc_vgpr_scalar_origins[index] = {};
+    std::erase_if(tracker.acc_vgpr_lane_components, [&](const auto &entry) {
+      const uint32_t acc_vgpr = entry.first >> 6u;
+      return acc_vgpr >= ref.index && acc_vgpr < end;
+    });
+    std::erase_if(tracker.acc_vgpr_lane_scalar_origins, [&](const auto &entry) {
+      const uint32_t acc_vgpr = entry.first >> 6u;
+      return acc_vgpr >= ref.index && acc_vgpr < end;
+    });
   }
 }
 
@@ -515,6 +543,18 @@ void clear_destination_components(const Instruction &inst, FlatPointerTracker &t
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     if (auto ref = register_ref(inst.dst_operand(i)))
       clear_components(tracker, *ref);
+  }
+}
+
+template <typename Value>
+void copy_register_lane_state(const std::unordered_map<uint32_t, Value> &source,
+                              uint16_t source_register,
+                              std::unordered_map<uint32_t, Value> &destination,
+                              uint16_t destination_register) {
+  for (const auto &[key, value] : source) {
+    if ((key >> 6u) != source_register)
+      continue;
+    destination[(static_cast<uint32_t>(destination_register) << 6u) | (key & 63u)] = value;
   }
 }
 
@@ -535,6 +575,8 @@ component_hint_for_ref(const FlatPointerTracker &tracker, RegisterRef ref) {
     return component_hint_at(tracker.sgprs, ref.index);
   if (ref.cls == RegClass::VGPR)
     return component_hint_at(tracker.vgprs, ref.index);
+  if (ref.cls == RegClass::ACC_VGPR)
+    return component_hint_at(tracker.acc_vgprs, ref.index);
   return std::nullopt;
 }
 
@@ -544,6 +586,15 @@ source_component_hint(const Operand *operand, const FlatPointerTracker &tracker)
   if (!ref)
     return std::nullopt;
   return component_hint_for_ref(tracker, *ref);
+}
+
+[[nodiscard]] ScalarRegisterOrigin scalar_value_origin(const FlatPointerTracker &tracker,
+                                                       uint16_t index) {
+  if (index >= tracker.sgpr_generations.size())
+    return {};
+  if (tracker.sgpr_value_origins[index].valid)
+    return tracker.sgpr_value_origins[index];
+  return {.index = index, .generation = tracker.sgpr_generations[index], .valid = true};
 }
 
 template <size_t N>
@@ -601,6 +652,12 @@ pair_hint_at(const std::array<PointerComponentHint, N> &components, uint16_t ind
   if (low && low->half == PointerHalfHint::Low)
     return FlatPointerPairHint{low->space, true};
 
+  // A 64-bit right shift can leave the semantic high half in the low
+  // physical register. Retain only a conservative segment hint until a
+  // later reconstruction restores the normal pair shape.
+  if (low && low->half == PointerHalfHint::High)
+    return FlatPointerPairHint{low->space, true};
+
   return std::nullopt;
 }
 
@@ -613,6 +670,8 @@ source_pair_hint(const Operand *operand, const FlatPointerTracker &tracker) {
     return pair_hint_at(tracker.sgprs, ref->index);
   if (ref->cls == RegClass::VGPR)
     return pair_hint_at(tracker.vgprs, ref->index);
+  if (ref->cls == RegClass::ACC_VGPR)
+    return pair_hint_at(tracker.acc_vgprs, ref->index);
   return std::nullopt;
 }
 
@@ -721,8 +780,10 @@ void invalidate_scratch_components_for_scalar_writes(const Instruction &inst,
                                                      rj_code_arch_t arch,
                                                      std::span<const uint8_t> instruction_bytes) {
   const std::string_view mnemonic = inst.mnemonic();
-  const bool load = mnemonic == "scratch_load_b32" || mnemonic == "scratch_load_b64";
-  const bool store = mnemonic == "scratch_store_b32" || mnemonic == "scratch_store_b64";
+  const bool load = mnemonic == "scratch_load_b32" || mnemonic == "scratch_load_b64" ||
+                    mnemonic == "scratch_load_dword" || mnemonic == "scratch_load_dwordx2";
+  const bool store = mnemonic == "scratch_store_b32" || mnemonic == "scratch_store_b64" ||
+                     mnemonic == "scratch_store_dword" || mnemonic == "scratch_store_dwordx2";
   if (!load && !store)
     return false;
 
@@ -732,8 +793,19 @@ void invalidate_scratch_components_for_scalar_writes(const Instruction &inst,
   uint32_t vsrc = 0;
   uint32_t saddr = 0;
   uint32_t ioffset = 0;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
-      instruction_bytes.size() == sizeof(rdna4::VscratchMachineInst)) {
+  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      instruction_bytes.size() == sizeof(cdna4::FlatScratchMachineInst)) {
+    // CDNA3 and CDNA4 share the VFLAT scratch encoding.
+    cdna4::FlatScratchMachineInst raw{};
+    std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
+    encoding = raw.encoding;
+    vaddr = raw.addr;
+    vdst = raw.vdst;
+    vsrc = raw.data;
+    saddr = raw.saddr;
+    ioffset = raw.offset;
+  } else if (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+             instruction_bytes.size() == sizeof(rdna4::VscratchMachineInst)) {
     rdna4::VscratchMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
     encoding = raw.encoding;
@@ -757,10 +829,13 @@ void invalidate_scratch_components_for_scalar_writes(const Instruction &inst,
   }
   // A vector address makes the effective slot lane-dependent and prevents an
   // exact store/load match. Fail closed instead of aliasing such traffic.
-  if (encoding != 0xedu || vaddr != 0u)
+  const bool valid_encoding = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
+                                  ? encoding == 0x37u
+                                  : encoding == 0xedu;
+  if (!valid_encoding || vaddr != 0u)
     return false;
 
-  const uint32_t width = mnemonic.ends_with("b64") ? 2u : 1u;
+  const uint32_t width = mnemonic.ends_with("b64") || mnemonic.ends_with("dwordx2") ? 2u : 1u;
   const uint16_t vgpr = static_cast<uint16_t>(load ? vdst : vsrc);
   if (static_cast<uint32_t>(vgpr) + width > tracker.vgprs.size())
     return false;
@@ -792,9 +867,10 @@ private_component_key(const FlatPointerTracker &tracker, uint16_t address_vgpr,
     return std::nullopt;
   const ScalarRegisterOrigin low = tracker.vgpr_scalar_origins[address_vgpr];
   const ScalarRegisterOrigin high = tracker.vgpr_scalar_origins[address_vgpr + 1u];
-  if (!low.valid || !high.valid || high.index != low.index + 1u)
+  if (!low.valid || !high.valid)
     return std::nullopt;
   return PrivateComponentKey{.low_sgpr = low.index,
+                             .high_sgpr = high.index,
                              .low_generation = low.generation,
                              .high_generation = high.generation,
                              .byte_offset = byte_offset};
@@ -805,41 +881,66 @@ private_component_key(const FlatPointerTracker &tracker, uint16_t address_vgpr,
                                                      rj_code_arch_t arch,
                                                      std::span<const uint8_t> instruction_bytes) {
   const std::string_view mnemonic = inst.mnemonic();
-  const bool load = mnemonic == "flat_load_b32" || mnemonic == "flat_load_b64";
-  const bool store = mnemonic == "flat_store_b32" || mnemonic == "flat_store_b64";
-  if ((!load && !store) || arch != ROCJITSU_CODE_ARCH_RDNA4 ||
-      instruction_bytes.size() != sizeof(rdna4::VflatMachineInst))
+  const bool load = mnemonic == "flat_load_b32" || mnemonic == "flat_load_b64" ||
+                    mnemonic == "flat_load_dword" || mnemonic == "flat_load_dwordx2";
+  const bool store = mnemonic == "flat_store_b32" || mnemonic == "flat_store_b64" ||
+                     mnemonic == "flat_store_dword" || mnemonic == "flat_store_dwordx2";
+  if (!load && !store)
     return false;
 
-  rdna4::VflatMachineInst raw{};
-  std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-  if (raw.encoding != 0xecu)
+  uint32_t address_vgpr = 0;
+  uint32_t data_vgpr = 0;
+  uint32_t ioffset = 0;
+  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      instruction_bytes.size() == sizeof(cdna4::FlatMachineInst)) {
+    cdna4::FlatMachineInst raw{};
+    std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
+    if (raw.encoding != 0x37u)
+      return false;
+    address_vgpr = raw.addr;
+    data_vgpr = load ? raw.vdst : raw.data;
+    ioffset = raw.offset;
+  } else if (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+             instruction_bytes.size() == sizeof(rdna4::VflatMachineInst)) {
+    rdna4::VflatMachineInst raw{};
+    std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
+    if (raw.encoding != 0xecu)
+      return false;
+    address_vgpr = raw.vaddr;
+    data_vgpr = load ? raw.vdst : raw.vsrc;
+    ioffset = raw.ioffset;
+  } else {
     return false;
-  const auto address_hint = pair_hint_at(tracker.vgprs, static_cast<uint16_t>(raw.vaddr));
+  }
+
+  const auto address_hint = pair_hint_at(tracker.vgprs, static_cast<uint16_t>(address_vgpr));
   if (!address_hint || address_hint->space != ConSanFlatAddressSpaceHint::Private)
     return false;
 
-  const uint32_t width = mnemonic.ends_with("b64") ? 2u : 1u;
-  const uint16_t data_vgpr = static_cast<uint16_t>(load ? raw.vdst : raw.vsrc);
-  if (static_cast<uint32_t>(data_vgpr) + width > tracker.vgprs.size())
+  const uint32_t width = mnemonic.ends_with("b64") || mnemonic.ends_with("dwordx2") ? 2u : 1u;
+  if (data_vgpr + width > tracker.vgprs.size())
     return false;
+
+  std::array<std::optional<PrivateComponentKey>, 2> keys;
+  for (uint32_t half = 0; half < width; ++half) {
+    keys[half] = private_component_key(tracker, static_cast<uint16_t>(address_vgpr),
+                                       ioffset + half * sizeof(uint32_t));
+    if (!keys[half])
+      return false;
+  }
   if (load)
-    clear_components(tracker, RegisterRef{RegClass::VGPR, data_vgpr, static_cast<uint8_t>(width)});
+    clear_components(tracker, RegisterRef{RegClass::VGPR, static_cast<uint16_t>(data_vgpr),
+                                          static_cast<uint8_t>(width)});
 
   for (uint32_t half = 0; half < width; ++half) {
-    const auto key =
-        private_component_key(tracker, static_cast<uint16_t>(raw.vaddr),
-                              static_cast<uint32_t>(raw.ioffset) + half * sizeof(uint32_t));
-    if (!key)
-      return false;
     if (store) {
       const auto component =
           component_hint_at(tracker.vgprs, static_cast<uint16_t>(data_vgpr + half));
       if (component)
-        tracker.private_components[*key] = *component;
+        tracker.private_components[*keys[half]] = *component;
       else
-        tracker.private_components.erase(*key);
-    } else if (const auto it = tracker.private_components.find(*key);
+        tracker.private_components.erase(*keys[half]);
+    } else if (const auto it = tracker.private_components.find(*keys[half]);
                it != tracker.private_components.end()) {
       set_vgpr_component(tracker, static_cast<uint16_t>(data_vgpr + half), it->second);
     }
@@ -864,6 +965,11 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
       rdna4::Vop3MachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       lane_selector = static_cast<uint32_t>(raw.src1);
+    } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+               instruction_bytes.size() == sizeof(cdna4::Vop3MachineInst)) {
+      cdna4::Vop3MachineInst raw{};
+      std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
+      lane_selector = static_cast<uint32_t>(raw.src1);
     } else if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
                instruction_bytes.size() == sizeof(gfx1250::Vop3MachineInst)) {
       gfx1250::Vop3MachineInst raw{};
@@ -882,32 +988,117 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
         if (!vgpr)
           return;
         const uint32_t key = (static_cast<uint32_t>(*vgpr) << 6u) | *lane;
-        // RDNA4 exposes the tied destination as source operand 0. gfx1250's
-        // decoder exposes only the scalar value and lane selector.
+        // CDNA and RDNA4 expose the tied destination as source operand 0.
+        // gfx1250's decoder exposes only the scalar value and lane selector.
         const int value_operand = arch == ROCJITSU_CODE_ARCH_GFX1250 ? 0 : 1;
         const auto component = source_component_hint(inst.src_operand(value_operand), tracker);
+        ScalarRegisterOrigin scalar_origin;
+        if (const auto source = register_ref(inst.src_operand(value_operand), RegClass::SGPR))
+          scalar_origin = scalar_value_origin(tracker, source->index);
         tracker.vgprs[*vgpr] = {};
         tracker.vgpr_scalar_origins[*vgpr] = {};
         if (component)
           tracker.vgpr_lane_components[key] = *component;
         else
           tracker.vgpr_lane_components.erase(key);
+
+        if (scalar_origin.valid)
+          tracker.vgpr_lane_scalar_origins[key] = scalar_origin;
+        else
+          tracker.vgpr_lane_scalar_origins.erase(key);
       } else {
         const auto vgpr = register_index(inst.src_operand(0), RegClass::VGPR);
         if (!vgpr)
           return;
         const uint32_t key = (static_cast<uint32_t>(*vgpr) << 6u) | *lane;
         const auto component = tracker.vgpr_lane_components.find(key);
+        const auto origin = tracker.vgpr_lane_scalar_origins.find(key);
         const auto sgpr = register_index(inst.dst_operand(0), RegClass::SGPR);
         clear_destination_components(inst, tracker);
         if (component != tracker.vgpr_lane_components.end() && sgpr)
           set_sgpr_component(tracker, *sgpr, component->second);
+        if (origin != tracker.vgpr_lane_scalar_origins.end() && sgpr)
+          tracker.sgpr_value_origins[*sgpr] = origin->second;
       }
       return;
     }
   }
 
-  if (mnemonic.starts_with("v_lshrrev_b64") || mnemonic.starts_with("v_lshlrev_b64")) {
+  if (mnemonic == "v_accvgpr_write" || mnemonic == "v_accvgpr_read") {
+    std::optional<RegisterRef> dst = register_ref(inst.dst_operand(0));
+    std::optional<RegisterRef> source = register_ref(inst.src_operand(0));
+    if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+        instruction_bytes.size() == sizeof(cdna4::Vop3MachineInst)) {
+      // V_ACCVGPR_READ/WRITE encode their AccVGPR operand as a raw bank
+      // selector rather than the normalized operand-selector range used by
+      // generic register_ref(). Decode that one architectural operand here.
+      cdna4::Vop3MachineInst raw{};
+      std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
+      if (mnemonic == "v_accvgpr_write") {
+        dst = RegisterRef{RegClass::ACC_VGPR, static_cast<uint16_t>(raw.vdst), 1u};
+      } else if (raw.src0 >= 256u && raw.src0 < 512u) {
+        source =
+            RegisterRef{RegClass::ACC_VGPR, static_cast<uint16_t>(raw.src0 - 256u), 1u};
+      } else {
+        source.reset();
+      }
+    }
+    const auto source_hint =
+        source ? component_hint_for_ref(tracker, *source) : std::optional<PointerComponentHint>{};
+    ScalarRegisterOrigin source_origin;
+    if (source) {
+      if (source->cls == RegClass::VGPR && source->index < tracker.vgpr_scalar_origins.size()) {
+        source_origin = tracker.vgpr_scalar_origins[source->index];
+      } else if (source->cls == RegClass::ACC_VGPR &&
+                 source->index < tracker.acc_vgpr_scalar_origins.size()) {
+        source_origin = tracker.acc_vgpr_scalar_origins[source->index];
+      }
+    }
+    if (!dst)
+      return;
+    clear_components(tracker, *dst);
+    if (dst->cls == RegClass::VGPR && dst->index < tracker.vgprs.size()) {
+      if (source_hint)
+        tracker.vgprs[dst->index] = *source_hint;
+      tracker.vgpr_scalar_origins[dst->index] = source_origin;
+      if (source && source->cls == RegClass::ACC_VGPR) {
+        copy_register_lane_state(tracker.acc_vgpr_lane_components, source->index,
+                                 tracker.vgpr_lane_components, dst->index);
+        copy_register_lane_state(tracker.acc_vgpr_lane_scalar_origins, source->index,
+                                 tracker.vgpr_lane_scalar_origins, dst->index);
+      }
+    } else if (dst->cls == RegClass::ACC_VGPR && dst->index < tracker.acc_vgprs.size()) {
+      if (source_hint)
+        tracker.acc_vgprs[dst->index] = *source_hint;
+      tracker.acc_vgpr_scalar_origins[dst->index] = source_origin;
+      if (source && source->cls == RegClass::VGPR) {
+        copy_register_lane_state(tracker.vgpr_lane_components, source->index,
+                                 tracker.acc_vgpr_lane_components, dst->index);
+        copy_register_lane_state(tracker.vgpr_lane_scalar_origins, source->index,
+                                 tracker.acc_vgpr_lane_scalar_origins, dst->index);
+      }
+    }
+    return;
+  }
+
+  if (mnemonic.starts_with("v_lshrrev_b64")) {
+    const auto dst = register_ref(inst.dst_operand(0), RegClass::VGPR);
+    std::optional<FlatPointerPairHint> source;
+    for (int i = 0; i < inst.num_src_operands() && !source; ++i)
+      source = source_pair_hint(inst.src_operand(i), tracker);
+    clear_destination_components(inst, tracker);
+    if (dst && source) {
+      // The common generic-pointer lowering shifts a 64-bit pointer right and
+      // copies the low result into the high half of a reconstructed address.
+      // Mark that extracted value as a semantic high half; pair_hint_at keeps
+      // a conservative segment hint if it is consumed directly instead.
+      set_vgpr_component(tracker, dst->index,
+                         PointerComponentHint{source->space, PointerHalfHint::High, true});
+    }
+    return;
+  }
+
+  if (mnemonic.starts_with("v_lshlrev_b64")) {
     const auto dst = register_ref(inst.dst_operand(0), RegClass::VGPR);
     std::optional<FlatPointerPairHint> source;
     for (int i = 0; i < inst.num_src_operands() && !source; ++i)
@@ -915,6 +1106,20 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
     clear_destination_components(inst, tracker);
     if (dst && dst->width >= 2u && source)
       set_vgpr_pair_components(tracker, dst->index, source->space, true);
+    return;
+  }
+
+  if (mnemonic.starts_with("v_lshl_add_u64")) {
+    const auto dst = register_ref(inst.dst_operand(0), RegClass::VGPR);
+    // V_LSHL_ADD_U64 computes (src0 << src1) + src2. The shifted value is an
+    // index; the final addend is the pointer base whose address-space
+    // provenance the result retains.
+    const auto base = inst.num_src_operands() > 2
+                          ? source_pair_hint(inst.src_operand(2), tracker)
+                          : std::nullopt;
+    clear_destination_components(inst, tracker);
+    if (dst && dst->width >= 2u && base)
+      set_vgpr_pair_components(tracker, dst->index, base->space, true);
     return;
   }
 
@@ -936,13 +1141,24 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
     const auto dst = register_ref(inst.dst_operand(0), RegClass::SGPR);
     const auto base_space = special_pointer_base_space(inst.src_operand(0));
     const auto src_pair = source_pair_hint(inst.src_operand(0), tracker);
+    const auto src = register_ref(inst.src_operand(0), RegClass::SGPR);
+    std::array<ScalarRegisterOrigin, 2> source_origins{};
+    if (src && src->width >= 2u) {
+      source_origins[0] = scalar_value_origin(tracker, src->index);
+      source_origins[1] = scalar_value_origin(tracker, static_cast<uint16_t>(src->index + 1u));
+    }
     clear_destination_components(inst, tracker);
     if (!dst || dst->width < 2)
       return;
     if (base_space) {
       set_sgpr_pair_components(tracker, dst->index, *base_space, false);
+      tracker.sgpr_value_origins[dst->index] = scalar_value_origin(tracker, dst->index);
+      tracker.sgpr_value_origins[dst->index + 1u] =
+          scalar_value_origin(tracker, static_cast<uint16_t>(dst->index + 1u));
     } else if (src_pair) {
       set_sgpr_pair_from_hint(tracker, dst->index, *src_pair);
+      tracker.sgpr_value_origins[dst->index] = source_origins[0];
+      tracker.sgpr_value_origins[dst->index + 1u] = source_origins[1];
     }
     return;
   }
@@ -961,9 +1177,14 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
   if (mnemonic == "s_mov_b32") {
     const auto dst = register_index(inst.dst_operand(0), RegClass::SGPR);
     const auto src = source_component_hint(inst.src_operand(0), tracker);
+    const auto src_ref = register_ref(inst.src_operand(0), RegClass::SGPR);
+    const ScalarRegisterOrigin source_origin =
+        src_ref ? scalar_value_origin(tracker, src_ref->index) : ScalarRegisterOrigin{};
     clear_destination_components(inst, tracker);
     if (dst && src)
       set_sgpr_component(tracker, *dst, *src);
+    if (dst && source_origin.valid)
+      tracker.sgpr_value_origins[*dst] = source_origin;
     return;
   }
 
@@ -989,15 +1210,38 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
     return;
   }
 
+  if (mnemonic.starts_with("v_mov_b64")) {
+    const auto dst = register_ref(inst.dst_operand(0), RegClass::VGPR);
+    const auto source_hint = source_pair_hint(inst.src_operand(0), tracker);
+    const auto source = register_ref(inst.src_operand(0));
+    std::array<ScalarRegisterOrigin, 2> source_origins{};
+    if (source && source->width >= 2u) {
+      if (source->cls == RegClass::SGPR) {
+        source_origins[0] = scalar_value_origin(tracker, source->index);
+        source_origins[1] = scalar_value_origin(tracker, static_cast<uint16_t>(source->index + 1u));
+      } else if (source->cls == RegClass::VGPR &&
+                 static_cast<size_t>(source->index) + 1u < tracker.vgpr_scalar_origins.size()) {
+        source_origins[0] = tracker.vgpr_scalar_origins[source->index];
+        source_origins[1] = tracker.vgpr_scalar_origins[source->index + 1u];
+      }
+    }
+    clear_destination_components(inst, tracker);
+    if (!dst || dst->width < 2u)
+      return;
+    if (source_hint)
+      set_vgpr_pair_components(tracker, dst->index, source_hint->space, source_hint->maybe);
+    tracker.vgpr_scalar_origins[dst->index] = source_origins[0];
+    tracker.vgpr_scalar_origins[dst->index + 1u] = source_origins[1];
+    return;
+  }
+
   if (mnemonic.starts_with("v_mov_b32")) {
     const auto dst = register_index(inst.dst_operand(0), RegClass::VGPR);
     const auto src = source_component_hint(inst.src_operand(0), tracker);
     ScalarRegisterOrigin scalar_origin;
     if (const auto src_ref = register_ref(inst.src_operand(0))) {
       if (src_ref->cls == RegClass::SGPR && src_ref->index < tracker.sgpr_generations.size()) {
-        scalar_origin = {.index = src_ref->index,
-                         .generation = tracker.sgpr_generations[src_ref->index],
-                         .valid = true};
+        scalar_origin = scalar_value_origin(tracker, src_ref->index);
       } else if (src_ref->cls == RegClass::VGPR &&
                  src_ref->index < tracker.vgpr_scalar_origins.size()) {
         scalar_origin = tracker.vgpr_scalar_origins[src_ref->index];
@@ -1145,7 +1389,8 @@ template <typename Raw> void fill_flat_like_atomic_raw(ConSanAtomicSite &site, c
   site.returns_old_value = amdgpu::gfx12_atomic_returns(static_cast<uint8_t>(raw.th));
 }
 
-template <typename Raw> void fill_cdna_flat_like_atomic_raw(ConSanAtomicSite &site, const Raw &raw) {
+template <typename Raw>
+void fill_cdna_flat_like_atomic_raw(ConSanAtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_saddr = static_cast<uint32_t>(raw.saddr);
   site.raw_vaddr = static_cast<uint32_t>(raw.addr);
@@ -1802,6 +2047,7 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
   if (entry_tracker != nullptr) {
     flat_pointer_tracker.sgprs = entry_tracker->sgprs;
     flat_pointer_tracker.vgprs = entry_tracker->vgprs;
+    flat_pointer_tracker.acc_vgprs = entry_tracker->acc_vgprs;
   }
   size_t offset = 0;
   size_t previous_offset = 0;
@@ -2165,6 +2411,7 @@ void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_ob
       if (initialized.insert(callee_offset).second) {
         entry.sgprs = state->second.sgprs;
         entry.vgprs = state->second.vgprs;
+        entry.acc_vgprs = state->second.acc_vgprs;
         continue;
       }
       for (size_t index = 0; index < entry.sgprs.size(); ++index)
@@ -2173,6 +2420,9 @@ void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_ob
       for (size_t index = 0; index < entry.vgprs.size(); ++index)
         entry.vgprs[index] =
             merge_call_entry_component(entry.vgprs[index], state->second.vgprs[index]);
+      for (size_t index = 0; index < entry.acc_vgprs.size(); ++index)
+        entry.acc_vgprs[index] =
+            merge_call_entry_component(entry.acc_vgprs[index], state->second.acc_vgprs[index]);
     }
     entry_trackers = std::move(next_entry_trackers);
     if (pass + 1u == kMaxRelayPasses) {

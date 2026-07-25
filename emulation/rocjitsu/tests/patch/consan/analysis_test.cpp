@@ -595,6 +595,129 @@ TEST(ConSan, InventoriesLocalFunctionFlatSharedAccesses) {
   EXPECT_TRUE(result.elf_bytes.empty());
 }
 
+TEST(ConSan, PropagatesCdna4LaneStateThroughAccVgpr) {
+  const std::vector<uint32_t> text_words = {
+      0xbe8001ebu, // s_mov_b64 s[0:1], src_shared_base
+      0xd28a000au,
+      0x00011800u, // v_writelane_b32 v10, s0, 12
+      0xd28a000au,
+      0x00011a01u, // v_writelane_b32 v10, s1, 13
+      0xd3d9400fu,
+      0x1800010au, // v_accvgpr_write_b32 a15, v10
+      0x7e140280u, // v_mov_b32_e32 v10, 0
+      0xd3d8400au,
+      0x1800010fu, // v_accvgpr_read_b32 v10, a15
+      0xd2890002u,
+      0x0001190au, // v_readlane_b32 s2, v10, 12
+      0xd2890003u,
+      0x00011b0au, // v_readlane_b32 s3, v10, 13
+      0x7e000202u, // v_mov_b32_e32 v0, s2
+      0x7e020203u, // v_mov_b32_e32 v1, s3
+      0xdc500000u,
+      0x04000000u, // flat_load_dword v4, v[0:1]
+      0xd3d9400fu,
+      0x1800010bu, // v_accvgpr_write_b32 a15, v11
+      0xd3d8400au,
+      0x1800010fu, // v_accvgpr_read_b32 v10, a15
+      0xd2890002u,
+      0x0001190au, // v_readlane_b32 s2, v10, 12
+      0xd2890003u,
+      0x00011b0au, // v_readlane_b32 s3, v10, 13
+      0x7e000202u, // v_mov_b32_e32 v0, s2
+      0x7e020203u, // v_mov_b32_e32 v1, s3
+      0xdc500000u,
+      0x04000000u, // flat_load_dword v4, v[0:1]
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+
+  const ConSanResult result =
+      try_patch_consan(make_cdna4_lds_code_object(text_words, "accvgpr_lane_state"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_EQ(result.kernels.size(), 1u);
+  ASSERT_EQ(result.kernels.front().flat_sites.size(), 2u);
+  EXPECT_EQ(result.kernels.front().flat_sites[0].address_space_hint,
+            ConSanFlatAddressSpaceHint::Group);
+  EXPECT_EQ(result.kernels.front().flat_sites[1].address_space_hint,
+            ConSanFlatAddressSpaceHint::Unknown);
+}
+
+TEST(ConSan, RelaysCdna4SharedPointerThroughPrivateHelperFrame) {
+  constexpr uint32_t kFunctionDelta = 20u;
+  const std::array<uint32_t, 21> kernel_words = {
+      0xbe8001ebu, // s_mov_b64 s[0:1], src_shared_base
+      build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_CDNA4),
+      build_v_mov_b32_e32(/*vdst=*/1, /*scalar s1=*/1, ROCJITSU_CODE_ARCH_CDNA4),
+      0xd3d94000u,
+      0x18000100u, // v_accvgpr_write_b32 a0, v0
+      0xd3d94001u,
+      0x18000101u, // v_accvgpr_write_b32 a1, v1
+      0xd3d84002u,
+      0x18000100u, // v_accvgpr_read_b32 v2, a0
+      0xd3d84003u,
+      0x18000101u, // v_accvgpr_read_b32 v3, a1
+      0xd2900000u,
+      0x00020400u, // v_lshrrev_b64 v[0:1], s0, v[2:3]
+      0x7e020300u, // v_mov_b32_e32 v1, v0
+      0x7e000302u, // v_mov_b32_e32 v0, v2
+      build_s_getpc_b64(/*sdst=*/2, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_add_u32(/*sdst=*/2, /*ssrc0=*/2, /*literal=*/255, ROCJITSU_CODE_ARCH_CDNA4),
+      kFunctionDelta,
+      build_s_addc_u32(/*sdst=*/3, /*ssrc0=*/3, /*inline 0=*/128, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_swappc_b64(/*sdst=*/30, /*ssrc0=*/2, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::array<uint32_t, 28> function_words = {
+      0xbe8801edu, // s_mov_b64 s[8:9], src_private_base
+      0xbe8a0009u, // s_mov_b32 s10, s9
+      0x7e040208u, // v_mov_b32_e32 v2, s8
+      0x7e06020au, // v_mov_b32_e32 v3, s10
+      0xdc740000u,
+      0x00000002u, // flat_store_dwordx2 v[2:3], v[0:1]
+      0xd28a000au,
+      0x00011808u, // v_writelane_b32 v10, s8, 12
+      0xd28a000au,
+      0x00011a0au, // v_writelane_b32 v10, s10, 13
+      0xbe880080u, // s_mov_b32 s8, 0
+      0xbe8a0080u, // s_mov_b32 s10, 0
+      0xd2890008u,
+      0x0001190au, // v_readlane_b32 s8, v10, 12
+      0xd289000au,
+      0x00011b0au, // v_readlane_b32 s10, v10, 13
+      0x7e040208u, // v_mov_b32_e32 v2, s8
+      0x7e06020au, // v_mov_b32_e32 v3, s10
+      0xdc540000u,
+      0x04000002u, // flat_load_dwordx2 v[4:5], v[2:3]
+      0x7e000208u, // v_mov_b32_e32 v0, s8
+      0x7e020209u, // v_mov_b32_e32 v1, s9
+      0xbe800082u, // s_mov_b32 s0, 2
+      0xd2080000u,
+      0x04100100u, // v_lshl_add_u64 v[0:1], v[0:1], s0, v[4:5]
+      0xdc700000u,
+      0x00000600u, // flat_store_dword v[0:1], v6
+      build_s_setpc_b64(/*ssrc0=*/30, ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes =
+      make_cdna4_code_object_with_local_function(kernel_words, function_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_EQ(result.functions.size(), 1u);
+  const ConSanFunctionInfo &function = result.functions.front();
+  ASSERT_EQ(function.flat_sites.size(), 3u);
+  EXPECT_EQ(function.flat_sites[0].address_space_hint, ConSanFlatAddressSpaceHint::Private);
+  EXPECT_EQ(function.flat_sites[1].address_space_hint, ConSanFlatAddressSpaceHint::Private);
+  EXPECT_EQ(function.flat_sites[2].address_space_hint, ConSanFlatAddressSpaceHint::MaybeGroup);
+  EXPECT_EQ(function.stats.flat_private_hint_count, 2u);
+  EXPECT_EQ(function.stats.flat_maybe_group_hint_count, 1u);
+  EXPECT_EQ(function.stats.flat_unknown_hint_count, 0u);
+}
+
 TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   const std::vector<uint8_t> bytes = make_rdna4_unsupported_lds_code_object();
   ConSanOptions options;
@@ -1871,9 +1994,7 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
   ASSERT_TRUE(atomic);
   EXPECT_EQ(*atomic, (std::array<uint32_t, 3>{0xEC0D407Cu, 0x02180002u, 0x00000002u}));
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0],
-      (*atomic)[1],
-      (*atomic)[2],
+      (*atomic)[0], (*atomic)[1], (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   ConSanOptions options;
