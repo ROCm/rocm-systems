@@ -3,6 +3,10 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 
 namespace rocjitsu {
 namespace {
@@ -1540,6 +1544,216 @@ std::optional<uint16_t> flat_check_trap_vcc_save_sgpr(const ConSanPatchInfo &pat
   if (patch.required_sgpr_count < 2u)
     return std::nullopt;
   return static_cast<uint16_t>(patch.required_sgpr_count - 2u);
+}
+
+constexpr uint64_t kFlatMismatchReportAddress = 0x8000u;
+constexpr uint32_t kFlatMismatchReportMarker = 0xC05A4D16u;
+constexpr uint32_t kFlatMismatchOriginal = 0x1234ABCDu;
+
+struct FlatMismatchExecutionCase {
+  uint32_t original;
+  uint32_t duplicate;
+  uint32_t expected_marker;
+};
+
+void execute_emitted_flat_mismatch_sequence(const FlatSubwordTarget &target,
+                                            std::string_view case_label,
+                                            std::span<const uint32_t> patched_words,
+                                            std::span<const uint32_t> normalization,
+                                            const ConSanPatchInfo &patch, uint16_t original_vgpr,
+                                            uint16_t compare_lhs_vgpr, uint16_t duplicate_vgpr,
+                                            std::span<const FlatMismatchExecutionCase> cases) {
+  const auto sequence_begin = std::search(patched_words.begin(), patched_words.end(),
+                                          normalization.begin(), normalization.end());
+  ASSERT_NE(sequence_begin, patched_words.end());
+  const auto compare = instrumentation::build_v_cmp_ne_u16_vcc(vector_source_vgpr(compare_lhs_vgpr),
+                                                               duplicate_vgpr, target.arch);
+  ASSERT_TRUE(compare);
+  const auto compare_word = sequence_begin + static_cast<ptrdiff_t>(normalization.size());
+  ASSERT_NE(compare_word, patched_words.end());
+  EXPECT_EQ(*compare_word, *compare);
+  const auto branch_word = std::next(compare_word);
+  ASSERT_NE(branch_word, patched_words.end());
+
+  const auto vcc_save = flat_check_trap_vcc_save_sgpr(patch);
+  ASSERT_TRUE(vcc_save);
+  const auto restore_vcc = instrumentation::build_s_mov_b64(kRdna4VccLo, *vcc_save, target.arch);
+  ASSERT_TRUE(restore_vcc);
+  auto sequence_end = std::next(branch_word);
+  for (; sequence_end != patched_words.end(); ++sequence_end) {
+    if (*sequence_end != *restore_vcc)
+      continue;
+    const ptrdiff_t action_words = sequence_end - std::next(branch_word);
+    if (action_words > std::numeric_limits<int16_t>::max())
+      continue;
+    const auto skip_action =
+        instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(action_words), target.arch);
+    if (skip_action && *skip_action == *branch_word)
+      break;
+  }
+  ASSERT_NE(sequence_end, patched_words.end());
+  const std::vector<uint32_t> sequence(sequence_begin, sequence_end);
+
+  const std::string component_prefix =
+      std::string(target.label) + "_consan_" + std::string(case_label);
+  amdgpu::GpuMemory gpu_mem(component_prefix + "_mem");
+  amdgpu::L2Cache l2(component_prefix + "_l2");
+  l2.set_backing_memory(&gpu_mem);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = target.arch;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create(component_prefix, config, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  for (size_t i = 0; i < sequence.size(); ++i)
+    gpu_mem.write32(i * sizeof(uint32_t), sequence[i]);
+
+  const uint32_t vgpr_base = wave->vgpr_alloc().base;
+  for (const FlatMismatchExecutionCase &test_case : cases) {
+    SCOPED_TRACE("original=" + std::to_string(test_case.original) +
+                 " duplicate=" + std::to_string(test_case.duplicate));
+    gpu_mem.write32(kFlatMismatchReportAddress, 0u);
+    wave->pc = 0u;
+    wave->set_exec(1u);
+    wave->set_vcc(0u);
+    cu->write_vgpr(vgpr_base + original_vgpr, 0u, test_case.original);
+    cu->write_vgpr(vgpr_base + duplicate_vgpr, 0u, test_case.duplicate);
+
+    size_t steps = 0;
+    while (wave->pc < sequence.size() * sizeof(uint32_t)) {
+      ASSERT_LT(steps, sequence.size());
+      ++steps;
+      cu->step();
+    }
+    cu->flush_all();
+    EXPECT_EQ(gpu_mem.read32(kFlatMismatchReportAddress), test_case.expected_marker);
+  }
+
+  if (!wave->is_halted())
+    wave->halt();
+}
+
+TEST(ConSan, SuperColliderHighHalfGroupFlatMismatchActionExecutesOnEveryTarget) {
+  constexpr std::array load_cases = {
+      FlatMismatchExecutionCase{kFlatMismatchOriginal, 0x1234DCBAu, 0u},
+      FlatMismatchExecutionCase{kFlatMismatchOriginal, 0x5678ABCDu, kFlatMismatchReportMarker},
+  };
+
+  for (const FlatSubwordTarget &target : kFlatSubwordTargets) {
+    for (const FlatD16LoadForm &form : kFlatD16LoadForms) {
+      if (form.placement != ConSanFlatSubwordPlacement::High16)
+        continue;
+      const std::string_view mnemonic = form.mnemonics[target.target_index];
+      SCOPED_TRACE(std::string(target.label) + " " + std::string(mnemonic));
+      const std::vector<uint8_t> bytes = make_group_flat_d16_load_code_object(target, form);
+      ASSERT_FALSE(bytes.empty());
+      ConSanOptions options;
+      options.flavor = ConSanFlavor::SuperCollider;
+      options.probe_flat_check_trap = true;
+      options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+      options.report_buffer_address = kFlatMismatchReportAddress;
+      options.report_marker = kFlatMismatchReportMarker;
+      options.max_patches = 1;
+
+      const ConSanResult result = try_patch_consan(bytes, options);
+
+      ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      ASSERT_TRUE(result.final_validation_passed);
+      ASSERT_EQ(result.kernels.size(), 1u);
+      ASSERT_EQ(result.kernels.front().flat_sites.size(), 1u);
+      const ConSanFlatSite &site = result.kernels.front().flat_sites.front();
+      ASSERT_TRUE(site.dst_vgpr);
+      const auto patch = std::ranges::find(result.patches, ConSanPatchKind::InlineFlatLoadCheckTrap,
+                                           &ConSanPatchInfo::kind);
+      ASSERT_NE(patch, result.patches.end());
+      ASSERT_TRUE(patch->scratch_vgpr);
+      ASSERT_LT(*patch->scratch_vgpr, 255u);
+
+      AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(replacement.is_valid());
+      ASSERT_EQ(replacement.text_sections().size(), 1u);
+      const Section *text = replacement.text_sections().front();
+      const auto words = std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(text->data()),
+                                                   text->size() / sizeof(uint32_t));
+      const uint16_t comparison_scratch = static_cast<uint16_t>(*patch->scratch_vgpr + 1u);
+      const auto select_original_high = instrumentation::build_v_lshrrev_b32(
+          comparison_scratch, scalar_positive_inline_u32(16u), *site.dst_vgpr, target.arch);
+      const auto select_duplicate_high = instrumentation::build_v_lshrrev_b32(
+          *patch->scratch_vgpr, scalar_positive_inline_u32(16u), *patch->scratch_vgpr, target.arch);
+      ASSERT_TRUE(select_original_high);
+      ASSERT_TRUE(select_duplicate_high);
+      const std::array normalization = {*select_original_high, *select_duplicate_high};
+      execute_emitted_flat_mismatch_sequence(target, mnemonic, words, normalization, *patch,
+                                             *site.dst_vgpr, comparison_scratch,
+                                             *patch->scratch_vgpr, load_cases);
+    }
+
+    for (const FlatSubwordStoreForm &form : kFlatSubwordStoreForms) {
+      if (form.placement != ConSanFlatSubwordPlacement::High16)
+        continue;
+      const std::string_view mnemonic = form.mnemonics[target.target_index];
+      SCOPED_TRACE(std::string(target.label) + " " + std::string(mnemonic));
+      const std::vector<uint8_t> bytes = make_group_flat_d16_store_code_object(target, form);
+      ASSERT_FALSE(bytes.empty());
+      ConSanOptions options;
+      options.flavor = ConSanFlavor::SuperCollider;
+      options.probe_flat_check_trap = true;
+      options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+      options.report_buffer_address = kFlatMismatchReportAddress;
+      options.report_marker = kFlatMismatchReportMarker;
+      options.max_patches = 1;
+
+      const ConSanResult result = try_patch_consan(bytes, options);
+
+      ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      ASSERT_TRUE(result.final_validation_passed);
+      ASSERT_EQ(result.kernels.size(), 1u);
+      ASSERT_EQ(result.kernels.front().flat_sites.size(), 1u);
+      const ConSanFlatSite &site = result.kernels.front().flat_sites.front();
+      ASSERT_TRUE(site.data_vgpr);
+      const auto patch = std::ranges::find(
+          result.patches, ConSanPatchKind::InlineFlatStoreCheckTrap, &ConSanPatchInfo::kind);
+      ASSERT_NE(patch, result.patches.end());
+      ASSERT_TRUE(patch->scratch_vgpr);
+      ASSERT_LT(*patch->scratch_vgpr, 255u);
+
+      AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(replacement.is_valid());
+      ASSERT_EQ(replacement.text_sections().size(), 1u);
+      const Section *text = replacement.text_sections().front();
+      const auto words = std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(text->data()),
+                                                   text->size() / sizeof(uint32_t));
+      const uint16_t comparison_scratch = static_cast<uint16_t>(*patch->scratch_vgpr + 1u);
+      const auto select_original_high = instrumentation::build_v_lshrrev_b32(
+          comparison_scratch, scalar_positive_inline_u32(16u), *site.data_vgpr, target.arch);
+      ASSERT_TRUE(select_original_high);
+      std::vector<uint32_t> normalization = {*select_original_high};
+      if (form.memory_width_bits == 8u) {
+        const auto mask_original_byte = instrumentation::build_v_and_b32_literal(
+            comparison_scratch, 0xffu, comparison_scratch, target.arch);
+        ASSERT_TRUE(mask_original_byte);
+        normalization.insert(normalization.end(), mask_original_byte->begin(),
+                             mask_original_byte->end());
+      }
+      const uint32_t readback = form.memory_width_bits == 8u
+                                    ? (kFlatMismatchOriginal >> 16u) & 0xffu
+                                    : kFlatMismatchOriginal >> 16u;
+      const std::array store_cases = {
+          FlatMismatchExecutionCase{0x1234DCBAu, readback, 0u},
+          FlatMismatchExecutionCase{kFlatMismatchOriginal, readback ^ 1u,
+                                    kFlatMismatchReportMarker},
+      };
+      execute_emitted_flat_mismatch_sequence(target, mnemonic, words, normalization, *patch,
+                                             *site.data_vgpr, comparison_scratch,
+                                             *patch->scratch_vgpr, store_cases);
+    }
+  }
 }
 
 TEST(ConSan, SuperColliderSupportsEveryD16GroupFlatLoadOnEveryTarget) {
