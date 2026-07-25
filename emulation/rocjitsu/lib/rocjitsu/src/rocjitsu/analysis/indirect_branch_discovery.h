@@ -66,9 +66,12 @@ struct IndirectCallFixup {
 /// @param extra_leaders Additional known block starts, usually kernel entries.
 /// @param wavefront_size Kernel wave size when known, or zero when the decoded
 /// operand widths must be used as-is.
+/// @param external_entries Subset of @p extra_leaders that are independently
+/// reachable entries for dominance. Empty defaults to all extra leaders.
 /// @returns Recovered indirect branch/call metadata.
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
-    std::span<const uint64_t> extra_leaders = {}, uint32_t wavefront_size = 0);
+    std::span<const uint64_t> extra_leaders = {}, uint32_t wavefront_size = 0,
+    std::span<const uint64_t> external_entries = {});
 
 } // namespace rocjitsu

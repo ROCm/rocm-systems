@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/analysis/kernel_scope.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/patch/cdna4_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
@@ -13,6 +15,8 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vbuffer.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/mubuf.h"
 #include "rocjitsu/isa/decoder.h"
@@ -264,6 +268,17 @@ uint32_t pack_sopc(uint16_t op, uint16_t ssrc0, uint16_t ssrc1) {
       op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
 }
 
+uint32_t pack_gfx1250_sop1(uint16_t op, uint16_t sdst, uint16_t ssrc0) {
+  return gfx1250::build_sop1(
+      op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
+}
+
+uint32_t pack_gfx1250_sop2(uint16_t op, uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1) {
+  return gfx1250::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                  .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                  .sdst = static_cast<uint8_t>(sdst)})[0];
+}
+
 uint32_t build_s_call_b64(uint16_t sdst, int16_t simm16) {
   return cdna3::build_sopk(cdna3::kSCallB64Sopk, {.simm16 = static_cast<uint16_t>(simm16),
                                                   .sdst = static_cast<uint8_t>(sdst)})[0];
@@ -281,6 +296,48 @@ std::array<uint32_t, 2> build_cdna4_readlane(uint16_t sgpr, uint16_t vgpr, uint1
                                                       .src0 = static_cast<uint16_t>(256 + vgpr),
                                                       .src1 = lane_selector,
                                                       .src2 = 128});
+}
+
+std::array<uint32_t, 2> build_gfx1250_writelane(uint16_t vgpr, uint16_t sgpr,
+                                                uint16_t lane_selector) {
+  return gfx1250::build_vop3(
+      gfx1250::kVWritelaneB32Vop3,
+      {.vdst = static_cast<uint8_t>(vgpr), .src0 = sgpr, .src1 = lane_selector});
+}
+
+std::array<uint32_t, 2> build_gfx1250_readlane(uint16_t sgpr, uint16_t vgpr,
+                                               uint16_t lane_selector) {
+  return gfx1250::build_vop3(gfx1250::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sgpr),
+                                                          .src0 = static_cast<uint16_t>(256 + vgpr),
+                                                          .src1 = lane_selector});
+}
+
+std::vector<IndirectCallFixup> discover_test_indirect_fixups(const std::vector<uint32_t> &words,
+                                                             rj_code_arch_t arch,
+                                                             std::span<const uint64_t> leaders,
+                                                             uint32_t wavefront_size) {
+  auto decoder = Decoder::create(arch);
+  if (!decoder)
+    return {};
+  std::vector<std::unique_ptr<Instruction>> decoded;
+  std::vector<const Instruction *> instructions;
+  for (size_t word_index = 0; word_index < words.size();) {
+    const uint64_t offset = word_index * sizeof(uint32_t);
+    std::unique_ptr<Instruction> instruction(decoder->decode(words.data() + word_index, offset));
+    if (!instruction || instruction->size() <= 0)
+      return {};
+    const size_t instruction_words = static_cast<size_t>(instruction->size()) / sizeof(uint32_t);
+    if (instruction_words == 0 || instruction_words > words.size() - word_index)
+      return {};
+    instructions.push_back(instruction.get());
+    decoded.push_back(std::move(instruction));
+    word_index += instruction_words;
+  }
+  return discover_indirect_branch_edges(
+      instructions,
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(words.data()),
+                               words.size() * sizeof(uint32_t)),
+      arch, leaders, wavefront_size);
 }
 
 TEST(RegisterSetAnalysis, KeepsRegisterClassesSeparate) {
@@ -575,9 +632,39 @@ enum class LaneSavedTargetMutation {
   DynamicLane,
   MismatchedHalf,
   CalleeClobber,
+  ReturnPairClobber,
   CallerClobber,
+  SameLaneWritelaneClobber,
   UnknownInterveningCall,
+  DirectPreservingCall,
+  DirectClobberingCall,
 };
+
+std::string_view lane_saved_target_mutation_name(LaneSavedTargetMutation mutation) {
+  switch (mutation) {
+  case LaneSavedTargetMutation::None:
+    return "None";
+  case LaneSavedTargetMutation::DynamicLane:
+    return "DynamicLane";
+  case LaneSavedTargetMutation::MismatchedHalf:
+    return "MismatchedHalf";
+  case LaneSavedTargetMutation::CalleeClobber:
+    return "CalleeClobber";
+  case LaneSavedTargetMutation::ReturnPairClobber:
+    return "ReturnPairClobber";
+  case LaneSavedTargetMutation::CallerClobber:
+    return "CallerClobber";
+  case LaneSavedTargetMutation::SameLaneWritelaneClobber:
+    return "SameLaneWritelaneClobber";
+  case LaneSavedTargetMutation::UnknownInterveningCall:
+    return "UnknownInterveningCall";
+  case LaneSavedTargetMutation::DirectPreservingCall:
+    return "DirectPreservingCall";
+  case LaneSavedTargetMutation::DirectClobberingCall:
+    return "DirectClobberingCall";
+  }
+  return "Unknown";
+}
 
 std::vector<uint32_t> build_lane_saved_target_program(LaneSavedTargetMutation mutation) {
   constexpr uint16_t kTargetSreg = 0;
@@ -596,13 +683,22 @@ std::vector<uint32_t> build_lane_saved_target_program(LaneSavedTargetMutation mu
   // 0x00: first callee. The negative case writes the complete carrier
   // register before returning.
   words.push_back(
-      mutation == LaneSavedTargetMutation::CalleeClobber
+      mutation == LaneSavedTargetMutation::CalleeClobber ||
+              mutation == LaneSavedTargetMutation::DirectClobberingCall
           ? cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 128, .vdst = kCarrierVgpr})[0]
           : build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
   words.push_back(pack_sop1(0x1d, 0, kReturnSreg));
-  // 0x08: a second, preserving callee used between the save and restore.
-  words.push_back(pack_sop1(0x1d, 0, kReturnSreg));
-  words.push_back(build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  // 0x08: a second callee used between the save and restore. One negative
+  // case proves that naming the expected return pair at setpc is insufficient
+  // after that pair was clobbered.
+  if (mutation == LaneSavedTargetMutation::ReturnPairClobber) {
+    words.push_back(
+        build_s_mov_b32(kReturnSreg, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4));
+    words.push_back(pack_sop1(0x1d, 0, kReturnSreg));
+  } else {
+    words.push_back(pack_sop1(0x1d, 0, kReturnSreg));
+    words.push_back(build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  }
 
   // 0x10: build the first callee target in s[0:1].
   words.push_back(pack_sop1(0x1c, kTargetSreg, 0));
@@ -627,14 +723,24 @@ std::vector<uint32_t> build_lane_saved_target_program(LaneSavedTargetMutation mu
     words.push_back(pack_sop2(4, kTargetSreg + 1, kTargetSreg + 1, kLiteralOperand));
     words.push_back(UINT32_MAX);
   }
-  words.push_back(pack_sop1(0x1e, kReturnSreg,
-                            mutation == LaneSavedTargetMutation::UnknownInterveningCall
-                                ? kUnknownTargetSreg
-                                : kTargetSreg)); // 0x4c.
-  words.push_back(
-      mutation == LaneSavedTargetMutation::CallerClobber
-          ? cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 128, .vdst = kCarrierVgpr})[0]
-          : build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4)); // 0x50.
+  if (mutation == LaneSavedTargetMutation::DirectPreservingCall) {
+    words.push_back(build_s_call_b64(kReturnSreg, -18)); // 0x4c -> 0x08.
+  } else if (mutation == LaneSavedTargetMutation::DirectClobberingCall) {
+    words.push_back(build_s_call_b64(kReturnSreg, -20)); // 0x4c -> 0x00.
+  } else {
+    words.push_back(pack_sop1(0x1e, kReturnSreg,
+                              mutation == LaneSavedTargetMutation::UnknownInterveningCall
+                                  ? kUnknownTargetSreg
+                                  : kTargetSreg)); // 0x4c.
+  }
+  if (mutation == LaneSavedTargetMutation::SameLaneWritelaneClobber) {
+    append(build_cdna4_writelane(kCarrierVgpr, kUnknownTargetSreg, kLowLane));
+  } else {
+    words.push_back(
+        mutation == LaneSavedTargetMutation::CallerClobber
+            ? cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 128, .vdst = kCarrierVgpr})[0]
+            : build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4)); // 0x50.
+  }
 
   append(build_cdna4_readlane(kTargetSreg, kCarrierVgpr, kLowLane));
   append(build_cdna4_readlane(kTargetSreg + 1, kCarrierVgpr,
@@ -643,6 +749,132 @@ std::vector<uint32_t> build_lane_saved_target_program(LaneSavedTargetMutation mu
   words.push_back(pack_sop1(0x1e, kReturnSreg, kTargetSreg)); // 0x64.
   words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
   return words;
+}
+
+std::vector<uint32_t> build_gfx1250_lane_saved_target_program(uint16_t low_lane = 128u + 7u,
+                                                              uint16_t high_lane = 128u + 8u,
+                                                              bool movrel_before_restore = false) {
+  constexpr uint16_t kTargetSreg = 0;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint16_t kCarrierVgpr = 42;
+  constexpr uint32_t kLiteralOperand = 255;
+
+  std::vector<uint32_t> words;
+  const auto append = [&](const auto &encoded) {
+    words.insert(words.end(), encoded.begin(), encoded.end());
+  };
+  words.push_back(pack_gfx1250_sop1(0x48, 0, kReturnSreg));
+  words.push_back(build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  words.push_back(pack_gfx1250_sop1(0x48, 0, kReturnSreg));
+  words.push_back(build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+
+  words.push_back(pack_gfx1250_sop1(0x47, kTargetSreg, 0));
+  words.push_back(pack_gfx1250_sop2(0, kTargetSreg, kTargetSreg, kLiteralOperand));
+  words.push_back(static_cast<uint32_t>(-20));
+  words.push_back(pack_gfx1250_sop2(4, kTargetSreg + 1, kTargetSreg + 1, kLiteralOperand));
+  words.push_back(UINT32_MAX);
+  append(build_gfx1250_writelane(kCarrierVgpr, kTargetSreg, low_lane));
+  append(build_gfx1250_writelane(kCarrierVgpr, kTargetSreg + 1, high_lane));
+  words.push_back(pack_gfx1250_sop1(0x49, kReturnSreg, kTargetSreg));
+
+  words.push_back(pack_gfx1250_sop1(0x47, kTargetSreg, 0));
+  words.push_back(pack_gfx1250_sop2(0, kTargetSreg, kTargetSreg, kLiteralOperand));
+  words.push_back(static_cast<uint32_t>(-52));
+  words.push_back(pack_gfx1250_sop2(4, kTargetSreg + 1, kTargetSreg + 1, kLiteralOperand));
+  words.push_back(UINT32_MAX);
+  words.push_back(pack_gfx1250_sop1(0x49, kReturnSreg, kTargetSreg));
+  words.push_back(
+      movrel_before_restore
+          ? gfx1250::build_vop1(gfx1250::kVMovrelsB32Vop1,
+                                {.src0 = static_cast<uint16_t>(256u + kCarrierVgpr), .vdst = 0u})[0]
+          : build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+
+  append(build_gfx1250_readlane(kTargetSreg, kCarrierVgpr, low_lane));
+  append(build_gfx1250_readlane(kTargetSreg + 1, kCarrierVgpr, high_lane));
+  words.push_back(pack_gfx1250_sop1(0x49, kReturnSreg, kTargetSreg));
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  return words;
+}
+
+struct ScratchPreservedLaneProgram {
+  std::vector<uint32_t> words;
+  uint64_t outer_callee_offset = 0;
+  uint64_t caller_offset = 0;
+  uint64_t final_consumer_offset = 0;
+};
+
+ScratchPreservedLaneProgram
+build_scratch_preserved_lane_program(bool matching_scratch_slot = true) {
+  constexpr uint16_t kTargetSreg = 0;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint16_t kReturnCarrierVgpr = 40;
+  constexpr uint16_t kTargetCarrierVgpr = 42;
+  constexpr uint16_t kReturnLowLane = 128u;
+  constexpr uint16_t kReturnHighLane = 129u;
+  constexpr uint16_t kTargetLowLane = 128u + 7u;
+  constexpr uint16_t kTargetHighLane = 128u + 8u;
+  constexpr uint16_t kScratchSaddr = 33;
+  constexpr uint32_t kLiteralOperand = 255;
+
+  ScratchPreservedLaneProgram program;
+  const auto append = [&](const auto &encoded) {
+    program.words.insert(program.words.end(), encoded.begin(), encoded.end());
+  };
+  const auto offset = [&] {
+    return static_cast<uint64_t>(program.words.size()) * sizeof(uint32_t);
+  };
+  const auto append_target_builder = [&](uint64_t target) {
+    const uint64_t getpc_offset = offset();
+    const int64_t delta =
+        static_cast<int64_t>(target) - static_cast<int64_t>(getpc_offset + sizeof(uint32_t));
+    program.words.push_back(pack_sop1(0x1c, kTargetSreg, 0));
+    program.words.push_back(pack_sop2(0, kTargetSreg, kTargetSreg, kLiteralOperand));
+    program.words.push_back(static_cast<uint32_t>(delta));
+    program.words.push_back(pack_sop2(4, kTargetSreg + 1, kTargetSreg + 1, kLiteralOperand));
+    program.words.push_back(delta < 0 ? UINT32_MAX : 0u);
+  };
+
+  // Inner callee: preserve its caller's complete v40 value in one exact
+  // scalar-addressed scratch slot, use two lanes for its own return pair, and
+  // restore the original v40 before returning.
+  append(build_cdna4_scratch_store_b32_saddr(kReturnCarrierVgpr, kScratchSaddr, 0,
+                                             ROCJITSU_CODE_ARCH_CDNA4)
+             .value());
+  append(build_cdna4_writelane(kReturnCarrierVgpr, kReturnSreg, kReturnLowLane));
+  append(build_cdna4_writelane(kReturnCarrierVgpr, kReturnSreg + 1, kReturnHighLane));
+  append(build_cdna4_readlane(kReturnSreg, kReturnCarrierVgpr, kReturnLowLane));
+  append(build_cdna4_readlane(kReturnSreg + 1, kReturnCarrierVgpr, kReturnHighLane));
+  append(build_cdna4_scratch_load_b32_saddr(kReturnCarrierVgpr, kScratchSaddr,
+                                            matching_scratch_slot ? 0u : 4u,
+                                            ROCJITSU_CODE_ARCH_CDNA4)
+             .value());
+  program.words.push_back(0xbf8c0f70u); // s_waitcnt vmcnt(0).
+  program.words.push_back(pack_sop1(0x1d, 0, kReturnSreg));
+
+  // Outer callee: keep its incoming return pair in v40 across a nested call to
+  // the inner callee. The inner scratch spill must preserve those exact lanes.
+  program.outer_callee_offset = offset();
+  append(build_cdna4_writelane(kReturnCarrierVgpr, kReturnSreg, kReturnLowLane));
+  append(build_cdna4_writelane(kReturnCarrierVgpr, kReturnSreg + 1, kReturnHighLane));
+  append_target_builder(0);
+  program.words.push_back(pack_sop1(0x1e, kReturnSreg, kTargetSreg));
+  append(build_cdna4_readlane(kReturnSreg, kReturnCarrierVgpr, kReturnLowLane));
+  append(build_cdna4_readlane(kReturnSreg + 1, kReturnCarrierVgpr, kReturnHighLane));
+  program.words.push_back(pack_sop1(0x1d, 0, kReturnSreg));
+
+  // Caller: establish one reusable static target, call it once, then recover
+  // the same target from v42 after the nested scratch-preserved call chain.
+  program.caller_offset = offset();
+  append_target_builder(program.outer_callee_offset);
+  append(build_cdna4_writelane(kTargetCarrierVgpr, kTargetSreg, kTargetLowLane));
+  append(build_cdna4_writelane(kTargetCarrierVgpr, kTargetSreg + 1, kTargetHighLane));
+  program.words.push_back(pack_sop1(0x1e, kReturnSreg, kTargetSreg));
+  append(build_cdna4_readlane(kTargetSreg, kTargetCarrierVgpr, kTargetLowLane));
+  append(build_cdna4_readlane(kTargetSreg + 1, kTargetCarrierVgpr, kTargetHighLane));
+  program.final_consumer_offset = offset();
+  program.words.push_back(pack_sop1(0x1e, kReturnSreg, kTargetSreg));
+  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  return program;
 }
 
 TEST(CfgAnalysis, RecoversLaneSavedTargetAcrossPreservingCalls) {
@@ -662,25 +894,149 @@ TEST(CfgAnalysis, RecoversLaneSavedTargetAcrossPreservingCalls) {
   EXPECT_EQ(consumer->call_edges()[0].callee, callee);
 }
 
+TEST(CfgAnalysis, RecoversGfx1250LaneSavedTargetOperandLayout) {
+  TestCodeObject co(build_gfx1250_lane_saved_target_program());
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 3> extra_leaders{0, 8, 16};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, extra_leaders);
+
+  const auto consumer_it = std::ranges::find_if(blocks, [](const auto &block) {
+    return block && block->terminator() && block->terminator()->src_loc() == 0x64u;
+  });
+  BasicBlock *consumer = consumer_it == blocks.end() ? nullptr : consumer_it->get();
+  BasicBlock *callee = block_starting_at(blocks, 0);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(callee, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 0u);
+  ASSERT_EQ(consumer->call_edges().size(), 1u);
+  EXPECT_EQ(consumer->call_edges()[0].callee, callee);
+}
+
+TEST(CfgAnalysis, RecoversLaneSavedTargetAcrossDirectPreservingCall) {
+  TestCodeObject co(build_lane_saved_target_program(LaneSavedTargetMutation::DirectPreservingCall));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 3> extra_leaders{0, 8, 16};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+
+  BasicBlock *consumer = block_starting_at(blocks, 0x64);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 0u);
+}
+
+TEST(CfgAnalysis, RecoversLaneSavedTargetAcrossScratchPreservedReturnCarrier) {
+  ScratchPreservedLaneProgram program = build_scratch_preserved_lane_program();
+  const std::array extra_leaders{uint64_t{0}, program.outer_callee_offset, program.caller_offset};
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      program.words, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders, /*wavefront_size=*/64u);
+  const auto consumer = std::ranges::find_if(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.final_consumer_offset;
+  });
+  ASSERT_NE(consumer, fixups.end());
+  EXPECT_EQ(consumer->source_target_offset, program.outer_callee_offset);
+}
+
+TEST(CfgAnalysis, RejectsLaneSavedTargetAcrossMismatchedScratchRestore) {
+  ScratchPreservedLaneProgram program =
+      build_scratch_preserved_lane_program(/*matching_scratch_slot=*/false);
+  const std::array extra_leaders{uint64_t{0}, program.outer_callee_offset, program.caller_offset};
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      program.words, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders, /*wavefront_size=*/64u);
+  EXPECT_TRUE(std::ranges::none_of(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.final_consumer_offset;
+  }));
+}
+
+TEST(CfgAnalysis, RejectsLaneSavedTargetBypassedFromExternalEntry) {
+  TestCodeObject co(build_lane_saved_target_program(LaneSavedTargetMutation::None));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 4> extra_leaders{0, 8, 16, 0x64};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+
+  BasicBlock *consumer = block_starting_at(blocks, 0x64);
+  ASSERT_NE(consumer, nullptr);
+  EXPECT_TRUE(consumer->static_indirect_call_fixups().empty());
+  EXPECT_TRUE(consumer->call_edges().empty());
+}
+
+TEST(CfgAnalysis, RejectsFixedLaneOutsideKnownWavefront) {
+  constexpr std::array<uint64_t, 3> extra_leaders{0, 8, 16};
+  const std::vector<uint32_t> words =
+      build_gfx1250_lane_saved_target_program(/*low_lane=*/128u + 40u,
+                                              /*high_lane=*/128u + 41u);
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      words, ROCJITSU_CODE_ARCH_GFX1250, extra_leaders, /*wavefront_size=*/32u);
+  EXPECT_TRUE(std::ranges::none_of(
+      fixups, [](const IndirectCallFixup &fixup) { return fixup.source_call_offset == 0x64u; }));
+}
+
+TEST(CfgAnalysis, RejectsLiteralSelectedLaneEvenWhenLiteralLooksInline) {
+  constexpr std::array<uint64_t, 3> extra_leaders{0, 8, 16};
+  std::vector<uint32_t> words = build_gfx1250_lane_saved_target_program();
+  constexpr size_t kFirstWritelaneSecondWord = 10u;
+  constexpr uint32_t kVop3Src1Shift = 9u;
+  constexpr uint32_t kVop3SourceMask = 0x1ffu;
+  words[kFirstWritelaneSecondWord] &= ~(kVop3SourceMask << kVop3Src1Shift);
+  words[kFirstWritelaneSecondWord] |= 255u << kVop3Src1Shift;
+  // A decoded literal value of 135 is numerically identical to inline lane 7.
+  // The raw selector still says "literal" and must not become static provenance.
+  words.insert(words.begin() + static_cast<ptrdiff_t>(kFirstWritelaneSecondWord + 1u), 135u);
+  const uint64_t final_consumer_offset =
+      static_cast<uint64_t>(words.size() - 2u) * sizeof(uint32_t);
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      words, ROCJITSU_CODE_ARCH_GFX1250, extra_leaders, /*wavefront_size=*/64u);
+  EXPECT_TRUE(std::ranges::none_of(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == final_consumer_offset;
+  }));
+}
+
+TEST(CfgAnalysis, RejectsRelativeVgprAccessAcrossLaneSavedTarget) {
+  TestCodeObject co(build_gfx1250_lane_saved_target_program(
+      /*low_lane=*/128u + 7u, /*high_lane=*/128u + 8u, /*movrel_before_restore=*/true));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 3> extra_leaders{0, 8, 16};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, extra_leaders);
+
+  const auto consumer_it = std::ranges::find_if(blocks, [](const auto &block) {
+    return block && block->terminator() && block->terminator()->src_loc() == 0x64u;
+  });
+  BasicBlock *consumer = consumer_it == blocks.end() ? nullptr : consumer_it->get();
+  ASSERT_NE(consumer, nullptr);
+  EXPECT_TRUE(consumer->static_indirect_call_fixups().empty());
+  EXPECT_TRUE(consumer->call_edges().empty());
+}
+
 TEST(CfgAnalysis, RejectsUnprovenLaneSavedTargets) {
   constexpr std::array mutations{
       LaneSavedTargetMutation::DynamicLane,
       LaneSavedTargetMutation::MismatchedHalf,
       LaneSavedTargetMutation::CalleeClobber,
+      LaneSavedTargetMutation::ReturnPairClobber,
       LaneSavedTargetMutation::CallerClobber,
+      LaneSavedTargetMutation::SameLaneWritelaneClobber,
       LaneSavedTargetMutation::UnknownInterveningCall,
+      LaneSavedTargetMutation::DirectClobberingCall,
   };
 
   for (LaneSavedTargetMutation mutation : mutations) {
-    SCOPED_TRACE(static_cast<int>(mutation));
-    TestCodeObject co(build_lane_saved_target_program(mutation));
+    SCOPED_TRACE(lane_saved_target_mutation_name(mutation));
+    std::vector<uint32_t> words = build_lane_saved_target_program(mutation);
+    const uint64_t final_consumer_offset =
+        static_cast<uint64_t>(words.size() - 2u) * sizeof(uint32_t);
+    TestCodeObject co(std::move(words));
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     ASSERT_NE(decoder, nullptr);
     constexpr std::array<uint64_t, 3> extra_leaders{0, 8, 16};
     auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
 
-    const auto consumer_it = std::ranges::find_if(blocks, [](const auto &block) {
-      return block && block->terminator() && block->terminator()->src_loc() == 0x64;
+    const auto consumer_it = std::ranges::find_if(blocks, [&](const auto &block) {
+      return block && block->terminator() &&
+             block->terminator()->src_loc() == final_consumer_offset;
     });
     BasicBlock *consumer = consumer_it == blocks.end() ? nullptr : consumer_it->get();
     ASSERT_NE(consumer, nullptr);
