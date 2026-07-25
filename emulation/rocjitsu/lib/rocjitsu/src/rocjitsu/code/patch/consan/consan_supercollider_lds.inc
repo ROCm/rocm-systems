@@ -2882,6 +2882,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                              ? std::optional<uint16_t>(candidate.vcc_save_sgpr)
                                              : std::nullopt;
     planned.info.scalar_vcc_spill_vgpr = candidate.scalar_vcc_spill_vgpr;
+    planned.info.scalar_vcc_spill_vgpr_count = candidate.scalar_vcc_spill_vgpr ? 1u : 0u;
     planned.info.required_sgpr_count =
         candidate.scalar_vcc_spill_vgpr ? static_cast<uint16_t>(candidate.vcc_save_sgpr + 1u) : 0u;
     planned.info.owner_descriptor_file_offsets = site.owner_descriptor_file_offsets;

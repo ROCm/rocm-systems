@@ -2180,6 +2180,25 @@ choose_flat_scratch_vgpr(const ConSanFlatSite &site, const ConSanOptions &option
   return std::nullopt;
 }
 
+/// Select the lowest allocated flat scratch window that does not overlap the
+/// guest access operands. Liveness is intentionally irrelevant here: the
+/// caller saves and restores the complete selected window through private
+/// memory before using it.
+[[nodiscard]] std::optional<uint16_t>
+choose_flat_spill_scratch_vgpr(const ConSanFlatSite &site, uint16_t allocation_count,
+                               uint16_t required_vgprs) {
+  for (uint32_t candidate = 0;
+       candidate + required_vgprs <= allocation_count &&
+       candidate + required_vgprs <= REGISTER_SET_MAX_VGPRS;
+       ++candidate) {
+    if (!is_forbidden_flat_scratch_vgpr_run(site, static_cast<uint16_t>(candidate),
+                                            required_vgprs)) {
+      return static_cast<uint16_t>(candidate);
+    }
+  }
+  return std::nullopt;
+}
+
 [[nodiscard]] std::optional<std::array<uint32_t, 3>>
 retarget_flat_load_vdst(std::array<uint32_t, 3> words, uint16_t vdst, rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {

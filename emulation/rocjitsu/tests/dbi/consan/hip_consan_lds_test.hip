@@ -156,6 +156,16 @@ int main(int argc, char **argv) {
   "s_mov_b64 s[98:99], s[98:99]\n\t"                                                               \
   "s_mov_b64 s[100:101], s[100:101]\n\t" RJ_CONSAN_TEST_KEEP_HIGH_ORDINARY_SGPRS_LIVE
 
+#define RJ_CONSAN_TEST_KEEP_ODD_VGPRS_LIVE                                                         \
+  ".irp r,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31,33,35,37,39,41,43,45,47,49,51,53,55,57,"        \
+  "59,61,63,65,67,69,71,73,75,77,79,81,83,85,87,89,91,93,95,97,99,101,103,105,107,109,111,"        \
+  "113,115,117,119,121,123,125,127,129,131,133,135,137,139,141,143,145,147,149,151,153,155,"       \
+  "157,159,161,163,165,167,169,171,173,175,177,179,181,183,185,187,189,191,193,195,197,199,"       \
+  "201,203,205,207,209,211,213,215,217,219,221,223,225,227,229,231,233,235,237,239,241,243,"       \
+  "245,247,249,251,253,255\n\t"                                                                     \
+  "v_mov_b32 v\\r, v\\r\n\t"                                                                        \
+  ".endr\n\t"
+
 namespace {
 
 bool bool_env(const char *name) {
@@ -288,6 +298,46 @@ padded_zero_exec_flat_lds_store_preserves_scalar_pair_for_instrumentation(uint32
   out[2] = after_lo;
   out[3] = after_hi;
   out[4] = lds[0];
+}
+
+__global__ void
+padded_full_pressure_flat_lds_store_preserves_registers_for_instrumentation(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  uint32_t scalar_before_lo = 0;
+  uint32_t scalar_before_hi = 0;
+  uint32_t scalar_after_lo = 0;
+  uint32_t scalar_after_hi = 0;
+  uint32_t vector_after_three = 0;
+  uint32_t vector_after_five = 0;
+  const uint32_t value = 0x51A7C0DEu;
+  asm volatile("" : : "v"(&lds[0]) : "memory");
+  asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
+               "v_mov_b32 v0, s14\n\t"
+               "v_mov_b32 v1, s15\n\t"
+               "v_mov_b32 v3, 0x13579bdf\n\t"
+               "v_mov_b32 v5, 0x2468ace0\n\t"
+               "v_mov_b32 %[scalar_before_lo], s2\n\t"
+               "v_mov_b32 %[scalar_before_hi], s3\n\t" RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED
+                   RJ_CONSAN_TEST_NOP_CAVE RJ_CONSAN_TEST_KEEP_ORDINARY_SGPRS_LIVE
+                       RJ_CONSAN_TEST_KEEP_ODD_VGPRS_LIVE
+               "v_mov_b32 %[scalar_after_lo], s2\n\t"
+               "v_mov_b32 %[scalar_after_hi], s3\n\t"
+               "v_mov_b32 %[vector_after_three], v3\n\t"
+               "v_mov_b32 %[vector_after_five], v5\n\t"
+               : [scalar_before_lo] "=&v"(scalar_before_lo),
+                 [scalar_before_hi] "=&v"(scalar_before_hi),
+                 [scalar_after_lo] "=&v"(scalar_after_lo),
+                 [scalar_after_hi] "=&v"(scalar_after_hi),
+                 [vector_after_three] "=&v"(vector_after_three),
+                 [vector_after_five] "=&v"(vector_after_five)
+               : [value] "v"(value)
+               : "s14", "s15", "v0", "v1", "v3", "v5", "memory");
+  out[0] = scalar_before_lo;
+  out[1] = scalar_before_hi;
+  out[2] = scalar_after_lo;
+  out[3] = scalar_after_hi;
+  out[4] = vector_after_three;
+  out[5] = vector_after_five;
 }
 
 __global__ void
@@ -532,6 +582,25 @@ TEST(ConSanLdsTest, ZeroExecFlatSpillPreservesLiveScalarPair) {
   free_device_ptr(d_out);
   EXPECT_EQ(out[0], out[2]);
   EXPECT_EQ(out[1], out[3]);
+}
+
+TEST(ConSanLdsTest, FullPressureFlatSpillPreservesLiveRegisterFiles) {
+  constexpr size_t kValues = 6;
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, kValues * sizeof(*d_out)));
+  HIP_ASSERT(hipMemset(d_out, 0, kValues * sizeof(*d_out)));
+
+  padded_full_pressure_flat_lds_store_preserves_registers_for_instrumentation<<<1, 1>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  std::array<uint32_t, kValues> out{};
+  HIP_ASSERT(hipMemcpy(out.data(), d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  EXPECT_EQ(out[0], out[2]);
+  EXPECT_EQ(out[1], out[3]);
+  EXPECT_EQ(out[4], 0x13579BDFu);
+  EXPECT_EQ(out[5], 0x2468ACE0u);
 }
 
 TEST(ConSanLdsTest, ZeroExecNativeLdsSpillPreservesAllocatedScalars) {

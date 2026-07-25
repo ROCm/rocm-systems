@@ -455,10 +455,13 @@ struct ConSanPatchInfo {
   /// Ordinary scalar borrowed by a spill-backed VCC save. The scalar is
   /// preserved through scalar_vcc_spill_vgpr and is never a fresh allocation.
   std::optional<uint16_t> scalar_vcc_spill_sgpr;
-  /// VGPR used as a fixed-lane reservoir for a borrowed live scalar VCC-save
-  /// pair. Presence proves the patch used the scalar-pressure fallback rather
-  /// than a liveness-dead SGPR pair.
+  /// First VGPR used as a reservoir for a borrowed live scalar VCC-save pair.
+  /// A non-spill patch uses fixed lanes in one VGPR. A private-spill patch uses
+  /// two consecutive active-lane reservoirs so inactive lanes remain untouched.
   std::optional<uint16_t> scalar_vcc_spill_vgpr;
+  /// Number of consecutive scalar-reservoir VGPRs beginning at
+  /// scalar_vcc_spill_vgpr. Zero means the scalar-pressure fallback was unused.
+  uint16_t scalar_vcc_spill_vgpr_count = 0;
   std::optional<uint16_t> persistent_owner_vgpr;
   std::optional<uint16_t> persistent_epoch_vgpr;
   std::optional<uint16_t> persistent_workgroup_key_vgpr;
