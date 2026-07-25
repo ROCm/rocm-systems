@@ -26,6 +26,28 @@ def find_rccl_library(artifact_dir: Path) -> Path:
     return lib_path
 
 
+def setup_rccl_preload(rccl_lib_dir: Path) -> None:
+    """Set LD_PRELOAD to force the CI-built librccl.so to be loaded.
+
+    LD_LIBRARY_PATH alone is insufficient because pip-installed wheels
+    (torch, jax) embed RUNPATH in their shared libraries, and the dynamic
+    linker resolves RUNPATH before LD_LIBRARY_PATH.  LD_PRELOAD bypasses
+    this entirely by loading our library before anything else.
+    """
+    ci_rccl = rccl_lib_dir.resolve() / "librccl.so"
+    if not ci_rccl.exists():
+        log.error("CI-built librccl.so not found at %s", ci_rccl)
+        sys.exit(1)
+    log.info("CI-built RCCL: %s (%d bytes)", ci_rccl, ci_rccl.stat().st_size)
+
+    existing = os.environ.get("LD_PRELOAD", "")
+    parts = [str(ci_rccl)]
+    if existing:
+        parts.append(existing)
+    os.environ["LD_PRELOAD"] = ":".join(parts)
+    log.info("LD_PRELOAD=%s", os.environ["LD_PRELOAD"])
+
+
 def verify_rccl_override(rccl_lib_dir: Path) -> None:
     """Verify that the CI-built librccl.so exists on disk."""
     ci_rccl = rccl_lib_dir.resolve() / "librccl.so"

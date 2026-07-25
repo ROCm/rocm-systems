@@ -27,6 +27,7 @@ from rccl_ci_utils import (
     parse_junit_xml,
     send_email_report,
     set_github_output,
+    setup_rccl_preload,
     verify_rccl_override,
     write_github_summary,
 )
@@ -376,9 +377,10 @@ def main() -> None:
     if args.discover_only:
         return
 
-    # Step 2: Set up library paths and verify override
+    # Step 2: Set up library paths, LD_PRELOAD, and verify override
     populate_rocm_lib_dir(lib_dirs)
     setup_ld_library_path(lib_dirs)
+    setup_rccl_preload(rccl_lib_dir)
     verify_rccl_override(rccl_lib_dir)
 
     # Step 3: Set XLA environment variables

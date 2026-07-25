@@ -28,6 +28,7 @@ from rccl_ci_utils import (
     parse_junit_xml,
     send_email_report,
     set_github_output,
+    setup_rccl_preload,
     verify_rccl_override,
     write_github_summary,
 )
@@ -417,8 +418,9 @@ def main() -> None:
     if args.discover_only:
         return
 
-    # Step 2: Set up LD_LIBRARY_PATH and verify override
+    # Step 2: Set up LD_LIBRARY_PATH, LD_PRELOAD, and verify override
     setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
+    setup_rccl_preload(rccl_lib_dir)
     verify_rccl_override(rccl_lib_dir)
 
     # Step 3: Clone PyTorch test sources
