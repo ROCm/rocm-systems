@@ -167,11 +167,19 @@ RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
       git checkout ${BRANCH}; \
     fi
 
+# Limit kernel generation to GIN-relevant collectives (build time optimization)
+ENV ONLY_FUNCS="SendRecv|AlltoAllPivot|AlltoAllGda|AlltoAllvGda"
+
 ## building RCCL (builds rocshmem from source via --rocshmem-gin)
+# Workaround: relax the rocshmem activation condition (upstream requires
+# multi-node + 8 ranks/node + threshold) so it works for any configuration.
+RUN cd ${SRC}/projects/rccl \
+ && sed -i -z 's/if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks \/ comm->nNodes == 8) &&\n      comm->rocshmemThreshold <= 1048576)/if (comm->enableRocshmem)/' \
+       src/rccl_wrap.cc
 RUN cd ${SRC}/projects/rccl \
  && ./install.sh --amdgpu_targets=${GPU_TARGETS} --prefix=${RCCL_INSTALL_PREFIX} \
       --no-device-linker --no_clean --rocshmem-gin \
-      --cmake-options "-DROCSHMEM_CMAKE_OPTIONS=-DBUILD_DEBUG_TRACE_DEVICE=ON -DBUILD_DEBUG_DEVICE=ON -DBUILD_DEBUG_TRACE_HOST=ON" \
+      --cmake-options "-DROCSHMEM_CMAKE_OPTIONS=-DBUILD_DEBUG_TRACE_DEVICE=ON;-DBUILD_DEBUG_DEVICE=ON;-DBUILD_DEBUG_TRACE_HOST=ON" \
       $([ "${DEBUG_BUILD}" = "1" ] && echo "--debug")
 
 ## Copy rccl-tests separately so edits don't rebuild rccl/rocshmem
@@ -185,7 +193,7 @@ RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
 RUN mkdir -p rccl-tests \
     && cd rccl-tests \
     && cmake $([ "${DEBUG_BUILD}" = "1" ] && echo "-DCMAKE_BUILD_TYPE=Debug" || echo "-DCMAKE_BUILD_TYPE=Release") \
-       -DUSE_MPI=ON -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM=ON \
+       -DUSE_MPI=ON -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM_GIN=ON \
        -DRCCL_ROOT="${RCCL_INSTALL_PREFIX}" \
        -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" \
        -DGPU_TARGETS=${GPU_TARGETS} \
