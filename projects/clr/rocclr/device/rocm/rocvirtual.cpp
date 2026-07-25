@@ -5005,8 +5005,8 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
       static_cast<KernelBlitManager&>(queue->blitMgr()).RunGwsInit(workgroups - 1);
     }
 
-    // SW grid.sync ASICs with DEBUG_CLR_COOP_CONCURRENT clear the AQL barrier bit
-    // so coop grids can overlap; ordering is kept by the AddExternalSignal chain.
+    // SW grid.sync ASICs + flag: clear barrier bit so coop grids overlap
+    // (ordering kept by the AddExternalSignal chain below).
     const bool coop_concurrent =
         DEBUG_CLR_COOP_CONCURRENT && !dev().settings().gwsInitSupported_;
     if (coop_concurrent) {
@@ -5015,10 +5015,8 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
       queue->setAqlHeader(dispatchPacketHeader_);
     }
 
-    // Submit kernel to HW. In concurrent mode attach a completion signal directly to
-    // the dispatch packet so completion can be tracked without a serializing barrier
-    // fence; GetLastSignal() then returns this dispatch's signal for the ordering
-    // dependency added into the user's stream below.
+    // Concurrent mode: attach a completion signal to the packet so ordering works
+    // without the serializing fence (GetLastSignal() returns this dispatch's signal).
     if (!queue->submitKernelInternal(vcmd.sizes(), vcmd.kernel(), vcmd.parameters(),
                                      static_cast<void*>(as_cl(&vcmd.event())),
                                      vcmd.sharedMemBytes(), &vcmd, nullptr,
@@ -5026,12 +5024,9 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
       LogError("AQL dispatch failed!");
       vcmd.setStatus(CL_INVALID_OPERATION);
     }
-    // In concurrent mode do NOT emit the serializing BARRIER_AND fence between coop
-    // dispatches -- that intervening barrier (barrier bit set) forces the next dispatch
-    // to wait for this one to retire, defeating the overlap CP firmware would otherwise
-    // provide for back-to-back barrier-bit-cleared dispatches.
+    // Skip the BARRIER_AND fence in concurrent mode: it would serialize the next
+    // coop dispatch. Legacy path keeps it to hold the queue in-order.
     if (!coop_concurrent) {
-      // Wait for the execution on the device queue. Keep the current queue in-order
       queue->releaseGpuMemoryFence(kSkipCpuWait);
     }
 
