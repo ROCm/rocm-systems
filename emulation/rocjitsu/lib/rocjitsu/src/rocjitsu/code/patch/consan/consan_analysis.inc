@@ -960,13 +960,15 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
 
   if (mnemonic == "v_writelane_b32" || mnemonic == "v_readlane_b32") {
     std::optional<uint32_t> lane_selector;
+    // RDNA4 and gfx1250 lane instructions may carry a trailing literal word;
+    // CDNA VOP3 lane instructions do not support literal operands.
     if (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
         instruction_bytes.size() >= sizeof(rdna4::Vop3MachineInst)) {
       rdna4::Vop3MachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       lane_selector = static_cast<uint32_t>(raw.src1);
     } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-               instruction_bytes.size() >= sizeof(cdna4::Vop3MachineInst)) {
+               instruction_bytes.size() == sizeof(cdna4::Vop3MachineInst)) {
       cdna4::Vop3MachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       lane_selector = static_cast<uint32_t>(raw.src1);

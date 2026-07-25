@@ -721,7 +721,7 @@ TEST(ConSan, RejectsCdnaDynamicLaneSelectorProvenance) {
   }
 }
 
-TEST(ConSan, RejectsRdna4DynamicLaneSelectorProvenance) {
+TEST(ConSan, RejectsRdna4AndGfx1250DynamicLaneSelectorProvenance) {
   const std::array<uint32_t, 15> text_words = {
       0xbe8001ebu, // s_mov_b64 s[0:1], src_shared_base
       0xd761000au,
@@ -759,7 +759,7 @@ TEST(ConSan, RejectsRdna4DynamicLaneSelectorProvenance) {
   }
 }
 
-TEST(ConSan, ClearsRdna4LaneProvenanceOnWideLiteralWrite) {
+TEST(ConSan, ClearsRdna4AndGfx1250LaneProvenanceOnWideLiteralWrite) {
   const std::array<uint32_t, 21> text_words = {
       0xbe8001ebu, // s_mov_b64 s[0:1], src_shared_base
       0xd761000au,
