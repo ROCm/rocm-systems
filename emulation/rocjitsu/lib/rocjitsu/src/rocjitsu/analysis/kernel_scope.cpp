@@ -156,7 +156,7 @@ void add_scoped_call_flow(KernelCfgScope &scope, std::span<const uint8_t> text) 
       assert(call.callee != nullptr && "BasicBlock call edges should always have a callee");
       assert(call.continuation != nullptr &&
              "BasicBlock call edges should always have a continuation");
-      if (!allowed_blocks.contains(call.callee) || !allowed_blocks.contains(call.continuation))
+      if (!allowed_blocks.contains(call.callee))
         continue;
 
       scope.liveness_edges.push_back({.from = block, .to = call.callee});
@@ -164,6 +164,12 @@ void add_scoped_call_flow(KernelCfgScope &scope, std::span<const uint8_t> text) 
           walk_function_returns(*call.callee, call.return_sreg, text, allowed_blocks);
       for (BasicBlock *return_block : return_walk.encountered_setpcs)
         reaching_return_sregs[return_block].insert(call.return_sreg);
+      // Even when the continuation belongs to another kernel scope, the call
+      // still reaches the shared helper and contributes a return-register
+      // context. It cannot add a scoped return edge or prove a return block
+      // exempt from ordinary indirect control flow.
+      if (!allowed_blocks.contains(call.continuation))
+        continue;
       for (BasicBlock *return_block : return_walk.matching_returns) {
         scope.liveness_edges.push_back({.from = return_block, .to = call.continuation});
         matching_return_blocks.insert(return_block);

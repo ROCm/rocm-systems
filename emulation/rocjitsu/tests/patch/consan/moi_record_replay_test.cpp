@@ -4784,6 +4784,74 @@ TEST(ConSanMoi, Cdna4ScalarHoleReportsUndecodedHelperFallthrough) {
   }));
 }
 
+TEST(ConSanMoi, Cdna4ScalarHoleClassifiesResolvedBranchWithMissingFallthrough) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint16_t kReturnSreg = 30u;
+  const auto guest = build_cdna4_ds_store_b32(/*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, kArch);
+  const auto branch = instrumentation::build_s_cbranch_scc1(/*offset_dwords=*/-2, kArch);
+  ASSERT_TRUE(guest);
+  ASSERT_TRUE(branch);
+
+  std::vector<uint32_t> kernel_words(320u, build_s_nop(0, kArch));
+  size_t cursor = 0u;
+  kernel_words[cursor++] =
+      build_s_call_b64(kReturnSreg, static_cast<int16_t>(kernel_words.size() - 1u), kArch);
+  std::copy(guest->begin(), guest->end(), kernel_words.begin() + cursor);
+  cursor += guest->size();
+  kernel_words[cursor++] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(7u), kArch);
+  for (uint16_t sgpr = 0u; sgpr < 72u; ++sgpr)
+    kernel_words[cursor++] = build_s_mov_b32(/*sdst=*/87u, sgpr, kArch);
+  kernel_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/87u, kArch);
+  kernel_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/90u, kArch);
+  kernel_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/91u, kArch);
+  kernel_words.back() = build_s_endpgm(kArch);
+
+  // The conditional branch target is the decoded start of this helper, while
+  // its fallthrough lies in the deliberately uncovered executable tail. The
+  // diagnostic must describe the missing fallthrough, not the resolved branch
+  // target.
+  const std::array<uint32_t, 2> helper_words = {
+      build_s_nop(0, kArch),
+      *branch,
+  };
+  const std::array<uint32_t, 3> uncovered_tail = {
+      build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/72u, kArch),
+      build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/73u, kArch),
+      build_s_endpgm(kArch),
+  };
+  std::vector<uint8_t> bytes = make_cdna4_code_object_with_local_function(
+      kernel_words, helper_words, uncovered_tail, /*vgpr_granulated=*/3u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.moi_init_owner_epoch = true;
+  options.moi_exec_save_sgpr = 92u;
+  options.moi_dispatch_id_sgpr = 88u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  EXPECT_FALSE(result.moi_persistent_sgprs_automatic);
+  EXPECT_FALSE(result.resolved_moi_persistent_owner_sgpr);
+  EXPECT_FALSE(result.resolved_moi_persistent_epoch_sgpr);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("unresolved guest fallthrough after s_cbranch") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("unresolved guest branch s_cbranch") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("using complete-text coverage") != std::string::npos;
+  }));
+}
+
 TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {
   constexpr uint32_t kBarrierSignal = 0xBE804EC1u;
   constexpr uint32_t kBarrierWait = 0xBF94FFFFu;

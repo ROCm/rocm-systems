@@ -100,6 +100,7 @@ resolve_static_successors(const BasicBlock &block,
   if (auto it = block_by_offset.find(block.end_offset()); it != block_by_offset.end())
     result.fallthrough = it->second;
   result.direct_call_return_sreg = s_call_sdst(*term, first_word(*term));
+  const bool is_call = (term->flags() & INDIRECT_CALL) != 0;
   result.expects_fallthrough = !is_unconditional_branch(*term);
 
   if (branch_delta) {
@@ -112,17 +113,15 @@ resolve_static_successors(const BasicBlock &block,
         it != block_by_offset.end()) {
       result.target = it->second;
     } else {
-      result.issue = result.direct_call_return_sreg
-                         ? BasicBlock::StaticSuccessorIssue::MissingCallTarget
-                         : BasicBlock::StaticSuccessorIssue::MissingBranchTarget;
+      result.issue = is_call ? BasicBlock::StaticSuccessorIssue::MissingCallTarget
+                             : BasicBlock::StaticSuccessorIssue::MissingBranchTarget;
     }
   }
 
   if (result.expects_fallthrough && result.fallthrough == nullptr &&
       result.issue == BasicBlock::StaticSuccessorIssue::None) {
-    result.issue = result.direct_call_return_sreg
-                       ? BasicBlock::StaticSuccessorIssue::MissingCallContinuation
-                       : BasicBlock::StaticSuccessorIssue::MissingFallthrough;
+    result.issue = is_call ? BasicBlock::StaticSuccessorIssue::MissingCallContinuation
+                           : BasicBlock::StaticSuccessorIssue::MissingFallthrough;
   }
   return result;
 }
@@ -594,14 +593,29 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch
       const auto newly_recovered = discover_indirect_branch_edges(
           std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size()), text,
           arch, discovery_leaders, wavefront_size, entry_offsets);
+
+      const auto same_fixup = [](const IndirectCallFixup &left, const IndirectCallFixup &right) {
+        return left.source_call_offset == right.source_call_offset &&
+               left.source_target_offset == right.source_target_offset &&
+               left.source_call_sreg == right.source_call_sreg &&
+               left.source_return_sreg == right.source_return_sreg;
+      };
+      // The decoded graph only grows. If rediscovery no longer emits a
+      // previously recovered source/target observation, retain the target for
+      // relocation and reachability but invalidate the stale closed-target
+      // proof. A newly decoded predecessor may have killed the tracked PC pair
+      // completely, in which case there is no replacement fixup to merge.
+      for (IndirectCallFixup &existing : recovered_indirect_targets) {
+        if (std::ranges::none_of(newly_recovered, [&](const IndirectCallFixup &candidate) {
+              return same_fixup(existing, candidate);
+            })) {
+          existing.source_targets_exhaustive = false;
+        }
+      }
       for (const IndirectCallFixup &fixup : newly_recovered) {
         const auto duplicate = std::ranges::find_if(
-            recovered_indirect_targets, [&](const IndirectCallFixup &existing) {
-              return existing.source_call_offset == fixup.source_call_offset &&
-                     existing.source_target_offset == fixup.source_target_offset &&
-                     existing.source_call_sreg == fixup.source_call_sreg &&
-                     existing.source_return_sreg == fixup.source_return_sreg;
-            });
+            recovered_indirect_targets,
+            [&](const IndirectCallFixup &existing) { return same_fixup(existing, fixup); });
         if (duplicate == recovered_indirect_targets.end())
           recovered_indirect_targets.push_back(fixup);
         else
