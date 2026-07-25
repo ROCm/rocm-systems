@@ -409,7 +409,9 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     output.value.disassembly += translated_inspection.disassembly;
   }
 
-  if (!validate_host_decode(output.value.translated_report, error)) {
+  const bool nothing_to_translate =
+      has_diagnostic_kind(output.value.diagnostics, DiagnosticKind::NothingToTranslate);
+  if (!nothing_to_translate && !validate_host_decode(output.value.translated_report, error)) {
     add_error(output, kValidationError, error);
     return output;
   }

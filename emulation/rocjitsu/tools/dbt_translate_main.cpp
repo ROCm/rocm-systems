@@ -330,6 +330,8 @@ struct ReportTotals {
     return "expand-missing";
   case DiagnosticKind::ExpandFailed:
     return "expand-failed";
+  case DiagnosticKind::NothingToTranslate:
+    return "nothing-to-translate";
   case DiagnosticKind::ResourceLimit:
     return "resource-limit";
   case DiagnosticKind::KernelSkipped:
