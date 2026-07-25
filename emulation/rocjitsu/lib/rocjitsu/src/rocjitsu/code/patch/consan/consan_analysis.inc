@@ -961,17 +961,17 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
   if (mnemonic == "v_writelane_b32" || mnemonic == "v_readlane_b32") {
     std::optional<uint32_t> lane_selector;
     if (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
-        instruction_bytes.size() == sizeof(rdna4::Vop3MachineInst)) {
+        instruction_bytes.size() >= sizeof(rdna4::Vop3MachineInst)) {
       rdna4::Vop3MachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       lane_selector = static_cast<uint32_t>(raw.src1);
     } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-               instruction_bytes.size() == sizeof(cdna4::Vop3MachineInst)) {
+               instruction_bytes.size() >= sizeof(cdna4::Vop3MachineInst)) {
       cdna4::Vop3MachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       lane_selector = static_cast<uint32_t>(raw.src1);
     } else if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-               instruction_bytes.size() == sizeof(gfx1250::Vop3MachineInst)) {
+               instruction_bytes.size() >= sizeof(gfx1250::Vop3MachineInst)) {
       gfx1250::Vop3MachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       lane_selector = static_cast<uint32_t>(raw.src1);
@@ -1099,6 +1099,8 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
 
   if (mnemonic.starts_with("v_lshlrev_b64")) {
     const auto dst = register_ref(inst.dst_operand(0), RegClass::VGPR);
+    // As above, the shift count is not an address carrier. Retain only the
+    // semantic 64-bit value's provenance.
     const auto source =
         inst.num_src_operands() > 1 ? source_pair_hint(inst.src_operand(1), tracker) : std::nullopt;
     clear_destination_components(inst, tracker);

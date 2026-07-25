@@ -721,6 +721,88 @@ TEST(ConSan, RejectsCdnaDynamicLaneSelectorProvenance) {
   }
 }
 
+TEST(ConSan, RejectsRdna4DynamicLaneSelectorProvenance) {
+  const std::array<uint32_t, 15> text_words = {
+      0xbe8001ebu, // s_mov_b64 s[0:1], src_shared_base
+      0xd761000au,
+      0x02011800u, // v_writelane_b32 v10, s0, 12
+      0xd761000au,
+      0x02011a01u, // v_writelane_b32 v10, s1, 13
+      0xd7600002u,
+      0x0200190au, // v_readlane_b32 s2, v10, s12
+      0xd7600003u,
+      0x02001b0au, // v_readlane_b32 s3, v10, s13
+      0x7e000202u, // v_mov_b32_e32 v0, s2
+      0x7e020203u, // v_mov_b32_e32 v1, s3
+      0xec05007cu,
+      0x00000004u,
+      0x00000000u, // flat_load_b32 v4, v[0:1]
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+    SCOPED_TRACE(static_cast<uint32_t>(arch));
+    const std::vector<uint8_t> bytes =
+        arch == ROCJITSU_CODE_ARCH_RDNA4
+            ? make_rdna4_lds_code_object(text_words, "rdna4_dynamic_lane")
+            : make_gfx1250_code_object(text_words, "gfx1250_dynamic_lane");
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result));
+    ASSERT_EQ(result.kernels.size(), 1u);
+    ASSERT_EQ(result.kernels.front().flat_sites.size(), 1u);
+    EXPECT_EQ(result.kernels.front().flat_sites.front().address_space_hint,
+              ConSanFlatAddressSpaceHint::Unknown);
+    EXPECT_EQ(result.kernels.front().stats.flat_unknown_hint_count, 1u);
+  }
+}
+
+TEST(ConSan, ClearsRdna4LaneProvenanceOnWideLiteralWrite) {
+  const std::array<uint32_t, 21> text_words = {
+      0xbe8001ebu, // s_mov_b64 s[0:1], src_shared_base
+      0xd761000au,
+      0x02011800u, // v_writelane_b32 v10, s0, 12
+      0xd761000au,
+      0x02011a01u, // v_writelane_b32 v10, s1, 13
+      0xd761000au,
+      0x020118ffu,
+      0x12345678u, // v_writelane_b32 v10, 0x12345678, 12
+      0xd761000au,
+      0x02011affu,
+      0x87654321u, // v_writelane_b32 v10, 0x87654321, 13
+      0xd7600002u,
+      0x0201190au, // v_readlane_b32 s2, v10, 12
+      0xd7600003u,
+      0x02011b0au, // v_readlane_b32 s3, v10, 13
+      0x7e000202u, // v_mov_b32_e32 v0, s2
+      0x7e020203u, // v_mov_b32_e32 v1, s3
+      0xec05007cu,
+      0x00000004u,
+      0x00000000u, // flat_load_b32 v4, v[0:1]
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+    SCOPED_TRACE(static_cast<uint32_t>(arch));
+    const std::vector<uint8_t> bytes =
+        arch == ROCJITSU_CODE_ARCH_RDNA4
+            ? make_rdna4_lds_code_object(text_words, "rdna4_wide_lane")
+            : make_gfx1250_code_object(text_words, "gfx1250_wide_lane");
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result));
+    ASSERT_EQ(result.kernels.size(), 1u);
+    ASSERT_EQ(result.kernels.front().flat_sites.size(), 1u);
+    EXPECT_EQ(result.kernels.front().flat_sites.front().address_space_hint,
+              ConSanFlatAddressSpaceHint::Unknown);
+    EXPECT_EQ(result.kernels.front().stats.flat_unknown_hint_count, 1u);
+  }
+}
+
 TEST(ConSan, SelectsCdnaSemanticValueForVectorShift) {
   const std::array<uint32_t, 11> text_words = {
       0xbe8401edu, // s_mov_b64 s[4:5], src_private_base
@@ -740,6 +822,34 @@ TEST(ConSan, SelectsCdnaSemanticValueForVectorShift) {
 
   const ConSanResult result =
       try_patch_consan(make_cdna4_lds_code_object(text_words, "cdna_vector_shift"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_EQ(result.kernels.size(), 1u);
+  ASSERT_EQ(result.kernels.front().flat_sites.size(), 1u);
+  EXPECT_EQ(result.kernels.front().flat_sites.front().address_space_hint,
+            ConSanFlatAddressSpaceHint::MaybeGroup);
+  EXPECT_EQ(result.kernels.front().stats.flat_maybe_group_hint_count, 1u);
+  EXPECT_EQ(result.kernels.front().stats.flat_private_hint_count, 0u);
+  EXPECT_EQ(result.kernels.front().stats.flat_maybe_private_hint_count, 0u);
+}
+
+TEST(ConSan, SelectsCdnaSemanticValueForVectorLeftShift) {
+  const std::array<uint32_t, 9> text_words = {
+      0xbe8401edu, // s_mov_b64 s[4:5], src_private_base
+      0xbe8001ebu, // s_mov_b64 s[0:1], src_shared_base
+      0x7e040200u, // v_mov_b32_e32 v2, s0
+      0x7e060201u, // v_mov_b32_e32 v3, s1
+      0xd28f0000u,
+      0x00020404u, // v_lshlrev_b64 v[0:1], s4, v[2:3]
+      0xdc500000u,
+      0x04000000u, // flat_load_dword v4, v[0:1]
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+
+  const ConSanResult result =
+      try_patch_consan(make_cdna4_lds_code_object(text_words, "cdna_vector_left_shift"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.kernels.size(), 1u);
