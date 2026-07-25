@@ -1019,43 +1019,87 @@ apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
 struct MoiOwnerScalarReferenceSummary {
   RegisterSet references;
   bool uses_indirect_sgprs = false;
-  bool every_call_target_resolved = true;
-  std::optional<uint64_t> first_unresolved_call_offset;
-  std::string first_unresolved_call_mnemonic;
+  bool control_flow_closed = true;
+  std::optional<uint64_t> first_unclosed_control_offset;
+  std::string first_unclosed_control_mnemonic;
+  bool first_unclosed_control_is_call = false;
 };
 
 [[nodiscard]] MoiOwnerScalarReferenceSummary summarize_moi_owner_scalar_references(
     std::span<const MoiKernelResourceContext *const> owner_contexts) {
   MoiOwnerScalarReferenceSummary result;
   std::unordered_set<BasicBlock *> visited;
-  std::unordered_set<uint64_t> resolved_call_offsets;
+  const auto mark_unclosed = [&](const Instruction &instruction) {
+    result.control_flow_closed = false;
+    if (!result.first_unclosed_control_offset) {
+      result.first_unclosed_control_offset = instruction.src_loc();
+      result.first_unclosed_control_mnemonic = instruction.mnemonic();
+      result.first_unclosed_control_is_call = (instruction.flags() & INDIRECT_CALL) != 0;
+    }
+  };
   for (const MoiKernelResourceContext *context : owner_contexts) {
     if (context == nullptr)
       continue;
+
+    // Closure is context-specific: a setpc can be a validated return for one
+    // owner while remaining an unproven branch for another. Require every CFG
+    // edge and every exhaustive recovered target to remain inside this owner's
+    // scope before using owner-local references as a whole-program proof.
+    std::unordered_set<const BasicBlock *> scope_blocks;
+    std::unordered_set<uint64_t> scope_block_offsets;
     for (BasicBlock *block : context->scope.blocks) {
       if (block == nullptr)
         continue;
-      for (const BasicBlock::CallEdge &call : block->call_edges())
-        resolved_call_offsets.insert(call.source_call_offset);
+      scope_blocks.insert(block);
+      scope_block_offsets.insert(block->start_offset());
     }
-  }
-  for (const MoiKernelResourceContext *context : owner_contexts) {
-    if (context == nullptr)
-      continue;
+
     for (BasicBlock *block : context->scope.blocks) {
-      if (block == nullptr || !visited.insert(block).second)
+      if (block == nullptr)
         continue;
+
+      const Instruction *terminator = block->terminator();
+      const auto mark_unclosed_terminator = [&]() {
+        if (terminator != nullptr)
+          mark_unclosed(*terminator);
+      };
+      if (std::ranges::any_of(block->successors(), [&](const BasicBlock *successor) {
+            return successor == nullptr || !scope_blocks.contains(successor);
+          })) {
+        mark_unclosed_terminator();
+      }
+      if (std::ranges::any_of(block->call_edges(), [&](const BasicBlock::CallEdge &call) {
+            return call.callee == nullptr || call.continuation == nullptr ||
+                   !scope_blocks.contains(call.callee) || !scope_blocks.contains(call.continuation);
+          })) {
+        mark_unclosed_terminator();
+      }
+
+      const bool scan_references = visited.insert(block).second;
       for (const Instruction &instruction : block->instructions()) {
+        const uint64_t offset = instruction.src_loc();
+        const bool indirect_call =
+            (instruction.flags() & INDIRECT_CALL) != 0 && !instruction.branch_offset_bytes();
+        const bool indirect_branch = (instruction.flags() & INDIRECT_BRANCH) != 0;
+        const bool validated_return = context->scope.call_return_offsets.contains(offset);
+        if (indirect_call || (indirect_branch && !validated_return)) {
+          bool found_fixup = false;
+          bool targets_exhaustive = true;
+          for (const IndirectCallFixup &fixup : block->static_indirect_call_fixups()) {
+            if (fixup.source_call_offset != offset)
+              continue;
+            found_fixup = true;
+            targets_exhaustive = targets_exhaustive && fixup.source_targets_exhaustive &&
+                                 scope_block_offsets.contains(fixup.source_target_offset);
+          }
+          if (!found_fixup || !targets_exhaustive)
+            mark_unclosed(instruction);
+        }
+
+        if (!scan_references)
+          continue;
         if (instruction.mnemonic().starts_with("s_movrel"))
           result.uses_indirect_sgprs = true;
-        if ((instruction.flags() & INDIRECT_CALL) != 0 &&
-            !resolved_call_offsets.contains(instruction.src_loc())) {
-          result.every_call_target_resolved = false;
-          if (!result.first_unresolved_call_offset) {
-            result.first_unresolved_call_offset = instruction.src_loc();
-            result.first_unresolved_call_mnemonic = instruction.mnemonic();
-          }
-        }
         const InstDefUse def_use(instruction);
         result.references |= def_use.defs | def_use.uses;
       }
@@ -1225,6 +1269,10 @@ struct MoiResourcePlanningState {
 /// an unresolved target is treated as represented by the summary.
 [[nodiscard]] std::optional<MoiOwnerScalarReferenceSummary>
 summarize_moi_complete_text_scalar_references(const MoiResourcePlanningState &state) {
+  // Function offsets are currently normalized against the code object's sole
+  // executable text span. Multi-text objects need section-aware function
+  // provenance before their ranges can be tiled independently, so retain the
+  // conservative fail-closed boundary here.
   if (!state.valid || state.code_object.text_sections().size() != 1u)
     return std::nullopt;
 
@@ -1799,8 +1847,11 @@ moi_dynamic_stack_exec_save_sgpr_count(ConSanMoiEngine engine) {
   if (options.moi_engine == ConSanMoiEngine::RecordReplay &&
       options.moi_record_replay_dense_barrier_router)
     return 8u;
-  if (options.automatic_moi_record_replay_sgpr_spill)
+  if (options.automatic_moi_record_replay_sgpr_spill) {
+    // Sampled access transfer and dense routing use slots +0..+7. Compact
+    // Record/Replay access, fence, and atomic bodies use only +0..+3.
     return options.moi_engine == ConSanMoiEngine::Sampled ? 8u : 4u;
+  }
   if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       options.moi_engine == ConSanMoiEngine::RecordReplay && options.moi_dynamic_stack_spill)
     // Preserve the compiler frame base in addition to EXEC, VCC, and SCC.
@@ -3371,11 +3422,12 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
       MoiOwnerScalarReferenceSummary scalar_references =
           summarize_moi_owner_scalar_references(scalar_contexts);
       bool used_complete_text_summary = false;
-      if (resolved_contexts && !scalar_references.every_call_target_resolved) {
-        // Some generated kernels use local-label calls without symbolized
-        // helpers. When declared function ranges cover the whole text section,
-        // scanning all of them is a conservative substitute for resolving the
-        // target: unrelated code may reject a hole, but omitted callees cannot
+      if (resolved_contexts && !scalar_references.control_flow_closed) {
+        // Some generated kernels use indirect local-label control flow whose
+        // recovered target set is absent or explicitly non-exhaustive. When
+        // declared function ranges cover the whole text section, scanning all
+        // of them is a conservative substitute for a closed owner CFG:
+        // unrelated code may reject a hole, but omitted destinations cannot
         // make an occupied register look free.
         if (auto complete = summarize_moi_complete_text_scalar_references(scalar_state)) {
           scalar_references = std::move(*complete);
@@ -3428,11 +3480,11 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         });
       };
       std::optional<uint16_t> persistent_hole;
-      // KernelCfgScope includes every validated direct and recovered indirect
-      // callee for an owner. Unrelated linked kernels must not veto a safe
-      // owner-local hole, while an unresolved call or dynamic scalar index
-      // still makes the proof fail closed.
-      if (every_owner_resolved && scalar_references.every_call_target_resolved &&
+      // A closed KernelCfgScope includes every direct edge and every member of
+      // an explicitly exhaustive recovered target set. Unrelated linked
+      // kernels must not veto a safe owner-local hole, while an open control
+      // transfer or dynamic scalar index still makes the proof fail closed.
+      if (every_owner_resolved && scalar_references.control_flow_closed &&
           !scalar_references.uses_indirect_sgprs) {
         for (uint32_t base = 0u; base + scalar_count <= first; ++base) {
           if (!hole_unavailable(static_cast<uint16_t>(base))) {
@@ -3481,11 +3533,12 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         result.warnings.emplace_back(
             "ConSan MOI could not resolve every owner descriptor for a proven-unused persistent "
             "SGPR window");
-      } else if (!scalar_references.every_call_target_resolved) {
+      } else if (!scalar_references.control_flow_closed) {
         result.warnings.emplace_back(
-            "ConSan MOI cannot prove a persistent SGPR hole across unresolved guest call " +
-            scalar_references.first_unresolved_call_mnemonic + " at text offset " +
-            std::to_string(scalar_references.first_unresolved_call_offset.value_or(0u)));
+            "ConSan MOI cannot prove a persistent SGPR hole across unresolved guest " +
+            std::string(scalar_references.first_unclosed_control_is_call ? "call " : "branch ") +
+            scalar_references.first_unclosed_control_mnemonic + " at text offset " +
+            std::to_string(scalar_references.first_unclosed_control_offset.value_or(0u)));
       } else if (scalar_references.uses_indirect_sgprs) {
         result.warnings.emplace_back(
             "ConSan MOI cannot prove a persistent SGPR hole across scalar-relative guest access");

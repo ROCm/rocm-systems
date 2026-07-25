@@ -818,9 +818,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                              *spill);
         }
         if (needs_scalar_spill) {
-          scalar_spill = build_inline_sgpr_spill_sequence(
-              *resources, candidate_options, visible_evidence_spill_managers, arch, result.warnings,
-              std::nullopt);
+          scalar_spill = build_inline_sgpr_spill_sequence(*resources, candidate_options,
+                                                          visible_evidence_spill_managers, arch,
+                                                          result.warnings, std::nullopt);
           if (!scalar_spill)
             continue;
           required_private_bytes =

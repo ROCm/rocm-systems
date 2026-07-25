@@ -33,6 +33,7 @@ struct IndirectCallFixup {
   uint64_t source_target_offset = 0;         ///< Recovered source branch target offset.
   uint16_t source_call_sreg = 0;             ///< Low SGPR of the recovered PC pair.
   bool source_is_call = false;               ///< Whether the consumer is a call-like swappc.
+  bool source_targets_exhaustive = false;    ///< Whether every runtime target is represented.
   uint16_t source_return_sreg = 0;           ///< Low SGPR receiving the return PC for calls.
   uint64_t target_getpc_offset = 0;          ///< Relocated offset of the s_getpc_b64 producer.
   uint64_t target_recovery_begin_offset = 0; ///< Relocated first byte of replaceable builder code.
@@ -50,7 +51,9 @@ struct IndirectCallFixup {
 /// path-insensitive joins leave the lattice incomplete but still expose a small
 /// concrete target set, those concrete targets are returned; BasicBlock decides
 /// whether each target is an ordinary CFG successor or a context-sensitive call
-/// edge.
+/// edge. Each fixup records whether the complete runtime target set for that
+/// consumer was recovered, so clients that require a closed CFG can reject
+/// partial edge sets.
 ///
 /// The implementation first builds a direct-CFG block skeleton, scans each
 /// block once to summarize writes to PC-builder SGPR pairs, runs bounded

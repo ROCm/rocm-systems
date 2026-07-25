@@ -3045,6 +3045,45 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
     EXPECT_GT(patch->required_private_segment_size, 0u);
   }
   EXPECT_TRUE(result.final_validation_passed);
+
+  constexpr uint32_t kDenseBarrierCount = 33u;
+  std::vector<uint32_t> dense_words;
+  for (uint32_t index = 0u; index < kDenseBarrierCount; ++index) {
+    dense_words.insert(dense_words.end(), access->begin(), access->end());
+    dense_words.push_back(*barrier);
+  }
+  for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr) {
+    if (std::ranges::find(kUnreferenced, sgpr) == kUnreferenced.end())
+      dense_words.push_back(build_s_mov_b32(/*sdst=*/10u, sgpr, kArch));
+  }
+  dense_words.push_back(build_s_endpgm(kArch));
+  std::vector<uint8_t> dense_bytes =
+      make_cdna4_lds_code_object(dense_words, "cdna4_dense_scalar_spill_barrier");
+  mutate_first_kernel_descriptor(dense_bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12u);
+  });
+  ConSanOptions dense_options = options;
+  dense_options.moi_report_buffer_size =
+      consan_moi_report_buffer_min_bytes(kDenseBarrierCount, 0, 0, 0, kDenseBarrierCount);
+  dense_options.max_patches = 96u;
+
+  const ConSanResult dense_result = try_patch_consan(dense_bytes, dense_options);
+
+  ASSERT_TRUE(consan_patch_succeeded(dense_result)) << testing::PrintToString(dense_result.errors);
+  ASSERT_TRUE(dense_result.modified) << testing::PrintToString(dense_result.warnings);
+  EXPECT_TRUE(dense_result.final_validation_passed);
+  ASSERT_EQ(dense_result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  EXPECT_TRUE(dense_result.resolved_moi_transient_sgpr_assignments.front().spill_backed);
+  for (ConSanPatchKind kind : {ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               ConSanPatchKind::TrampolineMoiInlineEpochBarrier}) {
+    const auto patch = std::ranges::find(dense_result.patches, kind, &ConSanPatchInfo::kind);
+    ASSERT_NE(patch, dense_result.patches.end()) << testing::PrintToString(dense_result.warnings);
+    // Dense Record/Replay routes use scalar slots +0..+7. Every probe that
+    // shares the spill builder must preserve the complete eight-register
+    // layout rather than the compact four-register access layout.
+    EXPECT_EQ(patch->required_private_segment_size, 8u * sizeof(uint32_t));
+  }
 }
 
 TEST(ConSanMoi, RecordReplayRejectsSpillRouterWithoutDeadPairAndScalars) {
@@ -4452,6 +4491,115 @@ TEST(ConSanMoi, Cdna4ScalarHoleUsesCompleteTextCoverageForUnresolvedCall) {
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("using complete-text coverage") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
+}
+
+TEST(ConSanMoi, Cdna4ScalarHoleUsesCompleteTextCoverageForUnresolvedBranch) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto guest = build_cdna4_ds_store_b32(/*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, kArch);
+  ASSERT_TRUE(guest);
+
+  std::vector<uint32_t> text_words(320u, build_s_nop(0, kArch));
+  size_t cursor = 0u;
+  std::copy(guest->begin(), guest->end(), text_words.begin() + cursor);
+  cursor += guest->size();
+  text_words[cursor++] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(7u), kArch);
+  for (uint16_t sgpr = 0u; sgpr < 72u; ++sgpr)
+    text_words[cursor++] = build_s_mov_b32(/*sdst=*/87u, sgpr, kArch);
+  text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/87u, kArch);
+  text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/90u, kArch);
+  text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/91u, kArch);
+  // This target cannot be recovered and has no fallthrough. The LDS site is
+  // still owned, but owner-local references are not a closed execution scope.
+  text_words[cursor++] = build_s_setpc_b64(/*ssrc0=*/2u, kArch);
+  text_words.back() = build_s_endpgm(kArch);
+
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "unresolved_branch_complete_text",
+                                 /*vgpr_granulated=*/3u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.moi_init_owner_epoch = true;
+  options.moi_exec_save_sgpr = 92u;
+  options.moi_dispatch_id_sgpr = 88u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
+  ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
+  ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
+  EXPECT_EQ(*result.resolved_moi_persistent_owner_sgpr, 72u);
+  EXPECT_EQ(*result.resolved_moi_persistent_epoch_sgpr, 73u);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("using complete-text coverage") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+}
+
+TEST(ConSanMoi, Cdna4ScalarHoleFailsClosedWithoutCompleteTextCoverage) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto guest = build_cdna4_ds_store_b32(/*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, kArch);
+  ASSERT_TRUE(guest);
+
+  std::vector<uint32_t> kernel_words(320u, build_s_nop(0, kArch));
+  size_t cursor = 0u;
+  kernel_words[cursor++] = build_s_swappc_b64(/*sdst=*/30u, /*ssrc0=*/2u, kArch);
+  std::copy(guest->begin(), guest->end(), kernel_words.begin() + cursor);
+  cursor += guest->size();
+  kernel_words[cursor++] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(7u), kArch);
+  for (uint16_t sgpr = 0u; sgpr < 72u; ++sgpr)
+    kernel_words[cursor++] = build_s_mov_b32(/*sdst=*/87u, sgpr, kArch);
+  kernel_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/87u, kArch);
+  kernel_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/90u, kArch);
+  kernel_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/91u, kArch);
+  kernel_words.back() = build_s_endpgm(kArch);
+  const std::array<uint32_t, 1> helper_words = {build_s_endpgm(kArch)};
+  // This executable tail is intentionally outside every declared function
+  // range. Complete-text coverage must therefore fail rather than blessing an
+  // owner-local hole across the unresolved call.
+  const std::array<uint32_t, 3> uncovered_tail = {
+      build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/72u, kArch),
+      build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/73u, kArch),
+      build_s_endpgm(kArch),
+  };
+  std::vector<uint8_t> bytes = make_cdna4_code_object_with_local_function(
+      kernel_words, helper_words, uncovered_tail, /*vgpr_granulated=*/3u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.moi_init_owner_epoch = true;
+  options.moi_exec_save_sgpr = 92u;
+  options.moi_dispatch_id_sgpr = 88u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  EXPECT_FALSE(result.moi_persistent_sgprs_automatic);
+  EXPECT_FALSE(result.resolved_moi_persistent_owner_sgpr);
+  EXPECT_FALSE(result.resolved_moi_persistent_epoch_sgpr);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("unresolved guest call s_swappc_b64") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("using complete-text coverage") != std::string::npos;
+  }));
 }
 
 TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {

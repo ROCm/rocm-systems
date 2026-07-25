@@ -2740,12 +2740,13 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
   std::vector<uint32_t> text_words(800, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   size_t cursor = 0;
   // Keep sparse scalar values live from the access through both atomics. No
-  // 28-register window is dead, so the Inline router must spill scalar state.
+  // complete Inline scalar window is dead, so the router must spill its state.
   text_words[cursor++] = build_s_mov_b32(0, 105u, ROCJITSU_CODE_ARCH_RDNA4);
   constexpr std::array<uint16_t, 6> kLiveSgprs = {15u, 31u, 47u, 63u, 79u, 95u};
   for (uint16_t sgpr : kLiveSgprs)
     text_words[cursor++] =
         build_s_mov_b32(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+  const size_t lds_access_word = cursor;
   text_words[cursor++] = 0xD8340000u;
   text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0
   constexpr std::array<uint32_t, 3> kGlobalWb = {0xEE0B0000u, 0x00000000u, 0x00000000u};
@@ -2805,6 +2806,40 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
                                                           *result.resolved_moi_exec_save_sgpr,
                                                           ROCJITSU_CODE_ARCH_RDNA4)),
               cave.end());
+  }
+
+  std::vector<uint32_t> atomic_only_words = text_words;
+  atomic_only_words[lds_access_word] = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+  atomic_only_words[lds_access_word + 1u] = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+  ConSanOptions atomic_only_options = options;
+  atomic_only_options.scratch_vgpr = 82u;
+  atomic_only_options.moi_owner_vgpr = 80u;
+  atomic_only_options.moi_epoch_vgpr = 81u;
+  atomic_only_options.moi_exec_save_sgpr = 4u;
+  atomic_only_options.automatic_moi_exec_save_sgprs = true;
+  atomic_only_options.automatic_moi_inline_sgpr_spill = true;
+  atomic_only_options.moi_inline_visible_evidence_sgpr = 40u;
+  atomic_only_options.moi_inline_dispatch_key_sgpr = 41u;
+  atomic_only_options.moi_inline_indirect_pc_sgpr = 42u;
+  atomic_only_options.moi_inline_call_return_sgpr = 44u;
+  atomic_only_options.moi_inline_indirect_scc_sgpr = 46u;
+  const ConSanResult atomic_only = try_patch_consan(
+      make_rdna4_lds_code_object(atomic_only_words, "inline_atomic_only_scalar_spill"),
+      atomic_only_options);
+
+  ASSERT_TRUE(consan_patch_succeeded(atomic_only)) << testing::PrintToString(atomic_only.errors);
+  ASSERT_TRUE(atomic_only.modified) << testing::PrintToString(atomic_only.warnings);
+  EXPECT_TRUE(atomic_only.final_validation_passed);
+  ASSERT_EQ(std::ranges::count(atomic_only.patches,
+                               ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
+                               &ConSanPatchInfo::kind),
+            2u);
+  for (const ConSanPatchInfo &patch : atomic_only.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiInlineAtomicOrdering)
+      continue;
+    // Atomic-only Inline probes use scalar slots +0..+21. The access layout
+    // through +29 must not inflate their private spill window.
+    EXPECT_EQ(patch.required_private_segment_size, 22u * sizeof(uint32_t));
   }
 }
 

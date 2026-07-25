@@ -1375,6 +1375,81 @@ TEST(CfgAnalysis, KillPredecessorPreventsRecoveredConsumer) {
   EXPECT_FALSE(has_successor_start(*consumer, target->start_offset()));
 }
 
+TEST(CfgAnalysis, IncompletePredecessorMarksRecoveredTargetsNonExhaustive) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kOriginalGetpcDelta = 28;
+
+  // The fallthrough path builds one concrete target, while the branch path
+  // reaches the same consumer with an unconstrained incoming pair. The
+  // concrete edge remains useful for relocation and liveness, but it is not an
+  // exhaustive description of the runtime target set.
+  const std::vector<uint32_t> words = {
+      pack_sopp(5, 5),                                     // 0x00 -> open path at 0x18.
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x04: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
+      kOriginalGetpcDelta,                                 // 0x0c: target delta.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
+      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> consumer at 0x1c.
+      build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4),         // 0x18 -> consumer at 0x1c.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x1c: joined consumer.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x20: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x24: concrete target.
+  };
+
+  const std::vector<IndirectCallFixup> fixups =
+      discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA4, {}, /*wavefront_size=*/64u);
+  const auto recovered = std::ranges::find_if(fixups, [](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == 0x1cu && fixup.source_target_offset == 0x24u;
+  });
+  ASSERT_NE(recovered, fixups.end());
+  EXPECT_FALSE(recovered->source_targets_exhaustive);
+}
+
+TEST(CfgAnalysis, LocalPcBuilderMarksRecoveredTargetExhaustive) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  const std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),
+      12u,
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0),
+      pack_sop1(0x1d, 0, kPcSreg),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+
+  const std::vector<IndirectCallFixup> fixups =
+      discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA4, {}, /*wavefront_size=*/64u);
+  ASSERT_EQ(fixups.size(), 1u);
+  EXPECT_TRUE(fixups.front().source_targets_exhaustive);
+}
+
+TEST(CfgAnalysis, RejectsSpecialPcPairSelectorsAtDecodeBoundary) {
+  constexpr uint16_t kLastSelector = 127u;
+  constexpr uint16_t kPcSreg = 8u;
+  constexpr uint32_t kLiteralOperand = 255u;
+  constexpr uint32_t kInlineInt0 = 128u;
+  const std::vector<uint32_t> words = {
+      // The final SGPR selector cannot name a complete pair.
+      pack_sop1(0x1c, kLastSelector, 0),
+      pack_sop1(0x1d, 0, kLastSelector),
+      // A valid source builder paired with an invalid swappc return selector
+      // must reject the entire consumer rather than indexing special state.
+      pack_sop1(0x1c, kPcSreg, 0),
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),
+      12u,
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0),
+      pack_sop1(0x1e, kLastSelector, kPcSreg),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+
+  const std::vector<IndirectCallFixup> fixups =
+      discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA4, {}, /*wavefront_size=*/64u);
+  EXPECT_TRUE(fixups.empty());
+}
+
 TEST(CfgAnalysis, RecoversSignedDeltaTemplateConsumers) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint16_t kTmpSreg = 12;

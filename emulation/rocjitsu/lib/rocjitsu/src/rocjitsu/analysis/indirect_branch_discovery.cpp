@@ -1027,7 +1027,8 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 
 [[nodiscard]] std::optional<IndirectCallFixup> fixup_for_value(const AnalysisContext &ctx,
                                                                size_t inst_index, uint16_t pair_lo,
-                                                               const PcValue &value) {
+                                                               const PcValue &value,
+                                                               bool targets_exhaustive = true) {
   // A recovered target outside the current text section cannot become a local
   // BasicBlock successor. Drop it here rather than forcing the caller to filter
   // impossible leaders.
@@ -1042,6 +1043,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
       .source_target_offset = static_cast<uint64_t>(value.offset),
       .source_call_sreg = pair_lo,
       .source_is_call = ctx.facts[inst_index].swappc_sdst.has_value(),
+      .source_targets_exhaustive = targets_exhaustive,
       .source_return_sreg = ctx.facts[inst_index].swappc_sdst.value_or(0),
   };
 }
@@ -1052,8 +1054,13 @@ bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup)
            existing.source_target_offset == fixup.source_target_offset &&
            existing.source_call_sreg == fixup.source_call_sreg;
   });
-  if (duplicate != out.end())
+  if (duplicate != out.end()) {
+    if (fixup.source_targets_exhaustive && !duplicate->source_targets_exhaustive) {
+      duplicate->source_targets_exhaustive = true;
+      return true;
+    }
     return false;
+  }
   out.push_back(fixup);
   return true;
 }
@@ -1408,13 +1415,22 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
 
 void emit_fixups_for_values(const AnalysisContext &ctx, size_t inst_index, uint16_t pair_lo,
                             std::span<const PcValue> values,
-                            std::vector<IndirectCallFixup> &recovered) {
+                            std::vector<IndirectCallFixup> &recovered,
+                            bool targets_exhaustive = true) {
   // A complete lattice value can contain multiple concrete targets. That is not
   // an error by itself; it represents a bounded static dispatch where different
   // predecessor paths materialize different PC constants before joining at one
   // setpc/swappc consumer.
+  // A complete lattice is exhaustive only when every value names a target in
+  // this text section. Dropping an out-of-section value is safe for CFG
+  // construction, but consumers that prove a closed owner scope must still see
+  // that the emitted local edges are only a subset of the runtime target set.
+  targets_exhaustive =
+      targets_exhaustive && std::ranges::all_of(values, [&](const PcValue &value) {
+        return value.offset >= 0 && static_cast<uint64_t>(value.offset) < ctx.text.size();
+      });
   for (const PcValue &value : values) {
-    if (auto fixup = fixup_for_value(ctx, inst_index, pair_lo, value))
+    if (auto fixup = fixup_for_value(ctx, inst_index, pair_lo, value, targets_exhaustive))
       append_unique(recovered, *fixup);
   }
 }
@@ -1635,8 +1651,8 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks) {
       continue;
     }
 
-    emit_fixups_for_values(ctx, consumer.inst_index, consumer.pair_lo, it->second.values,
-                           recovered);
+    emit_fixups_for_values(ctx, consumer.inst_index, consumer.pair_lo, it->second.values, recovered,
+                           !it->second.incomplete);
   }
   return unresolved;
 }

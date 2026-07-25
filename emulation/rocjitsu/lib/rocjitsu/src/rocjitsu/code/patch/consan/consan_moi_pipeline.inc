@@ -173,9 +173,9 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       note_spill_descriptor_requirements(private_requirements, active_resources, *spill);
     }
     if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
-      scalar_spill = build_inline_sgpr_spill_sequence(active_resources, candidate_options,
-                                                      spill_managers, arch, result.warnings,
-                                                      private_layout_base);
+      scalar_spill =
+          build_inline_sgpr_spill_sequence(active_resources, candidate_options, spill_managers,
+                                           arch, result.warnings, private_layout_base);
       if (!scalar_spill)
         continue;
       for (uint64_t descriptor_offset : active_resources.owner_descriptor_file_offsets) {
