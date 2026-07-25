@@ -165,17 +165,18 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     const uint32_t private_layout_base = private_owner
                                              ? private_owner->private_state_end
                                              : active_resources.original_private_segment_size;
-    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
-      spill = build_moi_spill_sequence(result, active_resources, options, spill_managers, arch,
-                                       result.warnings, private_layout_base);
+    if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
+        moi_scalar_spill_requires_dynamic_vgpr_frame(result, active_resources, candidate_options)) {
+      spill = build_moi_spill_sequence(result, active_resources, candidate_options, spill_managers,
+                                       arch, result.warnings, private_layout_base);
       if (!spill)
         continue;
       note_spill_descriptor_requirements(private_requirements, active_resources, *spill);
     }
     if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
-      scalar_spill =
-          build_inline_sgpr_spill_sequence(active_resources, candidate_options, spill_managers,
-                                           arch, result.warnings, private_layout_base);
+      scalar_spill = build_inline_sgpr_spill_sequence(
+          result, active_resources, candidate_options, spill_managers, arch, result.warnings,
+          private_layout_base, spill ? &*spill : nullptr);
       if (!scalar_spill)
         continue;
       for (uint64_t descriptor_offset : active_resources.owner_descriptor_file_offsets) {

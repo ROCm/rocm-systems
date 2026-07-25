@@ -490,17 +490,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       if (!private_layout || (private_layout->owner_offset && !private_owner_shift))
         continue;
     }
-    std::optional<VgprSpillSequence> spill;
-    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
-      spill = build_moi_spill_sequence(
-          result, *resources, options, spill_managers, arch, result.warnings,
-          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
-      if (!spill)
-        continue;
-    }
-    uint32_t required_private_bytes = private_layout ? private_layout->ephemeral_base : 0u;
-    if (spill)
-      required_private_bytes = std::max(required_private_bytes, spill->total_private_bytes);
     ConSanOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(candidate_options,
                                              resources->owner_descriptor_file_offsets)) {
@@ -509,14 +498,27 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       continue;
     }
     candidate_options.scratch_vgpr = resources->base;
+    std::optional<VgprSpillSequence> spill;
+    if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
+        moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
+      spill = build_moi_spill_sequence(
+          result, *resources, candidate_options, spill_managers, arch, result.warnings,
+          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
+      if (!spill)
+        continue;
+    }
+    uint32_t required_private_bytes = private_layout ? private_layout->ephemeral_base : 0u;
+    if (spill)
+      required_private_bytes = std::max(required_private_bytes, spill->total_private_bytes);
     const uint32_t candidate_entry_island_words =
         candidate_options.automatic_moi_record_replay_sgpr_spill ? kIndirectIslandWords + 1u
                                                                  : kIndirectIslandWords;
     std::optional<InlineSgprSpillSequence> scalar_spill;
     if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
       scalar_spill = build_inline_sgpr_spill_sequence(
-          *resources, candidate_options, spill_managers, arch, result.warnings,
-          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
+          result, *resources, candidate_options, spill_managers, arch, result.warnings,
+          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
+          spill ? &*spill : nullptr);
       if (!scalar_spill)
         continue;
       required_private_bytes = std::max(required_private_bytes, scalar_spill->total_private_bytes);

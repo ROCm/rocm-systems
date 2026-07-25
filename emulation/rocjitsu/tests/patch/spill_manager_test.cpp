@@ -7,6 +7,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/patch/cdna3_instrumentation_builder.h"
 #include "rocjitsu/code/patch/cdna4_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
@@ -748,6 +749,154 @@ TEST(SpillManager, BuildsCdna4SccPreservingDynamicStackVgprFrame) {
   EXPECT_EQ(sequence->restore_words[6], 0xbf8c0f70u);
   EXPECT_EQ(sequence->restore_words[7], 0xbea00021u);
   EXPECT_EQ(sequence->restore_words[8], 0xbea10050u);
+}
+
+TEST(SpillManager, ComposesDynamicStackVgprAndSgprFramesAcrossArchitectures) {
+  struct Target {
+    rj_code_arch_t arch;
+    std::string_view label;
+  };
+  constexpr std::array targets = {
+      Target{ROCJITSU_CODE_ARCH_CDNA3, "cdna3"},
+      Target{ROCJITSU_CODE_ARCH_CDNA4, "cdna4"},
+      Target{ROCJITSU_CODE_ARCH_RDNA4, "rdna4"},
+      Target{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250"},
+  };
+  constexpr uint16_t kTransferVgpr = 10u;
+  constexpr uint16_t kSgprBase = 40u;
+  constexpr uint16_t kSgprCount = 2u;
+  constexpr uint32_t kVgprFrameBytes = 3u * SpillManager::kSlotBytes;
+  constexpr uint32_t kSgprFrameBytes = kSgprCount * SpillManager::kSlotBytes;
+  constexpr uint32_t kTotalPrivateBytes = 32u;
+
+  for (const Target &target : targets) {
+    SCOPED_TRACE(target.label);
+    auto vgpr_sequence = build_dynamic_stack_vgpr_spill_sequence(
+        /*vgpr_base=*/kTransferVgpr, /*vgpr_count=*/3, /*stack_top_sgpr=*/32,
+        /*frame_base_sgpr=*/33, /*saved_frame_base_sgpr=*/80, /*saved_scc_sgpr=*/66, target.arch,
+        kSgprFrameBytes);
+    ASSERT_TRUE(vgpr_sequence);
+    vgpr_sequence->total_private_bytes = kTotalPrivateBytes;
+    ASSERT_GE(vgpr_sequence->save_words.size(), 2u);
+    EXPECT_EQ(vgpr_sequence->save_words[vgpr_sequence->save_words.size() - 2u],
+              kVgprFrameBytes + kSgprFrameBytes);
+    EXPECT_EQ(vgpr_sequence->dynamic_frame_base_sgpr, 33u);
+    EXPECT_EQ(vgpr_sequence->dynamic_frame_bytes, kVgprFrameBytes + kSgprFrameBytes);
+
+    const auto sgpr_sequence = build_dynamic_stack_sgpr_spill_sequence(
+        kSgprBase, kSgprCount, kTransferVgpr, *vgpr_sequence, kVgprFrameBytes, target.arch);
+    ASSERT_TRUE(sgpr_sequence);
+    EXPECT_EQ(sgpr_sequence->sgpr_base, kSgprBase);
+    EXPECT_EQ(sgpr_sequence->sgpr_count, kSgprCount);
+    EXPECT_EQ(sgpr_sequence->total_private_bytes, kTotalPrivateBytes);
+
+    std::vector<uint32_t> expected_save;
+    std::vector<uint32_t> expected_restore;
+    for (uint16_t index = 0; index < kSgprCount; ++index) {
+      const uint16_t source_sgpr = static_cast<uint16_t>(kSgprBase + index);
+      const uint32_t byte_offset =
+          kVgprFrameBytes + static_cast<uint32_t>(index) * SpillManager::kSlotBytes;
+      std::vector<uint32_t> store_words;
+      std::vector<uint32_t> load_words;
+      std::optional<uint32_t> restore;
+      if (target.arch == ROCJITSU_CODE_ARCH_CDNA3) {
+        expected_save.push_back(cdna3::build_vop1(
+            cdna3::kVMovB32Vop1,
+            {.src0 = source_sgpr, .vdst = static_cast<uint8_t>(kTransferVgpr)})[0]);
+        const auto store = build_cdna3_scratch_store_b32_saddr(
+            kTransferVgpr, /*frame_base_sgpr=*/33, byte_offset, target.arch);
+        const auto load = build_cdna3_scratch_load_b32_saddr(kTransferVgpr, /*frame_base_sgpr=*/33,
+                                                             byte_offset, target.arch);
+        ASSERT_TRUE(store && load);
+        store_words.assign(store->begin(), store->end());
+        load_words.assign(load->begin(), load->end());
+        restore = build_cdna3_v_readfirstlane_b32(source_sgpr, kTransferVgpr, target.arch);
+      } else if (target.arch == ROCJITSU_CODE_ARCH_CDNA4) {
+        expected_save.push_back(cdna4::build_vop1(
+            cdna4::kVMovB32Vop1,
+            {.src0 = source_sgpr, .vdst = static_cast<uint8_t>(kTransferVgpr)})[0]);
+        const auto store = build_cdna4_scratch_store_b32_saddr(
+            kTransferVgpr, /*frame_base_sgpr=*/33, byte_offset, target.arch);
+        const auto load = build_cdna4_scratch_load_b32_saddr(kTransferVgpr, /*frame_base_sgpr=*/33,
+                                                             byte_offset, target.arch);
+        ASSERT_TRUE(store && load);
+        store_words.assign(store->begin(), store->end());
+        load_words.assign(load->begin(), load->end());
+        restore = build_cdna4_v_readfirstlane_b32(source_sgpr, kTransferVgpr, target.arch);
+      } else {
+        expected_save.push_back(build_v_mov_b32_e32(kTransferVgpr, source_sgpr, target.arch));
+        const auto store = build_scratch_store_b32_saddr(kTransferVgpr, /*frame_base_sgpr=*/33,
+                                                         byte_offset, target.arch);
+        const auto load = build_scratch_load_b32_saddr(kTransferVgpr, /*frame_base_sgpr=*/33,
+                                                       byte_offset, target.arch);
+        ASSERT_TRUE(store && load);
+        store_words.assign(store->begin(), store->end());
+        load_words.assign(load->begin(), load->end());
+        restore = build_v_readfirstlane_b32(source_sgpr, kTransferVgpr, target.arch);
+      }
+      ASSERT_TRUE(restore);
+      expected_save.insert(expected_save.end(), store_words.begin(), store_words.end());
+      expected_restore.insert(expected_restore.end(), load_words.begin(), load_words.end());
+      const auto wait =
+          target.arch == ROCJITSU_CODE_ARCH_CDNA3   ? build_cdna3_s_wait_vmcnt0(target.arch)
+          : target.arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(target.arch)
+                                                    : build_s_wait_loadcnt0(target.arch);
+      ASSERT_TRUE(wait);
+      expected_restore.push_back(*wait);
+      expected_restore.push_back(*restore);
+    }
+    const auto wait =
+        target.arch == ROCJITSU_CODE_ARCH_CDNA3   ? build_cdna3_s_wait_vmcnt0(target.arch)
+        : target.arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(target.arch)
+                                                  : build_s_wait_storecnt0(target.arch);
+    ASSERT_TRUE(wait);
+    expected_save.push_back(*wait);
+    EXPECT_EQ(sgpr_sequence->save_words, expected_save);
+    EXPECT_EQ(sgpr_sequence->restore_words, expected_restore);
+  }
+
+  auto vgpr_sequence = build_dynamic_stack_vgpr_spill_sequence(
+      /*vgpr_base=*/kTransferVgpr, /*vgpr_count=*/3, /*stack_top_sgpr=*/32,
+      /*frame_base_sgpr=*/33, /*saved_frame_base_sgpr=*/80, /*saved_scc_sgpr=*/66,
+      ROCJITSU_CODE_ARCH_CDNA4, kSgprFrameBytes);
+  ASSERT_TRUE(vgpr_sequence);
+  vgpr_sequence->total_private_bytes = kTotalPrivateBytes;
+  VgprSpillSequence invalid_frame = *vgpr_sequence;
+  invalid_frame.total_private_bytes = invalid_frame.dynamic_frame_bytes - 1u;
+  EXPECT_FALSE(build_dynamic_stack_sgpr_spill_sequence(kSgprBase, kSgprCount, kTransferVgpr,
+                                                       invalid_frame, kVgprFrameBytes,
+                                                       ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_dynamic_stack_vgpr_spill_sequence(
+      /*vgpr_base=*/kTransferVgpr, /*vgpr_count=*/1, /*stack_top_sgpr=*/32,
+      /*frame_base_sgpr=*/33, /*saved_frame_base_sgpr=*/80, /*saved_scc_sgpr=*/66,
+      ROCJITSU_CODE_ARCH_CDNA4, kMaxCdnaAddressFreeScratchPrivateBytes));
+  invalid_frame = *vgpr_sequence;
+  invalid_frame.total_private_bytes =
+      kMaxCdnaAddressFreeScratchPrivateBytes + SpillManager::kSlotBytes;
+  EXPECT_FALSE(build_dynamic_stack_sgpr_spill_sequence(kSgprBase, kSgprCount, kTransferVgpr,
+                                                       invalid_frame, kVgprFrameBytes,
+                                                       ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_dynamic_stack_sgpr_spill_sequence(kSgprBase, /*sgpr_count=*/0u, kTransferVgpr,
+                                                       *vgpr_sequence, kVgprFrameBytes,
+                                                       ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_dynamic_stack_sgpr_spill_sequence(
+      REGISTER_SET_MAX_SGPRS - 1u, /*sgpr_count=*/2u, kTransferVgpr, *vgpr_sequence,
+      kVgprFrameBytes, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_dynamic_stack_sgpr_spill_sequence(kSgprBase, kSgprCount,
+                                                       /*outside saved window=*/13u, *vgpr_sequence,
+                                                       kVgprFrameBytes, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_dynamic_stack_sgpr_spill_sequence(
+      kSgprBase, kSgprCount, kTransferVgpr, *vgpr_sequence,
+      /*overlaps VGPR slots=*/kVgprFrameBytes - SpillManager::kSlotBytes,
+      ROCJITSU_CODE_ARCH_CDNA4));
+  invalid_frame = *vgpr_sequence;
+  invalid_frame.dynamic_frame_base_sgpr = 128u;
+  EXPECT_FALSE(build_dynamic_stack_sgpr_spill_sequence(kSgprBase, kSgprCount, kTransferVgpr,
+                                                       invalid_frame, kVgprFrameBytes,
+                                                       ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_dynamic_stack_sgpr_spill_sequence(kSgprBase, kSgprCount, kTransferVgpr,
+                                                       *vgpr_sequence, kVgprFrameBytes,
+                                                       ROCJITSU_CODE_ARCH_CDNA2));
 }
 
 TEST(SpillManager, BuildsCdna3SccPreservingDynamicStackVgprFrame) {

@@ -1868,6 +1868,95 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Cdna4SampledSpillsFullPressureStateThroughDynamicStackFrame) {
+  const auto guest = build_cdna4_ds_store_b32(
+      /*vaddr=*/0, /*vdata=*/0, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto barrier = build_cdna4_s_barrier(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(guest && barrier);
+  const std::array<uint16_t, 4> dead_router_sgprs = {0u, 1u, 4u, 6u};
+  std::vector<uint32_t> text_words(1200u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  std::copy(guest->begin(), guest->end(), text_words.begin() + 1u);
+  text_words[3] = *barrier;
+  size_t cursor = 4u;
+  for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr) {
+    if (std::ranges::find(dead_router_sgprs, sgpr) == dead_router_sgprs.end()) {
+      text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, sgpr, ROCJITSU_CODE_ARCH_CDNA4);
+    }
+  }
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  constexpr uint32_t kCdna4Wave64AllVgprsGranulated = 31u;
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "sampled_full_pressure_dynamic_stack", kCdna4Wave64AllVgprsGranulated,
+      /*uses_dynamic_stack=*/true);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    // Allocate the full ordinary scalar file. The synthetic uses below keep
+    // every register live except the minimal dead indirect-router state, so
+    // no eight-register transient window can be justified by liveness.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 3u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  ASSERT_TRUE(assignment.spill_backed);
+  ASSERT_TRUE(assignment.indirect_pc_sgpr);
+  ASSERT_TRUE(assignment.indirect_scc_sgpr);
+  ASSERT_TRUE(assignment.dispatch_key_sgpr);
+  ASSERT_TRUE(assignment.call_return_sgpr);
+  const auto overlaps_dynamic_stack = [](uint16_t base, uint16_t width) {
+    return base < 34u && 32u < static_cast<uint32_t>(base) + width;
+  };
+  EXPECT_FALSE(overlaps_dynamic_stack(assignment.exec_save_sgpr, 8u));
+  EXPECT_FALSE(overlaps_dynamic_stack(*assignment.indirect_pc_sgpr, 2u));
+  EXPECT_FALSE(overlaps_dynamic_stack(*assignment.indirect_scc_sgpr, 1u));
+  EXPECT_FALSE(overlaps_dynamic_stack(*assignment.dispatch_key_sgpr, 1u));
+  EXPECT_FALSE(overlaps_dynamic_stack(*assignment.call_return_sgpr, 2u));
+
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
+  const auto sync = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_NE(sync, result.patches.end());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  for (const ConSanPatchInfo *patch : {&*access, &*sync}) {
+    SCOPED_TRACE(static_cast<unsigned>(patch->kind));
+    ASSERT_TRUE(patch->scratch_vgpr);
+    EXPECT_GT(patch->spilled_vgpr_count, 0u);
+    EXPECT_GT(patch->required_private_segment_size, patch->spilled_vgpr_count * sizeof(uint32_t));
+    const std::vector<uint32_t> cave =
+        text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+    EXPECT_NE(
+        std::ranges::find(cave, build_s_mov_b32(*assignment.indirect_pc_sgpr,
+                                                /*frame base=*/33u, ROCJITSU_CODE_ARCH_CDNA4)),
+        cave.end());
+    const uint32_t scalar_slot = patch->spilled_vgpr_count * sizeof(uint32_t);
+    const auto scalar_store = build_cdna4_scratch_store_b32_saddr(
+        *patch->scratch_vgpr, /*frame base=*/33u, scalar_slot, ROCJITSU_CODE_ARCH_CDNA4);
+    const auto scalar_load = build_cdna4_scratch_load_b32_saddr(
+        *patch->scratch_vgpr, /*frame base=*/33u, scalar_slot, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_TRUE(scalar_store && scalar_load);
+    EXPECT_TRUE(contains_subsequence(cave, *scalar_store));
+    EXPECT_TRUE(contains_subsequence(cave, *scalar_load));
+  }
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Cdna4Wave64AccvgprBoundarySampledUsesPrivatePersistentState) {
   const auto guest = build_cdna4_ds_store_b32(
       /*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);

@@ -123,7 +123,8 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_barrier_sync_cave_words(
     std::span<const uint8_t> bytes, const SampledBarrierCandidate &candidate,
-    const ConSanOptions &options, const VgprSpillSequence *spill, rj_code_arch_t arch,
+    const ConSanOptions &options, const VgprSpillSequence *spill,
+    const InlineSgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
     uint64_t return_text_offset, const MoiPrivateEpochLayout *private_layout,
     std::optional<uint16_t> gfx1250_vgpr_msb_mode, std::vector<std::string> &errors) {
@@ -195,6 +196,8 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
         static_cast<uint8_t>(gfx1250_vgpr_msb_mode.value_or(0u)), 0u, arch));
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
+  if (scalar_spill)
+    words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
   if (restore_guest_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         0u, static_cast<uint8_t>(*gfx1250_vgpr_msb_mode), arch));
@@ -605,6 +608,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   }
   if (!sequence.bind(fast_return_label))
     return std::nullopt;
+  if (scalar_spill)
+    words.insert(words.end(), scalar_spill->restore_words.begin(),
+                 scalar_spill->restore_words.end());
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
   if (restore_guest_vgpr_bank)
@@ -894,6 +900,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     SampledBarrierCandidate candidate;
     ResolvedMoiScratchPlan resources;
     std::optional<VgprSpillSequence> spill;
+    std::optional<InlineSgprSpillSequence> scalar_spill;
     std::optional<MoiPrivateEpochLayout> private_layout;
     uint32_t required_private_bytes = 0;
   };
@@ -956,6 +963,14 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     const auto resources = resolve_moi_scratch_plan(plan, options, scratch_count);
     if (!resources)
       continue;
+    ConSanOptions candidate_options = options;
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             resources->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI sampled barrier lost its owner-local transient scalar assignment");
+      continue;
+    }
+    candidate_options.scratch_vgpr = resources->base;
     std::optional<MoiPrivateEpochLayout> private_layout;
     if (options.automatic_moi_private_epoch) {
       private_layout =
@@ -964,16 +979,27 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         continue;
     }
     std::optional<VgprSpillSequence> spill;
-    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
+    if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
+        moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
       spill = build_moi_spill_sequence(
-          result, *resources, options, spill_managers, arch, result.warnings,
+          result, *resources, candidate_options, spill_managers, arch, result.warnings,
           private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
       if (!spill)
         continue;
     }
+    std::optional<InlineSgprSpillSequence> scalar_spill;
+    if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
+      scalar_spill = build_inline_sgpr_spill_sequence(
+          result, *resources, candidate_options, spill_managers, arch, result.warnings,
+          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
+          spill ? &*spill : nullptr);
+      if (!scalar_spill)
+        continue;
+    }
     const uint32_t required_private_bytes =
-        std::max(private_layout ? private_layout->ephemeral_base : 0u,
-                 spill ? spill->total_private_bytes : 0u);
+        std::max({private_layout ? private_layout->ephemeral_base : 0u,
+                  spill ? spill->total_private_bytes : 0u,
+                  scalar_spill ? scalar_spill->total_private_bytes : 0u});
     if (required_private_bytes != 0u) {
       for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {
         auto [it, inserted] =
@@ -983,7 +1009,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       }
     }
     note_descriptor_requirements(descriptor_requirements, *resources);
-    selected.push_back({std::move(candidate), *resources, std::move(spill),
+    selected.push_back({std::move(candidate), *resources, std::move(spill), std::move(scalar_spill),
                         std::move(private_layout), required_private_bytes});
   }
   if (selected.empty()) {
@@ -1242,7 +1268,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
             planned.candidate.barrier.container_entry_text_offset, site.file_offset);
         auto body_words = build_sampled_barrier_sync_cave_words(
             bytes, planned.candidate, candidate_options, planned.spill ? &*planned.spill : nullptr,
-            arch, layout, body_offset, site.text_offset + site.size,
+            planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, layout, body_offset,
+            site.text_offset + site.size,
             planned.private_layout ? &*planned.private_layout : nullptr, vgpr_msb_mode,
             result.errors);
         if (!body_words)
@@ -1414,8 +1441,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     }
     auto cave_words = build_sampled_barrier_sync_cave_words(
         bytes, planned.candidate, candidate_options, planned.spill ? &*planned.spill : nullptr,
-        arch, layout, cave_offset, site.text_offset + site.size,
-        planned.private_layout ? &*planned.private_layout : nullptr, std::nullopt, result.errors);
+        planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, layout, cave_offset,
+        site.text_offset + site.size, planned.private_layout ? &*planned.private_layout : nullptr,
+        std::nullopt, result.errors);
     if (!cave_words) {
       result.errors.emplace_back(
           "ConSan MOI sampled barrier sync could not encode its probe with scratch v" +

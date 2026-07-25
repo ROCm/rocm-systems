@@ -787,7 +787,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const bool needs_scalar_spill =
           needs_record_replay_scalar_spill ||
           (scratch_count > 1u && candidate_options.automatic_moi_inline_sgpr_spill);
-      if (scratch_count > 1u || needs_record_replay_scalar_spill) {
+      if (scratch_count > 1u || needs_scalar_spill) {
         if (plan == nullptr) {
           result.warnings.emplace_back(
               "ConSan MOI inline barrier visible evidence has no resource plan in " +
@@ -808,7 +808,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         if (scratch_count > 1u)
           scratch_vgpr = resources->base;
         owners = resources->owner_descriptor_file_offsets;
-        if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
+        if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
+            moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
           spill = build_moi_spill_sequence(result, *resources, candidate_options,
                                            visible_evidence_spill_managers, arch, result.warnings);
           if (!spill)
@@ -818,9 +819,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                              *spill);
         }
         if (needs_scalar_spill) {
-          scalar_spill = build_inline_sgpr_spill_sequence(*resources, candidate_options,
-                                                          visible_evidence_spill_managers, arch,
-                                                          result.warnings, std::nullopt);
+          scalar_spill = build_inline_sgpr_spill_sequence(
+              result, *resources, candidate_options, visible_evidence_spill_managers, arch,
+              result.warnings, std::nullopt, spill ? &*spill : nullptr);
           if (!scalar_spill)
             continue;
           required_private_bytes =

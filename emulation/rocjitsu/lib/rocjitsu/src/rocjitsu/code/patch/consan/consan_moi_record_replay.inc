@@ -456,10 +456,19 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       if (private_layout->owner_offset && !private_owner_shift)
         continue;
     }
+    ConSanOptions candidate_options = options;
+    candidate_options.scratch_vgpr = resources->base;
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             resources->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI first-light probe found no common transient SGPR assignment");
+      continue;
+    }
     std::optional<VgprSpillSequence> spill;
-    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
+    if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
+        moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
       spill = build_moi_spill_sequence(
-          result, *resources, options, spill_managers, arch, result.warnings,
+          result, *resources, candidate_options, spill_managers, arch, result.warnings,
           private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
       if (!spill) {
         result.warnings.emplace_back(
@@ -470,14 +479,6 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     uint32_t required_private_bytes = private_layout ? private_layout->ephemeral_base : 0u;
     if (spill)
       required_private_bytes = std::max(required_private_bytes, spill->total_private_bytes);
-    ConSanOptions candidate_options = options;
-    candidate_options.scratch_vgpr = resources->base;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
-                                             resources->owner_descriptor_file_offsets)) {
-      result.warnings.emplace_back(
-          "ConSan MOI first-light probe found no common transient SGPR assignment");
-      continue;
-    }
     bool spill_overlaps_guest_operands = false;
     if (spill && (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
         !options.moi_dynamic_access_records) {
@@ -492,8 +493,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     std::optional<InlineSgprSpillSequence> scalar_spill;
     if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
       scalar_spill = build_inline_sgpr_spill_sequence(
-          *resources, candidate_options, spill_managers, arch, result.warnings,
-          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
+          result, *resources, candidate_options, spill_managers, arch, result.warnings,
+          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
+          spill ? &*spill : nullptr);
       if (!scalar_spill)
         continue;
       required_private_bytes = std::max(required_private_bytes, scalar_spill->total_private_bytes);

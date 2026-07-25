@@ -162,10 +162,25 @@ struct VgprSpillSequence {
   std::vector<uint32_t> restore_words;
   uint32_t total_private_bytes = 0;
   bool uses_dynamic_stack_frame = false;
+  uint16_t dynamic_frame_base_sgpr = 0;
+  uint32_t dynamic_frame_bytes = 0;
 
   [[nodiscard]] bool has_complete_slot_metadata() const {
     return slot_offsets.size() == vgpr_count;
   }
+};
+
+/// @brief Standalone save/restore program for one ordinary SGPR window.
+///
+/// @details A caller-provided VGPR transfers each wave-uniform scalar value
+/// through private memory. The transfer VGPR must already have been preserved
+/// when the sequence executes.
+struct SgprSpillSequence {
+  uint16_t sgpr_base = 0;
+  uint16_t sgpr_count = 0;
+  std::vector<uint32_t> save_words;
+  std::vector<uint32_t> restore_words;
+  uint32_t total_private_bytes = 0;
 };
 
 /// @brief Reserve slots and encode a CDNA3, CDNA4, RDNA4, or gfx1250 VGPR
@@ -188,9 +203,22 @@ struct VgprSpillSequence {
 /// The encoding is available for CDNA3, CDNA4, RDNA4, and gfx1250. No
 /// descriptor growth is needed because the loader already allocates the
 /// kernel's dynamic stack.
-[[nodiscard]] std::optional<VgprSpillSequence> build_dynamic_stack_vgpr_spill_sequence(
-    uint16_t vgpr_base, uint16_t vgpr_count, uint16_t stack_top_sgpr, uint16_t frame_base_sgpr,
-    uint16_t saved_frame_base_sgpr, uint16_t saved_scc_sgpr, rj_code_arch_t arch);
+[[nodiscard]] std::optional<VgprSpillSequence>
+build_dynamic_stack_vgpr_spill_sequence(uint16_t vgpr_base, uint16_t vgpr_count,
+                                        uint16_t stack_top_sgpr, uint16_t frame_base_sgpr,
+                                        uint16_t saved_frame_base_sgpr, uint16_t saved_scc_sgpr,
+                                        rj_code_arch_t arch, uint32_t additional_frame_bytes = 0);
+
+/// @brief Save an SGPR window in an already-established dynamic-stack frame.
+///
+/// @details Slots begin at @p frame_byte_offset relative to the frame base
+/// recorded in @p vgpr_frame. The VGPR save must establish a dynamic frame
+/// containing the scalar slots and preserve @p transfer_vgpr; this sequence
+/// validates that contract before using the transfer register.
+[[nodiscard]] std::optional<SgprSpillSequence>
+build_dynamic_stack_sgpr_spill_sequence(uint16_t sgpr_base, uint16_t sgpr_count,
+                                        uint16_t transfer_vgpr, const VgprSpillSequence &vgpr_frame,
+                                        uint32_t frame_byte_offset, rj_code_arch_t arch);
 
 enum class SpillDescriptorUpdate : uint8_t {
   Updated,

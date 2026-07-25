@@ -806,7 +806,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
             cave_words.end());
 }
 
-TEST(ConSanMoi, Cdna4DynamicStackRejectsShortRecordReplayScalarSpillWindow) {
+TEST(ConSanMoi, Cdna4DynamicStackRejectsRecordReplayScalarSpillWithoutBootstrap) {
   const auto guest = build_cdna4_ds_store_b32(
       /*vaddr=*/0, /*vdata=*/0, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(guest);
@@ -829,7 +829,7 @@ TEST(ConSanMoi, Cdna4DynamicStackRejectsShortRecordReplayScalarSpillWindow) {
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("no reserved frame-base save slot") != std::string::npos;
+    return warning.find("no SCC-save register") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
 }
 

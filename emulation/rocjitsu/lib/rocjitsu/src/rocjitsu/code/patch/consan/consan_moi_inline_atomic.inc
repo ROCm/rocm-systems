@@ -153,13 +153,6 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       if (!planned_candidate.kernel_descriptor_file_offset)
         continue;
     }
-    std::optional<VgprSpillSequence> spill;
-    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
-      spill = build_moi_spill_sequence(result, *resources, options, spill_managers, arch,
-                                       result.warnings);
-      if (!spill)
-        continue;
-    }
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
     if (!apply_moi_transient_sgpr_assignment(candidate_options,
@@ -167,6 +160,14 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       result.warnings.emplace_back(
           "ConSan MOI inline atomic patch found no common transient SGPR assignment");
       continue;
+    }
+    std::optional<VgprSpillSequence> spill;
+    if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
+        moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
+      spill = build_moi_spill_sequence(result, *resources, candidate_options, spill_managers, arch,
+                                       result.warnings);
+      if (!spill)
+        continue;
     }
     std::optional<InlineSgprSpillSequence> scalar_spill;
     if (candidate_options.automatic_moi_inline_sgpr_spill) {
@@ -186,9 +187,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
             candidate.container_name);
         continue;
       }
-      scalar_spill = build_inline_sgpr_spill_sequence(*resources, candidate_options, spill_managers,
-                                                      arch, result.warnings,
-                                                      /*private_layout_base=*/std::nullopt);
+      scalar_spill = build_inline_sgpr_spill_sequence(
+          result, *resources, candidate_options, spill_managers, arch, result.warnings,
+          /*private_layout_base=*/std::nullopt, spill ? &*spill : nullptr);
       if (!scalar_spill)
         continue;
     }

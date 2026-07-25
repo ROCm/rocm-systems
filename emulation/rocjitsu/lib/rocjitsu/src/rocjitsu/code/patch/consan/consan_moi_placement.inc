@@ -1418,12 +1418,12 @@ resolve_moi_scalar_owner_contexts(const MoiResourcePlanningState &state,
              overlaps_range(set, *options.moi_record_replay_call_return_sgpr, 2u);
     }
     if (options.automatic_moi_inline_sgpr_spill) {
-      if (!options.moi_inline_indirect_pc_sgpr || !options.moi_inline_indirect_scc_sgpr ||
-          !options.moi_inline_visible_evidence_sgpr)
+      if (!options.moi_inline_indirect_pc_sgpr || !options.moi_inline_indirect_scc_sgpr)
         return true;
       return overlaps_range(set, *options.moi_inline_indirect_pc_sgpr, 2u) ||
              overlaps_range(set, *options.moi_inline_indirect_scc_sgpr, 1u) ||
-             overlaps_range(set, *options.moi_inline_visible_evidence_sgpr, 1u);
+             (options.moi_inline_visible_evidence_sgpr &&
+              overlaps_range(set, *options.moi_inline_visible_evidence_sgpr, 1u));
     }
     return overlaps_range(set, *options.moi_exec_save_sgpr,
                           moi_exec_save_sgpr_count(options, state.arch));
@@ -1852,6 +1852,8 @@ moi_dynamic_stack_exec_save_sgpr_count(ConSanMoiEngine engine) {
     // indirect-PC pair, so the probe may reuse that temporary after dispatch.
     if (!options.moi_report_buffer_address)
       return 0u;
+    if (options.automatic_moi_record_replay_sgpr_spill)
+      return 8u;
     if (options.moi_dynamic_stack_spill)
       return moi_dynamic_stack_exec_save_sgpr_count(options.moi_engine).value_or(0u);
     if (arch == ROCJITSU_CODE_ARCH_GFX1250)
@@ -2083,7 +2085,6 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       options.moi_engine == ConSanMoiEngine::Sampled &&
       (arch == ROCJITSU_CODE_ARCH_GFX1250 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
        arch == ROCJITSU_CODE_ARCH_CDNA4);
-  const bool gfx1250_sampled = component_local_sampled && arch == ROCJITSU_CODE_ARCH_GFX1250;
   if ((options.moi_engine != ConSanMoiEngine::RecordReplay &&
        options.moi_engine != ConSanMoiEngine::InlineShadow && !component_local_sampled) ||
       !options.automatic_moi_partial_exec_save_sgprs || !options.moi_exec_save_sgpr)
@@ -2238,13 +2239,15 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     if (!selected && options.moi_engine == ConSanMoiEngine::InlineShadow &&
         (is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
          arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-        !options.moi_dynamic_stack_spill && address_free_scratch_private_limit(arch)) {
+        address_free_scratch_private_limit(arch)) {
       const auto reserved = [&](uint16_t base, uint16_t width) {
         return (options.moi_owner_sgpr &&
                 range_overlaps(base, width, *options.moi_owner_sgpr, 1u)) ||
                (options.moi_dispatch_id_sgpr &&
                 range_overlaps(base, width, *options.moi_dispatch_id_sgpr,
-                               moi_dispatch_state_sgpr_count(options)));
+                               moi_dispatch_state_sgpr_count(options))) ||
+               (options.moi_dynamic_stack_spill &&
+                range_overlaps(base, width, /*stack top=*/32u, /*stack registers=*/2u));
       };
       uint32_t initialized_end = 0u;
       uint32_t referenced_end = 0u;
@@ -2313,12 +2316,25 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         }
         for (uint32_t reg = 0; spill_pc && reg < limit; ++reg) {
           const uint16_t candidate = static_cast<uint16_t>(reg);
-          if (!unavailable_or_reserved(candidate, 1u) && candidate != *spill_visible &&
+          if (!unavailable_or_reserved(candidate, 1u) &&
+              (!spill_visible || candidate != *spill_visible) &&
               !range_overlaps(candidate, 1u, *spill_pc, 2u) && can_add_range(candidate, 1u)) {
             spill_scc = candidate;
             selected_ranges.push_back({candidate, 1u});
             break;
           }
+        }
+        // CDNA access and barrier sites retain independent local entry
+        // islands. They need only the dead indirect-PC pair and SCC slot; if
+        // no fresh cross-site latch exists, use the external exact-shadow
+        // table and let the unused dense-router fields alias that bootstrap
+        // state.
+        if (!spill_visible && spill_pc && spill_scc &&
+            (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)) {
+          spill_key = spill_scc;
+          spill_call_return = spill_pc;
+          selected = spill_base;
+          break;
         }
         for (uint32_t reg = fresh_begin; spill_scc && reg < limit; ++reg) {
           const uint16_t candidate = static_cast<uint16_t>(reg);
@@ -2366,18 +2382,11 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         }
       }
     }
-    const bool component_uses_dynamic_stack = std::ranges::any_of(owners, [&](uint64_t owner) {
-      const MoiKernelResourceContext *context = context_for_owner(owner);
-      return context != nullptr && context->kernel != nullptr &&
-             context->kernel->uses_dynamic_stack.value_or(false);
-    });
-    const bool supports_record_replay_scalar_spill =
-        options.moi_engine == ConSanMoiEngine::RecordReplay &&
+    const bool supports_compact_scalar_spill =
+        (options.moi_engine == ConSanMoiEngine::RecordReplay || component_local_sampled) &&
         (is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
          arch == ROCJITSU_CODE_ARCH_CDNA4);
-    if (!selected && (supports_record_replay_scalar_spill || gfx1250_sampled) &&
-        !component_uses_dynamic_stack && !options.moi_dynamic_stack_spill &&
-        address_free_scratch_private_limit(arch)) {
+    if (!selected && supports_compact_scalar_spill && address_free_scratch_private_limit(arch)) {
       const auto conflicts_with_cdna_vcc = [&](uint16_t base, uint16_t width) {
         return instrumentation::is_cdna_family_arch(arch) &&
                std::ranges::any_of(owners, [&](uint64_t owner) {
@@ -2392,6 +2401,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
                (options.moi_dispatch_id_sgpr &&
                 range_overlaps(base, width, *options.moi_dispatch_id_sgpr,
                                moi_dispatch_state_sgpr_count(options))) ||
+               (options.moi_dynamic_stack_spill &&
+                range_overlaps(base, width, /*stack top=*/32u, /*stack registers=*/2u)) ||
                conflicts_with_cdna_vcc(base, width);
       };
       for (uint32_t base = 0; base + 2u <= limit; base += 2u) {
@@ -2423,7 +2434,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       // One dead pair is therefore sufficient for both transient roles.
       if (spill_key)
         spill_call_return = spill_pc;
-      const uint16_t spilled_scalar_count = gfx1250_sampled ? 8u : 4u;
+      const uint16_t spilled_scalar_count = component_local_sampled ? 8u : 4u;
       for (uint32_t base = 0; spill_call_return && base + spilled_scalar_count <= limit;
            base += 2u) {
         const uint16_t candidate = static_cast<uint16_t>(base);
@@ -2441,9 +2452,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       missed_required_assignment = true;
       continue;
     }
-    const bool spill_backed =
-        spill_pc && spill_scc && spill_key && spill_call_return &&
-        (options.moi_engine != ConSanMoiEngine::InlineShadow || spill_visible);
+    const bool spill_backed = spill_pc && spill_scc && spill_key && spill_call_return;
     uint32_t component_max_referenced_sgpr_count = 0u;
     for (uint64_t owner : owners) {
       const MoiKernelResourceContext *context = context_for_owner(owner);
@@ -2896,7 +2905,9 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
        arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       (options.moi_engine == ConSanMoiEngine::RecordReplay ||
        options.moi_engine == ConSanMoiEngine::InlineShadow ||
-       (arch == ROCJITSU_CODE_ARCH_GFX1250 && options.moi_engine == ConSanMoiEngine::Sampled))) {
+       ((arch == ROCJITSU_CODE_ARCH_GFX1250 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+        options.moi_engine == ConSanMoiEngine::Sampled))) {
     options.moi_exec_save_sgpr = 0u;
     options.automatic_moi_exec_save_sgprs = true;
     options.automatic_moi_partial_exec_save_sgprs = true;

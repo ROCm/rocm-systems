@@ -1,16 +1,23 @@
-struct InlineSgprSpillSequence {
-  uint16_t sgpr_base = 0;
-  uint16_t sgpr_count = 0;
-  std::vector<uint32_t> save_words;
-  std::vector<uint32_t> restore_words;
-  uint32_t total_private_bytes = 0;
-};
+using InlineSgprSpillSequence = SgprSpillSequence;
 
-[[nodiscard]] std::optional<InlineSgprSpillSequence>
-build_inline_sgpr_spill_sequence(const ResolvedMoiScratchPlan &resources,
-                                 const ConSanOptions &options, MoiSpillManagers &managers,
-                                 rj_code_arch_t arch, std::vector<std::string> &warnings,
-                                 std::optional<uint32_t> private_layout_base) {
+[[nodiscard]] bool
+moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanResult &result,
+                                             const ResolvedMoiScratchPlan &resources,
+                                             const ConSanOptions &options) {
+  if (!options.automatic_moi_inline_sgpr_spill && !options.automatic_moi_record_replay_sgpr_spill) {
+    return false;
+  }
+  return std::ranges::any_of(resources.owner_descriptor_file_offsets, [&](uint64_t offset) {
+    const ConSanKernelInfo *kernel = kernel_for_descriptor(result, offset);
+    return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
+  });
+}
+
+[[nodiscard]] std::optional<InlineSgprSpillSequence> build_inline_sgpr_spill_sequence(
+    const ConSanResult &result, const ResolvedMoiScratchPlan &resources,
+    const ConSanOptions &options, MoiSpillManagers &managers, rj_code_arch_t arch,
+    std::vector<std::string> &warnings, std::optional<uint32_t> private_layout_base,
+    const VgprSpillSequence *vgpr_spill = nullptr) {
   if ((!options.automatic_moi_inline_sgpr_spill &&
        !options.automatic_moi_record_replay_sgpr_spill) ||
       !options.moi_exec_save_sgpr)
@@ -25,6 +32,20 @@ build_inline_sgpr_spill_sequence(const ResolvedMoiScratchPlan &resources,
     warnings.emplace_back("ConSan MOI spill-backed Inline scalar state has no private capacity");
     return std::nullopt;
   }
+  const uint16_t count = moi_exec_save_sgpr_count(options, arch);
+  if (moi_scalar_spill_requires_dynamic_vgpr_frame(result, resources, options)) {
+    if (vgpr_spill == nullptr || !vgpr_spill->uses_dynamic_stack_frame) {
+      warnings.emplace_back(
+          "ConSan MOI dynamic-stack scalar spill requires an established VGPR spill frame");
+      return std::nullopt;
+    }
+    auto sequence = build_dynamic_stack_sgpr_spill_sequence(
+        *options.moi_exec_save_sgpr, count, resources.base, *vgpr_spill,
+        static_cast<uint32_t>(resources.count) * SpillManager::kSlotBytes, arch);
+    if (!sequence)
+      warnings.emplace_back("ConSan MOI could not encode the dynamic-stack scalar spill sequence");
+    return sequence;
+  }
   const uint32_t layout_base =
       private_layout_base.value_or(resources.original_private_segment_size);
   SpillManager planned_manager(layout_base, *private_limit);
@@ -36,7 +57,6 @@ build_inline_sgpr_spill_sequence(const ResolvedMoiScratchPlan &resources,
     planned_manager = it->second;
     committed_manager = &it->second;
   }
-  const uint16_t count = moi_exec_save_sgpr_count(options, arch);
   if (!planned_manager.allocate_slots(RegisterRef{RegClass::SGPR, *options.moi_exec_save_sgpr, 1u},
                                       count)) {
     warnings.emplace_back("ConSan MOI could not reserve the Inline scalar spill slots");
@@ -602,9 +622,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
 
     std::optional<VgprSpillSequence> spill;
-    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
+    if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
+        moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
       spill = build_moi_spill_sequence(
-          result, *resources, options, spill_managers, arch, result.warnings,
+          result, *resources, candidate_options, spill_managers, arch, result.warnings,
           private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
       if (!spill)
         continue;
@@ -612,8 +633,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::optional<InlineSgprSpillSequence> scalar_spill;
     if (candidate_options.automatic_moi_inline_sgpr_spill) {
       scalar_spill = build_inline_sgpr_spill_sequence(
-          *resources, candidate_options, spill_managers, arch, result.warnings,
-          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
+          result, *resources, candidate_options, spill_managers, arch, result.warnings,
+          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
+          spill ? &*spill : nullptr);
       if (!scalar_spill)
         continue;
     }

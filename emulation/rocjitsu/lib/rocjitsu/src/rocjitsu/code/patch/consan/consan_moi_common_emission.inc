@@ -381,8 +381,6 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
                          const ConSanOptions &options, MoiSpillManagers &managers,
                          rj_code_arch_t arch, std::vector<std::string> &warnings,
                          std::optional<uint32_t> private_layout_base = std::nullopt) {
-  if (resources.source != ConSanRegisterAllocationSource::SpillRequired)
-    return std::nullopt;
   if (resources.owner_descriptor_file_offsets.empty()) {
     warnings.emplace_back("ConSan MOI spill requires an owning kernel descriptor");
     return std::nullopt;
@@ -407,6 +405,13 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
     else
       has_fixed_owner = true;
   }
+  const bool needs_dynamic_scalar_frame =
+      has_dynamic_owner &&
+      (options.automatic_moi_inline_sgpr_spill || options.automatic_moi_record_replay_sgpr_spill);
+  if (resources.source != ConSanRegisterAllocationSource::SpillRequired &&
+      !needs_dynamic_scalar_frame) {
+    return std::nullopt;
+  }
 
   if (has_dynamic_owner) {
     if (has_fixed_owner) {
@@ -425,25 +430,37 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
     }
     constexpr uint16_t kDynamicStackTopSgpr = 32u;
     constexpr uint16_t kDynamicFrameBaseSgpr = 33u;
+    const bool spill_backed_scalar_window =
+        options.automatic_moi_inline_sgpr_spill || options.automatic_moi_record_replay_sgpr_spill;
     const auto special_state = moi_special_state_sgprs(options);
-    if (!special_state) {
+    const auto indirect_state = moi_indirect_jump_sgprs(options);
+    if (!special_state || (spill_backed_scalar_window && !indirect_state)) {
       warnings.emplace_back("ConSan MOI dynamic-stack spill has no SCC-save register");
       return std::nullopt;
     }
-    const uint16_t saved_scc_sgpr = special_state->scc_save_sgpr;
+    const uint16_t saved_scc_sgpr =
+        spill_backed_scalar_window ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
     const auto saved_frame_offset = moi_dynamic_stack_frame_save_sgpr_offset(options.moi_engine);
-    if (!saved_frame_offset || *saved_frame_offset >= moi_exec_save_sgpr_count(options, arch)) {
+    if (!spill_backed_scalar_window &&
+        (!saved_frame_offset || *saved_frame_offset >= moi_exec_save_sgpr_count(options, arch))) {
       warnings.emplace_back("ConSan MOI dynamic-stack spill has no reserved frame-base save slot");
       return std::nullopt;
     }
     const uint16_t saved_frame_base_sgpr =
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr + *saved_frame_offset);
+        spill_backed_scalar_window
+            ? indirect_state->pc_sgpr
+            : static_cast<uint16_t>(*options.moi_exec_save_sgpr + *saved_frame_offset);
+    const uint32_t additional_frame_bytes =
+        spill_backed_scalar_window
+            ? static_cast<uint32_t>(moi_exec_save_sgpr_count(options, arch)) *
+                  SpillManager::kSlotBytes
+            : 0u;
     auto spill = build_dynamic_stack_vgpr_spill_sequence(
         resources.base, resources.count, kDynamicStackTopSgpr, kDynamicFrameBaseSgpr,
-        saved_frame_base_sgpr, saved_scc_sgpr, arch);
+        saved_frame_base_sgpr, saved_scc_sgpr, arch, additional_frame_bytes);
     const uint64_t requested_private_bytes =
         static_cast<uint64_t>(resources.original_private_segment_size) +
-        static_cast<uint64_t>(resources.count) * SpillManager::kSlotBytes;
+        static_cast<uint64_t>(resources.count) * SpillManager::kSlotBytes + additional_frame_bytes;
     const auto required_private_bytes =
         requested_private_bytes <= std::numeric_limits<uint32_t>::max()
             ? normalize_address_free_scratch_private_size(
