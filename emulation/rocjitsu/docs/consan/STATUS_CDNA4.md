@@ -237,10 +237,43 @@ hashes are
 `6b6da24cabbdadaa866f2628b826afe29a7c8a71e690fd4451de2f10e18a0106`
 and
 `8e82a54b2b0342c7e9d179778ab58f3a601e6fba20cfd7cd4d1c22d9127823d5`.
-Explicit `GlobalReadPerMfma: 1` overrides elsewhere in the upstream YAML
-population are outside this bounded row and remain tracked by `bd-1w9.9.11`;
-that follow-up must extend a parameter-aware canonicalization boundary rather
-than introduce broad or parallel coercion.
+The `bd-1w9.9.11` follow-up is pinned at rocm-libraries
+`ccf6befac45a48e0e309ba940b7733ccb8d8e4a4`.  Its production assignment
+boundary converts only plain integer `GlobalReadPerMfma` values whose float
+equivalents belong to the canonical registry; booleans, strings, and
+out-of-range integers remain unchanged for strict diagnostics.  The opt-in
+table does not infer coercions from registry shape; it is the shared extension
+point for another parameter only after that parameter's wire contract is
+established.  The bead's original “roughly 200 files” was a scoping estimate.
+A retained exhaustive offline sweep at
+`rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-explicit-normalization-20260725`
+passes the measured complete population of 4,522 explicit values across 97
+upstream YAML files through that production boundary with zero mismatches.
+Its README and executable sweep command pin the rocm-libraries and corpus
+revisions, exact invocation, and all 98 grep-selected candidates before the
+YAML parser identifies the 97 files containing values; their hashes are
+`eb9139a5ac1fb41fec2333be91518b085d5003c560b7ffda3e2983077104feae`
+and
+`842a588c0a8153c33abffba7a877b33ff6aad236e25ff63dc04b693bbb85bd22`.
+The same artifact root records
+70/70 focused tests and the complete unit gate at 1,184 passes, 202 skips, and
+one expected failure.  The verbose focused log names both accepted
+MessagePack round trips and rejected boolean, string, and out-of-range cases.
+The focused, full, and sweep log SHA-256 hashes are
+`c30e5e87559a4108430017de02c32a46d792c107fc95987146cd05d11367fb4e`,
+`35e7b95605f4179b319e3ac3dba11fb06a1965723992137d8efd4e4de7e85b28`,
+and
+`78a866f49d9c058c285edf8f95720e1a8960b9d025b29848c46635386ac25ba5`.
+The committed-revision
+`rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-explicit-normalization-ccf6befa-20260725`
+run passes the exact numerical oracle and gfx950 ELF checks in 5.065 seconds
+without a type warning or `std::bad_cast`; its `results.csv` and runner log
+hashes are
+`d0d5957424d574c10a88fee8e951428cb03b54f6a35197da03a03144ddbe2048`
+and
+`723d71b01c4f3209b676c6242407ba0c030f71879699f83f19a38259e9a20036`.
+The distinct mixed float plus integer-sentinel contract for
+`LocalWritePerMfma` remains isolated under `bd-1w9.9.12`.
 
 The three MOI profiles fail closed before the numeric oracle executes:
 
@@ -426,6 +459,15 @@ a ConSan detection.
 
 ## Progress log
 
+- 2026-07-25: Completed `bd-1w9.9.11` at rocm-libraries `ccf6befac4`.
+  The parameter-aware production boundary now converts every in-range plain
+  integer `GlobalReadPerMfma` shorthand to the float MessagePack wire type,
+  while incompatible values retain strict diagnostics.  MessagePack
+  round-trip tests, the full unit gate, a 4,522-value upstream YAML sweep, and
+  the bounded gfx950 numerical/ELF row all pass.  The adjacent
+  `LocalWritePerMfma` sentinel contract is tracked independently by
+  `bd-1w9.9.12` rather than generalized by assumption.
+
 - 2026-07-25: Completed the `bd-1w9.9.5` gfx950 Tensile msgpack producer fix
   at rocm-libraries `a4d0529339`.  The canonical scheduling default is now a
   float, every derived `DirectToLdsMetadata` write uses the integer wire
@@ -433,7 +475,7 @@ a ConSan detection.
   regressions preserve the strict registry contract.  The full upstream unit
   gate passes in one session, and a fresh bounded gfx950 Stream-K run preserves
   the exact numerical oracle and target checks while eliminating both
-  field-type warnings.  Broader explicit integer YAML overrides are isolated
+  field-type warnings.  Broader explicit integer YAML overrides were isolated
   under `bd-1w9.9.11` rather than hidden by generic coercion.
 
 - 2026-07-25: Closed the `bd-1w9.9.9` gfx950 Tensile SuperCollider
