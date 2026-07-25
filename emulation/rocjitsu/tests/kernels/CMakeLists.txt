@@ -63,12 +63,19 @@ execute_process(
 )
 set(HAS_GFX1250_DEVICE_KERNELS FALSE)
 set(RJ_GFX1250_DEVICE_KERNEL_TARGET)
+set(RJ_GFX1250_VECTOR_ADD_TARGET)
 if(RJ_AMDCXX_SUPPORTS_GFX1250 EQUAL 0)
     rj_add_device_kernel(relocation_function_table_dispatch gfx1250)
+    # A trivial, relocation-free kernel used as the gfx1250 B0->A0 end-to-end
+    # fixture: it loads, translates, and executes on the emulator so the auto-A0
+    # plumbing can be proven before stressing the translator. OUTPUT_NAME keeps it
+    # distinct from the gfx950 vector_add.o built from the same source.
+    rj_add_device_kernel(vector_add gfx1250 OUTPUT_NAME vector_add_gfx1250)
     set(HAS_GFX1250_DEVICE_KERNELS TRUE)
     set(RJ_GFX1250_DEVICE_KERNEL_TARGET
         kernel_relocation_function_table_dispatch
     )
+    set(RJ_GFX1250_VECTOR_ADD_TARGET kernel_vector_add_gfx1250)
 else()
     message(
         STATUS
@@ -239,6 +246,7 @@ add_custom_target(
         kernel_multikernel_indirect_branch_part0
         kernel_multikernel_indirect_branch_part1
         ${RJ_GFX1250_DEVICE_KERNEL_TARGET}
+        ${RJ_GFX1250_VECTOR_ADD_TARGET}
         ${RJ_GFX1250_DBT_FIXTURE_TARGET}
         kernel_triton_cdna4_matmul_dynamic_32x32x64
         kernel_triton_cdna4_matmul_buffer_async_1024

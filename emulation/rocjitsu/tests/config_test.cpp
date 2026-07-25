@@ -393,6 +393,36 @@ TEST(ConfigLoaderTest, LoadsDbtGuestSiliconRevisions) {
   EXPECT_EQ(dbt.host_revision, config::DbtSiliconRevision::Gfx1250A0);
 }
 
+TEST(ConfigLoaderTest, ReportsDbtGuestBlockPresence) {
+  // The hook's runtime loader must distinguish a config that carries no
+  // dbt_guest block at all (a plain KMD/topology config -> auto-A0) from one that
+  // is present but disabled (an explicit simulation directive). The out-param is
+  // how it tells them apart, so both cases are exercised here.
+  const std::filesystem::path kmd_only =
+      write_temp_config("rocjitsu_kmd_only_config_test.json", R"({
+      "topology": { "nodes": [] }
+    })");
+  bool has_block = true;
+  auto kmd = config::load_dbt_guest_config_from_file(kmd_only.string(), &has_block);
+  std::filesystem::remove(kmd_only);
+  EXPECT_FALSE(has_block);
+  EXPECT_FALSE(kmd.enabled);
+
+  const std::filesystem::path disabled =
+      write_temp_config("rocjitsu_disabled_dbt_guest_config_test.json", R"({
+      "dbt_guest": {
+        "enabled": false,
+        "guest_isa": "gfx1250",
+        "host_isa": "gfx1250"
+      }
+    })");
+  has_block = false;
+  auto off = config::load_dbt_guest_config_from_file(disabled.string(), &has_block);
+  std::filesystem::remove(disabled);
+  EXPECT_TRUE(has_block);
+  EXPECT_FALSE(off.enabled);
+}
+
 TEST(ConfigLoaderTest, RejectsDbtGuestDeviceWithInconsistentSimdCount) {
   const auto file = write_temp_config(R"({
       "dbt_guest": {

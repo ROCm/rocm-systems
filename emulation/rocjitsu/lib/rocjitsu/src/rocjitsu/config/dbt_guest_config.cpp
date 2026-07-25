@@ -130,7 +130,7 @@ std::string resolve_dbt_host_config_path(const std::string &dbt_config_path,
   return (dbt_path.parent_path() / host_path).lexically_normal().string();
 }
 
-DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
+DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path, bool *has_dbt_guest_block) {
   const std::string json = read_config_file(path);
   bool has_dbt_guest = false;
   DbtGuestConfig parsed = with_parsed_simulation_config_json(
@@ -138,6 +138,8 @@ DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
         has_dbt_guest = config->dbt_guest() != nullptr;
         return dbt_guest_from_fb(config->dbt_guest());
       });
+  if (has_dbt_guest_block)
+    *has_dbt_guest_block = has_dbt_guest;
   if (!has_dbt_guest)
     return parsed;
 
@@ -180,7 +182,18 @@ std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
   std::getline(file, path);
   if (path.empty())
     return std::nullopt;
-  return load_dbt_guest_config_from_file(path);
+
+  // A config that carries no top-level `dbt_guest` block is a plain KMD/topology
+  // config (e.g. the auto-A0 gfx1250 config the launcher writes for the interposer
+  // to build the emulated GPU). The hook must read that as "no simulation guest
+  // requested" -> auto-A0, exactly as if no config file existed at all. Only a
+  // *present* dbt_guest block (enabled or explicitly disabled) is a simulation
+  // directive the hook acts on.
+  bool has_dbt_guest_block = false;
+  DbtGuestConfig parsed = load_dbt_guest_config_from_file(path, &has_dbt_guest_block);
+  if (!has_dbt_guest_block)
+    return std::nullopt;
+  return parsed;
 }
 
 } // namespace config

@@ -93,8 +93,13 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest);
 /// intentionally accepts configs that contain only the top-level `dbt_guest`
 /// table, so guest discovery configs do not need unused `vm` or `topology`
 /// sections.
+/// @param has_dbt_guest_block when non-null, set to true iff the JSON actually
+///        contained a top-level `dbt_guest` table. Callers that must distinguish
+///        "no block at all" (e.g. a KMD-only config that selects auto-A0) from a
+///        present-but-disabled block use this; a null out-param is ignored.
 /// @throws std::runtime_error on file I/O, parse errors, or invalid config.
-DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path);
+DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path,
+                                               bool *has_dbt_guest_block = nullptr);
 
 /// @brief Load only dbt_guest from the rocjitsu child-process runtime config file.
 ///

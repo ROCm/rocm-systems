@@ -478,12 +478,16 @@ endif()
 if(HAS_GFX1250_DEVICE_KERNELS)
     target_sources(
         rocjitsu_tests
-        PRIVATE dbt/relocation_function_table_hip_test.cpp
+        PRIVATE
+            dbt/relocation_function_table_hip_test.cpp
+            dbt/gfx1250_auto_a0_e2e_test.cpp
     )
     target_compile_definitions(
         rocjitsu_tests
         PRIVATE HAS_GFX1250_DEVICE_KERNELS=1
     )
+    # The e2e test loads and executes the gfx1250 vector_add fixture.
+    add_dependencies(rocjitsu_tests kernel_vector_add_gfx1250)
 endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)
     target_sources(

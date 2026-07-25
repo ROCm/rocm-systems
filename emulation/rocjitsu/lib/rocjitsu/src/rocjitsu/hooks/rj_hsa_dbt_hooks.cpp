@@ -990,9 +990,6 @@ hsa_status_t HSA_API rj_agent_iterate_isas(hsa_agent_t agent,
                                            hsa_status_t (*callback)(hsa_isa_t isa, void *data),
                                            void *data);
 
-/// @brief Present a synthetic B0 identity for A0 agents in auto-A0 mode.
-hsa_status_t HSA_API rj_agent_get_info(hsa_agent_t agent, hsa_agent_info_t attribute, void *value);
-
 /// @brief Wrap the AMD loader vendor table so the fd/offset reader captures bytes.
 hsa_status_t HSA_API rj_system_get_major_extension_table(uint16_t extension, uint16_t version_major,
                                                          size_t table_length, void *table);
@@ -1195,6 +1192,7 @@ void clear_virtual_lds_dispatch_queues();
 /// - `type` is the exact function-pointer type stored in `original_<name>_`.
 #define RJ_HSA_SAVED_ONLY_ENTRIES(X)                                                               \
   X(isa_get_info_alt, core_, true, hsa_isa_get_info_alt_fn, decltype(hsa_isa_get_info_alt) *)      \
+  X(agent_get_info, core_, true, hsa_agent_get_info_fn, decltype(hsa_agent_get_info) *)            \
   X(queue_load_write_index_relaxed, core_, true, hsa_queue_load_write_index_relaxed_fn,            \
     decltype(hsa_queue_load_write_index_relaxed) *)                                                \
   X(signal_create, core_, true, hsa_signal_create_fn, decltype(hsa_signal_create) *)               \
@@ -1225,8 +1223,6 @@ void clear_virtual_lds_dispatch_queues();
     decltype(hsa_iterate_agents) *)                                                                \
   X(agent_iterate_isas, core_, true, false, hsa_agent_iterate_isas_fn, rj_agent_iterate_isas,      \
     decltype(hsa_agent_iterate_isas) *)                                                            \
-  X(agent_get_info, core_, true, false, hsa_agent_get_info_fn, rj_agent_get_info,                  \
-    decltype(hsa_agent_get_info) *)                                                                \
   X(queue_create, core_, true, false, hsa_queue_create_fn, rj_queue_create,                        \
     decltype(hsa_queue_create) *)                                                                  \
   X(queue_destroy, core_, true, false, hsa_queue_destroy_fn, rj_queue_destroy,                     \
@@ -1345,21 +1341,28 @@ void clear_virtual_lds_dispatch_queues();
 
 /// @brief Return true when auto-A0 mode installs the patch entry named @p name.
 ///
-/// @details Auto-A0 is a narrow overlay on real A0 silicon: it presents a B0
-/// identity, captures source bytes, and translates at load. It must NOT inherit
-/// the simulation manifest's queue/signal/memory/profiling/executable-symbol/
-/// virtual-LDS surface, which exists to remap a synthetic guest agent onto a
-/// distinct host and has no meaning when the presented agent IS the execution
-/// agent. This allowlist is the auto-A0 patch set; simulation installs the whole
-/// manifest. Entry names come from RJ_HSA_PATCH_ENTRIES.
+/// @details Auto-A0 is a narrow overlay on real A0 silicon: it captures source
+/// bytes and translates at load. It must NOT inherit the simulation manifest's
+/// queue/signal/memory/profiling/executable-symbol/virtual-LDS surface, which
+/// exists to remap a synthetic guest agent onto a distinct host and has no
+/// meaning when the agent the app sees IS the execution agent. This allowlist is
+/// the auto-A0 patch set; simulation installs the whole manifest. Entry names
+/// come from RJ_HSA_PATCH_ENTRIES.
+///
+/// NOTE: there is deliberately **no agent presentation** here. A0 and B0 are
+/// silicon steppings of the *same* gfx1250 ISA; a compiled object is tagged plain
+/// `gfx1250` with no A0/B0 distinction, and CLR selects code objects by processor
+/// name only (never ASIC revision). A real A0 device already advertises `gfx1250`
+/// and the app already loads the gfx1250 object, so nothing needs to be presented
+/// -- the hook only detects A0 silicon (via the saved ASIC-revision query) to arm
+/// translation, and translates at load.
 [[nodiscard]] constexpr bool auto_a0_patches(std::string_view name) {
   // NOTE: `shut_down` is intentionally NOT patched in auto-A0. `rj_shut_down`
   // only suppresses teardown when a simulation `guest_target` is configured; in
   // auto-A0 there is no config, so the wrapper is a pure `return original()`.
   // Leaving the table's own pointer in place avoids a needless indirection and a
   // wrapper-lifetime dependency on the hook DSO during ROCr teardown.
-  return name == "agent_get_info" ||                   // B0 presentation overlay
-         name == "create_from_file" ||                 // source-byte capture
+  return name == "create_from_file" ||                 // source-byte capture
          name == "create_from_memory" ||               // source-byte capture
          name == "system_get_major_extension_table" || // vendor-reader capture wrap
          name == "destroy" ||                          // reader lifetime bookkeeping
@@ -1578,11 +1581,10 @@ struct AgentIsaName {
 
 /// @brief Read the first ISA name advertised by @p agent.
 ///
-/// @details Uses the saved (unpatched) ISA-iteration entries so detection runs
-/// against ROCR's real values regardless of any presentation overlay installed
-/// on the patched table. Mirrors ROCr hotswap's GetAgentIsaName. Returns
-/// `ok == false` when the ISA getters are unavailable, iteration errors, or a
-/// name lookup fails -- the query result is then unknown, not "no ISA".
+/// @details Uses the saved (unpatched) ISA-iteration entries so detection always
+/// reads ROCR's real agent values. Mirrors ROCr hotswap's GetAgentIsaName.
+/// Returns `ok == false` when the ISA getters are unavailable, iteration errors,
+/// or a name lookup fails -- the query result is then unknown, not "no ISA".
 [[nodiscard]] AgentIsaName agent_first_isa_name(hsa_agent_t agent) {
   auto *iterate_isas = layer().agent_iterate_isas();
   auto *isa_get_info = layer().isa_get_info_alt();
@@ -1659,11 +1661,15 @@ enum class Gfx1250Stepping : uint8_t {
 
 /// @brief Classify @p agent as a gfx1250 stepping.
 ///
-/// @details A0 and B0 share the gfx1250 ISA string, so the stepping comes from
-/// the ASIC revision: A0 == 0. Mirrors ROCr hotswap's
-/// IsHotswapSupportedGfxRevision (gfx1250 && asic_revision == 0). Reads the saved
-/// (unpatched) agent entries so the result reflects real silicon, not any
-/// presentation overlay. An agent whose ISA query *fails* is @ref kUnknownTarget
+/// @details A0 and B0 are silicon steppings of the *same* gfx1250 ISA -- both
+/// advertise the identical `gfx1250` ISA string and a compiled object carries no
+/// A0/B0 tag -- so the stepping comes from the ASIC revision: A0 == 0. Mirrors
+/// ROCr hotswap's IsHotswapSupportedGfxRevision (gfx1250 && asic_revision == 0).
+/// Reads the saved (unpatched) agent entries so the result reflects real silicon.
+/// This detection is the *only* thing that arms auto-A0 translation; nothing is
+/// presented to the app (the device already advertises gfx1250 and the app
+/// already loads the gfx1250 object). An agent whose ISA query *fails* is
+/// @ref kUnknownTarget
 /// (fail-closed) -- distinct from one that reads cleanly as non-gfx1250
 /// (@ref kNotGfx1250, safe to forward). A gfx1250 agent whose revision query
 /// fails is @ref kUnknownRevision, also fail-closed. NOTE: the "A0 ==
@@ -1687,17 +1693,6 @@ enum class Gfx1250Stepping : uint8_t {
   return asic_revision == 0 ? Gfx1250Stepping::kA0 : Gfx1250Stepping::kNotA0;
 }
 
-/// @brief Return true when @p agent is a confirmed gfx1250 A0 device.
-///
-/// @details Thin predicate over @ref classify_gfx1250_stepping for the callers
-/// that only need "confirmed A0" (e.g. the B0 presentation overlay). Unknown
-/// revisions are intentionally *not* A0 here: presenting a synthetic B0 identity
-/// for an agent we cannot confirm is A0 would be wrong. The load path uses the
-/// full classification instead so it can fail closed on unknown revisions.
-[[nodiscard]] bool agent_is_gfx1250_a0(hsa_agent_t agent) {
-  return classify_gfx1250_stepping(agent) == Gfx1250Stepping::kA0;
-}
-
 /// @brief Return true when any agent in the system could be a gfx1250 A0 target.
 ///
 /// @details The agent-less load entries (`hsa_executable_load_program_code_object`,
@@ -1708,7 +1703,7 @@ enum class Gfx1250Stepping : uint8_t {
 /// untranslated B0 object loaded through one of those entries could execute on A0
 /// silicon. This predicate lets those entries fail closed whenever an A0 (or
 /// possible-A0) consumer exists. Enumerates via the saved (unpatched)
-/// `hsa_iterate_agents` so it sees real silicon, not the presentation overlay.
+/// `hsa_iterate_agents` so it sees real silicon.
 [[nodiscard]] bool any_agent_could_be_gfx1250_a0() {
   auto *iterate_agents = layer().iterate_agents();
   if (iterate_agents == nullptr)
@@ -1734,16 +1729,6 @@ enum class Gfx1250Stepping : uint8_t {
       &found);
   return found;
 }
-
-/// @brief Synthetic ASIC revision presented for a B0 gfx1250 identity.
-///
-/// @details Auto-A0 presents a B0 gfx1250 identity on the real A0 agent so the
-/// stack above selects and loads B0 code objects, which the hook then translates
-/// to A0. A0 and B0 share the gfx1250 ISA string, so only the ASIC revision
-/// distinguishes them. PLACEHOLDER: the real B0 revision must be read from B0
-/// silicon; 1 is used as "the first stepping after A0" until confirmed in
-/// hardware testing (paired with the A0==0 assumption in agent_is_gfx1250_a0).
-constexpr uint32_t kSyntheticGfx1250B0AsicRevision = 1;
 
 /// @brief Parse a uint32_t from a NUL-terminated sysfs text value.
 [[nodiscard]] bool parse_u32_text(const char *text, uint32_t *out) {
@@ -3622,31 +3607,6 @@ hsa_status_t HSA_API rj_agent_iterate_isas(hsa_agent_t agent,
   return original(agent, callback, data);
 }
 
-hsa_status_t HSA_API rj_agent_get_info(hsa_agent_t agent, hsa_agent_info_t attribute, void *value) {
-  auto *original = layer().agent_get_info();
-  if (!original)
-    return HSA_STATUS_ERROR;
-
-  // Auto-A0 presents a B0 gfx1250 identity on the real A0 agent so the stack
-  // above selects and loads B0 code objects (which the hook then translates to
-  // A0). Only the ASIC revision distinguishes A0 from B0 -- the ISA string and
-  // every other query stay the real agent's values, and the real handle is used
-  // for all execution. Overlay only the revision, and only for detected A0
-  // agents in auto-A0 mode; everything else forwards unchanged.
-  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION) &&
-      value != nullptr) {
-    auto config = layer().config();
-    if (config && config->mode == HookMode::kAutoA0 && agent_is_gfx1250_a0(agent)) {
-      *static_cast<uint32_t *>(value) = kSyntheticGfx1250B0AsicRevision;
-      log_message(kLogDebug, "agent_get_info presenting B0 asic_revision for A0 agent=%llu",
-                  static_cast<unsigned long long>(agent.handle));
-      return HSA_STATUS_SUCCESS;
-    }
-  }
-
-  return original(agent, attribute, value);
-}
-
 hsa_status_t HSA_API rj_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
                                      void (*callback)(hsa_status_t, hsa_queue_t *, void *),
                                      void *data, uint32_t private_segment_size,
@@ -4432,8 +4392,9 @@ load_snapshot_for_auto_a0(hsa_executable_t executable, hsa_agent_t agent,
 /// @brief Eagerly translate a gfx1250 B0 code object to A0 and load it.
 ///
 /// @details The auto-A0 load path. Unlike simulation there is no guest/host
-/// agent split: the presented B0 agent IS the real A0 execution agent, so the
-/// translated object loads on the same @p agent. Translation direction (B0->A0)
+/// agent split and nothing is presented: the app loads a gfx1250 object onto the
+/// real A0 agent, and the translated object loads on that same @p agent.
+/// Translation direction (B0->A0)
 /// comes from the auto-A0 config revisions, matching the sim path's use of
 /// BinaryTranslator. Fails closed: a load with no captured bytes, an invalid
 /// object, a failed translation, or a skipped kernel returns an HSA error rather

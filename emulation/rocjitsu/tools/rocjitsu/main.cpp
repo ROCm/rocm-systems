@@ -497,10 +497,20 @@ int main(int argc, char *argv[]) {
   }
 
   rocjitsu::config::DbtGuestConfig dbt_guest_config;
+  // Auto-A0: with NO dbt_guest block, a config that presents a real gfx1250 A0
+  // GPU (gfx_target_version 120500, ASIC revision 0) selects the transparent
+  // hotswap path -- the DBT hook is loaded to auto-translate gfx1250 B0 code
+  // objects to A0, without any guest ISA remapping. This mirrors the production
+  // deployment, which is flagless: the hardware identity alone drives it.
+  bool auto_a0_mode = false;
   try {
     dbt_guest_config = rocjitsu::config::load_dbt_guest_config_from_file(abs_config);
-    if (!dbt_guest_config.enabled)
-      (void)rocjitsu::config::load_config(abs_config, rocjitsu::kEmbeddedSchema);
+    if (!dbt_guest_config.enabled) {
+      const auto loaded = rocjitsu::config::load_config(abs_config, rocjitsu::kEmbeddedSchema);
+      const auto ip = rocjitsu::kmd::decode_gfx_target_version(loaded.device.gfx_target_version);
+      auto_a0_mode =
+          ip.major == 12 && ip.minor == 5 && ip.stepping == 0 && loaded.device.revision_id == 0;
+    }
   } catch (const std::exception &e) {
     std::cerr << std::format("rocjitsu: failed to parse config: {}\n", e.what());
     return 1;
@@ -543,6 +553,15 @@ int main(int argc, char *argv[]) {
     }
     if (!has_unambiguous_host_gpu(dbt_guest_config))
       return 1;
+    hooks_path = find_hooks_lib();
+    if (hooks_path.empty()) {
+      std::cerr << "rocjitsu: could not find librocjitsu_hooks.so\n";
+      return 1;
+    }
+  } else if (auto_a0_mode) {
+    // Auto-A0 loads the same hook DSO but with no guest config, so the hook
+    // enters its transparent B0->A0 translation mode (parse_config() finds no
+    // dbt_guest block). No guest/host ISA validation applies.
     hooks_path = find_hooks_lib();
     if (hooks_path.empty()) {
       std::cerr << "rocjitsu: could not find librocjitsu_hooks.so\n";
@@ -623,6 +642,12 @@ int main(int argc, char *argv[]) {
     // The HSA hook still uses the legacy tools callback path. Disable only the
     // rocprofiler-register table-delivery path so it cannot validate an
     // unshadowed table before rocjitsu installs guest-agent wrappers.
+    launch_environment.set("HSA_TOOLS_DISABLE_REGISTER", "1");
+    launch_environment.set("HSA_TOOLS_LIB", hooks_path);
+  } else if (auto_a0_mode) {
+    // Auto-A0 loads the hook the same way but drives no guest-agent remapping,
+    // so there is no ROCR_VISIBLE_DEVICES guest/host split to apply -- the sole
+    // emulated gfx1250 GPU is both the presented B0 and the executing A0 agent.
     launch_environment.set("HSA_TOOLS_DISABLE_REGISTER", "1");
     launch_environment.set("HSA_TOOLS_LIB", hooks_path);
   }
