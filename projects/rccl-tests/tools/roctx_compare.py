@@ -328,18 +328,18 @@ def load_profiled_data(run_dir, outlier_fn):
             if factor_fn and np_val:
                 bus_factor = factor_fn(np_val)
 
-            all_samples = defaultdict(list)
+            regions = defaultdict(lambda: defaultdict(list))
             for d in subdirs:
-                pairs = ra.discover_trace_files(d)
-                for marker_path, kernel_path in pairs:
+                for marker_path, kernel_path in ra.discover_trace_files(d):
                     markers = ra.parse_marker_csv(marker_path)
                     kernels = ra.parse_kernel_csv(kernel_path)
-                    samples = ra.correlate_collective(markers, kernels)
-                    for key, durations in samples.items():
-                        all_samples[key].extend(durations)
+                    ra.merge_regions(regions, ra.correlate(markers, kernels))
+            all_samples = ra.collective_samples(regions)
+            overhead_by_key = ra.compute_overhead(regions)
 
             rows = ra.generate_report(all_samples, outlier_fn,
-                                      np_val=np_val, bus_factor=bus_factor)
+                                      np_val=np_val, bus_factor=bus_factor,
+                                      overhead_by_key=overhead_by_key)
             for r in rows:
                 if r.get("median") is not None:
                     r["median_us"] = r["median"] / 1000.0
@@ -360,16 +360,17 @@ def load_profiled_data(run_dir, outlier_fn):
             if factor_fn:
                 bus_factor = factor_fn(np_val)
 
-        all_samples = defaultdict(list)
+        regions = defaultdict(lambda: defaultdict(list))
         for marker_path, kernel_path in pairs:
             markers = ra.parse_marker_csv(marker_path)
             kernels = ra.parse_kernel_csv(kernel_path)
-            samples = ra.correlate_collective(markers, kernels)
-            for key, durations in samples.items():
-                all_samples[key].extend(durations)
+            ra.merge_regions(regions, ra.correlate(markers, kernels))
+        all_samples = ra.collective_samples(regions)
+        overhead_by_key = ra.compute_overhead(regions)
 
         rows = ra.generate_report(all_samples, outlier_fn,
-                                  np_val=np_val, bus_factor=bus_factor)
+                                  np_val=np_val, bus_factor=bus_factor,
+                                  overhead_by_key=overhead_by_key)
         for r in rows:
             if r.get("median") is not None:
                 r["median_us"] = r["median"] / 1000.0

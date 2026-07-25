@@ -99,6 +99,25 @@ def _central(rec, metric):
     return rec.get(metric)
 
 
+def _effective(rec, metric):
+    """Metric value including per-call non-collective overhead (e.g. DDA copy).
+
+    Returns None when there is no overhead for this record (nothing to show)."""
+    ovhd = rec.get("overhead_us") or 0.0
+    if ovhd <= 0:
+        return None
+    med = rec.get("median_us")
+    if metric == "time":
+        return (med + ovhd) if med is not None else None
+    if med is None or (med + ovhd) <= 0:
+        return None
+    algbw = rec["size"] / ((med + ovhd) * 1000.0)
+    if metric == "algbw":
+        return algbw
+    factor = _bus_factor(rec)
+    return algbw * factor if factor is not None else algbw
+
+
 def _band_bounds(rec, metric, band):
     """Return (lo, hi) for the requested band in *metric* space, or (None, None).
 
@@ -147,8 +166,14 @@ def _facet_keys(records, color_by):
 
 def build_line_figure(records, metric="busbw", band="iqr",
                       color_by=None, placements=(1, 0), ncols=None,
-                      title=None):
-    """Build a plotly Figure of *metric* vs message size with variance bands."""
+                      title=None, overhead=False):
+    """Build a plotly Figure of *metric* vs message size with variance bands.
+
+    When *overhead* is set, series that carry per-call non-collective overhead
+    (e.g. a DDA staging copy) also get a dashed "effective" line and a shaded
+    gap between the collective-only and effective values, so the cost of that
+    overhead is visible.
+    """
     records = [r for r in records if r.get(metric if metric != "eff_busbw" else "busbw")
                is not None or _central(r, metric) is not None]
     if not records:
@@ -213,6 +238,35 @@ def build_line_figure(records, metric="busbw", band="iqr",
                             showlegend=False, legendgroup=legname,
                         ), row=row, col=col)
 
+                # Overhead: shade the gap between collective-only and effective,
+                # and draw a dashed effective line.
+                if overhead:
+                    eff_pts = [(r["size"], _central(r, metric), _effective(r, metric))
+                               for r in precs]
+                    eff_pts = [(s, c, e) for (s, c, e) in eff_pts
+                               if c is not None and e is not None]
+                    if eff_pts:
+                        xs = [p[0] for p in eff_pts]
+                        cvals = [p[1] for p in eff_pts]
+                        evals = [p[2] for p in eff_pts]
+                        fig.add_trace(go.Scatter(
+                            x=xs + xs[::-1], y=cvals + evals[::-1],
+                            fill="toself", fillcolor="rgba(120,120,120,0.28)",
+                            line=dict(width=0), hoverinfo="skip",
+                            showlegend=False, legendgroup=legname,
+                        ), row=row, col=col)
+                        fig.add_trace(go.Scatter(
+                            x=xs, y=evals, mode="lines",
+                            line=dict(color=color, dash="dot", width=1.2),
+                            name=legname, legendgroup=legname, showlegend=False,
+                            hovertemplate=(
+                                f"<b>{cval}</b> ({place_name}) effective<br>"
+                                "size=%{x:,} B<br>"
+                                f"{minfo['label']}=%{{y:.3g}} (incl. overhead)"
+                                "<extra></extra>"
+                            ),
+                        ), row=row, col=col)
+
                 # Median / central line.
                 sizes = [p[0] for p in pts]
                 vals = [p[1] for p in pts]
@@ -236,7 +290,8 @@ def build_line_figure(records, metric="busbw", band="iqr",
     band_desc = {"iqr": "IQR (p25–p75)", "minmax": "min–max",
                  "std": "mean ± std", "none": "no"}[band]
     ttl = title or (f"{metric} vs size  —  colour: {color_by}, "
-                    f"dash: placement, band: {band_desc}")
+                    f"dash: placement, band: {band_desc}"
+                    + ("  (dotted = effective incl. overhead)" if overhead else ""))
     fig.update_layout(
         title=ttl,
         template="plotly_white",

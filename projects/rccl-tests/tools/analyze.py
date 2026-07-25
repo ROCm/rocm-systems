@@ -436,8 +436,9 @@ def _cmd_plot_plotly(args, outlier_fn):
     else:
         fig = viz.build_line_figure(
             records, metric=args.metric, band=args.band, color_by=args.color_by,
+            overhead=getattr(args, "overhead", False),
         )
-        detail = f"band={args.band}"
+        detail = f"band={args.band}" + (", +overhead" if args.overhead else "")
     viz.write_html(fig, out)
     n_runs = len({r["run_dir"] for r in records})
     print(f"Saved interactive plot: {out}  "
@@ -735,6 +736,9 @@ def main():
     p_plot.add_argument("--band", choices=["none", "iqr", "minmax", "std"],
                         default="iqr",
                         help="Variance band for plotly line kind (default: iqr)")
+    p_plot.add_argument("--overhead", action="store_true",
+                        help="Overlay effective (incl. per-call overhead, e.g. DDA "
+                             "staging copy) as a dotted line + shaded gap (line kind)")
     p_plot.add_argument("--color-by", choices=["label", "dtype", "machine"],
                         default=None,
                         help="Comparison factor mapped to colour (plotly; "
