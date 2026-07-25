@@ -25,6 +25,7 @@ from pathlib import Path
 
 from rccl_ci_utils import (
     find_rccl_library,
+    find_rocm_sdk_lib_dirs,
     override_bundled_rccl,
     parse_junit_xml,
     send_email_report,
@@ -72,11 +73,17 @@ def find_rocm_lib_dir(artifact_dir: Path) -> Path | None:
     return None
 
 
-def setup_ld_library_path(rccl_lib_dir: Path, rocm_lib_dir: Path | None) -> str:
-    """Prepend RCCL and ROCm lib dirs to LD_LIBRARY_PATH."""
+def setup_ld_library_path(
+    rccl_lib_dir: Path,
+    rocm_lib_dir: Path | None,
+    extra_lib_dirs: list[Path] | None = None,
+) -> str:
+    """Prepend RCCL, ROCm, and additional lib dirs to LD_LIBRARY_PATH."""
     parts = [str(rccl_lib_dir.resolve())]
     if rocm_lib_dir:
         parts.append(str(rocm_lib_dir.resolve()))
+    if extra_lib_dirs:
+        parts.extend(str(d.resolve()) for d in extra_lib_dirs)
     existing = os.environ.get("LD_LIBRARY_PATH", "")
     if existing:
         parts.append(existing)
@@ -426,7 +433,8 @@ def main() -> None:
         return
 
     # Step 2: Set up LD_LIBRARY_PATH and replace pip-bundled RCCL
-    setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
+    rocm_sdk_lib_dirs = find_rocm_sdk_lib_dirs()
+    setup_ld_library_path(rccl_lib_dir, rocm_lib_dir, extra_lib_dirs=rocm_sdk_lib_dirs)
     override_bundled_rccl(rccl_lib_dir)
     verify_rccl_override(rccl_lib_dir)
 
