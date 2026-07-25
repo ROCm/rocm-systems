@@ -153,4 +153,14 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   }
 };
 
+template <>
+struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
+  template <typename Coop>
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop, int, ncclGinWindow_t, size_t,
+                                      ncclGinWindow_t, size_t, size_t, bool,
+                                      ncclGinDescriptorSmem*, uint32_t = ncclGinOptFlagsDefault) {
+    __builtin_unreachable();
+  }
+};
+
 #endif /* _NCCL_DEVICE_GIN_ROCSHMEM_GDA_H_ */
