@@ -698,6 +698,44 @@ TEST(Cdna4Vop3Test, CmpClassF16WritesWave64UpperMaskDword) {
   }
 }
 
+TEST(Cdna4Vop3Test, BcntAddsSourceAccumulator) {
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory gpu_mem(force_scalar ? "cdna4_bcnt_scalar_mem" : "cdna4_bcnt_simd_mem");
+    amdgpu::L2Cache l2(force_scalar ? "cdna4_bcnt_scalar_l2" : "cdna4_bcnt_simd_l2");
+
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+
+    auto cu = amdgpu::ComputeUnitCore::create("cdna4", cfg, &gpu_mem, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NE(decoder, nullptr);
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    cu->raw_vgpr_reg<64>(vb + 0)[0] = 0x80000001u;
+    cu->raw_vgpr_reg<64>(vb + 1)[0] = 7u;
+    wf->set_exec(1);
+
+    const auto words = encode_cdna_vop3(cdna4::kVBcntU32B32Vop3, /*vdst=*/2,
+                                        /*src0=*/256, /*src1=*/257, /*src2=*/0);
+    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(std::string_view(inst->mnemonic()), "v_bcnt_u32_b32");
+    cu->execute_instruction(inst.get(), *wf);
+
+    EXPECT_EQ(cu->raw_vgpr_reg<64>(vb + 2)[0], 9u);
+    if (!wf->is_halted())
+      wf->halt();
+  }
+}
+
 TEST(CdnaVop3True16Test, B16I16U16OpsUseOpSelAndCdnaDestinationPolicy) {
   struct ArchCase {
     rj_code_arch_t arch;

@@ -3484,8 +3484,8 @@ inline void execute_v_ashrrev_i64_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_bcnt_u32_b32_vop3([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t,
-                               [](auto a) { return util::popcount_u32_simd(a); });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t,
+                                    [](auto a, auto b) { return util::popcount_u32_simd(a) + b; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3493,7 +3493,8 @@ inline void execute_v_bcnt_u32_b32_vop3([[maybe_unused]] Inst &inst,
     amdgpu::RegisterAccess(wf).write_lane(
         inst.vdst, lane,
         static_cast<uint32_t>(
-            std::popcount(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))));
+            std::popcount(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))) +
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
   }
 }
 
