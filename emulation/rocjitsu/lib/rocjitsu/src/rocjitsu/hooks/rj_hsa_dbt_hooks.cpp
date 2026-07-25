@@ -952,6 +952,118 @@ private:
   std::unordered_map<uint64_t, std::vector<std::shared_ptr<const std::vector<uint8_t>>>> map_;
 };
 
+/// @brief Lifecycle of a lazily-deferred code object's translation.
+enum class DeferredTranslationState : uint8_t {
+  kUnseen,      ///< Proxy loaded; no dispatch has triggered translation yet.
+  kTranslating, ///< A publishing thread is translating; others wait (Step 4).
+  kReady,       ///< Translation done, hidden child loaded and frozen.
+  kFailed,      ///< Translation failed permanently; dispatches fail closed.
+};
+
+/// @brief Per-source-object state for lazy (deferred) B0->A0 translation.
+///
+/// @details Created when an eligible object is loaded lazily: rocjitsu loads a
+/// cheap proxy (Step 2) so the runtime gets stable kernel symbols/descriptors,
+/// and retains the original source bytes for the DBT run deferred to the first
+/// dispatch. On that first dispatch the source is translated into a **hidden
+/// child executable** (§14.2/§14.3) whose kernel objects replace the proxy's in
+/// the dispatch packet. This is a plain-data record; the registry owns locking.
+struct DeferredObject {
+  hsa_executable_t parent_executable{}; ///< Executable the app loaded the proxy into.
+  hsa_agent_t agent{};                  ///< Physical A0 agent the proxy loaded on.
+  std::shared_ptr<const std::vector<uint8_t>> source_bytes; ///< Retained original B0 ELF.
+  hsa_loaded_code_object_t proxy_loaded{};                  ///< Proxy's loaded-code-object handle.
+  DeferredTranslationState state = DeferredTranslationState::kUnseen;
+
+  // Populated when translation completes (kReady):
+  hsa_executable_t child_executable{}; ///< Hidden executable holding translated A0 code.
+  std::shared_ptr<const std::vector<uint8_t>> translated_bytes; ///< Retained translated ELF.
+};
+
+/// @brief Process-wide registry of lazily-deferred code objects.
+///
+/// @details Keyed on `{parent executable, agent}` so one app executable can defer
+/// several code objects on the same agent without collision (an executable may
+/// hold more than one code object). Modeled on @ref TranslatedExecutableRegistry:
+/// a single `std::mutex`, values held by `shared_ptr` so a dispatch thread can
+/// operate on a `DeferredObject` after releasing the registry lock (Step 4's
+/// single-flight runs translation outside this lock). Storage for an executable
+/// is released on `hsa_executable_destroy`.
+class DeferredObjectRegistry {
+public:
+  static DeferredObjectRegistry &instance() {
+    static DeferredObjectRegistry registry;
+    return registry;
+  }
+
+  /// @brief Record a newly-deferred object; returns the shared record.
+  std::shared_ptr<DeferredObject> record(std::shared_ptr<DeferredObject> object) {
+    std::lock_guard lock(mutex_);
+    const Key key{object->parent_executable.handle, object->agent.handle};
+    map_[key].push_back(object);
+    return object;
+  }
+
+  /// @brief Find the deferred object for a proxy kernel object handle.
+  ///
+  /// @details Step 4 will resolve a dispatch's proxy `kernel_object` to its
+  /// `DeferredObject` through the kernel-object map; for Step 3 the registry only
+  /// needs `{executable, agent}` lookup to prove records are stored and retrieved.
+  std::shared_ptr<DeferredObject> find(hsa_executable_t executable, hsa_agent_t agent) {
+    std::lock_guard lock(mutex_);
+    auto it = map_.find(Key{executable.handle, agent.handle});
+    if (it == map_.end() || it->second.empty())
+      return nullptr;
+    return it->second.front();
+  }
+
+  /// @brief Number of deferred objects recorded for @p executable across agents.
+  [[nodiscard]] size_t deferred_count(hsa_executable_t executable) {
+    std::lock_guard lock(mutex_);
+    size_t count = 0;
+    for (const auto &[key, objects] : map_)
+      if (key.first == executable.handle)
+        count += objects.size();
+    return count;
+  }
+
+  /// @brief Release all deferred records for @p executable (on executable destroy).
+  ///
+  /// @details Returns the removed records so the caller can tear down their hidden
+  /// child executables through the profiler-aware chain (§14.5a, Step 9) before the
+  /// records -- and the translated bytes they retain -- are dropped.
+  std::vector<std::shared_ptr<DeferredObject>> erase_executable(hsa_executable_t executable) {
+    std::lock_guard lock(mutex_);
+    std::vector<std::shared_ptr<DeferredObject>> removed;
+    for (auto it = map_.begin(); it != map_.end();) {
+      if (it->first.first == executable.handle) {
+        removed.insert(removed.end(), it->second.begin(), it->second.end());
+        it = map_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    return removed;
+  }
+
+  /// @brief Drop every deferred record during hook unload.
+  void clear() {
+    std::lock_guard lock(mutex_);
+    map_.clear();
+  }
+
+private:
+  using Key = std::pair<uint64_t, uint64_t>; ///< {executable.handle, agent.handle}
+  struct KeyHash {
+    size_t operator()(const Key &key) const {
+      return std::hash<uint64_t>{}(key.first) ^ (std::hash<uint64_t>{}(key.second) << 1);
+    }
+  };
+
+  std::mutex mutex_;
+  std::unordered_map<Key, std::vector<std::shared_ptr<DeferredObject>>, KeyHash> map_;
+};
+
 /// @brief Record memory-backed HSA code-object bytes for later DBT translation.
 hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
     const void *code_object, size_t size, hsa_code_object_reader_t *code_object_reader);
@@ -1193,6 +1305,11 @@ void clear_virtual_lds_dispatch_queues();
 #define RJ_HSA_SAVED_ONLY_ENTRIES(X)                                                               \
   X(isa_get_info_alt, core_, true, hsa_isa_get_info_alt_fn, decltype(hsa_isa_get_info_alt) *)      \
   X(agent_get_info, core_, true, hsa_agent_get_info_fn, decltype(hsa_agent_get_info) *)            \
+  X(executable_create_alt, core_, true, hsa_executable_create_alt_fn,                              \
+    decltype(hsa_executable_create_alt) *)                                                         \
+  X(executable_freeze, core_, true, hsa_executable_freeze_fn, decltype(hsa_executable_freeze) *)   \
+  X(executable_get_info, core_, true, hsa_executable_get_info_fn,                                  \
+    decltype(hsa_executable_get_info) *)                                                           \
   X(queue_load_write_index_relaxed, core_, true, hsa_queue_load_write_index_relaxed_fn,            \
     decltype(hsa_queue_load_write_index_relaxed) *)                                                \
   X(signal_create, core_, true, hsa_signal_create_fn, decltype(hsa_signal_create) *)               \
@@ -1456,6 +1573,7 @@ public:
 
     CodeObjectReaderRegistry::instance().clear();
     ExecutableAgentRegistry::instance().clear();
+    DeferredObjectRegistry::instance().clear();
     // NOTE: released here on hook uninstall to keep test/reload state clean. The
     // plan's process-lifetime pinning of translated storage across a real
     // hsa_shut_down (Sec. 7.4/B3) is separate, later lifecycle work.
@@ -3750,9 +3868,20 @@ hsa_status_t HSA_API rj_executable_destroy(hsa_executable_t executable) {
               static_cast<unsigned long long>(executable.handle));
   VirtualLdsRuntimeRegistry::instance().erase_executable(executable);
   ExecutableAgentRegistry::instance().erase_executable(executable);
+  // Detach any lazily-deferred records for this executable. Their hidden child
+  // executables must be destroyed through the profiler-aware chain BEFORE the
+  // parent (§14.5a, Step 9); until that outer destroy wrapper exists, releasing
+  // the records here drops the retained source/translated bytes once the parent
+  // is gone. The child handles are carried on the records for Step 9 to consume.
+  std::vector<std::shared_ptr<DeferredObject>> deferred =
+      DeferredObjectRegistry::instance().erase_executable(executable);
   auto *original = layer().executable_destroy();
   if (!original)
     return HSA_STATUS_ERROR;
+  for (const auto &object : deferred) {
+    if (object && object->child_executable.handle != 0)
+      (void)original(object->child_executable);
+  }
   hsa_status_t status = original(executable);
   // Release translated storage only after the loader has torn the executable
   // down, so no loader reference into those bytes outlives them.
@@ -4334,6 +4463,93 @@ create_owned_memory_reader(std::shared_ptr<const std::vector<uint8_t>> owned,
   return HSA_STATUS_SUCCESS;
 }
 
+/// @brief Create, load, and freeze a hidden child executable holding translated code.
+///
+/// @details The lazy path cannot load translated code into the app's parent
+/// executable: the parent is already frozen carrying the proxy (Step 2). Instead
+/// the translated ELF loads into a **separate** executable rocjitsu creates and
+/// owns. The child is created to match the parent's shape by *querying* the frozen
+/// parent's profile and default float rounding (`hsa_executable_get_info`) and
+/// creating with **null** options -- the fixed shape CLR uses. If the parent used
+/// non-default create/freeze options we cannot reproduce here, the object must be
+/// classified eager instead (§14.6, Step 7); we do not guess. On any failure every
+/// partial resource is rolled back and the source translated bytes are left for the
+/// caller to release.
+///
+/// @param translated Retained translated A0 ELF bytes (kept alive by the caller).
+/// @param agent The physical A0 agent the child loads on (same as the proxy).
+/// @param parent_executable The frozen app executable, queried for profile/rounding.
+/// @param out_child On success, the frozen child executable handle.
+/// @returns HSA_STATUS_SUCCESS, or an error with @p out_child left unset.
+///
+/// NOTE [[maybe_unused]]: the shipped DSO build (no RJ_HOOK_TEST_HOOKS) has no
+/// caller until Step 4 wires this into translate-on-first-dispatch; the test
+/// build exercises it through rj_test_create_hidden_child.
+[[maybe_unused]] [[nodiscard]] hsa_status_t
+create_hidden_child_executable(const std::shared_ptr<const std::vector<uint8_t>> &translated,
+                               hsa_agent_t agent, hsa_executable_t parent_executable,
+                               hsa_executable_t *out_child) {
+  if (translated == nullptr || out_child == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  auto *create_alt = layer().executable_create_alt();
+  auto *get_info = layer().executable_get_info();
+  auto *freeze = layer().executable_freeze();
+  auto *load = layer().load_agent_code_object();
+  auto *destroy = layer().executable_destroy();
+  if (create_alt == nullptr || get_info == nullptr || freeze == nullptr || load == nullptr ||
+      destroy == nullptr)
+    return HSA_STATUS_ERROR;
+
+  // Match the parent's profile and default float rounding. These are the only
+  // create-time attributes hsa_executable_get_info exposes; the create/freeze
+  // option strings are not queryable, so we pass null (CLR's shape) and rely on
+  // the eager fallback for any caller that needs non-null options.
+  hsa_profile_t profile = HSA_PROFILE_FULL;
+  hsa_default_float_rounding_mode_t rounding = HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT;
+  if (get_info(parent_executable, HSA_EXECUTABLE_INFO_PROFILE, &profile) != HSA_STATUS_SUCCESS ||
+      get_info(parent_executable, HSA_EXECUTABLE_INFO_DEFAULT_FLOAT_ROUNDING_MODE, &rounding) !=
+          HSA_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR_INVALID_EXECUTABLE;
+
+  hsa_executable_t child{};
+  hsa_status_t status = create_alt(profile, rounding, /*options=*/nullptr, &child);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+  // Destroy the child on any failure path; cleared to false once the frozen child
+  // is handed back to the caller, who then owns its lifetime.
+  bool destroy_child = true;
+  auto child_guard = make_scope_guard([&] {
+    if (destroy_child && child.handle != 0)
+      (void)destroy(child);
+  });
+
+  // The translated reader is transient: ROCR copies the segment payloads by the
+  // time load returns, so it is destroyed on every path (the retained translated
+  // bytes, not the reader, keep the loaded child valid).
+  hsa_code_object_reader_t reader{};
+  status = create_owned_memory_reader(translated, &reader);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+  auto reader_guard = make_scope_guard([&] {
+    CodeObjectReaderRegistry::instance().remove(reader);
+    if (auto *reader_destroy = layer().destroy(); reader_destroy != nullptr)
+      (void)reader_destroy(reader);
+  });
+
+  status = load(child, agent, reader, /*options=*/nullptr, /*loaded_code_object=*/nullptr);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+
+  status = freeze(child, /*options=*/nullptr);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+
+  destroy_child = false;
+  *out_child = child;
+  return HSA_STATUS_SUCCESS;
+}
+
 /// @brief Load a forwarded auto-A0 object from an authoritative hook-owned snapshot.
 ///
 /// @details Used for the auto-A0 branch that forwards an object to the A0 agent
@@ -4864,5 +5080,47 @@ extern "C" RJ_HOOK_EXPORT void rj_test_retain_translation(uint64_t executable_ha
   TranslatedExecutableRegistry::instance().retain(
       hsa_executable_t{executable_handle},
       std::make_shared<const std::vector<uint8_t>>(std::vector<uint8_t>{0x7f, 'E', 'L', 'F'}));
+}
+
+/// @brief Test-only: record a deferred object for {executable, agent}.
+///
+/// @details Exercises the DeferredObjectRegistry the lazy load path will use
+/// (Step 4), so a test can verify a deferred record is stored, counted, and
+/// dropped on executable destroy without a full lazy load pipeline. @p bytes is
+/// retained as the record's source bytes.
+extern "C" RJ_HOOK_EXPORT void rj_test_record_deferred(uint64_t executable_handle,
+                                                       uint64_t agent_handle, const void *bytes,
+                                                       size_t size) {
+  auto object = std::make_shared<DeferredObject>();
+  object->parent_executable = hsa_executable_t{executable_handle};
+  object->agent = hsa_agent_t{agent_handle};
+  if (bytes != nullptr && size > 0)
+    object->source_bytes = std::make_shared<const std::vector<uint8_t>>(
+        static_cast<const uint8_t *>(bytes), static_cast<const uint8_t *>(bytes) + size);
+  DeferredObjectRegistry::instance().record(std::move(object));
+}
+
+/// @brief Test-only: number of deferred objects recorded for an executable.
+extern "C" RJ_HOOK_EXPORT size_t rj_test_deferred_count(uint64_t executable_handle) {
+  return DeferredObjectRegistry::instance().deferred_count(hsa_executable_t{executable_handle});
+}
+
+/// @brief Test-only: create a hidden child executable from translated bytes.
+///
+/// @details Drives create_hidden_child_executable against the installed (fake)
+/// API table so a test can verify the child create/load/freeze sequence and
+/// rollback without the production translate-on-dispatch path. Returns the child
+/// executable handle on success (nonzero) or 0 on failure.
+extern "C" RJ_HOOK_EXPORT uint64_t rj_test_create_hidden_child(uint64_t parent_executable_handle,
+                                                               uint64_t agent_handle,
+                                                               const void *bytes, size_t size) {
+  auto translated = std::make_shared<const std::vector<uint8_t>>(
+      static_cast<const uint8_t *>(bytes), static_cast<const uint8_t *>(bytes) + size);
+  hsa_executable_t child{};
+  if (create_hidden_child_executable(translated, hsa_agent_t{agent_handle},
+                                     hsa_executable_t{parent_executable_handle},
+                                     &child) != HSA_STATUS_SUCCESS)
+    return 0;
+  return child.handle;
 }
 #endif // RJ_HOOK_TEST_HOOKS

@@ -43,6 +43,12 @@ extern "C" bool OnLoad(HsaApiTable *table, uint64_t runtime_version, uint64_t fa
 extern "C" void OnUnload();
 extern "C" size_t rj_test_retained_translation_count(uint64_t executable_handle);
 extern "C" void rj_test_retain_translation(uint64_t executable_handle);
+extern "C" void rj_test_record_deferred(uint64_t executable_handle, uint64_t agent_handle,
+                                        const void *bytes, size_t size);
+extern "C" size_t rj_test_deferred_count(uint64_t executable_handle);
+extern "C" uint64_t rj_test_create_hidden_child(uint64_t parent_executable_handle,
+                                                uint64_t agent_handle, const void *bytes,
+                                                size_t size);
 
 namespace {
 
@@ -457,6 +463,59 @@ hsa_status_t HSA_API fake_system_get_major_extension_table(uint16_t extension,
 
 hsa_status_t HSA_API fake_executable_destroy(hsa_executable_t) { return HSA_STATUS_SUCCESS; }
 
+// Hidden-child-executable fakes (Step 3). A test drives create/load/freeze via
+// rj_test_create_hidden_child and asserts the sequence and rollback.
+uint64_t g_next_child_executable_handle = 900;
+int g_fake_create_alt_calls = 0;
+int g_fake_freeze_calls = 0;
+hsa_profile_t g_fake_parent_profile = HSA_PROFILE_FULL;
+hsa_default_float_rounding_mode_t g_fake_parent_rounding = HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT;
+// Records the profile/rounding create_alt was called with, so a test can assert
+// the child was created to match the parent's queried shape.
+hsa_profile_t g_last_create_alt_profile = HSA_PROFILE_BASE;
+hsa_default_float_rounding_mode_t g_last_create_alt_rounding = HSA_DEFAULT_FLOAT_ROUNDING_MODE_ZERO;
+// When set, the corresponding fake fails so a test can exercise child rollback.
+hsa_status_t g_fake_create_alt_status = HSA_STATUS_SUCCESS;
+hsa_status_t g_fake_freeze_status = HSA_STATUS_SUCCESS;
+hsa_status_t g_fake_get_info_status = HSA_STATUS_SUCCESS;
+
+hsa_status_t HSA_API fake_executable_get_info(hsa_executable_t, hsa_executable_info_t attribute,
+                                              void *value) {
+  if (g_fake_get_info_status != HSA_STATUS_SUCCESS)
+    return g_fake_get_info_status;
+  if (value == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  switch (attribute) {
+  case HSA_EXECUTABLE_INFO_PROFILE:
+    *static_cast<hsa_profile_t *>(value) = g_fake_parent_profile;
+    return HSA_STATUS_SUCCESS;
+  case HSA_EXECUTABLE_INFO_DEFAULT_FLOAT_ROUNDING_MODE:
+    *static_cast<hsa_default_float_rounding_mode_t *>(value) = g_fake_parent_rounding;
+    return HSA_STATUS_SUCCESS;
+  default:
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+}
+
+hsa_status_t HSA_API fake_executable_create_alt(hsa_profile_t profile,
+                                                hsa_default_float_rounding_mode_t rounding,
+                                                const char *, hsa_executable_t *executable) {
+  ++g_fake_create_alt_calls;
+  g_last_create_alt_profile = profile;
+  g_last_create_alt_rounding = rounding;
+  if (g_fake_create_alt_status != HSA_STATUS_SUCCESS)
+    return g_fake_create_alt_status;
+  if (executable == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  executable->handle = g_next_child_executable_handle++;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_executable_freeze(hsa_executable_t, const char *) {
+  ++g_fake_freeze_calls;
+  return g_fake_freeze_status;
+}
+
 hsa_status_t HSA_API fake_executable_load_agent_code_object(
     hsa_executable_t, hsa_agent_t agent, hsa_code_object_reader_t reader, const char *,
     hsa_loaded_code_object_t *loaded_code_object) {
@@ -760,6 +819,9 @@ struct FakeApiTable {
     core.hsa_executable_load_program_code_object_fn = fake_executable_load_program_code_object;
     core.hsa_executable_load_code_object_fn = fake_executable_load_code_object;
     core.hsa_executable_destroy_fn = fake_executable_destroy;
+    core.hsa_executable_create_alt_fn = fake_executable_create_alt;
+    core.hsa_executable_freeze_fn = fake_executable_freeze;
+    core.hsa_executable_get_info_fn = fake_executable_get_info;
     core.hsa_executable_get_symbol_by_name_fn = fake_executable_get_symbol_by_name;
     core.hsa_executable_iterate_agent_symbols_fn = fake_executable_iterate_agent_symbols;
     core.hsa_executable_symbol_get_info_fn = fake_executable_symbol_get_info;
@@ -1628,6 +1690,116 @@ TEST(HsaHooksUnitTest, ReleasesTranslatedStorageOnUnload) {
   }
   // InstalledHook's destructor called OnUnload, which clears the registry.
   EXPECT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 0u);
+}
+
+// Reset the hidden-child-executable fakes to their success defaults.
+void reset_child_executable_fakes() {
+  g_fake_create_alt_calls = 0;
+  g_fake_freeze_calls = 0;
+  g_fake_create_alt_status = HSA_STATUS_SUCCESS;
+  g_fake_freeze_status = HSA_STATUS_SUCCESS;
+  g_fake_get_info_status = HSA_STATUS_SUCCESS;
+  g_fake_parent_profile = HSA_PROFILE_FULL;
+  g_fake_parent_rounding = HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR;
+}
+
+// A deferred object recorded for an executable is counted and then dropped when
+// the executable is destroyed through the patched wrapper (Step 3 registry).
+TEST(HsaHooksUnitTest, DeferredObjectRecordedAndDroppedOnDestroy) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  ASSERT_EQ(rj_test_deferred_count(kFakeExecutable.handle), 0u);
+  const std::vector<uint8_t> source{0x7f, 'E', 'L', 'F'};
+  rj_test_record_deferred(kFakeExecutable.handle, kGuestAgent.handle, source.data(), source.size());
+  rj_test_record_deferred(kFakeExecutable.handle, kGuestAgent.handle, source.data(), source.size());
+  EXPECT_EQ(rj_test_deferred_count(kFakeExecutable.handle), 2u);
+
+  // Destroying the executable through the patched wrapper drops its deferred
+  // records (and, in later steps, tears down their hidden children first).
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kFakeExecutable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_deferred_count(kFakeExecutable.handle), 0u);
+}
+
+// Deferred records are cleared when the hook is uninstalled.
+TEST(HsaHooksUnitTest, ClearsDeferredObjectsOnUnload) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  {
+    InstalledHook hook(api);
+    ASSERT_TRUE(hook.installed());
+    const std::vector<uint8_t> source{0x7f, 'E', 'L', 'F'};
+    rj_test_record_deferred(kFakeExecutable.handle, kGuestAgent.handle, source.data(),
+                            source.size());
+    EXPECT_EQ(rj_test_deferred_count(kFakeExecutable.handle), 1u);
+  }
+  EXPECT_EQ(rj_test_deferred_count(kFakeExecutable.handle), 0u);
+}
+
+// create_hidden_child_executable queries the parent's profile/rounding, creates a
+// child with those, loads the translated bytes, and freezes it -- returning the
+// child handle.
+TEST(HsaHooksUnitTest, CreatesHiddenChildExecutableMatchingParentShape) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  reset_child_executable_fakes();
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  // Parent reports BASE profile + near rounding; the child must be created to match.
+  g_fake_parent_profile = HSA_PROFILE_BASE;
+  g_fake_parent_rounding = HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR;
+
+  const std::vector<uint8_t> translated{0x7f, 'E', 'L', 'F', 0x02, 0x01, 0x01};
+  const uint64_t child = rj_test_create_hidden_child(kFakeExecutable.handle, kGuestAgent.handle,
+                                                     translated.data(), translated.size());
+  EXPECT_NE(child, 0u) << "hidden child executable was not created";
+  EXPECT_EQ(g_fake_create_alt_calls, 1);
+  EXPECT_EQ(g_fake_freeze_calls, 1);
+  EXPECT_EQ(g_last_create_alt_profile, HSA_PROFILE_BASE);
+  EXPECT_EQ(g_last_create_alt_rounding, HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR);
+  // The translated bytes reached the loader on the same agent.
+  EXPECT_EQ(g_last_load_bytes, translated);
+  EXPECT_EQ(g_last_load_agent.handle, kGuestAgent.handle);
+}
+
+// A freeze failure rolls the child back: create_hidden_child_executable returns
+// 0 and the partially-created child is destroyed (no leak of a live executable).
+TEST(HsaHooksUnitTest, HiddenChildRollsBackOnFreezeFailure) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  reset_child_executable_fakes();
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  g_fake_freeze_status = HSA_STATUS_ERROR; // freeze fails after create + load succeed
+
+  const std::vector<uint8_t> translated{0x7f, 'E', 'L', 'F'};
+  const uint64_t child = rj_test_create_hidden_child(kFakeExecutable.handle, kGuestAgent.handle,
+                                                     translated.data(), translated.size());
+  EXPECT_EQ(child, 0u) << "child create should fail closed when freeze fails";
+  EXPECT_EQ(g_fake_create_alt_calls, 1);
+  EXPECT_EQ(g_fake_freeze_calls, 1);
 }
 
 // Register a code object image and return its reader handle.
