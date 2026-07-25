@@ -687,6 +687,12 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
   return (inst.flags() & INDIRECT_CALL) != 0 && inst.branch_offset_bytes().has_value();
 }
 
+[[nodiscard]] bool is_recoverable_indirect_consumer(const Instruction &inst) {
+  // Every fixup producer in this pass targets one of these consumer kinds.
+  // Extend this predicate when adding recovery for another terminator.
+  return is_indirect_branch(inst) || ((inst.flags() & INDIRECT_CALL) != 0 && !is_direct_call(inst));
+}
+
 [[nodiscard]] bool has_no_direct_successor(const Instruction &inst) {
   // Indirect branches have no known target until this analysis recovers one.
   // Indirect calls still expose their ordinary fallthrough/return continuation
@@ -2165,16 +2171,11 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
   return static_cast<uint16_t>((word >> 16) & 0x7fu);
 }
 
-} // namespace
-
-std::vector<IndirectCallFixup>
-discover_indirect_branch_edges(std::span<const Instruction *const> insts,
-                               std::span<const uint8_t> text, rj_code_arch_t arch,
-                               std::span<const uint64_t> extra_leaders) {
+[[nodiscard]] std::vector<IndirectCallFixup>
+discover_indirect_branch_edges_unfiltered(std::span<const Instruction *const> insts,
+                                          std::span<const uint8_t> text, rj_code_arch_t arch,
+                                          std::span<const uint64_t> extra_leaders) {
   std::vector<IndirectCallFixup> recovered;
-  if (insts.empty())
-    return recovered;
-
   AnalysisContext ctx = build_context(insts, text, arch);
   recover_vector_lane_stashed_pcs(ctx, recovered, extra_leaders);
   std::vector<uint64_t> leaders(extra_leaders.begin(), extra_leaders.end());
@@ -2207,6 +2208,34 @@ discover_indirect_branch_edges(std::span<const Instruction *const> insts,
 
   std::ranges::sort(recovered, {}, &IndirectCallFixup::source_call_offset);
   return recovered;
+}
+
+} // namespace
+
+std::vector<IndirectCallFixup>
+discover_indirect_branch_edges(std::span<const Instruction *const> insts,
+                               std::span<const uint8_t> text, rj_code_arch_t arch,
+                               std::span<const uint64_t> extra_leaders) {
+  if (insts.empty())
+    return {};
+
+  // Every recoverable edge ends at an indirect branch/call consumer. Most
+  // generated kernels have none, so avoid building the auxiliary CFG and
+  // running its dataflow passes when no fixup can possibly be produced.
+  const bool has_indirect_consumer = std::ranges::any_of(
+      insts, [](const Instruction *inst) { return is_recoverable_indirect_consumer(*inst); });
+  if (!has_indirect_consumer) {
+#ifndef NDEBUG
+    // Keep the cheap predicate coupled to every fixup producer. A future
+    // recovery path for another consumer kind must extend the predicate above.
+    const auto unfiltered =
+        discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders);
+    assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
+#endif
+    return {};
+  }
+
+  return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders);
 }
 
 } // namespace rocjitsu
