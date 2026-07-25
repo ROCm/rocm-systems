@@ -214,6 +214,34 @@ only because every run also reproduces the independent scalar-load wait hazard
 tracked by `bd-1w9.9.8`; the SuperCollider fault-bundle gate itself is
 complete.
 
+A separate generator cleanup for `bd-1w9.9.5` is pinned at rocm-libraries
+`a4d052933951130bb6776f6ea39d4b7b87c4cad3`.  It keeps the
+`GlobalReadPerMfma` default on the registry's float wire type and centralizes
+the derived `DirectToLdsMetadata` integer flag without weakening strict type
+validation.  The regression executes the production sparse-metadata
+finalization branch for both enabled and disabled outcomes, while unrelated
+matrix-conversion tests copy rather than mutate the process-global defaults.
+At corpus `0db836e7bd8c6400b7ffd187d749225899875d7c`, the retained
+`rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-msgpack-fixed-a4d05293-verified-20260725`
+run passes the exact numerical oracle and gfx950 ELF checks in 5.084 seconds
+with neither schema-mismatch nor `std::bad_cast` output; its `results.csv` and
+runner log hashes are
+`3aa62283aa84cd32fdee46564ccb19d3cbc451411ca39c61fad4311b9db042be`
+and
+`08ab09a24a5ae86aada3bb611e3a3775e69a65b5326176c0fbc50285c4d6ccef`.
+The retained
+`rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-msgpack-unit-fix-20260725`
+logs record 63/63 focused type tests and the complete TensileLite Python unit
+suite at 1,177 passes, 202 skips, and one expected failure; their SHA-256
+hashes are
+`6b6da24cabbdadaa866f2628b826afe29a7c8a71e690fd4451de2f10e18a0106`
+and
+`8e82a54b2b0342c7e9d179778ab58f3a601e6fba20cfd7cd4d1c22d9127823d5`.
+Explicit `GlobalReadPerMfma: 1` overrides elsewhere in the upstream YAML
+population are outside this bounded row and remain tracked by `bd-1w9.9.11`;
+that follow-up must extend a parameter-aware canonicalization boundary rather
+than introduce broad or parallel coercion.
+
 The three MOI profiles fail closed before the numeric oracle executes:
 
 - Record/Replay inventories 82 accesses and 11 barriers and plans a
@@ -397,6 +425,16 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-25: Completed the `bd-1w9.9.5` gfx950 Tensile msgpack producer fix
+  at rocm-libraries `a4d0529339`.  The canonical scheduling default is now a
+  float, every derived `DirectToLdsMetadata` write uses the integer wire
+  representation, and hermetic whole-default plus production-derivation
+  regressions preserve the strict registry contract.  The full upstream unit
+  gate passes in one session, and a fresh bounded gfx950 Stream-K run preserves
+  the exact numerical oracle and target checks while eliminating both
+  field-type warnings.  Broader explicit integer YAML overrides are isolated
+  under `bd-1w9.9.11` rather than hidden by generic coercion.
 
 - 2026-07-25: Closed the `bd-1w9.9.9` gfx950 Tensile SuperCollider
   fault-bundle gap with a reviewed exact target-native selector rather than a
