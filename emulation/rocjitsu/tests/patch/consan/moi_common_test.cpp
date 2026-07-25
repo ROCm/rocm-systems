@@ -536,10 +536,10 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
     options.force_vgpr_spill = true;
     options.moi_runtime_sample_stride = 2u;
     options.moi_track_barriers = false;
-    // Record/Replay's CDNA atomic mode requires a persistent workgroup key
-    // and therefore exercises its scalar tail even though this fixture's
-    // selected shared site is the ordinary LDS access.
+    // Record/Replay's persistent access epoch exercises its scalar tail
+    // without relying on an unrelated atomic-tracking request.
     options.moi_track_atomics = true;
+    options.moi_init_owner_epoch = engine == ConSanMoiEngine::RecordReplay;
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size =
         engine == ConSanMoiEngine::Sampled ? direct_sampled_report_bytes(2) : 64u * 1024u * 1024u;
@@ -549,11 +549,14 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
+    ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr)
+        << testing::PrintToString(result.warnings);
     ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
     EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
-    EXPECT_EQ(*result.resolved_moi_persistent_owner_sgpr,
-              engine == ConSanMoiEngine::Sampled ? 80u : 86u);
+    EXPECT_EQ(*result.resolved_moi_persistent_owner_sgpr, 80u);
+    if (engine == ConSanMoiEngine::RecordReplay) {
+      EXPECT_FALSE(result.resolved_moi_persistent_workgroup_key_sgpr);
+    }
     const auto access_patch =
         std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
           return patch.phase == ConSanPatchPhase::Instrumentation &&

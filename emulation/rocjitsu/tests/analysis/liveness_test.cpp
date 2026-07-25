@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
@@ -296,6 +297,22 @@ std::array<uint32_t, 2> build_cdna4_readlane(uint16_t sgpr, uint16_t vgpr, uint1
                                                       .src0 = static_cast<uint16_t>(256 + vgpr),
                                                       .src1 = lane_selector,
                                                       .src2 = 128});
+}
+
+std::array<uint32_t, 2> build_cdna4_accvgpr_write(uint16_t acc_vgpr, uint16_t src_vgpr) {
+  return cdna4::build_vop3p(cdna4::kVAccvgprWriteVop3p,
+                            {.vdst = static_cast<uint8_t>(acc_vgpr),
+                             .op_sel_hi_2 = 1u,
+                             .src0 = static_cast<uint16_t>(256u + src_vgpr),
+                             .op_sel_hi = 3u});
+}
+
+std::array<uint32_t, 2> build_cdna4_accvgpr_read(uint16_t dst_vgpr, uint16_t acc_vgpr) {
+  return cdna4::build_vop3p(cdna4::kVAccvgprReadVop3p,
+                            {.vdst = static_cast<uint8_t>(dst_vgpr),
+                             .op_sel_hi_2 = 1u,
+                             .src0 = static_cast<uint16_t>(256u + acc_vgpr),
+                             .op_sel_hi = 3u});
 }
 
 std::array<uint32_t, 2> build_gfx1250_writelane(uint16_t vgpr, uint16_t sgpr,
@@ -804,17 +821,24 @@ std::vector<uint32_t> build_gfx1250_lane_saved_target_program(uint16_t low_lane 
   return words;
 }
 
-struct UnprovenScratchCarrierProgram {
+enum class UnprovenCarrier {
+  Scratch,
+  AccVgpr,
+};
+
+struct UnprovenCarrierProgram {
   std::vector<uint32_t> words;
   uint64_t outer_callee_offset = 0;
   uint64_t caller_offset = 0;
+  uint64_t initial_consumer_offset = 0;
   uint64_t final_consumer_offset = 0;
 };
 
-UnprovenScratchCarrierProgram build_unproven_scratch_carrier_program() {
+UnprovenCarrierProgram build_unproven_carrier_program(UnprovenCarrier carrier) {
   constexpr uint16_t kTargetSreg = 0;
   constexpr uint16_t kReturnSreg = 30;
   constexpr uint16_t kReturnCarrierVgpr = 40;
+  constexpr uint16_t kReturnCarrierAccVgpr = 40;
   constexpr uint16_t kTargetCarrierVgpr = 42;
   constexpr uint16_t kReturnLowLane = 128u;
   constexpr uint16_t kReturnHighLane = 129u;
@@ -823,7 +847,7 @@ UnprovenScratchCarrierProgram build_unproven_scratch_carrier_program() {
   constexpr uint16_t kScratchSaddr = 33;
   constexpr uint32_t kLiteralOperand = 255;
 
-  UnprovenScratchCarrierProgram program;
+  UnprovenCarrierProgram program;
   const auto append = [&](const auto &encoded) {
     program.words.insert(program.words.end(), encoded.begin(), encoded.end());
   };
@@ -841,24 +865,34 @@ UnprovenScratchCarrierProgram build_unproven_scratch_carrier_program() {
     program.words.push_back(delta < 0 ? UINT32_MAX : 0u);
   };
 
-  // Inner callee: the matching scratch store/load looks like it preserves its
-  // caller's complete v40 value, but the code provides no full-EXEC, stable
-  // frame-base, or non-alias proof. Recovery must therefore fail closed.
-  append(build_cdna4_scratch_store_b32_saddr(kReturnCarrierVgpr, kScratchSaddr, 0,
-                                             ROCJITSU_CODE_ARCH_CDNA4)
-             .value());
+  // Inner callee: the matching transfer round-trip looks like it preserves its
+  // caller's complete v40 value, but both carrier classes are EXEC-gated and
+  // scratch additionally lacks stable-frame and non-alias proofs. Recovery must
+  // therefore fail closed.
+  if (carrier == UnprovenCarrier::Scratch) {
+    append(build_cdna4_scratch_store_b32_saddr(kReturnCarrierVgpr, kScratchSaddr, 0,
+                                               ROCJITSU_CODE_ARCH_CDNA4)
+               .value());
+  } else {
+    append(build_cdna4_accvgpr_write(kReturnCarrierAccVgpr, kReturnCarrierVgpr));
+  }
   append(build_cdna4_writelane(kReturnCarrierVgpr, kReturnSreg, kReturnLowLane));
   append(build_cdna4_writelane(kReturnCarrierVgpr, kReturnSreg + 1, kReturnHighLane));
   append(build_cdna4_readlane(kReturnSreg, kReturnCarrierVgpr, kReturnLowLane));
   append(build_cdna4_readlane(kReturnSreg + 1, kReturnCarrierVgpr, kReturnHighLane));
-  append(build_cdna4_scratch_load_b32_saddr(kReturnCarrierVgpr, kScratchSaddr, 0u,
-                                            ROCJITSU_CODE_ARCH_CDNA4)
-             .value());
-  program.words.push_back(0xbf8c0f70u); // s_waitcnt vmcnt(0).
+  if (carrier == UnprovenCarrier::Scratch) {
+    append(build_cdna4_scratch_load_b32_saddr(kReturnCarrierVgpr, kScratchSaddr, 0u,
+                                              ROCJITSU_CODE_ARCH_CDNA4)
+               .value());
+    program.words.push_back(0xbf8c0f70u); // s_waitcnt vmcnt(0).
+  } else {
+    append(build_cdna4_accvgpr_read(kReturnCarrierVgpr, kReturnCarrierAccVgpr));
+  }
   program.words.push_back(pack_sop1(0x1d, 0, kReturnSreg));
 
   // Outer callee: try to keep its incoming return pair in v40 across that
-  // nested call. An exact slot match alone is not a preservation proof.
+  // nested call. A syntactic transfer round-trip alone is not a preservation
+  // proof.
   program.outer_callee_offset = offset();
   append(build_cdna4_writelane(kReturnCarrierVgpr, kReturnSreg, kReturnLowLane));
   append(build_cdna4_writelane(kReturnCarrierVgpr, kReturnSreg + 1, kReturnHighLane));
@@ -869,11 +903,12 @@ UnprovenScratchCarrierProgram build_unproven_scratch_carrier_program() {
   program.words.push_back(pack_sop1(0x1d, 0, kReturnSreg));
 
   // Caller: establish one reusable static target, call it once, then attempt
-  // to recover the same target from v42 after the unproven scratch chain.
+  // to recover the same target from v42 after the unproven carrier chain.
   program.caller_offset = offset();
   append_target_builder(program.outer_callee_offset);
   append(build_cdna4_writelane(kTargetCarrierVgpr, kTargetSreg, kTargetLowLane));
   append(build_cdna4_writelane(kTargetCarrierVgpr, kTargetSreg + 1, kTargetHighLane));
+  program.initial_consumer_offset = offset();
   program.words.push_back(pack_sop1(0x1e, kReturnSreg, kTargetSreg));
   append(build_cdna4_readlane(kTargetSreg, kTargetCarrierVgpr, kTargetLowLane));
   append(build_cdna4_readlane(kTargetSreg + 1, kTargetCarrierVgpr, kTargetHighLane));
@@ -934,10 +969,28 @@ TEST(CfgAnalysis, RecoversLaneSavedTargetAcrossDirectPreservingCall) {
 }
 
 TEST(CfgAnalysis, RejectsLaneSavedTargetAcrossUnprovenScratchCarrier) {
-  UnprovenScratchCarrierProgram program = build_unproven_scratch_carrier_program();
+  UnprovenCarrierProgram program = build_unproven_carrier_program(UnprovenCarrier::Scratch);
   const std::array extra_leaders{uint64_t{0}, program.outer_callee_offset, program.caller_offset};
   const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
       program.words, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders, /*wavefront_size=*/64u);
+  EXPECT_TRUE(std::ranges::any_of(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.initial_consumer_offset &&
+           fixup.source_target_offset == program.outer_callee_offset;
+  }));
+  EXPECT_TRUE(std::ranges::none_of(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.final_consumer_offset;
+  }));
+}
+
+TEST(CfgAnalysis, RejectsLaneSavedTargetAcrossUnprovenAccVgprCarrier) {
+  UnprovenCarrierProgram program = build_unproven_carrier_program(UnprovenCarrier::AccVgpr);
+  const std::array extra_leaders{uint64_t{0}, program.outer_callee_offset, program.caller_offset};
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      program.words, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders, /*wavefront_size=*/64u);
+  EXPECT_TRUE(std::ranges::any_of(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.initial_consumer_offset &&
+           fixup.source_target_offset == program.outer_callee_offset;
+  }));
   EXPECT_TRUE(std::ranges::none_of(fixups, [&](const IndirectCallFixup &fixup) {
     return fixup.source_call_offset == program.final_consumer_offset;
   }));

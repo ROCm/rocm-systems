@@ -178,8 +178,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     std::optional<InlineSgprSpillSequence> scalar_spill;
     if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
       scalar_spill = build_inline_sgpr_spill_sequence(*resources, candidate_options, spill_managers,
-                                                      arch, result.warnings, private_layout_base,
-                                                      /*spill_count=*/4u);
+                                                      arch, result.warnings, private_layout_base);
       if (!scalar_spill)
         continue;
     }

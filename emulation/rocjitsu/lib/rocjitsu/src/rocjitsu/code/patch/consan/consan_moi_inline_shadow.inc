@@ -10,8 +10,7 @@ struct InlineSgprSpillSequence {
 build_inline_sgpr_spill_sequence(const ResolvedMoiScratchPlan &resources,
                                  const ConSanOptions &options, MoiSpillManagers &managers,
                                  rj_code_arch_t arch, std::vector<std::string> &warnings,
-                                 std::optional<uint32_t> private_layout_base,
-                                 uint16_t spill_count = kConSanMoiInlineExecSaveSgprCount) {
+                                 std::optional<uint32_t> private_layout_base) {
   if ((!options.automatic_moi_inline_sgpr_spill &&
        !options.automatic_moi_record_replay_sgpr_spill) ||
       !options.moi_exec_save_sgpr)
@@ -37,7 +36,7 @@ build_inline_sgpr_spill_sequence(const ResolvedMoiScratchPlan &resources,
     planned_manager = it->second;
     committed_manager = &it->second;
   }
-  const uint16_t count = spill_count;
+  const uint16_t count = moi_exec_save_sgpr_count(options, arch);
   if (!planned_manager.allocate_slots(RegisterRef{RegClass::SGPR, *options.moi_exec_save_sgpr, 1u},
                                       count)) {
     warnings.emplace_back("ConSan MOI could not reserve the Inline scalar spill slots");

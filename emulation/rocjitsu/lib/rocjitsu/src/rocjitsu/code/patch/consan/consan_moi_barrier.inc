@@ -782,7 +782,12 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       std::optional<InlineSgprSpillSequence> scalar_spill;
       uint32_t required_private_bytes = 0u;
       const uint16_t scratch_count = inline_shadow_barrier_scratch_count(candidate_options);
-      if (scratch_count > 1u) {
+      const bool needs_record_replay_scalar_spill =
+          candidate_options.automatic_moi_record_replay_sgpr_spill;
+      const bool needs_scalar_spill =
+          needs_record_replay_scalar_spill ||
+          (scratch_count > 1u && candidate_options.automatic_moi_inline_sgpr_spill);
+      if (scratch_count > 1u || needs_record_replay_scalar_spill) {
         if (plan == nullptr) {
           result.warnings.emplace_back(
               "ConSan MOI inline barrier visible evidence has no resource plan in " +
@@ -796,7 +801,12 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
               candidate.container_name);
           continue;
         }
-        scratch_vgpr = resources->base;
+        // A one-VGPR Record/Replay resource can be used solely as the scalar
+        // spill transfer register. It is not Inline visible-evidence scratch:
+        // passing it as such would select Inline's much wider +12/+14 SGPR
+        // layout and reject an otherwise valid compact Record/Replay probe.
+        if (scratch_count > 1u)
+          scratch_vgpr = resources->base;
         owners = resources->owner_descriptor_file_offsets;
         if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
           spill = build_moi_spill_sequence(result, *resources, candidate_options,
@@ -807,10 +817,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           note_spill_descriptor_requirements(visible_evidence_private_requirements, *resources,
                                              *spill);
         }
-        if (candidate_options.automatic_moi_inline_sgpr_spill) {
-          scalar_spill = build_inline_sgpr_spill_sequence(*resources, candidate_options,
-                                                          visible_evidence_spill_managers, arch,
-                                                          result.warnings, std::nullopt);
+        if (needs_scalar_spill) {
+          scalar_spill = build_inline_sgpr_spill_sequence(
+              *resources, candidate_options, visible_evidence_spill_managers, arch, result.warnings,
+              std::nullopt);
           if (!scalar_spill)
             continue;
           required_private_bytes =

@@ -493,8 +493,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
       scalar_spill = build_inline_sgpr_spill_sequence(
           *resources, candidate_options, spill_managers, arch, result.warnings,
-          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
-          /*spill_count=*/4u);
+          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
       if (!scalar_spill)
         continue;
       required_private_bytes = std::max(required_private_bytes, scalar_spill->total_private_bytes);

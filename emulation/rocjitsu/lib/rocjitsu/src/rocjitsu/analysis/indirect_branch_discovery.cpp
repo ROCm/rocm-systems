@@ -81,6 +81,8 @@ namespace {
 // paths. EXEC-gated vector and memory copies are deliberately outside this
 // proof: accepting them would require full-EXEC and private-memory alias
 // analysis, and a conservative miss is preferable to an unproven CFG edge.
+// Follow-up bd-1w9.9.6.1.1 records the semantic prerequisites for safely
+// admitting either carrier class in the future.
 //
 // The five phases run to a small fixed point. The first round uses only direct
 // CFG edges. Later rounds add already-proven recovered edges to the temporary
@@ -606,9 +608,15 @@ private:
   auto opcode = scalar_pc_opcode(arch, op);
   if (!opcode || ((word >> 8) & 0xffu) != *opcode)
     return std::nullopt;
-  if (op == ScalarPcOp::GetPc64)
-    return static_cast<uint16_t>((word >> 16) & 0x7fu);
-  return static_cast<uint16_t>(word & 0xffu);
+  const uint16_t pair_lo = op == ScalarPcOp::GetPc64 ? static_cast<uint16_t>((word >> 16) & 0x7fu)
+                                                     : static_cast<uint16_t>(word & 0xffu);
+  // SOP1 source fields also encode inline constants and special registers.
+  // Only a complete pair in the tracked general-purpose SGPR file can carry a
+  // PC. Reject other selectors at the decoding boundary so no later analysis
+  // can accidentally use the raw selector as an array index.
+  if (pair_lo >= kMaxTrackedSgprPair)
+    return std::nullopt;
+  return pair_lo;
 }
 
 [[nodiscard]] bool sop2_literal_to_sreg(const Instruction &inst, uint32_t word,
@@ -1103,8 +1111,17 @@ void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
     facts.getpc_sdst = scalar_pc_sreg(arch, inst, facts.word, ScalarPcOp::GetPc64);
     facts.setpc_ssrc = scalar_pc_sreg(arch, inst, facts.word, ScalarPcOp::SetPc64);
     facts.swappc_ssrc = scalar_pc_sreg(arch, inst, facts.word, ScalarPcOp::SwapPc64);
-    if (facts.swappc_ssrc)
-      facts.swappc_sdst = static_cast<uint16_t>((facts.word >> 16) & 0x7fu);
+    if (facts.swappc_ssrc) {
+      const uint16_t return_pair = static_cast<uint16_t>((facts.word >> 16) & 0x7fu);
+      if (return_pair < kMaxTrackedSgprPair) {
+        facts.swappc_sdst = return_pair;
+      } else {
+        // A malformed/non-general destination cannot be modeled as either a
+        // returning call or an ordinary recovered branch without inventing
+        // hardware semantics, so reject the whole consumer.
+        facts.swappc_ssrc.reset();
+      }
+    }
     facts.call_sdst = s_call_sdst(inst, facts.word);
   }
 
@@ -1849,6 +1866,8 @@ template <typename T> void add_copy(std::vector<T> &copies, T copy) {
     copies.push_back(copy);
 }
 
+/// @pre Both states originate from the same callee entry and therefore track
+/// the same two return-PC halves followed by the same protected carrier lanes.
 void meet_callee_value_state(CalleeValueState &dst, const CalleeValueState &src) {
   assert(dst.values.size() == src.values.size());
   for (size_t value = 0; value < dst.values.size(); ++value) {
@@ -1859,6 +1878,12 @@ void meet_callee_value_state(CalleeValueState &dst, const CalleeValueState &src)
       return !contains_copy(src.values[value].vgpr_lanes, lane);
     });
   }
+}
+
+[[nodiscard]] bool state_has_sgpr_pair(const CalleeValueState &state, uint16_t pair_lo) {
+  if (state.values.size() < 2u || pair_lo >= kMaxTrackedSgprPair)
+    return false;
+  return state.values[0].sgprs.at(pair_lo) && state.values[1].sgprs.at(pair_lo + 1u);
 }
 
 void transfer_callee_value_state(AnalysisContext &ctx, size_t inst_index, CalleeValueState &state) {
@@ -2020,8 +2045,7 @@ callee_preserves_vgpr_lanes(AnalysisContext &ctx, const std::vector<AnalysisBloc
       }
 
       if (facts.setpc_ssrc) {
-        if (*facts.setpc_ssrc >= kMaxTrackedSgprPair || !state.values[0].sgprs[*facts.setpc_ssrc] ||
-            !state.values[1].sgprs[*facts.setpc_ssrc + 1u]) {
+        if (!state_has_sgpr_pair(state, *facts.setpc_ssrc)) {
           return false;
         }
         for (size_t lane_index = 0; lane_index < lanes.size(); ++lane_index) {

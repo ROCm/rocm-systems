@@ -1016,6 +1016,54 @@ apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
   return static_cast<uint16_t>(std::min<uint32_t>(max_count, kMaxSgprs));
 }
 
+struct MoiOwnerScalarReferenceSummary {
+  RegisterSet references;
+  bool uses_indirect_sgprs = false;
+  bool every_call_target_resolved = true;
+  std::optional<uint64_t> first_unresolved_call_offset;
+  std::string first_unresolved_call_mnemonic;
+};
+
+[[nodiscard]] MoiOwnerScalarReferenceSummary summarize_moi_owner_scalar_references(
+    std::span<const MoiKernelResourceContext *const> owner_contexts) {
+  MoiOwnerScalarReferenceSummary result;
+  std::unordered_set<BasicBlock *> visited;
+  std::unordered_set<uint64_t> resolved_call_offsets;
+  for (const MoiKernelResourceContext *context : owner_contexts) {
+    if (context == nullptr)
+      continue;
+    for (BasicBlock *block : context->scope.blocks) {
+      if (block == nullptr)
+        continue;
+      for (const BasicBlock::CallEdge &call : block->call_edges())
+        resolved_call_offsets.insert(call.source_call_offset);
+    }
+  }
+  for (const MoiKernelResourceContext *context : owner_contexts) {
+    if (context == nullptr)
+      continue;
+    for (BasicBlock *block : context->scope.blocks) {
+      if (block == nullptr || !visited.insert(block).second)
+        continue;
+      for (const Instruction &instruction : block->instructions()) {
+        if (instruction.mnemonic().starts_with("s_movrel"))
+          result.uses_indirect_sgprs = true;
+        if ((instruction.flags() & INDIRECT_CALL) != 0 &&
+            !resolved_call_offsets.contains(instruction.src_loc())) {
+          result.every_call_target_resolved = false;
+          if (!result.first_unresolved_call_offset) {
+            result.first_unresolved_call_offset = instruction.src_loc();
+            result.first_unresolved_call_mnemonic = instruction.mnemonic();
+          }
+        }
+        const InstDefUse def_use(instruction);
+        result.references |= def_use.defs | def_use.uses;
+      }
+    }
+  }
+  return result;
+}
+
 [[nodiscard]] const Instruction *instruction_at(BasicBlock *block, uint64_t text_offset) {
   if (block == nullptr)
     return nullptr;
@@ -1167,6 +1215,53 @@ struct MoiResourcePlanningState {
     valid = true;
   }
 };
+
+/// Conservatively summarize every instruction in a code object's declared
+/// function ranges when those ranges cover the complete text section.
+///
+/// This is the fail-safe fallback for generated kernels whose local-label
+/// calls cannot be reconstructed by CFG analysis. Scanning unrelated kernels
+/// can only make a hole unavailable; complete text coverage is required before
+/// an unresolved target is treated as represented by the summary.
+[[nodiscard]] std::optional<MoiOwnerScalarReferenceSummary>
+summarize_moi_complete_text_scalar_references(const MoiResourcePlanningState &state) {
+  if (!state.valid || state.code_object.text_sections().size() != 1u)
+    return std::nullopt;
+
+  const uint64_t text_size = state.code_object.text_sections().front()->size();
+  std::vector<std::pair<uint64_t, uint64_t>> ranges;
+  ranges.reserve(state.code_object.functions().size());
+  for (const AmdGpuFunctionInfo &function : state.code_object.functions()) {
+    if (function.code_size == 0u || function.entry_text_offset > text_size ||
+        function.code_size > text_size - function.entry_text_offset) {
+      return std::nullopt;
+    }
+    ranges.emplace_back(function.entry_text_offset,
+                        function.entry_text_offset + function.code_size);
+  }
+  std::ranges::sort(ranges);
+  uint64_t covered_end = 0u;
+  for (const auto &[begin, end] : ranges) {
+    if (begin > covered_end)
+      return std::nullopt;
+    covered_end = std::max(covered_end, end);
+  }
+  if (covered_end != text_size)
+    return std::nullopt;
+
+  MoiOwnerScalarReferenceSummary result;
+  for (const std::unique_ptr<BasicBlock> &block : state.blocks) {
+    if (!block)
+      continue;
+    for (const Instruction &instruction : block->instructions()) {
+      if (instruction.mnemonic().starts_with("s_movrel"))
+        result.uses_indirect_sgprs = true;
+      const InstDefUse def_use(instruction);
+      result.references |= def_use.defs | def_use.uses;
+    }
+  }
+  return result;
+}
 
 [[nodiscard]] std::vector<uint64_t> moi_scalar_owner_descriptors(const ConSanResult &result) {
   std::vector<uint64_t> owners;
@@ -2191,16 +2286,33 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         }
       }
     }
-    if (!selected &&
-        ((options.moi_engine == ConSanMoiEngine::RecordReplay && is_rdna4_family_arch(arch)) ||
-         gfx1250_sampled) &&
-        !options.moi_dynamic_stack_spill && address_free_scratch_private_limit(arch)) {
+    const bool component_uses_dynamic_stack = std::ranges::any_of(owners, [&](uint64_t owner) {
+      const MoiKernelResourceContext *context = context_for_owner(owner);
+      return context != nullptr && context->kernel != nullptr &&
+             context->kernel->uses_dynamic_stack.value_or(false);
+    });
+    const bool supports_record_replay_scalar_spill =
+        options.moi_engine == ConSanMoiEngine::RecordReplay &&
+        (is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA4);
+    if (!selected && (supports_record_replay_scalar_spill || gfx1250_sampled) &&
+        !component_uses_dynamic_stack && !options.moi_dynamic_stack_spill &&
+        address_free_scratch_private_limit(arch)) {
+      const auto conflicts_with_cdna_vcc = [&](uint16_t base, uint16_t width) {
+        return instrumentation::is_cdna_family_arch(arch) &&
+               std::ranges::any_of(owners, [&](uint64_t owner) {
+                 const MoiKernelResourceContext *context = context_for_owner(owner);
+                 return context == nullptr || cdna_sgpr_window_conflicts_with_physical_vcc(
+                                                  base, width, context->current_sgpr_count);
+               });
+      };
       const auto reserved = [&](uint16_t base, uint16_t width) {
         return (options.moi_owner_sgpr &&
                 range_overlaps(base, width, *options.moi_owner_sgpr, 1u)) ||
                (options.moi_dispatch_id_sgpr &&
                 range_overlaps(base, width, *options.moi_dispatch_id_sgpr,
-                               moi_dispatch_state_sgpr_count(options)));
+                               moi_dispatch_state_sgpr_count(options))) ||
+               conflicts_with_cdna_vcc(base, width);
       };
       for (uint32_t base = 0; base + 2u <= limit; base += 2u) {
         if (!intersects(unavailable, static_cast<uint16_t>(base), 2u) &&
@@ -3089,7 +3201,13 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
   const bool needs_record_replay_workgroup_key =
       (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       options.moi_engine == ConSanMoiEngine::RecordReplay && options.moi_track_atomics &&
-      !options.moi_persistent_workgroup_key_sgpr;
+      !options.moi_persistent_workgroup_key_sgpr &&
+      std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
+        return plan.source != ConSanRegisterAllocationSource::Unsupported &&
+               !plan.owner_descriptor_file_offsets.empty() &&
+               (plan.site_kind == ConSanResourceSiteKind::Atomic ||
+                plan.site_kind == ConSanResourceSiteKind::Fence);
+      });
   const bool needs_workgroup_key = needs_inline_workgroup_key || needs_record_replay_workgroup_key;
   // Sampled access probes execute after arbitrary guest instructions. Their
   // owner must therefore come from entry-captured persistent state even when
@@ -3249,13 +3367,25 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
       const bool scalar_state_valid =
           resolved_contexts.has_value() &&
           apply_moi_transient_sgpr_assignment(scalar_options, scalar_owners);
-      RegisterSet component_references;
-      bool component_uses_indirect_sgprs = false;
       bool every_owner_resolved = scalar_state_valid;
+      MoiOwnerScalarReferenceSummary scalar_references =
+          summarize_moi_owner_scalar_references(scalar_contexts);
+      bool used_complete_text_summary = false;
+      if (resolved_contexts && !scalar_references.every_call_target_resolved) {
+        // Some generated kernels use local-label calls without symbolized
+        // helpers. When declared function ranges cover the whole text section,
+        // scanning all of them is a conservative substitute for resolving the
+        // target: unrelated code may reject a hole, but omitted callees cannot
+        // make an occupied register look free.
+        if (auto complete = summarize_moi_complete_text_scalar_references(scalar_state)) {
+          scalar_references = std::move(*complete);
+          used_complete_text_summary = true;
+        }
+      }
       for (const MoiKernelResourceContext *context : scalar_contexts) {
         const uint64_t descriptor_offset = context->kernel->descriptor_file_offset;
         if (context->kernel->uses_dynamic_stack.value_or(false)) {
-          component_references.expand({RegClass::SGPR, 32u, 2u});
+          scalar_references.references.expand({RegClass::SGPR, 32u, 2u});
         }
         if (descriptor_offset > bytes.size() || sizeof(KD) > bytes.size() - descriptor_offset) {
           every_owner_resolved = false;
@@ -3267,26 +3397,13 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
                                            moi_descriptor_system_sgpr_count(descriptor);
         for (uint32_t sgpr = 0u;
              sgpr < std::min<uint32_t>(initialized_count, moi_ordinary_sgpr_limit(arch)); ++sgpr) {
-          component_references.expand({RegClass::SGPR, static_cast<uint16_t>(sgpr), 1u});
-        }
-      }
-      // Scan every decoded block in the linked object, rather than only the
-      // recovered owner scopes. This is stricter (unrelated kernels can make a
-      // hole unavailable), but it remains sound in the presence of indirect
-      // calls whose targets cannot be proven from the CFG.
-      for (const std::unique_ptr<BasicBlock> &block : scalar_state.blocks) {
-        if (!block)
-          continue;
-        for (const Instruction &instruction : block->instructions()) {
-          if (instruction.mnemonic().starts_with("s_movrel"))
-            component_uses_indirect_sgprs = true;
-          const InstDefUse def_use(instruction);
-          component_references |= def_use.defs | def_use.uses;
+          scalar_references.references.expand({RegClass::SGPR, static_cast<uint16_t>(sgpr), 1u});
         }
       }
       const auto hole_unavailable = [&](uint16_t base) {
-        if (component_references.contains({RegClass::SGPR, base, 1u}) ||
-            component_references.contains({RegClass::SGPR, static_cast<uint16_t>(base + 1u), 1u}) ||
+        if (scalar_references.references.contains({RegClass::SGPR, base, 1u}) ||
+            scalar_references.references.contains(
+                {RegClass::SGPR, static_cast<uint16_t>(base + 1u), 1u}) ||
             (scalar_options.moi_exec_save_sgpr &&
              range_overlaps(base, scalar_count, *scalar_options.moi_exec_save_sgpr,
                             moi_exec_save_sgpr_count(scalar_options, arch))) ||
@@ -3311,7 +3428,12 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         });
       };
       std::optional<uint16_t> persistent_hole;
-      if (every_owner_resolved && !component_uses_indirect_sgprs) {
+      // KernelCfgScope includes every validated direct and recovered indirect
+      // callee for an owner. Unrelated linked kernels must not veto a safe
+      // owner-local hole, while an unresolved call or dynamic scalar index
+      // still makes the proof fail closed.
+      if (every_owner_resolved && scalar_references.every_call_target_resolved &&
+          !scalar_references.uses_indirect_sgprs) {
         for (uint32_t base = 0u; base + scalar_count <= first; ++base) {
           if (!hole_unavailable(static_cast<uint16_t>(base))) {
             persistent_hole = static_cast<uint16_t>(base);
@@ -3344,10 +3466,12 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         result.moi_persistent_sgprs_automatic = true;
         result.resolved_moi_prologue_scratch_vgpr_assignments =
             options.moi_prologue_scratch_vgpr_assignments;
-        result.warnings.emplace_back("ConSan MOI assigned persistent scalar owner/epoch" +
-                                     std::string(needs_workgroup_key ? "/workgroup-key" : "") +
-                                     " state to a proven-unused "
-                                     "CDNA SGPR pair below the maximum guest reference");
+        result.warnings.emplace_back(
+            "ConSan MOI assigned persistent scalar owner/epoch" +
+            std::string(needs_workgroup_key ? "/workgroup-key" : "") +
+            " state to a proven-unused CDNA SGPR window below the "
+            "maximum guest reference" +
+            std::string(used_complete_text_summary ? " using complete-text coverage" : ""));
         return true;
       }
       if (!scalar_state_valid) {
@@ -3357,7 +3481,12 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         result.warnings.emplace_back(
             "ConSan MOI could not resolve every owner descriptor for a proven-unused persistent "
             "SGPR window");
-      } else if (component_uses_indirect_sgprs) {
+      } else if (!scalar_references.every_call_target_resolved) {
+        result.warnings.emplace_back(
+            "ConSan MOI cannot prove a persistent SGPR hole across unresolved guest call " +
+            scalar_references.first_unresolved_call_mnemonic + " at text offset " +
+            std::to_string(scalar_references.first_unresolved_call_offset.value_or(0u)));
+      } else if (scalar_references.uses_indirect_sgprs) {
         result.warnings.emplace_back(
             "ConSan MOI cannot prove a persistent SGPR hole across scalar-relative guest access");
       } else {
