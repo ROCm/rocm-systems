@@ -160,7 +160,7 @@ gate.
 
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Current evidence |
 |---|---|---|---|---|---|---|
-| P0 | `gfx950_sk_sgemm_streamk` | 🟨 Clean qualification passes; fault bundle pending (`bd-1w9.9.9`) | 🟥 Strict load rejection: persistent state placement | 🟥 Strict load rejection: transient state placement | 🟥 Strict load rejection: transient and barrier state placement | All runs used the standard profiles and a 120-second bound.  Every retained log records the driver working directory, exact shell-quoted invocation, and timeout; instrumented logs additionally record the hook and `RJ_*` profile settings. |
+| P0 | `gfx950_sk_sgemm_streamk` | 🟨 Clean and reviewed exact-one fault qualification pass; the independent generated-code wait hazard remains tracked by `bd-1w9.9.8` | 🟥 Strict load rejection: persistent state placement | 🟥 Strict load rejection: transient state placement | 🟥 Strict load rejection: transient and barrier state placement | All runs used the standard profiles and a 120-second bound.  Every retained log records the driver working directory, exact shell-quoted invocation, and timeout; instrumented logs additionally record the hook and `RJ_*` profile settings. |
 
 This row is the executable denominator selected from the larger gfx950 YAML
 survey.  Static YAML features alone do not promote or expand that denominator.
@@ -169,14 +169,50 @@ target-native gfx950 ELF checks.  Their paired host-dominated end-to-end
 elapsed times are 5.024 and 5.601 seconds, respectively (1.11x); this is not a
 kernel-overhead measurement.  SuperCollider discovers, selects, and patches
 all 82 LDS accesses, reports no unsupported or resource-failed sites, and
-finishes with marker zero, no mismatch, and complete report cleanup.  Fault
-detection, containment, and post-fault health evidence is not yet retained, so
-the row is yellow rather than green and that bundle remains tracked by
-`bd-1w9.9.9`.  Artifact paths in this section are relative to the workspace
-root, and the paired artifacts are:
+finishes with marker zero, no mismatch, and complete report cleanup.
+
+The reviewed fault bundle selects occurrence zero of the target-native full
+`s_barrier` form from a fresh dry-run inventory.  It is the first of 11 such
+sites sharing code-object identity `fnv1a64:9d3b63168a196d96`, at text PC
+`0x10a0`.  Two independent runs require exactly one barrier drop and both record
+`requested=1`, `planned=1`, and `applied=1` while retaining 82/82 access
+patches.  Both exact numerical oracles pass and SuperCollider reports zero
+mismatches, so this is a qualified miss rather than a detector hit.  The
+trials finish in 5.804 and 5.660 seconds under the 120-second bound, with zero
+allocation, read, or cleanup failures and a complete report.  A clean
+post-fault SuperCollider health run then passes the same exact oracle and
+82/82 coverage in 5.762 seconds with complete cleanup.  These are
+host-dominated end-to-end timings that include Tensile generation and
+simulator startup; they are not kernel-overhead measurements.
+
+Artifact paths in this section are relative to the workspace root.  The
+paired clean artifacts and retained fault bundle are:
 
 - `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-paired-baseline-provenance-20260724`;
-- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-paired-supercollider-provenance-20260724`.
+- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-paired-supercollider-provenance-20260724`;
+- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-sc-fault-inventory-20260725`;
+- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-sc-fault-drop-pc10a0-20260725`;
+- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-sc-fault-drop-pc10a0-trial2-20260725`;
+- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-sc-post-fault-health-20260725`.
+
+The checked-in ledger pins rocJITsu
+`b881a768e3cdcef55d6c23399584e9179d2a5e25`, corpus
+`0db836e7bd8c6400b7ffd187d749225899875d7c`, and rocm-libraries
+`a8f0845f87ab50adc3dc8d0edd86693cb31065b1`.  SHA-256 also pins the Tensile
+config (`3d40a61d238f82aaa6bdd6b9e8fb4d417d8fe94de507bad35ea2da848d581d52`),
+gfx950 simulator config
+(`2f36f532932e5960424b31d9909ead67936168fbd551a125658170d066e0fd49`),
+corpus runner
+(`717bb3f1d639d3a3452be2ac146cc4e56eb5b9c69d307d051ac3f36dd867f666`),
+client wrapper
+(`cf6a90c93cdaadfca898a62ea88edbff737aaf27e6cb9631f35f7dc61fb86ec0`),
+and loaded hook
+`0be89aec2512038d31c389523796e9b755e4d9c0e7422b22b72a3e3cdea8744e`;
+the retained runner logs record the exact shell invocation, paths, runtime
+environment, target, and generated gfx950 ELF checks.  The row remains yellow
+only because every run also reproduces the independent scalar-load wait hazard
+tracked by `bd-1w9.9.8`; the SuperCollider fault-bundle gate itself is
+complete.
 
 The three MOI profiles fail closed before the numeric oracle executes:
 
@@ -361,6 +397,21 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-25: Closed the `bd-1w9.9.9` gfx950 Tensile SuperCollider
+  fault-bundle gap with a reviewed exact target-native selector rather than a
+  broad barrier index.  A fresh inventory selects occurrence zero of the full
+  `s_barrier` form at PC `0x10a0`, the first of 11 sites sharing the exact
+  code-object identity.  Two bounded trials each prove one requested, planned,
+  and applied mutation, retain all 82/82 access patches, and pass the exact
+  numerical oracle with zero SuperCollider mismatches; the outcome is therefore
+  a qualified miss.  Both trials terminate in under six seconds with complete
+  cleanup, and the same clean profile passes immediately afterward as a health
+  check.  The checked-in ledger pins the rocJITsu, corpus, rocm-libraries, and
+  hook identities; retained logs pin commands, runtime settings, and target
+  checks while distinguishing host-dominated end-to-end time from kernel
+  overhead.  The row stays yellow solely for the separately tracked
+  generated-code wait hazard.
 
 - 2026-07-25: Closed the `bd-1w9.35` deterministic high-half mismatch-oracle
   gap without adding a hook-only fault switch or changing production
