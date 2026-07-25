@@ -715,7 +715,7 @@ TEST(ConSanMoi, FirstLightProbeSupportsZeroToNonzeroDispatchScratch) {
       1u);
 }
 
-TEST(ConSanMoi, FirstLightProbeRejectsSpillingDynamicStackKernel) {
+TEST(ConSanMoi, Rdna4RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,
       0x00000000u,
@@ -731,27 +731,87 @@ TEST(ConSanMoi, FirstLightProbeRejectsSpillingDynamicStackKernel) {
 
   const auto result = try_patch_consan(bytes, options);
 
-  EXPECT_TRUE(result.errors.empty());
-  EXPECT_FALSE(result.modified);
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_TRUE(result.final_validation_passed);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   ASSERT_EQ(result.resource_plans.size(), 1u);
-  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
-  EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::DynamicStack);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::None);
   ASSERT_EQ(result.site_dispositions.size(), 1u);
-  EXPECT_EQ(result.site_dispositions.front().lowering_outcome,
-            ConSanSiteLoweringOutcome::ResourceFailed);
-  EXPECT_EQ(result.site_dispositions.front().lowering_reason,
-            ConSanSiteLoweringReason::UnsupportedResourcePlan);
-  EXPECT_EQ(result.site_dispositions.front().resource_reason,
-            ConSanRegisterPlanReason::DynamicStack);
-  EXPECT_STREQ(consan_site_lowering_outcome_name(result.site_dispositions.front().lowering_outcome),
-               "resource_failed");
-  EXPECT_STREQ(consan_site_lowering_reason_name(result.site_dispositions.front().lowering_reason),
-               "unsupported_resource_plan");
-  EXPECT_EQ(result.resource_plan_summary.unsupported_plans, 1u);
+  EXPECT_EQ(result.site_dispositions.front().lowering_outcome, ConSanSiteLoweringOutcome::Patched);
+  EXPECT_EQ(result.site_dispositions.front().lowering_reason, ConSanSiteLoweringReason::None);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
+    return item.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  EXPECT_EQ(patch->spilled_vgpr_count, 3u);
+  EXPECT_EQ(patch->required_private_segment_size, 12u);
+  EXPECT_EQ(patch->dynamic_private_segment_addend, 12u);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave_words =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const uint16_t saved_frame_sgpr = static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 5u);
+  EXPECT_NE(std::ranges::find(cave_words, build_s_mov_b32(saved_frame_sgpr, /*frame base=*/33,
+                                                          ROCJITSU_CODE_ARCH_RDNA4)),
+            cave_words.end());
+}
+
+TEST(ConSanMoi, Gfx1250RecordReplaySpillsDynamicStackAccessInBothWaveModes) {
+  constexpr auto guest = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0u, .data0 = 0u});
+  for (bool wave32 : {false, true}) {
+    SCOPED_TRACE(wave32 ? "wave32" : "wave64");
+    std::vector<uint32_t> text_words(guest.begin(), guest.end());
+    text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+    const std::vector<uint8_t> bytes = make_gfx1250_code_object(
+        text_words, "dynamic_spill", kRdna4Wave64AllVgprsGranulated, wave32,
+        /*uses_dynamic_stack=*/true);
+    ConSanOptions options = moi_options();
+    options.force_vgpr_spill = true;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    EXPECT_TRUE(result.final_validation_passed);
+    const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
+      return item.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+    });
+    ASSERT_NE(patch, result.patches.end());
+    EXPECT_EQ(patch->spilled_vgpr_count, 3u);
+    EXPECT_EQ(patch->required_private_segment_size, 12u);
+    EXPECT_EQ(patch->dynamic_private_segment_addend, 12u);
+  }
+}
+
+TEST(ConSanMoi, Rdna4RecordReplayRejectsMixedStackOwnersWhenSharedHelperNeedsSpill) {
+  std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object();
+  append_kernel_metadata_note(bytes, "shared_owner_0", /*uses_dynamic_stack=*/true,
+                              /*sgpr_count=*/0u);
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+  options.max_patches = 1;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  EXPECT_FALSE(result.modified);
+  const auto shared_plan =
+      std::ranges::find_if(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
+        return plan.site_kind == ConSanResourceSiteKind::Access &&
+               plan.owner_descriptor_file_offsets.size() == 2u;
+      });
+  ASSERT_NE(shared_plan, result.resource_plans.end());
+  EXPECT_EQ(shared_plan->source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(shared_plan->reason, ConSanRegisterPlanReason::DynamicStack);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("dynamic-stack") != std::string::npos;
-  }));
+    return warning.find("dynamic-stack owning kernel") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
 }
 
 TEST(ConSanMoi, Cdna4RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
@@ -3815,6 +3875,40 @@ TEST(ConSanMoi, BarrierRecordForcedSpillUsesPlannedPrivateWindow) {
   EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 36u);
 }
 
+TEST(ConSanMoi, Rdna4DynamicStackBarrierRecordUsesSiteLocalSpillFrames) {
+  constexpr uint32_t kBarrierWait = 0xBF940000u;
+  const std::array<uint32_t, 4> text_words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+      kBarrierWait,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "dynamic_barrier_spill", kRdna4Wave64AllVgprsGranulated,
+      /*wave32=*/false, /*uses_dynamic_stack=*/true);
+  ConSanOptions options = moi_options();
+  options.moi_track_barriers = true;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  const auto barrier = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_NE(barrier, result.patches.end());
+  EXPECT_EQ(access->spilled_vgpr_count, 3u);
+  EXPECT_EQ(access->dynamic_private_segment_addend, 12u);
+  EXPECT_EQ(barrier->spilled_vgpr_count, 6u);
+  EXPECT_EQ(barrier->dynamic_private_segment_addend, 24u);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Cdna4BarrierRecordForcedSpillUsesNativePrivateWindows) {
   const auto guest = build_cdna4_ds_store_b32(
       /*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
@@ -6244,6 +6338,33 @@ TEST(ConSanMoi, AtomicRecordForcedSpillUsesPlannedPrivateWindow) {
   EXPECT_EQ(result.resource_plan_summary.spill_plans, 2u);
   EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 2u);
   EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 40u);
+}
+
+TEST(ConSanMoi, Rdna4DynamicStackAtomicRecordUsesSiteLocalSpillFrames) {
+  std::vector<uint8_t> bytes = make_rdna4_ordered_flat_atomic_code_object();
+  append_kernel_metadata_note(bytes, "lds_probe", /*uses_dynamic_stack=*/true,
+                              /*sgpr_count=*/0u);
+  ConSanOptions options = moi_options();
+  options.moi_track_atomics = true;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto atomic = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
+                                        &ConSanPatchInfo::kind);
+  ASSERT_NE(atomic, result.patches.end());
+  EXPECT_EQ(atomic->spilled_vgpr_count, 7u);
+  EXPECT_EQ(atomic->dynamic_private_segment_addend, 28u);
+  const auto fence = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
+                                       &ConSanPatchInfo::kind);
+  ASSERT_NE(fence, result.patches.end());
+  EXPECT_GT(fence->spilled_vgpr_count, 0u);
+  EXPECT_EQ(fence->dynamic_private_segment_addend, fence->spilled_vgpr_count * sizeof(uint32_t));
+  EXPECT_TRUE(result.final_validation_passed);
 }
 
 TEST(ConSanMoi, AtomicRecordSpillsSpecialStateOnRdna4) {

@@ -1770,7 +1770,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     return std::nullopt;
   if (preserved_lds_byte_offset_vgpr)
     lds_byte_offset_vgpr = preserved_lds_byte_offset_vgpr;
-  if (reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
+  if (!options.moi_spill_overlaps_guest_operands &&
+      reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
                                              errors))
     return std::nullopt;
   if ((!options.automatic_moi_private_epoch && !moi_uses_scalar_persistent_state(options) &&

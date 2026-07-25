@@ -142,9 +142,11 @@ struct ConSanPreappliedCodeRange {
   std::optional<uint64_t> continuation_text_offset;
 };
 
-/// Mutation bytes already committed before a staged instrumentation pass.
+/// Bytes unavailable to the current placement pass. Mutation composition uses
+/// this for already committed fault bytes; multi-stage instrumentation can
+/// also reserve an anchor for a deferred patch in the same transaction.
 /// Placement must never consume these ranges as newly available padding or a
-/// cave, because doing so would erase the injected fault being analyzed.
+/// cave.
 struct ConSanPreappliedReservedRange {
   uint64_t text_offset = 0;
   uint32_t size = 0;

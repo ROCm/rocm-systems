@@ -332,10 +332,12 @@ Current register policy:
 - The target-specific spill backends allocate stable slots through
   `SpillManager`, emit address-free `scratch_store/load_b32` batches with
   conservative split waits, and grows only the selected descriptor's fixed
-  private segment. For the supported compiler `s32:s33` dynamic-stack
-  convention, Inline access probes can instead create a site-local frame,
-  preserve the caller frame and SCC, spill the borrowed VGPR window, and grow
-  dispatch backing by the maximum added depth.
+  private segment. For the supported compiler dynamic-stack convention,
+  Inline, Record/Replay, and Sampled probes on CDNA3/CDNA4 and RDNA4-family
+  targets can instead create a site-local frame, preserve the caller frame and
+  SCC, spill the borrowed VGPR window, and grow dispatch backing by the maximum
+  added depth. Allocation excludes the backend's named stack-top and
+  frame-base registers rather than assuming a numeric preserved-SGPR range.
 - On gfx1250, a saturated SuperCollider group-FLAT probe bootstraps the same
   kind of site-local frame without assuming a dead or permanently preserved
   SGPR window. It saves the full VGPR victim window first, uses four saved
@@ -347,9 +349,11 @@ Current register policy:
   probes consume those backends for direct kernels and reachable shared helpers.
   A shared spill starts above the maximum original private extent and grows
   every owner to the same required size. Mixed fixed/dynamic shared ownership,
-  dynamic-stack consumers outside the qualified Inline access recipe, and
-  unresolved indirect ownership remain unsupported. No SGPR spill backend is
-  present; a full 106-normal-SGPR file fails explicitly.
+  unsupported engine/target recipes, and unresolved indirect ownership remain
+  unsupported. Dynamic full-VGPR RDNA4 Sampled owners require a persistent
+  scalar tuple proven untouched over each complete owner scope plus an
+  entry-local dead VGPR pair; failure of either proof is typed and
+  transactional. No general SGPR spill backend is present.
 
 The generic allocator, target-specific spill sequences, descriptor helper,
 implementation provenance, and backend tests now live outside ConSan and are

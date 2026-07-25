@@ -327,7 +327,7 @@ set(RJ_CONSAN_MOI_SHARED_ATOMIC_HELPER_TEST
     "ConSanMoiHipTest.SharedAtomicNoinlineHelperPreservesBothCallers"
 )
 set(RJ_CONSAN_MOI_DYNAMIC_PRIVATE_STACK_TEST
-    "ConSanMoiHipTest.DynamicPrivateStackTypedFallbackPreservesOutput"
+    "ConSanMoiHipTest.DynamicPrivateStackPreservesOutput"
 )
 
 function(rj_add_consan_common_sim_cases)
@@ -862,22 +862,48 @@ function(rj_add_consan_gfx1250_sim_cases)
             "RJ_CONSAN_REQUIRE_PATCH=1"
     )
     rj_add_consan_hip_case(
-        NAME "${_sim_PREFIX}.MoiDynamicStackTypedFallback"
+        NAME "${_sim_PREFIX}.MoiDynamicStackRecordReplayForcedSpill"
         TARGET ${_sim_MOI_TARGET}
         FILTER "${RJ_CONSAN_MOI_DYNAMIC_PRIVATE_STACK_TEST}"
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
-        PASS_REGEX "ConSan patch end.*outcome=unsupported"
+        PASS_REGEX
+            "kind=trampoline-moi-[a-z-]*[ -~]*spilled_vgprs=[1-9][0-9]*[ -~]*dynamic_private_addend=[1-9][0-9]*"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=record-replay"
+            "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
             "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
             "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
             "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
             "RJ_CONSAN_TEST_KERNEL_FILTER=moi_dynamic_private_stack_test_kernel_for_instrumentation"
-            "RJ_CONSAN_LOG=1"
+            "RJ_CONSAN_LOG=3"
             "RJ_CONSAN_MAX_PATCHES=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "${_sim_PREFIX}.MoiDynamicStackSampledForcedSpill"
+        TARGET ${_sim_MOI_TARGET}
+        FILTER "${RJ_CONSAN_MOI_DYNAMIC_PRIVATE_STACK_TEST}"
+        CONFIG "${_sim_CONFIG}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX
+            "kind=trampoline-moi-[a-z-]*[ -~]*spilled_vgprs=[1-9][0-9]*[ -~]*dynamic_private_addend=[1-9][0-9]*"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=sampled"
+            "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+            "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_dynamic_private_stack_test_kernel_for_instrumentation"
+            "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_MAX_PATCHES=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
     )
 endfunction()
 
@@ -1448,22 +1474,40 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
         )
         rj_add_consan_hip_case(
-                NAME "ConSanMoiHipTest.DbiDynamicPrivateStackTypedFallbackPreservesOutput"
+                NAME "ConSanMoiHipTest.DbiDynamicPrivateStackRecordReplayForcedSpillPreservesOutput"
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_MOI_DYNAMIC_PRIVATE_STACK_TEST}"
                 TIMEOUT 30
+                PASS_REGEX
+                    "kind=trampoline-moi-[a-z-]*[ -~]*spilled_vgprs=[1-9][0-9]*[ -~]*dynamic_private_addend=[1-9][0-9]*"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_dynamic_private_stack_test_kernel_for_instrumentation"
-                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
         )
-        set_tests_properties(
-            "ConSanMoiHipTest.DbiDynamicPrivateStackTypedFallbackPreservesOutput"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION "ConSan patch end.*outcome=unsupported"
+        rj_add_consan_hip_case(
+                NAME "ConSanMoiHipTest.DbiDynamicPrivateStackSampledForcedSpillPreservesOutput"
+                TARGET hip_consan_moi_test
+                FILTER "${RJ_CONSAN_MOI_DYNAMIC_PRIVATE_STACK_TEST}"
+                TIMEOUT 30
+                PASS_REGEX
+                    "kind=trampoline-moi-[a-z-]*[ -~]*spilled_vgprs=[1-9][0-9]*[ -~]*dynamic_private_addend=[1-9][0-9]*"
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=sampled"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                    "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_dynamic_private_stack_test_kernel_for_instrumentation"
+                    "RJ_CONSAN_LOG=3"
+                    "RJ_CONSAN_MAX_PATCHES=1"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
         )
         rj_add_consan_hip_case(
                 NAME "ConSanLdsTest.BaselinePaddedCleanStore"

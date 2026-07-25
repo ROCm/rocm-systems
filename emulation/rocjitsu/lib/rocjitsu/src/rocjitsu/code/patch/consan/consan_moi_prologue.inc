@@ -1738,23 +1738,47 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     std::optional<uint64_t> entry_island_offset;
     bool indirect_at_entry = false;
     uint64_t prologue_return_target = kernel.entry_text_offset;
+    const auto original_kernel =
+        std::ranges::find(result.kernels, kernel.name, &ConSanKernelInfo::name);
+    const auto composed_entry_patch =
+        std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+          const bool chainable_access =
+              patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
+              patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
+              patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+          return chainable_access && patch.anchor_offset == kernel.entry_text_offset &&
+                 patch.original_size != 0u && patch.trampoline_size != 0u &&
+                 original_kernel != result.kernels.end() &&
+                 kernel_owns_patch(*original_kernel, patch);
+        });
+    const bool chains_existing_entry_trampoline =
+        instrument_entry_in_place && composed_entry_patch != result.patches.end();
     if (instrument_entry_in_place) {
-      std::vector<std::string> relocation_errors;
-      auto decoded = decode_relocatable_entry_instruction(old_text, kernel.entry_text_offset, arch,
-                                                          relocation_errors);
-      if (!decoded) {
-        if (requires_in_place_entry) {
-          result.errors.insert(result.errors.end(), relocation_errors.begin(),
-                               relocation_errors.end());
-          return;
-        }
-        // A non-dynamic kernel with a PC-relative first instruction cannot
-        // safely displace that instruction. Retain descriptor redirection as
-        // the compatibility fallback for this uncommon entry shape.
-        instrument_entry_in_place = false;
+      if (chains_existing_entry_trampoline) {
+        // An earlier instrumentation phase already displaced the guest entry
+        // instruction and owns the continuation back into the kernel. Chain
+        // initialization directly into that generated body instead of trying
+        // to relocate its PC-relative anchor branch as though it were guest
+        // control flow.
+        prologue_return_target = composed_entry_patch->trampoline_offset;
       } else {
-        displaced_entry_words = std::move(*decoded);
-        prologue_return_target += displaced_entry_words.size() * sizeof(uint32_t);
+        std::vector<std::string> relocation_errors;
+        auto decoded = decode_relocatable_entry_instruction(
+            old_text, kernel.entry_text_offset, arch, relocation_errors);
+        if (!decoded) {
+          if (requires_in_place_entry) {
+            result.errors.insert(result.errors.end(), relocation_errors.begin(),
+                                 relocation_errors.end());
+            return;
+          }
+          // A non-dynamic kernel with a PC-relative first instruction cannot
+          // safely displace that instruction. Retain descriptor redirection as
+          // the compatibility fallback for this uncommon entry shape.
+          instrument_entry_in_place = false;
+        } else {
+          displaced_entry_words = std::move(*decoded);
+          prologue_return_target += displaced_entry_words.size() * sizeof(uint32_t);
+        }
       }
     }
 
@@ -1764,6 +1788,12 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
         !compute_sopp_branch_simm16(kernel.entry_text_offset, prologue_text_offset)) {
       entry_island_offset = entry_islands.claim_reachable(kernel.entry_text_offset);
       if (!entry_island_offset) {
+        if (chains_existing_entry_trampoline) {
+          result.errors.emplace_back(
+              "ConSan MOI dynamic-stack owner/epoch prologue found no reachable entry relay "
+              "without clobbering an existing entry instrumentation patch");
+          return;
+        }
         constexpr size_t kDirectEntryRelayWords = 7u;
         while (displaced_entry_words.size() < kDirectEntryRelayWords) {
           std::vector<std::string> relocation_errors;
@@ -1942,8 +1972,11 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     info.kind = ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
     info.anchor_offset = kernel.entry_text_offset;
     info.trampoline_offset = prologue_text_offset;
-    info.original_size =
-        instrument_entry_in_place ? displaced_entry_words.size() * sizeof(uint32_t) : 0u;
+    info.original_size = instrument_entry_in_place
+                             ? (chains_existing_entry_trampoline
+                                    ? composed_entry_patch->original_size
+                                    : displaced_entry_words.size() * sizeof(uint32_t))
+                             : 0u;
     info.trampoline_size = static_cast<uint32_t>(new_text.size() - prologue_text_offset);
     info.dispatch_id_primary_prologue_offset = dispatch_id_primary_prologue_offset;
     info.dispatch_id_secondary_prologue_offset = dispatch_id_secondary_prologue_offset;

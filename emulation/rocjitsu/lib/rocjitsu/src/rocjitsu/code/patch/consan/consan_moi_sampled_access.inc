@@ -176,6 +176,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     uint32_t required_private_bytes = 0;
     uint32_t probe_guest_instruction_offset = 0;
     std::optional<uint16_t> transient_exec_save_sgpr;
+    bool spill_overlaps_guest_operands = false;
     bool wrap_embedded_guest_vgpr_bank = false;
   };
   std::vector<PlannedSampledPatch> planned_patches;
@@ -236,7 +237,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   }
   std::optional<MoiLocalNopIslandAllocator> local_entry_islands;
   if (use_indirect_appended && !original_text.empty())
-    local_entry_islands.emplace(original_text, result, arch, kIndirectIslandWords);
+    local_entry_islands.emplace(original_text, result, arch, kIndirectIslandWords,
+                                options.preapplied_reserved_ranges);
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_entry_islands;
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_dispatchers;
   std::unordered_map<const ConSanMoiCandidate *, size_t> candidate_indices;
@@ -510,6 +512,14 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     uint32_t required_private_bytes = private_layout ? private_layout->ephemeral_base : 0u;
     if (spill)
       required_private_bytes = std::max(required_private_bytes, spill->total_private_bytes);
+    bool spill_overlaps_guest_operands = false;
+    if (spill &&
+        sampled_access_can_emit_spill_over_guest_operands(candidate_options, candidate)) {
+      std::vector<std::string> ignored_overlap_errors;
+      spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
+          candidate, resources->base, resources->count, ignored_overlap_errors);
+      candidate_options.moi_spill_overlaps_guest_operands = spill_overlaps_guest_operands;
+    }
     const uint32_t candidate_entry_island_words =
         candidate_options.automatic_moi_record_replay_sgpr_spill ? kIndirectIslandWords + 1u
                                                                  : kIndirectIslandWords;
@@ -706,6 +716,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     planned.required_private_bytes = required_private_bytes;
     planned.probe_guest_instruction_offset = probe_guest_instruction_offset;
     planned.transient_exec_save_sgpr = candidate_options.moi_exec_save_sgpr;
+    planned.spill_overlaps_guest_operands = spill_overlaps_guest_operands;
     planned.wrap_embedded_guest_vgpr_bank = wrap_embedded_guest_vgpr_bank;
     planned_patches.push_back(std::move(planned));
     if (use_indirect_appended && !use_dense_call)
@@ -1055,6 +1066,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         return;
       }
       candidate_options.scratch_vgpr = planned_patch.resources.base;
+      candidate_options.moi_spill_overlaps_guest_operands =
+          planned_patch.spill_overlaps_guest_operands;
       if (planned_patch.private_epoch_offset ||
           moi_uses_scalar_persistent_state(candidate_options)) {
         uint16_t state_vgpr =
@@ -1343,6 +1356,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               return std::optional<std::vector<uint32_t>>{};
             }
             candidate_options.scratch_vgpr = planned_patch.resources.base;
+            candidate_options.moi_spill_overlaps_guest_operands =
+                planned_patch.spill_overlaps_guest_operands;
             if (planned_patch.private_epoch_offset ||
                 moi_uses_scalar_persistent_state(candidate_options)) {
               uint16_t state_vgpr = static_cast<uint16_t>(planned_patch.resources.base +

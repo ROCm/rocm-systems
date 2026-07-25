@@ -137,6 +137,11 @@ constexpr size_t moi_direct_sampled_report_buffer_bytes(uint32_t sampled_capacit
               sizeof(MoiSampledSyncMetadataPacked) + sizeof(MoiSampledPendingAcquireSlot));
 }
 
+constexpr size_t moi_access_report_buffer_bytes(uint32_t access_capacity) {
+  return std::max(moi_report_buffer_bytes(access_capacity),
+                  moi_direct_sampled_report_buffer_bytes(access_capacity));
+}
+
 constexpr size_t moi_direct_sampled_entries_offset(uint32_t sampled_capacity) {
   return sizeof(MoiReportHeader) + sampled_capacity * sizeof(MoiSampledCausalWindow);
 }
@@ -1223,9 +1228,12 @@ TEST(ConSanMoiHipTest, StaticPrivateStackForcedSpillPreservesOutput) {
     EXPECT_EQ(out[tid], 0x57AC0000u ^ tid) << "tid=" << tid;
 }
 
-TEST(ConSanMoiHipTest, DynamicPrivateStackTypedFallbackPreservesOutput) {
+TEST(ConSanMoiHipTest, DynamicPrivateStackPreservesOutput) {
   constexpr uint32_t kThreads = 64;
-  constexpr size_t kReportBytes = moi_report_buffer_bytes(/*access_record_capacity=*/1);
+  // This fixture is shared by Record/Replay and Sampled runtime validation.
+  // Provision the larger access-only ABI rather than coupling the kernel test
+  // to whichever engine happens to run it.
+  constexpr size_t kReportBytes = moi_access_report_buffer_bytes(/*access_capacity=*/1);
   uint32_t *d_out = nullptr;
   void *d_report = nullptr;
   HIP_ASSERT(hipMalloc(&d_out, kThreads * sizeof(uint32_t)));

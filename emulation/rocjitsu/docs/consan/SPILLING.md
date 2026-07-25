@@ -111,17 +111,25 @@ which `s32` is the stack top and `s33` is the current frame base. A spill-backed
 probe uses the shared backend's site-local dynamic frame only after ownership
 analysis establishes that this recipe applies. InlineShadow supports the
 recipe on every admitted target. Record/Replay and Sampled support it on
-CDNA3/CDNA4 when every owner of the spilled site uses a dynamic stack. This is
-an implementation boundary rather than an ISA limitation: the non-Inline
-frame-save and scalar-window layouts are not yet wired for RDNA4-family
-targets (`bd-1w9.28`).
+CDNA3/CDNA4 and the RDNA4 family when every owner of the spilled site uses a
+dynamic stack.
 
 ConSan supplies safe scalar save registers, preserves SCC and the incoming
 frame, borrows the VGPR window, and restores all state before resuming guest
 code. The engine-specific scalar window reserves a frame-base save slot, and
-automatic scalar allocation excludes `s32:s33`, whose implicit stack roles
-need not appear as decoded operands. This path applies to access, atomic, and
-synchronization probes that receive a spill-backed resource plan.
+automatic scalar allocation excludes the backend's named stack-top and
+frame-base registers individually, whose implicit roles need not appear as
+decoded operands. This path applies to access, atomic, and synchronization
+probes that receive a spill-backed resource plan. A full-VGPR RDNA4 Sampled
+owner keeps persistent owner/epoch state in a scalar tuple only after
+whole-owner CFG/reference analysis proves the tuple untouched; its entry
+initializer separately borrows an entry-local dead VGPR pair. If either proof
+is unavailable, the dynamic owner fails closed instead of using fixed-offset
+private state.
+The owner-scope reference summary and scalar-tuple admissibility proof are the
+intended shared foundation for future general SGPR spilling and mixed
+fixed/dynamic ownership; those follow-ups must preserve the same fail-closed
+contract rather than derive a weaker placement rule.
 
 The gfx1250 SuperCollider group-FLAT path also supports full register pressure.
 It first saves the complete borrowed VGPR window relative to the incoming stack
@@ -179,16 +187,16 @@ from removing private-size mutation.
 | Probe family | Current resource path |
 |---|---|
 | SuperCollider group-FLAT probes | Dead and fresh windows on admitted targets; gfx1250 full-pressure dynamic-stack owners can use the borrowed-pair site-local frame. |
-| Record/Replay access probes | Dead, fresh-growth, and spill-backed VGPR windows; dynamic-stack spill on CDNA3/CDNA4. |
-| Sampled access probes | Dead, fresh-growth, and spill-backed VGPR windows; dynamic-stack spill on CDNA3/CDNA4. |
+| Record/Replay access probes | Dead, fresh-growth, and spill-backed VGPR windows; dynamic-stack spill on CDNA3/CDNA4 and the RDNA4 family. |
+| Sampled access probes | Dead, fresh-growth, and spill-backed VGPR windows; dynamic-stack spill on CDNA3/CDNA4 and the RDNA4 family. |
 | InlineShadow access probes | Dead, fresh-growth, and spill-backed VGPR windows on every admitted target; fixed-stack owners may use the private-epoch fallback. |
 | Reachable shared helpers | One all-owner-compatible dead, fresh, or common spill plan; a dynamic spill requires every owner to be dynamic. |
-| Persistent owner/epoch/key state | Owner-compatible VGPR tuples, fixed-stack private state where supported, or CDNA scalar tuples for dynamic full-VGPR owners. |
+| Persistent owner/epoch/key state | Owner-compatible VGPR tuples, fixed-stack private state where supported, or proven owner-scope scalar tuples for dynamic full-VGPR CDNA/RDNA4 owners. |
 | Private-epoch entry/barrier temporaries | Saved and restored through the target-specific private path. |
 | Transient scalar state | Component-local dead/fresh windows, plus bounded private-memory preservation for supported Record/Replay, Sampled, and InlineShadow probes. Indirect-router scalars remain dead/fresh. |
 | Barrier and atomic VGPR temporaries | Dead, fresh-growth, and spill-backed common plans, including the engine/target dynamic-stack matrix above. |
 | General SGPR or AccVGPR spilling | Not implemented. |
-| Dynamic-stack kernels | InlineShadow on all admitted targets; Record/Replay and Sampled on CDNA3/CDNA4; gfx1250 SuperCollider group-FLAT full-pressure spill; unsupported engine/target or mixed-owner spill recipes fail closed. |
+| Dynamic-stack kernels | InlineShadow, Record/Replay, and Sampled on all admitted CDNA3/CDNA4/RDNA4-family targets; gfx1250 SuperCollider group-FLAT full-pressure spill; unsupported engine/target or mixed-owner spill recipes fail closed. |
 | Unresolved indirect ownership | Not instrumented. |
 
 This is narrower than a compiler register allocator. It is the semantically

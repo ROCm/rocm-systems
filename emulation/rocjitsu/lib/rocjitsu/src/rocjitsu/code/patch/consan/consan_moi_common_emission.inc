@@ -419,13 +419,18 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
           "ConSan MOI spill cannot share one frame recipe across dynamic and fixed owners");
       return std::nullopt;
     }
-    const bool supported_engine =
-        options.moi_engine == ConSanMoiEngine::InlineShadow ||
-        ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-         (options.moi_engine == ConSanMoiEngine::RecordReplay ||
-          options.moi_engine == ConSanMoiEngine::Sampled));
-    if (!supported_engine || !options.moi_dynamic_stack_spill || !options.moi_exec_save_sgpr) {
-      warnings.emplace_back("ConSan MOI dynamic-stack spill has no supported scalar-state layout");
+    if (!moi_supports_dynamic_stack_spill(arch, options.moi_engine)) {
+      warnings.emplace_back(
+          "ConSan MOI dynamic-stack spill has no backend for this target and engine");
+      return std::nullopt;
+    }
+    if (!options.moi_dynamic_stack_spill) {
+      warnings.emplace_back(
+          "ConSan MOI dynamic-stack spill was not included in scalar-state planning");
+      return std::nullopt;
+    }
+    if (!options.moi_exec_save_sgpr) {
+      warnings.emplace_back("ConSan MOI dynamic-stack spill has no EXEC-save scalar window");
       return std::nullopt;
     }
     const bool spill_backed_scalar_window =

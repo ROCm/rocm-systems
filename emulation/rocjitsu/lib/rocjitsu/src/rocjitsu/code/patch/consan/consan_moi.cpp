@@ -307,13 +307,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   MoiResourcePlanningState resource_planning_state(code_object_bytes, arch, effective_options,
                                                    result);
   rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
-  const bool supports_dynamic_stack_spill =
-      effective_options.moi_engine == ConSanMoiEngine::InlineShadow ||
-      ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-       (effective_options.moi_engine == ConSanMoiEngine::RecordReplay ||
-        effective_options.moi_engine == ConSanMoiEngine::Sampled));
   effective_options.moi_dynamic_stack_spill =
-      supports_dynamic_stack_spill &&
+      moi_supports_dynamic_stack_spill(arch, effective_options.moi_engine) &&
       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
         if (plan.source != ConSanRegisterAllocationSource::SpillRequired)
           return false;
@@ -355,6 +350,26 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     finalize_moi_site_lowering_outcomes(result);
     summarize_moi_resource_plans(result);
     return result;
+  }
+  if (effective_options.moi_engine == ConSanMoiEngine::Sampled &&
+      effective_options.moi_init_owner_epoch) {
+    for (const ConSanKernelInfo &kernel : result.kernels) {
+      if (!kernel.has_text_range || !kernel.uses_dynamic_stack.value_or(false))
+        continue;
+      const bool entry_already_reserved = std::ranges::any_of(
+          effective_options.preapplied_reserved_ranges,
+          [&](const ConSanPreappliedReservedRange &reserved) {
+            return reserved.size != 0u && kernel.entry_text_offset >= reserved.text_offset &&
+                   kernel.entry_text_offset - reserved.text_offset < reserved.size;
+          });
+      if (!entry_already_reserved) {
+        // Dynamic-stack owner/epoch setup must branch in place from the
+        // original entry. Keep every Sampled cave/relay allocator off that
+        // anchor until the prologue is emitted in the final growth pass.
+        effective_options.preapplied_reserved_ranges.push_back(
+            {.text_offset = kernel.entry_text_offset, .size = sizeof(uint32_t)});
+      }
+    }
   }
   if (std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
         return plan.reason == ConSanRegisterPlanReason::DynamicStack;
@@ -540,9 +555,11 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
                                  std::span<const uint8_t> code_object_bytes) {
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = options.moi_engine;
-  const rj_code_arch_t arch = result.arch_name == "cdna3"   ? ROCJITSU_CODE_ARCH_CDNA3
-                              : result.arch_name == "cdna4" ? ROCJITSU_CODE_ARCH_CDNA4
-                                                            : ROCJITSU_CODE_ARCH_INVALID;
+  const rj_code_arch_t arch = result.arch_name == "rdna4"     ? ROCJITSU_CODE_ARCH_RDNA4
+                              : result.arch_name == "gfx1250" ? ROCJITSU_CODE_ARCH_GFX1250
+                              : result.arch_name == "cdna3"   ? ROCJITSU_CODE_ARCH_CDNA3
+                              : result.arch_name == "cdna4"   ? ROCJITSU_CODE_ARCH_CDNA4
+                                                              : ROCJITSU_CODE_ARCH_INVALID;
 
   size_t selected_candidate_count = 0;
   bool selected_flat_candidate = false;
