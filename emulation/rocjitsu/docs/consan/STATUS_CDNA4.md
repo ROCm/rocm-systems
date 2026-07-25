@@ -160,7 +160,7 @@ gate.
 
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Current evidence |
 |---|---|---|---|---|---|---|
-| P0 | `gfx950_sk_sgemm_streamk` | 🟩 Current wait-fixed clean and exact-one fault bundle: exact oracle, complete 82/82 access coverage, zero mismatches, clean containment, and 1.10x paired slowdown | 🟨 Current wait-fixed clean run: exact oracle, complete 82/82 accesses plus 11/11 barriers, complete replay, zero diagnostics, and 1.08x paired slowdown; current exact-one fault bundle missing | 🟨 Current wait-fixed clean run: exact oracle, complete 82/82 accesses plus 11/11 barriers, complete sampled report, zero diagnostics, and 1.19x paired slowdown; current exact-one fault bundle missing | 🟨 Current wait-fixed clean run: exact oracle, complete 82/82 accesses plus 11/11 barriers, complete inline report, zero diagnostics, and 6.08x paired slowdown; current exact-one fault bundle missing | All current runs use rocm-libraries `0a323b7493` and a 120-second bound; instrumented legs use the standard profiles.  Every retained log records the driver working directory, exact shell-quoted invocation, and timeout; instrumented logs additionally record the hook and `RJ_*` profile settings. |
+| P0 | `gfx950_sk_sgemm_streamk` | 🟩 Current wait-fixed clean and exact-one qualified-miss bundle: exact oracle, complete 82/82 access coverage, zero mismatches, clean containment, and 1.10x paired slowdown | 🟩 Current clean and exact-one qualified-miss bundle: 82/82 accesses plus every present barrier, complete replay, zero diagnostics, clean containment, and 1.13x paired slowdown | 🟩 Current clean and exact-one qualified-miss bundle: 82/82 accesses plus every present barrier, complete sampled report, zero diagnostics, clean containment, and 1.35x paired slowdown | 🟩 Current clean and exact-one qualified-miss bundle: 82/82 accesses plus every present barrier, complete inline report, zero diagnostics, clean containment, and 5.98x paired slowdown | All current runs use rocm-libraries `0a323b7493` and a 120-second bound; instrumented legs use the standard profiles.  Every retained log records the driver working directory, exact shell-quoted invocation, and timeout; instrumented logs additionally record the hook and `RJ_*` profile settings. |
 
 This row is the executable denominator selected from the larger gfx950 YAML
 survey.  Static YAML features alone do not promote or expand that denominator.
@@ -168,8 +168,8 @@ The current baseline-before, SuperCollider, and baseline-after runs all pass
 the exact numeric oracle and target-native gfx950 ELF checks.  Their
 host-dominated end-to-end elapsed times are 5.107, 5.651, and 5.125 seconds,
 respectively.  The mean of the two baseline legs is 5.116 seconds, giving a
-1.104573885848319 (1.10x rounded) paired ratio; this is not a kernel-overhead
-measurement.  SuperCollider discovers, selects, and patches all 82 LDS
+1.10x paired ratio; this is not a kernel-overhead measurement.  SuperCollider
+discovers, selects, and patches all 82 LDS
 accesses, reports no unsupported or resource-failed sites, and finishes with
 marker zero, no mismatch, and complete report cleanup.
 
@@ -193,6 +193,7 @@ paired clean artifacts and retained fault bundle are:
 - `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fix-review-20260725`;
 - `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-sc-clean-20260725`;
 - `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-sc-paired-20260725`;
+- `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-moi-paired-20260725`;
 - `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-sc-inventory-20260725`;
 - `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-sc-fault-trial1-20260725`;
 - `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-sc-fault-trial2-20260725`;
@@ -211,14 +212,19 @@ client wrapper
 (`cf6a90c93cdaadfca898a62ea88edbff737aaf27e6cb9631f35f7dc61fb86ec0`),
 and loaded hook
 `0be89aec2512038d31c389523796e9b755e4d9c0e7422b22b72a3e3cdea8744e`;
-the paired-overhead `summary.json` is
-`f29aa2cb8488c2f0a2d5744af750649cdac6f5cae5f1cb486eb71025a84b126e`;
+the SuperCollider and MOI paired-overhead summaries are
+`f29aa2cb8488c2f0a2d5744af750649cdac6f5cae5f1cb486eb71025a84b126e`
+and
+`099ab4439e5993beaba0d096cb5790a746c5153f59490150766fb39bf2f37079`;
+the MOI fault summary is
+`6d86da84430c4338e84fd2ab8169f56897ac48d1158fe4bc33489d5488707842`;
 the retained runner logs record the exact shell invocation, paths, runtime
 environment, target, and generated gfx950 ELF checks, while only instrumented
-logs contain hook and `RJ_*` settings.  The three MOI cells remain yellow only
-because their clean bundles do not yet include current-producer exact-one
-fault qualification, tracked by `bd-1w9.42`.  The SuperCollider cell is
-complete and the independent scalar-load wait hazard tracked by
+logs contain hook and `RJ_*` settings.  All four profile cells satisfy the
+declared bundle contract; the accepted qualified misses are not claims of
+positive detector sensitivity.  The MOI fault qualification was completed
+under `bd-1w9.42`, a Tensile-specific positive detector control is tracked by
+`bd-1w9.43`, and the independent scalar-load wait hazard tracked by
 `bd-1w9.9.8` is closed.
 
 A separate generator cleanup for `bd-1w9.9.5` is pinned at rocm-libraries
@@ -370,49 +376,100 @@ Exactly one four-reviewer local round covered original head `c4dbaf1a70b4`;
 all seven comments were addressed in amended head `0a323b74932c`, resolved,
 and approved without a reviewer rerun or Curator pass.
 
-The current producer also passes every strict MOI clean profile:
+The current producer also passes a paired campaign over every strict MOI
+profile.  Its execution order is baseline-before, Record/Replay, Sampled,
+Inline Shadow, then baseline-after.  The 5.697- and 5.401-second baseline legs
+give a 5.549-second paired baseline.  Its raw files are under the explicit
+profile directories
+`rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-moi-paired-20260725/record-replay`,
+`rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-moi-paired-20260725/sampled`,
+and
+`rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-moi-paired-20260725/inline-shadow`:
 
-- Record/Replay patches all 82 accesses and 11 barriers with 187 total
-  patches.  Its 462,544-byte primary report contains 82/82 visible access
-  records with none dropped; replay processes all 82, reports no conflict,
-  overflow, unsupported record, or diagnostic, and returns report memory to
-  zero.  The exact numerical oracle passes in 6.217 seconds, or 1.08x the
-  paired baseline.  The retained artifact root is
-  `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-record-replay-20260725`;
-  its `results.csv` and runner log hashes are
-  `2050e8a39b0ab05c732b082160797d078fcb0906ce696934e03f9baf9650809b`
+- Record/Replay emits 187 total patches, covering all 82 accesses and 11
+  barriers.  Its 462,544-byte primary report contains 82/82 visible access
+  records with none dropped;
+  replay processes all 82, reports no conflict, overflow, unsupported record,
+  or diagnostic, and returns report memory to zero.  The exact numerical
+  oracle passes in 6.291 seconds, or 1.13x.  Its `results.csv` and runner log
+  hashes are
+  `257b2674264672c410effd99c359b8589c3e950019b324f4926f2ae5150a89b2`
   and
-  `58bec76890115c7a1d9b100eb3d6629ee3aaf41c4b069b7fe7232297b6524efb`.
-- Sampled patches all 82 accesses and 11 barriers with 187 total patches.  Its
-  106,448-byte primary report provisions 656 banks/watchpoints, records eight
-  visible sampled windows, and reports no dropped window, stale/incomplete/
-  changed/malformed snapshot, conflict, unsupported synchronization, or
-  diagnostic.  Cleanup returns report memory to zero.  The exact numerical
-  oracle passes in 6.840 seconds, or 1.19x the paired baseline.  The retained
-  artifact root is
-  `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-sampled-20260725`;
-  its `results.csv` and runner log hashes are
-  `62d9c89c778ac4dacc14cd496d6de877ec9f7d4c7a56faf88225c3049421cb7f`
+  `6381da3c8475a0148e60929b17a8488029ea0f0cd57fa525388af07954eaa6d8`.
+- Sampled emits 187 total patches, covering all 82 accesses and 11 barriers.
+  Its 106,448-byte primary report provisions 656 banks/watchpoints, records
+  eight visible sampled windows, and reports no dropped window,
+  stale/incomplete/changed/malformed snapshot, conflict, unsupported
+  synchronization, or diagnostic.  Cleanup returns report memory to zero.
+  The exact numerical oracle passes in 7.467 seconds, or 1.35x.  Its
+  `results.csv` and runner log hashes are
+  `f9da87d699742980d963656deaa359c284182c866fdb0c1a8cd1dae671844116`
   and
-  `103c4f60ad152b9405dad280a85fd5b1dcd20d5a94c10cf8ac2d27853697ff48`.
-- Inline Shadow patches all 82 accesses and 11 barriers with 176 total
-  patches.  Its 12,598,640-byte primary report includes 8,192 inline-LDS
+  `1ae2b8673a9cadcc434bb3f93f79cead76559cc2b82e0deecc03a461721af09c`.
+- Inline Shadow emits 176 total patches, covering all 82 accesses and 11
+  barriers.  Its 12,598,640-byte primary report includes 8,192 inline-LDS
   bytes, 524,288 exact-shadow entries, and 64 release/snapshot/token records.
   Runtime records 465,408 events and 18,432 visible exact-shadow entries with
   no incomplete, changed, malformed, unsupported, overflow, or diagnostic
   outcome.  Cleanup returns report memory to zero.  The exact numerical oracle
-  passes in 34.912 seconds, or 6.08x the paired baseline.  The retained
-  artifact root is
-  `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-wait-fixed-inline-shadow-20260725`;
-  its `results.csv` and runner log hashes are
-  `e62e702fc4795502fbbbc9265547f2de91a56d9cfb3db194745a8553be47da1e`
+  passes in 33.200 seconds, or 5.98x.  Its `results.csv` and runner log hashes
+  are
+  `ea641830bc5e9fe5e0fd7b6de43c31ed9867866c47006fc004aedd554d455f8a`
   and
-  `8e10768f80b2cdc8268b201271cf092e1e3ed780ca641b4332cd15bd76ca413c`.
+  `0d32c1989c4889c8aeb834d05ef43aaf4b3ceed7a41b738c1c4102e842f0df28`.
+
+The SuperCollider and MOI ratios come from separate paired campaigns with
+different baseline legs.  Both are host-dominated end-to-end measurements;
+they must not be compared with each other as relative engine overhead.
+
+The same current-producer inventory and selector also qualify each MOI fault
+cell.  Fault discovery is profile-independent and follows the validator
+contract: one SuperCollider dry run inventories 11 target-native barriers,
+then each requested profile applies the prospectively frozen occurrence-zero
+selector at code-object identity `fnv1a64:89754d9658cf27ec` and PC `0x10a4`.
+The precommitted outcome is an exact-oracle pass with no MOI diagnostic, so
+each accepted result is a qualified miss rather than a detector hit.  Green
+for this row means that every declared bundle gate passes with that
+prospectively frozen outcome; it is not a positive detector-sensitivity claim.
+Positive gfx950 detector-hit rows exist elsewhere in this matrix, including
+Record/Replay D128, while a Tensile-specific positive control is tracked by
+`bd-1w9.43`.
+
+Each profile has two independent fault trials.  Record/Replay, Sampled, and
+Inline Shadow finish their first trials in 6.400, 8.008, and 33.245 seconds
+and their second trials in 6.202, 7.012, and 32.970 seconds.  Every trial
+records one requested, planned, and applied deletion, patches all 82/82
+accesses and all 10 surviving barriers, passes the exact oracle with zero
+diagnostics, and returns report memory to zero.  Clean pre-fault health runs
+immediately before the second trials pass in 6.208, 6.976, and 33.181 seconds;
+clean post-fault runs immediately afterward pass in 6.164, 6.724, and 33.350
+seconds.  Each health run restores 82/82 access and 11/11 barrier coverage,
+keeps the exact oracle and no-diagnostic contract, and completes report
+cleanup.
+
+The paired root above contains `fault-summary.json`, which pins both trials,
+the earlier post-fault checks, the directly containing before/after health
+runs, and every raw-file SHA-256.  The literal trial roots under
+`rocjitsu-test-corpus/.pytest-artifacts` are:
+
+- `consan-gfx950-tensile-wait-fixed-rr-fault-trial1-20260725`;
+- `consan-gfx950-tensile-wait-fixed-sampled-fault-trial1-20260725`;
+- `consan-gfx950-tensile-wait-fixed-inline-fault-trial1-20260725`;
+- `consan-gfx950-tensile-wait-fixed-rr-pre-fault-health-20260725`;
+- `consan-gfx950-tensile-wait-fixed-rr-fault-trial2-20260725`;
+- `consan-gfx950-tensile-wait-fixed-rr-post-fault-health-trial2-20260725`;
+- `consan-gfx950-tensile-wait-fixed-sampled-pre-fault-health-20260725`;
+- `consan-gfx950-tensile-wait-fixed-sampled-fault-trial2-20260725`;
+- `consan-gfx950-tensile-wait-fixed-sampled-post-fault-health-trial2-20260725`;
+- `consan-gfx950-tensile-wait-fixed-inline-pre-fault-health-20260725`;
+- `consan-gfx950-tensile-wait-fixed-inline-fault-trial2-20260725`;
+- `consan-gfx950-tensile-wait-fixed-inline-post-fault-health-trial2-20260725`.
 
 The cumulative placement work is closed under `bd-1w9.9.6` and
 `bd-1w9.9.7`.  The producer fix for `bd-1w9.9.8` makes all three generated
 code objects waitcheck-clean at this same revision; none of the four current
-instrumented runs reports the historical scalar-load dependency hazard.
+instrumented runs reports the historical scalar-load dependency hazard.  The
+current MOI fault parity work was completed under `bd-1w9.42`.
 
 ## PyTorch expansion
 
@@ -569,6 +626,19 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-25: Completed the current-producer `bd-1w9.42` qualification for
+  Record/Replay, Sampled, and Inline Shadow.  One shared target-native
+  inventory supplies the exact occurrence-zero barrier selector; two
+  independent trials per standard strict profile record a 1/1/1 mutation,
+  complete 82/82 access plus 10/10 surviving-barrier coverage, a passing exact
+  oracle, zero diagnostics, and complete cleanup.  Clean health runs directly
+  before and after the second trial restore 11/11 barriers.  These are
+  prospectively frozen qualified misses, not detector hits; the separate
+  positive Tensile control is tracked by `bd-1w9.43`.  A
+  baseline-before/all-profiles/baseline-after campaign replaces the earlier
+  single-baseline quotients with true paired ratios of 1.13x, 1.35x, and
+  5.98x.  Every individual row stays below one minute.
 
 - 2026-07-25: Completed `bd-1w9.9.8` at rocm-libraries `0a323b7493`.
   The general grouped-user-argument loader now retires real non-preloaded
