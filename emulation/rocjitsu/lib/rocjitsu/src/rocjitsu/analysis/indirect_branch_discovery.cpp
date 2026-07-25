@@ -1028,7 +1028,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 [[nodiscard]] std::optional<IndirectCallFixup> fixup_for_value(const AnalysisContext &ctx,
                                                                size_t inst_index, uint16_t pair_lo,
                                                                const PcValue &value,
-                                                               bool targets_exhaustive = true) {
+                                                               bool targets_exhaustive) {
   // A recovered target outside the current text section cannot become a local
   // BasicBlock successor. Drop it here rather than forcing the caller to filter
   // impossible leaders.
@@ -1055,8 +1055,13 @@ bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup)
            existing.source_call_sreg == fixup.source_call_sreg;
   });
   if (duplicate != out.end()) {
-    if (fixup.source_targets_exhaustive && !duplicate->source_targets_exhaustive) {
-      duplicate->source_targets_exhaustive = true;
+    // Discovery only adds CFG edges between iterations. A later pass can
+    // expose an unconstrained predecessor for a consumer that looked complete
+    // earlier, but it cannot erase that path again. Preserve that monotonicity:
+    // once any observation is non-exhaustive, the merged fixup stays
+    // non-exhaustive.
+    if (duplicate->source_targets_exhaustive && !fixup.source_targets_exhaustive) {
+      duplicate->source_targets_exhaustive = false;
       return true;
     }
     return false;
@@ -1415,8 +1420,7 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
 
 void emit_fixups_for_values(const AnalysisContext &ctx, size_t inst_index, uint16_t pair_lo,
                             std::span<const PcValue> values,
-                            std::vector<IndirectCallFixup> &recovered,
-                            bool targets_exhaustive = true) {
+                            std::vector<IndirectCallFixup> &recovered, bool targets_exhaustive) {
   // A complete lattice value can contain multiple concrete targets. That is not
   // an error by itself; it represents a bounded static dispatch where different
   // predecessor paths materialize different PC constants before joining at one
@@ -1472,7 +1476,7 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
       // block. Emit now so BasicBlock can split at the consumer and target.
       if (PcValue *value = state.builder(*consumer_pair)) {
         emit_fixups_for_values(ctx, index, *consumer_pair, std::span<const PcValue>(value, 1),
-                               recovered);
+                               recovered, /*targets_exhaustive=*/true);
         // A setpc/swappc source operand is a read, not a write. Preserve the
         // source pair unless the instruction also defines it. Real kernels can
         // build one callee address once and issue multiple swappc calls through
@@ -2399,9 +2403,11 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
         .source_recovery_end_offset = sub_consumer->second,
     };
 
-    if (auto fixup = fixup_for_value(ctx, sub_consumer->first, *pair_lo, value))
+    if (auto fixup = fixup_for_value(ctx, sub_consumer->first, *pair_lo, value,
+                                     /*targets_exhaustive=*/true))
       append_unique(recovered, *fixup);
-    if (auto fixup = fixup_for_value(ctx, *add_consumer, *pair_lo, value))
+    if (auto fixup = fixup_for_value(ctx, *add_consumer, *pair_lo, value,
+                                     /*targets_exhaustive=*/true))
       append_unique(recovered, *fixup);
   }
 }

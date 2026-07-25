@@ -361,36 +361,43 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
       assert((!(term->flags() & (BRANCH | COND_BRANCH)) || branch_delta.has_value()) &&
              "direct branch is missing branch_offset_bytes()");
 
+      const auto fallthrough_it = block_by_offset.find(block.end_offset());
       if (branch_delta) {
         // BasicBlock::end_offset() is the next instruction address for the
         // terminator, which is the base used by AMDGPU direct branch labels.
         const int64_t target =
             static_cast<int64_t>(block.end_offset()) + static_cast<int64_t>(*branch_delta);
-        if (target >= 0) {
-          auto target_it = block_by_offset.find(static_cast<uint64_t>(target));
-          const auto fallthrough_it = block_by_offset.find(block.end_offset());
-          const auto call_sdst = s_call_sdst(*term, first_word(*term));
-          if (call_sdst && target_it != block_by_offset.end() &&
-              fallthrough_it != block_by_offset.end()) {
-            // Like recovered swappc, direct s_call validation needs the callee's
-            // internal CFG to be complete before we decide whether the target is
-            // a returning helper or an ordinary reachable branch target.
-            deferred_direct_calls.push_back({.source = &block,
-                                             .target = target_it->second,
-                                             .continuation = fallthrough_it->second,
-                                             .source_call_offset = term->src_loc(),
-                                             .return_sreg = *call_sdst});
-          } else if (target_it != block_by_offset.end()) {
-            block.add_successor(*target_it->second);
-          }
+        const auto target_it = target >= 0 ? block_by_offset.find(static_cast<uint64_t>(target))
+                                           : block_by_offset.end();
+        if (target_it == block_by_offset.end())
+          block.mark_static_successors_incomplete();
+
+        const auto call_sdst = s_call_sdst(*term, first_word(*term));
+        if (call_sdst && fallthrough_it == block_by_offset.end())
+          block.mark_static_successors_incomplete();
+        if (call_sdst && target_it != block_by_offset.end() &&
+            fallthrough_it != block_by_offset.end()) {
+          // Like recovered swappc, direct s_call validation needs the callee's
+          // internal CFG to be complete before we decide whether the target is
+          // a returning helper or an ordinary reachable branch target.
+          deferred_direct_calls.push_back({.source = &block,
+                                           .target = target_it->second,
+                                           .continuation = fallthrough_it->second,
+                                           .source_call_offset = term->src_loc(),
+                                           .return_sreg = *call_sdst});
+        } else if (target_it != block_by_offset.end()) {
+          block.add_successor(*target_it->second);
         }
       }
 
-      const auto fallthrough_it = block_by_offset.find(block.end_offset());
       // Conditional branches and ordinary instructions may fall through; direct
       // unconditional branches do not.
-      if (!is_unconditional_branch(*term) && fallthrough_it != block_by_offset.end())
-        block.add_successor(*fallthrough_it->second);
+      if (!is_unconditional_branch(*term)) {
+        if (fallthrough_it != block_by_offset.end())
+          block.add_successor(*fallthrough_it->second);
+        else
+          block.mark_static_successors_incomplete();
+      }
     }
 
     for (const DeferredIndirectCall &call : deferred_indirect_calls) {
@@ -653,29 +660,34 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch
       const Instruction *term = block.terminator();
       if (term == nullptr || has_no_static_successor(*term))
         continue;
+      const auto fallthrough_it = block_by_offset.find(block.end_offset());
       if (const auto branch_delta = term->branch_offset_bytes()) {
         const int64_t target =
             static_cast<int64_t>(block.end_offset()) + static_cast<int64_t>(*branch_delta);
-        if (target >= 0) {
-          auto target_it = block_by_offset.find(static_cast<uint64_t>(target));
-          const auto fallthrough_it = block_by_offset.find(block.end_offset());
-          const auto call_sdst = s_call_sdst(*term, first_word(*term));
-          if (call_sdst && target_it != block_by_offset.end() &&
-              fallthrough_it != block_by_offset.end()) {
-            deferred_direct_calls.push_back({.source = &block,
-                                             .target = target_it->second,
-                                             .continuation = fallthrough_it->second,
-                                             .source_call_offset = term->src_loc(),
-                                             .return_sreg = *call_sdst});
-          } else if (target_it != block_by_offset.end()) {
-            block.add_successor(*target_it->second);
-          }
+        const auto target_it = target >= 0 ? block_by_offset.find(static_cast<uint64_t>(target))
+                                           : block_by_offset.end();
+        if (target_it == block_by_offset.end())
+          block.mark_static_successors_incomplete();
+
+        const auto call_sdst = s_call_sdst(*term, first_word(*term));
+        if (call_sdst && fallthrough_it == block_by_offset.end())
+          block.mark_static_successors_incomplete();
+        if (call_sdst && target_it != block_by_offset.end() &&
+            fallthrough_it != block_by_offset.end()) {
+          deferred_direct_calls.push_back({.source = &block,
+                                           .target = target_it->second,
+                                           .continuation = fallthrough_it->second,
+                                           .source_call_offset = term->src_loc(),
+                                           .return_sreg = *call_sdst});
+        } else if (target_it != block_by_offset.end()) {
+          block.add_successor(*target_it->second);
         }
       }
       if (!is_unconditional_branch(*term)) {
-        if (auto fallthrough_it = block_by_offset.find(block.end_offset());
-            fallthrough_it != block_by_offset.end())
+        if (fallthrough_it != block_by_offset.end())
           block.add_successor(*fallthrough_it->second);
+        else
+          block.mark_static_successors_incomplete();
       }
     }
 

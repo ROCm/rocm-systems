@@ -1261,6 +1261,37 @@ TEST(KernelScopeAnalysis, SymbolRangesExcludeTextPadding) {
   EXPECT_TRUE(blocks[1]->predecessors().empty());
 }
 
+TEST(CfgAnalysis, MarksUndecodedDirectTargetIncomplete) {
+  std::vector<uint32_t> words = {
+      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4), // 0x00 -> 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(words);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<BasicBlock::CodeRange, 1> ranges{{{0, 4}}};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, {}, ranges);
+
+  ASSERT_EQ(blocks.size(), 1u);
+  EXPECT_FALSE(blocks.front()->static_successors_complete());
+}
+
+TEST(CfgAnalysis, MarksUndecodedFallthroughIncomplete) {
+  std::vector<uint32_t> words = {
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(words);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<BasicBlock::CodeRange, 1> ranges{{{0, 4}}};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, {}, ranges);
+
+  ASSERT_EQ(blocks.size(), 1u);
+  EXPECT_FALSE(blocks.front()->static_successors_complete());
+}
+
 TEST(KernelScopeAnalysis, SeedsAdditionalDescriptorEntryWithoutClaimingNextKernel) {
   std::vector<uint32_t> words = {
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
@@ -1325,10 +1356,44 @@ TEST(KernelScopeAnalysis, SharedHelperGetsContextSpecificReturnEdges) {
   BasicBlock *first_continuation = block_for_offset(index, 4);
   BasicBlock *second_continuation = block_for_offset(index, 12);
   ASSERT_NE(helper, nullptr);
+  EXPECT_EQ(first->owner_proofs.at(helper), KernelCfgOwnerProofKind::DirectCall);
+  EXPECT_EQ(second->owner_proofs.at(helper), KernelCfgOwnerProofKind::DirectCall);
   EXPECT_EQ(first->liveness_edges[1].from, helper);
   EXPECT_EQ(first->liveness_edges[1].to, first_continuation);
   EXPECT_EQ(second->liveness_edges[1].from, helper);
   EXPECT_EQ(second->liveness_edges[1].to, second_continuation);
+}
+
+TEST(KernelScopeAnalysis, MixedLocalAndCallReachabilityDoesNotExemptSetpcReturn) {
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 3),            // 0x00 -> helper at 0x10.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x04 call continuation.
+      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4), // 0x08 -> same helper.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      pack_sop1(0x1d, 0, kReturnSreg), // 0x10 syntactic return on both paths.
+  };
+  TestCodeObject co(words);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 2> owned_entries{0, 8};
+  constexpr std::array<uint64_t, 1> kernel_entries{0};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, owned_entries);
+  const auto index = build_block_offset_index(blocks);
+  const auto text = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(words.data()),
+                                             words.size() * sizeof(uint32_t));
+
+  const auto scope = build_kernel_cfg_scope(
+      blocks, index, KernelScopeRequest{.entry_offset = 0, .additional_entry_offsets = {8}},
+      kernel_entries, text);
+  ASSERT_TRUE(scope.has_value());
+  BasicBlock *helper = block_for_offset(index, 16);
+  ASSERT_NE(helper, nullptr);
+  EXPECT_EQ(scope->owner_proofs.at(helper), KernelCfgOwnerProofKind::KernelLocal);
+  EXPECT_FALSE(scope->call_return_offsets.contains(16));
+  EXPECT_TRUE(std::ranges::any_of(scope->liveness_edges, [&](const ScopedCfgEdge &edge) {
+    return edge.from == helper && edge.to == block_for_offset(index, 4);
+  }));
 }
 
 TEST(CfgAnalysis, KillPredecessorPreventsRecoveredConsumer) {
@@ -1407,6 +1472,46 @@ TEST(CfgAnalysis, IncompletePredecessorMarksRecoveredTargetsNonExhaustive) {
   EXPECT_FALSE(recovered->source_targets_exhaustive);
 }
 
+TEST(CfgAnalysis, LaterRecoveredPredecessorDowngradesTargetExhaustiveness) {
+  constexpr uint16_t kEdgePcSreg = 8u;
+  constexpr uint16_t kConsumerPcSreg = 12u;
+  constexpr uint16_t kUnresolvedPcSreg = 20u;
+  constexpr uint32_t kLiteralOperand = 255u;
+  constexpr uint32_t kInlineInt0 = 128u;
+
+  // Round 1 sees only the direct builder block as a predecessor of the final
+  // consumer and initially recovers its target exhaustively. The first setpc
+  // also recovers an edge to that consumer, while the unrelated unresolved
+  // setpc keeps discovery iterating. Round 2 adds the new predecessor, whose
+  // exit has no fact for the consumer pair, so the already-emitted target must
+  // be downgraded to non-exhaustive.
+  const std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kEdgePcSreg, 0),                             // 0x00: edge getpc.
+      pack_sop2(0, kEdgePcSreg, kEdgePcSreg, kLiteralOperand),     // 0x04: edge low.
+      44u,                                                         // 0x08: -> 0x30.
+      pack_sop2(4, kEdgePcSreg + 1, kEdgePcSreg + 1, kInlineInt0), // 0x0c: edge high.
+      pack_sop1(0x1d, 0, kEdgePcSreg),                             // 0x10: recovered edge.
+      pack_sop1(0x1c, kConsumerPcSreg, 0),                         // 0x14: target getpc.
+      pack_sop2(0, kConsumerPcSreg, kConsumerPcSreg, kLiteralOperand),
+      32u, // 0x1c: -> 0x38.
+      pack_sop2(4, kConsumerPcSreg + 1, kConsumerPcSreg + 1, kInlineInt0),
+      build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA4), // 0x24 -> 0x30.
+      pack_sop1(0x1d, 0, kUnresolvedPcSreg),       // 0x28: keeps round 2 live.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x2c.
+      pack_sop1(0x1d, 0, kConsumerPcSreg),         // 0x30: joined consumer.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),    // 0x34.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x38: concrete target.
+  };
+
+  const std::vector<IndirectCallFixup> fixups =
+      discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA4, {}, /*wavefront_size=*/64u);
+  const auto recovered = std::ranges::find_if(fixups, [](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == 0x30u && fixup.source_target_offset == 0x38u;
+  });
+  ASSERT_NE(recovered, fixups.end());
+  EXPECT_FALSE(recovered->source_targets_exhaustive);
+}
+
 TEST(CfgAnalysis, LocalPcBuilderMarksRecoveredTargetExhaustive) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint32_t kLiteralOperand = 255;
@@ -1426,17 +1531,26 @@ TEST(CfgAnalysis, LocalPcBuilderMarksRecoveredTargetExhaustive) {
   EXPECT_TRUE(fixups.front().source_targets_exhaustive);
 }
 
-TEST(CfgAnalysis, RejectsSpecialPcPairSelectorsAtDecodeBoundary) {
+TEST(CfgAnalysis, RejectsLastSelectorPcPairSource) {
+  constexpr uint16_t kLastSelector = 127u;
+  const std::vector<uint32_t> words = {
+      // The final SGPR selector cannot name a complete pair.
+      pack_sop1(0x1c, kLastSelector, 0),
+      pack_sop1(0x1d, 0, kLastSelector),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+
+  const std::vector<IndirectCallFixup> fixups =
+      discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA4, {}, /*wavefront_size=*/64u);
+  EXPECT_TRUE(fixups.empty());
+}
+
+TEST(CfgAnalysis, RejectsLastSelectorSwappcReturnSelector) {
   constexpr uint16_t kLastSelector = 127u;
   constexpr uint16_t kPcSreg = 8u;
   constexpr uint32_t kLiteralOperand = 255u;
   constexpr uint32_t kInlineInt0 = 128u;
   const std::vector<uint32_t> words = {
-      // The final SGPR selector cannot name a complete pair.
-      pack_sop1(0x1c, kLastSelector, 0),
-      pack_sop1(0x1d, 0, kLastSelector),
-      // A valid source builder paired with an invalid swappc return selector
-      // must reject the entire consumer rather than indexing special state.
       pack_sop1(0x1c, kPcSreg, 0),
       pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),
       12u,

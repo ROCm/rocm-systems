@@ -93,6 +93,14 @@ public:
   /// @brief CFG predecessor blocks, inverse of successors().
   [[nodiscard]] const std::vector<BasicBlock *> &predecessors() const { return predecessors_; }
 
+  /// @brief Whether every required direct target and fallthrough was decoded.
+  ///
+  /// @details This covers only structurally known edges. Indirect target
+  /// exhaustiveness and context-sensitive returns remain client-specific
+  /// checks. A false result means the decoded graph omitted an edge that the
+  /// instruction stream can take, for example at a symbol-range boundary.
+  [[nodiscard]] bool static_successors_complete() const { return static_successors_complete_; }
+
   /// @brief Function-call edges that leave this block.
   [[nodiscard]] const std::vector<CallEdge> &call_edges() const { return call_edges_; }
 
@@ -153,6 +161,7 @@ private:
   void add_successor(BasicBlock &successor);
   void add_call_edge(CallEdge edge);
   void add_static_indirect_call_fixup(IndirectCallFixup fixup);
+  void mark_static_successors_incomplete() { static_successors_complete_ = false; }
 
   uint64_t start_offset_;
   uint32_t size_ = 0;
@@ -164,6 +173,7 @@ private:
   std::vector<BasicBlock *> predecessors_;
   std::vector<CallEdge> call_edges_;
   std::vector<IndirectCallFixup> static_indirect_call_fixups_;
+  bool static_successors_complete_ = true;
 };
 
 } // namespace rocjitsu

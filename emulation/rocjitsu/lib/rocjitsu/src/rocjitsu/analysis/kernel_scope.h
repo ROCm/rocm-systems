@@ -42,6 +42,7 @@ struct KernelCfgScope {
   BasicBlock *entry = nullptr;
   std::vector<BasicBlock *> blocks;
   std::vector<ScopedCfgEdge> liveness_edges;
+  /// Return terminators reachable only through validated call contexts.
   std::unordered_set<uint64_t> call_return_offsets;
   std::unordered_map<const BasicBlock *, KernelCfgOwnerProofKind> owner_proofs;
 };

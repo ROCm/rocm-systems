@@ -153,7 +153,16 @@ void add_scoped_call_flow(KernelCfgScope &scope, std::span<const uint8_t> text) 
         scope.liveness_edges.push_back({.from = return_block, .to = call.continuation});
         const Instruction *term = return_block->terminator();
         assert(term != nullptr && "return block should contain a terminator");
-        scope.call_return_offsets.insert(term->src_loc());
+        const auto owner_proof = scope.owner_proofs.find(return_block);
+        // A syntactic return is safe to exempt from ordinary indirect-branch
+        // handling only when every path to its block entered through a
+        // validated call. If the same block is also kernel-locally reachable,
+        // that path may execute setpc with an arbitrary value in the return
+        // pair.
+        if (owner_proof != scope.owner_proofs.end() &&
+            owner_proof->second != KernelCfgOwnerProofKind::KernelLocal) {
+          scope.call_return_offsets.insert(term->src_loc());
+        }
       }
     }
   }

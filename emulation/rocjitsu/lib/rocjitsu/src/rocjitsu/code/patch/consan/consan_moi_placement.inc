@@ -1016,25 +1016,39 @@ apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
   return static_cast<uint16_t>(std::min<uint32_t>(max_count, kMaxSgprs));
 }
 
+enum class MoiUnclosedControlKind {
+  Branch,
+  Call,
+  Fallthrough,
+};
+
 struct MoiOwnerScalarReferenceSummary {
   RegisterSet references;
   bool uses_indirect_sgprs = false;
   bool control_flow_closed = true;
   std::optional<uint64_t> first_unclosed_control_offset;
   std::string first_unclosed_control_mnemonic;
-  bool first_unclosed_control_is_call = false;
+  MoiUnclosedControlKind first_unclosed_control_kind = MoiUnclosedControlKind::Branch;
 };
 
 [[nodiscard]] MoiOwnerScalarReferenceSummary summarize_moi_owner_scalar_references(
     std::span<const MoiKernelResourceContext *const> owner_contexts) {
   MoiOwnerScalarReferenceSummary result;
   std::unordered_set<BasicBlock *> visited;
-  const auto mark_unclosed = [&](const Instruction &instruction) {
+  const auto classify_unclosed = [](const Instruction &instruction) {
+    if ((instruction.flags() & INDIRECT_CALL) != 0)
+      return MoiUnclosedControlKind::Call;
+    if ((instruction.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH)) != 0)
+      return MoiUnclosedControlKind::Branch;
+    return MoiUnclosedControlKind::Fallthrough;
+  };
+  const auto mark_unclosed = [&](const Instruction &instruction,
+                                 std::optional<MoiUnclosedControlKind> kind = std::nullopt) {
     result.control_flow_closed = false;
     if (!result.first_unclosed_control_offset) {
       result.first_unclosed_control_offset = instruction.src_loc();
       result.first_unclosed_control_mnemonic = instruction.mnemonic();
-      result.first_unclosed_control_is_call = (instruction.flags() & INDIRECT_CALL) != 0;
+      result.first_unclosed_control_kind = kind.value_or(classify_unclosed(instruction));
     }
   };
   for (const MoiKernelResourceContext *context : owner_contexts) {
@@ -1063,6 +1077,8 @@ struct MoiOwnerScalarReferenceSummary {
         if (terminator != nullptr)
           mark_unclosed(*terminator);
       };
+      if (!block->static_successors_complete())
+        mark_unclosed_terminator();
       if (std::ranges::any_of(block->successors(), [&](const BasicBlock *successor) {
             return successor == nullptr || !scope_blocks.contains(successor);
           })) {
@@ -3534,10 +3550,22 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
             "ConSan MOI could not resolve every owner descriptor for a proven-unused persistent "
             "SGPR window");
       } else if (!scalar_references.control_flow_closed) {
+        std::string control_description;
+        switch (scalar_references.first_unclosed_control_kind) {
+        case MoiUnclosedControlKind::Call:
+          control_description = "call ";
+          break;
+        case MoiUnclosedControlKind::Branch:
+          control_description = "branch ";
+          break;
+        case MoiUnclosedControlKind::Fallthrough:
+          control_description = "fallthrough after ";
+          break;
+        }
         result.warnings.emplace_back(
             "ConSan MOI cannot prove a persistent SGPR hole across unresolved guest " +
-            std::string(scalar_references.first_unclosed_control_is_call ? "call " : "branch ") +
-            scalar_references.first_unclosed_control_mnemonic + " at text offset " +
+            control_description + scalar_references.first_unclosed_control_mnemonic +
+            " at text offset " +
             std::to_string(scalar_references.first_unclosed_control_offset.value_or(0u)));
       } else if (scalar_references.uses_indirect_sgprs) {
         result.warnings.emplace_back(
