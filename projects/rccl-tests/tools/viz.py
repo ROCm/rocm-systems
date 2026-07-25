@@ -248,6 +248,115 @@ def build_line_figure(records, metric="busbw", band="iqr",
     return fig
 
 
+def _fmt_size(nbytes):
+    for unit, div in (("G", 1024 ** 3), ("M", 1024 ** 2), ("K", 1024)):
+        if nbytes >= div and nbytes % div == 0:
+            return f"{nbytes // div}{unit}"
+    return str(nbytes)
+
+
+def build_box_figure(records, metric="time", kind="box", color_by=None,
+                     placements=(1, 0), ncols=None, title=None):
+    """Box/violin distribution per message size (all sizes on one frame).
+
+    One subplot per (collective[, dtype]); within each, one box (or violin) per
+    message size, grouped by the colour dimension (default: placement).  Needs
+    the retained per-iteration ``samples_us`` (i.e. the profiled source); rows
+    with a single sample degenerate to a flat line.
+    """
+    records = [r for r in records if r.get("samples_us")]
+    if not records:
+        raise ValueError("no records with per-iteration samples (use --source profiled)")
+
+    minfo = _METRICS[metric]
+
+    # Colour dimension. 'placement' is synthetic; the rest are record fields.
+    if color_by is None:
+        color_by = "placement" if len({r["in_place"] for r in records}) > 1 else \
+            _auto_color_by(records)
+
+    facet_dims, facet_keys = _facet_keys(records, color_by if color_by != "placement" else "dtype")
+    if color_by == "placement":
+        group_vals = [p for p in placements
+                      if any(r["in_place"] == p for r in records)]
+        group_name = {p: _PLACE[p]["name"] for p in group_vals}
+        def group_of(r):
+            return r["in_place"]
+    else:
+        group_vals = _distinct(records, color_by)
+        group_name = {v: str(v) for v in group_vals}
+        def group_of(r):
+            return r.get(color_by)
+    color_map = {v: _PALETTE[i % len(_PALETTE)] for i, v in enumerate(group_vals)}
+
+    n = len(facet_keys)
+    ncols = ncols or min(n, 2)
+    nrows = (n + ncols - 1) // ncols
+    subplot_titles = [" / ".join(str(x) for x in k) for k in facet_keys]
+    fig = make_subplots(rows=nrows, cols=ncols, subplot_titles=subplot_titles,
+                        horizontal_spacing=0.08, vertical_spacing=0.12)
+
+    legend_seen = set()
+    # Global size ordering so category axis is consistent across facets.
+    all_sizes = sorted({r["size"] for r in records})
+    size_labels = [_fmt_size(s) for s in all_sizes]
+
+    for f_idx, fkey in enumerate(facet_keys):
+        row, col = divmod(f_idx, ncols)
+        row += 1
+        col += 1
+        sub = [r for r in records
+               if tuple(r.get(d) for d in facet_dims) == fkey]
+
+        for gval in group_vals:
+            color = color_map[gval]
+            grecs = [r for r in sub if group_of(r) == gval]
+            if not grecs:
+                continue
+            xs, ys = [], []
+            for r in grecs:
+                lbl = _fmt_size(r["size"])
+                for s in r["samples_us"]:
+                    v = _value_at_time(r, s, metric)
+                    if v is None:
+                        continue
+                    xs.append(lbl)
+                    ys.append(v)
+            if not ys:
+                continue
+            legname = group_name[gval]
+            show_legend = legname not in legend_seen
+            legend_seen.add(legname)
+            common = dict(x=xs, y=ys, name=legname, legendgroup=legname,
+                          showlegend=show_legend, marker_color=color,
+                          offsetgroup=legname)
+            if kind == "violin":
+                fig.add_trace(go.Violin(points=False, spanmode="hard",
+                                        line_width=1, **common),
+                              row=row, col=col)
+            else:
+                fig.add_trace(go.Box(boxpoints="outliers", boxmean=True,
+                                     line_width=1, **common),
+                              row=row, col=col)
+
+        fig.update_xaxes(categoryorder="array", categoryarray=size_labels,
+                         title_text="message size", tickangle=45, row=row, col=col)
+        fig.update_yaxes(type="log" if minfo["log"] else "linear",
+                         title_text=minfo["label"], row=row, col=col)
+
+    boxmode = "group"
+    ttl = title or (f"{metric} distribution per size  —  "
+                    f"{kind}, grouped by {color_by}")
+    fig.update_layout(
+        title=ttl, template="plotly_white",
+        boxmode=boxmode, violinmode=boxmode,
+        height=max(380 * nrows, 440), width=max(620 * ncols, 720),
+        legend=dict(title=color_by, groupclick="toggleitem"),
+        margin=dict(t=90, l=70, r=30, b=70),
+    )
+    return fig
+
+
 def write_html(fig, path, embed_js=True):
     """Write *fig* to a self-contained (offline) HTML file by default."""
     fig.write_html(path, include_plotlyjs=(True if embed_js else "cdn"),

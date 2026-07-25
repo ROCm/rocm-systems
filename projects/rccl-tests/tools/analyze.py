@@ -426,14 +426,22 @@ def _cmd_plot_plotly(args, outlier_fn):
     if out.endswith(".png"):  # plotly default output is html
         out = out[:-4] + ".html"
 
-    fig = viz.build_line_figure(
-        records, metric=args.metric, band=args.band,
-        color_by=args.color_by,
-    )
+    kind = getattr(args, "kind", "line")
+    if kind in ("box", "violin"):
+        metric = args.metric if args.metric != "eff_busbw" else "time"
+        fig = viz.build_box_figure(
+            records, metric=metric, kind=kind, color_by=args.color_by,
+        )
+        detail = f"kind={kind}"
+    else:
+        fig = viz.build_line_figure(
+            records, metric=args.metric, band=args.band, color_by=args.color_by,
+        )
+        detail = f"band={args.band}"
     viz.write_html(fig, out)
     n_runs = len({r["run_dir"] for r in records})
     print(f"Saved interactive plot: {out}  "
-          f"({len(records)} records, {n_runs} run(s), band={args.band})")
+          f"({len(records)} records, {n_runs} run(s), {detail})")
     return 0
 
 
@@ -720,9 +728,13 @@ def main():
                         default="matplotlib",
                         help="Plot backend (default: matplotlib). plotly = "
                              "interactive HTML with variance bands.")
+    p_plot.add_argument("--kind", choices=["line", "box", "violin"],
+                        default="line",
+                        help="plotly plot kind: line+band, or per-size box/violin "
+                             "distributions (default: line)")
     p_plot.add_argument("--band", choices=["none", "iqr", "minmax", "std"],
                         default="iqr",
-                        help="Variance band for plotly backend (default: iqr)")
+                        help="Variance band for plotly line kind (default: iqr)")
     p_plot.add_argument("--color-by", choices=["label", "dtype", "machine"],
                         default=None,
                         help="Comparison factor mapped to colour (plotly; "
