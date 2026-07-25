@@ -51,6 +51,7 @@ extern "C" uint64_t rj_test_create_hidden_child(uint64_t parent_executable_handl
                                                 size_t size);
 extern "C" unsigned rj_test_single_flight_producer_runs(unsigned thread_count, bool succeed);
 extern "C" uint64_t rj_test_lazy_rewrite_kernel_object(uint64_t proxy_ko, uint64_t child_ko);
+extern "C" bool rj_test_is_lazy_safe(const void *bytes, size_t size);
 
 namespace {
 
@@ -1618,19 +1619,34 @@ TEST(HsaHooksUnitTest, AutoA0InstallsNarrowManifest) {
   FakeApiTable api;
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
 
-  // Patched in auto-A0.
+  // Auto-A0 patches the load/capture set...
   EXPECT_NE(api.core.hsa_executable_load_agent_code_object_fn,
             fake_executable_load_agent_code_object);
   EXPECT_NE(api.core.hsa_system_get_major_extension_table_fn,
             fake_system_get_major_extension_table);
-  // NOT patched in auto-A0. agent_get_info is saved-only (used for detection, not
-  // presentation). shut_down is a pure passthrough. The simulation-only
-  // queue/signal remap surface is also untouched.
+  // ...plus the dispatch-publication surface, because lazy translation is the
+  // default for gfx1250 B0->A0: the doorbell seam (queue + signal stores) must be
+  // wrapped so a proxy dispatch is rewritten to its translated child.
+  EXPECT_NE(api.core.hsa_queue_create_fn, fake_queue_create);
+  EXPECT_NE(api.core.hsa_queue_destroy_fn, fake_queue_destroy);
+  EXPECT_NE(api.core.hsa_signal_store_relaxed_fn, fake_signal_store_relaxed);
+  EXPECT_NE(api.core.hsa_signal_store_screlease_fn, fake_signal_store_screlease);
+  // Still NOT patched: agent_get_info is saved-only (detection, not presentation),
+  // and shut_down is a pure passthrough in auto-A0.
   EXPECT_EQ(api.core.hsa_agent_get_info_fn, fake_agent_get_info);
   EXPECT_EQ(api.core.hsa_shut_down_fn, fake_shut_down);
-  EXPECT_EQ(api.core.hsa_queue_create_fn, fake_queue_create);
-  EXPECT_EQ(api.core.hsa_signal_store_relaxed_fn, fake_signal_store_relaxed);
   OnUnload();
+}
+
+// The lazy-safe classifier fails closed on bytes that are not a valid code object:
+// such an object routes to eager (never a proxy). (The positive case -- a real
+// gfx1250 object IS lazy-safe -- is proven end-to-end at the full-stack step.)
+TEST(HsaHooksUnitTest, LazySafeClassifierRejectsInvalidBytes) {
+  EXPECT_FALSE(rj_test_is_lazy_safe(nullptr, 0));
+  const std::vector<uint8_t> not_an_elf{0x00, 0x01, 0x02, 0x03, 0x04, 0x05};
+  EXPECT_FALSE(rj_test_is_lazy_safe(not_an_elf.data(), not_an_elf.size()));
+  const std::vector<uint8_t> elf_magic_only{0x7f, 'E', 'L', 'F'};
+  EXPECT_FALSE(rj_test_is_lazy_safe(elf_magic_only.data(), elf_magic_only.size()));
 }
 
 // Simulation installs the full manifest, including the queue/signal surface that

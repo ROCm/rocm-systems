@@ -21,8 +21,10 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
+#include "rocjitsu/code/dbt/proxy_code_object.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
+#include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/config/dbt_guest_config.h"
@@ -79,6 +81,8 @@ using rocjitsu::arch_for_elf_mach;
 using rocjitsu::arch_lds_bytes;
 using rocjitsu::BinaryTranslator;
 using rocjitsu::BinaryTranslatorOptions;
+using rocjitsu::build_proxy_code_object;
+using rocjitsu::CodeObjectPatcher;
 using rocjitsu::DiagnosticKind;
 using rocjitsu::DiagnosticSeverity;
 using rocjitsu::EF_AMDGPU_MACH;
@@ -111,6 +115,7 @@ using rocjitsu::parse_kernarg_extension_metadata;
 using rocjitsu::parse_virtual_lds_metadata;
 using rocjitsu::plan_virtual_lds_dispatch;
 using rocjitsu::ProcessorRevision;
+using rocjitsu::ProxyCodeObject;
 using rocjitsu::SHN_UNDEF;
 using rocjitsu::SHT_NULL;
 using rocjitsu::SHT_STRTAB;
@@ -252,6 +257,13 @@ struct HookConfig {
   /// object; it selects the B0->A0 workaround direction for same-target loads.
   ProcessorRevision guest_revision = ProcessorRevision::Unspecified;
   ProcessorRevision host_revision = ProcessorRevision::Unspecified;
+  /// @brief Defer translation of lazy-safe objects to first dispatch (§14).
+  ///
+  /// @details Intrinsic to auto-A0: a gfx1250 B0->A0 load is lazy by default. An
+  /// object that passes the conservative lazy-safe classifier is loaded as a proxy
+  /// and translated on its first dispatch; everything else falls back to eager
+  /// translation at load. Simulation mode leaves this false (it does not defer).
+  bool lazy_enabled = false;
 };
 
 /// @brief Parse a config ISA name or architecture alias into a DBT target.
@@ -395,6 +407,11 @@ void restore_signal_backtrace_handlers() {
   config.target = gfx1250;
   config.guest_revision = ProcessorRevision::Gfx1250B0;
   config.host_revision = ProcessorRevision::Gfx1250A0;
+  // Lazy translation is the default for gfx1250 B0->A0: an eligible object is
+  // loaded as a proxy and translated on its first dispatch, and everything else
+  // falls back to eager translation at load (§14.6). There is no flag -- lazy is
+  // intrinsic to the auto-A0 path.
+  config.lazy_enabled = true;
   return config;
 }
 
@@ -1575,20 +1592,31 @@ void clear_virtual_lds_dispatch_queues();
 /// and the app already loads the gfx1250 object, so nothing needs to be presented
 /// -- the hook only detects A0 silicon (via the saved ASIC-revision query) to arm
 /// translation, and translates at load.
-[[nodiscard]] constexpr bool auto_a0_patches(std::string_view name) {
+[[nodiscard]] constexpr bool auto_a0_patches(std::string_view name, bool lazy) {
   // NOTE: `shut_down` is intentionally NOT patched in auto-A0. `rj_shut_down`
   // only suppresses teardown when a simulation `guest_target` is configured; in
   // auto-A0 there is no config, so the wrapper is a pure `return original()`.
   // Leaving the table's own pointer in place avoids a needless indirection and a
   // wrapper-lifetime dependency on the hook DSO during ROCr teardown.
-  return name == "create_from_file" ||                 // source-byte capture
-         name == "create_from_memory" ||               // source-byte capture
-         name == "system_get_major_extension_table" || // vendor-reader capture wrap
-         name == "destroy" ||                          // reader lifetime bookkeeping
-         name == "load_agent_code_object" ||           // translate at load
-         name == "load_program_code_object" ||         // fail-closed agent-less load
-         name == "load_code_object" ||                 // fail-closed deprecated sized load
-         name == "executable_destroy";                 // release retained translated storage
+  const bool eager_set = name == "create_from_file" ||                 // source-byte capture
+                         name == "create_from_memory" ||               // source-byte capture
+                         name == "system_get_major_extension_table" || // vendor-reader wrap
+                         name == "destroy" ||                  // reader lifetime bookkeeping
+                         name == "load_agent_code_object" ||   // translate at load
+                         name == "load_program_code_object" || // fail-closed agent-less load
+                         name == "load_code_object" ||         // fail-closed deprecated load
+                         name == "executable_destroy";         // release retained storage
+  if (eager_set)
+    return true;
+  if (!lazy)
+    return false;
+  // Lazy adds the dispatch-publication surface so the doorbell seam can rewrite a
+  // proxy dispatch's kernel_object to its translated child (§14.3). queue_create/
+  // destroy track the ring for the seam; the signal stores are the doorbell path.
+  return name == "queue_create" ||         // track the ring for dispatch rewrite
+         name == "queue_destroy" ||        // stop tracking on queue teardown
+         name == "signal_store_relaxed" || // doorbell path: rewrite before publish
+         name == "signal_store_screlease"; // doorbell path: rewrite before publish
 }
 
 /// @brief Process-local HSA API table patch state for the rocjitsu DBT tool.
@@ -1642,9 +1670,10 @@ public:
     // still saved above, so layer() getters return the real originals in both
     // modes; only what is written into the live table differs.
     const bool install_all = config_->mode == HookMode::kSimulation;
+    const bool lazy = config_->mode == HookMode::kAutoA0 && config_->lazy_enabled;
 #define RJ_INSTALL_PATCH(name, table_ptr, present, patch_if_original, field, wrapper, type)        \
   if ((present) && (!(patch_if_original) || original_##name##_ != nullptr) &&                      \
-      (install_all || auto_a0_patches(#name)))                                                     \
+      (install_all || auto_a0_patches(#name, lazy)))                                               \
     (table_ptr)->field = wrapper;
     RJ_HSA_PATCH_ENTRIES(RJ_INSTALL_PATCH)
 #undef RJ_INSTALL_PATCH
@@ -4867,6 +4896,95 @@ create_hidden_child_executable(const std::shared_ptr<const std::vector<uint8_t>>
   return true;
 }
 
+/// @brief Conservative classifier: is @p object safe to defer (load a proxy)?
+///
+/// @details M2's first lazy-safe class is intentionally narrow (§14.6). An object
+/// qualifies only when it is a valid gfx1250 object with at least one kernel and
+/// carries none of the relocation shapes DBT cannot remap -- the same fail-closed
+/// guards the eager path enforces (has_relocations_within_text /
+/// has_unsupported_relocation_to_text). Anything else falls back to eager
+/// translation at load, so laziness never widens what rocjitsu accepts. Future
+/// steps can grow this class (device-enqueue, writable host globals, cross-object
+/// refs) as each is proven; today the safe default is "eager unless clearly safe".
+[[nodiscard]] bool is_lazy_safe(const AmdGpuCodeObject &object) {
+  if (!object.is_valid())
+    return false;
+  if (object.kernel_names().empty())
+    return false;
+  CodeObjectPatcher patcher(object);
+  if (patcher.text_bytes().empty())
+    return false;
+  if (patcher.has_relocations_within_text() || patcher.has_unsupported_relocation_to_text())
+    return false;
+  return true;
+}
+
+/// @brief Load a lazy-safe gfx1250 object as a proxy, deferring translation.
+///
+/// @details Builds the cheap proxy ELF (Step 2), loads it into the app's
+/// executable on the A0 agent, then records a DeferredObject retaining the source
+/// bytes and registers every proxy kernel_object so the dispatch seam can resolve
+/// a first dispatch to this object (Step 4). Translation itself is deferred to
+/// that first dispatch. Fails closed to the caller (returns an error, having
+/// loaded nothing) so the load wrapper can fall back to eager translation.
+[[nodiscard]] hsa_status_t
+load_proxy_for_auto_a0(hsa_executable_t executable, hsa_agent_t agent,
+                       const std::shared_ptr<const std::vector<uint8_t>> &source_bytes,
+                       const AmdGpuCodeObject &source_object, const char *options,
+                       hsa_loaded_code_object_t *loaded_code_object,
+                       decltype(hsa_executable_load_agent_code_object) *original_load) {
+  ProxyCodeObject proxy = build_proxy_code_object(source_object, ROCJITSU_CODE_ARCH_GFX1250);
+  if (!proxy.ok()) {
+    log_message(kLogInfo, "auto-A0 lazy: proxy build failed; falling back to eager");
+    return HSA_STATUS_ERROR;
+  }
+
+  auto proxy_owned = std::make_shared<const std::vector<uint8_t>>(std::move(proxy.elf_bytes));
+  hsa_code_object_reader_t proxy_reader{};
+  hsa_status_t status = create_owned_memory_reader(proxy_owned, &proxy_reader);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+  auto reader_guard = make_scope_guard([&] {
+    CodeObjectReaderRegistry::instance().remove(proxy_reader);
+    if (auto *reader_destroy = layer().destroy(); reader_destroy != nullptr)
+      (void)reader_destroy(proxy_reader);
+  });
+
+  // ROCR aliases the proxy bytes until the executable is destroyed; reserve the
+  // retention before the loader commits, matching the eager/snapshot paths.
+  if (!TranslatedExecutableRegistry::instance().try_retain(executable, proxy_owned))
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  hsa_loaded_code_object_t proxy_loaded{};
+  status = original_load(executable, agent, proxy_reader, options,
+                         loaded_code_object ? loaded_code_object : &proxy_loaded);
+  if (status != HSA_STATUS_SUCCESS) {
+    TranslatedExecutableRegistry::instance().unretain(executable, proxy_owned);
+    return status;
+  }
+  if (loaded_code_object)
+    proxy_loaded = *loaded_code_object;
+
+  // Record the deferred object and index its proxy kernel_objects so the dispatch
+  // seam can resolve a first dispatch. The proxy is now the loaded object; the
+  // source bytes are retained for the translation deferred to first dispatch.
+  auto object = std::make_shared<DeferredObject>();
+  object->parent_executable = executable;
+  object->agent = agent;
+  object->source_bytes = source_bytes;
+  object->proxy_loaded = proxy_loaded;
+  DeferredObjectRegistry::instance().record(object);
+  for (const std::string &kernel_name : source_object.kernel_names()) {
+    const uint64_t proxy_ko = kernel_object_for(executable, agent, kernel_name);
+    if (proxy_ko != 0)
+      DeferredObjectRegistry::instance().register_proxy_kernel_object(proxy_ko, object);
+  }
+  log_message(kLogVerbose, "auto-A0 lazy: loaded proxy exec=%llu agent=%llu kernels=%zu",
+              static_cast<unsigned long long>(executable.handle),
+              static_cast<unsigned long long>(agent.handle), source_object.kernel_names().size());
+  return HSA_STATUS_SUCCESS;
+}
+
 /// @brief Load a forwarded auto-A0 object from an authoritative hook-owned snapshot.
 ///
 /// @details Used for the auto-A0 branch that forwards an object to the A0 agent
@@ -4967,6 +5085,16 @@ load_translated_for_auto_a0(const HookConfig &config, hsa_executable_t executabl
   if (!source_object.is_valid()) {
     log_message(kLogInfo, "auto-A0: source bytes are not a valid AMDGPU code object");
     return HSA_STATUS_ERROR;
+  }
+
+  // Lazy path (opt-in): a lazy-safe object is loaded as a proxy now and translated
+  // on its first dispatch. On any lazy-load failure, fall through to eager
+  // translation so laziness never rejects an object the eager path would accept.
+  if (config.lazy_enabled && is_lazy_safe(source_object)) {
+    if (load_proxy_for_auto_a0(executable, agent, reader_bytes.owned, source_object, options,
+                               loaded_code_object, original_load) == HSA_STATUS_SUCCESS)
+      return HSA_STATUS_SUCCESS;
+    log_message(kLogInfo, "auto-A0 lazy: proxy load failed; falling back to eager translation");
   }
 
   BinaryTranslator translator(source.arch, config.target.arch, config.target.mach,
@@ -5517,5 +5645,17 @@ extern "C" RJ_HOOK_EXPORT uint64_t rj_test_lazy_rewrite_kernel_object(uint64_t p
 
   VirtualLdsDispatchQueueRegistry::rewrite_lazy_kernel_object_for_test(packet);
   return packet.kernel_object;
+}
+
+/// @brief Test-only: classify @p bytes with the lazy-safe eligibility predicate.
+///
+/// @details Lets a test drive is_lazy_safe against real code-object bytes without
+/// the full load path. Returns true when the object qualifies for the lazy (proxy)
+/// path, false when it must fall back to eager translation.
+extern "C" RJ_HOOK_EXPORT bool rj_test_is_lazy_safe(const void *bytes, size_t size) {
+  if (bytes == nullptr || size == 0)
+    return false;
+  AmdGpuCodeObject object(static_cast<const uint8_t *>(bytes), size);
+  return is_lazy_safe(object);
 }
 #endif // RJ_HOOK_TEST_HOOKS
