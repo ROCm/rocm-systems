@@ -28,7 +28,7 @@ NCCL_DEVICE_INLINE bool anvilCtxValid(ncclGinAnvilSdmaGPUContext* rsCtx) {
   return rsCtx != nullptr && loadConst(&rsCtx->layoutMagic) == NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
 }
 
-__device__ uint64_t anvilGinDummySignal;
+__attribute__((weak)) __device__ uint64_t anvilGinDummySignal;
 
 NCCL_DEVICE_INLINE uint64_t* anvilSignalPtrOrDummy(ncclGinAnvilSdmaGPUContext* rsCtx, ncclGinSignal_t signalId) {
   if (!anvilCtxValid(rsCtx)) return &anvilGinDummySignal;
@@ -419,6 +419,16 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
       coop.sync();
     }
     __threadfence_system();
+  }
+};
+
+template <>
+struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
+  template <typename Coop>
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop, int, ncclGinWindow_t, size_t,
+                                      ncclGinWindow_t, size_t, size_t, bool,
+                                      ncclGinDescriptorSmem*, uint32_t = ncclGinOptFlagsDefault) {
+    __builtin_unreachable();
   }
 };
 
