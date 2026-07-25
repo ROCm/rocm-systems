@@ -50,7 +50,8 @@ extern "C" uint64_t rj_test_create_hidden_child(uint64_t parent_executable_handl
                                                 uint64_t agent_handle, const void *bytes,
                                                 size_t size);
 extern "C" unsigned rj_test_single_flight_producer_runs(unsigned thread_count, bool succeed);
-extern "C" uint64_t rj_test_lazy_rewrite_kernel_object(uint64_t proxy_ko, uint64_t child_ko);
+extern "C" uint64_t rj_test_lazy_rewrite_kernel_object(uint64_t proxy_ko, uint64_t child_ko,
+                                                       bool ext);
 extern "C" bool rj_test_is_lazy_safe(const void *bytes, size_t size);
 
 namespace {
@@ -847,6 +848,18 @@ void write_runtime_config_path(const std::string &runtime_dir) {
 
   std::ofstream config_path(rocjitsu::rpc_default_config_file_path());
   config_path << RJ_HOOK_UNIT_CONFIG_PATH << '\n';
+}
+
+// Convenience: point the runtime config at a fresh per-process temp directory and
+// write the simulation config there. Tests that only need "simulation mode is
+// selected" (rather than a controlled dir) use this no-arg form.
+void write_runtime_config_path() {
+  const std::filesystem::path runtime_dir =
+      std::filesystem::temp_directory_path() /
+      ("rocjitsu-hsa-hooks-unit-sim-" + std::to_string(static_cast<long long>(::getpid())));
+  std::filesystem::remove_all(runtime_dir);
+  std::filesystem::create_directories(runtime_dir);
+  write_runtime_config_path(runtime_dir.string());
 }
 
 class InstalledHook {
@@ -1840,20 +1853,31 @@ TEST(HsaHooksUnitTest, SingleFlightFailureIsPermanentAndOnce) {
   EXPECT_NE(result & 0x10000u, 0u) << "not all threads observed the same failed result";
 }
 
-// The dispatch-seam rewrite mechanic (§14.3): a kernel-dispatch packet carrying a
-// tracked, translated proxy kernel_object has it swapped for the child's
-// kernel_object in place. (Full translate/load producer is proven at full stack.)
+// The dispatch-seam rewrite mechanic (§14.3): a STANDARD kernel-dispatch packet
+// carrying a tracked, translated proxy kernel_object has it swapped for the
+// child's kernel_object in place. (Full producer is proven at full stack.)
 TEST(HsaHooksUnitTest, LazyDispatchRewritesProxyKernelObject) {
   constexpr uint64_t kProxyKo = 0x5000;
   constexpr uint64_t kChildKo = 0x9000;
-  const uint64_t rewritten = rj_test_lazy_rewrite_kernel_object(kProxyKo, kChildKo);
+  const uint64_t rewritten = rj_test_lazy_rewrite_kernel_object(kProxyKo, kChildKo, /*ext=*/false);
   EXPECT_EQ(rewritten, kChildKo) << "proxy kernel_object was not rewritten to the translated child";
+}
+
+// §14.3a: the normal gfx1250 HIP launch is an AMD EXTENDED kernel-dispatch packet
+// (vendor-specific type + amd_format). The seam must recognize it and rewrite its
+// kernel_object (at the same offset 32 as the standard layout) to the child's.
+TEST(HsaHooksUnitTest, LazyDispatchRewritesExtendedPacketProxyKernelObject) {
+  constexpr uint64_t kProxyKo = 0x6000;
+  constexpr uint64_t kChildKo = 0xA000;
+  const uint64_t rewritten = rj_test_lazy_rewrite_kernel_object(kProxyKo, kChildKo, /*ext=*/true);
+  EXPECT_EQ(rewritten, kChildKo)
+      << "extended-packet proxy kernel_object was not rewritten (§14.3a not recognized)";
 }
 
 // The rewrite is a no-op when the translated kernel_object equals the proxy's
 // (the identity guard), so a packet is never needlessly re-published.
 TEST(HsaHooksUnitTest, LazyDispatchIdentityMapLeavesPacketUnchanged) {
-  const uint64_t unchanged = rj_test_lazy_rewrite_kernel_object(0x7777, 0x7777);
+  const uint64_t unchanged = rj_test_lazy_rewrite_kernel_object(0x7777, 0x7777, /*ext=*/false);
   EXPECT_EQ(unchanged, 0x7777u) << "identity map should leave the kernel_object unchanged";
 }
 

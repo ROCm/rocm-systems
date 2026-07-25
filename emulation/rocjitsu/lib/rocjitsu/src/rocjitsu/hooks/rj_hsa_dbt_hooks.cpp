@@ -16,6 +16,7 @@
 /// hook returns an HSA error instead of retrying the original reader, because
 /// the original ELF may target a different GPU ISA.
 
+#include "hsa/amd_ext_aql_packet.h"
 #include "hsa/hsa_api_trace_minimal.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -2929,6 +2930,29 @@ void map_pointer_info_accessible_agents(uint32_t *num_agents_accessible, hsa_age
   return aql_packet_type(packet.header) == HSA_PACKET_TYPE_KERNEL_DISPATCH;
 }
 
+/// @brief Return true when a packet is an AMD *extended* kernel dispatch (§14.3a).
+///
+/// @details Normal gfx1250 HIP launches are NOT standard kernel-dispatch packets:
+/// CLR emits `hsa_amd_ext_kernel_dispatch_packet_t` (clustered dispatch), which
+/// rides on the vendor-specific packet type with `amd_format ==
+/// kHsaAmdPacketTypeExtKernelDispatch`. The second byte of the packet is
+/// `amd_format` for a vendor-specific packet. Crucially, the extended layout keeps
+/// `kernel_object` at the SAME offset (32) as the standard packet
+/// (static_assert in amd_ext_aql_packet.h), so the lazy rewrite -- which only
+/// swaps `kernel_object` -- is layout-agnostic once the packet is recognized. The
+/// standard-only virtual-LDS path must NOT run on these (its other fields differ).
+[[nodiscard]] bool is_ext_kernel_dispatch_packet(const hsa_kernel_dispatch_packet_t &packet) {
+  if (aql_packet_type(packet.header) != HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+    return false;
+  const auto *ext = reinterpret_cast<const rocjitsu::amdgpu::AmdExtKernelDispatchPacket *>(&packet);
+  return ext->amd_format == rocjitsu::amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+}
+
+/// @brief Return true when a packet dispatches a kernel via EITHER layout.
+[[nodiscard]] bool is_lazy_dispatch_packet(const hsa_kernel_dispatch_packet_t &packet) {
+  return is_kernel_dispatch_packet(packet) || is_ext_kernel_dispatch_packet(packet);
+}
+
 /// @brief Return a copy of @p header with the packet type forced to INVALID.
 ///
 /// @details Used only as a transient "not ready" marker while the ring rewrite
@@ -2962,10 +2986,17 @@ public:
   }
 
 #if defined(RJ_HOOK_TEST_HOOKS)
-  /// @brief Test shim: run the lazy kernel_object rewrite on one packet.
+  /// @brief Test shim: dispatch-type-detect + lazy rewrite one packet.
+  ///
+  /// @details Mirrors rewrite_packet's lazy branch: it only rewrites a packet the
+  /// seam actually recognizes as a kernel dispatch (standard OR extended), so a
+  /// test proves both that an extended packet is recognized (§14.3a) and that a
+  /// non-dispatch packet is left alone.
   static void rewrite_lazy_kernel_object_for_test(hsa_kernel_dispatch_packet_t &packet) {
     const uint16_t header =
         std::atomic_ref<uint16_t>(packet.header).load(std::memory_order_acquire);
+    if (!is_lazy_dispatch_packet(packet))
+      return;
     rewrite_lazy_kernel_object(packet, header);
   }
 #endif
@@ -3729,7 +3760,11 @@ private:
       hsa_kernel_dispatch_packet_t &packet = packets[slot];
       const uint16_t header =
           std::atomic_ref<uint16_t>(packet.header).load(std::memory_order_acquire);
-      if (aql_packet_type(header) != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+      if (aql_packet_type(header) == HSA_PACKET_TYPE_INVALID)
+        continue;
+      // Accept BOTH standard and extended kernel-dispatch packets: the normal
+      // gfx1250 HIP launch is an extended (vendor-specific) packet (§14.3a).
+      if (!is_lazy_dispatch_packet(packet))
         continue;
       auto object =
           DeferredObjectRegistry::instance().find_by_proxy_kernel_object(packet.kernel_object);
@@ -3767,6 +3802,16 @@ private:
     const uint32_t type = aql_packet_type(header);
     if (type == HSA_PACKET_TYPE_INVALID)
       return false;
+
+    // An AMD extended kernel-dispatch packet (the normal gfx1250 HIP launch,
+    // §14.3a) is vendor-specific, so it is NOT an is_kernel_dispatch_packet. It
+    // still carries a kernel_object at the same offset, so run ONLY the lazy
+    // rewrite on it and return -- the virtual-LDS path below reads standard-only
+    // fields and must never touch an extended packet.
+    if (is_ext_kernel_dispatch_packet(packet)) {
+      rewrite_lazy_kernel_object(packet, header);
+      return true;
+    }
 
     if (!is_kernel_dispatch_packet(packet)) {
       retire_slot_buffers(state, slot);
@@ -5620,13 +5665,14 @@ extern "C" RJ_HOOK_EXPORT unsigned rj_test_single_flight_producer_runs(unsigned 
 ///
 /// @details Builds a READY DeferredObject with a single proxy->child kernel_object
 /// mapping, registers the proxy kernel_object in the reverse index, writes a
-/// kernel-dispatch packet carrying @p proxy_ko, runs the doorbell-seam rewrite, and
-/// returns the packet's kernel_object afterward. The full translate/load producer
-/// is exercised elsewhere; this proves the rewrite mechanic (proxy KO in the ring
-/// -> translated KO) without needing the emulator. Returns the rewritten
-/// kernel_object (should equal @p child_ko for a mapped proxy).
+/// dispatch packet carrying @p proxy_ko, runs the doorbell-seam rewrite, and
+/// returns the packet's kernel_object afterward. When @p ext is true the packet is
+/// an AMD *extended* kernel-dispatch (the normal gfx1250 HIP launch, §14.3a),
+/// proving the rewrite recognizes and rewrites that layout too. The full
+/// translate/load producer is exercised elsewhere; this proves the rewrite
+/// mechanic (proxy KO in the ring -> translated KO) without the emulator.
 extern "C" RJ_HOOK_EXPORT uint64_t rj_test_lazy_rewrite_kernel_object(uint64_t proxy_ko,
-                                                                      uint64_t child_ko) {
+                                                                      uint64_t child_ko, bool ext) {
   auto object = std::make_shared<DeferredObject>();
   object->parent_executable = hsa_executable_t{0xABC};
   object->agent = hsa_agent_t{0xDEF};
@@ -5638,10 +5684,20 @@ extern "C" RJ_HOOK_EXPORT uint64_t rj_test_lazy_rewrite_kernel_object(uint64_t p
   DeferredObjectRegistry::instance().record(object);
   DeferredObjectRegistry::instance().register_proxy_kernel_object(proxy_ko, object);
 
-  // A valid kernel-dispatch header (type field = KERNEL_DISPATCH).
+  // kernel_object sits at offset 32 in both the standard and the extended layout,
+  // so a single hsa_kernel_dispatch_packet_t backing store works for both; only
+  // the header type + amd_format distinguish them.
   hsa_kernel_dispatch_packet_t packet{};
-  packet.header = static_cast<uint16_t>(HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
-  packet.kernel_object = proxy_ko;
+  if (ext) {
+    auto *ep = reinterpret_cast<rocjitsu::amdgpu::AmdExtKernelDispatchPacket *>(&packet);
+    ep->header = static_cast<uint16_t>(HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE);
+    ep->amd_format = rocjitsu::amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+    ep->kernel_object = proxy_ko;
+  } else {
+    packet.header =
+        static_cast<uint16_t>(HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    packet.kernel_object = proxy_ko;
+  }
 
   VirtualLdsDispatchQueueRegistry::rewrite_lazy_kernel_object_for_test(packet);
   return packet.kernel_object;

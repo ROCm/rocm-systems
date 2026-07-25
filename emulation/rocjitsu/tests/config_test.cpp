@@ -398,18 +398,15 @@ TEST(ConfigLoaderTest, ReportsDbtGuestBlockPresence) {
   // dbt_guest block at all (a plain KMD/topology config -> auto-A0) from one that
   // is present but disabled (an explicit simulation directive). The out-param is
   // how it tells them apart, so both cases are exercised here.
-  const std::filesystem::path kmd_only =
-      write_temp_config("rocjitsu_kmd_only_config_test.json", R"({
+  const auto kmd_only = write_temp_config(R"({
       "topology": { "nodes": [] }
     })");
   bool has_block = true;
-  auto kmd = config::load_dbt_guest_config_from_file(kmd_only.string(), &has_block);
-  std::filesystem::remove(kmd_only);
+  auto kmd = config::load_dbt_guest_config_from_file(kmd_only.path(), &has_block);
   EXPECT_FALSE(has_block);
   EXPECT_FALSE(kmd.enabled);
 
-  const std::filesystem::path disabled =
-      write_temp_config("rocjitsu_disabled_dbt_guest_config_test.json", R"({
+  const auto disabled = write_temp_config(R"({
       "dbt_guest": {
         "enabled": false,
         "guest_isa": "gfx1250",
@@ -417,8 +414,7 @@ TEST(ConfigLoaderTest, ReportsDbtGuestBlockPresence) {
       }
     })");
   has_block = false;
-  auto off = config::load_dbt_guest_config_from_file(disabled.string(), &has_block);
-  std::filesystem::remove(disabled);
+  auto off = config::load_dbt_guest_config_from_file(disabled.path(), &has_block);
   EXPECT_TRUE(has_block);
   EXPECT_FALSE(off.enabled);
 }
