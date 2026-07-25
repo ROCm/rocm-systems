@@ -20,7 +20,7 @@ SemanticSpillFrame::SemanticSpillFrame(TranslationContext &context)
 std::optional<SemanticSpillRange> SemanticSpillFrame::allocate_dwords(uint16_t dword_count,
                                                                       uint32_t byte_alignment,
                                                                       uint32_t max_dword_offset) {
-  if (dword_count == 0 || byte_alignment == 0)
+  if (!context_.private_spills_allowed || dword_count == 0 || byte_alignment == 0)
     return std::nullopt;
 
   const uint32_t bytes = static_cast<uint32_t>(dword_count) * sizeof(uint32_t);
@@ -75,7 +75,7 @@ SemanticScratchAllocator::acquire_vgprs(const SemanticScratchRequest &request) {
     search_start = static_cast<uint16_t>(*free + request.alignment);
   }
 
-  if (!request.allow_spill)
+  if (!request.allow_spill || !context_.private_spills_allowed)
     return {.lease = std::nullopt, .failure = SemanticScratchFailure::NoRegisterWindow};
 
   const uint16_t allocated_vgprs =

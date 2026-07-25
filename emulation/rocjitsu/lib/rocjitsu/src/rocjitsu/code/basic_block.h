@@ -21,6 +21,10 @@ namespace rocjitsu {
 
 class CodeObject;
 class Decoder;
+class Instruction;
+
+/// @brief Whether @p inst is an exact scalar set-PC through @p ssrc0.
+[[nodiscard]] bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0);
 
 /// @brief A maximal sequence of instructions with single entry, single exit.
 ///
@@ -164,6 +168,17 @@ public:
   build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
         std::span<const uint64_t> extra_leaders = {},
         ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless);
+
+  /// @brief Build blocks with distinct split points and external analysis roots.
+  ///
+  /// @param[in] block_leaders Byte offsets that must start a basic block.
+  /// @param[in] external_entries Block offsets that may be entered from outside
+  /// the recovered direct CFG. Unlike block boundaries, these seed conservative
+  /// register state in indirect-control-flow analysis.
+  static std::vector<std::unique_ptr<BasicBlock>>
+  build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+        std::span<const uint64_t> block_leaders, std::span<const uint64_t> external_entries,
+        ExternalEntryPolicy entry_policy = ExternalEntryPolicy::ExplicitOnly);
 
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);

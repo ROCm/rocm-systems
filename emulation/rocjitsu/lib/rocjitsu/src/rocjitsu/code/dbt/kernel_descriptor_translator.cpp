@@ -36,6 +36,7 @@ RJ_DIAGNOSTIC_POP
 #include <string>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -52,6 +53,10 @@ constexpr uint64_t kKernargPreloadSkipBytes = 256;
 constexpr uint16_t kScalarOperandTtmpBase = 108;
 constexpr uint16_t kTtmpRdna4GridYz = 7;
 constexpr uint16_t kTtmpRdna4GridX = 9;
+
+[[nodiscard]] bool image_contains_range(size_t image_size, uint64_t offset, uint64_t size) {
+  return offset <= image_size && size <= image_size - offset;
+}
 
 // -----------------------------------------------------------------------------
 // ISA-family helpers.
@@ -211,11 +216,10 @@ kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t s
 
 [[nodiscard]] std::optional<uint64_t> text_vaddr_for_section(uint64_t text_offset,
                                                              uint64_t text_size,
-                                                             const Elf64_Ehdr &ehdr,
-                                                             const Elf64_Shdr *shdr) {
-  for (int i = 0; i < ehdr.e_shnum; ++i) {
-    if (shdr[i].sh_offset == text_offset && shdr[i].sh_size == text_size)
-      return shdr[i].sh_addr;
+                                                             std::span<const Elf64_Shdr> sections) {
+  for (const Elf64_Shdr &section : sections) {
+    if (section.sh_offset == text_offset && section.sh_size == text_size)
+      return section.sh_addr;
   }
   return std::nullopt;
 }
@@ -229,12 +233,16 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   if (image.size() < sizeof(Elf64_Ehdr))
     return;
 
-  const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image.data());
-  if (ehdr->e_shoff + static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr) > image.size())
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  const uint64_t section_table_size = static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr);
+  if (ehdr.e_shnum == 0 || ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
+      !image_contains_range(image.size(), ehdr.e_shoff, section_table_size))
     return;
 
-  const auto *shdr = reinterpret_cast<const Elf64_Shdr *>(image.data() + ehdr->e_shoff);
-  auto text_vaddr = text_vaddr_for_section(text_offset, text_size, *ehdr, shdr);
+  std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
+  std::memcpy(sections.data(), image.data() + ehdr.e_shoff, section_table_size);
+  auto text_vaddr = text_vaddr_for_section(text_offset, text_size, sections);
   if (!text_vaddr)
     return;
   constexpr uint64_t max_u64 = std::numeric_limits<uint64_t>::max();
@@ -245,38 +253,43 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   // .symtab and .dynsym may both describe the same descriptor. Translation is
   // keyed by descriptor bytes, so visit each file offset once.
   std::unordered_set<uint64_t> seen_descriptor_offsets;
-  for (int i = 0; i < ehdr->e_shnum; ++i) {
-    if (shdr[i].sh_type != SHT_SYMTAB && shdr[i].sh_type != SHT_DYNSYM)
+  for (const Elf64_Shdr &symbol_section : sections) {
+    if (symbol_section.sh_type != SHT_SYMTAB && symbol_section.sh_type != SHT_DYNSYM)
       continue;
-    if (shdr[i].sh_offset + shdr[i].sh_size > image.size() || shdr[i].sh_entsize == 0)
+    if (!image_contains_range(image.size(), symbol_section.sh_offset, symbol_section.sh_size) ||
+        symbol_section.sh_entsize == 0)
       continue;
-    if (shdr[i].sh_entsize != sizeof(Elf64_Sym))
+    if (symbol_section.sh_entsize != sizeof(Elf64_Sym))
       continue;
 
     const char *strtab = nullptr;
     size_t strtab_size = 0;
-    if (shdr[i].sh_link < ehdr->e_shnum) {
-      const auto &strtab_shdr = shdr[shdr[i].sh_link];
-      if (strtab_shdr.sh_offset + strtab_shdr.sh_size <= image.size()) {
+    if (symbol_section.sh_link < sections.size()) {
+      const auto &strtab_shdr = sections[symbol_section.sh_link];
+      if (image_contains_range(image.size(), strtab_shdr.sh_offset, strtab_shdr.sh_size)) {
         strtab = reinterpret_cast<const char *>(image.data() + strtab_shdr.sh_offset);
-        strtab_size = strtab_shdr.sh_size;
+        strtab_size = static_cast<size_t>(strtab_shdr.sh_size);
       }
     }
 
-    const auto *symtab = reinterpret_cast<const Elf64_Sym *>(image.data() + shdr[i].sh_offset);
-    const size_t nsyms = shdr[i].sh_size / shdr[i].sh_entsize;
+    const size_t nsyms = symbol_section.sh_size / symbol_section.sh_entsize;
     for (size_t j = 0; j < nsyms; ++j) {
-      auto kernel_name = kernel_descriptor_symbol_name(symtab[j], strtab, strtab_size);
+      Elf64_Sym symbol{};
+      std::memcpy(&symbol, image.data() + symbol_section.sh_offset + j * symbol_section.sh_entsize,
+                  sizeof(symbol));
+      auto kernel_name = kernel_descriptor_symbol_name(symbol, strtab, strtab_size);
       if (!kernel_name)
         continue;
 
-      const uint16_t sec_idx = symtab[j].st_shndx;
-      if (sec_idx >= ehdr->e_shnum || symtab[j].st_value < shdr[sec_idx].sh_addr)
+      const uint16_t sec_idx = symbol.st_shndx;
+      if (sec_idx >= sections.size() || symbol.st_value < sections[sec_idx].sh_addr)
         continue;
 
-      const uint64_t file_off =
-          shdr[sec_idx].sh_offset + (symtab[j].st_value - shdr[sec_idx].sh_addr);
-      if (file_off + sizeof(KD) > image.size())
+      const uint64_t section_offset = symbol.st_value - sections[sec_idx].sh_addr;
+      if (sections[sec_idx].sh_offset > max_u64 - section_offset)
+        continue;
+      const uint64_t file_off = sections[sec_idx].sh_offset + section_offset;
+      if (!image_contains_range(image.size(), file_off, sizeof(KD)))
         continue;
       if (!seen_descriptor_offsets.insert(file_off).second)
         continue;
@@ -284,7 +297,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
       KD desc;
       std::memcpy(&desc, image.data() + file_off, sizeof(desc));
       const int64_t entry_vaddr_signed =
-          static_cast<int64_t>(symtab[j].st_value) + desc.kernel_code_entry_byte_offset;
+          static_cast<int64_t>(symbol.st_value) + desc.kernel_code_entry_byte_offset;
 
       if (entry_vaddr_signed < 0)
         continue;
@@ -454,32 +467,6 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
 
 [[nodiscard]] bool uses_gfx10_plus_rsrc3(rj_code_arch_t arch) {
   return arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250;
-}
-
-[[nodiscard]] uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch,
-                                                                 uint32_t wavefront_size) {
-  // This is the AMDHSA kernel-descriptor encoding granularity for
-  // COMPUTE_PGM_RSRC1.GRANULATED_WORKITEM_VGPR_COUNT, not the physical VGPR
-  // allocation block from the ISA manuals. For example, RDNA3/RDNA4 manuals
-  // describe Wave64 physical allocation in blocks of 8 VGPRs (or 12 on
-  // 1536-VGPR/SIMD parts), while the AMDHSA descriptor table encodes
-  // GFX10-GFX12 Wave64 as max(0, ceil(vgprs_used / 4) - 1).
-  //
-  // If/when occupancy modeling needs the physical allocation block size, add a
-  // separate helper for that policy. Reusing this descriptor helper for
-  // occupancy would mix two different hardware contracts.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA1)
-    return 4;
-  if (arch_is_cdna(arch))
-    return 8;
-  // gfx1250 exposes four 256-VGPR banks selected by WAVE_MODE.VGPR_MSB. Its
-  // AMDHSA descriptor allocates that combined Wave32 namespace in blocks of
-  // 16 VGPRs, unlike the 8-VGPR Wave32 granule used by generic RDNA targets.
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
-    return 16;
-  if (arch_is_rdna(arch))
-    return wavefront_size == 32 ? 8 : 4;
-  return 1;
 }
 
 [[nodiscard]] uint32_t granulated_count_to_registers(uint32_t granulated, uint32_t granularity) {

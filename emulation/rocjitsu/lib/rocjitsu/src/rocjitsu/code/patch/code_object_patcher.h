@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -19,11 +20,16 @@ struct KdTranslation;
 /// @brief One exact source-to-target offset mapping inside `.text`.
 ///
 /// @details DBT supplies instruction starts and block ends after final kernel
-/// placement. The ELF patcher uses these mappings to keep local labels and
-/// function symbols attached to relocated code without interpreting the ISA.
+/// placement. The ELF patcher uses these mappings to keep local labels,
+/// function symbols, and unwind ranges attached to relocated code without
+/// interpreting the ISA. A source range copied into multiple kernel-local
+/// placements receives one placement ID per copy. Block-end-only mappings do
+/// not begin unwind ranges at an adjacent function boundary.
 struct TextOffsetRelocation {
   uint64_t source_offset = 0;
   uint64_t target_offset = 0;
+  uint64_t placement_id = 0;
+  bool source_is_instruction_start = true;
 };
 
 /// @brief One relocated literal64 PC builder whose target is outside `.text`.
@@ -55,10 +61,18 @@ public:
   /// @details Updates the .text section size, shifts later file contents, grows
   /// the executable LOAD segment that contains .text, preserves LOAD alignment,
   /// updates moved symbols and relocation places, and keeps descriptor-relative
-  /// entries coherent with explicit descriptor patches applied by DBT.
+  /// entries coherent with explicit descriptor patches applied by DBT. When
+  /// provided, @p error_out receives a specific reason for failure.
+  /// @param require_exact_function_ranges Require every sized text function's
+  /// end to appear in the relocation map. Descriptorless gfx1250 translation
+  /// needs this fail-closed guarantee; established architecture pairs retain
+  /// their prior best-effort symbol-size behavior.
   [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text,
                                   std::span<const TextOffsetRelocation> text_relocations = {},
-                                  std::span<const PcRelativeDataRelocation> data_relocations = {});
+                                  std::span<const PcRelativeDataRelocation> data_relocations = {},
+                                  std::string *error_out = nullptr,
+                                  std::vector<std::string> *warnings_out = nullptr,
+                                  bool require_exact_function_ranges = true);
 
   /// @brief True if any relocation's place (r_offset) falls inside .text.
   ///
@@ -106,7 +120,8 @@ public:
   /// itself. Runtime metadata records the returned virtual addresses.
   [[nodiscard]] std::optional<std::vector<AppendedSidecarDescriptor>>
   append_sidecar_descriptor_translations(std::span<const KdTranslation> translations,
-                                         rj_code_arch_t target_arch, uint64_t alignment = 64);
+                                         rj_code_arch_t target_arch, uint64_t alignment = 64,
+                                         std::string *error_out = nullptr);
 
   /// @brief Append a named, non-allocated ELF section without moving loadable bytes.
   ///

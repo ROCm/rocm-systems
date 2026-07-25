@@ -18,20 +18,24 @@ namespace rocjitsu {
 
 class Instruction;
 
+/// @brief Whether @p inst can modify gfx1250 WAVE_MODE.VGPR_MSB state.
+[[nodiscard]] bool changes_gfx1250_vgpr_msb_state(const Instruction &inst);
+
 /// @brief Resolve gfx1250 encoded VGPR operands to their 256-register bank.
 ///
 /// @details gfx1250 stores only the low eight bits of a VGPR index in vector
 /// instructions. S_SET_VGPR_MSB and MODE register writes provide two high bits
 /// independently for DST, SRC0, SRC1, and SRC2. This analysis propagates those
-/// four fields through a kernel-local CFG. A field is known at a join only when
-/// every reachable predecessor agrees; otherwise bank_before() returns
-/// std::nullopt so clients can behave conservatively.
+/// four fields through a kernel-local CFG from every independently callable ABI
+/// entry. A field is known at a join only when every reachable predecessor
+/// agrees; otherwise bank_before() returns std::nullopt so clients can behave
+/// conservatively.
 class Gfx1250VgprMsbAnalysis {
 public:
   /// @param text Raw .text image, used to read S_SETREG_IMM32_B32 literals safely
   ///        at src_loc()+4. Empty is tolerated: such writes then mark the affected
   ///        banks ambiguous rather than reading a literal.
-  Gfx1250VgprMsbAnalysis(KernelBlockScope blocks, BasicBlock *entry,
+  Gfx1250VgprMsbAnalysis(KernelBlockScope blocks, std::span<BasicBlock *const> entries,
                          std::span<const ScopedCfgEdge> extra_edges = {},
                          std::span<const uint8_t> text = {});
   ~Gfx1250VgprMsbAnalysis();

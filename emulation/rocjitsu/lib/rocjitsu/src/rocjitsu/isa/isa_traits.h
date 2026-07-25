@@ -117,6 +117,23 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
   return 0;
 }
 
+/// @brief AMDHSA descriptor VGPR encoding granularity for one wave size.
+///
+/// This is the COMPUTE_PGM_RSRC1 descriptor granule, not the physical VGPR
+/// allocation block used by occupancy modeling.
+[[nodiscard]] inline constexpr uint32_t
+descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefront_size) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA1)
+    return 4;
+  if (arch_is_cdna(arch))
+    return 8;
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return 16;
+  if (arch_is_rdna(arch))
+    return wavefront_size == 32 ? 8 : 4;
+  return 1;
+}
+
 /// @brief Maximum hardware LDS bytes available to one workgroup on @p arch.
 ///
 /// @details Zero means the limit is not modeled yet. Callers use that

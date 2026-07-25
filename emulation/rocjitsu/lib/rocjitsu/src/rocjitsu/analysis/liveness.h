@@ -45,6 +45,18 @@ struct ScopedCfgEdge {
   BasicBlock *to = nullptr;
 };
 
+/// @brief Source instruction range with its own scratch-VGPR ceiling.
+///
+/// @details A descriptorless ELF can contain several independently callable
+/// STT_FUNC ranges with different source allocation envelopes. A register used
+/// by one function does not prove that an unrelated caller allocated it for
+/// another function, so scratch allocation must honor the containing range.
+struct ScratchVgprRangeLimit {
+  uint64_t begin_offset = 0;
+  uint64_t end_offset = 0;
+  uint16_t max_free_vgpr = 0;
+};
+
 /// @brief Block-level dataflow state for one kernel scope.
 ///
 /// @details `gen` is the upward-exposed use set: registers read in the block
@@ -64,12 +76,17 @@ struct LivenessAnalysisOptions {
   /// @brief Architecture whose register semantics should be analyzed.
   ///
   /// @details INVALID preserves the legacy ISA-independent behavior. DBT sets
-  /// this to gfx1250 together with entry_block so VGPR_MSB state can resolve
+  /// this to gfx1250 together with entry_blocks so VGPR_MSB state can resolve
   /// encoded vector operands to physical VGPRs.
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
 
-  /// @brief Kernel entry block where architectural VGPR_MSB state is zero.
-  BasicBlock *entry_block = nullptr;
+  /// @brief All ABI entry blocks where architectural VGPR_MSB state is zero.
+  ///
+  /// @details Linked descriptorless libraries can expose several independent
+  /// STT_FUNC entries in one analysis scope. Each entry starts with the ABI
+  /// default bank state; seeding only the first would leave later callables
+  /// unreachable to forward VGPR_MSB analysis.
+  std::span<BasicBlock *const> entry_blocks = {};
 
   /// @brief Lowest VGPR index that find_free_run() may return.
   ///
@@ -86,6 +103,21 @@ struct LivenessAnalysisOptions {
   /// prevents 8-bit destination fields from truncating v256 and above.
   uint16_t max_free_vgpr = static_cast<uint16_t>(
       std::min(amdgpu::CdnaIsaBase::MAX_VGPRS_PER_WF, amdgpu::RdnaIsaBase::MAX_VGPRS_PER_WF));
+
+  /// @brief Registers that scratch allocation must never borrow.
+  ///
+  /// @details This is independent of program liveness. Callers use it for ABI
+  /// registers whose values are not represented by an in-object CFG edge, such
+  /// as unknown descriptorless-function return values and callee-saved
+  /// registers that the original function did not touch.
+  RegisterSet scratch_reserved;
+
+  /// @brief Optional per-source-range exclusive VGPR allocation ceilings.
+  ///
+  /// @details When non-empty, an instruction outside every listed range has no
+  /// scratch VGPRs available. Ranges must be non-empty, source ordered, and
+  /// disjoint.
+  std::span<const ScratchVgprRangeLimit> scratch_vgpr_range_limits = {};
 
   /// @brief Restrict instruction-level live-before materialization to selected instructions.
   ///
@@ -204,6 +236,9 @@ private:
   bool available_ = true;
   uint16_t min_free_vgpr_ = 0;
   uint16_t max_free_vgpr_ = 0;
+  RegisterSet scratch_reserved_;
+  bool has_scratch_vgpr_range_limits_ = false;
+  std::vector<ScratchVgprRangeLimit> scratch_vgpr_range_limits_;
   std::unique_ptr<Gfx1250VgprMsbAnalysis> gfx1250_vgpr_msb_;
   std::vector<BlockLiveness> liveness_;
   std::unordered_map<const BasicBlock *, size_t> block_index_;

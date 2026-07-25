@@ -181,14 +181,20 @@ inline constexpr uint32_t SHT_DYNSYM = 11;
 inline constexpr uint32_t R_AMDGPU_ABS64 = 3;
 inline constexpr uint32_t R_AMDGPU_RELATIVE64 = 13;
 
+inline constexpr uint8_t kElfSymbolBindLocal = 0;
 inline constexpr uint8_t kElfSymbolBindGlobal = 1;
-inline constexpr uint8_t kElfSymbolTypeNone = 0;    // STT_NOTYPE
-inline constexpr uint8_t kElfSymbolTypeObject = 1;  // STT_OBJECT
-inline constexpr uint8_t kElfSymbolTypeFunc = 2;    // STT_FUNC
-inline constexpr uint8_t kElfSymbolTypeSection = 3; // STT_SECTION
+inline constexpr uint8_t kElfSymbolBindWeak = 2;
+inline constexpr uint8_t kElfSymbolVisibilityDefault = 0;
+inline constexpr uint8_t kElfSymbolVisibilityProtected = 3;
+inline constexpr uint8_t kElfSymbolTypeNone = 0;             // STT_NOTYPE
+inline constexpr uint8_t kElfSymbolTypeObject = 1;           // STT_OBJECT
+inline constexpr uint8_t kElfSymbolTypeFunc = 2;             // STT_FUNC
+inline constexpr uint8_t kElfSymbolTypeSection = 3;          // STT_SECTION
+inline constexpr uint8_t kElfSymbolTypeAmdGpuHsaKernel = 10; // STT_AMDGPU_HSA_KERNEL
 
 inline constexpr uint8_t elf_symbol_bind(uint8_t info) { return info >> 4; }
 inline constexpr uint8_t elf_symbol_type(uint8_t info) { return info & 0xf; }
+inline constexpr uint8_t elf_symbol_visibility(uint8_t other) { return other & 0x3; }
 inline constexpr uint8_t elf_symbol_info(uint8_t bind, uint8_t type) {
   return static_cast<uint8_t>((bind << 4) | (type & 0xf));
 }
@@ -215,6 +221,11 @@ inline constexpr uint32_t NT_AMDGPU_METADATA = 32;
 inline constexpr uint32_t PT_LOAD = 1;
 inline constexpr uint32_t PT_DYNAMIC = 2;
 inline constexpr uint32_t PT_NOTE = 4;
+
+// Program-header permission bits.
+inline constexpr uint32_t PF_X = 1u << 0;
+inline constexpr uint32_t PF_W = 1u << 1;
+inline constexpr uint32_t PF_R = 1u << 2;
 
 // Dynamic section tags.
 inline constexpr int64_t DT_NULL = 0;

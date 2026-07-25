@@ -221,12 +221,34 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
 
 } // namespace
 
+bool changes_gfx1250_vgpr_msb_state(const Instruction &inst) {
+  const std::string_view mnemonic = inst.mnemonic();
+  if (mnemonic == "s_set_vgpr_msb")
+    return true;
+  if (mnemonic != "s_setreg_b32" && mnemonic != "s_setreg_imm32_b32")
+    return false;
+
+  const Operand *hwreg_operand = inst.dst_operand(0);
+  if (hwreg_operand == nullptr)
+    return true;
+  const HwregSlice slice = decode_hwreg(static_cast<uint16_t>(hwreg_operand->encoding_value()));
+  if (slice.id != kModeHwreg)
+    return false;
+  if (mnemonic == "s_setreg_imm32_b32")
+    return true;
+
+  constexpr uint16_t kVgprMsbBegin = 12;
+  constexpr uint16_t kVgprMsbEnd = 20;
+  const uint16_t width = std::min<uint16_t>(slice.width, static_cast<uint16_t>(32u - slice.begin));
+  return slice.begin < kVgprMsbEnd && kVgprMsbBegin < slice.begin + width;
+}
+
 class Gfx1250VgprMsbAnalysis::Impl {
 public:
-  Impl(KernelBlockScope blocks, BasicBlock *entry, std::span<const ScopedCfgEdge> extra_edges,
-       std::span<const uint8_t> text)
+  Impl(KernelBlockScope blocks, std::span<BasicBlock *const> entries,
+       std::span<const ScopedCfgEdge> extra_edges, std::span<const uint8_t> text)
       : text_(text) {
-    analyze(blocks, entry, extra_edges);
+    analyze(blocks, entries, extra_edges);
   }
 
   [[nodiscard]] std::optional<uint8_t> bank_before(const Instruction &inst,
@@ -243,7 +265,7 @@ public:
   }
 
 private:
-  void analyze(KernelBlockScope blocks, BasicBlock *entry,
+  void analyze(KernelBlockScope blocks, std::span<BasicBlock *const> entries,
                std::span<const ScopedCfgEdge> extra_edges) {
     std::unordered_map<const BasicBlock *, size_t> block_index;
     block_index.reserve(blocks.size());
@@ -251,10 +273,6 @@ private:
       if (blocks[i] != nullptr)
         block_index.emplace(blocks[i], i);
     }
-    const auto entry_it = block_index.find(entry);
-    if (entry_it == block_index.end())
-      return;
-
     std::vector<std::vector<size_t>> successors(blocks.size());
     auto add_edge = [&](const BasicBlock *from, const BasicBlock *to) {
       const auto from_it = block_index.find(from);
@@ -276,7 +294,6 @@ private:
 
     std::vector<VgprMsbState> in(blocks.size());
     std::vector<VgprMsbState> out(blocks.size());
-    in[entry_it->second] = entry_state();
 
     std::deque<size_t> worklist;
     std::vector<bool> queued(blocks.size(), false);
@@ -286,7 +303,13 @@ private:
       queued[index] = true;
       worklist.push_back(index);
     };
-    enqueue(entry_it->second);
+    for (BasicBlock *entry : entries) {
+      const auto entry_it = block_index.find(entry);
+      if (entry_it == block_index.end())
+        return;
+      (void)merge_state(in[entry_it->second], entry_state());
+      enqueue(entry_it->second);
+    }
 
     while (!worklist.empty()) {
       const size_t index = worklist.front();
@@ -326,10 +349,11 @@ private:
   std::unordered_map<const Instruction *, VgprMsbState> before_;
 };
 
-Gfx1250VgprMsbAnalysis::Gfx1250VgprMsbAnalysis(KernelBlockScope blocks, BasicBlock *entry,
+Gfx1250VgprMsbAnalysis::Gfx1250VgprMsbAnalysis(KernelBlockScope blocks,
+                                               std::span<BasicBlock *const> entries,
                                                std::span<const ScopedCfgEdge> extra_edges,
                                                std::span<const uint8_t> text)
-    : impl_(std::make_unique<Impl>(blocks, entry, extra_edges, text)) {}
+    : impl_(std::make_unique<Impl>(blocks, entries, extra_edges, text)) {}
 
 Gfx1250VgprMsbAnalysis::~Gfx1250VgprMsbAnalysis() = default;
 Gfx1250VgprMsbAnalysis::Gfx1250VgprMsbAnalysis(Gfx1250VgprMsbAnalysis &&) noexcept = default;

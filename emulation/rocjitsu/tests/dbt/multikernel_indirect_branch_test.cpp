@@ -176,8 +176,8 @@ cfg_block_counts_by_kernel(const rocjitsu::AmdGpuCodeObject &co,
   if (!decoder)
     return counts;
 
-  auto blocks =
-      rocjitsu::BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, kernel_entry_leaders);
+  auto blocks = rocjitsu::BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4,
+                                            kernel_entry_leaders, kernel_entry_leaders);
 
   for (const char *name : kernel_names) {
     const auto *kernel = kernel_translation_by_name(source_kernels, co, name);
@@ -282,8 +282,8 @@ TEST(BinaryTranslatorE2E, BuildsCfgForRealMultiKernelIndirectBranches) {
 
   auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  auto blocks =
-      rocjitsu::BasicBlock::build(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, kernel_entries);
+  auto blocks = rocjitsu::BasicBlock::build(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, kernel_entries,
+                                            kernel_entries);
   ASSERT_FALSE(blocks.empty());
 
   size_t recovered_swappc_blocks = 0;
@@ -359,8 +359,8 @@ TEST(BinaryTranslatorE2E, CountsRealMultiKernelIndirectBranchCfgBlocksPerKernel)
 
   auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  auto blocks =
-      rocjitsu::BasicBlock::build(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, kernel_entry_leaders);
+  auto blocks = rocjitsu::BasicBlock::build(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA4,
+                                            kernel_entry_leaders, kernel_entry_leaders);
   ASSERT_FALSE(blocks.empty());
 
   struct ExpectedKernelCfg {

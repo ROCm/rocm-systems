@@ -211,7 +211,7 @@ build_test_blocks(std::vector<TestOpcode> ops, std::span<const uint64_t> extra_l
 
   TestCodeObject co(std::move(words));
   TestDecoder decoder;
-  return BasicBlock::build(co, decoder, ROCJITSU_CODE_ARCH_CDNA3, extra_leaders);
+  return BasicBlock::build(co, decoder, ROCJITSU_CODE_ARCH_CDNA3, extra_leaders, extra_leaders);
 }
 
 bool has_predecessor(const BasicBlock &block, const BasicBlock *pred) {
@@ -520,6 +520,36 @@ TEST(CfgAnalysis, ExtraLeaderSplitsBlockAtKernelEntry) {
   EXPECT_TRUE(has_predecessor(*blocks[1], blocks[0].get()));
 }
 
+TEST(CfgAnalysis, BoundaryOnlyLeaderDoesNotBecomeExternalEntry) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x00: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x04: s_add_u32.
+      20,                                                  // 0x08: -> 0x18.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c: s_addc_u32.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x10: s_setpc_b64.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x14.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x18: target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 1> block_leaders{16};
+  constexpr std::array<uint64_t, 1> external_entries{0};
+  auto blocks =
+      BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, block_leaders, external_entries);
+
+  BasicBlock *consumer = block_starting_at(blocks, 16);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 24u);
+  EXPECT_FALSE(consumer->static_indirect_call_fixups()[0].source_incomplete)
+      << "a symbol end may split a block without manufacturing an external CFG entry";
+}
+
 TEST(CfgAnalysis, IndirectCallFallsThroughToReturnSuccessor) {
   auto blocks =
       build_test_blocks({TestOpcode::IndirectCall, TestOpcode::UseSgpr4, TestOpcode::End});
@@ -561,7 +591,8 @@ TEST(CfgAnalysis, IndirectRecoveryPrefilterAdmitsSetPcConsumer) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
   constexpr std::array<uint64_t, 1> extra_leaders{16};
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+  auto blocks =
+      BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders, extra_leaders);
 
   auto *builder = block_starting_at(blocks, 0);
   auto *consumer = block_starting_at(blocks, 16);
@@ -688,7 +719,8 @@ TEST(CfgAnalysis, IgnoresUnconsumedPairWhileRecoveringPendingConsumer) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
   constexpr std::array<uint64_t, 1> extra_leaders{20};
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+  auto blocks =
+      BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders, extra_leaders);
 
   auto *consumer = block_starting_at(blocks, 20);
   ASSERT_NE(consumer, nullptr);
@@ -1018,7 +1050,8 @@ TEST(CfgAnalysis, ExplicitKernelEntryMakesIncomingPcBuilderIncomplete) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
   constexpr std::array<uint64_t, 1> extra_leaders{24};
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+  auto blocks =
+      BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders, extra_leaders);
 
   auto *consumer = block_starting_at(blocks, 24);
   ASSERT_NE(consumer, nullptr);
@@ -1051,7 +1084,8 @@ TEST(CfgAnalysis, RocrAbortTrapStopsTemporaryPcBuilderCfg) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
   constexpr std::array<uint64_t, 1> extra_leaders{20};
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+  auto blocks =
+      BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders, extra_leaders);
 
   auto *consumer = block_starting_at(blocks, 20);
   ASSERT_NE(consumer, nullptr);
@@ -1541,7 +1575,8 @@ TEST(CfgAnalysis, KillPredecessorPreventsRecoveredConsumer) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
   constexpr std::array<uint64_t, 1> extra_leaders{40};
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+  auto blocks =
+      BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders, extra_leaders);
 
   auto *consumer = block_starting_at(blocks, 32);
   auto *target = block_starting_at(blocks, 40);
@@ -2035,6 +2070,58 @@ TEST(CfgAnalysis, Gfx1250UnreachablePostRocrAbortBlockDoesNotPoisonLaneStash) {
   EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 72u);
 }
 
+TEST(CfgAnalysis, Gfx1250VectorLaneRecoveryUsesRecoveredScalarEdge) {
+  constexpr auto scalar_getpc = gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1, {.sdst = 8});
+  constexpr auto scalar_add =
+      gfx1250::build_sop2(gfx1250::kSAddNcU64Sop2, {.ssrc0 = 8, .ssrc1 = 254, .sdst = 8});
+  constexpr auto scalar_setpc =
+      gfx1250::build_sop1(gfx1250::kSSetPcI64Sop1, {.ssrc0 = 8, .sdst = 0});
+  std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u, 84u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(84) -> lane-stashed target 0x58.
+      0xD761002Cu,
+      0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u,     // 0x18: v_writelane_b32 v44, s1, 1.
+      scalar_getpc[0], // 0x20: s_get_pc_i64 s[8:9].
+      scalar_add[0], 20u,
+      0u,              // 0x24: s_add_nc_u64 ..., lit64(20) -> bridge 0x38.
+      scalar_setpc[0], // 0x30: recovered scalar edge to 0x38.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x34: no lexical path to consumer.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), // 0x38: recovered bridge.
+      gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = 0})[0],
+      // 0x3c: direct edge from the recovered bridge to the consumer.
+      0xD7600000u,
+      0x0201012Cu, // 0x40: v_readlane_b32 s0, v44, 0.
+      0xD7600001u,
+      0x0201032Cu,                                // 0x48: v_readlane_b32 s1, v44, 1.
+      0xBE9E4900u,                                // 0x50: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x54: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x58: lane-stashed target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  const IndirectCallFixup *scalar_fixup = nullptr;
+  const IndirectCallFixup *vector_fixup = nullptr;
+  for (const auto &block : blocks) {
+    for (const IndirectCallFixup &fixup : block->static_indirect_call_fixups()) {
+      if (fixup.source_call_offset == 48u)
+        scalar_fixup = &fixup;
+      if (fixup.source_call_offset == 80u)
+        vector_fixup = &fixup;
+    }
+  }
+  ASSERT_NE(scalar_fixup, nullptr);
+  EXPECT_EQ(scalar_fixup->source_target_offset, 56u);
+  ASSERT_NE(vector_fixup, nullptr);
+  EXPECT_EQ(vector_fixup->source_target_offset, 88u);
+}
+
 TEST(CfgAnalysis, Gfx1250ExplicitOnlyRecoversLaneStashInRecoveredCallee) {
   // The kernel root first makes a scalar-recoverable call to the helper at
   // 0x18. The helper is not an explicit entry and has no direct predecessor;
@@ -2415,7 +2502,8 @@ TEST(CfgAnalysis, Gfx1250ExplicitKernelEntryClearsIncomingLaneStash) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
   constexpr std::array<uint64_t, 1> extra_leaders{40};
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, extra_leaders);
+  auto blocks =
+      BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, extra_leaders, extra_leaders);
 
   size_t total_fixups = 0;
   for (const auto &block : blocks)
@@ -2617,7 +2705,7 @@ TEST(CfgAnalysis, Gfx1250DoesNotReuseStashFromSkippedFallthroughPredecessor) {
 
   const auto fixups = discover_indirect_branch_edges(
       std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size()), text,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_GFX1250, {}, {});
   EXPECT_TRUE(fixups.empty()) << "must-dataflow must not reuse a skipped-path stash";
 }
 
@@ -2699,7 +2787,7 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbResolvesPhysicalRegisterBank) {
 
   LivenessAnalysisOptions options;
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
-  options.entry_block = scope.front();
+  options.entry_blocks = std::span<BasicBlock *const>(scope.data(), 1);
   options.text = text_span(co);
   LivenessAnalysis liveness(KernelBlockScope(scope), options);
 
@@ -2710,6 +2798,35 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbResolvesPhysicalRegisterBank) {
   EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
   EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}));
   EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250VgprMsbExternalEntryMergesWithInternalPredecessor) {
+  constexpr auto set_bank_two = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 2});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({set_bank_two[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  constexpr std::array<uint64_t, 1> block_leaders{4};
+  constexpr std::array<uint64_t, 2> external_entries{0, 4};
+  auto blocks =
+      BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, block_leaders, external_entries);
+  ASSERT_EQ(blocks.size(), 2u);
+  auto scope = block_scope(blocks);
+  std::array entry_blocks{blocks[0].get(), blocks[1].get()};
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_blocks = entry_blocks;
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &joined_move = *blocks[1]->instructions().begin();
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0), std::nullopt);
+  for (uint16_t bank = 0; bank < 4; ++bank)
+    EXPECT_TRUE(liveness.is_live_before(
+        joined_move, {RegClass::VGPR, static_cast<uint16_t>(1 + bank * 256), 1}));
 }
 
 TEST(LivenessAnalysis, Gfx1250DynamicModeWriteConservativelyUsesEveryBank) {
@@ -2727,7 +2844,7 @@ TEST(LivenessAnalysis, Gfx1250DynamicModeWriteConservativelyUsesEveryBank) {
 
   LivenessAnalysisOptions options;
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
-  options.entry_block = scope.front();
+  options.entry_blocks = std::span<BasicBlock *const>(scope.data(), 1);
   options.text = text_span(co);
   LivenessAnalysis liveness(KernelBlockScope(scope), options);
 
@@ -2760,7 +2877,7 @@ TEST(LivenessAnalysis, Gfx1250FullLiteralModeWriteRecoversKnownBank) {
 
   LivenessAnalysisOptions options;
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
-  options.entry_block = scope.front();
+  options.entry_blocks = std::span<BasicBlock *const>(scope.data(), 1);
   options.text = text_span(co);
   LivenessAnalysis liveness(KernelBlockScope(scope), options);
 
@@ -2798,7 +2915,7 @@ TEST(LivenessAnalysis, Gfx1250TruncatedLiteralModeWriteMarksBanksAmbiguous) {
 
   LivenessAnalysisOptions options;
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
-  options.entry_block = scope.front();
+  options.entry_blocks = std::span<BasicBlock *const>(scope.data(), 1);
   // Truncate the text span to 8 bytes: the setreg (at offset 4) has no readable
   // literal at offset 8.
   const auto full = text_span(co);
@@ -2830,7 +2947,7 @@ TEST(LivenessAnalysis, Gfx1250PartialLiteralModeWriteUsesUnmaskedVgprFields) {
 
   LivenessAnalysisOptions options;
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
-  options.entry_block = scope.front();
+  options.entry_blocks = std::span<BasicBlock *const>(scope.data(), 1);
   options.text = text_span(co);
   LivenessAnalysis liveness(KernelBlockScope(scope), options);
 
@@ -2862,7 +2979,7 @@ TEST(LivenessAnalysis, Gfx1250ImmediateModeWriteRecoversBanksOutsideRequestedSli
 
   LivenessAnalysisOptions options;
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
-  options.entry_block = scope.front();
+  options.entry_blocks = std::span<BasicBlock *const>(scope.data(), 1);
   options.text = text_span(co);
   LivenessAnalysis liveness(KernelBlockScope(scope), options);
 
@@ -2889,7 +3006,7 @@ TEST(LivenessAnalysis, Gfx1250LiteralModeWriteTracksEveryRole) {
 
   LivenessAnalysisOptions options;
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
-  options.entry_block = scope.front();
+  options.entry_blocks = std::span<BasicBlock *const>(scope.data(), 1);
   options.text = text_span(co);
   LivenessAnalysis liveness(KernelBlockScope(scope), options);
 
@@ -2917,7 +3034,7 @@ TEST(LivenessAnalysis, Gfx1250ImmediateNonModeWriteDoesNotChangeBanks) {
 
   LivenessAnalysisOptions options;
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
-  options.entry_block = scope.front();
+  options.entry_blocks = std::span<BasicBlock *const>(scope.data(), 1);
   options.text = text_span(co);
   LivenessAnalysis liveness(KernelBlockScope(scope), options);
 
@@ -2948,7 +3065,7 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinRequiresPredecessorsToAgree) {
 
   LivenessAnalysisOptions options;
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
-  options.entry_block = scope.front();
+  options.entry_blocks = std::span<BasicBlock *const>(scope.data(), 1);
   options.text = text_span(co);
   LivenessAnalysis liveness(KernelBlockScope(scope), options);
 
@@ -2976,7 +3093,7 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinPreservesAgreeingBank) {
 
   LivenessAnalysisOptions options;
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
-  options.entry_block = scope.front();
+  options.entry_blocks = std::span<BasicBlock *const>(scope.data(), 1);
   options.text = text_span(co);
   LivenessAnalysis liveness(KernelBlockScope(scope), options);
 
@@ -3013,7 +3130,7 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbJoinExcludesUnreachablePredecessor) {
 
   LivenessAnalysisOptions options;
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
-  options.entry_block = scope.front();
+  options.entry_blocks = std::span<BasicBlock *const>(scope.data(), 1);
   options.text = text_span(co);
   LivenessAnalysis liveness(KernelBlockScope(scope), options);
 
@@ -3108,6 +3225,89 @@ TEST(LivenessAnalysis, FindFreeRunHonorsBaseAlignment) {
   const Instruction &use = *blocks[0]->instructions().begin();
   EXPECT_EQ(liveness.find_free_run(&use, 4, 0, 2), 94);
   EXPECT_EQ(liveness.find_free_run(&use, 4, 94, 4), 96);
+}
+
+TEST(LivenessAnalysis, ScratchAllocationSkipsAbiReservedRegisters) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.scratch_reserved.expand({RegClass::VGPR, 0, 32});
+  options.scratch_reserved.expand({RegClass::VGPR, 40, 8});
+  options.scratch_reserved.expand({RegClass::SGPR, 0, 6});
+  options.scratch_reserved.expand({RegClass::SGPR, 8, 1});
+
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_EQ(liveness.find_free_run(&use, 1), 32);
+  EXPECT_EQ(liveness.find_free_run(&use, 8, 33), 48);
+  EXPECT_EQ(liveness.find_free_sgpr(&use), 6);
+  EXPECT_EQ(liveness.find_free_sgpr_pair(&use), 6);
+}
+
+TEST(LivenessAnalysis, ScratchAllocationHonorsPerFunctionVgprEnvelope) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  constexpr std::array limits = {
+      ScratchVgprRangeLimit{.begin_offset = 0, .end_offset = 4, .max_free_vgpr = 34}};
+
+  LivenessAnalysisOptions options;
+  options.max_free_vgpr = 64;
+  options.scratch_reserved.expand({RegClass::VGPR, 0, 32});
+  options.scratch_vgpr_range_limits = limits;
+
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  const Instruction &outside = *std::next(blocks[0]->instructions().begin());
+  EXPECT_EQ(liveness.find_free_run(&use, 2), 32);
+  EXPECT_EQ(liveness.find_free_run(&use, 3), std::nullopt);
+  EXPECT_EQ(liveness.find_free_run(&outside, 1), std::nullopt);
+}
+
+TEST(LivenessAnalysis, PerFunctionVgprEnvelopeCannotRaiseDestinationLimit) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  constexpr std::array limits = {
+      ScratchVgprRangeLimit{.begin_offset = 0, .end_offset = 4, .max_free_vgpr = 64}};
+
+  LivenessAnalysisOptions options;
+  options.max_free_vgpr = 32;
+  options.scratch_reserved.expand({RegClass::VGPR, 0, 32});
+  options.scratch_vgpr_range_limits = limits;
+
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_EQ(liveness.find_free_run(&use, 1), std::nullopt);
+}
+
+TEST(LivenessAnalysis, GapBetweenPerFunctionVgprEnvelopesDisablesScratch) {
+  constexpr std::array<uint64_t, 2> extra_leaders{4, 8};
+  auto blocks = build_test_blocks(
+      {TestOpcode::UseSgpr4, TestOpcode::UseSgpr4, TestOpcode::UseSgpr4, TestOpcode::End},
+      extra_leaders);
+  auto scope = block_scope(blocks);
+  constexpr std::array limits = {
+      ScratchVgprRangeLimit{.begin_offset = 0, .end_offset = 4, .max_free_vgpr = 34},
+      ScratchVgprRangeLimit{.begin_offset = 8, .end_offset = 12, .max_free_vgpr = 36},
+  };
+
+  LivenessAnalysisOptions options;
+  options.max_free_vgpr = 64;
+  options.scratch_reserved.expand({RegClass::VGPR, 0, 32});
+  options.scratch_vgpr_range_limits = limits;
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &first = *blocks[0]->instructions().begin();
+  const Instruction &gap = *blocks[1]->instructions().begin();
+  const Instruction &second = *blocks[2]->instructions().begin();
+  EXPECT_EQ(liveness.find_free_run(&first, 2), 32);
+  EXPECT_EQ(liveness.find_free_run(&first, 3), std::nullopt);
+  EXPECT_EQ(liveness.find_free_run(&gap, 1), std::nullopt);
+  EXPECT_EQ(liveness.find_free_run(&second, 4), 32);
+  EXPECT_EQ(liveness.find_free_run(&second, 5), std::nullopt);
 }
 
 TEST(LivenessAnalysis, ReadWriteSameRegisterIsLiveBeforeInstruction) {

@@ -134,4 +134,17 @@ struct PcAddressBuilder {
     ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
     std::vector<PcAddressBuilder> *pc_builders = nullptr);
 
+/// @brief Recover indirect branch and call targets with distinct CFG split points and roots.
+///
+/// @param block_leaders Additional offsets that must start analysis blocks.
+/// @param external_entries Offsets whose incoming register state is unconstrained.
+/// @param entry_policy Whether other predecessorless blocks are inferred to be external entries.
+/// @param pc_builders Optional sink for every discovered PC-relative address producer.
+/// @returns Recovered indirect branch/call metadata.
+[[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges(
+    std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
+    std::span<const uint64_t> block_leaders, std::span<const uint64_t> external_entries,
+    ExternalEntryPolicy entry_policy = ExternalEntryPolicy::ExplicitOnly,
+    std::vector<PcAddressBuilder> *pc_builders = nullptr);
+
 } // namespace rocjitsu

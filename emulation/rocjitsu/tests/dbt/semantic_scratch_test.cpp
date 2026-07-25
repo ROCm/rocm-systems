@@ -54,6 +54,19 @@ TEST(SemanticSpillFrame, TransientReservationRejects32BitOverflow) {
   EXPECT_FALSE(transient);
 }
 
+TEST(SemanticSpillFrame, DisabledPrivateSpillsRejectAllReservations) {
+  TranslationContext context(/*vgprs=*/8, /*agprs=*/0, /*accum_base=*/0,
+                             /*sgprs=*/8, /*private_bytes=*/20);
+  context.private_spills_allowed = false;
+
+  EXPECT_FALSE(context.reserve_persistent_semantic_spill_dwords(1));
+  EXPECT_FALSE(context.reserve_semantic_spill_dwords(1));
+
+  SemanticSpillFrame frame(context);
+  EXPECT_FALSE(frame.allocate_dwords(1, /*byte_alignment=*/4));
+  EXPECT_EQ(context.required_private_segment_fixed_size, 20u);
+}
+
 TEST(SemanticSpillFrame, NewInstructionsReuseTransientFrameBase) {
   TranslationContext context(/*vgprs=*/8, /*agprs=*/0, /*accum_base=*/0,
                              /*sgprs=*/8, /*private_bytes=*/12);
@@ -112,6 +125,25 @@ TEST(SemanticScratchAllocator, ReportsTargetSpillOffsetLimit) {
   EXPECT_FALSE(result);
   EXPECT_EQ(result.failure, SemanticScratchFailure::SpillOffsetUnencodable);
   EXPECT_EQ(context.required_private_segment_fixed_size, 32u);
+}
+
+TEST(SemanticScratchAllocator, DisabledPrivateSpillsFailWithoutGrowingPrivateMemory) {
+  Instruction inst("scratch_test", nullptr);
+  std::vector<BasicBlock *> blocks;
+  LivenessAnalysis liveness(blocks);
+  TranslationContext context(/*vgprs=*/8, /*agprs=*/0, /*accum_base=*/0,
+                             /*sgprs=*/8, /*private_bytes=*/20);
+  context.private_spills_allowed = false;
+  SemanticScratchAllocator allocator(inst, liveness, context,
+                                     Cdna3ScratchEmitter::allocation_policy());
+
+  SemanticScratchRequest request;
+  request.count = 2;
+  const SemanticScratchResult result = allocator.acquire_vgprs(request);
+
+  EXPECT_FALSE(result);
+  EXPECT_EQ(result.failure, SemanticScratchFailure::NoRegisterWindow);
+  EXPECT_EQ(context.required_private_segment_fixed_size, 20u);
 }
 
 TEST(Cdna3ScratchEmitter, MaterializesSaveAndRestoreSequences) {

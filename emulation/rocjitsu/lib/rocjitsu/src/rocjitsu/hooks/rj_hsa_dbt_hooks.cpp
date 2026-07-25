@@ -519,38 +519,6 @@ void trace_virtual_lds_kernarg(uint64_t packet_id, const void *kernarg, size_t s
   }
 }
 
-/// @brief Return a stable diagnostic severity name.
-[[nodiscard]] const char *diagnostic_severity_name(DiagnosticSeverity severity) {
-  switch (severity) {
-  case DiagnosticSeverity::Warning:
-    return "warning";
-  case DiagnosticSeverity::Error:
-    return "error";
-  }
-  return "diagnostic";
-}
-
-/// @brief Return a stable diagnostic kind name.
-[[nodiscard]] const char *diagnostic_kind_name(DiagnosticKind kind) {
-  switch (kind) {
-  case DiagnosticKind::UnsupportedGuestArch:
-    return "unsupported-guest-arch";
-  case DiagnosticKind::KernelDescriptor:
-    return "kernel-descriptor";
-  case DiagnosticKind::Legalization:
-    return "legalization";
-  case DiagnosticKind::ExpandMissing:
-    return "expand-missing";
-  case DiagnosticKind::ExpandFailed:
-    return "expand-failed";
-  case DiagnosticKind::ResourceLimit:
-    return "resource-limit";
-  case DiagnosticKind::KernelSkipped:
-    return "kernel-skipped";
-  }
-  return "unknown";
-}
-
 /// @brief Print one structured DBT diagnostic in the same compact style as the CLI.
 void print_diagnostic(FILE *stream, const TranslationDiagnostic &diagnostic) {
   std::fprintf(stream, "[rocjitsu-dbt] %s: %s", diagnostic_severity_name(diagnostic.severity),

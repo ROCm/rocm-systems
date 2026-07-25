@@ -107,6 +107,17 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, LivenessAnalysisOpti
   min_free_vgpr_ = options.min_free_vgpr;
   max_free_vgpr_ =
       static_cast<uint16_t>(std::min<size_t>(options.max_free_vgpr, REGISTER_SET_MAX_VGPRS));
+  scratch_reserved_ = options.scratch_reserved;
+  has_scratch_vgpr_range_limits_ = !options.scratch_vgpr_range_limits.empty();
+  scratch_vgpr_range_limits_.assign(options.scratch_vgpr_range_limits.begin(),
+                                    options.scratch_vgpr_range_limits.end());
+  for (size_t i = 0; i < scratch_vgpr_range_limits_.size(); ++i) {
+    assert(scratch_vgpr_range_limits_[i].begin_offset < scratch_vgpr_range_limits_[i].end_offset &&
+           "scratch ranges must be non-empty");
+    assert((i == 0 || scratch_vgpr_range_limits_[i - 1].end_offset <=
+                          scratch_vgpr_range_limits_[i].begin_offset) &&
+           "scratch ranges must be sorted and disjoint");
+  }
   analyze(blocks, options, extra_edges);
 }
 
@@ -121,8 +132,8 @@ void LivenessAnalysis::require_available() const {
 
 void LivenessAnalysis::analyze(KernelBlockScope blocks, const LivenessAnalysisOptions &options,
                                std::span<const ScopedCfgEdge> extra_edges) {
-  if (options.arch == ROCJITSU_CODE_ARCH_GFX1250 && options.entry_block != nullptr) {
-    gfx1250_vgpr_msb_ = std::make_unique<Gfx1250VgprMsbAnalysis>(blocks, options.entry_block,
+  if (options.arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.entry_blocks.empty()) {
+    gfx1250_vgpr_msb_ = std::make_unique<Gfx1250VgprMsbAnalysis>(blocks, options.entry_blocks,
                                                                  extra_edges, options.text);
   }
   liveness_.resize(blocks.size());
@@ -302,9 +313,24 @@ std::optional<uint16_t> LivenessAnalysis::find_free_run(const Instruction *inst,
 
   const RegisterSet &live = live_it->second;
   const size_t first_candidate = std::max<size_t>(search_start, min_free_vgpr_);
+  size_t effective_max = max_free_vgpr_;
+  if (has_scratch_vgpr_range_limits_) {
+    auto range = std::ranges::upper_bound(scratch_vgpr_range_limits_, inst->src_loc(), {},
+                                          &ScratchVgprRangeLimit::begin_offset);
+    if (range == scratch_vgpr_range_limits_.begin()) {
+      effective_max = 0;
+    } else {
+      --range;
+      if (inst->src_loc() < range->end_offset)
+        effective_max = std::min<size_t>(effective_max, range->max_free_vgpr);
+      else
+        effective_max = 0;
+    }
+  }
   for (size_t base = util::align_up(first_candidate, static_cast<size_t>(base_alignment));
-       base + count <= max_free_vgpr_; base += base_alignment) {
-    if (!any_live_in_range(live, RegClass::VGPR, static_cast<uint16_t>(base), count))
+       base + count <= effective_max; base += base_alignment) {
+    if (!any_live_in_range(live, RegClass::VGPR, static_cast<uint16_t>(base), count) &&
+        !any_live_in_range(scratch_reserved_, RegClass::VGPR, static_cast<uint16_t>(base), count))
       return static_cast<uint16_t>(base);
   }
   return std::nullopt;
@@ -317,12 +343,16 @@ std::optional<uint16_t> LivenessAnalysis::find_free_sgpr_pair(const Instruction 
   if (live_it == live_before_.end())
     return std::nullopt;
 
+  // scratch_vgpr_range_limits is deliberately VGPR-only. Supported gfx1250
+  // callables share the fixed 106-SGPR ABI envelope, while scratch_reserved_
+  // carries the SGPRs that an unknown external caller may require preserved.
   const RegisterSet &live = live_it->second;
   size_t base = search_start;
   if (base % 2 != 0)
     ++base; // even-align for s_mov_b64-style pair moves.
   for (; base + 1 < REGISTER_SET_ALLOCATABLE_SGPRS; base += 2) {
-    if (!any_live_in_range(live, RegClass::SGPR, static_cast<uint16_t>(base), 2))
+    if (!any_live_in_range(live, RegClass::SGPR, static_cast<uint16_t>(base), 2) &&
+        !any_live_in_range(scratch_reserved_, RegClass::SGPR, static_cast<uint16_t>(base), 2))
       return static_cast<uint16_t>(base);
   }
   return std::nullopt;
@@ -339,7 +369,8 @@ std::optional<uint16_t> LivenessAnalysis::find_free_sgpr(const Instruction *inst
   // Keep this in sync with find_free_sgpr_pair(): only normal SGPRs that are
   // valid across supported families are candidates for temporary allocation.
   for (size_t base = search_start; base < REGISTER_SET_ALLOCATABLE_SGPRS; ++base) {
-    if (!live.contains({RegClass::SGPR, static_cast<uint16_t>(base), 1}))
+    const RegisterRef candidate{RegClass::SGPR, static_cast<uint16_t>(base), 1};
+    if (!live.contains(candidate) && !scratch_reserved_.contains(candidate))
       return static_cast<uint16_t>(base);
   }
   return std::nullopt;

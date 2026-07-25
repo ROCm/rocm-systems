@@ -80,6 +80,22 @@ def test_max_addressable_vgprs_per_wf(profile, expected):
     assert profile.max_addressable_vgprs_per_wf == expected
 
 
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (CdnaProfile(), (0, 0, 0)),
+        (Rdna4Profile(), (0, 0, 0)),
+        (Gfx1250Profile(), (0xFFFF0000, 0xD7600000, 0xD7610000)),
+    ],
+)
+def test_vector_lane_encodings(profile, expected):
+    assert (
+        profile.vector_lane_encoding_mask,
+        profile.vector_readlane_b32_encoding,
+        profile.vector_writelane_b32_encoding,
+    ) == expected
+
+
 def test_only_gfx1250_splits_execution_sources():
     assert Gfx1250Profile().split_execution_sources
     assert not Rdna4Profile().split_execution_sources
@@ -134,6 +150,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     output = emit_isa_properties(str(tmp_path), specs).read_text()
 
     assert 'uint32_t max_addressable_vgprs_per_wf = 0;' in output
+    assert 'uint32_t vector_lane_encoding_mask = 0;' in output
     assert 'MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;' in output
     assert (
         'case ROCJITSU_CODE_ARCH_CDNA3:\n'
@@ -163,6 +180,9 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = true,\n'
         '        .max_addressable_vgprs_per_wf = 1024,\n'
+        '        .vector_lane_encoding_mask = 0xFFFF0000,\n'
+        '        .vector_readlane_b32_encoding = 0xD7600000,\n'
+        '        .vector_writelane_b32_encoding = 0xD7610000,\n'
         '    };'
     ) in output
 

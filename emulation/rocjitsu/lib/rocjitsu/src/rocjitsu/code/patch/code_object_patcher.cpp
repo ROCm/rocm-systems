@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
+#include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -160,6 +161,979 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
       return i;
   }
   return std::nullopt;
+}
+
+[[nodiscard]] bool image_contains_range(size_t image_size, uint64_t file_offset, uint64_t size);
+
+[[nodiscard]] std::optional<std::string_view> section_name(const std::vector<uint8_t> &image,
+                                                           const Elf64_Ehdr &ehdr,
+                                                           std::span<const Elf64_Shdr> shdrs,
+                                                           size_t index) {
+  if (ehdr.e_shstrndx >= shdrs.size() || index >= shdrs.size())
+    return std::nullopt;
+  const Elf64_Shdr &strings = shdrs[ehdr.e_shstrndx];
+  if (strings.sh_type != SHT_STRTAB ||
+      !image_contains_range(image.size(), strings.sh_offset, strings.sh_size) ||
+      shdrs[index].sh_name >= strings.sh_size) {
+    return std::nullopt;
+  }
+
+  const uint64_t name_offset = strings.sh_offset + shdrs[index].sh_name;
+  const size_t available = static_cast<size_t>(strings.sh_size - shdrs[index].sh_name);
+  const char *name = reinterpret_cast<const char *>(image.data() + name_offset);
+  const size_t length = strnlen(name, available);
+  if (length == available)
+    return std::nullopt;
+  return std::string_view(name, length);
+}
+
+[[nodiscard]] std::optional<uint64_t> read_uleb128(std::span<const uint8_t> bytes, size_t &cursor,
+                                                   size_t end) {
+  uint64_t value = 0;
+  unsigned shift = 0;
+  while (cursor < end) {
+    const uint8_t byte = bytes[cursor++];
+    const uint64_t payload = byte & 0x7fu;
+    if (shift >= 64 || (payload << shift) >> shift != payload)
+      return std::nullopt;
+    value |= payload << shift;
+    if ((byte & 0x80u) == 0)
+      return value;
+    shift += 7;
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] std::optional<int64_t> read_sleb128(std::span<const uint8_t> bytes, size_t &cursor,
+                                                  size_t end) {
+  uint64_t value = 0;
+  unsigned shift = 0;
+  uint8_t byte = 0;
+  do {
+    if (cursor >= end || shift >= 64)
+      return std::nullopt;
+    byte = bytes[cursor++];
+    const uint64_t payload = byte & 0x7fu;
+    if ((payload << shift) >> shift != payload)
+      return std::nullopt;
+    value |= payload << shift;
+    shift += 7;
+  } while ((byte & 0x80u) != 0);
+
+  if ((byte & 0x40u) != 0 && shift < 64)
+    value |= std::numeric_limits<uint64_t>::max() << shift;
+  return static_cast<int64_t>(value);
+}
+
+[[nodiscard]] bool skip_uleb128(std::span<const uint8_t> bytes, size_t &cursor, size_t end) {
+  return read_uleb128(bytes, cursor, end).has_value();
+}
+
+[[nodiscard]] bool skip_sleb128(std::span<const uint8_t> bytes, size_t &cursor, size_t end) {
+  return read_sleb128(bytes, cursor, end).has_value();
+}
+
+[[nodiscard]] bool skip_cfi_expression(std::span<const uint8_t> bytes, size_t &cursor, size_t end) {
+  const auto length = read_uleb128(bytes, cursor, end);
+  if (!length || *length > end - cursor)
+    return false;
+  cursor += static_cast<size_t>(*length);
+  return true;
+}
+
+/// @brief Return whether a CFI program describes one state for the whole FDE.
+///
+/// Descriptorless DBT may change instruction offsets inside a callable. CFI
+/// state that advances at particular PCs would need its own instruction-level
+/// relocation map; range-wide AMDGPU rules can be preserved by relocating only
+/// the FDE start and end. Parse operands rather than byte-scanning so opcodes
+/// embedded in DWARF expressions do not cause false decisions.
+[[nodiscard]] bool cfi_program_is_location_invariant(std::span<const uint8_t> bytes) {
+  size_t cursor = 0;
+  while (cursor < bytes.size()) {
+    const uint8_t opcode = bytes[cursor++];
+    const uint8_t primary = opcode & 0xc0u;
+    if (primary == 0x40u)
+      return false; // DW_CFA_advance_loc
+    if (primary == 0x80u) {
+      if (!skip_uleb128(bytes, cursor, bytes.size()))
+        return false; // DW_CFA_offset
+      continue;
+    }
+    if (primary == 0xc0u)
+      continue; // DW_CFA_restore
+
+    switch (opcode) {
+    case 0x00: // DW_CFA_nop
+    case 0x0a: // DW_CFA_remember_state
+    case 0x0b: // DW_CFA_restore_state
+    case 0x2d: // DW_CFA_GNU_window_save / AArch64 negate_ra_state
+      break;
+    case 0x01: // DW_CFA_set_loc
+    case 0x02: // DW_CFA_advance_loc1
+    case 0x03: // DW_CFA_advance_loc2
+    case 0x04: // DW_CFA_advance_loc4
+      return false;
+    case 0x05: // DW_CFA_offset_extended
+    case 0x09: // DW_CFA_register
+    case 0x0c: // DW_CFA_def_cfa
+    case 0x14: // DW_CFA_val_offset
+    case 0x2f: // DW_CFA_GNU_negative_offset_extended
+      if (!skip_uleb128(bytes, cursor, bytes.size()) ||
+          !skip_uleb128(bytes, cursor, bytes.size())) {
+        return false;
+      }
+      break;
+    case 0x06: // DW_CFA_restore_extended
+    case 0x07: // DW_CFA_undefined
+    case 0x08: // DW_CFA_same_value
+    case 0x0d: // DW_CFA_def_cfa_register
+    case 0x0e: // DW_CFA_def_cfa_offset
+    case 0x2e: // DW_CFA_GNU_args_size
+      if (!skip_uleb128(bytes, cursor, bytes.size()))
+        return false;
+      break;
+    case 0x0f: // DW_CFA_def_cfa_expression
+      if (!skip_cfi_expression(bytes, cursor, bytes.size()))
+        return false;
+      break;
+    case 0x10: // DW_CFA_expression
+    case 0x16: // DW_CFA_val_expression
+      if (!skip_uleb128(bytes, cursor, bytes.size()) ||
+          !skip_cfi_expression(bytes, cursor, bytes.size())) {
+        return false;
+      }
+      break;
+    case 0x11: // DW_CFA_offset_extended_sf
+    case 0x12: // DW_CFA_def_cfa_sf
+    case 0x15: // DW_CFA_val_offset_sf
+      if (!skip_uleb128(bytes, cursor, bytes.size()) ||
+          !skip_sleb128(bytes, cursor, bytes.size())) {
+        return false;
+      }
+      break;
+    case 0x13: // DW_CFA_def_cfa_offset_sf
+      if (!skip_sleb128(bytes, cursor, bytes.size()))
+        return false;
+      break;
+    default:
+      return false;
+    }
+  }
+  return true;
+}
+
+struct PlacedTextOffset {
+  uint64_t target_offset = 0;
+  bool is_instruction_start = false;
+};
+using PlacedTextOffsets = std::unordered_map<uint64_t, PlacedTextOffset>;
+
+/// @brief Relocate the PC transitions in one FDE CFI program in place.
+///
+/// The linked AMDGPU form uses a four-byte code-alignment factor and compact
+/// advance_loc opcodes. Re-encode each transition through DBT's exact text
+/// offset map, preserving the original operand width so the `.eh_frame`
+/// section itself does not change size.
+[[nodiscard]] bool
+relocate_fde_cfi_program(std::span<const uint8_t> bytes, uint64_t source_start, uint64_t source_end,
+                         uint64_t target_start, uint64_t target_end, uint64_t text_vaddr,
+                         uint64_t code_alignment_factor, const PlacedTextOffsets &targets_by_source,
+                         std::vector<uint8_t> &relocated_out, std::string *error_out) {
+  const auto fail = [error_out](const char *message) {
+    report(error_out, message);
+    return false;
+  };
+  if (code_alignment_factor == 0)
+    return fail(".eh_frame CIE has a zero code-alignment factor");
+
+  uint64_t source_location = source_start;
+  uint64_t target_location = target_start;
+  std::vector<uint8_t> relocated;
+  relocated.reserve(bytes.size());
+  const auto emit_advance = [&](uint64_t units) -> bool {
+    if (units <= 0x3fu) {
+      relocated.push_back(static_cast<uint8_t>(0x40u | units));
+      return true;
+    }
+    if (units <= std::numeric_limits<uint8_t>::max()) {
+      relocated.push_back(0x02);
+      relocated.push_back(static_cast<uint8_t>(units));
+      return true;
+    }
+    if (units <= std::numeric_limits<uint16_t>::max()) {
+      relocated.push_back(0x03);
+      const uint16_t encoded = static_cast<uint16_t>(units);
+      const auto *data = reinterpret_cast<const uint8_t *>(&encoded);
+      relocated.insert(relocated.end(), data, data + sizeof(encoded));
+      return true;
+    }
+    if (units <= std::numeric_limits<uint32_t>::max()) {
+      relocated.push_back(0x04);
+      const uint32_t encoded = static_cast<uint32_t>(units);
+      const auto *data = reinterpret_cast<const uint8_t *>(&encoded);
+      relocated.insert(relocated.end(), data, data + sizeof(encoded));
+      return true;
+    }
+    return fail("relocated .eh_frame CFI advance_loc4 no longer fits");
+  };
+  const auto relocate_advance = [&](uint64_t source_units, uint64_t &target_units) -> bool {
+    if (source_units >
+        (std::numeric_limits<uint64_t>::max() - source_location) / code_alignment_factor) {
+      return fail(".eh_frame CFI source location overflows");
+    }
+    const uint64_t next_source = source_location + source_units * code_alignment_factor;
+    if (next_source > source_end)
+      return fail(".eh_frame CFI location has no exact text relocation");
+    const auto targets_it = targets_by_source.find(next_source);
+    if (targets_it == targets_by_source.end())
+      return fail(".eh_frame CFI location has no monotonic text relocation");
+    const uint64_t target = targets_it->second.target_offset;
+    if (target < target_location || target > target_end)
+      return fail(".eh_frame CFI location has no monotonic text relocation");
+    const uint64_t target_delta = target - target_location;
+    if (target_delta % code_alignment_factor != 0)
+      return fail(".eh_frame CFI advance is not code-aligned after relocation");
+    target_units = target_delta / code_alignment_factor;
+    source_location = next_source;
+    target_location = target;
+    return true;
+  };
+  const auto relocate_set_location = [&](uint64_t source_vaddr, uint64_t &target_vaddr) -> bool {
+    if (source_vaddr < text_vaddr)
+      return fail(".eh_frame CFI set_loc points before .text");
+    const uint64_t source_offset = source_vaddr - text_vaddr;
+    if (source_offset < source_location || source_offset > source_end) {
+      return fail(".eh_frame CFI set_loc has no exact text relocation");
+    }
+    const auto targets_it = targets_by_source.find(source_offset);
+    if (targets_it == targets_by_source.end())
+      return fail(".eh_frame CFI set_loc has no representable monotonic relocation");
+    const uint64_t target = targets_it->second.target_offset;
+    if (target < target_location || target > target_end ||
+        text_vaddr > std::numeric_limits<uint64_t>::max() - target)
+      return fail(".eh_frame CFI set_loc has no representable monotonic relocation");
+    source_location = source_offset;
+    target_location = target;
+    target_vaddr = text_vaddr + target_location;
+    return true;
+  };
+
+  size_t cursor = 0;
+  while (cursor < bytes.size()) {
+    const size_t opcode_offset = cursor;
+    const uint8_t opcode = bytes[cursor++];
+    const uint8_t primary = opcode & 0xc0u;
+    if (primary == 0x40u) {
+      uint64_t target_units = 0;
+      if (!relocate_advance(opcode & 0x3fu, target_units))
+        return false;
+      if (!emit_advance(target_units))
+        return false;
+      continue;
+    }
+    if (primary == 0x80u) {
+      if (!skip_uleb128(bytes, cursor, bytes.size()))
+        return fail("allocated .eh_frame has malformed CFI");
+      relocated.insert(relocated.end(), bytes.begin() + opcode_offset, bytes.begin() + cursor);
+      continue;
+    }
+    if (primary == 0xc0u) {
+      relocated.push_back(opcode);
+      continue;
+    }
+
+    switch (opcode) {
+    case 0x00: // DW_CFA_nop
+      continue;
+    case 0x0a: // DW_CFA_remember_state
+    case 0x0b: // DW_CFA_restore_state
+    case 0x2d: // DW_CFA_GNU_window_save / AArch64 negate_ra_state
+      break;
+    case 0x01: { // DW_CFA_set_loc
+      if (bytes.size() - cursor < sizeof(uint64_t))
+        return fail("allocated .eh_frame has a truncated CFI set_loc");
+      uint64_t source_vaddr = 0;
+      std::memcpy(&source_vaddr, bytes.data() + cursor, sizeof(source_vaddr));
+      uint64_t target_vaddr = 0;
+      if (!relocate_set_location(source_vaddr, target_vaddr))
+        return false;
+      relocated.push_back(opcode);
+      const auto *data = reinterpret_cast<const uint8_t *>(&target_vaddr);
+      relocated.insert(relocated.end(), data, data + sizeof(target_vaddr));
+      cursor += sizeof(target_vaddr);
+      continue;
+    }
+    case 0x02: { // DW_CFA_advance_loc1
+      if (cursor == bytes.size())
+        return fail("allocated .eh_frame has a truncated CFI advance_loc1");
+      uint64_t target_units = 0;
+      if (!relocate_advance(bytes[cursor], target_units))
+        return false;
+      ++cursor;
+      if (!emit_advance(target_units))
+        return false;
+      continue;
+    }
+    case 0x03: { // DW_CFA_advance_loc2
+      if (bytes.size() - cursor < sizeof(uint16_t))
+        return fail("allocated .eh_frame has a truncated CFI advance_loc2");
+      uint16_t source_units = 0;
+      std::memcpy(&source_units, bytes.data() + cursor, sizeof(source_units));
+      uint64_t target_units = 0;
+      if (!relocate_advance(source_units, target_units))
+        return false;
+      cursor += sizeof(source_units);
+      if (!emit_advance(target_units))
+        return false;
+      continue;
+    }
+    case 0x04: { // DW_CFA_advance_loc4
+      if (bytes.size() - cursor < sizeof(uint32_t))
+        return fail("allocated .eh_frame has a truncated CFI advance_loc4");
+      uint32_t source_units = 0;
+      std::memcpy(&source_units, bytes.data() + cursor, sizeof(source_units));
+      uint64_t target_units = 0;
+      if (!relocate_advance(source_units, target_units))
+        return false;
+      cursor += sizeof(source_units);
+      if (!emit_advance(target_units))
+        return false;
+      continue;
+    }
+    case 0x05: // DW_CFA_offset_extended
+    case 0x09: // DW_CFA_register
+    case 0x0c: // DW_CFA_def_cfa
+    case 0x14: // DW_CFA_val_offset
+    case 0x2f: // DW_CFA_GNU_negative_offset_extended
+      if (!skip_uleb128(bytes, cursor, bytes.size()) ||
+          !skip_uleb128(bytes, cursor, bytes.size())) {
+        return fail("allocated .eh_frame has malformed CFI");
+      }
+      break;
+    case 0x06: // DW_CFA_restore_extended
+    case 0x07: // DW_CFA_undefined
+    case 0x08: // DW_CFA_same_value
+    case 0x0d: // DW_CFA_def_cfa_register
+    case 0x0e: // DW_CFA_def_cfa_offset
+    case 0x2e: // DW_CFA_GNU_args_size
+      if (!skip_uleb128(bytes, cursor, bytes.size()))
+        return fail("allocated .eh_frame has malformed CFI");
+      break;
+    case 0x0f: // DW_CFA_def_cfa_expression
+      if (!skip_cfi_expression(bytes, cursor, bytes.size()))
+        return fail("allocated .eh_frame has malformed CFI");
+      break;
+    case 0x10: // DW_CFA_expression
+    case 0x16: // DW_CFA_val_expression
+      if (!skip_uleb128(bytes, cursor, bytes.size()) ||
+          !skip_cfi_expression(bytes, cursor, bytes.size())) {
+        return fail("allocated .eh_frame has malformed CFI");
+      }
+      break;
+    case 0x11: // DW_CFA_offset_extended_sf
+    case 0x12: // DW_CFA_def_cfa_sf
+    case 0x15: // DW_CFA_val_offset_sf
+      if (!skip_uleb128(bytes, cursor, bytes.size()) ||
+          !skip_sleb128(bytes, cursor, bytes.size())) {
+        return fail("allocated .eh_frame has malformed CFI");
+      }
+      break;
+    case 0x13: // DW_CFA_def_cfa_offset_sf
+      if (!skip_sleb128(bytes, cursor, bytes.size()))
+        return fail("allocated .eh_frame has malformed CFI");
+      break;
+    default:
+      return fail("allocated .eh_frame uses an unsupported CFI opcode");
+    }
+    relocated.insert(relocated.end(), bytes.begin() + opcode_offset, bytes.begin() + cursor);
+  }
+  relocated_out = std::move(relocated);
+  return true;
+}
+
+/// @brief Decoded CIE properties required to relocate one `.eh_frame` FDE.
+struct EhFrameCie {
+  uint8_t fde_encoding = 0;
+  bool has_augmentation_length = false;
+  bool initial_program_location_invariant = true;
+  uint64_t code_alignment_factor = 0;
+  size_t relocated_offset = 0;
+};
+
+void shift_symbols_in_moved_sections(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
+                                     std::span<const Elf64_Shdr> shdrs,
+                                     const std::vector<bool> &shift_section_vaddr, uint64_t delta);
+void shift_relocation_offsets_in_moved_sections(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
+                                                std::span<const Elf64_Shdr> shdrs,
+                                                const std::vector<bool> &shift_section_vaddr,
+                                                uint64_t delta);
+
+/// @brief Relocate allocated `.eh_frame` FDEs through DBT's text offset map.
+///
+/// The supported AMDGPU form is the linked-HSACO `zR` CIE with
+/// pcrel+sdata4 FDE starts. Function ranges and FDE CFI location advances are
+/// relocated through the exact instruction offset map. Unsupported forms fail
+/// closed instead of leaving unwind PCs pointing at stale B0 code.
+[[nodiscard]] bool relocate_eh_frame_fdes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
+                                          std::vector<Elf64_Shdr> &shdrs,
+                                          std::vector<Elf64_Phdr> &phdrs, size_t text_index,
+                                          uint64_t old_text_size, uint64_t new_text_size,
+                                          std::span<const TextOffsetRelocation> relocations,
+                                          std::vector<bool> &shift_section_vaddr,
+                                          uint64_t future_text_delta, std::string *error_out) {
+  const auto fail = [error_out](const char *message) {
+    report(error_out, message);
+    return false;
+  };
+  for (const TextOffsetRelocation &relocation : relocations) {
+    if (relocation.source_offset > old_text_size || relocation.target_offset > new_text_size)
+      return fail(".eh_frame relocation map contains an out-of-range text offset");
+  }
+
+  const bool layout_changed = old_text_size != new_text_size ||
+                              std::ranges::any_of(relocations, [](const auto &relocation) {
+                                return relocation.source_offset != relocation.target_offset;
+                              });
+  if (!layout_changed)
+    return true;
+  if (shift_section_vaddr.size() != shdrs.size())
+    return fail(".eh_frame relocation has incomplete final section placement");
+
+  std::vector<size_t> eh_frame_sections;
+  for (size_t section_index = 0; section_index < shdrs.size(); ++section_index) {
+    const auto name = section_name(image, ehdr, shdrs, section_index);
+    if (!name)
+      return fail("ELF section names are malformed while locating .eh_frame");
+    if (*name == ".eh_frame_hdr" && (shdrs[section_index].sh_flags & SHF_ALLOC) != 0)
+      return fail("allocated .eh_frame_hdr relocation is unsupported");
+    if (*name == ".eh_frame" && (shdrs[section_index].sh_flags & SHF_ALLOC) != 0)
+      eh_frame_sections.push_back(section_index);
+  }
+  if (eh_frame_sections.empty())
+    return true;
+
+  struct RelocationPlacement {
+    PlacedTextOffsets offsets;
+  };
+  std::vector<RelocationPlacement> placements;
+  std::unordered_map<uint64_t, size_t> placement_index_by_id;
+  for (const TextOffsetRelocation &relocation : relocations) {
+    auto [placement_it, inserted] =
+        placement_index_by_id.try_emplace(relocation.placement_id, placements.size());
+    if (inserted)
+      placements.emplace_back();
+    PlacedTextOffsets &offsets = placements[placement_it->second].offsets;
+    auto [offset_it, offset_inserted] = offsets.try_emplace(
+        relocation.source_offset,
+        PlacedTextOffset{.target_offset = relocation.target_offset,
+                         .is_instruction_start = relocation.source_is_instruction_start});
+    if (!offset_inserted) {
+      if (offset_it->second.target_offset != relocation.target_offset)
+        return fail(".eh_frame relocation placement maps one source offset to multiple targets");
+      offset_it->second.is_instruction_start |= relocation.source_is_instruction_start;
+    }
+  }
+
+  const Elf64_Shdr &text = shdrs[text_index];
+  if (text.sh_addr > std::numeric_limits<uint64_t>::max() - old_text_size)
+    return fail(".text address range overflows while relocating .eh_frame");
+  const uint64_t old_text_end = text.sh_addr + old_text_size;
+
+  for (const size_t section_index : eh_frame_sections) {
+    const Elf64_Shdr section = shdrs[section_index];
+    if (section.sh_type != SHT_PROGBITS ||
+        !image_contains_range(image.size(), section.sh_offset, section.sh_size)) {
+      return fail("allocated .eh_frame section is malformed");
+    }
+    const uint64_t section_future_delta =
+        shift_section_vaddr[section_index] ? future_text_delta : 0;
+    if (section.sh_addr > std::numeric_limits<uint64_t>::max() - section_future_delta) {
+      return fail("relocated .eh_frame section address overflows");
+    }
+    // Parse pcrel fields at their source address, then encode them relative to
+    // the section's final address after text growth shifts later LOADs.
+    const uint64_t target_section_vaddr = section.sh_addr + section_future_delta;
+    const auto bytes =
+        std::span<uint8_t>(image.data() + section.sh_offset, static_cast<size_t>(section.sh_size));
+    const auto const_bytes = std::span<const uint8_t>(bytes.data(), bytes.size());
+    std::vector<uint8_t> relocated_section;
+    relocated_section.reserve(bytes.size());
+    std::vector<size_t> relocated_initial_location_fields;
+    bool had_terminator = false;
+    std::unordered_map<uint64_t, EhFrameCie> cies;
+    size_t cursor = 0;
+    while (cursor < bytes.size()) {
+      const size_t entry_start = cursor;
+      if (bytes.size() - cursor < sizeof(uint32_t))
+        return fail("allocated .eh_frame has a truncated entry length");
+      uint32_t length = 0;
+      std::memcpy(&length, bytes.data() + cursor, sizeof(length));
+      cursor += sizeof(length);
+      if (length == 0) {
+        if (!std::ranges::all_of(bytes.subspan(cursor), [](uint8_t byte) { return byte == 0; }))
+          return fail("allocated .eh_frame has nonzero data after its terminator");
+        had_terminator = true;
+        break;
+      }
+      if (length == std::numeric_limits<uint32_t>::max() || length < sizeof(uint32_t) ||
+          length > bytes.size() - cursor) {
+        return fail("allocated .eh_frame has an unsupported or invalid entry length");
+      }
+      const size_t entry_end = cursor + length;
+      const size_t id_field = cursor;
+      uint32_t cie_pointer = 0;
+      std::memcpy(&cie_pointer, bytes.data() + cursor, sizeof(cie_pointer));
+      cursor += sizeof(cie_pointer);
+
+      if (cie_pointer == 0) {
+        if (cursor >= entry_end)
+          return fail("allocated .eh_frame has a truncated CIE");
+        const uint8_t version = bytes[cursor++];
+        if (version != 1)
+          return fail("unsupported .eh_frame CIE version");
+        const size_t augmentation_start = cursor;
+        while (cursor < entry_end && bytes[cursor] != 0)
+          ++cursor;
+        if (cursor == entry_end)
+          return fail("allocated .eh_frame CIE has an unterminated augmentation string");
+        const std::string_view augmentation(
+            reinterpret_cast<const char *>(bytes.data() + augmentation_start),
+            cursor - augmentation_start);
+        ++cursor;
+        const auto code_alignment_factor = read_uleb128(const_bytes, cursor, entry_end);
+        if (!code_alignment_factor || *code_alignment_factor == 0 ||
+            !read_sleb128(const_bytes, cursor, entry_end)) {
+          return fail("allocated .eh_frame CIE has malformed alignment fields");
+        }
+        if (cursor >= entry_end)
+          return fail("allocated .eh_frame CIE is missing its return-address register");
+        ++cursor;
+
+        EhFrameCie cie;
+        if (!augmentation.empty()) {
+          if (augmentation.front() != 'z')
+            return fail("allocated .eh_frame CIE uses an unsupported augmentation format");
+          cie.has_augmentation_length = true;
+          const auto augmentation_size = read_uleb128(const_bytes, cursor, entry_end);
+          if (!augmentation_size || *augmentation_size > entry_end - cursor)
+            return fail("allocated .eh_frame CIE has malformed augmentation data");
+          const size_t augmentation_end = cursor + static_cast<size_t>(*augmentation_size);
+          for (const char kind : augmentation.substr(1)) {
+            switch (kind) {
+            case 'R':
+              if (cursor >= augmentation_end)
+                return fail("allocated .eh_frame CIE is missing its FDE encoding");
+              cie.fde_encoding = bytes[cursor++];
+              break;
+            case 'L':
+              return fail("allocated .eh_frame CIE uses unsupported LSDA augmentation");
+            case 'S':
+              break;
+            default:
+              // Personality encodings and vendor augmentation data need a
+              // complete encoded-pointer parser before their FDE layout can be
+              // trusted.
+              return fail("allocated .eh_frame CIE uses an unsupported augmentation");
+            }
+          }
+          if (cursor > augmentation_end)
+            return fail("allocated .eh_frame CIE augmentation exceeds its declared size");
+          cursor = augmentation_end;
+        }
+        cie.code_alignment_factor = *code_alignment_factor;
+        cie.initial_program_location_invariant =
+            cfi_program_is_location_invariant(const_bytes.subspan(cursor, entry_end - cursor));
+        cie.relocated_offset = relocated_section.size();
+        cies.emplace(entry_start, cie);
+        relocated_section.insert(relocated_section.end(), bytes.begin() + entry_start,
+                                 bytes.begin() + entry_end);
+        cursor = entry_end;
+        continue;
+      }
+
+      if (cie_pointer > id_field)
+        return fail("allocated .eh_frame FDE has an invalid CIE pointer");
+      const uint64_t cie_start = id_field - cie_pointer;
+      const auto cie_it = cies.find(cie_start);
+      if (cie_it == cies.end())
+        return fail("allocated .eh_frame FDE references an unknown CIE");
+      const EhFrameCie &cie = cie_it->second;
+      constexpr uint8_t kDwEhPePcrelSdata4 = 0x1b;
+      if (cie.fde_encoding != kDwEhPePcrelSdata4 || entry_end - cursor < 2 * sizeof(uint32_t)) {
+        return fail("allocated .eh_frame FDE uses an unsupported encoding or is truncated");
+      }
+
+      const size_t initial_location_field = cursor;
+      int32_t initial_location_delta = 0;
+      std::memcpy(&initial_location_delta, bytes.data() + cursor, sizeof(initial_location_delta));
+      cursor += sizeof(initial_location_delta);
+      int32_t address_range = 0;
+      const size_t address_range_field = cursor;
+      std::memcpy(&address_range, bytes.data() + cursor, sizeof(address_range));
+      cursor += sizeof(address_range);
+      if (address_range < 0 ||
+          section.sh_addr >
+              static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) - initial_location_field) {
+        return fail("allocated .eh_frame FDE has an invalid address range");
+      }
+      const int64_t field_vaddr = static_cast<int64_t>(section.sh_addr + initial_location_field);
+      if ((initial_location_delta > 0 &&
+           field_vaddr > std::numeric_limits<int64_t>::max() - initial_location_delta) ||
+          (initial_location_delta < 0 &&
+           field_vaddr < std::numeric_limits<int64_t>::min() - initial_location_delta)) {
+        return fail("allocated .eh_frame FDE initial location overflows");
+      }
+      const int64_t initial_location = field_vaddr + initial_location_delta;
+      if (initial_location < 0)
+        return fail("allocated .eh_frame FDE has a negative initial location");
+      const uint64_t source_vaddr = static_cast<uint64_t>(initial_location);
+      const uint64_t source_range = static_cast<uint32_t>(address_range);
+      if (source_vaddr > std::numeric_limits<uint64_t>::max() - source_range)
+        return fail("allocated .eh_frame FDE source range overflows");
+      const uint64_t source_vaddr_end = source_vaddr + source_range;
+
+      if (cie.has_augmentation_length) {
+        const auto augmentation_size = read_uleb128(const_bytes, cursor, entry_end);
+        if (!augmentation_size || *augmentation_size > entry_end - cursor)
+          return fail("allocated .eh_frame FDE has malformed augmentation data");
+        cursor += static_cast<size_t>(*augmentation_size);
+      }
+
+      const bool starts_in_text = source_vaddr >= text.sh_addr && source_vaddr < old_text_end;
+      const bool overlaps_text = source_vaddr < old_text_end && source_vaddr_end > text.sh_addr;
+      struct RelocatedFde {
+        uint64_t target_vaddr = 0;
+        uint64_t target_range_size = 0;
+        std::vector<uint8_t> cfi;
+      };
+      std::vector<RelocatedFde> relocated_fdes;
+      if (!starts_in_text) {
+        if (overlaps_text)
+          return fail("allocated .eh_frame FDE partially overlaps .text");
+        relocated_fdes.push_back(
+            {.target_vaddr = source_vaddr,
+             .target_range_size = source_range,
+             .cfi = std::vector<uint8_t>(bytes.begin() + cursor, bytes.begin() + entry_end)});
+      } else {
+        if (source_vaddr_end > old_text_end)
+          return fail("allocated .eh_frame FDE extends beyond .text");
+        const uint64_t source_start = source_vaddr - text.sh_addr;
+        const uint64_t source_end = source_vaddr_end - text.sh_addr;
+        // A helper may be copied into several kernel-local translated bodies.
+        // Preserve an FDE for every copy: ELF can retain only one symbol value,
+        // but unwind consumers must be able to cover traps and samples in all
+        // emitted clones. Pair start/end mappings only within the same emitted
+        // placement, and require a real instruction at the source start. This
+        // excludes the block-end mapping from the preceding kernel when two
+        // source functions meet at the same offset.
+        for (const RelocationPlacement &placement : placements) {
+          const auto target_start_it = placement.offsets.find(source_start);
+          const auto target_end_it = placement.offsets.find(source_end);
+          if (target_start_it == placement.offsets.end() ||
+              !target_start_it->second.is_instruction_start ||
+              target_end_it == placement.offsets.end()) {
+            continue;
+          }
+
+          const uint64_t target_start = target_start_it->second.target_offset;
+          const uint64_t target_end = target_end_it->second.target_offset;
+          if (target_end < target_start ||
+              (source_end != source_start && target_end == target_start) ||
+              target_end > new_text_size) {
+            continue;
+          }
+
+          bool affine = true;
+          for (const auto &[source, target] : placement.offsets) {
+            if (source < source_start || source > source_end)
+              continue;
+            if (source - source_start > target_end - target_start ||
+                target.target_offset != target_start + (source - source_start)) {
+              affine = false;
+              break;
+            }
+          }
+          if (!affine && !cie.initial_program_location_invariant)
+            return fail("non-affine .eh_frame CIE has location-sensitive CFI");
+
+          std::vector<uint8_t> relocated_cfi;
+          if (!relocate_fde_cfi_program(const_bytes.subspan(cursor, entry_end - cursor),
+                                        source_start, source_end, target_start, target_end,
+                                        text.sh_addr, cie.code_alignment_factor, placement.offsets,
+                                        relocated_cfi, error_out)) {
+            return false;
+          }
+          if (text.sh_addr > std::numeric_limits<uint64_t>::max() - target_start)
+            return fail("relocated .eh_frame FDE target address overflows");
+          relocated_fdes.push_back({.target_vaddr = text.sh_addr + target_start,
+                                    .target_range_size = target_end - target_start,
+                                    .cfi = std::move(relocated_cfi)});
+        }
+        if (relocated_fdes.empty())
+          return fail("allocated .eh_frame FDE lacks an exact instruction relocation range");
+      }
+
+      const size_t initial_location_in_entry = initial_location_field - entry_start;
+      const size_t address_range_in_entry = address_range_field - entry_start;
+      const size_t id_field_in_entry = id_field - entry_start;
+      for (const RelocatedFde &relocated_fde : relocated_fdes) {
+        const size_t relocated_entry_start = relocated_section.size();
+        if (relocated_entry_start >
+                std::numeric_limits<uint64_t>::max() - initial_location_in_entry ||
+            target_section_vaddr > std::numeric_limits<uint64_t>::max() -
+                                       (relocated_entry_start + initial_location_in_entry)) {
+          return fail("relocated .eh_frame FDE field address overflows");
+        }
+        const uint64_t relocated_initial_location_field =
+            relocated_entry_start + initial_location_in_entry;
+        const uint64_t target_field_vaddr = target_section_vaddr + relocated_initial_location_field;
+        if (relocated_fde.target_vaddr >
+                static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
+            target_field_vaddr > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+          return fail("relocated .eh_frame FDE target is not representable");
+        }
+        const int64_t target_delta = static_cast<int64_t>(relocated_fde.target_vaddr) -
+                                     static_cast<int64_t>(target_field_vaddr);
+        if (target_delta < std::numeric_limits<int32_t>::min() ||
+            target_delta > std::numeric_limits<int32_t>::max() ||
+            relocated_fde.target_range_size >
+                static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
+          return fail("relocated .eh_frame FDE does not fit its pcrel+sdata4 encoding");
+        }
+
+        std::vector<uint8_t> relocated_entry(bytes.begin() + entry_start, bytes.begin() + cursor);
+        relocated_entry.insert(relocated_entry.end(), relocated_fde.cfi.begin(),
+                               relocated_fde.cfi.end());
+        while (relocated_entry.size() % sizeof(uint32_t) != 0)
+          relocated_entry.push_back(0);
+        if (relocated_entry.size() < 2 * sizeof(uint32_t) ||
+            relocated_entry.size() - sizeof(uint32_t) > std::numeric_limits<uint32_t>::max()) {
+          return fail("relocated .eh_frame FDE length is not representable");
+        }
+        if (relocated_entry_start > std::numeric_limits<uint64_t>::max() - id_field_in_entry ||
+            relocated_entry_start + id_field_in_entry < cie.relocated_offset ||
+            relocated_entry_start + id_field_in_entry - cie.relocated_offset >
+                std::numeric_limits<uint32_t>::max()) {
+          return fail("relocated .eh_frame FDE CIE pointer is not representable");
+        }
+        const uint32_t encoded_length =
+            static_cast<uint32_t>(relocated_entry.size() - sizeof(uint32_t));
+        const uint32_t encoded_cie_pointer =
+            static_cast<uint32_t>(relocated_entry_start + id_field_in_entry - cie.relocated_offset);
+        const int32_t encoded_target_delta = static_cast<int32_t>(target_delta);
+        const int32_t encoded_target_range = static_cast<int32_t>(relocated_fde.target_range_size);
+        std::memcpy(relocated_entry.data(), &encoded_length, sizeof(encoded_length));
+        std::memcpy(relocated_entry.data() + id_field_in_entry, &encoded_cie_pointer,
+                    sizeof(encoded_cie_pointer));
+        std::memcpy(relocated_entry.data() + initial_location_in_entry, &encoded_target_delta,
+                    sizeof(encoded_target_delta));
+        std::memcpy(relocated_entry.data() + address_range_in_entry, &encoded_target_range,
+                    sizeof(encoded_target_range));
+        relocated_initial_location_fields.push_back(relocated_initial_location_field);
+        relocated_section.insert(relocated_section.end(), relocated_entry.begin(),
+                                 relocated_entry.end());
+      }
+      cursor = entry_end;
+    }
+    if (had_terminator)
+      relocated_section.resize(relocated_section.size() + sizeof(uint32_t), 0);
+    if (relocated_section.size() > bytes.size()) {
+      const uint64_t insertion_file_offset = section.sh_offset + section.sh_size;
+      const uint64_t required_growth = relocated_section.size() - bytes.size();
+      const uint64_t file_alignment = shifted_load_delta_alignment(phdrs, insertion_file_offset);
+      const uint64_t padded_growth = align_up(required_growth, file_alignment);
+      if (padded_growth < required_growth || padded_growth > std::numeric_limits<size_t>::max() ||
+          section.sh_size > std::numeric_limits<uint64_t>::max() - padded_growth) {
+        return fail("relocated .eh_frame section growth overflows");
+      }
+
+      std::optional<size_t> owner_index;
+      for (size_t phdr_index = 0; phdr_index < phdrs.size(); ++phdr_index) {
+        const Elf64_Phdr &phdr = phdrs[phdr_index];
+        if (phdr.p_type != PT_LOAD ||
+            phdr.p_offset > std::numeric_limits<uint64_t>::max() - phdr.p_filesz)
+          continue;
+        if (section.sh_offset >= phdr.p_offset &&
+            phdr.p_offset + phdr.p_filesz == insertion_file_offset) {
+          owner_index = phdr_index;
+          break;
+        }
+      }
+
+      bool can_grow_in_place = false;
+      if (owner_index &&
+          section.sh_addr <= std::numeric_limits<uint64_t>::max() - section.sh_size) {
+        const Elf64_Phdr &owner = phdrs[*owner_index];
+        if (owner.p_vaddr <= std::numeric_limits<uint64_t>::max() - owner.p_memsz &&
+            section.sh_addr + section.sh_size <= owner.p_vaddr + owner.p_memsz) {
+          const uint64_t owner_vaddr_end = owner.p_vaddr + owner.p_memsz;
+          if (owner_vaddr_end <= std::numeric_limits<uint64_t>::max() - padded_growth) {
+            can_grow_in_place = std::ranges::none_of(phdrs, [&](const Elf64_Phdr &phdr) {
+              return phdr.p_type == PT_LOAD && phdr.p_vaddr >= owner_vaddr_end &&
+                     phdr.p_vaddr < owner_vaddr_end + padded_growth;
+            });
+          }
+        }
+      }
+
+      if (can_grow_in_place) {
+        std::vector<uint8_t> inserted(static_cast<size_t>(padded_growth), 0);
+        insert_file_bytes(image, ehdr, shdrs, phdrs, insertion_file_offset, inserted, section_index,
+                          true);
+        shdrs[section_index].sh_size += padded_growth;
+      } else {
+        // Linked GPU objects commonly place .eh_frame immediately before the
+        // executable LOAD. When cloning a shared helper requires more unwind
+        // entries than that virtual gap can hold, move the rebuilt section to
+        // the tail LOAD instead of shifting the executable image or dropping
+        // coverage for a clone.
+        std::optional<size_t> tail_load_index;
+        uint64_t greatest_file_end = 0;
+        uint64_t greatest_memory_end = 0;
+        for (size_t phdr_index = 0; phdr_index < phdrs.size(); ++phdr_index) {
+          const Elf64_Phdr &phdr = phdrs[phdr_index];
+          if (phdr.p_type != PT_LOAD ||
+              phdr.p_offset > std::numeric_limits<uint64_t>::max() - phdr.p_filesz ||
+              phdr.p_vaddr > std::numeric_limits<uint64_t>::max() - phdr.p_memsz) {
+            continue;
+          }
+          const uint64_t file_end = phdr.p_offset + phdr.p_filesz;
+          const uint64_t memory_end = phdr.p_vaddr + phdr.p_memsz;
+          greatest_file_end = std::max(greatest_file_end, file_end);
+          if (!tail_load_index || memory_end > greatest_memory_end ||
+              (memory_end == greatest_memory_end &&
+               file_end > phdrs[*tail_load_index].p_offset + phdrs[*tail_load_index].p_filesz)) {
+            tail_load_index = phdr_index;
+            greatest_memory_end = memory_end;
+          }
+        }
+        if (!tail_load_index)
+          return fail("allocated .eh_frame has no LOAD available for expanded unwind data");
+
+        const Elf64_Phdr tail_source = phdrs[*tail_load_index];
+        if (tail_source.p_offset > std::numeric_limits<uint64_t>::max() - tail_source.p_filesz ||
+            tail_source.p_vaddr > std::numeric_limits<uint64_t>::max() - tail_source.p_memsz ||
+            tail_source.p_offset + tail_source.p_filesz != greatest_file_end ||
+            tail_source.p_vaddr + tail_source.p_memsz != greatest_memory_end ||
+            tail_source.p_memsz < tail_source.p_filesz) {
+          return fail("allocated .eh_frame cannot identify a non-overlapping tail LOAD");
+        }
+
+        const uint64_t section_alignment = std::max<uint64_t>(section.sh_addralign, 1);
+        const uint64_t tail_memory_end = tail_source.p_vaddr + tail_source.p_memsz;
+        if (tail_memory_end > std::numeric_limits<uint64_t>::max() - (section_alignment - 1)) {
+          return fail("allocated .eh_frame tail alignment overflows");
+        }
+        const uint64_t destination_vaddr = align_up(tail_memory_end, section_alignment);
+        const uint64_t section_load_offset = destination_vaddr - tail_source.p_vaddr;
+        if (section_load_offset < tail_source.p_filesz ||
+            section_load_offset > std::numeric_limits<uint64_t>::max() - relocated_section.size()) {
+          return fail("allocated .eh_frame tail placement overflows");
+        }
+        const uint64_t inserted_size =
+            section_load_offset - tail_source.p_filesz + relocated_section.size();
+        if (inserted_size > std::numeric_limits<size_t>::max() ||
+            tail_source.p_offset > std::numeric_limits<uint64_t>::max() - tail_source.p_filesz ||
+            tail_source.p_offset > std::numeric_limits<uint64_t>::max() - section_load_offset ||
+            tail_source.p_offset + tail_source.p_filesz > image.size() ||
+            tail_source.p_vaddr > std::numeric_limits<uint64_t>::max() - section_load_offset) {
+          return fail("allocated .eh_frame tail insertion is not representable");
+        }
+
+        const uint64_t tail_insertion_file_offset = tail_source.p_offset + tail_source.p_filesz;
+        std::vector<std::pair<size_t, uint64_t>> preserved_nobits_offsets;
+        for (size_t other_index = 0; other_index < shdrs.size(); ++other_index) {
+          const Elf64_Shdr &other = shdrs[other_index];
+          if (other.sh_type != SHT_NOBITS || (other.sh_flags & SHF_ALLOC) == 0 ||
+              other.sh_offset < tail_insertion_file_offset) {
+            continue;
+          }
+          const bool remains_in_place = std::ranges::any_of(phdrs, [&](const Elf64_Phdr &phdr) {
+            return phdr.p_type == PT_LOAD &&
+                   phdr.p_vaddr <= std::numeric_limits<uint64_t>::max() - phdr.p_memsz &&
+                   other.sh_addr >= phdr.p_vaddr && other.sh_addr - phdr.p_vaddr < phdr.p_memsz;
+          });
+          if (remains_in_place)
+            preserved_nobits_offsets.emplace_back(other_index, other.sh_offset);
+        }
+
+        std::vector<uint8_t> inserted(static_cast<size_t>(inserted_size), 0);
+        insert_file_bytes(image, ehdr, shdrs, phdrs, tail_insertion_file_offset, inserted,
+                          std::nullopt, false);
+        Elf64_Phdr &tail = phdrs[*tail_load_index];
+        tail.p_offset = tail_source.p_offset;
+        tail.p_filesz = section_load_offset + relocated_section.size();
+        tail.p_memsz = tail.p_filesz;
+        for (const auto &[other_index, old_offset] : preserved_nobits_offsets)
+          shdrs[other_index].sh_offset = old_offset;
+
+        const uint64_t destination_file_offset = tail_source.p_offset + section_load_offset;
+        if (destination_file_offset % section_alignment != 0)
+          return fail("allocated .eh_frame tail LOAD cannot preserve section alignment");
+        if (destination_vaddr < section.sh_addr)
+          return fail("allocated .eh_frame tail LOAD precedes its source address");
+        tail.p_flags |= PF_R;
+        const uint64_t move_delta = destination_vaddr - section.sh_addr;
+        shdrs[section_index].sh_addr = destination_vaddr;
+        shdrs[section_index].sh_offset = destination_file_offset;
+        shdrs[section_index].sh_size = relocated_section.size();
+
+        std::vector<bool> moved_section(shdrs.size(), false);
+        moved_section[section_index] = true;
+        shift_symbols_in_moved_sections(image, ehdr, shdrs, moved_section, move_delta);
+        shift_relocation_offsets_in_moved_sections(image, ehdr, shdrs, moved_section, move_delta);
+
+        if (text.sh_offset > std::numeric_limits<uint64_t>::max() - old_text_size)
+          return fail("source .text file range overflows while moving .eh_frame");
+        const uint64_t old_text_end_file = text.sh_offset + old_text_size;
+        const bool destination_shifts_with_text = future_text_delta != 0 &&
+                                                  destination_vaddr >= old_text_end &&
+                                                  destination_file_offset >= old_text_end_file;
+        shift_section_vaddr[section_index] = destination_shifts_with_text;
+        const uint64_t destination_future_delta =
+            destination_shifts_with_text ? future_text_delta : 0;
+        if (destination_vaddr > std::numeric_limits<uint64_t>::max() - destination_future_delta) {
+          return fail("relocated .eh_frame tail address overflows");
+        }
+        const uint64_t final_destination_vaddr = destination_vaddr + destination_future_delta;
+        if (target_section_vaddr > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
+            final_destination_vaddr > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+          return fail("relocated .eh_frame tail address is not representable");
+        }
+        const int64_t base_adjustment = static_cast<int64_t>(target_section_vaddr) -
+                                        static_cast<int64_t>(final_destination_vaddr);
+        for (const size_t field_offset : relocated_initial_location_fields) {
+          if (field_offset > relocated_section.size() ||
+              sizeof(int32_t) > relocated_section.size() - field_offset) {
+            return fail("relocated .eh_frame FDE field lies outside the rebuilt section");
+          }
+          int32_t encoded_delta = 0;
+          std::memcpy(&encoded_delta, relocated_section.data() + field_offset,
+                      sizeof(encoded_delta));
+          if ((encoded_delta > 0 &&
+               base_adjustment > std::numeric_limits<int64_t>::max() - encoded_delta) ||
+              (encoded_delta < 0 &&
+               base_adjustment < std::numeric_limits<int64_t>::min() - encoded_delta)) {
+            return fail("relocated .eh_frame tail PC adjustment overflows");
+          }
+          const int64_t adjusted_delta = base_adjustment + encoded_delta;
+          if (adjusted_delta < std::numeric_limits<int32_t>::min() ||
+              adjusted_delta > std::numeric_limits<int32_t>::max()) {
+            return fail("relocated .eh_frame tail PC does not fit pcrel+sdata4");
+          }
+          const int32_t adjusted = static_cast<int32_t>(adjusted_delta);
+          std::memcpy(relocated_section.data() + field_offset, &adjusted, sizeof(adjusted));
+        }
+      }
+    }
+    const auto relocated_bytes =
+        std::span<uint8_t>(image.data() + shdrs[section_index].sh_offset,
+                           static_cast<size_t>(shdrs[section_index].sh_size));
+    std::ranges::fill(relocated_bytes, 0);
+    std::ranges::copy(relocated_section, relocated_bytes.begin());
+  }
+  return true;
 }
 
 [[nodiscard]] bool target_supports_wave32(rj_code_arch_t arch) {
@@ -429,7 +1403,8 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
 [[nodiscard]] bool relocate_text_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
                                          std::span<const Elf64_Shdr> shdrs, size_t text_index,
                                          uint64_t old_text_size, uint64_t new_text_size,
-                                         std::span<const TextOffsetRelocation> relocations) {
+                                         std::span<const TextOffsetRelocation> relocations,
+                                         bool require_exact_function_ranges) {
   if (relocations.empty())
     return true;
 
@@ -525,10 +1500,19 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
       }
 
       const uint64_t old_size = symbol.st_size;
-      if (old_size <= old_text_size - source_text_offset) {
+      const uint8_t symbol_type = elf_symbol_type(symbol.st_info);
+      const bool sized_function = old_size != 0 && (symbol_type == kElfSymbolTypeFunc ||
+                                                    symbol_type == kElfSymbolTypeAmdGpuHsaKernel);
+      if (old_size > old_text_size - source_text_offset) {
+        if (must_relocate || (require_exact_function_ranges && sized_function))
+          return false;
+      } else {
         const auto relocated_end = target_by_source.find(source_text_offset + old_size);
-        if (relocated_end != target_by_source.end() &&
-            relocated_end->second >= relocated_start->second) {
+        if (relocated_end == target_by_source.end() ||
+            relocated_end->second < relocated_start->second) {
+          if (must_relocate || (require_exact_function_ranges && sized_function))
+            return false;
+        } else {
           symbol.st_size = relocated_end->second - relocated_start->second;
         }
       }
@@ -953,21 +1937,47 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
 
 bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
                                      std::span<const TextOffsetRelocation> text_relocations,
-                                     std::span<const PcRelativeDataRelocation> data_relocations) {
+                                     std::span<const PcRelativeDataRelocation> data_relocations,
+                                     std::string *error_out, std::vector<std::string> *warnings_out,
+                                     bool require_exact_function_ranges) {
+  const auto fail = [error_out](const char *message) {
+    report(error_out, message);
+    return false;
+  };
   // Keep fail-closed behavior for callers that assume word-aligned executable
   // sections; accepting a non-word-aligned replacement can break downstream
   // PC-relative patching and branch-distance checks.
   if ((new_text.size() % sizeof(uint32_t)) != 0)
-    return false;
+    return fail("replacement .text is not word-aligned");
 
   if (text_size_ == 0)
-    return false;
+    return fail("code object has no replaceable .text payload");
   if (new_text.size() < text_size_)
-    return false;
+    return fail("replacement .text is smaller than the source allocation");
   if (!image_contains_range(image_.size(), text_offset_, text_size_))
-    return false;
+    return fail("source .text extends beyond the ELF image");
   if (!text_relocations.empty() && has_unsupported_relocation_to_text())
-    return false;
+    return fail("ELF contains an unsupported relocation referencing .text");
+
+  // replace_text() is a public patch transaction. Several late validation
+  // paths run after unwind relocation or file insertion, so retain the exact
+  // original state until every ELF table update succeeds.
+  struct Rollback {
+    CodeObjectPatcher &patcher;
+    std::vector<uint8_t> image;
+    uint64_t text_offset;
+    uint64_t text_size;
+    uint64_t text_tail_size;
+    bool committed = false;
+    ~Rollback() {
+      if (committed)
+        return;
+      patcher.image_ = std::move(image);
+      patcher.text_offset_ = text_offset;
+      patcher.text_size_ = text_size;
+      patcher.text_tail_size_ = text_tail_size;
+    }
+  } rollback{*this, image_, text_offset_, text_size_, text_tail_size_};
 
   auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image_.data());
   auto header = *ehdr;
@@ -977,10 +1987,70 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
   const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
   if (!text_index) {
     assert(false && "text section header not found");
-    return false;
+    return fail("source .text section header could not be found");
+  }
+  const auto text_header = shdrs[*text_index];
+  uint64_t old_text_end_file = text_offset_ + text_size_;
+  const uint64_t old_text_end_vaddr = text_header.sh_addr + text_size_;
+  const uint64_t growth = new_text.size() - text_size_;
+  uint64_t padded_file_delta = 0;
+  std::vector<bool> shift_section_vaddr(shdrs.size(), false);
+  std::vector<bool> shift_segment_vaddr(phdrs.size(), false);
+  if (growth != 0) {
+    // Growing .text can shift later LOAD segments. Pad the inserted file range
+    // so every shifted LOAD keeps p_offset % p_align congruent with p_vaddr %
+    // p_align. The padding is executable segment filler, not part of .text.
+    const uint64_t file_delta_alignment = shifted_load_delta_alignment(phdrs, old_text_end_file);
+    padded_file_delta = align_up(growth, file_delta_alignment);
+    assert(padded_file_delta >= growth && "aligned text growth underflowed");
+    assert(padded_file_delta % sizeof(uint32_t) == 0 && "text growth must stay word-aligned");
+
+    for (size_t i = 0; i < shdrs.size(); ++i) {
+      if (i == *text_index || shdrs[i].sh_type == SHT_NULL)
+        continue;
+      if ((shdrs[i].sh_flags & SHF_ALLOC) != 0 && shdrs[i].sh_addr >= old_text_end_vaddr) {
+        shift_section_vaddr[i] = true;
+      }
+    }
+    for (size_t i = 0; i < phdrs.size(); ++i) {
+      if (phdrs[i].p_vaddr >= old_text_end_vaddr && phdrs[i].p_offset >= old_text_end_file)
+        shift_segment_vaddr[i] = true;
+    }
   }
 
-  const auto text_header = shdrs[*text_index];
+  std::vector<std::string> warnings;
+  const bool layout_changed =
+      new_text.size() != text_size_ ||
+      std::ranges::any_of(text_relocations, [](const TextOffsetRelocation &relocation) {
+        return relocation.source_offset != relocation.target_offset;
+      });
+  if (layout_changed) {
+    bool dropped_debug = false;
+    for (size_t section_index = 0; section_index < shdrs.size(); ++section_index) {
+      const auto name = section_name(image_, header, shdrs, section_index);
+      if (!name)
+        return fail("ELF section names are malformed while locating debug metadata");
+      if ((shdrs[section_index].sh_flags & SHF_ALLOC) == 0 &&
+          (name->starts_with(".debug_") || name->starts_with(".zdebug_")) &&
+          shdrs[section_index].sh_size != 0) {
+        shdrs[section_index].sh_size = 0;
+        dropped_debug = true;
+      }
+    }
+    if (dropped_debug) {
+      warnings.emplace_back(
+          "dropped non-allocated DWARF sections whose PC ranges became stale after .text "
+          "relocation");
+    }
+  }
+  if (!relocate_eh_frame_fdes(image_, header, shdrs, phdrs, *text_index, text_size_,
+                              new_text.size(), text_relocations, shift_section_vaddr,
+                              padded_file_delta, error_out)) {
+    return false;
+  }
+  text_offset_ = shdrs[*text_index].sh_offset;
+  old_text_end_file = text_offset_ + text_size_;
+
   struct ResolvedDataRelocation {
     PcRelativeDataRelocation relocation;
     size_t target_section = 0;
@@ -993,7 +2063,7 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
         sizeof(uint32_t) > new_text.size() - relocation.target_getpc_offset ||
         relocation.target_literal_offset > new_text.size() ||
         sizeof(uint64_t) > new_text.size() - relocation.target_literal_offset) {
-      return false;
+      return fail("PC-relative data relocation lies outside replacement .text");
     }
     const auto section = std::ranges::find_if(shdrs, [&](const Elf64_Shdr &candidate) {
       return (candidate.sh_flags & SHF_ALLOC) != 0 && (candidate.sh_flags & SHF_EXECINSTR) == 0 &&
@@ -1001,40 +2071,14 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
              relocation.source_target_vaddr - candidate.sh_addr < candidate.sh_size;
     });
     if (section == shdrs.end())
-      return false;
+      return fail("PC-relative data relocation target is not in allocated non-executable data");
     resolved_data_relocations.push_back(
         {.relocation = relocation,
          .target_section = static_cast<size_t>(section - shdrs.begin()),
          .target_section_offset = relocation.source_target_vaddr - section->sh_addr});
   }
-  const uint64_t old_text_end_file = text_offset_ + text_size_;
-  const uint64_t old_text_end_vaddr = text_header.sh_addr + text_size_;
-  const uint64_t growth = new_text.size() - text_size_;
-
   if (growth != 0) {
-    // Growing .text can shift later LOAD segments. Pad the inserted file range
-    // so every shifted LOAD keeps p_offset % p_align congruent with p_vaddr %
-    // p_align. The padding is executable segment filler, not part of .text.
-    const uint64_t file_delta_alignment = shifted_load_delta_alignment(phdrs, old_text_end_file);
-    const uint64_t padded_file_delta = align_up(growth, file_delta_alignment);
-    assert(padded_file_delta >= growth && "aligned text growth underflowed");
-    assert(padded_file_delta % sizeof(uint32_t) == 0 && "text growth must stay word-aligned");
-
     std::vector<uint8_t> inserted(padded_file_delta, 0);
-    std::vector<bool> shift_section_vaddr(shdrs.size(), false);
-    for (size_t i = 0; i < shdrs.size(); ++i) {
-      if (i == *text_index || shdrs[i].sh_type == SHT_NULL)
-        continue;
-      if ((shdrs[i].sh_flags & SHF_ALLOC) != 0 && shdrs[i].sh_addr >= old_text_end_vaddr)
-        shift_section_vaddr[i] = true;
-    }
-
-    std::vector<bool> shift_segment_vaddr(phdrs.size(), false);
-    for (size_t i = 0; i < phdrs.size(); ++i) {
-      if (phdrs[i].p_vaddr >= old_text_end_vaddr && phdrs[i].p_offset >= old_text_end_file)
-        shift_segment_vaddr[i] = true;
-    }
-
     insert_file_bytes(image_, header, shdrs, phdrs, old_text_end_file, inserted, *text_index, true);
 
     for (size_t i = 0; i < shdrs.size(); ++i) {
@@ -1070,7 +2114,7 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
   for (const ResolvedDataRelocation &resolved : resolved_data_relocations) {
     if (resolved.target_section >= shdrs.size() ||
         resolved.target_section_offset >= shdrs[resolved.target_section].sh_size) {
-      return false;
+      return fail("PC-relative data relocation target moved outside its section");
     }
     const uint64_t target_vaddr =
         shdrs[resolved.target_section].sh_addr + resolved.target_section_offset;
@@ -1078,7 +2122,7 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
             std::numeric_limits<uint64_t>::max() - resolved.relocation.target_getpc_offset ||
         text_header.sh_addr + resolved.relocation.target_getpc_offset >
             std::numeric_limits<uint64_t>::max() - sizeof(uint32_t)) {
-      return false;
+      return fail("PC-relative data relocation address overflows");
     }
     const uint64_t getpc_result =
         text_header.sh_addr + resolved.relocation.target_getpc_offset + sizeof(uint32_t);
@@ -1088,12 +2132,12 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
   }
   shdrs[*text_index].sh_size = new_text.size();
   if (!relocate_text_symbols(image_, header, shdrs, *text_index, text_size_, new_text.size(),
-                             text_relocations)) {
-    return false;
+                             text_relocations, require_exact_function_ranges)) {
+    return fail("text symbols cannot be mapped exactly into replacement .text");
   }
   if (!relocate_relative_text_addends(image_, header, shdrs, *text_index, text_size_,
                                       new_text.size(), text_relocations)) {
-    return false;
+    return fail("R_AMDGPU_RELATIVE64 addends cannot be mapped exactly into replacement .text");
   }
   // Instrumentation appends a cave without relocating the original body and
   // therefore supplies no offset map. Preserve its historical function-range
@@ -1109,6 +2153,9 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
            "patched LOAD lost file/virtual address congruence");
   }
   write_elf_tables(image_, header, shdrs, phdrs);
+  rollback.committed = true;
+  if (warnings_out != nullptr)
+    warnings_out->insert(warnings_out->end(), warnings.begin(), warnings.end());
   return true;
 }
 
@@ -1145,7 +2192,8 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
 
 std::optional<std::vector<AppendedSidecarDescriptor>>
 CodeObjectPatcher::append_sidecar_descriptor_translations(
-    std::span<const KdTranslation> translations, rj_code_arch_t target_arch, uint64_t alignment) {
+    std::span<const KdTranslation> translations, rj_code_arch_t target_arch, uint64_t alignment,
+    std::string *error_out) {
   if (translations.empty())
     return std::vector<AppendedSidecarDescriptor>{};
   if (alignment == 0 || (alignment & (alignment - 1)) != 0)
@@ -1176,6 +2224,21 @@ CodeObjectPatcher::append_sidecar_descriptor_translations(
   });
   if (!insertion_is_loaded)
     return std::nullopt;
+
+  for (size_t section_index = 0; section_index < shdrs.size(); ++section_index) {
+    const auto name = section_name(image_, header, shdrs, section_index);
+    if (!name) {
+      report(error_out, "ELF section names are malformed while locating unwind metadata");
+      return std::nullopt;
+    }
+    if ((shdrs[section_index].sh_flags & SHF_ALLOC) != 0 &&
+        (*name == ".eh_frame" || *name == ".eh_frame_hdr") &&
+        shdrs[section_index].sh_addr >= insertion_vaddr) {
+      report(error_out,
+             "sidecar insertion would move allocated unwind metadata without relocating it");
+      return std::nullopt;
+    }
+  }
 
   std::vector<uint8_t> inserted;
   std::vector<AppendedSidecarDescriptor> appended;

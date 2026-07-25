@@ -421,6 +421,37 @@ If one dynamic consumer has multiple recovered targets, one direct window cannot
 preserve it. DBT keeps the indirect consumer and rewrites each recovered
 source-side PC-builder range to compute the relocated target instead.
 
+### Descriptorless LLVM Callables
+
+gfx1250 B0-to-A0 translation also accepts complete, non-overlapping, sized
+`STT_FUNC` ranges that are not owned by a kernel descriptor. This path supports
+only linked AMDHSA code objects V4-V6 and the LLVM C/Fast/Cold device-function
+ABI. A symbol type alone does not encode a calling convention, so other
+producers or LLVM graphics/chain conventions are outside this contract.
+
+LLVM's per-function `.amdgpu.info` records cannot carry the contract into this
+path. LLVM emits that `SHF_EXCLUDE` section only in relocatable objects for the
+linker to consume. Legacy `.AMDGPU.gpr_maximums` likewise contains no bytes,
+and its assembler resource symbols are not retained in linked corpus HSACOs.
+RocJITsu runs on the final `ET_DYN` HSACO, where neither form provides mutable
+per-function resource records.
+
+The final-object fallback is deliberately bounded:
+
+- every callable range must decode completely;
+- ABI argument, result, return-address, stack, and callee-saved registers are
+  unavailable to scratch allocation;
+- each function's highest referenced low-bank VGPR is rounded to the hardware
+  allocation granule, and scratch must remain within that same per-function
+  envelope;
+- MODE changes that can select another physical VGPR bank are rejected; and
+- descriptorless translation cannot grow registers or manufacture private
+  spill storage because no descriptor can advertise those resources.
+
+These constraints allow rewrites that reuse a dead caller-clobbered register
+already covered by the source allocation. A rewrite that needs a larger
+resource envelope fails without committing any ELF changes.
+
 ### 6. Feed Resources Back into the Descriptor
 
 Semantic expansion can discover requirements that were unknown during the

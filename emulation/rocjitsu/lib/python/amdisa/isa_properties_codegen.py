@@ -42,6 +42,20 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
             'true' if profile.uses_cluster_ttmp_workgroup_ids else 'false'
         )
         addressable_vgprs = profile.max_addressable_vgprs_per_wf
+        vector_lane_encoding_mask = profile.vector_lane_encoding_mask
+        vector_readlane_b32_encoding = profile.vector_readlane_b32_encoding
+        vector_writelane_b32_encoding = profile.vector_writelane_b32_encoding
+        vector_lane_encoding_lines = []
+        if vector_lane_encoding_mask:
+            if not vector_readlane_b32_encoding or not vector_writelane_b32_encoding:
+                raise ValueError(
+                    f'{name} vector lane encodings require both readlane and writelane'
+                )
+            vector_lane_encoding_lines = [
+                f'        .vector_lane_encoding_mask = 0x{vector_lane_encoding_mask:08X},',
+                f'        .vector_readlane_b32_encoding = 0x{vector_readlane_b32_encoding:08X},',
+                f'        .vector_writelane_b32_encoding = 0x{vector_writelane_b32_encoding:08X},',
+            ]
         max_addressable_vgprs_per_wf = max(
             max_addressable_vgprs_per_wf, addressable_vgprs
         )
@@ -53,6 +67,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
             f'        .uses_ttmp_workgroup_ids = {uses_ttmp_workgroup_ids},',
             f'        .uses_cluster_ttmp_workgroup_ids = {uses_cluster_ttmp_workgroup_ids},',
             f'        .max_addressable_vgprs_per_wf = {addressable_vgprs},',
+            *vector_lane_encoding_lines,
             '    };',
         ]
 
@@ -78,6 +93,9 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         '  bool uses_ttmp_workgroup_ids = false;',
         '  bool uses_cluster_ttmp_workgroup_ids = false;',
         '  uint32_t max_addressable_vgprs_per_wf = 0;',
+        '  uint32_t vector_lane_encoding_mask = 0;',
+        '  uint32_t vector_readlane_b32_encoding = 0;',
+        '  uint32_t vector_writelane_b32_encoding = 0;',
         '};',
         '',
         'inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = '

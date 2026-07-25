@@ -5,6 +5,7 @@
 
 #include "rocjitsu/analysis/control_flow.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
@@ -22,6 +23,7 @@
 #include <set>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -261,6 +263,8 @@ struct AnalysisContext {
   std::span<const uint8_t> text;
   rj_code_arch_t arch;
   std::vector<InstructionFacts> facts;
+  bool has_vector_lane_write = false;
+  std::vector<uint64_t> vector_lane_read_offsets;
 };
 
 /// @brief Per-pair summary for one analysis block.
@@ -1165,6 +1169,7 @@ void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
   ctx.insts = insts;
   ctx.text = text;
   ctx.arch = arch;
+  const IsaProperties properties = isa_properties(arch);
 
   ctx.facts.resize(insts.size());
   for (size_t i = 0; i < insts.size(); ++i) {
@@ -1177,6 +1182,14 @@ void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
     if (facts.swappc_ssrc)
       facts.swappc_sdst = static_cast<uint16_t>((facts.word >> 16) & 0x7fu);
     facts.call_sdst = s_call_sdst(inst, facts.word);
+    if (properties.vector_lane_encoding_mask != 0) {
+      // Compare the already-cached word against target-owned encoding
+      // properties instead of decoding every mnemonic on large code objects.
+      const uint32_t encoding = facts.word & properties.vector_lane_encoding_mask;
+      ctx.has_vector_lane_write |= encoding == properties.vector_writelane_b32_encoding;
+      if (encoding == properties.vector_readlane_b32_encoding)
+        ctx.vector_lane_read_offsets.push_back(inst.src_loc());
+    }
   }
 
   return ctx;
@@ -1250,12 +1263,20 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
 
 [[nodiscard]] std::vector<uint8_t>
 explicit_external_entries(const std::vector<AnalysisBlock> &blocks,
-                          std::span<const uint64_t> extra_leaders) {
+                          std::span<const uint64_t> external_entry_offsets) {
   std::vector<uint8_t> entries(blocks.size(), 0);
   if (!entries.empty())
     entries[0] = 1;
+
+  // Callers may supply thousands of sized STT_FUNC roots. A linear search for
+  // every block made entry classification O(blocks * functions), dominating
+  // translation of large linked libraries. Hash the comparatively compact
+  // entry set once so this pass remains linear in the block count.
+  std::unordered_set<uint64_t> external_entries;
+  external_entries.reserve(external_entry_offsets.size());
+  external_entries.insert(external_entry_offsets.begin(), external_entry_offsets.end());
   for (size_t block_index = 1; block_index < blocks.size(); ++block_index) {
-    if (std::ranges::find(extra_leaders, blocks[block_index].offset) != extra_leaders.end())
+    if (external_entries.contains(blocks[block_index].offset))
       entries[block_index] = 1;
   }
   return entries;
@@ -1654,10 +1675,9 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
   finalize_block_transfers(block, state);
 }
 
-[[nodiscard]] std::vector<LatticeFacts>
-run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
-                   std::span<const PendingConsumer> pending_consumers,
-                   std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy) {
+[[nodiscard]] std::vector<LatticeFacts> run_block_dataflow(
+    const std::vector<AnalysisBlock> &blocks, std::span<const PendingConsumer> pending_consumers,
+    std::span<const uint64_t> external_entry_offsets, ExternalEntryPolicy entry_policy) {
   // Phase 3: compute block-entry facts to a fixed point.
   //
   // entry[B] = JOIN(exit[P]) for every predecessor P of B.
@@ -1672,7 +1692,8 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
     for (size_t successor : blocks[block_index].successors)
       predecessors[successor].push_back(block_index);
   }
-  const std::vector<uint8_t> external_entries = explicit_external_entries(blocks, extra_leaders);
+  const std::vector<uint8_t> external_entries =
+      explicit_external_entries(blocks, external_entry_offsets);
 
   // Dataflow results are consumed only by pending cross-block branches. A pair
   // that is built or killed somewhere but never reaches such a consumer cannot
@@ -1860,7 +1881,7 @@ void add_recovered_leaders(std::vector<uint64_t> &leaders,
   leaders.erase(std::ranges::unique(leaders).begin(), leaders.end());
 }
 
-void add_recovered_successors(const std::vector<IndirectCallFixup> &recovered,
+void add_recovered_successors(std::span<const IndirectCallFixup> recovered,
                               std::vector<AnalysisBlock> &blocks) {
   // Recovered indirect edges are not part of the first direct-CFG graph, but
   // they are real control flow once proven. Feeding them into the next
@@ -1949,8 +1970,9 @@ struct VectorLaneFlowState {
 
 void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<AnalysisBlock> &blocks,
                                      std::vector<IndirectCallFixup> &recovered,
-                                     std::span<const uint64_t> extra_leaders,
-                                     ExternalEntryPolicy entry_policy) {
+                                     std::span<const uint64_t> external_entry_offsets,
+                                     ExternalEntryPolicy entry_policy,
+                                     std::span<const IndirectCallFixup> focus_fixups) {
   // gfx1250 device functions sometimes keep a small static call set in one
   // VGPR: getpc-built low/high halves are written to fixed lanes, then read
   // back into an SGPR pair before swappc. Track only fixed-lane
@@ -1973,12 +1995,15 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
   // This pass only observes MODE; it never inserts or reorders
   // S_SETREG/S_SET_VGPR_MSB and therefore cannot violate the required co-issue
   // spacing.
-  if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+  if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250 || !ctx.has_vector_lane_write ||
+      ctx.vector_lane_read_offsets.empty()) {
     return;
+  }
 
   if (blocks.empty())
     return;
-  const std::vector<uint8_t> external_entries = explicit_external_entries(blocks, extra_leaders);
+  const std::vector<uint8_t> external_entries =
+      explicit_external_entries(blocks, external_entry_offsets);
 
   const auto changes_vgpr_msb_bank = [](std::string_view mnemonic) {
     return mnemonic == "s_set_vgpr_msb" || mnemonic == "s_setreg_b32" ||
@@ -2147,13 +2172,76 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       predecessors[successor].push_back(block_index);
   }
 
+  std::vector<uint8_t> active_blocks(blocks.size(), 1);
+  if (!focus_fixups.empty()) {
+    std::ranges::fill(active_blocks, uint8_t{0});
+    std::unordered_map<uint64_t, size_t> block_by_offset;
+    block_by_offset.reserve(blocks.size());
+    for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
+      block_by_offset.emplace(blocks[block_index].offset, block_index);
+
+    std::vector<uint8_t> forward(blocks.size(), 0);
+    std::deque<size_t> worklist;
+    for (const IndirectCallFixup &fixup : focus_fixups) {
+      const auto target = block_by_offset.find(fixup.source_target_offset);
+      if (target == block_by_offset.end() || forward[target->second] != 0)
+        continue;
+      forward[target->second] = 1;
+      worklist.push_back(target->second);
+    }
+    while (!worklist.empty()) {
+      const size_t block_index = worklist.front();
+      worklist.pop_front();
+      for (const size_t successor : blocks[block_index].successors) {
+        if (forward[successor] != 0)
+          continue;
+        forward[successor] = 1;
+        worklist.push_back(successor);
+      }
+    }
+
+    const auto block_containing = [&](uint64_t offset) -> std::optional<size_t> {
+      auto it = std::upper_bound(
+          blocks.begin(), blocks.end(), offset,
+          [](uint64_t value, const AnalysisBlock &block) { return value < block.offset; });
+      if (it == blocks.begin())
+        return std::nullopt;
+      return static_cast<size_t>(std::distance(blocks.begin(), std::prev(it)));
+    };
+    for (const uint64_t read_offset : ctx.vector_lane_read_offsets) {
+      const auto block_index = block_containing(read_offset);
+      if (!block_index || forward[*block_index] == 0 || active_blocks[*block_index] != 0)
+        continue;
+      active_blocks[*block_index] = 1;
+      worklist.push_back(*block_index);
+    }
+    while (!worklist.empty()) {
+      const size_t block_index = worklist.front();
+      worklist.pop_front();
+      if (is_analysis_root(block_index, external_entries, predecessors, entry_policy))
+        continue;
+      for (const size_t predecessor : predecessors[block_index]) {
+        if (active_blocks[predecessor] != 0)
+          continue;
+        active_blocks[predecessor] = 1;
+        worklist.push_back(predecessor);
+      }
+    }
+    if (std::ranges::none_of(active_blocks, [](uint8_t active) { return active != 0; }))
+      return;
+  }
+
   std::vector<VectorLaneFlowState> entry_states(blocks.size());
   std::vector<VectorLaneFlowState> exit_states(blocks.size());
   std::vector<uint8_t> reachable(blocks.size(), 0);
-  std::vector<uint8_t> on_worklist(blocks.size(), 1);
+  std::vector<uint8_t> on_worklist(blocks.size(), 0);
   std::deque<size_t> worklist;
-  for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
+  for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
+    if (active_blocks[block_index] == 0)
+      continue;
     worklist.push_back(block_index);
+    on_worklist[block_index] = 1;
+  }
 
   while (!worklist.empty()) {
     const size_t block_index = worklist.front();
@@ -2202,6 +2290,16 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         if (new_entry.vgpr_msb_imm != external_entry.vgpr_msb_imm)
           new_entry.vgpr_msb_imm = std::nullopt;
       }
+      if (!focus_fixups.empty() && external_entries[block_index] != 0 &&
+          std::ranges::any_of(predecessors[block_index], [&](size_t predecessor) {
+            return active_blocks[predecessor] == 0;
+          })) {
+        // Focused re-analysis stops at explicit callable entries because the
+        // external path clears every incoming lane stash. An inactive
+        // structural predecessor can still carry a different MODE bank, so
+        // keep bank selection unknown rather than assuming the entry default.
+        new_entry.vgpr_msb_imm = std::nullopt;
+      }
     }
     if (!new_reachable)
       continue;
@@ -2215,7 +2313,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
     entry_states[block_index] = std::move(new_entry);
     exit_states[block_index] = std::move(new_exit);
     for (size_t successor : blocks[block_index].successors) {
-      if (on_worklist[successor])
+      if (active_blocks[successor] == 0 || on_worklist[successor])
         continue;
       worklist.push_back(successor);
       on_worklist[successor] = 1;
@@ -2223,9 +2321,90 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
   }
 
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
-    if (reachable[block_index])
+    if (active_blocks[block_index] != 0 && reachable[block_index])
       (void)scan_block(blocks[block_index], entry_states[block_index], true);
   }
+}
+
+[[nodiscard]] std::vector<IndirectCallFixup>
+recovered_edges_enabling_vector_lane_flow(const AnalysisContext &ctx,
+                                          const std::vector<AnalysisBlock> &blocks,
+                                          std::span<const uint64_t> external_entry_offsets,
+                                          std::span<const IndirectCallFixup> newly_recovered) {
+  if (newly_recovered.empty() || !ctx.has_vector_lane_write ||
+      ctx.vector_lane_read_offsets.empty() || blocks.empty()) {
+    return {};
+  }
+
+  const auto block_containing = [&](uint64_t offset) -> std::optional<size_t> {
+    auto it = std::upper_bound(
+        blocks.begin(), blocks.end(), offset,
+        [](uint64_t value, const AnalysisBlock &block) { return value < block.offset; });
+    if (it == blocks.begin())
+      return std::nullopt;
+    return static_cast<size_t>(std::distance(blocks.begin(), std::prev(it)));
+  };
+
+  std::unordered_set<uint64_t> external_entries(external_entry_offsets.begin(),
+                                                external_entry_offsets.end());
+  external_entries.insert(blocks.front().offset);
+  std::vector<std::pair<const IndirectCallFixup *, size_t>> candidates;
+  candidates.reserve(newly_recovered.size());
+  for (const IndirectCallFixup &fixup : newly_recovered) {
+    if (external_entries.contains(fixup.source_target_offset))
+      continue;
+    if (const auto target = block_containing(fixup.source_target_offset))
+      candidates.emplace_back(&fixup, *target);
+  }
+  if (candidates.empty())
+    return {};
+
+  std::vector<std::vector<size_t>> predecessors(blocks.size());
+  for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
+    for (const size_t successor : blocks[block_index].successors)
+      predecessors[successor].push_back(block_index);
+  }
+
+  std::vector<uint8_t> can_reach_readlane(blocks.size(), 0);
+  std::deque<size_t> worklist;
+  size_t read_block = 0;
+  for (const uint64_t read_offset : ctx.vector_lane_read_offsets) {
+    while (read_block + 1 < blocks.size() && blocks[read_block + 1].offset <= read_offset)
+      ++read_block;
+    if (can_reach_readlane[read_block] != 0)
+      continue;
+    can_reach_readlane[read_block] = 1;
+    worklist.push_back(read_block);
+  }
+  while (!worklist.empty()) {
+    const size_t block_index = worklist.front();
+    worklist.pop_front();
+    if (external_entries.contains(blocks[block_index].offset))
+      continue;
+    for (const size_t predecessor : predecessors[block_index]) {
+      if (can_reach_readlane[predecessor] != 0)
+        continue;
+      can_reach_readlane[predecessor] = 1;
+      worklist.push_back(predecessor);
+    }
+  }
+
+  std::vector<IndirectCallFixup> relevant;
+  for (const auto &[fixup, target] : candidates) {
+    if (can_reach_readlane[target] == 0)
+      continue;
+
+    const AnalysisBlock &block = blocks[target];
+    const auto read =
+        std::ranges::lower_bound(ctx.vector_lane_read_offsets, fixup->source_target_offset);
+    const bool read_in_target_suffix = read != ctx.vector_lane_read_offsets.end() &&
+                                       *read <= ctx.insts[block.last_index]->src_loc();
+    const bool successor_reaches_read = std::ranges::any_of(
+        block.successors, [&](size_t successor) { return can_reach_readlane[successor] != 0; });
+    if (read_in_target_suffix || successor_reaches_read)
+      relevant.push_back(*fixup);
+  }
+  return relevant;
 }
 
 void recover_signed_delta_templates(const AnalysisContext &ctx,
@@ -2336,11 +2515,12 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges_unfiltered(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
-    std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
-    std::vector<PcAddressBuilder> *pc_builders) {
+    std::span<const uint64_t> block_leaders, std::span<const uint64_t> external_entries,
+    ExternalEntryPolicy entry_policy, std::vector<PcAddressBuilder> *pc_builders) {
   std::vector<IndirectCallFixup> recovered;
   AnalysisContext ctx = build_context(insts, text, arch);
-  std::vector<uint64_t> leaders(extra_leaders.begin(), extra_leaders.end());
+  std::vector<uint64_t> leaders(block_leaders.begin(), block_leaders.end());
+  std::vector<IndirectCallFixup> vector_lane_focus;
 
   PcAddressBuilderMap round_builders;
   for (size_t iteration = 0; iteration < kMaxIndirectDiscoveryIterations; ++iteration) {
@@ -2352,10 +2532,13 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     std::vector<PendingConsumer> pending_consumers;
     std::vector<IndirectCallFixup> iteration_recovered;
     // Lane-stash recovery consumes the same graph as scalar recovery, including
-    // edges proven in earlier rounds. Keep extra_leaders separate from leaders:
-    // recovered targets become reachable through those edges, not by being
-    // promoted to external roots.
-    recover_vector_lane_stashed_pcs(ctx, blocks, iteration_recovered, extra_leaders, entry_policy);
+    // edges proven in earlier rounds. The first pass covers the complete direct
+    // CFG. Later passes are restricted to newly reachable paths that can carry
+    // a stashed PC to a readlane consumer.
+    if (iteration == 0 || !vector_lane_focus.empty()) {
+      recover_vector_lane_stashed_pcs(ctx, blocks, iteration_recovered, external_entries,
+                                      entry_policy, vector_lane_focus);
+    }
     // Recovered leaders can split a block between rounds, which changes where a
     // builder's block-exit value is observed. Keep only the final round's view
     // so the published records are internally consistent with one CFG.
@@ -2364,17 +2547,25 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
       scan_block(ctx, block_index, blocks, pending_consumers, iteration_recovered, round_builders);
     recover_signed_delta_templates(ctx, blocks, iteration_recovered);
 
+    size_t unresolved_consumers = 0;
     if (!pending_consumers.empty()) {
       const auto entry_facts =
-          run_block_dataflow(blocks, pending_consumers, extra_leaders, entry_policy);
-      (void)classify_pending_consumers(ctx, blocks, entry_facts, pending_consumers,
-                                       iteration_recovered);
+          run_block_dataflow(blocks, pending_consumers, external_entries, entry_policy);
+      unresolved_consumers = classify_pending_consumers(ctx, blocks, entry_facts, pending_consumers,
+                                                        iteration_recovered);
     }
 
     bool changed = false;
-    for (const IndirectCallFixup &fixup : iteration_recovered)
-      changed |= append_unique(recovered, fixup);
-    if (!changed)
+    std::vector<IndirectCallFixup> newly_recovered;
+    for (const IndirectCallFixup &fixup : iteration_recovered) {
+      if (!append_unique(recovered, fixup))
+        continue;
+      changed = true;
+      newly_recovered.push_back(fixup);
+    }
+    vector_lane_focus =
+        recovered_edges_enabling_vector_lane_flow(ctx, blocks, external_entries, newly_recovered);
+    if (!changed || (unresolved_consumers == 0 && vector_lane_focus.empty()))
       break;
   }
 
@@ -2396,6 +2587,14 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
     std::vector<PcAddressBuilder> *pc_builders) {
+  return discover_indirect_branch_edges(insts, text, arch, extra_leaders, extra_leaders,
+                                        entry_policy, pc_builders);
+}
+
+std::vector<IndirectCallFixup> discover_indirect_branch_edges(
+    std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
+    std::span<const uint64_t> block_leaders, std::span<const uint64_t> external_entries,
+    ExternalEntryPolicy entry_policy, std::vector<PcAddressBuilder> *pc_builders) {
   if (pc_builders != nullptr)
     pc_builders->clear();
   if (insts.empty())
@@ -2414,14 +2613,14 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     // Keep the cheap predicate coupled to every fixup producer. A future
     // recovery path for another consumer kind must extend the predicate above.
     const auto unfiltered = discover_indirect_branch_edges_unfiltered(
-        insts, text, arch, extra_leaders, entry_policy, nullptr);
+        insts, text, arch, block_leaders, external_entries, entry_policy, nullptr);
     assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
 #endif
     return {};
   }
 
-  return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders, entry_policy,
-                                                   pc_builders);
+  return discover_indirect_branch_edges_unfiltered(insts, text, arch, block_leaders,
+                                                   external_entries, entry_policy, pc_builders);
 }
 
 } // namespace rocjitsu

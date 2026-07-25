@@ -314,36 +314,6 @@ struct ReportTotals {
   return os.str();
 }
 
-[[nodiscard]] const char *diagnostic_severity_name(DiagnosticSeverity severity) {
-  switch (severity) {
-  case DiagnosticSeverity::Warning:
-    return "warning";
-  case DiagnosticSeverity::Error:
-    return "error";
-  }
-  return "diagnostic";
-}
-
-[[nodiscard]] const char *diagnostic_kind_name(DiagnosticKind kind) {
-  switch (kind) {
-  case DiagnosticKind::UnsupportedGuestArch:
-    return "unsupported-guest-arch";
-  case DiagnosticKind::KernelDescriptor:
-    return "kernel-descriptor";
-  case DiagnosticKind::Legalization:
-    return "legalization";
-  case DiagnosticKind::ExpandMissing:
-    return "expand-missing";
-  case DiagnosticKind::ExpandFailed:
-    return "expand-failed";
-  case DiagnosticKind::ResourceLimit:
-    return "resource-limit";
-  case DiagnosticKind::KernelSkipped:
-    return "kernel-skipped";
-  }
-  return "unknown";
-}
-
 void print_diagnostic(std::ostream &os, const TranslationDiagnostic &diagnostic,
                       std::string_view prefix = {}) {
   if (!prefix.empty())

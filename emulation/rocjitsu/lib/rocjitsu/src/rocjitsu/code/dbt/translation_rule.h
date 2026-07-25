@@ -98,6 +98,12 @@ struct KernelResourceRequirements {
   /// guest body is allowed to clobber the dispatch/kernarg pointer SGPRs.
   uint32_t semantic_spill_persistent_end = 0;
 
+  /// @brief Whether semantic lowerings may grow and use per-lane private memory.
+  ///
+  /// Descriptorless callables have no dispatch descriptor whose private
+  /// segment size can be raised, so their translation must remain spill-free.
+  bool private_spills_allowed = true;
+
   /// @brief Construct an empty context component for tests or call sites without
   /// descriptor feedback.
   KernelResourceRequirements() = default;
@@ -198,6 +204,8 @@ private:
   /// std::nullopt if either would exceed the 32-bit private-size field.
   [[nodiscard]] std::optional<std::pair<uint32_t, uint32_t>>
   semantic_spill_reservation(uint32_t dwords) const {
+    if (!private_spills_allowed)
+      return std::nullopt;
     constexpr uint64_t kSpillAlignment = 16;
     constexpr uint64_t kMax = std::numeric_limits<uint32_t>::max();
     const uint64_t base =

@@ -19,6 +19,9 @@ struct IsaProperties {
   bool uses_ttmp_workgroup_ids = false;
   bool uses_cluster_ttmp_workgroup_ids = false;
   uint32_t max_addressable_vgprs_per_wf = 0;
+  uint32_t vector_lane_encoding_mask = 0;
+  uint32_t vector_readlane_b32_encoding = 0;
+  uint32_t vector_writelane_b32_encoding = 0;
 };
 
 inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
@@ -104,6 +107,9 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .uses_ttmp_workgroup_ids = true,
         .uses_cluster_ttmp_workgroup_ids = true,
         .max_addressable_vgprs_per_wf = 1024,
+        .vector_lane_encoding_mask = 0xFFFF0000,
+        .vector_readlane_b32_encoding = 0xD7600000,
+        .vector_writelane_b32_encoding = 0xD7610000,
     };
   default:
     return {};

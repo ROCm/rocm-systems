@@ -86,6 +86,13 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
     size_t pc = 0;
 
     while (pc < word_count) {
+      // gfx1250 linked code objects use zero-filled holes between independently
+      // aligned function bodies. Match BasicBlock::build(): zero is padding,
+      // not a decodable instruction and therefore not a host-decode failure.
+      if (arch == ROCJITSU_CODE_ARCH_GFX1250 && words[pc] == 0) {
+        ++pc;
+        continue;
+      }
       try {
         std::unique_ptr<Instruction> inst(decoder->decode(&words[pc]));
         if (!inst) {
@@ -526,7 +533,13 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     output.value.disassembly += translated_inspection.disassembly;
   }
 
-  if (!validate_host_decode(output.value.translated_report, error)) {
+  const bool data_only_noop =
+      has_diagnostic_kind(output.value.diagnostics, DiagnosticKind::DataOnly);
+  // A data-only object intentionally has no instructions to validate. An
+  // executable descriptorless no-op still goes through normal host decoding:
+  // NothingToTranslate means no rewrite matched, not that its bytes are exempt
+  // from structural validation.
+  if (!data_only_noop && !validate_host_decode(output.value.translated_report, error)) {
     add_error(output, kValidationError, error);
     return output;
   }

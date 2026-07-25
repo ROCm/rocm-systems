@@ -332,20 +332,44 @@ struct VirtualLdsPlan {
   int16_t lds_overflow_workgroup_id_sgpr_z = -1;
 };
 
-/// @brief Composed per-kernel descriptor/resource/ABI translation plan.
+/// @brief Composed descriptor-backed kernel or descriptorless callable translation plan.
 ///
 /// @details The component plans are independently reusable by descriptor
 /// translation, semantic DBT, patching, and future DBI entry instrumentation.
-/// Inheritance retains the established field syntax while call sites migrate to
-/// narrower component types.
+/// Descriptorless STT_FUNC scopes reuse the entry/resource fields as
+/// conservative translation constraints even though they have no descriptor to
+/// patch. Inheritance retains the established field syntax while call sites
+/// migrate to narrower component types.
+struct CallableRange {
+  uint64_t begin = 0;
+  uint64_t end = 0;
+};
+
 struct KdTranslation : KernelDescriptorFacts, KernelResourcePlan, KernelEntryPlan, VirtualLdsPlan {
-  /// @brief False when resource or ABI translation cannot be represented safely.
+  /// @brief True when this plan represents ELF STT_FUNC roots rather than a
+  /// hardware-dispatchable AMDHSA kernel descriptor.
+  ///
+  /// Descriptorless callable functions still contain executable ISA and must
+  /// participate in stepping translation. They have no descriptor whose entry
+  /// or resource fields can be rewritten, so BinaryTranslator uses this marker
+  /// to keep their text/relocation transaction separate from descriptor policy.
+  bool descriptorless_callable = false;
+
+  /// @brief Complete, source-ordered STT_FUNC ranges in one callable scope.
+  ///
+  /// All descriptorless functions in an object are translated as one scope so
+  /// direct calls between them can be relocated without cloning a runtime
+  /// function-pointer target. Keeping both bounds in one value makes the
+  /// sorted/disjoint range invariant explicit.
+  std::vector<CallableRange> callable_ranges;
+
+  /// @brief False when this scope's resource or ABI translation cannot be represented safely.
   bool supported = true;
 
-  /// @brief True when DBT emitted a target `s_endpgm` stub instead of translating this kernel.
+  /// @brief True when DBT emitted a target `s_endpgm` stub for a descriptor-backed kernel scope.
   bool skipped = false;
 
-  /// @brief Structured warnings and errors produced while planning this descriptor.
+  /// @brief Structured warnings and errors produced while planning this translation scope.
   std::vector<TranslationDiagnostic> diagnostics;
 
   /// @brief Replace target resource/ABI state with a minimal skipped-kernel stub plan.

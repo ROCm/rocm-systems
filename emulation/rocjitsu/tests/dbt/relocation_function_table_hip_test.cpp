@@ -60,8 +60,8 @@ TEST(RelocationFunctionTableHip, TranslatesEightWayDeviceDispatch) {
 
   auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  const auto blocks =
-      rocjitsu::BasicBlock::build(*source, *decoder, ROCJITSU_CODE_ARCH_GFX1250, source_targets);
+  const auto blocks = rocjitsu::BasicBlock::build(*source, *decoder, ROCJITSU_CODE_ARCH_GFX1250,
+                                                  source_targets, source_targets);
   const auto dispatches = rocjitsu::discover_relocation_table_dispatches(
       blocks, source_tables, source->text_sections()[0]->vaddr());
   ASSERT_EQ(dispatches.size(), 1u);

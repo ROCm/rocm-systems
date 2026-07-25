@@ -27,9 +27,45 @@ enum class DiagnosticKind {
   Legalization,
   ExpandMissing,
   ExpandFailed,
+  DataOnly,
+  NothingToTranslate,
   ResourceLimit,
   KernelSkipped,
 };
+
+[[nodiscard]] inline constexpr const char *diagnostic_severity_name(DiagnosticSeverity severity) {
+  switch (severity) {
+  case DiagnosticSeverity::Warning:
+    return "warning";
+  case DiagnosticSeverity::Error:
+    return "error";
+  }
+  return "diagnostic";
+}
+
+[[nodiscard]] inline constexpr const char *diagnostic_kind_name(DiagnosticKind kind) {
+  switch (kind) {
+  case DiagnosticKind::UnsupportedGuestArch:
+    return "unsupported-guest-arch";
+  case DiagnosticKind::KernelDescriptor:
+    return "kernel-descriptor";
+  case DiagnosticKind::Legalization:
+    return "legalization";
+  case DiagnosticKind::ExpandMissing:
+    return "expand-missing";
+  case DiagnosticKind::ExpandFailed:
+    return "expand-failed";
+  case DiagnosticKind::DataOnly:
+    return "data-only";
+  case DiagnosticKind::NothingToTranslate:
+    return "nothing-to-translate";
+  case DiagnosticKind::ResourceLimit:
+    return "resource-limit";
+  case DiagnosticKind::KernelSkipped:
+    return "kernel-skipped";
+  }
+  return "unknown";
+}
 
 /// @brief One user/developer-facing DBT diagnostic.
 ///
@@ -54,6 +90,13 @@ has_error_diagnostic(const std::vector<TranslationDiagnostic> &diagnostics) {
   });
 }
 
+[[nodiscard]] inline bool has_diagnostic_kind(const std::vector<TranslationDiagnostic> &diagnostics,
+                                              DiagnosticKind kind) {
+  return std::ranges::any_of(diagnostics, [kind](const TranslationDiagnostic &diagnostic) {
+    return diagnostic.kind == kind;
+  });
+}
+
 /// @brief True if any kernel was replaced by a non-dispatchable no-op stub.
 ///
 /// @details skip_failed_kernels reports a KernelSkipped *warning* (not an error),
@@ -64,9 +107,7 @@ has_error_diagnostic(const std::vector<TranslationDiagnostic> &diagnostics) {
 /// non-dispatchable, matching the HSA hook which refuses such a load.
 [[nodiscard]] inline bool
 has_skipped_kernel(const std::vector<TranslationDiagnostic> &diagnostics) {
-  return std::ranges::any_of(diagnostics, [](const TranslationDiagnostic &diagnostic) {
-    return diagnostic.kind == DiagnosticKind::KernelSkipped;
-  });
+  return has_diagnostic_kind(diagnostics, DiagnosticKind::KernelSkipped);
 }
 
 } // namespace rocjitsu

@@ -47,16 +47,6 @@ uint32_t first_word(const Instruction &inst) {
   return raw == nullptr ? 0 : raw[0];
 }
 
-bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
-  // gfx1250 renamed the scalar PC transfer without changing its role in the
-  // call/return CFG. Accept both spellings; the raw source operand remains in
-  // the low byte for the canonical one-word form.
-  const std::string_view mnemonic = inst.mnemonic();
-  if (inst.size() != sizeof(uint32_t) || (mnemonic != "s_setpc_b64" && mnemonic != "s_set_pc_i64"))
-    return false;
-  return static_cast<uint16_t>(word & 0xffu) == ssrc0;
-}
-
 bool has_exact_words(const Instruction &inst, std::span<const uint32_t> words) {
   if (inst.size() != static_cast<int>(words.size_bytes()) || inst.raw_encoding() == nullptr)
     return false;
@@ -92,6 +82,16 @@ struct DeferredCallSite {
 };
 
 } // namespace
+
+bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
+  // gfx1250 renamed the scalar PC transfer without changing its role in the
+  // call/return CFG. Accept both spellings; the raw source operand remains in
+  // the low byte for the canonical one-word form.
+  const std::string_view mnemonic = inst.mnemonic();
+  if (inst.size() != sizeof(uint32_t) || (mnemonic != "s_setpc_b64" && mnemonic != "s_set_pc_i64"))
+    return false;
+  return static_cast<uint16_t>(word & 0xffu) == ssrc0;
+}
 
 BasicBlock::BasicBlock(uint64_t start_offset) : start_offset_(start_offset) {}
 
@@ -173,6 +173,13 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
                                                            rj_code_arch_t arch,
                                                            std::span<const uint64_t> extra_leaders,
                                                            ExternalEntryPolicy entry_policy) {
+  return build(co, decoder, arch, extra_leaders, extra_leaders, entry_policy);
+}
+
+std::vector<std::unique_ptr<BasicBlock>>
+BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+                  std::span<const uint64_t> block_leaders,
+                  std::span<const uint64_t> external_entries, ExternalEntryPolicy entry_policy) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
 
   for (const auto *sec : co.text_sections()) {
@@ -230,12 +237,13 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
     const auto decoded_span =
         std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size());
     std::vector<PcAddressBuilder> pc_address_builders;
-    std::vector<IndirectCallFixup> recovered_indirect_targets = discover_indirect_branch_edges(
-        decoded_span, text, arch, extra_leaders, entry_policy, &pc_address_builders);
+    std::vector<IndirectCallFixup> recovered_indirect_targets =
+        discover_indirect_branch_edges(decoded_span, text, arch, block_leaders, external_entries,
+                                       entry_policy, &pc_address_builders);
 
     std::set<uint64_t> leaders;
     leaders.insert(decoded.front()->src_loc());
-    for (uint64_t leader : extra_leaders) {
+    for (uint64_t leader : block_leaders) {
       if (leader < section_end)
         leaders.insert(leader);
     }
@@ -438,7 +446,8 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
         block.add_successor(*fallthrough_it->second);
     }
 
-    std::unordered_set<uint64_t> kernel_entry_offsets(extra_leaders.begin(), extra_leaders.end());
+    std::unordered_set<uint64_t> kernel_entry_offsets(external_entries.begin(),
+                                                      external_entries.end());
     std::vector<std::vector<CallReturnClassification>> classifications;
     classifications.reserve(deferred_calls.size());
     for (const DeferredCallSite &site : deferred_calls)

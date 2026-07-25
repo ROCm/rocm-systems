@@ -845,6 +845,21 @@ class _AmdgpuProfileBase(IsaProfile):
         return 256
 
     @property
+    def vector_lane_encoding_mask(self) -> int:
+        """Word-zero mask for vector readlane/writelane instruction matching."""
+        return 0
+
+    @property
+    def vector_readlane_b32_encoding(self) -> int:
+        """Masked word-zero encoding for V_READLANE_B32."""
+        return 0
+
+    @property
+    def vector_writelane_b32_encoding(self) -> int:
+        """Masked word-zero encoding for V_WRITELANE_B32."""
+        return 0
+
+    @property
     def descriptor_sgpr_count_encoded(self) -> bool:
         """Whether zero SGPR granule fields still use descriptor encoding."""
         return True
@@ -1679,6 +1694,18 @@ class Gfx1250Profile(Rdna4Profile):
     @property
     def max_addressable_vgprs_per_wf(self) -> int:
         return 1024
+
+    @property
+    def vector_lane_encoding_mask(self) -> int:
+        return 0xFFFF0000
+
+    @property
+    def vector_readlane_b32_encoding(self) -> int:
+        return 0xD7600000
+
+    @property
+    def vector_writelane_b32_encoding(self) -> int:
+        return 0xD7610000
 
     @property
     def has_vopd3(self) -> bool:
