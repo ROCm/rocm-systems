@@ -42,12 +42,17 @@ flat_check_trap_delay_source_sgpr(const ConSanOptions &options) {
 [[nodiscard]] std::optional<uint16_t>
 choose_flat_check_trap_vcc_save_sgpr(const Instruction *inst, const LivenessAnalysis *liveness,
                                      std::optional<uint16_t> min_preferred_sgpr,
-                                     const ConSanOptions &options) {
+                                     const ConSanOptions &options,
+                                     bool preserve_dynamic_stack_abi) {
   if (inst == nullptr || liveness == nullptr)
     return std::nullopt;
   const auto find_pair = [&](uint16_t start) -> std::optional<uint16_t> {
     while (auto pair = liveness->find_free_sgpr_pair(inst, start)) {
-      if (!flat_check_trap_overlaps_delay_source(*pair, 2u, options))
+      const bool overlaps_dynamic_stack =
+          preserve_dynamic_stack_abi &&
+          flat_check_trap_sgpr_ranges_overlap(*pair, 2u, kDynamicStackTopSgpr, 2u);
+      if (!flat_check_trap_overlaps_delay_source(*pair, 2u, options) &&
+          !overlaps_dynamic_stack)
         return pair;
       if (*pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
         return std::nullopt;
@@ -64,14 +69,18 @@ choose_flat_check_trap_vcc_save_sgpr(const Instruction *inst, const LivenessAnal
 
 [[nodiscard]] std::optional<uint16_t>
 choose_flat_check_trap_scalar_spill_pair(uint16_t allocated_sgpr_count,
-                                         const ConSanOptions &options) {
+                                         const ConSanOptions &options,
+                                         bool preserve_dynamic_stack_abi) {
   // The caller spills and restores the returned live pair, so any ordinary
   // allocated pair is legal except the active delay source. Staying within
   // the descriptor allocation (and every owner's common minimum for shared
   // code) avoids growing an owner around a site-local choice.
   const uint16_t limit = std::min<uint16_t>(allocated_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
   for (uint16_t pair = 0; static_cast<uint32_t>(pair) + 2u <= limit; pair += 2u) {
-    if (!flat_check_trap_overlaps_delay_source(pair, 2u, options))
+    const bool overlaps_dynamic_stack =
+        preserve_dynamic_stack_abi &&
+        flat_check_trap_sgpr_ranges_overlap(pair, 2u, kDynamicStackTopSgpr, 2u);
+    if (!flat_check_trap_overlaps_delay_source(pair, 2u, options) && !overlaps_dynamic_stack)
       return pair;
   }
   return std::nullopt;
@@ -220,6 +229,13 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     std::optional<uint16_t> scalar_vcc_spill_vgpr = std::nullopt;
     uint16_t scalar_vcc_spill_vgpr_count = 0;
     std::optional<VgprSpillSequence> vgpr_spill;
+    std::optional<DynamicStackBorrowedSgprSpillSequence> dynamic_stack_spill;
+  };
+
+  enum class FlatOwnerStackKind : uint8_t {
+    Fixed,
+    Dynamic,
+    Mixed,
   };
 
   const auto make_candidate =
@@ -263,7 +279,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   size_t supported_candidate_count = 0;
   size_t scratchable_candidate_count = 0;
   size_t spill_backed_candidate_count = 0;
-  size_t dynamic_stack_spill_rejection_count = 0;
+  size_t mixed_stack_owner_spill_rejection_count = 0;
+  size_t dynamic_stack_spill_encoding_failure_count = 0;
   size_t private_spill_encoding_failure_count = 0;
   size_t append_cave_reachable_candidate_count = 0;
   size_t local_cave_reachable_candidate_count = 0;
@@ -289,7 +306,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                         std::optional<uint16_t> max_auto_scratch_vgpr,
                         std::optional<uint16_t> min_fresh_sgpr,
                         std::optional<uint16_t> allocated_sgpr_count,
-                        uint32_t original_private_segment_size, bool uses_dynamic_stack,
+                        uint32_t original_private_segment_size,
+                        FlatOwnerStackKind owner_stack_kind,
                         std::vector<uint64_t> owner_descriptor_file_offsets) {
     if (!is_supported_flat_check_trap_site(site, options.flat_provenance_mode))
       return;
@@ -323,11 +341,14 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                mismatch_words + 2u;
     const Instruction *site_inst =
         find_instruction_at_text_offset(KernelBlockScope(block_ptrs), site.text_offset);
-    auto vcc_save =
-        choose_flat_check_trap_vcc_save_sgpr(site_inst, liveness.get(), min_fresh_sgpr, options);
+    const bool uses_dynamic_stack = owner_stack_kind == FlatOwnerStackKind::Dynamic;
+    const bool preserve_dynamic_stack_abi = owner_stack_kind != FlatOwnerStackKind::Fixed;
+    auto vcc_save = choose_flat_check_trap_vcc_save_sgpr(
+        site_inst, liveness.get(), min_fresh_sgpr, options, preserve_dynamic_stack_abi);
     bool spill_vcc_save_pair_to_vgprs = false;
     if (!vcc_save && arch == ROCJITSU_CODE_ARCH_GFX1250 && allocated_sgpr_count) {
-      vcc_save = choose_flat_check_trap_scalar_spill_pair(*allocated_sgpr_count, options);
+      vcc_save = choose_flat_check_trap_scalar_spill_pair(
+          *allocated_sgpr_count, options, preserve_dynamic_stack_abi);
       spill_vcc_save_pair_to_vgprs = vcc_save.has_value();
     }
     if (!vcc_save)
@@ -338,33 +359,53 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         choose_flat_scratch_vgpr(site, options, site_inst, liveness.get(), min_auto_scratch_vgpr,
                                  max_auto_scratch_vgpr, scratch_vgprs);
     std::optional<VgprSpillSequence> vgpr_spill;
+    std::optional<DynamicStackBorrowedSgprSpillSequence> dynamic_stack_spill;
     uint16_t scalar_vcc_spill_vgpr_count = spill_vcc_save_pair_to_vgprs ? 1u : 0u;
     if (!scratch && spill_vcc_save_pair_to_vgprs && !options.scratch_vgpr &&
         max_auto_scratch_vgpr) {
-      if (uses_dynamic_stack) {
-        ++dynamic_stack_spill_rejection_count;
+      if (owner_stack_kind == FlatOwnerStackKind::Mixed) {
+        ++mixed_stack_owner_spill_rejection_count;
       } else {
         // A fixed-lane scalar reservoir is EXEC-independent only while its
         // VGPR is otherwise dead. Once the VGPR window itself is live, use
         // one active-lane reservoir per scalar. The spill preserves exactly
         // those active lanes, and an EXECZ guard leaves empty waves untouched.
-        scratch_vgprs = instrumentation_scratch_vgprs + 2u;
+        const uint16_t scalar_reservoir_count =
+            uses_dynamic_stack
+                ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
+                : 2u;
+        scratch_vgprs = instrumentation_scratch_vgprs + scalar_reservoir_count;
         scratch =
             choose_flat_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
-        const auto private_limit = address_free_scratch_private_limit(arch);
-        if (scratch && private_limit) {
-          SpillManager manager(original_private_segment_size, *private_limit);
-          vgpr_spill =
-              build_vgpr_spill_sequence(manager, *scratch, scratch_vgprs, arch);
+        if (scratch && uses_dynamic_stack) {
+          dynamic_stack_spill = build_dynamic_stack_borrowed_sgpr_spill_sequence(
+              *scratch, scratch_vgprs, *vcc_save,
+              static_cast<uint16_t>(*scratch + instrumentation_scratch_vgprs),
+              original_private_segment_size, arch);
+        } else if (scratch) {
+          const auto private_limit = address_free_scratch_private_limit(arch);
+          if (private_limit) {
+            SpillManager manager(original_private_segment_size, *private_limit);
+            vgpr_spill =
+                build_vgpr_spill_sequence(manager, *scratch, scratch_vgprs, arch);
+          }
         }
-        if (vgpr_spill) {
-          scalar_vcc_spill_vgpr_count = 2u;
-          requested_words += 1u + vgpr_spill->save_words.size() + 2u + 2u +
-                             vgpr_spill->restore_words.size();
+        if (vgpr_spill || dynamic_stack_spill) {
+          scalar_vcc_spill_vgpr_count = scalar_reservoir_count;
+          if (dynamic_stack_spill) {
+            requested_words += 1u + dynamic_stack_spill->save_words.size() +
+                               dynamic_stack_spill->restore_words.size();
+          } else {
+            requested_words += 1u + vgpr_spill->save_words.size() + 2u + 2u +
+                               vgpr_spill->restore_words.size();
+          }
           ++spill_backed_candidate_count;
         } else {
           scratch.reset();
-          ++private_spill_encoding_failure_count;
+          if (uses_dynamic_stack)
+            ++dynamic_stack_spill_encoding_failure_count;
+          else
+            ++private_spill_encoding_failure_count;
         }
       }
     } else if (spill_vcc_save_pair_to_vgprs) {
@@ -386,6 +427,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       candidate.scalar_vcc_spill_vgpr = scalar_vcc_spill_vgpr;
       candidate.scalar_vcc_spill_vgpr_count = scalar_vcc_spill_vgpr_count;
       candidate.vgpr_spill = vgpr_spill;
+      candidate.dynamic_stack_spill = dynamic_stack_spill;
     };
     ++scratchable_candidate_count;
     uint32_t observed_padding =
@@ -542,7 +584,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     for (const ConSanFlatSite &site : kernel.flat_sites)
       visit_site(site, min_auto_scratch_vgpr, max_auto_scratch_vgpr, min_fresh_sgpr,
                  allocated_sgpr_count, original_private_segment_size,
-                 kernel.uses_dynamic_stack.value_or(false), {kernel.descriptor_file_offset});
+                 kernel.uses_dynamic_stack.value_or(false) ? FlatOwnerStackKind::Dynamic
+                                                           : FlatOwnerStackKind::Fixed,
+                 {kernel.descriptor_file_offset});
   }
   for (const ConSanFunctionInfo &function : result.functions) {
     if (!options.test_kernel_name_filter.empty() &&
@@ -574,6 +618,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       std::optional<uint16_t> max_owner_sgpr_ref = std::nullopt;
       uint32_t max_owner_private_segment_size = 0;
       bool any_owner_uses_dynamic_stack = false;
+      bool any_owner_uses_fixed_stack = false;
       for (uint64_t owner : owners) {
         const auto allocated = descriptor_vgpr_allocation_count(original_bytes, owner, arch);
         if (!allocated) {
@@ -599,8 +644,10 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         }
         const auto owner_kernel = kernels_by_descriptor.find(owner);
         if (owner_kernel != kernels_by_descriptor.end()) {
-          any_owner_uses_dynamic_stack |=
-              owner_kernel->second->uses_dynamic_stack.value_or(false);
+          if (owner_kernel->second->uses_dynamic_stack.value_or(false))
+            any_owner_uses_dynamic_stack = true;
+          else
+            any_owner_uses_fixed_stack = true;
           const KernelMaxRegisterRefs &refs = max_refs_by_descriptor.at(owner);
           if (refs.sgpr)
             max_owner_sgpr_ref =
@@ -613,14 +660,18 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       std::optional<uint16_t> allocated_sgpr_count;
       if (all_owners_have_sgpr_allocations && has_common_allocated_sgpr_count)
         allocated_sgpr_count = common_allocated_sgpr_count;
+      const FlatOwnerStackKind owner_stack_kind =
+          any_owner_uses_dynamic_stack && any_owner_uses_fixed_stack
+              ? FlatOwnerStackKind::Mixed
+          : any_owner_uses_dynamic_stack ? FlatOwnerStackKind::Dynamic
+                                         : FlatOwnerStackKind::Fixed;
       if (all_owners_have_vgpr_allocations && has_common_allocated_vgpr_count) {
         visit_site(site, std::nullopt, std::optional<uint16_t>{common_allocated_vgpr_count},
                    min_fresh_sgpr, allocated_sgpr_count, max_owner_private_segment_size,
-                   any_owner_uses_dynamic_stack, std::move(owners));
+                   owner_stack_kind, std::move(owners));
       } else {
         visit_site(site, std::nullopt, std::nullopt, min_fresh_sgpr, allocated_sgpr_count,
-                   max_owner_private_segment_size, any_owner_uses_dynamic_stack,
-                   std::move(owners));
+                   max_owner_private_segment_size, owner_stack_kind, std::move(owners));
       }
     }
   }
@@ -756,8 +807,10 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         std::to_string(supported_candidate_count) +
         " scratchable_candidates=" + std::to_string(scratchable_candidate_count) +
         " spill_backed_candidates=" + std::to_string(spill_backed_candidate_count) +
-        " dynamic_stack_spill_rejections=" +
-        std::to_string(dynamic_stack_spill_rejection_count) +
+        " mixed_stack_owner_spill_rejections=" +
+        std::to_string(mixed_stack_owner_spill_rejection_count) +
+        " dynamic_stack_spill_encoding_failures=" +
+        std::to_string(dynamic_stack_spill_encoding_failure_count) +
         " private_spill_encoding_failures=" +
         std::to_string(private_spill_encoding_failure_count) +
         " inline_candidates=" + std::to_string(inline_candidates.size()) +
@@ -862,6 +915,12 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     if (candidate.vgpr_spill) {
       planned.info.spilled_vgpr_count = candidate.vgpr_spill->vgpr_count;
       planned.info.required_private_segment_size = candidate.vgpr_spill->total_private_bytes;
+    } else if (candidate.dynamic_stack_spill) {
+      planned.info.spilled_vgpr_count = candidate.dynamic_stack_spill->vgpr_count;
+      planned.info.required_private_segment_size =
+          candidate.dynamic_stack_spill->total_private_bytes;
+      planned.info.dynamic_private_segment_addend =
+          candidate.dynamic_stack_spill->dynamic_frame_bytes;
     }
     planned.words.reserve(static_cast<size_t>(candidate.requested_words));
     const auto save_vcc =
@@ -1034,56 +1093,87 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       }
       planned.words[*runtime_group_gate_branch_index] = *skip_probe;
     }
-    if (candidate.vgpr_spill) {
+    if (candidate.vgpr_spill || candidate.dynamic_stack_spill) {
       if (!candidate.scalar_vcc_spill_vgpr ||
-          candidate.scalar_vcc_spill_vgpr_count != 2u) {
+          (!candidate.dynamic_stack_spill &&
+           candidate.scalar_vcc_spill_vgpr_count != 2u) ||
+          (candidate.dynamic_stack_spill &&
+           candidate.scalar_vcc_spill_vgpr_count !=
+               DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount)) {
         result.errors.emplace_back(
             "ConSan flat check/trap proof lost its active-lane scalar spill window");
         return;
       }
-      std::array<uint32_t, 2> save_scalar_pair{};
-      std::array<uint32_t, 2> restore_scalar_pair{};
-      for (uint16_t i = 0; i < 2u; ++i) {
-        save_scalar_pair[i] =
-            build_v_mov_b32_e32(static_cast<uint16_t>(*candidate.scalar_vcc_spill_vgpr + i),
-                                static_cast<uint16_t>(candidate.vcc_save_sgpr + i), arch);
-        const auto restore = instrumentation::build_v_readfirstlane_b32(
-            static_cast<uint16_t>(candidate.vcc_save_sgpr + i),
-            static_cast<uint16_t>(*candidate.scalar_vcc_spill_vgpr + i), arch);
-        if (!restore) {
+      if (candidate.dynamic_stack_spill) {
+        const size_t guarded_words = candidate.dynamic_stack_spill->save_words.size() +
+                                     planned.words.size() +
+                                     candidate.dynamic_stack_spill->restore_words.size();
+        if (guarded_words > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
           result.errors.emplace_back(
-              "ConSan flat check/trap proof could not encode its active-lane scalar restore");
+              "ConSan flat check/trap proof dynamic spill guard exceeds s_cbranch_execz range");
           return;
         }
-        restore_scalar_pair[i] = *restore;
+        const auto skip_empty_wave = instrumentation::build_s_cbranch_execz(
+            static_cast<int16_t>(guarded_words), arch);
+        if (!skip_empty_wave) {
+          result.errors.emplace_back(
+              "ConSan flat check/trap proof could not encode its dynamic empty-wave spill guard");
+          return;
+        }
+        std::vector<uint32_t> wrapped;
+        wrapped.reserve(1u + guarded_words);
+        wrapped.push_back(*skip_empty_wave);
+        wrapped.insert(wrapped.end(), candidate.dynamic_stack_spill->save_words.begin(),
+                       candidate.dynamic_stack_spill->save_words.end());
+        wrapped.insert(wrapped.end(), planned.words.begin(), planned.words.end());
+        wrapped.insert(wrapped.end(), candidate.dynamic_stack_spill->restore_words.begin(),
+                       candidate.dynamic_stack_spill->restore_words.end());
+        planned.words = std::move(wrapped);
+      } else {
+        std::array<uint32_t, 2> save_scalar_pair{};
+        std::array<uint32_t, 2> restore_scalar_pair{};
+        for (uint16_t i = 0; i < 2u; ++i) {
+          save_scalar_pair[i] =
+              build_v_mov_b32_e32(static_cast<uint16_t>(*candidate.scalar_vcc_spill_vgpr + i),
+                                  static_cast<uint16_t>(candidate.vcc_save_sgpr + i), arch);
+          const auto restore = instrumentation::build_v_readfirstlane_b32(
+              static_cast<uint16_t>(candidate.vcc_save_sgpr + i),
+              static_cast<uint16_t>(*candidate.scalar_vcc_spill_vgpr + i), arch);
+          if (!restore) {
+            result.errors.emplace_back(
+                "ConSan flat check/trap proof could not encode its active-lane scalar restore");
+            return;
+          }
+          restore_scalar_pair[i] = *restore;
+        }
+        const size_t guarded_words = candidate.vgpr_spill->save_words.size() +
+                                     save_scalar_pair.size() + planned.words.size() +
+                                     restore_scalar_pair.size() +
+                                     candidate.vgpr_spill->restore_words.size();
+        if (guarded_words > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
+          result.errors.emplace_back(
+              "ConSan flat check/trap proof spill guard exceeds s_cbranch_execz range");
+          return;
+        }
+        const auto skip_empty_wave = instrumentation::build_s_cbranch_execz(
+            static_cast<int16_t>(guarded_words), arch);
+        if (!skip_empty_wave) {
+          result.errors.emplace_back(
+              "ConSan flat check/trap proof could not encode its empty-wave spill guard");
+          return;
+        }
+        std::vector<uint32_t> wrapped;
+        wrapped.reserve(1u + guarded_words);
+        wrapped.push_back(*skip_empty_wave);
+        wrapped.insert(wrapped.end(), candidate.vgpr_spill->save_words.begin(),
+                       candidate.vgpr_spill->save_words.end());
+        wrapped.insert(wrapped.end(), save_scalar_pair.begin(), save_scalar_pair.end());
+        wrapped.insert(wrapped.end(), planned.words.begin(), planned.words.end());
+        wrapped.insert(wrapped.end(), restore_scalar_pair.begin(), restore_scalar_pair.end());
+        wrapped.insert(wrapped.end(), candidate.vgpr_spill->restore_words.begin(),
+                       candidate.vgpr_spill->restore_words.end());
+        planned.words = std::move(wrapped);
       }
-      const size_t guarded_words = candidate.vgpr_spill->save_words.size() +
-                                   save_scalar_pair.size() + planned.words.size() +
-                                   restore_scalar_pair.size() +
-                                   candidate.vgpr_spill->restore_words.size();
-      if (guarded_words > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
-        result.errors.emplace_back(
-            "ConSan flat check/trap proof spill guard exceeds s_cbranch_execz range");
-        return;
-      }
-      const auto skip_empty_wave = instrumentation::build_s_cbranch_execz(
-          static_cast<int16_t>(guarded_words), arch);
-      if (!skip_empty_wave) {
-        result.errors.emplace_back(
-            "ConSan flat check/trap proof could not encode its empty-wave spill guard");
-        return;
-      }
-      std::vector<uint32_t> wrapped;
-      wrapped.reserve(1u + guarded_words);
-      wrapped.push_back(*skip_empty_wave);
-      wrapped.insert(wrapped.end(), candidate.vgpr_spill->save_words.begin(),
-                     candidate.vgpr_spill->save_words.end());
-      wrapped.insert(wrapped.end(), save_scalar_pair.begin(), save_scalar_pair.end());
-      wrapped.insert(wrapped.end(), planned.words.begin(), planned.words.end());
-      wrapped.insert(wrapped.end(), restore_scalar_pair.begin(), restore_scalar_pair.end());
-      wrapped.insert(wrapped.end(), candidate.vgpr_spill->restore_words.begin(),
-                     candidate.vgpr_spill->restore_words.end());
-      planned.words = std::move(wrapped);
     } else if (candidate.scalar_vcc_spill_vgpr) {
       if (candidate.scalar_vcc_spill_vgpr_count != 1u) {
         result.errors.emplace_back(
@@ -1299,7 +1389,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       std::array<uint8_t, sizeof(KD)> descriptor{};
       std::memcpy(descriptor.data(), image.data() + descriptor_offset, descriptor.size());
       const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-          descriptor, 0, required_private_bytes, /*uses_dynamic_stack=*/false);
+          descriptor, 0, required_private_bytes);
       if ((update != SpillDescriptorUpdate::Updated &&
            update != SpillDescriptorUpdate::Unchanged) ||
           !patcher.patch_kernel_descriptor(descriptor_offset, descriptor)) {
@@ -1403,8 +1493,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         return;
       }
       const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-          patched_bytes, *active_descriptor_offset, required_private_bytes,
-          /*uses_dynamic_stack=*/false);
+          patched_bytes, *active_descriptor_offset, required_private_bytes);
       if (update != SpillDescriptorUpdate::Updated &&
           update != SpillDescriptorUpdate::Unchanged) {
         result.errors.emplace_back(

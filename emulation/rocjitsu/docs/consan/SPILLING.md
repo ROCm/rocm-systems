@@ -123,13 +123,30 @@ automatic scalar allocation excludes `s32:s33`, whose implicit stack roles
 need not appear as decoded operands. This path applies to access, atomic, and
 synchronization probes that receive a spill-backed resource plan.
 
-The descriptor and dispatch packet grow by the maximum added frame depth so
-the runtime allocates backing storage. The emitted scratch accesses remain
-relative to the runtime frame. Fixed-offset private owner/epoch state cannot
-be used by a dynamic-stack owner; the planner instead selects owner-compatible
-VGPR state or, on CDNA, a scalar persistent tuple. Mixed fixed/dynamic shared
-ownership is rejected because one emitted helper cannot safely use two frame
-recipes.
+The gfx1250 SuperCollider group-FLAT path also supports full register pressure.
+It first saves the complete borrowed VGPR window relative to the incoming stack
+top, then uses four already-preserved VGPRs as transient reservoirs for the
+live VCC-save SGPR pair, incoming frame base, and SCC. The SGPR pair is exactly
+the 64-bit VCC preservation shape required by this probe; it is not a
+hard-coded preserved SGPR range. A shared helper may use this recipe when all
+owners are dynamic-stack kernels. A mixed fixed/dynamic owner set receives the
+typed `mixed_stack_owner_spill_rejections` outcome only when simultaneous
+register pressure actually requires a shared spill recipe.
+
+The descriptor records an absolute private-segment minimum. Separately, each
+dynamic patch records its site-local frame depth. Immediately before dispatch,
+the HSA hook computes:
+
+```text
+max(descriptor minimum, launch private bytes + maximum site-local frame depth)
+```
+
+The launch value remains authoritative for the runtime-configurable stack
+depth; alternative site-local frames use their maximum rather than a sum
+because they cannot be active simultaneously. The emitted scratch accesses
+remain relative to the runtime frame. Fixed-offset private owner/epoch state
+cannot be used by a dynamic-stack owner; the planner instead selects
+owner-compatible VGPR state or, on CDNA, a scalar persistent tuple.
 
 ## Code-object and dispatch transaction
 
@@ -161,6 +178,7 @@ from removing private-size mutation.
 
 | Probe family | Current resource path |
 |---|---|
+| SuperCollider group-FLAT probes | Dead and fresh windows on admitted targets; gfx1250 full-pressure dynamic-stack owners can use the borrowed-pair site-local frame. |
 | Record/Replay access probes | Dead, fresh-growth, and spill-backed VGPR windows; dynamic-stack spill on CDNA3/CDNA4. |
 | Sampled access probes | Dead, fresh-growth, and spill-backed VGPR windows; dynamic-stack spill on CDNA3/CDNA4. |
 | InlineShadow access probes | Dead, fresh-growth, and spill-backed VGPR windows on every admitted target; fixed-stack owners may use the private-epoch fallback. |
@@ -170,7 +188,7 @@ from removing private-size mutation.
 | Transient scalar state | Component-local dead/fresh windows, plus bounded private-memory preservation for supported Record/Replay, Sampled, and InlineShadow probes. Indirect-router scalars remain dead/fresh. |
 | Barrier and atomic VGPR temporaries | Dead, fresh-growth, and spill-backed common plans, including the engine/target dynamic-stack matrix above. |
 | General SGPR or AccVGPR spilling | Not implemented. |
-| Dynamic-stack kernels | InlineShadow on all admitted targets; Record/Replay and Sampled on CDNA3/CDNA4; unsupported engine/target or mixed-owner combinations fail closed. |
+| Dynamic-stack kernels | InlineShadow on all admitted targets; Record/Replay and Sampled on CDNA3/CDNA4; gfx1250 SuperCollider group-FLAT full-pressure spill; unsupported engine/target or mixed-owner spill recipes fail closed. |
 | Unresolved indirect ownership | Not instrumented. |
 
 This is narrower than a compiler register allocator. It is the semantically

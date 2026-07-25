@@ -1022,6 +1022,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       info.required_private_segment_size = planned_patch.required_private_bytes;
       if (planned_patch.spill) {
         info.spilled_vgpr_count = planned_patch.spill->vgpr_count;
+        note_dynamic_stack_private_requirement(info, &*planned_patch.spill);
       }
 
       if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
@@ -1236,8 +1237,10 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             info.required_private_segment_size = planned_patch.required_private_bytes;
             info.relocated_guest_instruction_offset =
                 candidate.text_offset + planned_patch.probe_guest_instruction_offset;
-            if (planned_patch.spill)
+            if (planned_patch.spill) {
               info.spilled_vgpr_count = planned_patch.spill->vgpr_count;
+              note_dynamic_stack_private_requirement(info, &*planned_patch.spill);
+            }
             return info;
           },
           [](std::vector<uint8_t> &, ConSanResult &) { return true; }, result))

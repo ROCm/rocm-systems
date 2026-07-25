@@ -340,6 +340,68 @@ padded_full_pressure_flat_lds_store_preserves_registers_for_instrumentation(uint
   out[5] = vector_after_five;
 }
 
+__global__ __launch_bounds__(64) void
+padded_dynamic_stack_full_pressure_flat_lds_store_preserves_registers_for_instrumentation(
+    uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  const size_t private_count = (tid & 7u) + 1u;
+  auto *private_words =
+      static_cast<volatile uint32_t *>(__builtin_alloca(private_count * sizeof(uint32_t)));
+  const uint32_t private_index = tid % private_count;
+  const uint32_t private_value = 0xD1A60000u ^ tid;
+  private_words[private_index] = private_value;
+
+  uint32_t scalar_before_lo = 0;
+  uint32_t scalar_before_hi = 0;
+  uint32_t scalar_after_lo = 0;
+  uint32_t scalar_after_hi = 0;
+  uint32_t vector_after_three = 0;
+  uint32_t vector_after_five = 0;
+  uint32_t vcc_survived = 0;
+  uint32_t scc_survived = 0;
+  const uint32_t value = 0x51A7C0DEu;
+  asm volatile("" : : "v"(&lds[0]) : "memory");
+  asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
+               "v_mov_b32 v0, s14\n\t"
+               "v_mov_b32 v1, s15\n\t"
+               "v_mov_b32 v3, 0x13579bdf\n\t"
+               "v_mov_b32 v5, 0x2468ace0\n\t"
+               "v_mov_b32 %[scalar_before_lo], s2\n\t"
+               "v_mov_b32 %[scalar_before_hi], s3\n\t"
+               "s_cmp_eq_u32 s2, s2\n\t" RJ_CONSAN_TEST_SET_VCC_TRUE
+                   RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED RJ_CONSAN_TEST_NOP_CAVE
+                       RJ_CONSAN_TEST_KEEP_ORDINARY_SGPRS_LIVE RJ_CONSAN_TEST_KEEP_ODD_VGPRS_LIVE
+               "v_mov_b32 %[scalar_after_lo], s2\n\t"
+               "v_mov_b32 %[scalar_after_hi], s3\n\t"
+               "v_mov_b32 %[vector_after_three], v3\n\t"
+               "v_mov_b32 %[vector_after_five], v5\n\t"
+               "s_cbranch_vccz 1f\n\t"
+               "v_mov_b32 %[vcc_survived], 1\n\t"
+               "1:\n\t"
+               "s_cbranch_scc0 2f\n\t"
+               "v_mov_b32 %[scc_survived], 1\n\t"
+               "2:\n\t"
+               : [scalar_before_lo] "=&v"(scalar_before_lo),
+                 [scalar_before_hi] "=&v"(scalar_before_hi),
+                 [scalar_after_lo] "=&v"(scalar_after_lo),
+                 [scalar_after_hi] "=&v"(scalar_after_hi),
+                 [vector_after_three] "=&v"(vector_after_three),
+                 [vector_after_five] "=&v"(vector_after_five),
+                 [vcc_survived] "+v"(vcc_survived), [scc_survived] "+v"(scc_survived)
+               : [value] "v"(value)
+               : "s14", "s15", "v0", "v1", "v3", "v5", "vcc", "memory");
+  out[0] = scalar_before_lo;
+  out[1] = scalar_before_hi;
+  out[2] = scalar_after_lo;
+  out[3] = scalar_after_hi;
+  out[4] = vector_after_three;
+  out[5] = vector_after_five;
+  out[6] = private_words[private_index];
+  out[7] = vcc_survived;
+  out[8] = scc_survived;
+}
+
 __global__ void
 padded_zero_exec_native_lds_load_preserves_allocated_scalars_for_instrumentation(uint32_t *out) {
   __shared__ uint32_t lds[1];
@@ -601,6 +663,29 @@ TEST(ConSanLdsTest, FullPressureFlatSpillPreservesLiveRegisterFiles) {
   EXPECT_EQ(out[1], out[3]);
   EXPECT_EQ(out[4], 0x13579BDFu);
   EXPECT_EQ(out[5], 0x2468ACE0u);
+}
+
+TEST(ConSanLdsTest, DynamicStackFullPressureFlatSpillPreservesLiveRegistersAndPrivateValues) {
+  constexpr size_t kValues = 9;
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, kValues * sizeof(*d_out)));
+  HIP_ASSERT(hipMemset(d_out, 0, kValues * sizeof(*d_out)));
+
+  padded_dynamic_stack_full_pressure_flat_lds_store_preserves_registers_for_instrumentation<<<1, 1>>>(
+      d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  std::array<uint32_t, kValues> out{};
+  HIP_ASSERT(hipMemcpy(out.data(), d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  EXPECT_EQ(out[0], out[2]);
+  EXPECT_EQ(out[1], out[3]);
+  EXPECT_EQ(out[4], 0x13579BDFu);
+  EXPECT_EQ(out[5], 0x2468ACE0u);
+  EXPECT_EQ(out[6], 0xD1A60000u);
+  EXPECT_EQ(out[7], 1u);
+  EXPECT_EQ(out[8], 1u);
 }
 
 TEST(ConSanLdsTest, ZeroExecNativeLdsSpillPreservesAllocatedScalars) {

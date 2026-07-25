@@ -1133,8 +1133,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     info.persistent_epoch_private_offset = planned.private_epoch_offset;
     info.required_private_segment_size = planned.required_private_bytes;
     info.owner_descriptor_file_offsets = planned.owner_descriptor_file_offsets;
-    if (planned.spill)
+    if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;
+      note_dynamic_stack_private_requirement(info, &*planned.spill);
+    }
     patches.push_back(info);
   }
 
@@ -1580,8 +1582,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         info.persistent_epoch_private_offset = planned.private_epoch_offset;
         info.required_private_segment_size = planned.required_private_bytes;
         info.owner_descriptor_file_offsets = planned.owner_descriptor_file_offsets;
-        if (planned.spill)
+        if (planned.spill) {
           info.spilled_vgpr_count = planned.spill->vgpr_count;
+          note_dynamic_stack_private_requirement(info, &*planned.spill);
+        }
         patches.push_back(std::move(info));
       }
     }
@@ -1853,6 +1857,7 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
     if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;
       info.required_private_segment_size = planned.spill->total_private_bytes;
+      note_dynamic_stack_private_requirement(info, &*planned.spill);
     }
     patches.push_back(info);
   }

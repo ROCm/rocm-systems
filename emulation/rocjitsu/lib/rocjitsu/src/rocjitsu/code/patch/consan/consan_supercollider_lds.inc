@@ -2995,6 +2995,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     if (spill != selected_spills.sequences.end()) {
       planned.info.spilled_vgpr_count = spill->second.vgpr_count;
       planned.info.required_private_segment_size = spill->second.total_private_bytes;
+      if (spill->second.uses_dynamic_stack_frame) {
+        planned.info.dynamic_private_segment_addend = spill->second.dynamic_frame_bytes;
+      }
     }
 
     if (candidate.use_local_cave || candidate.use_appended_cave) {
@@ -3329,7 +3332,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       std::array<uint8_t, sizeof(KD)> descriptor{};
       std::memcpy(descriptor.data(), image.data() + descriptor_offset, descriptor.size());
       const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-          descriptor, 0, required_private_bytes, /*uses_dynamic_stack=*/false);
+          descriptor, 0, required_private_bytes);
       if ((update != SpillDescriptorUpdate::Updated &&
            update != SpillDescriptorUpdate::Unchanged) ||
           !patcher.patch_kernel_descriptor(descriptor_offset, descriptor)) {
@@ -3804,8 +3807,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
       std::vector<uint8_t> descriptor_probe(patched_image.begin(), patched_image.end());
       const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-          descriptor_probe, moved_kernel->descriptor_file_offset, required_private_bytes,
-          /*uses_dynamic_stack=*/false);
+          descriptor_probe, moved_kernel->descriptor_file_offset, required_private_bytes);
       if (update != SpillDescriptorUpdate::Unchanged) {
         result.errors.emplace_back(
             "ConSan LDS check/trap text replacement lost its spill descriptor update at offset " +
@@ -3828,8 +3830,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   }
   for (const auto &[descriptor_offset, required_private_bytes] : descriptor_private_requirements) {
     const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-        result.elf_bytes, descriptor_offset, required_private_bytes,
-        /*uses_dynamic_stack=*/false);
+        result.elf_bytes, descriptor_offset, required_private_bytes);
     if (update != SpillDescriptorUpdate::Updated && update != SpillDescriptorUpdate::Unchanged) {
       result.errors.emplace_back("ConSan LDS check/trap could not grow its spill descriptor");
       result.patches.clear();

@@ -4083,6 +4083,14 @@ void note_spill_descriptor_requirements(MoiDescriptorPrivateRequirements &requir
   }
 }
 
+void note_dynamic_stack_private_requirement(ConSanPatchInfo &info,
+                                            const VgprSpillSequence *spill) {
+  if (spill == nullptr || !spill->uses_dynamic_stack_frame)
+    return;
+  info.dynamic_private_segment_addend =
+      std::max(info.dynamic_private_segment_addend, spill->dynamic_frame_bytes);
+}
+
 void note_moi_lds_requirements(MoiDescriptorLdsRequirements &requirements,
                                const ResolvedMoiScratchPlan &plan,
                                const ConSanMoiWorkgroupShadowLayout &layout) {

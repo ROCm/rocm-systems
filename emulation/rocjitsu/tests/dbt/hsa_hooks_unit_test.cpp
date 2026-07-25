@@ -3159,6 +3159,92 @@ TEST(HsaHooksUnitTest, QueueDoorbellRaisesPacketPrivateSizeFromDescriptor) {
   EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
 }
 
+TEST(HsaHooksUnitTest, ConSanDynamicStackDispatchAddsMaximumFrameAboveRuntimePrivateSize) {
+  reset_code_object_observations();
+  reset_queue_fakes();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+
+  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  g_transform_override_result.modified = true;
+  g_transform_override_result.final_validation_passed = true;
+  g_transform_override_result.elf_bytes = {0x7f, 'E', 'L', 'F', 'd', 'y', 'n'};
+  g_transform_override_result.kernels.emplace_back();
+  auto &kernel = g_transform_override_result.kernels.back();
+  kernel.name = "oversized_kernel";
+  kernel.descriptor_file_offset = 64u;
+  kernel.uses_dynamic_stack = true;
+
+  rocjitsu::ConSanPatchInfo first_patch;
+  first_patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
+  first_patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAtomicRecord;
+  first_patch.required_private_segment_size = 48u;
+  first_patch.dynamic_private_segment_addend = 32u;
+  first_patch.owner_descriptor_file_offsets = {kernel.descriptor_file_offset};
+  g_transform_override_result.patches.push_back(first_patch);
+
+  rocjitsu::ConSanPatchInfo second_patch = first_patch;
+  second_patch.required_private_segment_size = 64u;
+  second_patch.dynamic_private_segment_addend = 16u;
+  g_transform_override_result.patches.push_back(second_patch);
+
+  FakeApiTable api;
+  api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
+  api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGuestAgent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+
+  hsa_queue_t *queue = nullptr;
+  ASSERT_EQ(api.core.hsa_queue_create_fn(kGuestAgent, 2, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0,
+                                         0, &queue),
+            HSA_STATUS_SUCCESS);
+  ASSERT_NE(queue, nullptr);
+
+  g_fake_symbol_kernel_object = 0x12345678u;
+  g_fake_symbol_private_segment_size = 16u;
+  hsa_executable_symbol_t symbol{};
+  ASSERT_EQ(api.core.hsa_executable_get_symbol_by_name_fn(
+                kFakeExecutable, g_fake_symbol_name.c_str(), &kGuestAgent, &symbol),
+            HSA_STATUS_SUCCESS);
+  uint32_t symbol_private_bytes = 0;
+  ASSERT_EQ(
+      api.core.hsa_executable_symbol_get_info_fn(
+          symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &symbol_private_bytes),
+      HSA_STATUS_SUCCESS);
+  // Symbol metadata exposes the absolute descriptor minimum. The dynamic
+  // addend is applied only after the launch has selected its runtime depth.
+  EXPECT_EQ(symbol_private_bytes, 64u);
+
+  hsa_kernel_dispatch_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+  packet.kernel_object = g_fake_symbol_kernel_object;
+  packet.private_segment_size = 1024u;
+  packet.workgroup_size_x = 64u;
+  packet.workgroup_size_y = 1u;
+  packet.workgroup_size_z = 1u;
+  packet.grid_size_x = 64u;
+  packet.grid_size_y = 1u;
+  packet.grid_size_z = 1u;
+
+  ASSERT_NE(g_fake_intercept_handler, nullptr);
+  g_fake_intercept_handler(&packet, 1u, 0u, g_fake_intercept_user_data,
+                           fake_intercept_packet_writer);
+
+  // Alternative site-local frames cannot overlap, so the per-kernel addend is
+  // their maximum (32), not their sum (48).
+  ASSERT_EQ(g_last_intercept_written_packets.size(), 1u);
+  EXPECT_EQ(g_last_intercept_written_packets.front().private_segment_size, 1056u);
+  EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+}
+
 TEST(HsaHooksUnitTest, VirtualLdsRewriteWorksWithoutLoadedCodeObjectOutput) {
   using rocr::llvm::amdhsa::kernel_descriptor_t;
 

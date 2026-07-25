@@ -1129,6 +1129,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
       if (planned_patch.spill) {
         info.spilled_vgpr_count = planned_patch.spill->vgpr_count;
+        note_dynamic_stack_private_requirement(info, &*planned_patch.spill);
       }
 
       if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
@@ -1393,6 +1394,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                 planned_patch.resources.owner_descriptor_file_offsets;
             info.relocated_guest_instruction_offset =
                 candidate.text_offset + planned_patch.probe_guest_instruction_offset;
+            note_dynamic_stack_private_requirement(
+                info, planned_patch.spill ? &*planned_patch.spill : nullptr);
             return info;
           },
           [](std::vector<uint8_t> &, ConSanResult &) { return true; }, result))

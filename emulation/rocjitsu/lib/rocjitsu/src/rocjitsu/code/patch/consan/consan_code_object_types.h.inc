@@ -458,9 +458,13 @@ struct ConSanPatchInfo {
   /// First VGPR used as a reservoir for a borrowed live scalar VCC-save pair.
   /// A non-spill patch uses fixed lanes in one VGPR. A private-spill patch uses
   /// two consecutive active-lane reservoirs so inactive lanes remain untouched.
+  /// A dynamic-stack bootstrap uses two additional reservoirs for the incoming
+  /// frame base and SCC.
   std::optional<uint16_t> scalar_vcc_spill_vgpr;
   /// Number of consecutive scalar-reservoir VGPRs beginning at
-  /// scalar_vcc_spill_vgpr. Zero means the scalar-pressure fallback was unused.
+  /// scalar_vcc_spill_vgpr: one fixed-lane reservoir, two private-spill
+  /// reservoirs, or four dynamic-stack bootstrap reservoirs. Zero means the
+  /// scalar-pressure fallback was unused.
   uint16_t scalar_vcc_spill_vgpr_count = 0;
   std::optional<uint16_t> persistent_owner_vgpr;
   std::optional<uint16_t> persistent_epoch_vgpr;
@@ -510,7 +514,14 @@ struct ConSanPatchInfo {
   uint16_t dispatch_id_required_sgpr_count = 0;
   bool dispatch_id_preload_inserted = false;
   uint16_t spilled_vgpr_count = 0;
+  /// Absolute per-workitem private-segment minimum encoded into the owning
+  /// kernel descriptor.
   uint32_t required_private_segment_size = 0;
+  /// Site-local frame depth added above a launch's runtime-selected dynamic
+  /// stack extent. Multiple alternative patches contribute their maximum
+  /// addend rather than a sum because their frames are never simultaneously
+  /// active.
+  uint32_t dynamic_private_segment_addend = 0;
   uint32_t workgroup_shadow_base = 0;
   uint32_t workgroup_shadow_size = 0;
   uint32_t workgroup_shadow_validity_base = 0;

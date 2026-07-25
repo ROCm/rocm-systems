@@ -428,8 +428,6 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
       warnings.emplace_back("ConSan MOI dynamic-stack spill has no supported scalar-state layout");
       return std::nullopt;
     }
-    constexpr uint16_t kDynamicStackTopSgpr = 32u;
-    constexpr uint16_t kDynamicFrameBaseSgpr = 33u;
     const bool spill_backed_scalar_window =
         options.automatic_moi_inline_sgpr_spill || options.automatic_moi_record_replay_sgpr_spill;
     const auto special_state = moi_special_state_sgprs(options);
@@ -553,8 +551,7 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
     std::memcpy(descriptor.data(), current_image.data() + active_kernel->descriptor_file_offset,
                 sizeof(KD));
     const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-        descriptor, /*descriptor_file_offset=*/0, required_private_bytes,
-        kernel->uses_dynamic_stack.value_or(false));
+        descriptor, /*descriptor_file_offset=*/0, required_private_bytes);
     if (update != SpillDescriptorUpdate::Updated && update != SpillDescriptorUpdate::Unchanged) {
       errors.emplace_back("ConSan MOI could not grow the owning kernel's private spill segment");
       return false;

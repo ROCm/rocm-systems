@@ -1409,6 +1409,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     info.persistent_private_state_end = item.layout.ephemeral_base;
     info.spilled_vgpr_count = item.spill.vgpr_count;
     info.required_private_segment_size = item.required_private_bytes;
+    note_dynamic_stack_private_requirement(info, &item.spill);
     if (item.dispatch_plan && options.moi_dispatch_id_sgpr)
       note_dispatch_id_patch_info(info, *item.dispatch_plan, *options.moi_dispatch_id_sgpr);
     info.trampoline_size = static_cast<uint32_t>(new_text.size() - prologue_text_offset);

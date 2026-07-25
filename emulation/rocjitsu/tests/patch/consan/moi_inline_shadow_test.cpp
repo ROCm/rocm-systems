@@ -1960,6 +1960,7 @@ TEST(ConSanMoi, InlineShadowSpillsThroughSiteLocalDynamicStackFrame) {
   ASSERT_NE(patch, result.patches.end());
   EXPECT_GT(patch->spilled_vgpr_count, 0u);
   EXPECT_EQ(patch->required_private_segment_size, patch->spilled_vgpr_count * sizeof(uint32_t));
+  EXPECT_EQ(patch->dynamic_private_segment_addend, patch->spilled_vgpr_count * sizeof(uint32_t));
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());

@@ -3210,6 +3210,31 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     }
   }
   for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.dynamic_private_segment_addend != 0) {
+      if (patch.required_private_segment_size < patch.dynamic_private_segment_addend) {
+        errors.emplace_back(
+            "ConSan final validation found a dynamic private addend larger than its absolute "
+            "private requirement");
+      }
+      if (patch.owner_descriptor_file_offsets.empty()) {
+        errors.emplace_back(
+            "ConSan final validation found an unowned dynamic private-segment requirement");
+      }
+      for (uint64_t owner : patch.owner_descriptor_file_offsets) {
+        const auto owner_name = owner_names.find(owner);
+        const auto owner_kernel =
+            owner_name == owner_names.end()
+                ? original.kernels().end()
+                : std::ranges::find(original.kernels(), owner_name->second,
+                                    &AmdGpuKernelInfo::name);
+        if (owner_kernel == original.kernels().end() ||
+            !owner_kernel->uses_dynamic_stack.value_or(false)) {
+          errors.emplace_back(
+              "ConSan final validation found a dynamic private-segment requirement on a "
+              "non-dynamic owner");
+        }
+      }
+    }
     for (uint64_t owner : patch.owner_descriptor_file_offsets) {
       apply_to_owner(owner, [&](DescriptorRequirement &requirement) {
         requirement.allow_resource_delta = true;
@@ -3451,7 +3476,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     std::vector<uint8_t> descriptor_probe(result.elf_bytes);
     const SpillDescriptorUpdate descriptor_update = update_kernel_descriptor_for_spills(
         descriptor_probe, replacement_it->descriptor_file_offset,
-        requirement.required_private_bytes, replacement_it->uses_dynamic_stack.value_or(false));
+        requirement.required_private_bytes);
     if (descriptor_update != SpillDescriptorUpdate::Unchanged) {
       errors.emplace_back(
           "ConSan final validation found insufficient spill descriptor state for kernel '" +

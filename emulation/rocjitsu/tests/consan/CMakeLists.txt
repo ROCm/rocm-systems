@@ -281,6 +281,9 @@ set(RJ_CONSAN_LDS_ZERO_EXEC_SCALAR_SPILL_TEST
 set(RJ_CONSAN_LDS_FULL_PRESSURE_FLAT_SPILL_TEST
     "ConSanLdsTest.FullPressureFlatSpillPreservesLiveRegisterFiles"
 )
+set(RJ_CONSAN_LDS_DYNAMIC_STACK_FULL_PRESSURE_FLAT_SPILL_TEST
+    "ConSanLdsTest.DynamicStackFullPressureFlatSpillPreservesLiveRegistersAndPrivateValues"
+)
 set(RJ_CONSAN_LDS_ZERO_EXEC_NATIVE_SCALAR_SPILL_TEST
     "ConSanLdsTest.ZeroExecNativeLdsSpillPreservesAllocatedScalars"
 )
@@ -727,6 +730,28 @@ function(rj_add_consan_gfx1250_sim_cases)
             "RJ_CONSAN_DELAY_VAR_SSRC=0"
             "RJ_CONSAN_DELAY=1"
             "RJ_CONSAN_TEST_KERNEL_FILTER=padded_full_pressure_flat_lds_store_preserves_registers_for_instrumentation"
+            "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_MAX_PATCHES=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+
+    rj_add_consan_hip_case(
+        NAME "${_sim_PREFIX}.SuperColliderDynamicStackFullPressureFlatSpill"
+        TARGET ${_sim_LDS_TARGET}
+        FILTER "${RJ_CONSAN_LDS_DYNAMIC_STACK_FULL_PRESSURE_FLAT_SPILL_TEST}"
+        CONFIG "${_sim_CONFIG}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX
+            "kind=[a-z-]*flat-store-check-trap[ -~]*scalar_vcc_spill_vgpr_count=4[ -~]*spilled_vgprs=[1-9][0-9]*"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=supercollider"
+            "RJ_CONSAN_FLAT_PROVENANCE=strict"
+            "RJ_CONSAN_DELAY_MODE=sleep_var"
+            "RJ_CONSAN_DELAY_VAR_SSRC=0"
+            "RJ_CONSAN_DELAY=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=padded_dynamic_stack_full_pressure_flat_lds_store_preserves_registers_for_instrumentation"
             "RJ_CONSAN_LOG=3"
             "RJ_CONSAN_MAX_PATCHES=1"
             "RJ_CONSAN_REQUIRE_PATCH=1"

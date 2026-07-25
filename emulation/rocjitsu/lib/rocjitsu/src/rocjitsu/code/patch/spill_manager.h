@@ -170,6 +170,36 @@ struct VgprSpillSequence {
   }
 };
 
+/// Dynamic-stack ABI state established by AMDGPU callable functions.
+///
+/// These are architectural ABI assignments, not instrumentation-reserved
+/// scratch registers. A site-local frame must preserve their incoming values.
+inline constexpr uint16_t kDynamicStackTopSgpr = 32u;
+inline constexpr uint16_t kDynamicFrameBaseSgpr = 33u;
+
+/// @brief Dynamic-stack spill program bootstrapped without a dead SGPR.
+///
+/// @details The complete VGPR window is first saved relative to the incoming
+/// runtime stack top. Four VGPRs from that now-preserved window then hold the
+/// incoming borrowed SGPR pair, frame base, and SCC while the temporary frame
+/// is active. This breaks the full-register-pressure dependency cycle without
+/// assigning an instrumentation-specific preserved SGPR range. The borrowed
+/// window is intentionally one pair because the current consumer uses it to
+/// preserve the complete 64-bit VCC value; a wider scalar spill is a distinct
+/// resource plan rather than an implicit extension of this contract.
+struct DynamicStackBorrowedSgprSpillSequence {
+  static constexpr uint16_t kScalarReservoirCount = 4u;
+
+  uint16_t vgpr_base = 0;
+  uint16_t vgpr_count = 0;
+  uint16_t borrowed_sgpr_base = 0;
+  uint16_t scalar_reservoir_vgpr_base = 0;
+  std::vector<uint32_t> save_words;
+  std::vector<uint32_t> restore_words;
+  uint32_t total_private_bytes = 0;
+  uint32_t dynamic_frame_bytes = 0;
+};
+
 /// @brief Standalone save/restore program for one ordinary SGPR window.
 ///
 /// @details A caller-provided VGPR transfers each wave-uniform scalar value
@@ -200,14 +230,35 @@ struct SgprSpillSequence {
 /// stack kernels: save the current frame base, set it to the stack top,
 /// advance the top by the temporary frame size, then reverse those operations
 /// after filling the VGPRs. The SCC value is restored before guest code runs.
-/// The encoding is available for CDNA3, CDNA4, RDNA4, and gfx1250. No
-/// descriptor growth is needed because the loader already allocates the
-/// kernel's dynamic stack.
+/// The encoding is available for CDNA3, CDNA4, RDNA4, and gfx1250. Callers
+/// remain responsible for requiring enough descriptor/AQL backing for the
+/// compiler maximum stack depth plus this temporary frame.
 [[nodiscard]] std::optional<VgprSpillSequence>
 build_dynamic_stack_vgpr_spill_sequence(uint16_t vgpr_base, uint16_t vgpr_count,
                                         uint16_t stack_top_sgpr, uint16_t frame_base_sgpr,
                                         uint16_t saved_frame_base_sgpr, uint16_t saved_scc_sgpr,
                                         rj_code_arch_t arch, uint32_t additional_frame_bytes = 0);
+
+/// @brief Encode an RDNA4-family dynamic-stack frame when both register files
+/// are live.
+///
+/// @param borrowed_sgpr_base Live ordinary SGPR pair borrowed by the caller.
+/// @param scalar_reservoir_vgpr_base First of four consecutive VGPRs inside
+///        the spilled window used to preserve the pair, frame base, and SCC.
+/// @param original_private_bytes Compiler-declared maximum private backing
+///        before the instrumentation frame is added.
+///
+/// @details Save leaves the borrowed pair available to the caller and restore
+/// expects any special state saved in that pair (for example VCC) to have
+/// already been restored. total_private_bytes is the compiler maximum plus the
+/// frame for descriptor validation; dynamic_frame_bytes is the addend applied
+/// above the runtime-selected AQL private depth.
+[[nodiscard]] std::optional<DynamicStackBorrowedSgprSpillSequence>
+build_dynamic_stack_borrowed_sgpr_spill_sequence(uint16_t vgpr_base, uint16_t vgpr_count,
+                                                 uint16_t borrowed_sgpr_base,
+                                                 uint16_t scalar_reservoir_vgpr_base,
+                                                 uint32_t original_private_bytes,
+                                                 rj_code_arch_t arch);
 
 /// @brief Save an SGPR window in an already-established dynamic-stack frame.
 ///
@@ -225,18 +276,16 @@ enum class SpillDescriptorUpdate : uint8_t {
   Unchanged,
   InvalidDescriptor,
   InvalidPrivateSize,
-  DynamicStack,
 };
 
 /// @brief Grow one kernel descriptor's fixed private segment for spill slots.
 ///
 /// @details Sets ENABLE_PRIVATE_SEGMENT when needed and preserves all other
-/// descriptor fields. For a dynamic-stack spill frame, @p required_private_bytes
-/// is the compiler maximum plus the instrumentation frame depth; the emitted
-/// accesses remain relative to the runtime frame base.
+/// descriptor fields. Dynamic-stack dispatch backing is a separate runtime
+/// contract because the launch's stack depth is not fixed in the descriptor.
 [[nodiscard]] SpillDescriptorUpdate
 update_kernel_descriptor_for_spills(std::span<uint8_t> image, uint64_t descriptor_file_offset,
-                                    uint32_t required_private_bytes, bool uses_dynamic_stack);
+                                    uint32_t required_private_bytes);
 
 } // namespace rocjitsu
 

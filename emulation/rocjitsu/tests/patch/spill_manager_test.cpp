@@ -723,6 +723,58 @@ TEST(SpillManager, BuildsRdna4FamilySccPreservingDynamicStackVgprFrame) {
   }
 }
 
+TEST(SpillManager, BootstrapsDynamicStackSpillFromBorrowedScalarPair) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+    SCOPED_TRACE(arch);
+    const auto sequence = build_dynamic_stack_borrowed_sgpr_spill_sequence(
+        /*vgpr_base=*/3u, /*vgpr_count=*/5u, /*borrowed_sgpr_base=*/2u,
+        /*scalar_reservoir_vgpr_base=*/4u, /*original_private_bytes=*/16u, arch);
+    ASSERT_TRUE(sequence);
+    EXPECT_EQ(sequence->dynamic_frame_bytes, 20u);
+    EXPECT_EQ(sequence->total_private_bytes, 36u);
+    ASSERT_EQ(sequence->save_words.size(), 25u);
+    ASSERT_EQ(sequence->restore_words.size(), 22u);
+    EXPECT_EQ(sequence->save_words.front(), *build_s_wait_loadcnt0(arch));
+    EXPECT_EQ(sequence->save_words[16], *build_s_wait_storecnt0(arch));
+    EXPECT_EQ(sequence->save_words[17], build_v_mov_b32_e32(/*vdst=*/4u, /*s2=*/2u, arch));
+    EXPECT_EQ(sequence->save_words[18], build_v_mov_b32_e32(/*vdst=*/5u, /*s3=*/3u, arch));
+    EXPECT_EQ(sequence->save_words[19],
+              build_v_mov_b32_e32(/*vdst=*/6u, kDynamicFrameBaseSgpr, arch));
+    EXPECT_EQ(sequence->save_words[20],
+              *build_rdna4_s_cselect_b32(/*sdst=*/2u, scalar_positive_inline_u32(1),
+                                         scalar_positive_inline_u32(0), arch));
+    EXPECT_EQ(sequence->save_words[21], build_v_mov_b32_e32(/*vdst=*/7u, /*s2=*/2u, arch));
+    EXPECT_EQ(sequence->save_words[22],
+              build_s_mov_b32(kDynamicFrameBaseSgpr, kDynamicStackTopSgpr, arch));
+    EXPECT_EQ(sequence->save_words[23],
+              *build_rdna4_s_add_u32(kDynamicStackTopSgpr, kDynamicStackTopSgpr,
+                                     /*literal source=*/255u, arch));
+    EXPECT_EQ(sequence->save_words[24], 20u);
+    EXPECT_EQ(sequence->restore_words[0],
+              build_s_mov_b32(kDynamicStackTopSgpr, kDynamicFrameBaseSgpr, arch));
+    EXPECT_EQ(sequence->restore_words[1],
+              *build_v_readfirstlane_b32(kDynamicFrameBaseSgpr, /*v6=*/6u, arch));
+    EXPECT_EQ(sequence->restore_words[2], *build_v_readfirstlane_b32(/*s2=*/2u, /*v7=*/7u, arch));
+    EXPECT_EQ(sequence->restore_words[3],
+              *build_rdna4_s_cmp_lg_u32(/*s2=*/2u, scalar_positive_inline_u32(0), arch));
+    EXPECT_EQ(sequence->restore_words[4], *build_v_readfirstlane_b32(/*s2=*/2u, /*v4=*/4u, arch));
+    EXPECT_EQ(sequence->restore_words[5], *build_v_readfirstlane_b32(/*s3=*/3u, /*v5=*/5u, arch));
+    EXPECT_EQ(sequence->restore_words.back(), *build_s_wait_loadcnt0(arch));
+  }
+
+  EXPECT_FALSE(build_dynamic_stack_borrowed_sgpr_spill_sequence(
+      /*vgpr_base=*/3u, /*vgpr_count=*/3u, /*borrowed_sgpr_base=*/2u,
+      /*scalar_reservoir_vgpr_base=*/3u, /*original_private_bytes=*/0u,
+      ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_FALSE(build_dynamic_stack_borrowed_sgpr_spill_sequence(
+      /*vgpr_base=*/3u, /*vgpr_count=*/5u, /*borrowed_sgpr_base=*/32u,
+      /*scalar_reservoir_vgpr_base=*/4u, /*original_private_bytes=*/0u,
+      ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_FALSE(build_dynamic_stack_borrowed_sgpr_spill_sequence(
+      /*vgpr_base=*/3u, /*vgpr_count=*/5u, /*borrowed_sgpr_base=*/2u,
+      /*scalar_reservoir_vgpr_base=*/4u, /*original_private_bytes=*/0u, ROCJITSU_CODE_ARCH_CDNA4));
+}
+
 TEST(SpillManager, BuildsCdna4SccPreservingDynamicStackVgprFrame) {
   const auto sequence = build_dynamic_stack_vgpr_spill_sequence(
       /*vgpr_base=*/10, /*vgpr_count=*/3, /*stack_top_sgpr=*/32,
@@ -982,8 +1034,7 @@ TEST(SpillManager, DescriptorGrowthEnablesPrivateSegmentAndIsKernelLocal) {
   }();
 
   EXPECT_EQ(update_kernel_descriptor_for_spills(image, /*descriptor_file_offset=*/0,
-                                                /*required_private_bytes=*/12,
-                                                /*uses_dynamic_stack=*/false),
+                                                /*required_private_bytes=*/12),
             SpillDescriptorUpdate::Updated);
   KD patched{};
   std::memcpy(&patched, image.data(), sizeof(patched));
@@ -996,7 +1047,7 @@ TEST(SpillManager, DescriptorGrowthEnablesPrivateSegmentAndIsKernelLocal) {
   EXPECT_TRUE(std::equal(second_before.begin(), second_before.end(), image.begin() + sizeof(KD)));
 }
 
-TEST(SpillManager, DescriptorGrowthHandlesFixedAndDynamicStackBacking) {
+TEST(SpillManager, DescriptorGrowthHandlesExistingAndAdditionalPrivateBacking) {
   using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
   namespace kd = rocr::llvm::amdhsa;
   KD descriptor{};
@@ -1005,22 +1056,18 @@ TEST(SpillManager, DescriptorGrowthHandlesFixedAndDynamicStackBacking) {
   std::array<uint8_t, sizeof(KD)> image{};
   std::memcpy(image.data(), &descriptor, sizeof(descriptor));
 
-  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, 16, false),
-            SpillDescriptorUpdate::Unchanged);
-  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, 48, false),
-            SpillDescriptorUpdate::Updated);
+  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, 16), SpillDescriptorUpdate::Unchanged);
+  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, 48), SpillDescriptorUpdate::Updated);
   KD grown{};
   std::memcpy(&grown, image.data(), sizeof(grown));
   EXPECT_EQ(grown.private_segment_fixed_size, 48u);
-  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, 64, true),
-            SpillDescriptorUpdate::Updated);
+  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, 64), SpillDescriptorUpdate::Updated);
   std::memcpy(&grown, image.data(), sizeof(grown));
   EXPECT_EQ(grown.private_segment_fixed_size, 64u);
   const auto before_invalid = image;
-  EXPECT_EQ(
-      update_kernel_descriptor_for_spills(image, 0, kMaxAddressFreeScratchPrivateBytes + 1u, false),
-      SpillDescriptorUpdate::InvalidPrivateSize);
-  EXPECT_EQ(update_kernel_descriptor_for_spills(image, image.size(), 48, false),
+  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, kMaxAddressFreeScratchPrivateBytes + 1u),
+            SpillDescriptorUpdate::InvalidPrivateSize);
+  EXPECT_EQ(update_kernel_descriptor_for_spills(image, image.size(), 48),
             SpillDescriptorUpdate::InvalidDescriptor);
   EXPECT_EQ(image, before_invalid);
 }
@@ -1044,8 +1091,7 @@ TEST(SpillManager, DescriptorGrowthIgnoresAndPreservesMetadataNotes) {
     std::memcpy(image.data() + kAdversarialDescriptorOffset, &descriptor, sizeof(descriptor));
     const std::vector<uint8_t> before = image;
 
-    EXPECT_EQ(update_kernel_descriptor_for_spills(image, kAdversarialDescriptorOffset, 128,
-                                                  /*uses_dynamic_stack=*/false),
+    EXPECT_EQ(update_kernel_descriptor_for_spills(image, kAdversarialDescriptorOffset, 128),
               SpillDescriptorUpdate::Updated);
 
     KD patched{};

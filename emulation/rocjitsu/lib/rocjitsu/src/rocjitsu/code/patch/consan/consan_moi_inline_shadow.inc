@@ -1206,6 +1206,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         info.persistent_private_state_end = persistent_state_end;
       }
       info.required_private_segment_size = planned_patch.required_private_bytes;
+      note_dynamic_stack_private_requirement(
+          info, planned_patch.spill ? &*planned_patch.spill : nullptr);
       if (planned_patch.workgroup_shadow) {
         info.workgroup_shadow_base = planned_patch.workgroup_shadow->base;
         info.workgroup_shadow_size = planned_patch.workgroup_shadow->size;

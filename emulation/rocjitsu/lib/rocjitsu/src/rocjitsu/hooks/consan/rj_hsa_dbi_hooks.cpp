@@ -1088,18 +1088,23 @@ public:
   void note_patch_requirements(hsa_executable_t executable, const rocjitsu::ConSanResult &result) {
     std::lock_guard lock(mutex_);
     for (const rocjitsu::ConSanPatchInfo &patch : result.patches) {
-      if (patch.required_private_segment_size == 0 && patch.required_group_segment_size == 0)
+      if (patch.required_private_segment_size == 0 && patch.dynamic_private_segment_addend == 0 &&
+          patch.required_group_segment_size == 0) {
         continue;
+      }
       const auto note_kernel = [&](const auto &kernel) {
         const auto pending = std::ranges::find_if(pending_, [&](const Pending &candidate) {
           return candidate.executable == executable.handle && candidate.kernel_name == kernel.name;
         });
         if (pending == pending_.end()) {
           pending_.push_back({executable.handle, kernel.name, patch.required_private_segment_size,
+                              patch.dynamic_private_segment_addend,
                               patch.required_group_segment_size});
         } else {
           pending->required_private_bytes =
               std::max(pending->required_private_bytes, patch.required_private_segment_size);
+          pending->dynamic_private_addend =
+              std::max(pending->dynamic_private_addend, patch.dynamic_private_segment_addend);
           pending->required_group_bytes =
               std::max(pending->required_group_bytes, patch.required_group_segment_size);
         }
@@ -1150,21 +1155,23 @@ public:
         bound_, [&](const Bound &candidate) { return candidate.symbol == symbol.handle; });
     if (bound == bound_.end()) {
       bound_.push_back({symbol.handle, kernel_object, pending->required_private_bytes,
-                        pending->required_group_bytes});
+                        pending->dynamic_private_addend, pending->required_group_bytes});
     } else {
       bound->kernel_object = kernel_object;
       bound->required_private_bytes =
           std::max(bound->required_private_bytes, pending->required_private_bytes);
+      bound->dynamic_private_addend =
+          std::max(bound->dynamic_private_addend, pending->dynamic_private_addend);
       bound->required_group_bytes =
           std::max(bound->required_group_bytes, pending->required_group_bytes);
     }
     log_message(kLogInfo,
                 "ConSan dispatch-segment binding executable=%llu symbol=%llu kernel_object=0x%llx "
-                "private_bytes=%u group_bytes=%u",
+                "private_bytes=%u dynamic_private_addend=%u group_bytes=%u",
                 static_cast<unsigned long long>(executable.handle),
                 static_cast<unsigned long long>(symbol.handle),
                 static_cast<unsigned long long>(kernel_object), pending->required_private_bytes,
-                pending->required_group_bytes);
+                pending->dynamic_private_addend, pending->required_group_bytes);
   }
 
   [[nodiscard]] std::optional<uint32_t> required_for_symbol(hsa_executable_symbol_t symbol) const {
@@ -1181,6 +1188,15 @@ public:
         bound_, [&](const Bound &candidate) { return candidate.kernel_object == kernel_object; });
     return bound == bound_.end() ? std::nullopt
                                  : std::optional<uint32_t>(bound->required_private_bytes);
+  }
+
+  [[nodiscard]] std::optional<uint32_t>
+  dynamic_private_addend_for_kernel_object(uint64_t kernel_object) const {
+    std::lock_guard lock(mutex_);
+    const auto bound = std::ranges::find_if(
+        bound_, [&](const Bound &candidate) { return candidate.kernel_object == kernel_object; });
+    return bound == bound_.end() ? std::nullopt
+                                 : std::optional<uint32_t>(bound->dynamic_private_addend);
   }
 
   [[nodiscard]] std::optional<uint32_t>
@@ -1212,12 +1228,14 @@ private:
     uint64_t executable = 0;
     std::string kernel_name;
     uint32_t required_private_bytes = 0;
+    uint32_t dynamic_private_addend = 0;
     uint32_t required_group_bytes = 0;
   };
   struct Bound {
     uint64_t symbol = 0;
     uint64_t kernel_object = 0;
     uint32_t required_private_bytes = 0;
+    uint32_t dynamic_private_addend = 0;
     uint32_t required_group_bytes = 0;
   };
 
@@ -2169,8 +2187,10 @@ void rj_dbi_queue_write_interceptor(const void *packets, uint64_t packet_count,
       continue;
     const auto &registry = KernelPrivateDispatchRegistry::instance();
     const auto required_private = registry.required_for_kernel_object(packet->kernel_object);
+    const auto dynamic_private_addend =
+        registry.dynamic_private_addend_for_kernel_object(packet->kernel_object);
     const auto required_group = registry.required_group_for_kernel_object(packet->kernel_object);
-    if (required_private || required_group) {
+    if (required_private || dynamic_private_addend || required_group) {
       if (is_extended_dispatch) {
         log_message(kLogInfo,
                     "ConSan extended dispatch geometry kernel_object=0x%llx "
@@ -2193,12 +2213,31 @@ void rj_dbi_queue_write_interceptor(const void *packets, uint64_t packet_count,
                     packet->private_segment_size, packet->group_segment_size);
       }
     }
-    if (required_private && *required_private > packet->private_segment_size) {
+    const uint32_t runtime_private_bytes = packet->private_segment_size;
+    uint32_t target_private_bytes = required_private
+                                        ? std::max(runtime_private_bytes, *required_private)
+                                        : runtime_private_bytes;
+    if (dynamic_private_addend && *dynamic_private_addend != 0) {
+      const uint64_t dynamic_target = static_cast<uint64_t>(runtime_private_bytes) +
+                                      static_cast<uint64_t>(*dynamic_private_addend);
+      if (dynamic_target > std::numeric_limits<uint32_t>::max()) {
+        target_private_bytes = std::numeric_limits<uint32_t>::max();
+        log_message(kLogInfo,
+                    "ConSan dispatch-private saturated kernel_object=0x%llx "
+                    "runtime_bytes=%u dynamic_addend=%u",
+                    static_cast<unsigned long long>(packet->kernel_object), runtime_private_bytes,
+                    *dynamic_private_addend);
+      } else {
+        target_private_bytes =
+            std::max(target_private_bytes, static_cast<uint32_t>(dynamic_target));
+      }
+    }
+    if (target_private_bytes > packet->private_segment_size) {
       log_message(kLogInfo,
                   "ConSan dispatch-private grow kernel_object=0x%llx private_bytes=%u->%u",
                   static_cast<unsigned long long>(packet->kernel_object),
-                  packet->private_segment_size, *required_private);
-      packet->private_segment_size = *required_private;
+                  packet->private_segment_size, target_private_bytes);
+      packet->private_segment_size = target_private_bytes;
     }
     if (required_group && *required_group > packet->group_segment_size) {
       log_message(kLogInfo, "ConSan dispatch-group grow kernel_object=0x%llx group_bytes=%u->%u",
@@ -3535,7 +3574,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   "scalar_vcc_spill_sgpr=%s scalar_vcc_spill_vgpr=%s "
                   "scalar_vcc_spill_vgpr_count=%u "
                   "private_epoch_offset=%s spilled_vgprs=%u "
-                  "private_bytes=%u "
+                  "private_bytes=%u dynamic_private_addend=%u "
                   "workgroup_shadow_base=%u workgroup_shadow_bytes=%u group_bytes=%u",
                   static_cast<unsigned long long>(code_object_reader.handle),
                   patch_kind_name(patch.kind), static_cast<unsigned long long>(patch.anchor_offset),
@@ -3543,8 +3582,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   patch.trampoline_size, scratch_vgpr.c_str(), scalar_vcc_spill_sgpr.c_str(),
                   scalar_vcc_spill_vgpr.c_str(), patch.scalar_vcc_spill_vgpr_count,
                   private_epoch_offset.c_str(), patch.spilled_vgpr_count,
-                  patch.required_private_segment_size, patch.workgroup_shadow_base,
-                  patch.workgroup_shadow_size, patch.required_group_segment_size);
+                  patch.required_private_segment_size, patch.dynamic_private_segment_addend,
+                  patch.workgroup_shadow_base, patch.workgroup_shadow_size,
+                  patch.required_group_segment_size);
     }
     if (config->require_patch && !config->fault_dry_run &&
         !has_consan_site_instrumentation_patch(patch_result)) {

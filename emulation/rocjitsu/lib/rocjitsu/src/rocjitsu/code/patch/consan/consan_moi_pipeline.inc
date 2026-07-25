@@ -543,6 +543,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;
       info.required_private_segment_size = planned.spill->total_private_bytes;
+      note_dynamic_stack_private_requirement(info, &*planned.spill);
     }
     if (planned.scalar_spill) {
       info.required_private_segment_size =

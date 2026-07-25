@@ -28,7 +28,7 @@ in [AMDGPU register spilling](../spilling.md).
 | Interception | HSA-tools hook via `HSA_TOOLS_LIB`. | Keep HSA-tools as the main path. |
 | Architecture | Target-specific native instrumentation for `gfx942`, `gfx950`, `gfx1201`, and `gfx1250`. | Keep target capabilities and encoders explicit; do not translate between targets. |
 | Public selection | Loading the hook selects MOI Record/Replay. `RJ_CONSAN_MODE` selects alternatives and `RJ_CONSAN_POLICY` selects default or strict completeness checks. | Keep flavor and engine as implementation concepts beneath a small public interface. |
-| SuperCollider | Delayed redundant LDS and admitted group-flat observations with an automatic mismatch marker. | Keep as a complementary perturbation/value-instability flavor. |
+| SuperCollider | Delayed redundant LDS and admitted group-flat observations with an automatic mismatch marker, including gfx1250 dynamic-stack group-FLAT probes under full register pressure. | Keep as a complementary perturbation/value-instability flavor. |
 | MOI Record/Replay | Bounded device records plus host replay. This is the recommended starting engine. | Preserve clear reference/debug semantics while making snapshot limits explicit. |
 | MOI Inline Shadow | Immediate supported-form shadow checks for admitted LDS accesses, barriers, and selected atomic ordering. | Broaden proven instruction and ordering coverage without weakening typed exclusions. |
 | MOI Sampled | Deterministically selected causal windows plus deferred host analysis. | Improve statistical sensitivity while keeping clean runs explicitly inconclusive. |
@@ -308,10 +308,14 @@ Current register policy:
   containing the spill save, derived-owner setup, original access,
   conservative LDS wait, instrumentation, spill restore, and return.
 - Spill plans grow the owning kernel descriptor. The HSA hook also associates
-  that requirement with the loaded kernel object and rewrites its AQL dispatch
-  packet, so a compiled private size of zero can become nonzero. ROCR consumes
-  those descriptor and packet fields; ConSan does not read or rewrite the
-  duplicated MessagePack private-size entry.
+  the absolute requirement and any site-local dynamic-frame addend with the
+  loaded kernel object. It rewrites the AQL dispatch packet to the greater of
+  the descriptor minimum and the launch-selected private depth plus the
+  maximum site-local frame. Thus a compiled private size of zero can become
+  nonzero without treating the descriptor or offline JSON as the source of
+  truth for a runtime-configurable stack. ROCR consumes those descriptor and
+  packet fields; ConSan does not read or rewrite the duplicated MessagePack
+  private-size entry.
 - Dynamic record, barrier-record, inline diagnostic, and inline atomic acquire
   paths allocate fresh descriptor-backed scalar windows. Scalar VCC snapshots
   make restoration independent of active lanes; SCC is captured before the
@@ -332,6 +336,13 @@ Current register policy:
   convention, Inline access probes can instead create a site-local frame,
   preserve the caller frame and SCC, spill the borrowed VGPR window, and grow
   dispatch backing by the maximum added depth.
+- On gfx1250, a saturated SuperCollider group-FLAT probe bootstraps the same
+  kind of site-local frame without assuming a dead or permanently preserved
+  SGPR window. It saves the full VGPR victim window first, uses four saved
+  VGPRs as transient reservoirs for the live VCC-save pair, frame base, and
+  SCC, then restores all guest state. Shared helpers use this recipe only when
+  every owner is dynamic; mixed owner stacks produce a typed rejection when
+  the spill recipe is actually needed.
 - Static Record/Replay, Sampled, and descriptor-full Inline Shadow access
   probes consume those backends for direct kernels and reachable shared helpers.
   A shared spill starts above the maximum original private extent and grows

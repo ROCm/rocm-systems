@@ -1394,8 +1394,10 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         }
         info.required_private_segment_size = planned.required_private_bytes;
         info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
-        if (planned.spill)
+        if (planned.spill) {
           info.spilled_vgpr_count = planned.spill->vgpr_count;
+          note_dynamic_stack_private_requirement(info, &*planned.spill);
+        }
         patches.push_back(std::move(info));
       }
     }
@@ -1515,6 +1517,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
     if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;
+      note_dynamic_stack_private_requirement(info, &*planned.spill);
     }
     patches.push_back(std::move(info));
   }
@@ -2096,8 +2099,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       info.persistent_private_state_end = planned.private_layout->ephemeral_base;
     }
     info.required_private_segment_size = planned.required_private_bytes;
-    if (planned.spill)
+    if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;
+      note_dynamic_stack_private_requirement(info, &*planned.spill);
+    }
     patches.push_back(std::move(info));
   }
   if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
