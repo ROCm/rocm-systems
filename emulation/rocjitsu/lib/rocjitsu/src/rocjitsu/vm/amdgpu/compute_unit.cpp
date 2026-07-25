@@ -529,25 +529,45 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   // watchpoint or memory fault resumes past the access instead of re-executing
   // it. Gated on debug_active_ so non-debugged runs pay no per-access cost.
   const bool debug_probe = debug_active_.load(std::memory_order_relaxed) && inst->is_memory_op() &&
-                           inst->data() && inst->data()->tag() == GLOBAL_MEM;
+                           inst->data() &&
+                           (inst->data()->tag() == GLOBAL_MEM || inst->data()->tag() == SCALAR_MEM);
   std::vector<uint64_t> dbg_addrs;
   uint32_t dbg_bytes = 0;
   bool dbg_is_write = false;
   bool dbg_is_atomic = false;
   if (debug_probe) {
-    auto &d = *inst->data_as<VectorMemState>();
-    dbg_is_atomic = (d.atomic_op != AtomicOp::NONE);
-    dbg_is_write = !d.is_load || dbg_is_atomic;
-    dbg_bytes = dbg_is_atomic ? d.elem_size : std::max(1u, d.num_elems * d.elem_size);
-    dbg_addrs.reserve(d.wf_size);
-    for (uint32_t lane = 0; lane < d.wf_size; ++lane)
-      if (d.lane_mask & (1ULL << lane))
-        dbg_addrs.push_back(d.per_lane_addr[lane]);
+    if (inst->data()->tag() == SCALAR_MEM) {
+      auto &d = *inst->data_as<ScalarMemState>();
+      dbg_is_write = !d.is_load;
+      dbg_bytes = std::max(1u, d.num_dwords * d.elem_size);
+      dbg_addrs.push_back(d.addr);
+    } else {
+      auto &d = *inst->data_as<VectorMemState>();
+      dbg_is_atomic = (d.atomic_op != AtomicOp::NONE);
+      dbg_is_write = !d.is_load || dbg_is_atomic;
+      dbg_bytes = dbg_is_atomic ? d.elem_size : std::max(1u, d.num_elems * d.elem_size);
+      dbg_addrs.reserve(d.wf_size);
+      for (uint32_t lane = 0; lane < d.wf_size; ++lane)
+        if (d.lane_mask & (1ULL << lane))
+          dbg_addrs.push_back(d.per_lane_addr[lane]);
+    }
+  }
+  bool debug_memory_fault = false;
+  if (debug_probe && memory_violation_handler_) {
+    const uint32_t vmid = active->process_id();
+    debug_memory_fault = std::ranges::any_of(dbg_addrs, [&](uint64_t addr) {
+      const bool shared_address = active->shared_aperture_base() != 0 &&
+                                  addr >= active->shared_aperture_base() &&
+                                  addr <= active->shared_aperture_limit();
+      return !shared_address && !memory_->is_mapped(addr, vmid);
+    });
   }
 
   const bool trap_return = std::string_view(inst->mnemonic()) == "s_rfe_b64";
 
-  if (inst->is_memory_op()) {
+  if (debug_memory_fault) {
+    delete inst;
+  } else if (inst->is_memory_op()) {
     if (inst->data() && inst->data()->tag() == GLOBAL_MEM) {
       auto *d = inst->data_as<VectorMemState>();
       d->issue_pc = active->pc;
@@ -579,16 +599,11 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   // more severe than a watchpoint and wins if both would fire on the same
   // instruction.
   if (debug_probe && !active->debug_halted()) {
-    if (memory_violation_handler_) {
-      const uint32_t vmid = active->process_id();
-      for (uint64_t addr : dbg_addrs) {
-        const bool shared_address =
-            addr >= active->shared_aperture_base() && addr <= active->shared_aperture_limit();
-        if (!shared_address && !memory_->is_mapped(addr, vmid) &&
+    if (debug_memory_fault)
+      for (uint64_t addr : dbg_addrs)
+        if (!memory_->is_mapped(addr, active->process_id()) &&
             memory_violation_handler_(*active, addr, dbg_is_write))
-          return; // wave stopped on a memory fault
-      }
-    }
+          return;
     if (watchpoint_handler_)
       for (uint64_t addr : dbg_addrs)
         if (watchpoint_handler_(*active, addr, dbg_bytes, dbg_is_write, dbg_is_atomic))

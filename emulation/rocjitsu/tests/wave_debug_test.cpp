@@ -193,6 +193,42 @@ TEST(WaveDebugTest, UnmappedInstructionFetchReportsMemoryViolationAtBranchTarget
   fx.gpu_mem.unregister_process(kProcessId);
 }
 
+TEST(WaveDebugTest, UnmappedScalarLoadReportsMemoryViolationAfterInstruction) {
+  WaveDebugFixture fx;
+  constexpr uint32_t kProcessId = 7;
+  std::vector<uint8_t> kernel_page(amdgpu::GpuMemory::PAGE_SIZE);
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
+                                                              amdgpu::Mtype::RW};
+  fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
+
+  fx.gpu_mem.write32(kKernelAddr, 0xC0000000u, kProcessId);     // s_load_dword s0, s[0:1]
+  fx.gpu_mem.write32(kKernelAddr + 4, 0, kProcessId);           // immediate offset 0
+  fx.gpu_mem.write32(kKernelAddr + 8, 0xBF800000u, kProcessId); // s_nop 0
+  auto *wave = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(kProcessId);
+  fx.cu->set_debug_active(true);
+
+  uint64_t fault_address = ~uint64_t{0};
+  fx.cu->set_memory_violation_handler(
+      [&](amdgpu::Wavefront &faulting_wave, uint64_t address, bool is_write) {
+        EXPECT_EQ(&faulting_wave, wave);
+        EXPECT_FALSE(is_write);
+        fault_address = address;
+        faulting_wave.debug_trap(0);
+        return true;
+      });
+
+  fx.cu->step();
+  EXPECT_EQ(fault_address, 0u);
+  EXPECT_TRUE(wave->debug_halted());
+  EXPECT_EQ(wave->pc, kKernelAddr + 8);
+
+  fx.gpu_mem.unregister_process(kProcessId);
+}
+
 // Linked gfx950 code forms helper addresses as GETPC plus a signed rel32
 // relocation. The 64-bit sum can have a 0x1ffff high dword even though it
 // denotes an address relative to the loaded code object. SWAPPC must relocate
