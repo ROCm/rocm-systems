@@ -26,14 +26,56 @@ def find_rccl_library(artifact_dir: Path) -> Path:
     return lib_path
 
 
+def setup_rccl_preload(rccl_lib_dir: Path) -> None:
+    """Set LD_PRELOAD to force the CI-built librccl.so to be loaded.
+
+    Works for JAX (no LLVM symbol clash) but NOT for PyTorch (causes
+    'spirv-expand-step registered more than once').  PyTorch must use
+    override_bundled_rccl() instead.
+    """
+    ci_rccl = rccl_lib_dir.resolve() / "librccl.so"
+    if not ci_rccl.exists():
+        log.error("CI-built librccl.so not found at %s", ci_rccl)
+        sys.exit(1)
+    existing = os.environ.get("LD_PRELOAD", "")
+    new_preload = f"{ci_rccl}:{existing}" if existing else str(ci_rccl)
+    os.environ["LD_PRELOAD"] = new_preload
+    log.info("LD_PRELOAD=%s", new_preload)
+
+
+def find_rocm_sdk_lib_dirs() -> list[Path]:
+    """Find _rocm_sdk_libraries*/lib/ dirs in the pip-installed environment.
+
+    Pip wheels bundle ROCm shared libraries (libamd_smi.so, etc.) under
+    _rocm_sdk_libraries/lib/ or _rocm_sdk_libraries_<target>/lib/.
+    The CI-built librccl.so may depend on these (e.g. libamd_smi.so.26)
+    so their directories must be on LD_LIBRARY_PATH.
+    """
+    dirs: list[Path] = []
+    seen: set[str] = set()
+    for pattern in ("_rocm_sdk_libraries/lib", "_rocm_sdk_libraries_*/lib"):
+        for d in Path(sys.prefix).rglob(pattern):
+            if d.is_dir() and str(d) not in seen:
+                seen.add(str(d))
+                dirs.append(d)
+                log.info("Found ROCm SDK lib dir: %s", d)
+    if not dirs:
+        log.warning("No _rocm_sdk_libraries lib dirs found in %s", sys.prefix)
+    return dirs
+
+
 def override_bundled_rccl(rccl_lib_dir: Path) -> None:
     """Replace pip-bundled librccl.so with the CI-built version.
 
     LD_LIBRARY_PATH alone is insufficient because pip-installed wheels
     (torch, jax) embed RUNPATH in their shared libraries, and the dynamic
     linker resolves RUNPATH before LD_LIBRARY_PATH.  LD_PRELOAD causes
-    LLVM symbol conflicts.  Instead, we physically replace the bundled
-    library files so the wheel's own RUNPATH loads our build.
+    LLVM symbol conflicts with PyTorch.  Instead, we physically replace
+    the bundled library files so the wheel's own RUNPATH loads our build.
+
+    Callers should also use find_rocm_sdk_lib_dirs() and add those paths
+    to LD_LIBRARY_PATH so the CI-built librccl.so can find transitive
+    dependencies like libamd_smi.so.26.
     """
     import shutil
 
