@@ -2459,6 +2459,7 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
       });
       ASSERT_NE(stopped_peer, states.end());
       stopped_peer->wave_stopped = true;
+      stopped_peer->mode |= kModeDebugEn;
       ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(
                       kCwsrAddress, kCwsrSize, states,
                       [&](uint64_t address, uint32_t value) {
@@ -2469,6 +2470,8 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
       control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
       control.resume_queues.num_queues = 1;
       ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+      EXPECT_TRUE(peer->debug_halted());
+      EXPECT_FALSE(peer->debug_single_step());
       bool queue_suspended = false;
       soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
         queue_suspended |=

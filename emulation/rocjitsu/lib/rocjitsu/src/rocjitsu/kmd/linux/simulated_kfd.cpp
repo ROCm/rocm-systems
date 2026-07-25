@@ -2741,9 +2741,9 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
   wave.set_scratch_base(scratch_base);
   wave.debug_write_sgpr(32, stack_pointer);
   wave.debug_write_sgpr(33, stack_frame);
-  const bool single_step = (state.mode & kModeDebugEnMask) != 0;
+  const bool single_step = !state.wave_stopped && (state.mode & kModeDebugEnMask) != 0;
   wave.set_debug_single_step(single_step);
-  wave.set_debug_halted(state.wave_stopped && !single_step);
+  wave.set_debug_halted(state.wave_stopped);
   wave.set_debug_suspended(false);
 }
 
