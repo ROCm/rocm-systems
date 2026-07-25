@@ -22,8 +22,6 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-const bool VNopVop3::execute_registered_ = register_exec_fn<VNopVop3>();
-
 void VNopVop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -53,8 +51,6 @@ void VNopVop3::execute_impl(amdgpu::Wavefront &wf) {
     }
   }
 }
-
-const bool VPipeflushVop3::execute_registered_ = register_exec_fn<VPipeflushVop3>();
 
 void VPipeflushVop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
@@ -86,21 +82,15 @@ void VPipeflushVop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-const bool VMovrelsdB32Vop3::execute_registered_ = register_exec_fn<VMovrelsdB32Vop3>();
-
 void VMovrelsdB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(mnemonic());
 }
 
-const bool VMovrelsd2B32Vop3::execute_registered_ = register_exec_fn<VMovrelsd2B32Vop3>();
-
 void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(mnemonic());
 }
-
-const bool VPrngB32Vop3::execute_registered_ = register_exec_fn<VPrngB32Vop3>();
 
 void VPrngB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
@@ -132,56 +122,40 @@ void VPrngB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src0.clear_delegate();
 }
 
-const bool VSatPkU8I16Vop3::execute_registered_ = register_exec_fn<VSatPkU8I16Vop3>();
-
 void VSatPkU8I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(mnemonic());
 }
-
-const bool VSatPk4I4I8Vop3::execute_registered_ = register_exec_fn<VSatPk4I4I8Vop3>();
 
 void VSatPk4I4I8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(mnemonic());
 }
 
-const bool VSatPk4U4U8Vop3::execute_registered_ = register_exec_fn<VSatPk4U4U8Vop3>();
-
 void VSatPk4U4U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(mnemonic());
 }
-
-const bool VMullitF32Vop3::execute_registered_ = register_exec_fn<VMullitF32Vop3>();
 
 void VMullitF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(mnemonic());
 }
 
-const bool VQsadPkU16U8Vop3::execute_registered_ = register_exec_fn<VQsadPkU16U8Vop3>();
-
 void VQsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(mnemonic());
 }
-
-const bool VMqsadPkU16U8Vop3::execute_registered_ = register_exec_fn<VMqsadPkU16U8Vop3>();
 
 void VMqsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(mnemonic());
 }
 
-const bool VMqsadU32U8Vop3::execute_registered_ = register_exec_fn<VMqsadU32U8Vop3>();
-
 void VMqsadU32U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(mnemonic());
 }
-
-const bool VTrigPreopF64Vop3::execute_registered_ = register_exec_fn<VTrigPreopF64Vop3>();
 
 void VTrigPreopF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;

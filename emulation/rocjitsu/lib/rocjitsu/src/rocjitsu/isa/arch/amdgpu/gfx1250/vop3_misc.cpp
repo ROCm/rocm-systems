@@ -12,21 +12,19 @@ namespace rocjitsu {
 namespace gfx1250 {
 
 VNopVop3::VNopVop3(const MachineInst *inst)
-    : Vop3("v_nop", reinterpret_cast<const OpEncoding *>(inst), registered_exec_fn<VNopVop3>()) {
+    : Vop3("v_nop", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(617)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
 VPipeflushVop3::VPipeflushVop3(const MachineInst *inst)
-    : Vop3("v_pipeflush", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VPipeflushVop3>()) {
+    : Vop3("v_pipeflush", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(643)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
 VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
-    : Vop3("v_movrelsd_b32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMovrelsdB32Vop3>()),
+    : Vop3("v_movrelsd_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(676)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -69,8 +67,7 @@ VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
 }
 
 VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
-    : Vop3("v_movrelsd_2_b32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMovrelsd2B32Vop3>()),
+    : Vop3("v_movrelsd_2_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(677)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -113,8 +110,7 @@ VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
 }
 
 VPrngB32Vop3::VPrngB32Vop3(const MachineInst *inst)
-    : Vop3("v_prng_b32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VPrngB32Vop3>()),
+    : Vop3("v_prng_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(680)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -154,8 +150,7 @@ VPrngB32Vop3::VPrngB32Vop3(const MachineInst *inst)
 }
 
 VSatPkU8I16Vop3::VSatPkU8I16Vop3(const MachineInst *inst)
-    : Vop3("v_sat_pk_u8_i16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VSatPkU8I16Vop3>()),
+    : Vop3("v_sat_pk_u8_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(699)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -201,8 +196,7 @@ void VSatPkU8I16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VSatPk4I4I8Vop3::VSatPk4I4I8Vop3(const MachineInst *inst)
-    : Vop3("v_sat_pk4_i4_i8", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VSatPk4I4I8Vop3>()),
+    : Vop3("v_sat_pk4_i4_i8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(710)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -248,8 +242,7 @@ void VSatPk4I4I8Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VSatPk4U4U8Vop3::VSatPk4U4U8Vop3(const MachineInst *inst)
-    : Vop3("v_sat_pk4_u4_u8", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VSatPk4U4U8Vop3>()),
+    : Vop3("v_sat_pk4_u4_u8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(711)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -295,8 +288,7 @@ void VSatPk4U4U8Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst)
-    : Vop3("v_mullit_f32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMullitF32Vop3>()),
+    : Vop3("v_mullit_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(783)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -364,8 +356,7 @@ VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst)
 }
 
 VQsadPkU16U8Vop3::VQsadPkU16U8Vop3(const MachineInst *inst)
-    : Vop3("v_qsad_pk_u16_u8", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VQsadPkU16U8Vop3>()),
+    : Vop3("v_qsad_pk_u16_u8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(813)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -433,8 +424,7 @@ VQsadPkU16U8Vop3::VQsadPkU16U8Vop3(const MachineInst *inst)
 }
 
 VMqsadPkU16U8Vop3::VMqsadPkU16U8Vop3(const MachineInst *inst)
-    : Vop3("v_mqsad_pk_u16_u8", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMqsadPkU16U8Vop3>()),
+    : Vop3("v_mqsad_pk_u16_u8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(814)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -502,8 +492,7 @@ VMqsadPkU16U8Vop3::VMqsadPkU16U8Vop3(const MachineInst *inst)
 }
 
 VMqsadU32U8Vop3::VMqsadU32U8Vop3(const MachineInst *inst)
-    : Vop3("v_mqsad_u32_u8", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMqsadU32U8Vop3>()),
+    : Vop3("v_mqsad_u32_u8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(815)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -571,8 +560,7 @@ VMqsadU32U8Vop3::VMqsadU32U8Vop3(const MachineInst *inst)
 }
 
 VTrigPreopF64Vop3::VTrigPreopF64Vop3(const MachineInst *inst)
-    : Vop3("v_trig_preop_f64", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VTrigPreopF64Vop3>()),
+    : Vop3("v_trig_preop_f64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(959)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {

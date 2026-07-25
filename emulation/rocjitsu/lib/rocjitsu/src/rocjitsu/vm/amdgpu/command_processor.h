@@ -226,17 +226,15 @@ private:
   ///
   /// @warning Drops dirty L2 lines without writeback. Only use after a direct
   /// backing write whose destination is the only stale region; otherwise use
-  /// flush_gpu_caches() so K$-writeback dirty lines are published, not lost.
+  /// flush_gpu_caches() so dirty L2 lines are published, not lost.
   void invalidate_gpu_caches();
 
   /// @brief Coarse writeback+invalidate of the GPU data caches (L1 K$/V$ + L2).
   /// @details Like invalidate_gpu_caches(), but publishes dirty data instead of
-  /// dropping it. Ordering is load-bearing: dirty scalar L1 (K$) lines are
-  /// written back into L2 first, then L2 is flushed to backing, so a dirty K$ or
-  /// L2 line overlapping an SDMA destination reaches backing before the direct
-  /// SDMA write (which runs after this returns) rather than being written out
-  /// over it by a later K$/L2 flush. Each line is written back under its own
-  /// owning vmid. Vector L1 (V$) is write-through, so it only needs invalidation.
+  /// dropping it. Scalar and vector L1 are write-through and only need
+  /// invalidation. Dirty L2 data is flushed to backing before the direct SDMA
+  /// write (which runs after this returns), so a later L2 flush cannot overwrite
+  /// the direct result. Each L2 line is written back under its owning VMID.
   void flush_gpu_caches();
 
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and create a DispatchEntry.
