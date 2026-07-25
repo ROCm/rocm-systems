@@ -4,8 +4,6 @@
 #include "rocjitsu/analysis/indirect_branch_discovery.h"
 
 #include "rocjitsu/code/patch/instruction_builder.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
@@ -13,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <deque>
@@ -78,8 +77,10 @@ namespace {
 // interprocedural proof starts only from calls already recovered by Phases 2-4,
 // requires each save and restore to dominate the later consumer from every
 // supplied entry, and follows the carrier lanes plus every callee return pair
-// through exact SGPR, VGPR-lane, AccVGPR, and scalar-addressed scratch copies
-// across all intervening calls and CFG paths.
+// through exact SGPR and VGPR-lane copies across all intervening calls and CFG
+// paths. EXEC-gated vector and memory copies are deliberately outside this
+// proof: accepting them would require full-EXEC and private-memory alias
+// analysis, and a conservative miss is preferable to an unproven CFG edge.
 //
 // The five phases run to a small fixed point. The first round uses only direct
 // CFG edges. Later rounds add already-proven recovered edges to the temporary
@@ -1818,152 +1819,17 @@ compute_analysis_dominators(const AnalysisContext &ctx, const std::vector<Analys
   return true;
 }
 
-struct ScratchLane {
-  uint16_t saddr = 0;
-  uint32_t offset = 0;
-  uint8_t lane = 0;
-
-  friend bool operator==(const ScratchLane &, const ScratchLane &) = default;
-};
-
-struct AccLaneTransfer {
-  enum class Kind {
-    Write,
-    Read,
-  };
-
-  Kind kind = Kind::Write;
-  uint16_t vgpr = 0;
-  uint16_t acc_vgpr = 0;
-};
-
-struct ScratchTransfer {
-  bool load = false;
-  uint16_t vgpr = 0;
-  uint16_t width = 1;
-  uint16_t saddr = 0;
-  uint32_t offset = 0;
-};
-
-[[nodiscard]] std::optional<AccLaneTransfer> acc_lane_transfer(const Instruction &inst,
-                                                               rj_code_arch_t arch) {
-  const std::string_view mnemonic = inst.mnemonic();
-  const bool write = mnemonic.starts_with("v_accvgpr_write");
-  const bool read = mnemonic.starts_with("v_accvgpr_read");
-  if (!write && !read)
-    return std::nullopt;
-
-  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-      inst.raw_encoding() != nullptr &&
-      static_cast<size_t>(inst.size()) == sizeof(cdna4::Vop3MachineInst)) {
-    cdna4::Vop3MachineInst raw{};
-    std::memcpy(&raw, inst.raw_encoding(), sizeof(raw));
-    if (raw.src0 < kVectorSourceVgprBase || raw.src0 >= kVectorSourceVgprBase + 256u)
-      return std::nullopt;
-    return AccLaneTransfer{
-        .kind = write ? AccLaneTransfer::Kind::Write : AccLaneTransfer::Kind::Read,
-        .vgpr = static_cast<uint16_t>(write ? raw.src0 - kVectorSourceVgprBase : raw.vdst),
-        .acc_vgpr = static_cast<uint16_t>(write ? raw.vdst : raw.src0 - kVectorSourceVgprBase),
-    };
-  }
-
-  const auto dst = inst.dst_operand(0) == nullptr ? std::optional<RegisterRef>{}
-                                                  : inst.dst_operand(0)->to_register_ref();
-  const auto src = inst.src_operand(0) == nullptr ? std::optional<RegisterRef>{}
-                                                  : inst.src_operand(0)->to_register_ref();
-  if (!dst || !src)
-    return std::nullopt;
-  const RegisterRef vgpr = write ? *src : *dst;
-  const RegisterRef acc = write ? *dst : *src;
-  if (vgpr.cls != RegClass::VGPR || acc.cls != RegClass::ACC_VGPR || vgpr.width != 1 ||
-      acc.width != 1)
-    return std::nullopt;
-  return AccLaneTransfer{
-      .kind = write ? AccLaneTransfer::Kind::Write : AccLaneTransfer::Kind::Read,
-      .vgpr = vgpr.index,
-      .acc_vgpr = acc.index,
-  };
-}
-
-[[nodiscard]] std::optional<ScratchTransfer> scratch_transfer(const Instruction &inst,
-                                                              rj_code_arch_t arch) {
-  const std::string_view mnemonic = inst.mnemonic();
-  const bool load = mnemonic == "scratch_load_b32" || mnemonic == "scratch_load_b64" ||
-                    mnemonic == "scratch_load_dword" || mnemonic == "scratch_load_dwordx2";
-  const bool store = mnemonic == "scratch_store_b32" || mnemonic == "scratch_store_b64" ||
-                     mnemonic == "scratch_store_dword" || mnemonic == "scratch_store_dwordx2";
-  if ((!load && !store) || inst.raw_encoding() == nullptr)
-    return std::nullopt;
-
-  uint32_t encoding = 0;
-  uint32_t vaddr = 0;
-  uint32_t vdst = 0;
-  uint32_t vsrc = 0;
-  uint32_t saddr = 0;
-  uint32_t ioffset = 0;
-  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-      static_cast<size_t>(inst.size()) == sizeof(cdna4::FlatScratchMachineInst)) {
-    cdna4::FlatScratchMachineInst raw{};
-    std::memcpy(&raw, inst.raw_encoding(), sizeof(raw));
-    encoding = raw.encoding;
-    vaddr = raw.addr;
-    vdst = raw.vdst;
-    vsrc = raw.data;
-    saddr = raw.saddr;
-    ioffset = raw.offset;
-  } else if (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
-             static_cast<size_t>(inst.size()) == sizeof(rdna4::VscratchMachineInst)) {
-    rdna4::VscratchMachineInst raw{};
-    std::memcpy(&raw, inst.raw_encoding(), sizeof(raw));
-    encoding = raw.encoding;
-    vaddr = raw.vaddr;
-    vdst = raw.vdst;
-    vsrc = raw.vsrc;
-    saddr = raw.saddr;
-    ioffset = raw.ioffset;
-  } else if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-             static_cast<size_t>(inst.size()) == sizeof(gfx1250::VscratchMachineInst)) {
-    gfx1250::VscratchMachineInst raw{};
-    std::memcpy(&raw, inst.raw_encoding(), sizeof(raw));
-    encoding = raw.encoding;
-    vaddr = raw.vaddr;
-    vdst = raw.vdst;
-    vsrc = raw.vsrc;
-    saddr = raw.saddr;
-    ioffset = raw.ioffset;
-  } else {
-    return std::nullopt;
-  }
-  const bool valid_encoding = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
-                                  ? encoding == 0x37u
-                                  : encoding == 0xedu;
-  if (!valid_encoding || vaddr != 0u || saddr >= REGISTER_SET_MAX_SGPRS)
-    return std::nullopt;
-
-  return ScratchTransfer{
-      .load = load,
-      .vgpr = static_cast<uint16_t>(load ? vdst : vsrc),
-      .width = static_cast<uint16_t>(
-          mnemonic.ends_with("b64") || mnemonic.ends_with("dwordx2") ? 2u : 1u),
-      .saddr = static_cast<uint16_t>(saddr),
-      .offset = ioffset,
-  };
-}
-
 /// @brief Proven copies of abstract values used by a callee-preservation proof.
 ///
 /// @details Values zero and one are the halves of the incoming return PC. The
 /// remaining values are caller VGPR lanes that must be restored unchanged.
-/// Compiler-generated functions routinely move these values through fixed
-/// VGPR lanes, AccVGPRs, and exact scalar-addressed scratch slots. Keeping those
-/// locations explicit proves the actual save/restore chain instead of assuming
-/// a named return pair or a register-preservation ABI. Joins retain only copies
-/// proven on every incoming path.
+/// Keeping exact SGPR and VGPR-lane locations explicit proves the actual
+/// save/restore chain instead of assuming a named return pair or a
+/// register-preservation ABI. Joins retain only copies proven on every incoming
+/// path. EXEC-gated or memory-backed transfers fail closed.
 struct ValueCopies {
   std::array<bool, REGISTER_SET_MAX_SGPRS> sgprs{};
   std::vector<VgprLane> vgpr_lanes;
-  std::vector<VgprLane> acc_lanes;
-  std::vector<ScratchLane> scratch_lanes;
 
   friend bool operator==(const ValueCopies &, const ValueCopies &) = default;
 };
@@ -1984,10 +1850,7 @@ template <typename T> void add_copy(std::vector<T> &copies, T copy) {
 }
 
 void meet_callee_value_state(CalleeValueState &dst, const CalleeValueState &src) {
-  if (dst.values.size() != src.values.size()) {
-    dst.values.clear();
-    return;
-  }
+  assert(dst.values.size() == src.values.size());
   for (size_t value = 0; value < dst.values.size(); ++value) {
     for (uint16_t sgpr = 0; sgpr < REGISTER_SET_MAX_SGPRS; ++sgpr)
       dst.values[value].sgprs[sgpr] =
@@ -1995,40 +1858,13 @@ void meet_callee_value_state(CalleeValueState &dst, const CalleeValueState &src)
     std::erase_if(dst.values[value].vgpr_lanes, [&](VgprLane lane) {
       return !contains_copy(src.values[value].vgpr_lanes, lane);
     });
-    std::erase_if(dst.values[value].acc_lanes,
-                  [&](VgprLane lane) { return !contains_copy(src.values[value].acc_lanes, lane); });
-    std::erase_if(dst.values[value].scratch_lanes, [&](ScratchLane lane) {
-      return !contains_copy(src.values[value].scratch_lanes, lane);
-    });
   }
-}
-
-[[nodiscard]] bool instruction_preserves_acc_lane(const Instruction &inst, VgprLane tracked) {
-  for (int i = 0; i < inst.num_dst_operands(); ++i) {
-    const Operand *operand = inst.dst_operand(i);
-    if (operand == nullptr)
-      continue;
-    const auto ref = operand->to_register_ref();
-    if (ref && ref->cls == RegClass::ACC_VGPR && tracked.vgpr >= ref->index &&
-        static_cast<uint32_t>(tracked.vgpr) <
-            static_cast<uint32_t>(ref->index) + std::max<uint16_t>(1, ref->width)) {
-      return false;
-    }
-  }
-  RegisterSet implicit_defs;
-  inst.implicit_defs(implicit_defs);
-  return !implicit_defs.contains({RegClass::ACC_VGPR, tracked.vgpr, 1});
 }
 
 void transfer_callee_value_state(AnalysisContext &ctx, size_t inst_index, CalleeValueState &state) {
-  const Instruction &inst = *ctx.insts[inst_index];
-  const auto lane_transfer = fixed_lane_transfer(inst, ctx.wavefront_size);
-  const auto acc_transfer = acc_lane_transfer(inst, ctx.arch);
-  const auto scratch = scratch_transfer(inst, ctx.arch);
+  const auto lane_transfer = fixed_lane_transfer(*ctx.insts[inst_index], ctx.wavefront_size);
 
   std::vector<bool> lane_sources(state.values.size(), false);
-  std::vector<std::vector<uint8_t>> acc_source_lanes(state.values.size());
-  std::vector<std::vector<std::pair<uint16_t, uint8_t>>> scratch_sources(state.values.size());
   for (size_t value = 0; value < state.values.size(); ++value) {
     if (lane_transfer) {
       lane_sources[value] =
@@ -2036,38 +1872,6 @@ void transfer_callee_value_state(AnalysisContext &ctx, size_t inst_index, Callee
               ? lane_transfer->sgpr < REGISTER_SET_MAX_SGPRS &&
                     state.values[value].sgprs[lane_transfer->sgpr]
               : contains_copy(state.values[value].vgpr_lanes, lane_transfer->lane);
-    }
-    if (acc_transfer) {
-      const auto &source = acc_transfer->kind == AccLaneTransfer::Kind::Write
-                               ? state.values[value].vgpr_lanes
-                               : state.values[value].acc_lanes;
-      const uint16_t source_register = acc_transfer->kind == AccLaneTransfer::Kind::Write
-                                           ? acc_transfer->vgpr
-                                           : acc_transfer->acc_vgpr;
-      for (VgprLane lane : source) {
-        if (lane.vgpr == source_register)
-          acc_source_lanes[value].push_back(lane.lane);
-      }
-    }
-    if (scratch) {
-      if (scratch->load) {
-        for (const ScratchLane copy : state.values[value].scratch_lanes) {
-          for (uint16_t half = 0; half < scratch->width; ++half) {
-            if (copy.saddr == scratch->saddr &&
-                copy.offset == scratch->offset + half * sizeof(uint32_t)) {
-              scratch_sources[value].emplace_back(half, copy.lane);
-            }
-          }
-        }
-      } else {
-        for (VgprLane copy : state.values[value].vgpr_lanes) {
-          if (copy.vgpr >= scratch->vgpr &&
-              copy.vgpr < static_cast<uint32_t>(scratch->vgpr) + scratch->width) {
-            scratch_sources[value].emplace_back(static_cast<uint16_t>(copy.vgpr - scratch->vgpr),
-                                                copy.lane);
-          }
-        }
-      }
     }
   }
 
@@ -2080,37 +1884,6 @@ void transfer_callee_value_state(AnalysisContext &ctx, size_t inst_index, Callee
     std::erase_if(copies.vgpr_lanes, [&](VgprLane lane) {
       return !instruction_preserves_vgpr_lane(ctx, inst_index, lane);
     });
-    std::erase_if(copies.acc_lanes,
-                  [&](VgprLane lane) { return !instruction_preserves_acc_lane(inst, lane); });
-    if (acc_transfer) {
-      if (acc_transfer->kind == AccLaneTransfer::Kind::Write) {
-        std::erase_if(copies.acc_lanes,
-                      [&](VgprLane lane) { return lane.vgpr == acc_transfer->acc_vgpr; });
-      } else {
-        std::erase_if(copies.vgpr_lanes,
-                      [&](VgprLane lane) { return lane.vgpr == acc_transfer->vgpr; });
-      }
-    }
-    if (scratch && scratch->load) {
-      std::erase_if(copies.vgpr_lanes, [&](VgprLane lane) {
-        return lane.vgpr >= scratch->vgpr &&
-               lane.vgpr < static_cast<uint32_t>(scratch->vgpr) + scratch->width;
-      });
-    }
-    std::erase_if(copies.scratch_lanes, [&](ScratchLane lane) {
-      if (ctx.facts[inst_index].written_sgprs.contains(lane.saddr))
-        return true;
-      if (!inst.mnemonic().starts_with("scratch_store"))
-        return false;
-      if (!scratch)
-        return true;
-      // Equal scalar bases make disjoint immediate ranges provably separate.
-      // Different scalar bases may still hold the same runtime address, so an
-      // unproven alias kills the saved copy.
-      return lane.saddr != scratch->saddr ||
-             (lane.offset >= scratch->offset &&
-              lane.offset < scratch->offset + scratch->width * sizeof(uint32_t));
-    });
   }
 
   for (size_t value = 0; value < state.values.size(); ++value) {
@@ -2122,32 +1895,6 @@ void transfer_callee_value_state(AnalysisContext &ctx, size_t inst_index, Callee
         copies.sgprs[lane_transfer->sgpr] = true;
       }
     }
-    if (acc_transfer) {
-      for (uint8_t lane : acc_source_lanes[value]) {
-        const VgprLane target{
-            .vgpr = acc_transfer->kind == AccLaneTransfer::Kind::Write ? acc_transfer->acc_vgpr
-                                                                       : acc_transfer->vgpr,
-            .lane = lane,
-        };
-        if (acc_transfer->kind == AccLaneTransfer::Kind::Write)
-          add_copy(copies.acc_lanes, target);
-        else
-          add_copy(copies.vgpr_lanes, target);
-      }
-    }
-    if (scratch) {
-      for (const auto [half, lane] : scratch_sources[value]) {
-        if (scratch->load) {
-          add_copy(copies.vgpr_lanes,
-                   VgprLane{.vgpr = static_cast<uint16_t>(scratch->vgpr + half), .lane = lane});
-        } else {
-          add_copy(copies.scratch_lanes, ScratchLane{.saddr = scratch->saddr,
-                                                     .offset = static_cast<uint32_t>(
-                                                         scratch->offset + half * sizeof(uint32_t)),
-                                                     .lane = lane});
-        }
-      }
-    }
   }
 }
 
@@ -2156,16 +1903,6 @@ prepare_callee_value_state_for_call(CalleeValueState &state) {
   std::vector<VgprLane> protected_lanes;
   for (ValueCopies &copies : state.values) {
     copies.sgprs.fill(false);
-    copies.acc_lanes.clear();
-    // Scratch slots modeled here are exact, scalar-addressed locations in the
-    // current compiler-managed device-call activation. Nested calls allocate
-    // distinct private-stack frames, so a current-frame copy remains live
-    // while the nested callee is checked independently. Register copies still
-    // need an explicit recursive preservation proof.
-    if (!copies.scratch_lanes.empty()) {
-      copies.vgpr_lanes.clear();
-      continue;
-    }
     if (copies.vgpr_lanes.empty())
       return std::nullopt;
     for (VgprLane lane : copies.vgpr_lanes) {
@@ -2283,7 +2020,7 @@ callee_preserves_vgpr_lanes(AnalysisContext &ctx, const std::vector<AnalysisBloc
       }
 
       if (facts.setpc_ssrc) {
-        if (!state.values[0].sgprs[*facts.setpc_ssrc] || *facts.setpc_ssrc >= kMaxTrackedSgprPair ||
+        if (*facts.setpc_ssrc >= kMaxTrackedSgprPair || !state.values[0].sgprs[*facts.setpc_ssrc] ||
             !state.values[1].sgprs[*facts.setpc_ssrc + 1u]) {
           return false;
         }

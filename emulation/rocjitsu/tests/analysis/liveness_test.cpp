@@ -638,6 +638,7 @@ enum class LaneSavedTargetMutation {
   UnknownInterveningCall,
   DirectPreservingCall,
   DirectClobberingCall,
+  SpecialReturnSelector,
 };
 
 std::string_view lane_saved_target_mutation_name(LaneSavedTargetMutation mutation) {
@@ -662,6 +663,8 @@ std::string_view lane_saved_target_mutation_name(LaneSavedTargetMutation mutatio
     return "DirectPreservingCall";
   case LaneSavedTargetMutation::DirectClobberingCall:
     return "DirectClobberingCall";
+  case LaneSavedTargetMutation::SpecialReturnSelector:
+    return "SpecialReturnSelector";
   }
   return "Unknown";
 }
@@ -695,6 +698,11 @@ std::vector<uint32_t> build_lane_saved_target_program(LaneSavedTargetMutation mu
     words.push_back(
         build_s_mov_b32(kReturnSreg, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4));
     words.push_back(pack_sop1(0x1d, 0, kReturnSreg));
+  } else if (mutation == LaneSavedTargetMutation::SpecialReturnSelector) {
+    // Exercise the raw SOP1 selector boundary: this is an inline/special
+    // selector, not an ordinary tracked SGPR pair.
+    words.push_back(pack_sop1(0x1d, 0, 200));
+    words.push_back(build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
   } else {
     words.push_back(pack_sop1(0x1d, 0, kReturnSreg));
     words.push_back(build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
@@ -796,15 +804,14 @@ std::vector<uint32_t> build_gfx1250_lane_saved_target_program(uint16_t low_lane 
   return words;
 }
 
-struct ScratchPreservedLaneProgram {
+struct UnprovenScratchCarrierProgram {
   std::vector<uint32_t> words;
   uint64_t outer_callee_offset = 0;
   uint64_t caller_offset = 0;
   uint64_t final_consumer_offset = 0;
 };
 
-ScratchPreservedLaneProgram
-build_scratch_preserved_lane_program(bool matching_scratch_slot = true) {
+UnprovenScratchCarrierProgram build_unproven_scratch_carrier_program() {
   constexpr uint16_t kTargetSreg = 0;
   constexpr uint16_t kReturnSreg = 30;
   constexpr uint16_t kReturnCarrierVgpr = 40;
@@ -816,7 +823,7 @@ build_scratch_preserved_lane_program(bool matching_scratch_slot = true) {
   constexpr uint16_t kScratchSaddr = 33;
   constexpr uint32_t kLiteralOperand = 255;
 
-  ScratchPreservedLaneProgram program;
+  UnprovenScratchCarrierProgram program;
   const auto append = [&](const auto &encoded) {
     program.words.insert(program.words.end(), encoded.begin(), encoded.end());
   };
@@ -834,9 +841,9 @@ build_scratch_preserved_lane_program(bool matching_scratch_slot = true) {
     program.words.push_back(delta < 0 ? UINT32_MAX : 0u);
   };
 
-  // Inner callee: preserve its caller's complete v40 value in one exact
-  // scalar-addressed scratch slot, use two lanes for its own return pair, and
-  // restore the original v40 before returning.
+  // Inner callee: the matching scratch store/load looks like it preserves its
+  // caller's complete v40 value, but the code provides no full-EXEC, stable
+  // frame-base, or non-alias proof. Recovery must therefore fail closed.
   append(build_cdna4_scratch_store_b32_saddr(kReturnCarrierVgpr, kScratchSaddr, 0,
                                              ROCJITSU_CODE_ARCH_CDNA4)
              .value());
@@ -844,15 +851,14 @@ build_scratch_preserved_lane_program(bool matching_scratch_slot = true) {
   append(build_cdna4_writelane(kReturnCarrierVgpr, kReturnSreg + 1, kReturnHighLane));
   append(build_cdna4_readlane(kReturnSreg, kReturnCarrierVgpr, kReturnLowLane));
   append(build_cdna4_readlane(kReturnSreg + 1, kReturnCarrierVgpr, kReturnHighLane));
-  append(build_cdna4_scratch_load_b32_saddr(kReturnCarrierVgpr, kScratchSaddr,
-                                            matching_scratch_slot ? 0u : 4u,
+  append(build_cdna4_scratch_load_b32_saddr(kReturnCarrierVgpr, kScratchSaddr, 0u,
                                             ROCJITSU_CODE_ARCH_CDNA4)
              .value());
   program.words.push_back(0xbf8c0f70u); // s_waitcnt vmcnt(0).
   program.words.push_back(pack_sop1(0x1d, 0, kReturnSreg));
 
-  // Outer callee: keep its incoming return pair in v40 across a nested call to
-  // the inner callee. The inner scratch spill must preserve those exact lanes.
+  // Outer callee: try to keep its incoming return pair in v40 across that
+  // nested call. An exact slot match alone is not a preservation proof.
   program.outer_callee_offset = offset();
   append(build_cdna4_writelane(kReturnCarrierVgpr, kReturnSreg, kReturnLowLane));
   append(build_cdna4_writelane(kReturnCarrierVgpr, kReturnSreg + 1, kReturnHighLane));
@@ -862,8 +868,8 @@ build_scratch_preserved_lane_program(bool matching_scratch_slot = true) {
   append(build_cdna4_readlane(kReturnSreg + 1, kReturnCarrierVgpr, kReturnHighLane));
   program.words.push_back(pack_sop1(0x1d, 0, kReturnSreg));
 
-  // Caller: establish one reusable static target, call it once, then recover
-  // the same target from v42 after the nested scratch-preserved call chain.
+  // Caller: establish one reusable static target, call it once, then attempt
+  // to recover the same target from v42 after the unproven scratch chain.
   program.caller_offset = offset();
   append_target_builder(program.outer_callee_offset);
   append(build_cdna4_writelane(kTargetCarrierVgpr, kTargetSreg, kTargetLowLane));
@@ -927,21 +933,8 @@ TEST(CfgAnalysis, RecoversLaneSavedTargetAcrossDirectPreservingCall) {
   EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 0u);
 }
 
-TEST(CfgAnalysis, RecoversLaneSavedTargetAcrossScratchPreservedReturnCarrier) {
-  ScratchPreservedLaneProgram program = build_scratch_preserved_lane_program();
-  const std::array extra_leaders{uint64_t{0}, program.outer_callee_offset, program.caller_offset};
-  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
-      program.words, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders, /*wavefront_size=*/64u);
-  const auto consumer = std::ranges::find_if(fixups, [&](const IndirectCallFixup &fixup) {
-    return fixup.source_call_offset == program.final_consumer_offset;
-  });
-  ASSERT_NE(consumer, fixups.end());
-  EXPECT_EQ(consumer->source_target_offset, program.outer_callee_offset);
-}
-
-TEST(CfgAnalysis, RejectsLaneSavedTargetAcrossMismatchedScratchRestore) {
-  ScratchPreservedLaneProgram program =
-      build_scratch_preserved_lane_program(/*matching_scratch_slot=*/false);
+TEST(CfgAnalysis, RejectsLaneSavedTargetAcrossUnprovenScratchCarrier) {
+  UnprovenScratchCarrierProgram program = build_unproven_scratch_carrier_program();
   const std::array extra_leaders{uint64_t{0}, program.outer_callee_offset, program.caller_offset};
   const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
       program.words, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders, /*wavefront_size=*/64u);
@@ -1021,6 +1014,7 @@ TEST(CfgAnalysis, RejectsUnprovenLaneSavedTargets) {
       LaneSavedTargetMutation::SameLaneWritelaneClobber,
       LaneSavedTargetMutation::UnknownInterveningCall,
       LaneSavedTargetMutation::DirectClobberingCall,
+      LaneSavedTargetMutation::SpecialReturnSelector,
   };
 
   for (LaneSavedTargetMutation mutation : mutations) {
