@@ -14,8 +14,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     });
   };
   if (!contains_supported_site(result.kernels) && !contains_supported_site(result.functions)) {
-    result.warnings.emplace_back("ConSan flat check/trap proof found no supported likely group "
-                                 "flat_load/store_b{32,64,128} site");
+    result.warnings.emplace_back(
+        "ConSan flat check/trap proof found no supported likely group-FLAT load/store site");
     return;
   }
 
@@ -135,15 +135,21 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         mismatch_action_word_count(options, arch, result.errors, "ConSan flat check/trap proof");
     if (!action_words)
       return;
+    const auto subword = consan_flat_load_subword_semantics(site.mnemonic);
+    const uint32_t comparison_scratch_vgprs =
+        subword && subword->placement == ConSanFlatSubwordPlacement::High16 ? 1u : 0u;
+    const uint32_t probe_scratch_vgprs = *required_vgprs + comparison_scratch_vgprs;
     const uint32_t report_alignment_padding =
         options.report_buffer_address &&
                 (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
             ? 1u
             : 0u;
     const uint32_t scratch_vgprs =
-        *required_vgprs + report_alignment_padding + report_action_scratch_vgprs(options);
-    const uint64_t mismatch_words = *required_vgprs > 1u ? 2u * *required_vgprs + 1u + *action_words
-                                                         : (2u + *action_words) * *required_vgprs;
+        probe_scratch_vgprs + report_alignment_padding + report_action_scratch_vgprs(options);
+    const uint64_t comparison_setup_words = comparison_scratch_vgprs == 0u ? 0u : 2u;
+    const uint64_t mismatch_words =
+        *required_vgprs > 1u ? 2u * *required_vgprs + 1u + *action_words
+                             : comparison_setup_words + (2u + *action_words) * *required_vgprs;
     const uint64_t access_words = site.size / sizeof(uint32_t);
     const bool needs_runtime_group_gate =
         arch == ROCJITSU_CODE_ARCH_GFX1250 &&
@@ -529,7 +535,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     }
     result.warnings.emplace_back(
         "ConSan flat check/trap proof found no selectable padded or "
-        "local- or appended-cave-reachable likely group flat_load/store_b{32,64,128} site; "
+        "local- or appended-cave-reachable likely group-FLAT load/store site; "
         "supported_candidates=" +
         std::to_string(supported_candidate_count) +
         " scratchable_candidates=" + std::to_string(scratchable_candidate_count) +
@@ -658,8 +664,12 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       planned.words.push_back(
           build_s_mov_b32(candidate.indirect_scratch->vcc_save_sgpr, kRdna4VccLo, arch));
     }
+    const auto subword = consan_flat_load_subword_semantics(site.mnemonic);
+    const bool compare_high_half =
+        subword && subword->placement == ConSanFlatSubwordPlacement::High16;
+    const uint16_t comparison_scratch_vgprs = compare_high_half ? 1u : 0u;
     uint16_t report_scratch_vgpr =
-        static_cast<uint16_t>(candidate.scratch_vgpr + static_cast<uint16_t>(*required_vgprs));
+        static_cast<uint16_t>(candidate.scratch_vgpr + *required_vgprs + comparison_scratch_vgprs);
     if (options.report_buffer_address &&
         (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
         report_scratch_vgpr % 2u != 0)
@@ -709,6 +719,24 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         planned.words[branch_index] = *branch;
       }
     } else {
+      uint16_t compare_lhs_vgpr = *compare_vgpr;
+      uint16_t compare_rhs_vgpr = candidate.scratch_vgpr;
+      if (compare_high_half) {
+        const uint16_t original_high_vgpr =
+            static_cast<uint16_t>(candidate.scratch_vgpr + *required_vgprs);
+        const auto select_original_high = instrumentation::build_v_lshrrev_b32(
+            original_high_vgpr, scalar_positive_inline_u32(16u), *compare_vgpr, arch);
+        const auto select_duplicate_high = instrumentation::build_v_lshrrev_b32(
+            candidate.scratch_vgpr, scalar_positive_inline_u32(16u), candidate.scratch_vgpr, arch);
+        if (!select_original_high || !select_duplicate_high) {
+          result.errors.emplace_back(
+              "ConSan flat check/trap proof could not select high-half load values");
+          return;
+        }
+        planned.words.push_back(*select_original_high);
+        planned.words.push_back(*select_duplicate_high);
+        compare_lhs_vgpr = original_high_vgpr;
+      }
       const auto skip_action =
           build_s_cbranch_vccz_word(static_cast<int16_t>(mismatch_action->size()), arch);
       if (!skip_action) {
@@ -717,9 +745,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         return;
       }
       const auto chunk_cmp_ne =
-          site.width_bits == 16
-              ? build_v_cmp_ne_u16_e32_word(*compare_vgpr, candidate.scratch_vgpr, arch)
-              : build_v_cmp_ne_u32_e32_word(*compare_vgpr, candidate.scratch_vgpr, arch);
+          subword || site.width_bits == 16
+              ? build_v_cmp_ne_u16_e32_word(compare_lhs_vgpr, compare_rhs_vgpr, arch)
+              : build_v_cmp_ne_u32_e32_word(compare_lhs_vgpr, compare_rhs_vgpr, arch);
       if (!chunk_cmp_ne) {
         result.errors.emplace_back("ConSan flat check/trap proof could not encode chunk compare");
         return;

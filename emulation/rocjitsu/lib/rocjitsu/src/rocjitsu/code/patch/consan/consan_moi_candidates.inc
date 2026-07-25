@@ -268,14 +268,13 @@ void warn_skipped_moi_lds_candidates(std::string_view container_name, bool in_ke
 }
 
 [[nodiscard]] bool is_supported_moi_flat_access_mnemonic(std::string_view mnemonic) {
-  // D16 entries are low-half only. High-half forms require explicit
-  // upper-half normalization before they can share these lowerings.
-  return equals_any(mnemonic,
-                    {"flat_load_b32", "flat_load_b64", "flat_load_b128", "flat_store_b32",
-                     "flat_store_b64", "flat_store_b128", "flat_load_dword", "flat_load_dwordx2",
-                     "flat_load_dwordx4", "flat_store_dword", "flat_store_dwordx2",
-                     "flat_store_dwordx4", "flat_load_ushort", "flat_load_short_d16",
-                     "flat_store_short", "flat_load_u16", "flat_load_d16_b16", "flat_store_b16"});
+  if (consan_flat_load_subword_semantics(mnemonic))
+    return true;
+  return equals_any(mnemonic, {"flat_load_b32", "flat_load_b64", "flat_load_b128", "flat_store_b32",
+                               "flat_store_b64", "flat_store_b128", "flat_load_dword",
+                               "flat_load_dwordx2", "flat_load_dwordx4", "flat_store_dword",
+                               "flat_store_dwordx2", "flat_store_dwordx4", "flat_load_ushort",
+                               "flat_store_short", "flat_load_u16", "flat_store_b16"});
 }
 
 struct SkippedMoiFlatCounts {

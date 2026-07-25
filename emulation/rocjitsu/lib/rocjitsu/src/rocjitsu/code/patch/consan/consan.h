@@ -16,6 +16,8 @@
 #include <string_view>
 #include <vector>
 
+#include "rocjitsu/code/patch/consan/consan_flat_access.h"
+
 #include "rocjitsu/code/patch/consan/consan_options.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_code_object_types.h.inc"

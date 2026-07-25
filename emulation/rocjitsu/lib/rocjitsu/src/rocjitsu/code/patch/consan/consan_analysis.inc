@@ -306,6 +306,8 @@ apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
 }
 
 [[nodiscard]] uint32_t lds_width_bits(std::string_view mnemonic) {
+  if (const auto subword = consan_flat_load_subword_semantics(mnemonic))
+    return subword->memory_width_bits;
   if (mnemonic.find("128") != std::string_view::npos ||
       mnemonic.find("x4") != std::string_view::npos)
     return 128;

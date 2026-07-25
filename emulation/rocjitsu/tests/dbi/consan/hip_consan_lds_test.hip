@@ -4,12 +4,14 @@
 /// @file hip_consan_lds_test.hip
 /// @brief Real-HIP smoke for ConSan DBI of a padded LDS store.
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <hip/hip_runtime.h>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -33,12 +35,18 @@ int main(int argc, char **argv) {
 #define RJ_CONSAN_TEST_WORKGROUP_BARRIER "s_barrier\n\t"
 #define RJ_CONSAN_TEST_DS_STORE_B32 "ds_write_b32 %0, %1\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32 "flat_store_dword v[0:1], %0\n\t"
+#define RJ_CONSAN_TEST_FLAT_LOAD_HIGH_B16 "flat_load_short_d16_hi %0, v[0:1]\n\t"
+#define RJ_CONSAN_TEST_FLAT_LOAD_HIGH_I8 "flat_load_sbyte_d16_hi %0, v[0:1]\n\t"
+#define RJ_CONSAN_TEST_FLAT_LOAD_WAIT "s_waitcnt vmcnt(0) lgkmcnt(0)\n\t"
 #else
 #define RJ_CONSAN_TEST_WORKGROUP_BARRIER                                                           \
   "s_barrier_signal -1\n\t"                                                                        \
   "s_barrier_wait -1\n\t"
 #define RJ_CONSAN_TEST_DS_STORE_B32 "ds_store_b32 %0, %1\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32 "flat_store_b32 v[0:1], %0\n\t"
+#define RJ_CONSAN_TEST_FLAT_LOAD_HIGH_B16 "flat_load_d16_hi_b16 %0, v[0:1]\n\t"
+#define RJ_CONSAN_TEST_FLAT_LOAD_HIGH_I8 "flat_load_d16_hi_i8 %0, v[0:1]\n\t"
+#define RJ_CONSAN_TEST_FLAT_LOAD_WAIT "s_wait_loadcnt_dscnt 0\n\t"
 #endif
 
 #define RJ_CONSAN_TEST_NOP_CAVE                                                                    \
@@ -194,6 +202,46 @@ __global__ __launch_bounds__(128) void padded_cross_wave_flat_lds_store(uint32_t
     out[0] = lds[0];
 }
 
+__device__ __forceinline__ uint32_t padded_flat_high_b16_load() {
+  uint32_t value = 0x00005AA5u;
+  asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
+               "v_mov_b32 v0, s14\n\t"
+               "v_mov_b32 v1, s15\n\t" RJ_CONSAN_TEST_FLAT_LOAD_HIGH_B16 RJ_CONSAN_TEST_NOP_CAVE
+                   RJ_CONSAN_TEST_FLAT_LOAD_WAIT
+               : "+v"(value)
+               :
+               : "s14", "s15", "v0", "v1", "memory");
+  return value;
+}
+
+__device__ __forceinline__ uint32_t padded_flat_high_i8_load() {
+  uint32_t value = 0x00005AA5u;
+  asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
+               "v_mov_b32 v0, s14\n\t"
+               "v_mov_b32 v1, s15\n\t" RJ_CONSAN_TEST_FLAT_LOAD_HIGH_I8 RJ_CONSAN_TEST_NOP_CAVE
+                   RJ_CONSAN_TEST_FLAT_LOAD_WAIT
+               : "+v"(value)
+               :
+               : "s14", "s15", "v0", "v1", "memory");
+  return value;
+}
+
+__global__ void padded_flat_high_d16_loads_kernel_for_instrumentation(uint32_t *out) {
+  __shared__ uint16_t lds[1];
+  if (threadIdx.x == 0)
+    lds[0] = 0xBEEFu;
+  asm volatile("" : : "v"(&lds[0]) : "memory");
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    // Declare enough architecturally allocated VGPRs for the duplicate value
+    // and independently normalized high half selected by automatic liveness,
+    // including the ordinary report-buffer action used by the production hook.
+    asm volatile("v_mov_b32 v8, 0" ::: "v8");
+    out[0] = padded_flat_high_b16_load();
+    out[1] = padded_flat_high_i8_load();
+  }
+}
+
 void launch_padded_lds_store(uint32_t *d_out, uint32_t racy) {
   padded_lds_store<<<1, 64>>>(d_out, racy);
   HIP_ASSERT(hipGetLastError());
@@ -241,6 +289,32 @@ TEST(ConSanLdsTest, PaddedCrossWaveFlatLdsStoreCompletes) {
   HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
   free_device_ptr(d_out);
   EXPECT_EQ(out, 0xF1A7005Au);
+}
+
+TEST(ConSanLdsTest, PaddedHighHalfD16FlatLoadsProduceExpectedResults) {
+  constexpr size_t kValues = 2;
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, kValues * sizeof(*d_out)));
+  HIP_ASSERT(hipMemset(d_out, 0, kValues * sizeof(*d_out)));
+
+  padded_flat_high_d16_loads_kernel_for_instrumentation<<<1, 1>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  std::array<uint32_t, kValues> out{};
+  HIP_ASSERT(hipMemcpy(out.data(), d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  hipDeviceProp_t properties{};
+  HIP_ASSERT(hipGetDeviceProperties(&properties, 0));
+  const std::string_view arch(properties.gcnArchName);
+  const bool cdna_sram_ecc = arch.starts_with("gfx942") || arch.starts_with("gfx950");
+  const uint32_t expected_b16 = cdna_sram_ecc ? 0xBEEF0000u : 0xBEEF5AA5u;
+  const uint32_t expected_i8 = cdna_sram_ecc ? 0xFFEF0000u : 0xFFEF5AA5u;
+  // SRAM-ECC CDNA execution writes the selected half and clears the other;
+  // RDNA preserves the untouched half. Instrumentation must retain either
+  // target's native behavior, including signed-byte extension.
+  EXPECT_EQ(out[0], expected_b16);
+  EXPECT_EQ(out[1], expected_i8);
 }
 
 TEST(ConSanLdsTest, PaddedRacyStoreCompletesOrTripsDbiTrap) {

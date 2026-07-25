@@ -1306,19 +1306,61 @@ std::vector<uint8_t> make_cdna4_padded_group_flat_code_object() {
 struct FlatD16LoadTarget {
   rj_code_arch_t arch;
   std::string_view label;
-  std::string_view low_mnemonic;
-  std::string_view high_mnemonic;
+  size_t target_index;
 };
 
 constexpr std::array<FlatD16LoadTarget, 4> kFlatD16LoadTargets = {{
-    {ROCJITSU_CODE_ARCH_RDNA4, "gfx1201", "flat_load_d16_b16", "flat_load_d16_hi_b16"},
-    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", "flat_load_d16_b16", "flat_load_d16_hi_b16"},
-    {ROCJITSU_CODE_ARCH_CDNA3, "gfx942", "flat_load_short_d16", "flat_load_short_d16_hi"},
-    {ROCJITSU_CODE_ARCH_CDNA4, "gfx950", "flat_load_short_d16", "flat_load_short_d16_hi"},
+    {ROCJITSU_CODE_ARCH_RDNA4, "gfx1201", 0},
+    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", 1},
+    {ROCJITSU_CODE_ARCH_CDNA3, "gfx942", 2},
+    {ROCJITSU_CODE_ARCH_CDNA4, "gfx950", 3},
 }};
 
-std::vector<uint8_t> make_group_flat_d16_load_code_object(const FlatD16LoadTarget &target,
-                                                          bool high_half = false) {
+struct FlatD16LoadForm {
+  std::array<uint16_t, 4> opcodes;
+  std::array<std::string_view, 4> mnemonics;
+  uint32_t memory_width_bits;
+  ConSanFlatSubwordPlacement placement;
+};
+
+constexpr std::array<FlatD16LoadForm, 6> kFlatD16LoadForms = {{
+    {{rdna4::kFlatLoadD16U8Vflat, gfx1250::kFlatLoadD16U8Vflat, cdna3::kFlatLoadUbyteD16Flat,
+      cdna4::kFlatLoadUbyteD16Flat},
+     {"flat_load_d16_u8", "flat_load_d16_u8", "flat_load_ubyte_d16", "flat_load_ubyte_d16"},
+     8,
+     ConSanFlatSubwordPlacement::Low16},
+    {{rdna4::kFlatLoadD16I8Vflat, gfx1250::kFlatLoadD16I8Vflat, cdna3::kFlatLoadSbyteD16Flat,
+      cdna4::kFlatLoadSbyteD16Flat},
+     {"flat_load_d16_i8", "flat_load_d16_i8", "flat_load_sbyte_d16", "flat_load_sbyte_d16"},
+     8,
+     ConSanFlatSubwordPlacement::Low16},
+    {{rdna4::kFlatLoadD16B16Vflat, gfx1250::kFlatLoadD16B16Vflat, cdna3::kFlatLoadShortD16Flat,
+      cdna4::kFlatLoadShortD16Flat},
+     {"flat_load_d16_b16", "flat_load_d16_b16", "flat_load_short_d16", "flat_load_short_d16"},
+     16,
+     ConSanFlatSubwordPlacement::Low16},
+    {{rdna4::kFlatLoadD16HiU8Vflat, gfx1250::kFlatLoadD16HiU8Vflat, cdna3::kFlatLoadUbyteD16HiFlat,
+      cdna4::kFlatLoadUbyteD16HiFlat},
+     {"flat_load_d16_hi_u8", "flat_load_d16_hi_u8", "flat_load_ubyte_d16_hi",
+      "flat_load_ubyte_d16_hi"},
+     8,
+     ConSanFlatSubwordPlacement::High16},
+    {{rdna4::kFlatLoadD16HiI8Vflat, gfx1250::kFlatLoadD16HiI8Vflat, cdna3::kFlatLoadSbyteD16HiFlat,
+      cdna4::kFlatLoadSbyteD16HiFlat},
+     {"flat_load_d16_hi_i8", "flat_load_d16_hi_i8", "flat_load_sbyte_d16_hi",
+      "flat_load_sbyte_d16_hi"},
+     8,
+     ConSanFlatSubwordPlacement::High16},
+    {{rdna4::kFlatLoadD16HiB16Vflat, gfx1250::kFlatLoadD16HiB16Vflat,
+      cdna3::kFlatLoadShortD16HiFlat, cdna4::kFlatLoadShortD16HiFlat},
+     {"flat_load_d16_hi_b16", "flat_load_d16_hi_b16", "flat_load_short_d16_hi",
+      "flat_load_short_d16_hi"},
+     16,
+     ConSanFlatSubwordPlacement::High16},
+}};
+
+std::vector<uint8_t> make_group_flat_load_code_object(const FlatD16LoadTarget &target,
+                                                      uint16_t opcode) {
   std::vector<uint32_t> text_words = {
       0xbe8001ebu, // s_mov_b64 s[0:1], SRC_SHARED_BASE
       build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, target.arch),
@@ -1326,35 +1368,27 @@ std::vector<uint8_t> make_group_flat_d16_load_code_object(const FlatD16LoadTarge
   };
   switch (target.arch) {
   case ROCJITSU_CODE_ARCH_RDNA4: {
-    const auto load =
-        rdna4::build_vflat(high_half ? rdna4::kFlatLoadD16HiB16Vflat : rdna4::kFlatLoadD16B16Vflat,
-                           {.saddr = 124, .vdst = 2, .vaddr = 0});
+    const auto load = rdna4::build_vflat(opcode, {.saddr = 124, .vdst = 2, .vaddr = 0});
     text_words.insert(text_words.end(), load.begin(), load.end());
     break;
   }
   case ROCJITSU_CODE_ARCH_GFX1250: {
-    const auto load = gfx1250::build_vflat(high_half ? gfx1250::kFlatLoadD16HiB16Vflat
-                                                     : gfx1250::kFlatLoadD16B16Vflat,
-                                           {.saddr = 124, .vdst = 2, .vaddr = 0});
+    const auto load = gfx1250::build_vflat(opcode, {.saddr = 124, .vdst = 2, .vaddr = 0});
     text_words.insert(text_words.end(), load.begin(), load.end());
     break;
   }
   case ROCJITSU_CODE_ARCH_CDNA3: {
-    const auto load =
-        cdna3::build_flat(high_half ? cdna3::kFlatLoadShortD16HiFlat : cdna3::kFlatLoadShortD16Flat,
-                          {.addr = 0, .vdst = 2});
+    const auto load = cdna3::build_flat(opcode, {.addr = 0, .vdst = 2});
     text_words.insert(text_words.end(), load.begin(), load.end());
     break;
   }
   case ROCJITSU_CODE_ARCH_CDNA4: {
-    const auto load =
-        cdna4::build_flat(high_half ? cdna4::kFlatLoadShortD16HiFlat : cdna4::kFlatLoadShortD16Flat,
-                          {.addr = 0, .vdst = 2});
+    const auto load = cdna4::build_flat(opcode, {.addr = 0, .vdst = 2});
     text_words.insert(text_words.end(), load.begin(), load.end());
     break;
   }
   default:
-    ADD_FAILURE() << "unsupported D16 load test architecture";
+    ADD_FAILURE() << "unsupported group-FLAT load test architecture";
     return {};
   }
   text_words.resize(1200, build_s_nop(0, target.arch));
@@ -1366,148 +1400,165 @@ std::vector<uint8_t> make_group_flat_d16_load_code_object(const FlatD16LoadTarge
   case ROCJITSU_CODE_ARCH_GFX1250:
     return make_gfx1250_code_object(text_words, "gfx1250_flat_d16_load");
   case ROCJITSU_CODE_ARCH_CDNA3:
-    return make_cdna3_lds_code_object(text_words, "gfx942_flat_d16_load");
+    return make_cdna3_lds_code_object(text_words, "gfx942_flat_d16_load",
+                                      /*vgpr_granulated=*/1u);
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return make_cdna4_lds_code_object(text_words, "gfx950_flat_d16_load");
+    return make_cdna4_lds_code_object(text_words, "gfx950_flat_d16_load",
+                                      /*vgpr_granulated=*/1u);
   default:
     return {};
   }
 }
 
-TEST(ConSan, SuperColliderSupportsLowHalfD16GroupFlatLoadsOnEveryTarget) {
+std::vector<uint8_t> make_group_flat_d16_load_code_object(const FlatD16LoadTarget &target,
+                                                          const FlatD16LoadForm &form) {
+  return make_group_flat_load_code_object(target, form.opcodes[target.target_index]);
+}
+
+TEST(ConSan, SuperColliderSupportsEveryD16GroupFlatLoadOnEveryTarget) {
   for (const FlatD16LoadTarget &target : kFlatD16LoadTargets) {
-    SCOPED_TRACE(target.label);
-    const std::vector<uint8_t> bytes = make_group_flat_d16_load_code_object(target);
-    ASSERT_FALSE(bytes.empty());
-    ConSanOptions options;
-    options.flavor = ConSanFlavor::SuperCollider;
-    options.probe_flat_check_trap = true;
-    options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
-    options.report_buffer_address = 0x100000000ull;
-    options.max_patches = 1;
+    for (const FlatD16LoadForm &form : kFlatD16LoadForms) {
+      const std::string_view expected_mnemonic = form.mnemonics[target.target_index];
+      SCOPED_TRACE(std::string(target.label) + " " + std::string(expected_mnemonic));
+      const std::vector<uint8_t> bytes = make_group_flat_d16_load_code_object(target, form);
+      ASSERT_FALSE(bytes.empty());
+      ConSanOptions options;
+      options.flavor = ConSanFlavor::SuperCollider;
+      options.probe_flat_check_trap = true;
+      options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+      options.report_buffer_address = 0x100000000ull;
+      options.max_patches = 1;
 
-    const ConSanResult result = try_patch_consan(bytes, options);
+      const ConSanResult result = try_patch_consan(bytes, options);
 
-    ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
-    ASSERT_EQ(result.kernels.size(), 1u);
-    ASSERT_EQ(result.kernels.front().flat_sites.size(), 1u);
-    const ConSanFlatSite &site = result.kernels.front().flat_sites.front();
-    EXPECT_EQ(site.mnemonic, target.low_mnemonic);
-    EXPECT_EQ(site.kind, ConSanLdsAccessKind::Read);
-    EXPECT_EQ(site.width_bits, 16u);
-    EXPECT_EQ(site.address_space_hint, ConSanFlatAddressSpaceHint::Group);
-    EXPECT_TRUE(consan_supercollider_supports_flat_site(site, ConSanFlatProvenanceMode::Strict));
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    EXPECT_TRUE(result.final_validation_passed);
-    const auto patch = std::ranges::find(result.patches, ConSanPatchKind::InlineFlatLoadCheckTrap,
-                                         &ConSanPatchInfo::kind);
-    ASSERT_NE(patch, result.patches.end());
-    ASSERT_TRUE(patch->scratch_vgpr);
-    ASSERT_TRUE(site.dst_vgpr);
-    ASSERT_FALSE(result.elf_bytes.empty());
-    AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
-    ASSERT_EQ(replacement.text_sections().size(), 1u);
-    const Section *text = replacement.text_sections().front();
-    const auto words = std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(text->data()),
-                                                 text->size() / sizeof(uint32_t));
-    const auto compare = instrumentation::build_v_cmp_ne_u16_vcc(vector_source_vgpr(*site.dst_vgpr),
-                                                                 *patch->scratch_vgpr, target.arch);
-    ASSERT_TRUE(compare);
-    EXPECT_NE(std::ranges::find(words, *compare), words.end());
+      ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+      ASSERT_EQ(result.kernels.size(), 1u);
+      ASSERT_EQ(result.kernels.front().flat_sites.size(), 1u);
+      const ConSanFlatSite &site = result.kernels.front().flat_sites.front();
+      EXPECT_EQ(site.mnemonic, expected_mnemonic);
+      EXPECT_EQ(site.kind, ConSanLdsAccessKind::Read);
+      EXPECT_EQ(site.width_bits, form.memory_width_bits);
+      EXPECT_EQ(site.address_space_hint, ConSanFlatAddressSpaceHint::Group);
+      const auto semantics = consan_flat_load_subword_semantics(site.mnemonic);
+      ASSERT_TRUE(semantics);
+      EXPECT_EQ(semantics->memory_width_bits, form.memory_width_bits);
+      EXPECT_EQ(semantics->placement, form.placement);
+      EXPECT_TRUE(consan_supercollider_supports_flat_site(site, ConSanFlatProvenanceMode::Strict));
+      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      EXPECT_TRUE(result.final_validation_passed);
+      const auto patch = std::ranges::find(result.patches, ConSanPatchKind::InlineFlatLoadCheckTrap,
+                                           &ConSanPatchInfo::kind);
+      ASSERT_NE(patch, result.patches.end());
+      ASSERT_TRUE(patch->scratch_vgpr);
+      ASSERT_TRUE(site.dst_vgpr);
+      ASSERT_FALSE(result.elf_bytes.empty());
+      AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_EQ(replacement.text_sections().size(), 1u);
+      const Section *text = replacement.text_sections().front();
+      const auto words = std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(text->data()),
+                                                   text->size() / sizeof(uint32_t));
+
+      uint16_t compare_lhs = *site.dst_vgpr;
+      if (form.placement == ConSanFlatSubwordPlacement::High16) {
+        ASSERT_LT(*patch->scratch_vgpr, 255u);
+        compare_lhs = static_cast<uint16_t>(*patch->scratch_vgpr + 1u);
+        const auto select_original_high = instrumentation::build_v_lshrrev_b32(
+            compare_lhs, scalar_positive_inline_u32(16u), *site.dst_vgpr, target.arch);
+        const auto select_duplicate_high = instrumentation::build_v_lshrrev_b32(
+            *patch->scratch_vgpr, scalar_positive_inline_u32(16u), *patch->scratch_vgpr,
+            target.arch);
+        ASSERT_TRUE(select_original_high);
+        ASSERT_TRUE(select_duplicate_high);
+        EXPECT_NE(std::ranges::find(words, *select_original_high), words.end());
+        EXPECT_NE(std::ranges::find(words, *select_duplicate_high), words.end());
+      }
+      const auto compare = instrumentation::build_v_cmp_ne_u16_vcc(
+          vector_source_vgpr(compare_lhs), *patch->scratch_vgpr, target.arch);
+      ASSERT_TRUE(compare);
+      EXPECT_NE(std::ranges::find(words, *compare), words.end());
+    }
   }
 }
 
-TEST(ConSan, RejectsHighHalfD16GroupFlatLoadsOnEveryTarget) {
-  for (const FlatD16LoadTarget &target : kFlatD16LoadTargets) {
-    SCOPED_TRACE(target.label);
-    const std::vector<uint8_t> bytes =
-        make_group_flat_d16_load_code_object(target, /*high_half=*/true);
-    ASSERT_FALSE(bytes.empty());
-
-    ConSanOptions supercollider_options;
-    supercollider_options.flavor = ConSanFlavor::SuperCollider;
-    supercollider_options.probe_flat_check_trap = true;
-    supercollider_options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
-    supercollider_options.report_buffer_address = 0x100000000ull;
-    supercollider_options.max_patches = 1;
-    const ConSanResult supercollider_result = try_patch_consan(bytes, supercollider_options);
-
-    ASSERT_TRUE(supercollider_result.errors.empty())
-        << testing::PrintToString(supercollider_result.errors);
-    ASSERT_EQ(supercollider_result.kernels.size(), 1u);
-    ASSERT_EQ(supercollider_result.kernels.front().flat_sites.size(), 1u);
-    const ConSanFlatSite &site = supercollider_result.kernels.front().flat_sites.front();
-    EXPECT_EQ(site.mnemonic, target.high_mnemonic);
-    EXPECT_EQ(site.kind, ConSanLdsAccessKind::Read);
-    EXPECT_EQ(site.width_bits, 16u);
-    EXPECT_EQ(site.address_space_hint, ConSanFlatAddressSpaceHint::Group);
-    EXPECT_FALSE(consan_supercollider_supports_flat_site(site, ConSanFlatProvenanceMode::Strict));
-    EXPECT_FALSE(supercollider_result.modified);
-
-    ConSanOptions moi_opts = moi_options();
-    moi_opts.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
-    const ConSanResult moi_result = try_patch_consan(bytes, moi_opts);
-
-    ASSERT_TRUE(moi_result.errors.empty()) << testing::PrintToString(moi_result.errors);
-    EXPECT_FALSE(consan_moi_supports_flat_access_mnemonic(target.high_mnemonic));
-    ASSERT_EQ(moi_result.moi_candidates.size(), 1u);
-    EXPECT_EQ(moi_result.moi_candidates.front().mnemonic, target.high_mnemonic);
-    ASSERT_EQ(moi_result.site_dispositions.size(), 1u);
-    EXPECT_EQ(moi_result.site_dispositions.front().disposition, ConSanSiteDisposition::Unsupported);
-    EXPECT_EQ(moi_result.site_dispositions.front().reason,
-              ConSanSiteDispositionReason::UnsupportedMnemonic);
-    EXPECT_EQ(moi_result.site_dispositions.front().lowering_outcome,
-              ConSanSiteLoweringOutcome::Unsupported);
-    EXPECT_EQ(moi_result.site_dispositions.front().mnemonic, target.high_mnemonic);
-  }
-}
-
-TEST(ConSanMoi, EveryEngineSupportsLowHalfD16GroupFlatLoadsOnEveryTarget) {
+TEST(ConSanMoi, EveryEngineSupportsEveryD16GroupFlatLoadOnEveryTarget) {
   constexpr std::array<ConSanMoiEngine, 3> kEngines = {
       ConSanMoiEngine::RecordReplay,
       ConSanMoiEngine::Sampled,
       ConSanMoiEngine::InlineShadow,
   };
   for (const FlatD16LoadTarget &target : kFlatD16LoadTargets) {
-    const std::vector<uint8_t> bytes = make_group_flat_d16_load_code_object(target);
-    ASSERT_FALSE(bytes.empty());
-    for (ConSanMoiEngine engine : kEngines) {
-      SCOPED_TRACE(std::string(target.label) +
-                   " engine=" + std::to_string(static_cast<uint32_t>(engine)));
-      ConSanOptions options = moi_options(engine);
-      options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
-      options.scratch_vgpr = 8;
-      options.moi_exec_save_sgpr = engine == ConSanMoiEngine::InlineShadow ? 60u : 80u;
-      options.moi_owner_vgpr = 40;
-      options.moi_epoch_vgpr = 41;
-      options.moi_report_buffer_address = 0x100000000ull;
-      options.moi_report_buffer_size =
-          engine == ConSanMoiEngine::RecordReplay ? consan_moi_report_buffer_min_bytes(1, 0, 0, 0)
-          : engine == ConSanMoiEngine::Sampled    ? direct_sampled_report_bytes(1)
-                                                  : kInlineShadowFullLdsReportBufferSize;
-      options.moi_track_barriers = false;
-      options.moi_track_atomics = false;
-      options.max_patches = 1;
+    for (const FlatD16LoadForm &form : kFlatD16LoadForms) {
+      const std::string_view expected_mnemonic = form.mnemonics[target.target_index];
+      const std::vector<uint8_t> bytes = make_group_flat_d16_load_code_object(target, form);
+      ASSERT_FALSE(bytes.empty());
+      for (ConSanMoiEngine engine : kEngines) {
+        SCOPED_TRACE(std::string(target.label) + " " + std::string(expected_mnemonic) +
+                     " engine=" + std::to_string(static_cast<uint32_t>(engine)));
+        ConSanOptions options = moi_options(engine);
+        options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+        options.scratch_vgpr = 8;
+        options.moi_exec_save_sgpr = engine == ConSanMoiEngine::InlineShadow ? 60u : 80u;
+        options.moi_owner_vgpr = 40;
+        options.moi_epoch_vgpr = 41;
+        options.moi_report_buffer_address = 0x100000000ull;
+        options.moi_report_buffer_size =
+            engine == ConSanMoiEngine::RecordReplay ? consan_moi_report_buffer_min_bytes(1, 0, 0, 0)
+            : engine == ConSanMoiEngine::Sampled    ? direct_sampled_report_bytes(1)
+                                                    : kInlineShadowFullLdsReportBufferSize;
+        options.moi_track_barriers = false;
+        options.moi_track_atomics = false;
+        options.max_patches = 1;
 
-      const ConSanResult result = try_patch_consan(bytes, options);
+        const ConSanResult result = try_patch_consan(bytes, options);
 
-      ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
-      ASSERT_EQ(result.moi_candidates.size(), 1u);
-      const ConSanMoiCandidate &candidate = result.moi_candidates.front();
-      EXPECT_EQ(candidate.mnemonic, target.low_mnemonic);
-      EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::FlatGroup);
-      EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
-      EXPECT_EQ(candidate.width_bits, 16u);
-      EXPECT_TRUE(consan_moi_supports_flat_access_mnemonic(candidate.mnemonic));
-      ASSERT_EQ(result.site_dispositions.size(), 1u);
-      EXPECT_EQ(result.site_dispositions.front().disposition, ConSanSiteDisposition::Supported);
-      EXPECT_EQ(result.site_dispositions.front().reason, ConSanSiteDispositionReason::None);
-      EXPECT_EQ(result.site_dispositions.front().lowering_outcome,
-                ConSanSiteLoweringOutcome::Patched);
-      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-      EXPECT_TRUE(result.final_validation_passed);
+        ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+        ASSERT_EQ(result.moi_candidates.size(), 1u);
+        const ConSanMoiCandidate &candidate = result.moi_candidates.front();
+        EXPECT_EQ(candidate.mnemonic, expected_mnemonic);
+        EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::FlatGroup);
+        EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
+        EXPECT_EQ(candidate.width_bits, form.memory_width_bits);
+        EXPECT_TRUE(consan_moi_supports_flat_access_mnemonic(candidate.mnemonic));
+        ASSERT_EQ(result.site_dispositions.size(), 1u);
+        EXPECT_EQ(result.site_dispositions.front().disposition, ConSanSiteDisposition::Supported);
+        EXPECT_EQ(result.site_dispositions.front().reason, ConSanSiteDispositionReason::None);
+        EXPECT_EQ(result.site_dispositions.front().lowering_outcome,
+                  ConSanSiteLoweringOutcome::Patched);
+        ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+        EXPECT_TRUE(result.final_validation_passed);
+      }
     }
   }
+}
+
+TEST(ConSanMoi, UnsupportedGroupFlatLoadRemainsInPreFilterLedger) {
+  const FlatD16LoadTarget &target = kFlatD16LoadTargets.back();
+  const std::vector<uint8_t> bytes =
+      make_group_flat_load_code_object(target, cdna4::kFlatLoadDwordx3Flat);
+  ASSERT_FALSE(bytes.empty());
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  options.max_patches = 1;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  EXPECT_FALSE(result.modified);
+  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  const ConSanMoiCandidate &candidate = result.moi_candidates.front();
+  EXPECT_EQ(candidate.mnemonic, "flat_load_dwordx3");
+  EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::FlatGroup);
+  EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
+  EXPECT_EQ(candidate.width_bits, 96u);
+  EXPECT_FALSE(consan_moi_supports_flat_access_mnemonic("flat_load_dwordx3"));
+  ASSERT_EQ(result.site_dispositions.size(), 1u);
+  const ConSanSiteDispositionRecord &site = result.site_dispositions.front();
+  EXPECT_EQ(site.site_kind, ConSanResourceSiteKind::Access);
+  EXPECT_EQ(site.mnemonic, "flat_load_dwordx3");
+  EXPECT_EQ(site.disposition, ConSanSiteDisposition::Unsupported);
+  EXPECT_EQ(site.reason, ConSanSiteDispositionReason::UnsupportedMnemonic);
+  EXPECT_EQ(site.lowering_outcome, ConSanSiteLoweringOutcome::Unsupported);
+  EXPECT_EQ(site.lowering_reason, ConSanSiteLoweringReason::SemanticUnsupported);
 }
 
 TEST(ConSan, Cdna4SuperColliderEmitsGroupFlatCheckAndReport) {

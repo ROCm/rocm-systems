@@ -2073,6 +2073,8 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
 }
 
 [[nodiscard]] std::optional<uint16_t> flat_dword_count(const ConSanFlatSite &site) {
+  if (consan_flat_load_subword_semantics(site.mnemonic))
+    return 1u;
   if (site.width_bits == 16)
     return 1u;
   if (site.width_bits == 32 || site.width_bits == 64 || site.width_bits == 128)
@@ -2090,13 +2092,11 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
   if (!dword_count)
     return false;
   if (site.kind == ConSanLdsAccessKind::Read) {
-    // D16 entries are low-half only. High-half forms need an upper-half
-    // comparison instead of the U16 comparison used by this lowering.
-    if (site.mnemonic != "flat_load_b32" && site.mnemonic != "flat_load_b64" &&
-        site.mnemonic != "flat_load_b128" && site.mnemonic != "flat_load_dword" &&
-        site.mnemonic != "flat_load_dwordx2" && site.mnemonic != "flat_load_dwordx4" &&
-        site.mnemonic != "flat_load_ushort" && site.mnemonic != "flat_load_short_d16" &&
-        site.mnemonic != "flat_load_u16" && site.mnemonic != "flat_load_d16_b16")
+    if (!consan_flat_load_subword_semantics(site.mnemonic) && site.mnemonic != "flat_load_b32" &&
+        site.mnemonic != "flat_load_b64" && site.mnemonic != "flat_load_b128" &&
+        site.mnemonic != "flat_load_dword" && site.mnemonic != "flat_load_dwordx2" &&
+        site.mnemonic != "flat_load_dwordx4" && site.mnemonic != "flat_load_ushort" &&
+        site.mnemonic != "flat_load_u16")
       return false;
     if (!site.dst_vgpr || static_cast<uint32_t>(*site.dst_vgpr) + *dword_count > 256)
       return false;
