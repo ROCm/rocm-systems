@@ -35,6 +35,7 @@ int main(int argc, char **argv) {
 #define RJ_CONSAN_TEST_WORKGROUP_BARRIER "s_barrier\n\t"
 #define RJ_CONSAN_TEST_DS_STORE_B32 "ds_write_b32 %0, %1\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32 "flat_store_dword v[0:1], %0\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED "flat_store_dword v[0:1], %[value]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 "flat_store_byte v[0:1], %0\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B8 "flat_store_byte_d16_hi v[0:1], %[value]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B16 "flat_store_short_d16_hi v[0:1], %0\n\t"
@@ -48,6 +49,7 @@ int main(int argc, char **argv) {
   "s_barrier_wait -1\n\t"
 #define RJ_CONSAN_TEST_DS_STORE_B32 "ds_store_b32 %0, %1\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32 "flat_store_b32 v[0:1], %0\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED "flat_store_b32 v[0:1], %[value]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 "flat_store_b8 v[0:1], %0\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B8 "flat_store_d16_hi_b8 v[0:1], %[value]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B16 "flat_store_d16_hi_b16 v[0:1], %0\n\t"
@@ -90,6 +92,61 @@ int main(int argc, char **argv) {
   "s_nop 0\n\t"                                                                                    \
   "s_nop 0\n\t"                                                                                    \
   "s_nop 0\n\t"
+
+#define RJ_CONSAN_TEST_KEEP_ORDINARY_SGPRS_LIVE                                                    \
+  "s_mov_b64 s[0:1], s[0:1]\n\t"                                                                   \
+  "s_mov_b64 s[2:3], s[2:3]\n\t"                                                                   \
+  "s_mov_b64 s[4:5], s[4:5]\n\t"                                                                   \
+  "s_mov_b64 s[6:7], s[6:7]\n\t"                                                                   \
+  "s_mov_b64 s[8:9], s[8:9]\n\t"                                                                   \
+  "s_mov_b64 s[10:11], s[10:11]\n\t"                                                               \
+  "s_mov_b64 s[12:13], s[12:13]\n\t"                                                               \
+  "s_mov_b64 s[14:15], s[14:15]\n\t"                                                               \
+  "s_mov_b64 s[16:17], s[16:17]\n\t"                                                               \
+  "s_mov_b64 s[18:19], s[18:19]\n\t"                                                               \
+  "s_mov_b64 s[20:21], s[20:21]\n\t"                                                               \
+  "s_mov_b64 s[22:23], s[22:23]\n\t"                                                               \
+  "s_mov_b64 s[24:25], s[24:25]\n\t"                                                               \
+  "s_mov_b64 s[26:27], s[26:27]\n\t"                                                               \
+  "s_mov_b64 s[28:29], s[28:29]\n\t"                                                               \
+  "s_mov_b64 s[30:31], s[30:31]\n\t"                                                               \
+  "s_mov_b64 s[32:33], s[32:33]\n\t"                                                               \
+  "s_mov_b64 s[34:35], s[34:35]\n\t"                                                               \
+  "s_mov_b64 s[36:37], s[36:37]\n\t"                                                               \
+  "s_mov_b64 s[38:39], s[38:39]\n\t"                                                               \
+  "s_mov_b64 s[40:41], s[40:41]\n\t"                                                               \
+  "s_mov_b64 s[42:43], s[42:43]\n\t"                                                               \
+  "s_mov_b64 s[44:45], s[44:45]\n\t"                                                               \
+  "s_mov_b64 s[46:47], s[46:47]\n\t"                                                               \
+  "s_mov_b64 s[48:49], s[48:49]\n\t"                                                               \
+  "s_mov_b64 s[50:51], s[50:51]\n\t"                                                               \
+  "s_mov_b64 s[52:53], s[52:53]\n\t"                                                               \
+  "s_mov_b64 s[54:55], s[54:55]\n\t"                                                               \
+  "s_mov_b64 s[56:57], s[56:57]\n\t"                                                               \
+  "s_mov_b64 s[58:59], s[58:59]\n\t"                                                               \
+  "s_mov_b64 s[60:61], s[60:61]\n\t"                                                               \
+  "s_mov_b64 s[62:63], s[62:63]\n\t"                                                               \
+  "s_mov_b64 s[64:65], s[64:65]\n\t"                                                               \
+  "s_mov_b64 s[66:67], s[66:67]\n\t"                                                               \
+  "s_mov_b64 s[68:69], s[68:69]\n\t"                                                               \
+  "s_mov_b64 s[70:71], s[70:71]\n\t"                                                               \
+  "s_mov_b64 s[72:73], s[72:73]\n\t"                                                               \
+  "s_mov_b64 s[74:75], s[74:75]\n\t"                                                               \
+  "s_mov_b64 s[76:77], s[76:77]\n\t"                                                               \
+  "s_mov_b64 s[78:79], s[78:79]\n\t"                                                               \
+  "s_mov_b64 s[80:81], s[80:81]\n\t"                                                               \
+  "s_mov_b64 s[82:83], s[82:83]\n\t"                                                               \
+  "s_mov_b64 s[84:85], s[84:85]\n\t"                                                               \
+  "s_mov_b64 s[86:87], s[86:87]\n\t"                                                               \
+  "s_mov_b64 s[88:89], s[88:89]\n\t"                                                               \
+  "s_mov_b64 s[90:91], s[90:91]\n\t"                                                               \
+  "s_mov_b64 s[92:93], s[92:93]\n\t"                                                               \
+  "s_mov_b64 s[94:95], s[94:95]\n\t"                                                               \
+  "s_mov_b64 s[96:97], s[96:97]\n\t"                                                               \
+  "s_mov_b64 s[98:99], s[98:99]\n\t"                                                               \
+  "s_mov_b64 s[100:101], s[100:101]\n\t"                                                           \
+  "s_mov_b64 s[102:103], s[102:103]\n\t"                                                           \
+  "s_mov_b64 s[104:105], s[104:105]\n\t"
 
 namespace {
 
@@ -194,6 +251,35 @@ __device__ __forceinline__ void padded_flat_lds_store(uint32_t value) {
                :
                : "v"(value)
                : "s14", "s15", "v0", "v1", "memory");
+}
+
+__global__ void
+padded_zero_exec_flat_lds_store_preserves_scalar_pair_for_instrumentation(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  uint32_t before_lo = 0;
+  uint32_t before_hi = 0;
+  uint32_t after_lo = 0;
+  uint32_t after_hi = 0;
+  const uint32_t value = 0x51A7C0DEu;
+  asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
+               "v_mov_b32 v0, s14\n\t"
+               "v_mov_b32 v1, s15\n\t"
+               "v_mov_b32 %[before_lo], s2\n\t"
+               "v_mov_b32 %[before_hi], s3\n\t"
+               "s_mov_b64 vcc, exec\n\t"
+               "s_mov_b64 exec, 0\n\t" RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED RJ_CONSAN_TEST_NOP_CAVE
+               "s_mov_b64 exec, vcc\n\t" RJ_CONSAN_TEST_KEEP_ORDINARY_SGPRS_LIVE
+               "v_mov_b32 %[after_lo], s2\n\t"
+               "v_mov_b32 %[after_hi], s3\n\t"
+               : [before_lo] "=&v"(before_lo), [before_hi] "=&v"(before_hi),
+                 [after_lo] "=&v"(after_lo), [after_hi] "=&v"(after_hi)
+               : [value] "v"(value)
+               : "s14", "s15", "v0", "v1", "vcc", "memory");
+  out[0] = before_lo;
+  out[1] = before_hi;
+  out[2] = after_lo;
+  out[3] = after_hi;
+  out[4] = lds[0];
 }
 
 __global__ __launch_bounds__(128) void padded_cross_wave_flat_lds_store(uint32_t *out) {
@@ -379,6 +465,23 @@ TEST(ConSanLdsTest, PaddedCrossWaveFlatLdsStoreCompletes) {
   HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
   free_device_ptr(d_out);
   EXPECT_EQ(out, 0xF1A7005Au);
+}
+
+TEST(ConSanLdsTest, ZeroExecFlatSpillPreservesLiveScalarPair) {
+  constexpr size_t kValues = 5;
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, kValues * sizeof(*d_out)));
+  HIP_ASSERT(hipMemset(d_out, 0, kValues * sizeof(*d_out)));
+
+  padded_zero_exec_flat_lds_store_preserves_scalar_pair_for_instrumentation<<<1, 1>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  std::array<uint32_t, kValues> out{};
+  HIP_ASSERT(hipMemcpy(out.data(), d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  EXPECT_EQ(out[0], out[2]);
+  EXPECT_EQ(out[1], out[3]);
 }
 
 TEST(ConSanLdsTest, PaddedHighHalfD16FlatLoadsProduceExpectedResults) {

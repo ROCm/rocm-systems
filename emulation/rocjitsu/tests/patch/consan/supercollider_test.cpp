@@ -740,6 +740,279 @@ TEST(ConSan, FlatStoreCheckTrapProofRuntimeGatesGfx1250Wave64MaybeGroupReadback)
                                                                    ROCJITSU_CODE_ARCH_GFX1250));
 }
 
+TEST(ConSan, Gfx1250FlatStoreCheckTrapSpillsLiveVccSavePairThroughVgprsInBothWaveModes) {
+  constexpr auto store =
+      gfx1250::build_vflat(gfx1250::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
+  std::vector<uint32_t> text_words = {
+      0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
+      build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_GFX1250),
+      build_v_mov_b32_e32(/*vdst=*/1, /*scalar s1=*/1, ROCJITSU_CODE_ARCH_GFX1250),
+      store[0],
+      store[1],
+      store[2],
+  };
+  for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+    text_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  for (const bool wave32 : {true, false}) {
+    SCOPED_TRACE(wave32 ? "wave32" : "wave64");
+    std::vector<uint8_t> bytes = make_gfx1250_code_object(
+        text_words, "gfx1250_flat_scalar_vcc_spill", kRdna4Wave64AllVgprsGranulated, wave32);
+    mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                      kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+    });
+    ConSanOptions options;
+    options.flavor = ConSanFlavor::SuperCollider;
+    options.probe_flat_check_trap = true;
+    options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+    options.delay_mode = ConSanDelayMode::SleepVar;
+    options.delay_nops = 1;
+    options.delay_var_ssrc = 0u;
+    options.scratch_vgpr = 3u;
+    options.max_patches = 1u;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.final_validation_passed);
+    const auto patch = std::ranges::find(
+        result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap, &ConSanPatchInfo::kind);
+    ASSERT_NE(patch, result.patches.end());
+    ASSERT_TRUE(patch->scratch_vgpr);
+    EXPECT_EQ(*patch->scratch_vgpr, 3u);
+    ASSERT_TRUE(patch->scalar_vcc_spill_vgpr);
+    EXPECT_EQ(*patch->scalar_vcc_spill_vgpr, 4u);
+    ASSERT_GE(patch->required_sgpr_count, 2u);
+    EXPECT_LE(patch->required_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
+    const uint16_t vcc_save_sgpr = static_cast<uint16_t>(patch->required_sgpr_count - 2u);
+    EXPECT_FALSE(vcc_save_sgpr == 0u || vcc_save_sgpr == 1u);
+
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    ASSERT_EQ(patched.text_sections().size(), 1u);
+    const Section *text = patched.text_sections().front();
+    std::vector<uint32_t> body(patch->trampoline_size / sizeof(uint32_t));
+    std::memcpy(body.data(), text->data() + patch->trampoline_offset, patch->trampoline_size);
+    ASSERT_GE(body.size(), 9u);
+    constexpr uint16_t kScalarSpillVgpr = 4u;
+    const auto save_lo = instrumentation::build_v_writelane_b32(
+        kScalarSpillVgpr, vcc_save_sgpr, /*lane=*/0, ROCJITSU_CODE_ARCH_GFX1250);
+    const auto save_hi = instrumentation::build_v_writelane_b32(
+        kScalarSpillVgpr, vcc_save_sgpr + 1u, /*lane=*/1, ROCJITSU_CODE_ARCH_GFX1250);
+    const auto restore_lo = instrumentation::build_v_readlane_b32(
+        vcc_save_sgpr, kScalarSpillVgpr, /*lane=*/0, ROCJITSU_CODE_ARCH_GFX1250);
+    const auto restore_hi = instrumentation::build_v_readlane_b32(
+        vcc_save_sgpr + 1u, kScalarSpillVgpr, /*lane=*/1, ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_TRUE(save_lo);
+    ASSERT_TRUE(save_hi);
+    ASSERT_TRUE(restore_lo);
+    ASSERT_TRUE(restore_hi);
+    EXPECT_TRUE(std::ranges::equal(std::span(body).first<2>(), *save_lo));
+    EXPECT_TRUE(std::ranges::equal(std::span(body).subspan(2u, 2u), *save_hi));
+    EXPECT_TRUE(std::ranges::equal(std::span(body).subspan(body.size() - 5u, 2u), *restore_lo));
+    EXPECT_TRUE(std::ranges::equal(std::span(body).subspan(body.size() - 3u, 2u), *restore_hi));
+  }
+}
+
+TEST(ConSan, Gfx1250FlatLoadCheckTrapSpillsLiveVccSavePairForFullAndHighHalfLoads) {
+  struct LoadCase {
+    const char *name;
+    std::array<uint32_t, 3> words;
+    uint16_t scalar_spill_vgpr;
+  };
+  constexpr std::array cases = {
+      LoadCase{
+          "b32",
+          gfx1250::build_vflat(gfx1250::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 2, .vaddr = 0}),
+          4u},
+      LoadCase{"d16_hi_b16",
+               gfx1250::build_vflat(gfx1250::kFlatLoadD16HiB16Vflat,
+                                    {.saddr = 124, .vdst = 2, .vaddr = 0}),
+               5u},
+  };
+  for (const auto &load_case : cases) {
+    SCOPED_TRACE(load_case.name);
+    std::vector<uint32_t> text_words = {
+        0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
+        build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_GFX1250),
+        build_v_mov_b32_e32(/*vdst=*/1, /*scalar s1=*/1, ROCJITSU_CODE_ARCH_GFX1250),
+    };
+    text_words.insert(text_words.end(), load_case.words.begin(), load_case.words.end());
+    for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+      text_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+    text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+
+    std::vector<uint8_t> bytes =
+        make_gfx1250_code_object(text_words, "gfx1250_flat_load_scalar_vcc_spill");
+    mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                      kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+    });
+    ConSanOptions options;
+    options.flavor = ConSanFlavor::SuperCollider;
+    options.probe_flat_check_trap = true;
+    options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+    options.delay_mode = ConSanDelayMode::SleepVar;
+    options.delay_nops = 1;
+    options.delay_var_ssrc = 0u;
+    options.scratch_vgpr = 3u;
+    options.max_patches = 1u;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.final_validation_passed);
+    const auto patch = std::ranges::find(
+        result.patches, ConSanPatchKind::LocalCaveFlatLoadCheckTrap, &ConSanPatchInfo::kind);
+    ASSERT_NE(patch, result.patches.end());
+    ASSERT_TRUE(patch->scalar_vcc_spill_vgpr);
+    EXPECT_EQ(*patch->scalar_vcc_spill_vgpr, load_case.scalar_spill_vgpr);
+    const uint16_t vcc_save_sgpr = static_cast<uint16_t>(patch->required_sgpr_count - 2u);
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    const Section *text = patched.text_sections().front();
+    std::vector<uint32_t> body(patch->trampoline_size / sizeof(uint32_t));
+    std::memcpy(body.data(), text->data() + patch->trampoline_offset, patch->trampoline_size);
+    ASSERT_GE(body.size(), 9u);
+    const auto save_lo = instrumentation::build_v_writelane_b32(
+        load_case.scalar_spill_vgpr, vcc_save_sgpr, /*lane=*/0, ROCJITSU_CODE_ARCH_GFX1250);
+    const auto save_hi = instrumentation::build_v_writelane_b32(
+        load_case.scalar_spill_vgpr, vcc_save_sgpr + 1u, /*lane=*/1, ROCJITSU_CODE_ARCH_GFX1250);
+    const auto restore_lo = instrumentation::build_v_readlane_b32(
+        vcc_save_sgpr, load_case.scalar_spill_vgpr, /*lane=*/0, ROCJITSU_CODE_ARCH_GFX1250);
+    const auto restore_hi = instrumentation::build_v_readlane_b32(
+        vcc_save_sgpr + 1u, load_case.scalar_spill_vgpr, /*lane=*/1, ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_TRUE(save_lo);
+    ASSERT_TRUE(save_hi);
+    ASSERT_TRUE(restore_lo);
+    ASSERT_TRUE(restore_hi);
+    EXPECT_TRUE(std::ranges::equal(std::span(body).first<2>(), *save_lo));
+    EXPECT_TRUE(std::ranges::equal(std::span(body).subspan(2u, 2u), *save_hi));
+    EXPECT_TRUE(std::ranges::equal(std::span(body).subspan(body.size() - 5u, 2u), *restore_lo));
+    EXPECT_TRUE(std::ranges::equal(std::span(body).subspan(body.size() - 3u, 2u), *restore_hi));
+  }
+}
+
+TEST(ConSan, Gfx950FlatCheckTrapFailsClosedWithoutDeadVccSavePair) {
+  const auto store = build_cdna4_flat_store_b32(/*vaddr=*/0, /*vsrc=*/2, /*byte_offset=*/0,
+                                                ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(store);
+  std::vector<uint32_t> function_words = {
+      0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
+      build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_CDNA4),
+      build_v_mov_b32_e32(/*vdst=*/1, /*scalar s1=*/1, ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  function_words.insert(function_words.end(), store->begin(), store->end());
+  for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+    function_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_CDNA4));
+  function_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  const std::array<uint32_t, 1> kernel_words = {
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes =
+      make_cdna4_code_object_with_local_function(kernel_words, function_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_flat_check_trap = true;
+  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  options.delay_nops = 1u;
+  options.scratch_vgpr = 3u;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_FALSE(result.modified);
+  EXPECT_TRUE(result.patches.empty());
+}
+
+TEST(ConSan, Gfx1250SharedFlatVccSpillUsesAllOwnersCommonSgprAllocation) {
+  constexpr auto store =
+      gfx1250::build_vflat(gfx1250::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
+  std::vector<uint32_t> helper_words = {
+      0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
+      build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_GFX1250),
+      build_v_mov_b32_e32(/*vdst=*/1, /*scalar s1=*/1, ROCJITSU_CODE_ARCH_GFX1250),
+      store[0],
+      store[1],
+      store[2],
+  };
+  for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+    helper_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+
+  TwoKernelSharedFixtureOptions fixture;
+  std::vector<uint8_t> bytes =
+      make_two_kernel_shared_helper_code_object(fixture, ROCJITSU_CODE_ARCH_RDNA4, helper_words);
+  mutate_elf_header(bytes,
+                    [](Elf64_Ehdr &header) { header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1250; });
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_EQ(original.kernels().size(), 3u);
+  const auto first_owner =
+      std::ranges::find(original.kernels(), "shared_owner_0", &AmdGpuKernelInfo::name);
+  const auto second_owner =
+      std::ranges::find(original.kernels(), "shared_owner_1", &AmdGpuKernelInfo::name);
+  ASSERT_NE(first_owner, original.kernels().end());
+  ASSERT_NE(second_owner, original.kernels().end());
+  ASSERT_LE(first_owner->descriptor_file_offset + sizeof(KD), bytes.size());
+  ASSERT_LE(second_owner->descriptor_file_offset + sizeof(KD), bytes.size());
+  const auto set_sgpr_granulation = [&](uint64_t descriptor_offset, uint32_t granulated) {
+    KD descriptor{};
+    std::memcpy(&descriptor, bytes.data() + descriptor_offset, sizeof(descriptor));
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, granulated);
+    std::memcpy(bytes.data() + descriptor_offset, &descriptor, sizeof(descriptor));
+  };
+  set_sgpr_granulation(first_owner->descriptor_file_offset, 3u);
+  set_sgpr_granulation(second_owner->descriptor_file_offset, 0u);
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_flat_check_trap = true;
+  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  options.delay_mode = ConSanDelayMode::SleepVar;
+  options.delay_nops = 1;
+  options.delay_var_ssrc = 0u;
+  options.scratch_vgpr = 3u;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto patch = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap,
+                                       &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_TRUE(patch->scalar_vcc_spill_vgpr);
+  ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(patch->owner_descriptor_file_offsets[0], first_owner->descriptor_file_offset);
+  EXPECT_EQ(patch->owner_descriptor_file_offsets[1], second_owner->descriptor_file_offset);
+  // The second owner has only one eight-SGPR granule. The shared body must
+  // borrow a pair that is already allocated by both owners rather than grow
+  // one caller around a site-local choice.
+  EXPECT_LE(patch->required_sgpr_count, 8u);
+  EXPECT_GT(patch->required_sgpr_count, 2u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  for (const auto &[owner_name, expected_granulated] :
+       {std::pair{"shared_owner_0", 3u}, std::pair{"shared_owner_1", 0u}}) {
+    const auto owner = std::ranges::find(patched.kernels(), owner_name, &AmdGpuKernelInfo::name);
+    ASSERT_NE(owner, patched.kernels().end());
+    ASSERT_LE(owner->descriptor_file_offset + sizeof(KD), result.elf_bytes.size());
+    KD descriptor{};
+    std::memcpy(&descriptor, result.elf_bytes.data() + owner->descriptor_file_offset,
+                sizeof(descriptor));
+    EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
+                              kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT),
+              expected_granulated);
+  }
+}
+
 TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepDelay) {
   const std::array<uint32_t, 1> kernel_words = {
       0xBFB00000u, // s_endpgm

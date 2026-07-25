@@ -56,6 +56,32 @@ build_gfx1250_v_cmp_ne_u16_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arc
                              {.src0 = src0, .vsrc1 = static_cast<uint8_t>(vsrc1)})[0];
 }
 
+/// @brief Encode gfx1250 `v_writelane_b32 vdst, ssrc, lane`.
+///
+/// Unlike ordinary vector writes, this fixed-lane transfer executes
+/// independently of EXEC and can therefore preserve scalar state across an
+/// instrumentation body entered with no active lanes.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_gfx1250_v_writelane_b32(uint16_t vdst, uint16_t ssrc, uint16_t lane, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || vdst > 255 || ssrc > 105 || lane > 63)
+    return std::nullopt;
+  return gfx1250::build_vop3(gfx1250::kVWritelaneB32Vop3, {.vdst = static_cast<uint8_t>(vdst),
+                                                           .src0 = ssrc,
+                                                           .src1 = scalar_positive_inline_u32(lane),
+                                                           .src2 = scalar_positive_inline_u32(0)});
+}
+
+/// @brief Encode gfx1250 `v_readlane_b32 sdst, vsrc, lane`.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_gfx1250_v_readlane_b32(uint16_t sdst, uint16_t vsrc, uint16_t lane, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || sdst > 105 || vsrc > 255 || lane > 63)
+    return std::nullopt;
+  return gfx1250::build_vop3(gfx1250::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sdst),
+                                                          .src0 = vector_source_vgpr(vsrc),
+                                                          .src1 = scalar_positive_inline_u32(lane),
+                                                          .src2 = scalar_positive_inline_u32(0)});
+}
+
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
 build_gfx1250_flat_store_b32(uint16_t vaddr, uint16_t vsrc, uint32_t byte_offset,
                              rj_code_arch_t arch) {

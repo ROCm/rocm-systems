@@ -275,6 +275,9 @@ set(RJ_CONSAN_LDS_HIGH_D16_TEST
 set(RJ_CONSAN_LDS_HIGH_D16_STORE_TEST
     "ConSanLdsTest.PaddedHighHalfD16FlatStoresProduceExpectedResults"
 )
+set(RJ_CONSAN_LDS_ZERO_EXEC_SCALAR_SPILL_TEST
+    "ConSanLdsTest.ZeroExecFlatSpillPreservesLiveScalarPair"
+)
 set(RJ_CONSAN_CDNA_MOI_FORCED_SPILL_RECORD_TEST
     "ConSanMoiCdnaTest.ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord"
 )
@@ -677,6 +680,28 @@ function(rj_add_consan_gfx1250_sim_cases)
         ACCESS_KERNEL "moi_forced_spill_preserves_live_vgprs_test_kernel_for_instrumentation"
         SHARED_KERNEL "moi_shared_noinline_lds_helper_for_instrumentation"
         SHARED_INIT_OWNER_EPOCH 0
+    )
+
+    rj_add_consan_hip_case(
+        NAME "${_sim_PREFIX}.SuperColliderZeroExecScalarSpill"
+        TARGET ${_sim_LDS_TARGET}
+        FILTER "${RJ_CONSAN_LDS_ZERO_EXEC_SCALAR_SPILL_TEST}"
+        CONFIG "${_sim_CONFIG}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX
+            "kind=inline-flat-store-check-trap[ -~]*scalar_vcc_spill_vgpr=[0-9]+"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=supercollider"
+            "RJ_CONSAN_FLAT_PROVENANCE=strict"
+            "RJ_CONSAN_DELAY_MODE=sleep_var"
+            "RJ_CONSAN_DELAY_VAR_SSRC=0"
+            "RJ_CONSAN_DELAY=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=padded_zero_exec_flat_lds_store_preserves_scalar_pair_for_instrumentation"
+            "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_MAX_PATCHES=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
     )
 
     rj_add_consan_hip_case(

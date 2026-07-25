@@ -3525,18 +3525,21 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           patch.persistent_epoch_private_offset
               ? std::to_string(*patch.persistent_epoch_private_offset)
               : "-";
+      const std::string scalar_vcc_spill_vgpr =
+          patch.scalar_vcc_spill_vgpr ? std::to_string(*patch.scalar_vcc_spill_vgpr) : "-";
       log_message(kLogDebug,
                   "ConSan proof patch reader=%llu kind=%s anchor=0x%llx "
                   "trampoline=0x%llx original_size=%u trampoline_size=%u scratch_vgpr=%s "
-                  "private_epoch_offset=%s spilled_vgprs=%u private_bytes=%u "
+                  "scalar_vcc_spill_vgpr=%s private_epoch_offset=%s spilled_vgprs=%u "
+                  "private_bytes=%u "
                   "workgroup_shadow_base=%u workgroup_shadow_bytes=%u group_bytes=%u",
                   static_cast<unsigned long long>(code_object_reader.handle),
                   patch_kind_name(patch.kind), static_cast<unsigned long long>(patch.anchor_offset),
                   static_cast<unsigned long long>(patch.trampoline_offset), patch.original_size,
-                  patch.trampoline_size, scratch_vgpr.c_str(), private_epoch_offset.c_str(),
-                  patch.spilled_vgpr_count, patch.required_private_segment_size,
-                  patch.workgroup_shadow_base, patch.workgroup_shadow_size,
-                  patch.required_group_segment_size);
+                  patch.trampoline_size, scratch_vgpr.c_str(), scalar_vcc_spill_vgpr.c_str(),
+                  private_epoch_offset.c_str(), patch.spilled_vgpr_count,
+                  patch.required_private_segment_size, patch.workgroup_shadow_base,
+                  patch.workgroup_shadow_size, patch.required_group_segment_size);
     }
     if (config->require_patch && !config->fault_dry_run &&
         !has_consan_site_instrumentation_patch(patch_result)) {

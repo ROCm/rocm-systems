@@ -66,6 +66,21 @@ choose_flat_check_trap_vcc_save_sgpr(const Instruction *inst, const LivenessAnal
   return find_pair(0);
 }
 
+[[nodiscard]] std::optional<uint16_t>
+choose_flat_check_trap_scalar_spill_pair(uint16_t allocated_sgpr_count,
+                                         const ConSanOptions &options) {
+  // The caller spills and restores the returned live pair, so any ordinary
+  // allocated pair is legal except the active delay source. Staying within
+  // the descriptor allocation (and every owner's common minimum for shared
+  // code) avoids growing an owner around a site-local choice.
+  const uint16_t limit = std::min<uint16_t>(allocated_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
+  for (uint16_t pair = 0; static_cast<uint32_t>(pair) + 2u <= limit; pair += 2u) {
+    if (!flat_check_trap_overlaps_delay_source(pair, 2u, options))
+      return pair;
+  }
+  return std::nullopt;
+}
+
 [[nodiscard]] std::optional<LdsCheckTrapIndirectScalarScratch>
 choose_flat_check_trap_indirect_scalar_scratch(const Instruction *inst,
                                                const LivenessAnalysis *liveness,
@@ -206,6 +221,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     uint32_t displaced_original_size = 0;
     std::vector<uint32_t> displaced_tail_words;
     uint16_t vcc_save_sgpr = 0;
+    std::optional<uint16_t> scalar_vcc_spill_vgpr = std::nullopt;
   };
 
   std::vector<FlatCheckTrapCandidate> inline_candidates;
@@ -252,6 +268,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   auto visit_site = [&](const ConSanFlatSite &site, std::optional<uint16_t> min_auto_scratch_vgpr,
                         std::optional<uint16_t> max_auto_scratch_vgpr,
                         std::optional<uint16_t> min_fresh_sgpr,
+                        std::optional<uint16_t> allocated_sgpr_count,
                         std::vector<uint64_t> owner_descriptor_file_offsets) {
     if (!is_supported_flat_check_trap_site(site, options.flat_provenance_mode))
       return;
@@ -270,7 +287,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                 (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
             ? 1u
             : 0u;
-    const uint32_t scratch_vgprs =
+    const uint32_t instrumentation_scratch_vgprs =
         probe_scratch_vgprs + report_alignment_padding + report_action_scratch_vgprs(options);
     const uint64_t comparison_setup_words = flat_check_trap_comparison_setup_words(site);
     const uint64_t mismatch_words =
@@ -280,25 +297,38 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     const bool needs_runtime_group_gate =
         arch == ROCJITSU_CODE_ARCH_GFX1250 &&
         site.address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup;
-    const uint64_t requested_words = access_words + static_cast<uint64_t>(*delay_words) +
-                                     (needs_runtime_group_gate ? 2u : 0u) + access_words + 1u +
-                                     mismatch_words + 2u;
+    uint64_t requested_words = access_words + static_cast<uint64_t>(*delay_words) +
+                               (needs_runtime_group_gate ? 2u : 0u) + access_words + 1u +
+                               mismatch_words + 2u;
+    const Instruction *site_inst =
+        find_instruction_at_text_offset(KernelBlockScope(block_ptrs), site.text_offset);
+    auto vcc_save =
+        choose_flat_check_trap_vcc_save_sgpr(site_inst, liveness.get(), min_fresh_sgpr, options);
+    bool spill_vcc_save_pair_to_vgprs = false;
+    if (!vcc_save && arch == ROCJITSU_CODE_ARCH_GFX1250 && allocated_sgpr_count) {
+      vcc_save = choose_flat_check_trap_scalar_spill_pair(*allocated_sgpr_count, options);
+      spill_vcc_save_pair_to_vgprs = vcc_save.has_value();
+    }
+    if (!vcc_save)
+      return;
+    const uint32_t scratch_vgprs =
+        instrumentation_scratch_vgprs + (spill_vcc_save_pair_to_vgprs ? 1u : 0u);
+    if (spill_vcc_save_pair_to_vgprs)
+      requested_words += 8u;
     if (requested_words > 256u) {
       skipped_supported_site_for_excessive_delay = true;
       return;
     }
     const uint32_t padding_words = static_cast<uint32_t>(requested_words - 3u);
-    const Instruction *site_inst =
-        find_instruction_at_text_offset(KernelBlockScope(block_ptrs), site.text_offset);
-    const auto vcc_save =
-        choose_flat_check_trap_vcc_save_sgpr(site_inst, liveness.get(), min_fresh_sgpr, options);
-    if (!vcc_save)
-      return;
     auto scratch =
         choose_flat_scratch_vgpr(site, options, site_inst, liveness.get(), min_auto_scratch_vgpr,
                                  max_auto_scratch_vgpr, scratch_vgprs);
     if (!scratch)
       return;
+    const std::optional<uint16_t> scalar_vcc_spill_vgpr =
+        spill_vcc_save_pair_to_vgprs ? std::optional<uint16_t>(static_cast<uint16_t>(
+                                           *scratch + instrumentation_scratch_vgprs))
+                                     : std::nullopt;
     ++scratchable_candidate_count;
     uint32_t observed_padding =
         count_nop_padding(original_bytes, site.file_offset + site.size, padding_words, arch);
@@ -331,6 +361,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                             0,
                                             {}});
         appended_cave_candidates.back().vcc_save_sgpr = *vcc_save;
+        appended_cave_candidates.back().scalar_vcc_spill_vgpr = scalar_vcc_spill_vgpr;
       }
     }
     const std::vector<const LocalNopCave *> caves = reachable_local_caves(site, requested_words);
@@ -351,8 +382,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                        0,
                                        {}});
       local_cave_candidates.back().vcc_save_sgpr = *vcc_save;
+      local_cave_candidates.back().scalar_vcc_spill_vgpr = scalar_vcc_spill_vgpr;
     }
-    if (appended_cave_offset != 0 && result.elf_bytes.empty() &&
+    if (!scalar_vcc_spill_vgpr && appended_cave_offset != 0 && result.elf_bytes.empty() &&
         !owner_descriptor_file_offsets.empty()) {
       auto scalar_scratch = choose_flat_check_trap_indirect_scalar_scratch(
           site_inst, liveness.get(), min_fresh_sgpr, options);
@@ -451,6 +483,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                  0,
                                  {}});
     inline_candidates.back().vcc_save_sgpr = *vcc_save;
+    inline_candidates.back().scalar_vcc_spill_vgpr = scalar_vcc_spill_vgpr;
   };
 
   // Shared functions can contribute hundreds of candidate sites to the same
@@ -486,9 +519,17 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       min_fresh_sgpr = static_cast<uint16_t>(*max_refs.sgpr + 1u);
     const auto max_auto_scratch_vgpr =
         descriptor_vgpr_allocation_count(original_bytes, kernel.descriptor_file_offset, arch);
+    std::optional<uint16_t> allocated_sgpr_count;
+    if (kernel.descriptor_file_offset <= original_bytes.size() &&
+        sizeof(KD) <= original_bytes.size() - kernel.descriptor_file_offset) {
+      KD descriptor{};
+      std::memcpy(&descriptor, original_bytes.data() + kernel.descriptor_file_offset,
+                  sizeof(descriptor));
+      allocated_sgpr_count = descriptor_sgpr_allocation_count(descriptor);
+    }
     for (const ConSanFlatSite &site : kernel.flat_sites)
       visit_site(site, min_auto_scratch_vgpr, max_auto_scratch_vgpr, min_fresh_sgpr,
-                 {kernel.descriptor_file_offset});
+                 allocated_sgpr_count, {kernel.descriptor_file_offset});
   }
   for (const ConSanFunctionInfo &function : result.functions) {
     if (!options.test_kernel_name_filter.empty() &&
@@ -513,17 +554,32 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       owners.erase(std::ranges::unique(owners).begin(), owners.end());
       uint16_t common_allocated_vgpr_count = 0;
       bool has_common_allocated_vgpr_count = false;
+      bool all_owners_have_vgpr_allocations = !owners.empty();
+      uint16_t common_allocated_sgpr_count = 0;
+      bool has_common_allocated_sgpr_count = false;
+      bool all_owners_have_sgpr_allocations = !owners.empty();
       std::optional<uint16_t> max_owner_sgpr_ref = std::nullopt;
       for (uint64_t owner : owners) {
         const auto allocated = descriptor_vgpr_allocation_count(original_bytes, owner, arch);
         if (!allocated) {
-          has_common_allocated_vgpr_count = false;
-          break;
+          all_owners_have_vgpr_allocations = false;
+        } else {
+          common_allocated_vgpr_count = has_common_allocated_vgpr_count
+                                            ? std::min(common_allocated_vgpr_count, *allocated)
+                                            : *allocated;
+          has_common_allocated_vgpr_count = true;
         }
-        common_allocated_vgpr_count = has_common_allocated_vgpr_count
-                                          ? std::min(common_allocated_vgpr_count, *allocated)
-                                          : *allocated;
-        has_common_allocated_vgpr_count = true;
+        if (owner > original_bytes.size() || sizeof(KD) > original_bytes.size() - owner) {
+          all_owners_have_sgpr_allocations = false;
+        } else {
+          KD descriptor{};
+          std::memcpy(&descriptor, original_bytes.data() + owner, sizeof(descriptor));
+          const uint16_t allocated_sgprs = descriptor_sgpr_allocation_count(descriptor);
+          common_allocated_sgpr_count = has_common_allocated_sgpr_count
+                                            ? std::min(common_allocated_sgpr_count, allocated_sgprs)
+                                            : allocated_sgprs;
+          has_common_allocated_sgpr_count = true;
+        }
         const auto owner_kernel = kernels_by_descriptor.find(owner);
         if (owner_kernel != kernels_by_descriptor.end()) {
           const KernelMaxRegisterRefs &refs = max_refs_by_descriptor.at(owner);
@@ -535,11 +591,15 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       std::optional<uint16_t> min_fresh_sgpr;
       if (max_owner_sgpr_ref && *max_owner_sgpr_ref + 1u < REGISTER_SET_ALLOCATABLE_SGPRS)
         min_fresh_sgpr = static_cast<uint16_t>(*max_owner_sgpr_ref + 1u);
-      if (has_common_allocated_vgpr_count) {
+      std::optional<uint16_t> allocated_sgpr_count;
+      if (all_owners_have_sgpr_allocations && has_common_allocated_sgpr_count)
+        allocated_sgpr_count = common_allocated_sgpr_count;
+      if (all_owners_have_vgpr_allocations && has_common_allocated_vgpr_count) {
         visit_site(site, std::nullopt, std::optional<uint16_t>{common_allocated_vgpr_count},
-                   min_fresh_sgpr, std::move(owners));
+                   min_fresh_sgpr, allocated_sgpr_count, std::move(owners));
       } else {
-        visit_site(site, std::nullopt, std::nullopt, min_fresh_sgpr, std::move(owners));
+        visit_site(site, std::nullopt, std::nullopt, min_fresh_sgpr, allocated_sgpr_count,
+                   std::move(owners));
       }
     }
   }
@@ -765,6 +825,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     planned.info.kind = patch_kind;
     planned.info.anchor_offset = site.text_offset;
     planned.info.scratch_vgpr = candidate.scratch_vgpr;
+    planned.info.scalar_vcc_spill_vgpr = candidate.scalar_vcc_spill_vgpr;
     planned.info.owner_descriptor_file_offsets = candidate.owner_descriptor_file_offsets;
     planned.info.required_sgpr_count = static_cast<uint16_t>(candidate.vcc_save_sgpr + 2u);
     planned.words.reserve(static_cast<size_t>(candidate.requested_words));
@@ -937,6 +998,31 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         return;
       }
       planned.words[*runtime_group_gate_branch_index] = *skip_probe;
+    }
+    if (candidate.scalar_vcc_spill_vgpr) {
+      std::array<uint32_t, 4> save_scalar_pair{};
+      std::array<uint32_t, 4> restore_scalar_pair{};
+      for (uint16_t i = 0; i < 2u; ++i) {
+        const auto save = instrumentation::build_v_writelane_b32(
+            *candidate.scalar_vcc_spill_vgpr, static_cast<uint16_t>(candidate.vcc_save_sgpr + i), i,
+            arch);
+        const auto restore = instrumentation::build_v_readlane_b32(
+            static_cast<uint16_t>(candidate.vcc_save_sgpr + i), *candidate.scalar_vcc_spill_vgpr, i,
+            arch);
+        if (!save || !restore) {
+          result.errors.emplace_back(
+              "ConSan flat check/trap proof could not encode its scalar VCC-save spill");
+          return;
+        }
+        std::copy(save->begin(), save->end(), save_scalar_pair.begin() + 2u * i);
+        std::copy(restore->begin(), restore->end(), restore_scalar_pair.begin() + 2u * i);
+      }
+      std::vector<uint32_t> wrapped;
+      wrapped.reserve(save_scalar_pair.size() + planned.words.size() + restore_scalar_pair.size());
+      wrapped.insert(wrapped.end(), save_scalar_pair.begin(), save_scalar_pair.end());
+      wrapped.insert(wrapped.end(), planned.words.begin(), planned.words.end());
+      wrapped.insert(wrapped.end(), restore_scalar_pair.begin(), restore_scalar_pair.end());
+      planned.words = std::move(wrapped);
     }
 
     if (use_trampoline) {

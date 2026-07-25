@@ -279,6 +279,16 @@ build_v_readfirstlane_b32(uint16_t sdst, uint16_t vsrc, rj_code_arch_t arch) {
                                           : rocjitsu::build_v_readfirstlane_b32(sdst, vsrc, arch);
 }
 
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_v_writelane_b32(uint16_t vdst, uint16_t ssrc, uint16_t lane, rj_code_arch_t arch) {
+  return build_gfx1250_v_writelane_b32(vdst, ssrc, lane, arch);
+}
+
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_v_readlane_b32(uint16_t sdst, uint16_t vsrc, uint16_t lane, rj_code_arch_t arch) {
+  return build_gfx1250_v_readlane_b32(sdst, vsrc, lane, arch);
+}
+
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_wait_flat_load0(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
