@@ -35,18 +35,26 @@ int main(int argc, char **argv) {
 #define RJ_CONSAN_TEST_WORKGROUP_BARRIER "s_barrier\n\t"
 #define RJ_CONSAN_TEST_DS_STORE_B32 "ds_write_b32 %0, %1\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32 "flat_store_dword v[0:1], %0\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 "flat_store_byte v[0:1], %0\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B8 "flat_store_byte_d16_hi v[0:1], %[value]\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B16 "flat_store_short_d16_hi v[0:1], %0\n\t"
 #define RJ_CONSAN_TEST_FLAT_LOAD_HIGH_B16 "flat_load_short_d16_hi %0, v[0:1]\n\t"
 #define RJ_CONSAN_TEST_FLAT_LOAD_HIGH_I8 "flat_load_sbyte_d16_hi %0, v[0:1]\n\t"
 #define RJ_CONSAN_TEST_FLAT_LOAD_WAIT "s_waitcnt vmcnt(0) lgkmcnt(0)\n\t"
+#define RJ_CONSAN_TEST_SET_VCC_TRUE "v_cmp_eq_u32_e32 vcc, %[value], %[value]\n\t"
 #else
 #define RJ_CONSAN_TEST_WORKGROUP_BARRIER                                                           \
   "s_barrier_signal -1\n\t"                                                                        \
   "s_barrier_wait -1\n\t"
 #define RJ_CONSAN_TEST_DS_STORE_B32 "ds_store_b32 %0, %1\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32 "flat_store_b32 v[0:1], %0\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 "flat_store_b8 v[0:1], %0\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B8 "flat_store_d16_hi_b8 v[0:1], %[value]\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B16 "flat_store_d16_hi_b16 v[0:1], %0\n\t"
 #define RJ_CONSAN_TEST_FLAT_LOAD_HIGH_B16 "flat_load_d16_hi_b16 %0, v[0:1]\n\t"
 #define RJ_CONSAN_TEST_FLAT_LOAD_HIGH_I8 "flat_load_d16_hi_i8 %0, v[0:1]\n\t"
 #define RJ_CONSAN_TEST_FLAT_LOAD_WAIT "s_wait_loadcnt_dscnt 0\n\t"
+#define RJ_CONSAN_TEST_SET_VCC_TRUE "v_cmp_eq_u32_e32 %[value], %[value]\n\t"
 #endif
 
 #define RJ_CONSAN_TEST_NOP_CAVE                                                                    \
@@ -242,6 +250,88 @@ __global__ void padded_flat_high_d16_loads_kernel_for_instrumentation(uint32_t *
   }
 }
 
+__device__ __forceinline__ uint32_t padded_flat_high_b8_store(uint32_t value) {
+  uint32_t vcc_survived = 0;
+  asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
+               "v_mov_b32 v0, s14\n\t"
+               "v_mov_b32 v1, s15\n\t" RJ_CONSAN_TEST_SET_VCC_TRUE
+                   RJ_CONSAN_TEST_FLAT_STORE_HIGH_B8 RJ_CONSAN_TEST_NOP_CAVE "s_cbranch_vccz 1f\n\t"
+               "v_mov_b32 %[survived], 1\n\t"
+               "1:\n\t"
+               : [survived] "+v"(vcc_survived)
+               : [value] "v"(value)
+               : "s14", "s15", "v0", "v1", "vcc", "memory");
+  return vcc_survived;
+}
+
+__device__ __forceinline__ void padded_flat_low_b8_store(uint32_t value) {
+  asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
+               "v_mov_b32 v0, s14\n\t"
+               "v_mov_b32 v1, s15\n\t" RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 RJ_CONSAN_TEST_NOP_CAVE
+               :
+               : "v"(value)
+               : "s14", "s15", "v0", "v1", "memory");
+}
+
+__device__ __forceinline__ void padded_flat_high_b16_store(uint32_t value) {
+  asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
+               "v_mov_b32 v0, s14\n\t"
+               "v_mov_b32 v1, s15\n\t" RJ_CONSAN_TEST_FLAT_STORE_HIGH_B16 RJ_CONSAN_TEST_NOP_CAVE
+               :
+               : "v"(value)
+               : "s14", "s15", "v0", "v1", "memory");
+}
+
+__global__ void padded_flat_high_d16_store_b8_kernel_for_instrumentation(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  uint32_t vcc_survived = 0;
+  if (threadIdx.x == 0)
+    lds[0] = 0xAAAA5555u;
+  asm volatile("" : : "v"(&lds[0]) : "memory");
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    // The production liveness planner chooses the readback, normalization, and
+    // report scratch from the declared allocation.
+    asm volatile("v_mov_b32 v8, 0" ::: "v8");
+    vcc_survived = padded_flat_high_b8_store(0x00EF0000u);
+  }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    out[0] = lds[0];
+    out[2] = vcc_survived;
+  }
+}
+
+__global__ void padded_flat_high_d16_store_b16_kernel_for_instrumentation(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  if (threadIdx.x == 0)
+    lds[0] = 0xAAAA5555u;
+  asm volatile("" : : "v"(&lds[0]) : "memory");
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    asm volatile("v_mov_b32 v8, 0" ::: "v8");
+    padded_flat_high_b16_store(0xBEEF0000u);
+  }
+  __syncthreads();
+  if (threadIdx.x == 0)
+    out[1] = lds[0];
+}
+
+__global__ void padded_flat_high_d16_store_low_b8_kernel_for_instrumentation(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  if (threadIdx.x == 0)
+    lds[0] = 0xAAAA5555u;
+  asm volatile("" : : "v"(&lds[0]) : "memory");
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    asm volatile("v_mov_b32 v8, 0" ::: "v8");
+    padded_flat_low_b8_store(0x000000EFu);
+  }
+  __syncthreads();
+  if (threadIdx.x == 0)
+    out[3] = lds[0];
+}
+
 void launch_padded_lds_store(uint32_t *d_out, uint32_t racy) {
   padded_lds_store<<<1, 64>>>(d_out, racy);
   HIP_ASSERT(hipGetLastError());
@@ -315,6 +405,29 @@ TEST(ConSanLdsTest, PaddedHighHalfD16FlatLoadsProduceExpectedResults) {
   // target's native behavior, including signed-byte extension.
   EXPECT_EQ(out[0], expected_b16);
   EXPECT_EQ(out[1], expected_i8);
+}
+
+TEST(ConSanLdsTest, PaddedHighHalfD16FlatStoresProduceExpectedResults) {
+  constexpr size_t kValues = 4;
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, kValues * sizeof(*d_out)));
+  HIP_ASSERT(hipMemset(d_out, 0, kValues * sizeof(*d_out)));
+
+  padded_flat_high_d16_store_b8_kernel_for_instrumentation<<<1, 1>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  padded_flat_high_d16_store_b16_kernel_for_instrumentation<<<1, 1>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  padded_flat_high_d16_store_low_b8_kernel_for_instrumentation<<<1, 1>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  std::array<uint32_t, kValues> out{};
+  HIP_ASSERT(hipMemcpy(out.data(), d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  EXPECT_EQ(out[0], 0xAAAA55EFu);
+  EXPECT_EQ(out[1], 0xAAAABEEFu);
+  EXPECT_EQ(out[2], 1u);
+  EXPECT_EQ(out[3], 0xAAAA55EFu);
 }
 
 TEST(ConSanLdsTest, PaddedRacyStoreCompletesOrTripsDbiTrap) {

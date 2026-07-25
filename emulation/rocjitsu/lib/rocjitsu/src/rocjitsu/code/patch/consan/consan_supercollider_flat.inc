@@ -1,3 +1,130 @@
+[[nodiscard]] uint16_t flat_check_trap_comparison_scratch_vgprs(const ConSanFlatSite &site) {
+  if (const auto load = consan_flat_load_subword_semantics(site.mnemonic))
+    return load->placement == ConSanFlatSubwordPlacement::High16 ? 1u : 0u;
+  if (const auto store = consan_flat_store_subword_semantics(site.mnemonic))
+    return store->placement == ConSanFlatSubwordPlacement::High16 || store->memory_width_bits == 8u
+               ? 1u
+               : 0u;
+  return 0u;
+}
+
+[[nodiscard]] uint32_t flat_check_trap_comparison_setup_words(const ConSanFlatSite &site) {
+  if (const auto load = consan_flat_load_subword_semantics(site.mnemonic))
+    return load->placement == ConSanFlatSubwordPlacement::High16 ? 2u : 0u;
+  if (const auto store = consan_flat_store_subword_semantics(site.mnemonic)) {
+    return (store->placement == ConSanFlatSubwordPlacement::High16 ? 1u : 0u) +
+           (store->memory_width_bits == 8u ? 2u : 0u);
+  }
+  return 0u;
+}
+
+[[nodiscard]] std::optional<uint32_t>
+build_flat_check_trap_vcc_move(uint16_t dst_sgpr, uint16_t src_sgpr, rj_code_arch_t arch) {
+  return instrumentation::build_s_mov_b64(dst_sgpr, src_sgpr, arch);
+}
+
+[[nodiscard]] bool flat_check_trap_sgpr_ranges_overlap(uint16_t lhs_base, uint16_t lhs_width,
+                                                       uint16_t rhs_base, uint16_t rhs_width) {
+  return static_cast<uint32_t>(lhs_base) < static_cast<uint32_t>(rhs_base) + rhs_width &&
+         static_cast<uint32_t>(rhs_base) < static_cast<uint32_t>(lhs_base) + lhs_width;
+}
+
+[[nodiscard]] std::optional<uint16_t>
+flat_check_trap_delay_source_sgpr(const ConSanOptions &options) {
+  if (options.delay_nops == 0 || options.delay_mode != ConSanDelayMode::SleepVar ||
+      options.delay_var_ssrc >= REGISTER_SET_ALLOCATABLE_SGPRS)
+    return std::nullopt;
+  return options.delay_var_ssrc;
+}
+
+[[nodiscard]] bool flat_check_trap_overlaps_delay_source(uint16_t base, uint16_t width,
+                                                         const ConSanOptions &options) {
+  const auto delay_source = flat_check_trap_delay_source_sgpr(options);
+  return delay_source && flat_check_trap_sgpr_ranges_overlap(base, width, *delay_source, 1u);
+}
+
+[[nodiscard]] std::optional<uint16_t>
+choose_flat_check_trap_vcc_save_sgpr(const Instruction *inst, const LivenessAnalysis *liveness,
+                                     std::optional<uint16_t> min_preferred_sgpr,
+                                     const ConSanOptions &options) {
+  if (inst == nullptr || liveness == nullptr)
+    return std::nullopt;
+  const auto find_pair = [&](uint16_t start) -> std::optional<uint16_t> {
+    while (auto pair = liveness->find_free_sgpr_pair(inst, start)) {
+      if (!flat_check_trap_overlaps_delay_source(*pair, 2u, options))
+        return pair;
+      if (*pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
+        return std::nullopt;
+      start = static_cast<uint16_t>(*pair + 2u);
+    }
+    return std::nullopt;
+  };
+  if (min_preferred_sgpr) {
+    if (auto high_pair = find_pair(*min_preferred_sgpr))
+      return high_pair;
+  }
+  return find_pair(0);
+}
+
+[[nodiscard]] std::optional<LdsCheckTrapIndirectScalarScratch>
+choose_flat_check_trap_indirect_scalar_scratch(const Instruction *inst,
+                                               const LivenessAnalysis *liveness,
+                                               std::optional<uint16_t> min_preferred_sgpr,
+                                               const ConSanOptions &options) {
+  if (inst == nullptr || liveness == nullptr)
+    return std::nullopt;
+
+  const auto search = [&](uint16_t start) -> std::optional<LdsCheckTrapIndirectScalarScratch> {
+    uint16_t vcc_start = start;
+    while (auto vcc_pair = liveness->find_free_sgpr_pair(inst, vcc_start)) {
+      if (flat_check_trap_overlaps_delay_source(*vcc_pair, 2u, options)) {
+        if (*vcc_pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
+          return std::nullopt;
+        vcc_start = static_cast<uint16_t>(*vcc_pair + 2u);
+        continue;
+      }
+
+      uint16_t pc_start = start;
+      while (auto pc_pair = liveness->find_free_sgpr_pair(inst, pc_start)) {
+        if (flat_check_trap_sgpr_ranges_overlap(*pc_pair, 2u, *vcc_pair, 2u) ||
+            flat_check_trap_overlaps_delay_source(*pc_pair, 2u, options)) {
+          if (*pc_pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
+            break;
+          pc_start = static_cast<uint16_t>(*pc_pair + 2u);
+          continue;
+        }
+
+        uint16_t scc_start = start;
+        while (auto scc_save = liveness->find_free_sgpr(inst, scc_start)) {
+          if (!flat_check_trap_sgpr_ranges_overlap(*scc_save, 1u, *vcc_pair, 2u) &&
+              !flat_check_trap_sgpr_ranges_overlap(*scc_save, 1u, *pc_pair, 2u) &&
+              !flat_check_trap_overlaps_delay_source(*scc_save, 1u, options)) {
+            return LdsCheckTrapIndirectScalarScratch{*vcc_pair, *pc_pair, *scc_save};
+          }
+          if (*scc_save + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS)
+            break;
+          scc_start = static_cast<uint16_t>(*scc_save + 1u);
+        }
+
+        if (*pc_pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
+          break;
+        pc_start = static_cast<uint16_t>(*pc_pair + 2u);
+      }
+
+      if (*vcc_pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
+        break;
+      vcc_start = static_cast<uint16_t>(*vcc_pair + 2u);
+    }
+    return std::nullopt;
+  };
+
+  if (min_preferred_sgpr) {
+    if (auto high_scratch = search(*min_preferred_sgpr))
+      return high_scratch;
+  }
+  return search(0);
+}
+
 void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                      const ConSanOptions &options, ConSanResult &result,
                                      std::span<const ByteRange> initial_reserved_ranges = {}) {
@@ -78,6 +205,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     bool entry_island_at_anchor = false;
     uint32_t displaced_original_size = 0;
     std::vector<uint32_t> displaced_tail_words;
+    uint16_t vcc_save_sgpr = 0;
   };
 
   std::vector<FlatCheckTrapCandidate> inline_candidates;
@@ -135,9 +263,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         mismatch_action_word_count(options, arch, result.errors, "ConSan flat check/trap proof");
     if (!action_words)
       return;
-    const auto subword = consan_flat_load_subword_semantics(site.mnemonic);
-    const uint32_t comparison_scratch_vgprs =
-        subword && subword->placement == ConSanFlatSubwordPlacement::High16 ? 1u : 0u;
+    const uint32_t comparison_scratch_vgprs = flat_check_trap_comparison_scratch_vgprs(site);
     const uint32_t probe_scratch_vgprs = *required_vgprs + comparison_scratch_vgprs;
     const uint32_t report_alignment_padding =
         options.report_buffer_address &&
@@ -146,7 +272,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
             : 0u;
     const uint32_t scratch_vgprs =
         probe_scratch_vgprs + report_alignment_padding + report_action_scratch_vgprs(options);
-    const uint64_t comparison_setup_words = comparison_scratch_vgprs == 0u ? 0u : 2u;
+    const uint64_t comparison_setup_words = flat_check_trap_comparison_setup_words(site);
     const uint64_t mismatch_words =
         *required_vgprs > 1u ? 2u * *required_vgprs + 1u + *action_words
                              : comparison_setup_words + (2u + *action_words) * *required_vgprs;
@@ -156,7 +282,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         site.address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup;
     const uint64_t requested_words = access_words + static_cast<uint64_t>(*delay_words) +
                                      (needs_runtime_group_gate ? 2u : 0u) + access_words + 1u +
-                                     mismatch_words;
+                                     mismatch_words + 2u;
     if (requested_words > 256u) {
       skipped_supported_site_for_excessive_delay = true;
       return;
@@ -164,6 +290,10 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     const uint32_t padding_words = static_cast<uint32_t>(requested_words - 3u);
     const Instruction *site_inst =
         find_instruction_at_text_offset(KernelBlockScope(block_ptrs), site.text_offset);
+    const auto vcc_save =
+        choose_flat_check_trap_vcc_save_sgpr(site_inst, liveness.get(), min_fresh_sgpr, options);
+    if (!vcc_save)
+      return;
     auto scratch =
         choose_flat_scratch_vgpr(site, options, site_inst, liveness.get(), min_auto_scratch_vgpr,
                                  max_auto_scratch_vgpr, scratch_vgprs);
@@ -200,6 +330,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                             false,
                                             0,
                                             {}});
+        appended_cave_candidates.back().vcc_save_sgpr = *vcc_save;
       }
     }
     const std::vector<const LocalNopCave *> caves = reachable_local_caves(site, requested_words);
@@ -219,19 +350,20 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                        false,
                                        0,
                                        {}});
+      local_cave_candidates.back().vcc_save_sgpr = *vcc_save;
     }
     if (appended_cave_offset != 0 && result.elf_bytes.empty() &&
         !owner_descriptor_file_offsets.empty()) {
-      auto scalar_scratch =
-          choose_lds_check_trap_indirect_scalar_scratch(site_inst, liveness.get(), min_fresh_sgpr);
+      auto scalar_scratch = choose_flat_check_trap_indirect_scalar_scratch(
+          site_inst, liveness.get(), min_fresh_sgpr, options);
       // Prefer fresh scalar words above every owner reference.  A maximally
       // allocated owner may leave too little room there for the PC pair plus
       // SCC/VCC saves even though liveness proves a disjoint dead window at
       // the shared function site.  Match the LDS far-trampoline policy and
       // use that bounded fallback before rejecting the supported access.
       if (!scalar_scratch && min_fresh_sgpr) {
-        scalar_scratch =
-            choose_lds_check_trap_indirect_scalar_scratch(site_inst, liveness.get(), std::nullopt);
+        scalar_scratch = choose_flat_check_trap_indirect_scalar_scratch(site_inst, liveness.get(),
+                                                                        std::nullopt, options);
       }
       if (scalar_scratch) {
         for (const LocalNopCave &island : flat_entry_islands) {
@@ -241,7 +373,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                                   nullptr,
                                                   &island,
                                                   *scratch,
-                                                  requested_words + 2u,
+                                                  requested_words,
                                                   false,
                                                   true,
                                                   scalar_scratch,
@@ -250,6 +382,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                                   false,
                                                   0,
                                                   {}});
+          indirect_appended_candidates.back().vcc_save_sgpr = scalar_scratch->vcc_save_sgpr;
         }
         if (code_object.text_sections().size() == 1) {
           const Section *text = code_object.text_sections().front();
@@ -282,7 +415,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                           nullptr,
                                           nullptr,
                                           *scratch,
-                                          requested_words + 2u,
+                                          requested_words,
                                           false,
                                           true,
                                           scalar_scratch,
@@ -292,6 +425,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                           0,
                                           {}};
             direct.entry_island_at_anchor = true;
+            direct.vcc_save_sgpr = scalar_scratch->vcc_save_sgpr;
             direct.displaced_original_size =
                 static_cast<uint32_t>(displaced_words.size() * sizeof(uint32_t));
             direct.displaced_tail_words.assign(
@@ -316,6 +450,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                  false,
                                  0,
                                  {}});
+    inline_candidates.back().vcc_save_sgpr = *vcc_save;
   };
 
   // Shared functions can contribute hundreds of candidate sites to the same
@@ -630,7 +765,18 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     planned.info.kind = patch_kind;
     planned.info.anchor_offset = site.text_offset;
     planned.info.scratch_vgpr = candidate.scratch_vgpr;
+    planned.info.owner_descriptor_file_offsets = candidate.owner_descriptor_file_offsets;
+    planned.info.required_sgpr_count = static_cast<uint16_t>(candidate.vcc_save_sgpr + 2u);
     planned.words.reserve(static_cast<size_t>(candidate.requested_words));
+    const auto save_vcc =
+        build_flat_check_trap_vcc_move(candidate.vcc_save_sgpr, kRdna4VccLo, arch);
+    const auto restore_vcc =
+        build_flat_check_trap_vcc_move(kRdna4VccLo, candidate.vcc_save_sgpr, arch);
+    if (!save_vcc || !restore_vcc) {
+      result.errors.emplace_back("ConSan flat check/trap proof could not preserve VCC");
+      return;
+    }
+    planned.words.push_back(*save_vcc);
     planned.words.insert(planned.words.end(), original_access.begin(),
                          original_access.begin() + access_words);
     if (!append_delay_words(planned.words, arch, options, result.errors,
@@ -639,10 +785,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     const bool needs_runtime_group_gate =
         arch == ROCJITSU_CODE_ARCH_GFX1250 &&
         site.address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup;
-    if (candidate.indirect_scratch && needs_runtime_group_gate) {
-      planned.words.push_back(
-          build_s_mov_b32(candidate.indirect_scratch->vcc_save_sgpr, kRdna4VccLo, arch));
-    }
     std::optional<size_t> runtime_group_gate_branch_index;
     if (needs_runtime_group_gate) {
       constexpr uint16_t kScalarInlineMinusOne = 0xC1;
@@ -660,14 +802,11 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     planned.words.insert(planned.words.end(), duplicate_load->begin(),
                          duplicate_load->begin() + access_words);
     planned.words.push_back(*wait_flat);
-    if (candidate.indirect_scratch && !needs_runtime_group_gate) {
-      planned.words.push_back(
-          build_s_mov_b32(candidate.indirect_scratch->vcc_save_sgpr, kRdna4VccLo, arch));
-    }
-    const auto subword = consan_flat_load_subword_semantics(site.mnemonic);
-    const bool compare_high_half =
-        subword && subword->placement == ConSanFlatSubwordPlacement::High16;
-    const uint16_t comparison_scratch_vgprs = compare_high_half ? 1u : 0u;
+    const auto load_subword = consan_flat_load_subword_semantics(site.mnemonic);
+    const auto store_subword = consan_flat_store_subword_semantics(site.mnemonic);
+    const bool compare_high_load =
+        load_subword && load_subword->placement == ConSanFlatSubwordPlacement::High16;
+    const uint16_t comparison_scratch_vgprs = flat_check_trap_comparison_scratch_vgprs(site);
     uint16_t report_scratch_vgpr =
         static_cast<uint16_t>(candidate.scratch_vgpr + *required_vgprs + comparison_scratch_vgprs);
     if (options.report_buffer_address &&
@@ -721,9 +860,10 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     } else {
       uint16_t compare_lhs_vgpr = *compare_vgpr;
       uint16_t compare_rhs_vgpr = candidate.scratch_vgpr;
-      if (compare_high_half) {
-        const uint16_t original_high_vgpr =
-            static_cast<uint16_t>(candidate.scratch_vgpr + *required_vgprs);
+      const uint16_t comparison_scratch_vgpr =
+          static_cast<uint16_t>(candidate.scratch_vgpr + *required_vgprs);
+      if (compare_high_load) {
+        const uint16_t original_high_vgpr = comparison_scratch_vgpr;
         const auto select_original_high = instrumentation::build_v_lshrrev_b32(
             original_high_vgpr, scalar_positive_inline_u32(16u), *compare_vgpr, arch);
         const auto select_duplicate_high = instrumentation::build_v_lshrrev_b32(
@@ -736,6 +876,30 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         planned.words.push_back(*select_original_high);
         planned.words.push_back(*select_duplicate_high);
         compare_lhs_vgpr = original_high_vgpr;
+      } else if (store_subword) {
+        if (store_subword->placement == ConSanFlatSubwordPlacement::High16) {
+          const auto select_store_high = instrumentation::build_v_lshrrev_b32(
+              comparison_scratch_vgpr, scalar_positive_inline_u32(16u), *compare_vgpr, arch);
+          if (!select_store_high) {
+            result.errors.emplace_back(
+                "ConSan flat check/trap proof could not select high-half store value");
+            return;
+          }
+          planned.words.push_back(*select_store_high);
+          compare_lhs_vgpr = comparison_scratch_vgpr;
+        }
+        if (store_subword->memory_width_bits == 8u) {
+          const auto mask_store_byte = instrumentation::build_v_and_b32_literal(
+              comparison_scratch_vgpr, 0xffu, compare_lhs_vgpr, arch);
+          if (!mask_store_byte) {
+            result.errors.emplace_back(
+                "ConSan flat check/trap proof could not mask byte store value");
+            return;
+          }
+          planned.words.insert(planned.words.end(), mask_store_byte->begin(),
+                               mask_store_byte->end());
+          compare_lhs_vgpr = comparison_scratch_vgpr;
+        }
       }
       const auto skip_action =
           build_s_cbranch_vccz_word(static_cast<int16_t>(mismatch_action->size()), arch);
@@ -745,7 +909,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         return;
       }
       const auto chunk_cmp_ne =
-          subword || site.width_bits == 16
+          load_subword || store_subword || site.width_bits == 16
               ? build_v_cmp_ne_u16_e32_word(compare_lhs_vgpr, compare_rhs_vgpr, arch)
               : build_v_cmp_ne_u32_e32_word(compare_lhs_vgpr, compare_rhs_vgpr, arch);
       if (!chunk_cmp_ne) {
@@ -757,10 +921,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       planned.words.insert(planned.words.end(), mismatch_action->begin(), mismatch_action->end());
     }
     const size_t runtime_group_gate_target_index = planned.words.size();
-    if (candidate.indirect_scratch) {
-      planned.words.push_back(
-          build_s_mov_b32(kRdna4VccLo, candidate.indirect_scratch->vcc_save_sgpr, arch));
-    }
+    planned.words.push_back(*restore_vcc);
     if (runtime_group_gate_branch_index) {
       const size_t distance =
           runtime_group_gate_target_index - (*runtime_group_gate_branch_index + 1u);
@@ -812,8 +973,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         planned.info.indirect_required_sgpr_count =
             std::max<uint16_t>(std::max<uint16_t>(static_cast<uint16_t>(scalar.pc_sgpr_pair + 2u),
                                                   static_cast<uint16_t>(scalar.scc_save_sgpr + 1u)),
-                               static_cast<uint16_t>(scalar.vcc_save_sgpr + 1u));
-        planned.info.owner_descriptor_file_offsets = candidate.owner_descriptor_file_offsets;
+                               static_cast<uint16_t>(scalar.vcc_save_sgpr + 2u));
         const bool return_encoded = candidate.entry_island_at_anchor
                                         ? append_lds_check_trap_indirect_jump(
                                               planned.cave_words, candidate.placement->body_offset,
@@ -936,14 +1096,15 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   }
   const bool has_appended_patch =
       std::ranges::any_of(planned_patches, &PlannedFlatCheckTrapPatch::use_appended_cave);
+  std::vector<DescriptorSgprGrowth> descriptor_sgpr_growths;
+  for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
+    for (uint64_t owner : planned.info.owner_descriptor_file_offsets)
+      descriptor_sgpr_growths.push_back(
+          {owner,
+           std::max(planned.info.required_sgpr_count, planned.info.indirect_required_sgpr_count)});
+  }
   if (has_appended_patch) {
     CodeObjectPatcher patcher(code_object);
-    std::vector<DescriptorSgprGrowth> descriptor_sgpr_growths;
-    for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
-      for (uint64_t owner : planned.info.owner_descriptor_file_offsets) {
-        descriptor_sgpr_growths.push_back({owner, planned.info.indirect_required_sgpr_count});
-      }
-    }
     if (!apply_descriptor_sgpr_growths_to_patcher(patcher, descriptor_sgpr_growths, result.errors))
       return;
     std::vector<uint8_t> new_text(patcher.text_bytes().begin(), patcher.text_bytes().end());
@@ -990,6 +1151,45 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     }
     result.elf_bytes = patcher.emit();
   } else {
+    std::optional<AmdGpuCodeObject> current_object;
+    if (!result.elf_bytes.empty())
+      current_object.emplace(patched_bytes.data(), patched_bytes.size());
+    for (const auto &[descriptor_offset, required_count] :
+         merge_descriptor_sgpr_growths(descriptor_sgpr_growths)) {
+      uint64_t current_descriptor_offset = descriptor_offset;
+      if (current_object) {
+        const auto original_kernel = std::ranges::find(code_object.kernels(), descriptor_offset,
+                                                       &AmdGpuKernelInfo::descriptor_file_offset);
+        if (original_kernel == code_object.kernels().end()) {
+          result.errors.emplace_back(
+              "ConSan flat check/trap proof could not resolve original SGPR descriptor owner");
+          return;
+        }
+        const auto current_kernel = std::ranges::find(
+            current_object->kernels(), original_kernel->name, &AmdGpuKernelInfo::name);
+        if (current_kernel == current_object->kernels().end()) {
+          result.errors.emplace_back(
+              "ConSan flat check/trap proof could not resolve relocated SGPR descriptor owner");
+          return;
+        }
+        current_descriptor_offset = current_kernel->descriptor_file_offset;
+      }
+      if (current_descriptor_offset > patched_bytes.size() ||
+          sizeof(KD) > patched_bytes.size() - current_descriptor_offset) {
+        result.errors.emplace_back(
+            "ConSan flat check/trap proof SGPR descriptor exceeds ELF bytes");
+        return;
+      }
+      KD descriptor{};
+      std::memcpy(&descriptor, patched_bytes.data() + current_descriptor_offset,
+                  sizeof(descriptor));
+      if (!grow_descriptor_sgpr_allocation(descriptor, required_count)) {
+        result.errors.emplace_back("ConSan flat check/trap proof could not grow SGPR allocation");
+        return;
+      }
+      std::memcpy(patched_bytes.data() + current_descriptor_offset, &descriptor,
+                  sizeof(descriptor));
+    }
     result.elf_bytes = std::move(patched_bytes);
   }
   result.patches.insert(result.patches.end(), new_patch_infos.begin(), new_patch_infos.end());

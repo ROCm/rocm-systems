@@ -268,7 +268,7 @@ void warn_skipped_moi_lds_candidates(std::string_view container_name, bool in_ke
 }
 
 [[nodiscard]] bool is_supported_moi_flat_access_mnemonic(std::string_view mnemonic) {
-  if (consan_flat_load_subword_semantics(mnemonic))
+  if (consan_flat_load_subword_semantics(mnemonic) || consan_flat_store_subword_semantics(mnemonic))
     return true;
   return equals_any(mnemonic, {"flat_load_b32", "flat_load_b64", "flat_load_b128", "flat_store_b32",
                                "flat_store_b64", "flat_store_b128", "flat_load_dword",

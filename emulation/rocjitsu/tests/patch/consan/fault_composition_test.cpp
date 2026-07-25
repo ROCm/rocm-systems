@@ -722,13 +722,13 @@ TEST(ConSan, PerturbationCompositionSharesTransactionWithFlatRedundantAccess) {
       0xBF94FFFFu,
       0xBFB00000u,
   };
-  const std::array<uint32_t, 17> function_words = {
+  const std::array<uint32_t, 19> function_words = {
       0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
       0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
       0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
       0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBFB00000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBFB00000u,
   };
   const std::vector<uint8_t> bytes =
       make_rdna4_code_object_with_local_function(kernel_words, function_words);

@@ -472,12 +472,22 @@ validate_sc_indirect_island_semantics(const AmdGpuCodeObject &replacement,
     const uint16_t pc = *body->indirect_pc_sgpr;
     const uint16_t scc_save = *body->indirect_saved_scc_sgpr;
     const uint16_t vcc_save = *body->indirect_saved_vcc_sgpr;
-    const bool disjoint = scc_save != vcc_save &&
-                          (scc_save < pc || scc_save > static_cast<uint16_t>(pc + 1u)) &&
-                          (vcc_save < pc || vcc_save > static_cast<uint16_t>(pc + 1u));
+    const bool is_flat_body = body->kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
+                              body->kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap;
+    const uint16_t vcc_save_width =
+        is_flat_body || arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 2u
+                                                                                             : 1u;
+    const auto ranges_overlap = [](uint16_t lhs_base, uint16_t lhs_width, uint16_t rhs_base,
+                                   uint16_t rhs_width) {
+      return static_cast<uint32_t>(lhs_base) < static_cast<uint32_t>(rhs_base) + rhs_width &&
+             static_cast<uint32_t>(rhs_base) < static_cast<uint32_t>(lhs_base) + lhs_width;
+    };
+    const bool disjoint = !ranges_overlap(scc_save, 1u, pc, 2u) &&
+                          !ranges_overlap(scc_save, 1u, vcc_save, vcc_save_width) &&
+                          !ranges_overlap(pc, 2u, vcc_save, vcc_save_width);
     const uint16_t required = std::max<uint16_t>(
         std::max<uint16_t>(static_cast<uint16_t>(pc + 2u), static_cast<uint16_t>(scc_save + 1u)),
-        static_cast<uint16_t>(vcc_save + 1u));
+        static_cast<uint16_t>(vcc_save + vcc_save_width));
     std::vector<uint32_t> expected_entry;
     std::vector<uint32_t> expected_return;
     const bool encoded =
@@ -3207,10 +3217,9 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
             std::max(requirement.required_private_bytes, patch.required_private_segment_size);
         requirement.required_group_bytes =
             std::max(requirement.required_group_bytes, patch.required_group_segment_size);
-        if (patch.indirect_required_sgpr_count != 0) {
-          requirement.required_sgpr_count =
-              std::max(requirement.required_sgpr_count, patch.indirect_required_sgpr_count);
-        }
+        requirement.required_sgpr_count =
+            std::max({requirement.required_sgpr_count, patch.required_sgpr_count,
+                      patch.indirect_required_sgpr_count});
         requirement.allow_entry_delta |=
             patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
             patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
@@ -3422,12 +3431,14 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
             original_kernel.name + "'");
       }
     }
+    const uint16_t replacement_sgpr_count =
+        descriptor_sgpr_allocation_count(replacement_descriptor);
     if (requirement.required_sgpr_count != 0 &&
-        descriptor_sgpr_allocation_count(replacement_descriptor) <
-            requirement.required_sgpr_count) {
+        replacement_sgpr_count < requirement.required_sgpr_count) {
       errors.emplace_back(
           "ConSan final validation found insufficient descriptor SGPRs for kernel '" +
-          original_kernel.name + "'");
+          original_kernel.name + "': required=" + std::to_string(requirement.required_sgpr_count) +
+          " allocated=" + std::to_string(replacement_sgpr_count));
     }
     if (requirement.required_group_bytes != 0 &&
         replacement_descriptor.group_segment_fixed_size != requirement.required_group_bytes) {

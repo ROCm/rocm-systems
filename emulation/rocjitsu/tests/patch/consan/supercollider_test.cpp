@@ -3,6 +3,7 @@
 
 #include "consan_test_support.h"
 
+#include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
 
@@ -282,13 +283,13 @@ TEST(ConSan, FlatLoadCheckTrapProofRewritesPaddedLocalFunctionSite) {
   const std::array<uint32_t, 1> kernel_words = {
       0xBFB00000u, // s_endpgm
   };
-  const std::array<uint32_t, 17> function_words = {
+  const std::array<uint32_t, 19> function_words = {
       0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
       0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
       0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
       0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes =
@@ -307,20 +308,29 @@ TEST(ConSan, FlatLoadCheckTrapProofRewritesPaddedLocalFunctionSite) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 24u);
   EXPECT_EQ(result.patches.front().trampoline_offset, 36u);
-  EXPECT_EQ(result.patches.front().original_size, 44u);
+  EXPECT_EQ(result.patches.front().original_size, 52u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 5u);
   ASSERT_EQ(result.elf_bytes.size(), bytes.size());
   EXPECT_NE(result.elf_bytes, bytes);
 
-  const std::array<uint32_t, 11> expected_words = {
-      0xEC05007Cu, 0x00000002u, 0x00000000u, // original flat_load_b32 v2, v[0:1]
-      0xBF800000u,                           // delay
-      0xEC05007Cu, 0x00000005u, 0x00000000u, // duplicate flat_load_b32 v5, v[0:1]
-      0xBFC60000u,                           // s_wait_dscnt 0
-      0x7C9A0B02u,                           // v_cmp_ne_u32_e32 v2, v5
-      0xBFA30001u,                           // s_cbranch_vccz +1
-      0xBF900000u,                           // s_trap 0
+  ASSERT_GE(result.patches.front().required_sgpr_count, 2u);
+  const uint16_t vcc_save_sgpr =
+      static_cast<uint16_t>(result.patches.front().required_sgpr_count - 2u);
+  const std::array<uint32_t, 13> expected_words = {
+      *instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      0xEC05007Cu,
+      0x00000002u,
+      0x00000000u, // original flat_load_b32 v2, v[0:1]
+      0xBF800000u, // delay
+      0xEC05007Cu,
+      0x00000005u,
+      0x00000000u, // duplicate flat_load_b32 v5, v[0:1]
+      0xBFC60000u, // s_wait_dscnt 0
+      0x7C9A0B02u, // v_cmp_ne_u32_e32 v2, v5
+      0xBFA30001u, // s_cbranch_vccz +1
+      0xBF900000u, // s_trap 0
+      *instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x118);
   EXPECT_EQ(rewritten_words, expected_words);
@@ -330,13 +340,13 @@ TEST(ConSan, CombinedCheckTrapFallsBackToFlatWhenNoNativeLdsPatchApplies) {
   const std::array<uint32_t, 1> kernel_words = {
       0xBFB00000u, // s_endpgm
   };
-  const std::array<uint32_t, 17> function_words = {
+  const std::array<uint32_t, 19> function_words = {
       0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
       0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
       0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
       0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes =
@@ -368,13 +378,13 @@ TEST(ConSan, CombinedCheckTrapCanPatchNativeLdsAndFlatInSameCodeObject) {
       0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
       0xBFB00000u, // s_endpgm
   };
-  const std::array<uint32_t, 17> function_words = {
+  const std::array<uint32_t, 19> function_words = {
       0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
       0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
       0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
       0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes =
@@ -403,7 +413,7 @@ TEST(ConSan, CombinedCheckTrapCanPatchNativeLdsAndFlatInSameCodeObject) {
   EXPECT_EQ(result.patches[1].kind, ConSanPatchKind::InlineFlatLoadCheckTrap);
   EXPECT_EQ(result.patches[1].anchor_offset, 72u);
   EXPECT_EQ(result.patches[1].trampoline_offset, 84u);
-  EXPECT_EQ(result.patches[1].original_size, 44u);
+  EXPECT_EQ(result.patches[1].original_size, 52u);
   EXPECT_EQ(result.patches[1].trampoline_size, 0u);
   ASSERT_TRUE(result.patches[1].scratch_vgpr);
   EXPECT_EQ(*result.patches[1].scratch_vgpr, 3u);
@@ -419,7 +429,7 @@ TEST(ConSan, CombinedCheckTrapIgnoresMetadataOnlyIslandAnchor) {
   constexpr size_t kLargeFunctionWords = 33000u;
   std::vector<uint32_t> function_words(kLargeFunctionWords,
                                        build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_RDNA4));
-  constexpr size_t kFlatWord = kLargeFunctionWords - 12u;
+  constexpr size_t kFlatWord = kLargeFunctionWords - 14u;
   function_words[kFlatWord - 5u] = 0xBE8001EBu; // s_mov_b64 s[0:1], src_shared_base
   function_words[kFlatWord - 4u] = 0xD5810000u;
   function_words[kFlatWord - 3u] = 0x00000000u; // v_mov_b32_e64 v0, s0
@@ -468,15 +478,16 @@ TEST(ConSan, FlatCheckTrapAllSupportedPolicyIgnoresNominalPatchLimit) {
   const std::array<uint32_t, 1> kernel_words = {
       0xBFB00000u, // s_endpgm
   };
-  const std::array<uint32_t, 28> function_words = {
+  const std::array<uint32_t, 32> function_words = {
       0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
       0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
       0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
       0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
-      0xBF800000u, 0xBF800000u, 0xEC05007Cu, 0x00000006u, 0x00000000u, // flat_load_b32 v6, v[0:1]
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
-      0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xEC05007Cu, 0x00000006u, 0x00000000u, // flat_load_b32
+                                                                                    // v6, v[0:1]
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u,
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes =
@@ -497,13 +508,13 @@ TEST(ConSan, FlatCheckTrapAllSupportedPolicyIgnoresNominalPatchLimit) {
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineFlatLoadCheckTrap);
   EXPECT_EQ(result.patches[0].anchor_offset, 24u);
   EXPECT_EQ(result.patches[0].trampoline_offset, 36u);
-  EXPECT_EQ(result.patches[0].original_size, 44u);
+  EXPECT_EQ(result.patches[0].original_size, 52u);
   ASSERT_TRUE(result.patches[0].scratch_vgpr);
   EXPECT_EQ(*result.patches[0].scratch_vgpr, 5u);
   EXPECT_EQ(result.patches[1].kind, ConSanPatchKind::InlineFlatLoadCheckTrap);
-  EXPECT_EQ(result.patches[1].anchor_offset, 68u);
-  EXPECT_EQ(result.patches[1].trampoline_offset, 80u);
-  EXPECT_EQ(result.patches[1].original_size, 44u);
+  EXPECT_EQ(result.patches[1].anchor_offset, 76u);
+  EXPECT_EQ(result.patches[1].trampoline_offset, 88u);
+  EXPECT_EQ(result.patches[1].original_size, 52u);
   ASSERT_TRUE(result.patches[1].scratch_vgpr);
   EXPECT_EQ(*result.patches[1].scratch_vgpr, 5u);
 }
@@ -512,13 +523,13 @@ TEST(ConSan, FlatStoreCheckTrapProofRewritesPaddedLocalFunctionSite) {
   const std::array<uint32_t, 1> kernel_words = {
       0xBFB00000u, // s_endpgm
   };
-  const std::array<uint32_t, 17> function_words = {
+  const std::array<uint32_t, 19> function_words = {
       0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
       0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
       0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
       0xEC06807Cu, 0x01000000u, 0x00000000u, // flat_store_b32 v[0:1], v2
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes =
@@ -537,20 +548,29 @@ TEST(ConSan, FlatStoreCheckTrapProofRewritesPaddedLocalFunctionSite) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatStoreCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 24u);
   EXPECT_EQ(result.patches.front().trampoline_offset, 36u);
-  EXPECT_EQ(result.patches.front().original_size, 44u);
+  EXPECT_EQ(result.patches.front().original_size, 52u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 5u);
   ASSERT_EQ(result.elf_bytes.size(), bytes.size());
   EXPECT_NE(result.elf_bytes, bytes);
 
-  const std::array<uint32_t, 11> expected_words = {
-      0xEC06807Cu, 0x01000000u, 0x00000000u, // original flat_store_b32 v[0:1], v2
-      0xBF800000u,                           // delay
-      0xEC05007Cu, 0x00000005u, 0x00000000u, // readback flat_load_b32 v5, v[0:1]
-      0xBFC60000u,                           // s_wait_dscnt 0
-      0x7C9A0B02u,                           // v_cmp_ne_u32_e32 v2, v5
-      0xBFA30001u,                           // s_cbranch_vccz +1
-      0xBF900000u,                           // s_trap 0
+  ASSERT_GE(result.patches.front().required_sgpr_count, 2u);
+  const uint16_t vcc_save_sgpr =
+      static_cast<uint16_t>(result.patches.front().required_sgpr_count - 2u);
+  const std::array<uint32_t, 13> expected_words = {
+      *instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      0xEC06807Cu,
+      0x01000000u,
+      0x00000000u, // original flat_store_b32 v[0:1], v2
+      0xBF800000u, // delay
+      0xEC05007Cu,
+      0x00000005u,
+      0x00000000u, // readback flat_load_b32 v5, v[0:1]
+      0xBFC60000u, // s_wait_dscnt 0
+      0x7C9A0B02u, // v_cmp_ne_u32_e32 v2, v5
+      0xBFA30001u, // s_cbranch_vccz +1
+      0xBF900000u, // s_trap 0
+      *instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x118);
   EXPECT_EQ(rewritten_words, expected_words);
@@ -585,15 +605,22 @@ TEST(ConSan, FlatStoreB16CheckTrapProofEncodesRdna4Readback) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatStoreCheckTrap);
   EXPECT_TRUE(result.final_validation_passed);
-  const auto rewritten_words = patched_words_at_file_offset<7>(result, 0x118);
-  EXPECT_EQ(rewritten_words[0], store[0]);
-  EXPECT_EQ(rewritten_words[1], store[1]);
-  EXPECT_EQ(rewritten_words[2], store[2]);
+  ASSERT_GE(result.patches.front().required_sgpr_count, 2u);
+  const uint16_t vcc_save_sgpr =
+      static_cast<uint16_t>(result.patches.front().required_sgpr_count - 2u);
+  const auto rewritten_words = patched_words_at_file_offset<13>(result, 0x118);
+  EXPECT_EQ(rewritten_words[0], *instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo,
+                                                                  ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(rewritten_words[1], store[0]);
+  EXPECT_EQ(rewritten_words[2], store[1]);
+  EXPECT_EQ(rewritten_words[3], store[2]);
   constexpr auto readback =
       rdna4::build_vflat(rdna4::kFlatLoadU16Vflat, {.saddr = 124, .vdst = 5, .vaddr = 0});
-  EXPECT_EQ(rewritten_words[4], readback[0]);
-  EXPECT_EQ(rewritten_words[5], readback[1]);
-  EXPECT_EQ(rewritten_words[6], readback[2]);
+  EXPECT_EQ(rewritten_words[5], readback[0]);
+  EXPECT_EQ(rewritten_words[6], readback[1]);
+  EXPECT_EQ(rewritten_words[7], readback[2]);
+  EXPECT_EQ(rewritten_words[12], *instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr,
+                                                                   ROCJITSU_CODE_ARCH_RDNA4));
 }
 
 TEST(ConSan, FlatStoreCheckTrapProofRewritesGfx1250VflatStore) {
@@ -629,20 +656,25 @@ TEST(ConSan, FlatStoreCheckTrapProofRewritesGfx1250VflatStore) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatStoreCheckTrap);
   EXPECT_TRUE(result.final_validation_passed);
-  const auto rewritten_words = patched_words_at_file_offset<7>(result, 0x118);
-  EXPECT_EQ(rewritten_words[0], store[0]);
-  EXPECT_EQ(rewritten_words[1], store[1]);
-  EXPECT_EQ(rewritten_words[2], store[2]);
+  ASSERT_GE(result.patches.front().required_sgpr_count, 2u);
+  const uint16_t vcc_save_sgpr =
+      static_cast<uint16_t>(result.patches.front().required_sgpr_count - 2u);
+  const auto rewritten_words = patched_words_at_file_offset<8>(result, 0x118);
+  EXPECT_EQ(rewritten_words[0], *instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo,
+                                                                  ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(rewritten_words[1], store[0]);
+  EXPECT_EQ(rewritten_words[2], store[1]);
+  EXPECT_EQ(rewritten_words[3], store[2]);
   constexpr auto readback =
       gfx1250::build_vflat(gfx1250::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 5, .vaddr = 0});
-  EXPECT_EQ(rewritten_words[4], readback[0]);
-  EXPECT_EQ(rewritten_words[5], readback[1]);
-  EXPECT_EQ(rewritten_words[6], readback[2]);
+  EXPECT_EQ(rewritten_words[5], readback[0]);
+  EXPECT_EQ(rewritten_words[6], readback[1]);
+  EXPECT_EQ(rewritten_words[7], readback[2]);
 }
 
-TEST(ConSan, FlatStoreCheckTrapProofRuntimeGatesGfx1250MaybeGroupReadback) {
+TEST(ConSan, FlatStoreCheckTrapProofRuntimeGatesGfx1250Wave64MaybeGroupReadback) {
   constexpr auto store =
-      gfx1250::build_vflat(gfx1250::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
+      gfx1250::build_vflat(gfx1250::kFlatStoreD16HiB8Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
   std::vector<uint32_t> text_words = {
       0xBE8001EBu,              // s_mov_b64 s[0:1], src_shared_base
       0xD5810000u, 0x00000080u, // v_mov_b32_e64 v0, 0
@@ -651,8 +683,8 @@ TEST(ConSan, FlatStoreCheckTrapProofRuntimeGatesGfx1250MaybeGroupReadback) {
   };
   text_words.resize(40u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
-  const std::vector<uint8_t> bytes =
-      make_gfx1250_code_object(text_words, "gfx1250_maybe_group_store");
+  const std::vector<uint8_t> bytes = make_gfx1250_code_object(
+      text_words, "gfx1250_maybe_group_store", kRdna4Wave64AllVgprsGranulated, /*wave32=*/false);
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.probe_flat_check_trap = true;
@@ -674,33 +706,51 @@ TEST(ConSan, FlatStoreCheckTrapProofRuntimeGatesGfx1250MaybeGroupReadback) {
   constexpr uint16_t kScalarInlineMinusOne = 0xC1;
   const auto group_aperture_high =
       build_v_cmp_eq_u32_e32_vcc(kScalarInlineMinusOne, /*vsrc1=*/1, ROCJITSU_CODE_ARCH_GFX1250);
-  const auto skip_non_group = build_s_cbranch_vccz(/*offset_dwords=*/7, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto skip_non_group =
+      build_s_cbranch_vccz(/*offset_dwords=*/10, ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_TRUE(group_aperture_high);
   ASSERT_TRUE(skip_non_group);
-  const auto rewritten_words = patched_words_at_file_offset<13>(result, 0x114);
-  EXPECT_EQ(rewritten_words[0], store[0]);
-  EXPECT_EQ(rewritten_words[1], store[1]);
-  EXPECT_EQ(rewritten_words[2], store[2]);
-  EXPECT_EQ(rewritten_words[4], *group_aperture_high);
-  EXPECT_EQ(rewritten_words[5], *skip_non_group);
+  ASSERT_GE(result.patches.front().required_sgpr_count, 2u);
+  const uint16_t vcc_save_sgpr =
+      static_cast<uint16_t>(result.patches.front().required_sgpr_count - 2u);
+  const auto rewritten_words = patched_words_at_file_offset<18>(result, 0x114);
+  EXPECT_EQ(rewritten_words[0], *instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo,
+                                                                  ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(rewritten_words[1], store[0]);
+  EXPECT_EQ(rewritten_words[2], store[1]);
+  EXPECT_EQ(rewritten_words[3], store[2]);
+  EXPECT_EQ(rewritten_words[5], *group_aperture_high);
+  EXPECT_EQ(rewritten_words[6], *skip_non_group);
   constexpr auto readback =
-      gfx1250::build_vflat(gfx1250::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 5, .vaddr = 0});
-  EXPECT_EQ(rewritten_words[6], readback[0]);
-  EXPECT_EQ(rewritten_words[7], readback[1]);
-  EXPECT_EQ(rewritten_words[8], readback[2]);
+      gfx1250::build_vflat(gfx1250::kFlatLoadU8Vflat, {.saddr = 124, .vdst = 5, .vaddr = 0});
+  EXPECT_EQ(rewritten_words[7], readback[0]);
+  EXPECT_EQ(rewritten_words[8], readback[1]);
+  EXPECT_EQ(rewritten_words[9], readback[2]);
+  const auto select_high = instrumentation::build_v_lshrrev_b32(
+      /*vdst=*/6, scalar_positive_inline_u32(16u), /*vsrc1=*/2, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto mask_byte = instrumentation::build_v_and_b32_literal(
+      /*vdst=*/6, 0xffu, /*vsrc1=*/6, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(select_high);
+  ASSERT_TRUE(mask_byte);
+  EXPECT_EQ(rewritten_words[11], *select_high);
+  ASSERT_EQ(mask_byte->size(), 2u);
+  EXPECT_EQ(rewritten_words[12], (*mask_byte)[0]);
+  EXPECT_EQ(rewritten_words[13], (*mask_byte)[1]);
+  EXPECT_EQ(rewritten_words[17], *instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr,
+                                                                   ROCJITSU_CODE_ARCH_GFX1250));
 }
 
 TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepDelay) {
   const std::array<uint32_t, 1> kernel_words = {
       0xBFB00000u, // s_endpgm
   };
-  const std::array<uint32_t, 17> function_words = {
+  const std::array<uint32_t, 19> function_words = {
       0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
       0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
       0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
       0xEC06807Cu, 0x01000000u, 0x00000000u, // flat_store_b32 v[0:1], v2
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes =
@@ -718,10 +768,14 @@ TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepDelay) {
   EXPECT_TRUE(result.modified);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatStoreCheckTrap);
-  EXPECT_EQ(result.patches.front().original_size, 44u);
+  EXPECT_EQ(result.patches.front().original_size, 52u);
   ASSERT_EQ(result.elf_bytes.size(), bytes.size());
 
-  const std::array<uint32_t, 11> expected_words = {
+  ASSERT_GE(result.patches.front().required_sgpr_count, 2u);
+  const uint16_t vcc_save_sgpr =
+      static_cast<uint16_t>(result.patches.front().required_sgpr_count - 2u);
+  const std::array<uint32_t, 13> expected_words = {
+      *instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0xEC06807Cu,
       0x01000000u,
       0x00000000u, // original flat_store_b32 v[0:1], v2
@@ -733,6 +787,7 @@ TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepDelay) {
       0x7C9A0B02u, // v_cmp_ne_u32_e32 v2, v5
       0xBFA30001u, // s_cbranch_vccz +1
       0xBF900000u, // s_trap 0
+      *instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x118);
   EXPECT_EQ(rewritten_words, expected_words);
@@ -742,13 +797,13 @@ TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepVarDelay) {
   const std::array<uint32_t, 1> kernel_words = {
       0xBFB00000u, // s_endpgm
   };
-  const std::array<uint32_t, 17> function_words = {
+  const std::array<uint32_t, 19> function_words = {
       0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
       0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
       0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
       0xEC06807Cu, 0x01000000u, 0x00000000u, // flat_store_b32 v[0:1], v2
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes =
@@ -758,7 +813,7 @@ TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepVarDelay) {
   options.probe_flat_check_trap = true;
   options.delay_mode = ConSanDelayMode::SleepVar;
   options.delay_nops = 1;
-  options.delay_var_ssrc = kRdna4VccLo;
+  options.delay_var_ssrc = 0u;
   options.scratch_vgpr = 5;
 
   const auto result = try_patch_consan(bytes, options);
@@ -767,14 +822,19 @@ TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepVarDelay) {
   EXPECT_TRUE(result.modified);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatStoreCheckTrap);
-  EXPECT_EQ(result.patches.front().original_size, 44u);
+  EXPECT_EQ(result.patches.front().original_size, 52u);
   ASSERT_EQ(result.elf_bytes.size(), bytes.size());
 
-  const std::array<uint32_t, 11> expected_words = {
+  ASSERT_GE(result.patches.front().required_sgpr_count, 2u);
+  const uint16_t vcc_save_sgpr =
+      static_cast<uint16_t>(result.patches.front().required_sgpr_count - 2u);
+  EXPECT_FALSE(vcc_save_sgpr == 0u || vcc_save_sgpr == 1u);
+  const std::array<uint32_t, 13> expected_words = {
+      *instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0xEC06807Cu,
       0x01000000u,
       0x00000000u, // original flat_store_b32 v[0:1], v2
-      build_s_sleep_var(kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_sleep_var(0u, ROCJITSU_CODE_ARCH_RDNA4),
       0xEC05007Cu,
       0x00000005u,
       0x00000000u, // readback flat_load_b32 v5, v[0:1]
@@ -782,6 +842,7 @@ TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepVarDelay) {
       0x7C9A0B02u, // v_cmp_ne_u32_e32 v2, v5
       0xBFA30001u, // s_cbranch_vccz +1
       0xBF900000u, // s_trap 0
+      *instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x118);
   EXPECT_EQ(rewritten_words, expected_words);

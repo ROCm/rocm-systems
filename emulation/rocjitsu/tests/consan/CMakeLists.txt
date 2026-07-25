@@ -272,6 +272,9 @@ set(RJ_CONSAN_LDS_FLAT_RACY_TEST
 set(RJ_CONSAN_LDS_HIGH_D16_TEST
     "ConSanLdsTest.PaddedHighHalfD16FlatLoadsProduceExpectedResults"
 )
+set(RJ_CONSAN_LDS_HIGH_D16_STORE_TEST
+    "ConSanLdsTest.PaddedHighHalfD16FlatStoresProduceExpectedResults"
+)
 set(RJ_CONSAN_CDNA_MOI_FORCED_SPILL_RECORD_TEST
     "ConSanMoiCdnaTest.ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord"
 )
@@ -399,6 +402,24 @@ function(rj_add_consan_common_sim_cases)
             "RJ_CONSAN_DELAY=2"
             "RJ_CONSAN_TEST_KERNEL_FILTER=padded_flat_high_d16_loads_kernel_for_instrumentation"
             "RJ_CONSAN_MAX_PATCHES=8"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "${_sim_PREFIX}.SuperColliderHighHalfD16Store"
+        TARGET ${_sim_LDS_TARGET}
+        FILTER "${RJ_CONSAN_LDS_HIGH_D16_STORE_TEST}"
+        CONFIG "${_sim_CONFIG}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX "kind=inline-flat-store-check-trap"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=supercollider"
+            "RJ_CONSAN_FLAT_PROVENANCE=strict"
+            "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_DELAY=2"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=padded_flat_high_d16_store"
+            "RJ_CONSAN_MAX_PATCHES=12"
             "RJ_CONSAN_REQUIRE_PATCH=1"
     )
     rj_add_consan_hip_case(
@@ -1384,6 +1405,28 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_DELAY=2"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=padded_flat_high_d16_loads_kernel_for_instrumentation"
                     "RJ_CONSAN_MAX_PATCHES=8"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        rj_add_consan_hip_case(
+                NAME "ConSanLdsTest.BaselineHighHalfD16FlatStore"
+                TARGET hip_consan_lds_test
+                FILTER "${RJ_CONSAN_LDS_HIGH_D16_STORE_TEST}"
+                TIMEOUT 30
+        )
+        rj_add_consan_hip_case(
+                NAME "ConSanLdsTest.DbiHighHalfD16FlatStoreDoesNotTrap"
+                TARGET hip_consan_lds_test
+                FILTER "${RJ_CONSAN_LDS_HIGH_D16_STORE_TEST}"
+                TIMEOUT 30
+                PASS_REGEX "kind=inline-flat-store-check-trap"
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=supercollider"
+                    "RJ_CONSAN_FLAT_PROVENANCE=strict"
+                    "RJ_CONSAN_LOG=3"
+                    "RJ_CONSAN_DELAY=2"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=padded_flat_high_d16_store"
+                    "RJ_CONSAN_MAX_PATCHES=12"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
         rj_add_consan_hip_case(

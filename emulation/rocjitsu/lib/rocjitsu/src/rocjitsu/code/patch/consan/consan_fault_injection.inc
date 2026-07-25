@@ -2073,7 +2073,8 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
 }
 
 [[nodiscard]] std::optional<uint16_t> flat_dword_count(const ConSanFlatSite &site) {
-  if (consan_flat_load_subword_semantics(site.mnemonic))
+  if (consan_flat_load_subword_semantics(site.mnemonic) ||
+      consan_flat_store_subword_semantics(site.mnemonic))
     return 1u;
   if (site.width_bits == 16)
     return 1u;
@@ -2101,10 +2102,11 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
     if (!site.dst_vgpr || static_cast<uint32_t>(*site.dst_vgpr) + *dword_count > 256)
       return false;
   } else {
-    if (site.mnemonic != "flat_store_b32" && site.mnemonic != "flat_store_b64" &&
-        site.mnemonic != "flat_store_b128" && site.mnemonic != "flat_store_dword" &&
-        site.mnemonic != "flat_store_dwordx2" && site.mnemonic != "flat_store_dwordx4" &&
-        site.mnemonic != "flat_store_short" && site.mnemonic != "flat_store_b16")
+    if (!consan_flat_store_subword_semantics(site.mnemonic) && site.mnemonic != "flat_store_b32" &&
+        site.mnemonic != "flat_store_b64" && site.mnemonic != "flat_store_b128" &&
+        site.mnemonic != "flat_store_dword" && site.mnemonic != "flat_store_dwordx2" &&
+        site.mnemonic != "flat_store_dwordx4" && site.mnemonic != "flat_store_short" &&
+        site.mnemonic != "flat_store_b16")
       return false;
     if (!site.data_vgpr || static_cast<uint32_t>(*site.data_vgpr) + *dword_count > 256)
       return false;
@@ -2199,6 +2201,8 @@ retarget_flat_load_vdst(std::array<uint32_t, 3> words, uint16_t vdst, rj_code_ar
 
 [[nodiscard]] std::optional<uint8_t> flat_load_op_for_width(uint32_t width_bits) {
   switch (width_bits) {
+  case 8:
+    return rdna4::kFlatLoadU8Vflat;
   case 16:
     return rdna4::kFlatLoadU16Vflat;
   case 32:
@@ -2234,6 +2238,9 @@ build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bi
   if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
     uint16_t load_op = 0;
     switch (width_bits) {
+    case 8:
+      load_op = gfx1250::kFlatLoadU8Vflat;
+      break;
     case 16:
       load_op = gfx1250::kFlatLoadU16Vflat;
       break;
@@ -2259,6 +2266,9 @@ build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bi
     return std::nullopt;
   uint32_t load_op = 0;
   switch (width_bits) {
+  case 8:
+    load_op = cdna4::kFlatLoadUbyteFlat;
+    break;
   case 16:
     load_op = cdna4::kFlatLoadUshortFlat;
     break;
