@@ -86,6 +86,13 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
     size_t pc = 0;
 
     while (pc < word_count) {
+      // Linked gfx1250 objects use zero-filled holes between independently
+      // aligned function bodies. BasicBlock::build() treats these words as
+      // padding rather than instructions, so host validation must do the same.
+      if (arch == ROCJITSU_CODE_ARCH_GFX1250 && words[pc] == 0) {
+        ++pc;
+        continue;
+      }
       try {
         std::unique_ptr<Instruction> inst(decoder->decode(&words[pc]));
         if (!inst) {
@@ -526,7 +533,8 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     output.value.disassembly += translated_inspection.disassembly;
   }
 
-  if (!validate_host_decode(output.value.translated_report, error)) {
+  const bool data_only = has_diagnostic_kind(output.value.diagnostics, DiagnosticKind::DataOnly);
+  if (!data_only && !validate_host_decode(output.value.translated_report, error)) {
     add_error(output, kValidationError, error);
     return output;
   }
