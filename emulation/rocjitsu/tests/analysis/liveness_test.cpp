@@ -34,6 +34,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -1662,6 +1663,13 @@ TEST(CfgAnalysis, ReversePostOrderSelfLoop) {
   auto rpo = reverse_post_order(KernelBlockScope(scope));
   ASSERT_EQ(rpo.size(), 1u);
   EXPECT_EQ(blocks[0].get(), rpo[0]);
+}
+
+TEST(LivenessAnalysis, UnavailableQueriesFailClosed) {
+  const TestInstruction instruction("query");
+  const LivenessAnalysis liveness = LivenessAnalysis::unavailable();
+
+  EXPECT_THROW((void)liveness.live_before(instruction), std::logic_error);
 }
 
 TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {
