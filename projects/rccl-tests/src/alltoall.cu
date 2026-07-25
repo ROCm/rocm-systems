@@ -11,7 +11,7 @@
 #include "nccl_device.h"
 #include "rccl_vector_types.h"
 #endif
-#ifdef ENABLE_ROCSHMEM
+#ifdef ENABLE_ROCSHMEM_GIN
 #include <rocshmem/rocshmem.hpp>
 #ifdef MPI_SUPPORT
 #include <mpi.h>
