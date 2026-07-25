@@ -116,6 +116,8 @@ function(add_rocshmem_targets)
     if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
         set(_rccl_root           "${CMAKE_SOURCE_DIR}")
         set(ROCSHMEM_INSTALL_DIR "${_rccl_root}/ext/rocshmem")
+        # Convert cmake list separators to spaces for shell command
+        string(REPLACE ";" " " _rocshmem_cmake_opts "${ROCSHMEM_CMAKE_OPTIONS}")
         message(STATUS "rocSHMEM: building from ${ROCSHMEM_SOURCE_DIR}")
 
         ExternalProject_Add(rocshmem_ext
@@ -133,7 +135,7 @@ function(add_rocshmem_targets)
             CONFIGURE_COMMAND   ""
             BUILD_COMMAND
                 ${CMAKE_COMMAND} -E make_directory build
-                && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/all_backends -DUSE_EXTERNAL_MPI=OFF -DBUILD_EXAMPLES=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_PYTHON_TESTS=OFF -DBUILD_CTESTS=OFF -DUSE_SDMA=ON -DGPU_TARGETS=${GPU_TARGETS} ${ROCSHMEM_CMAKE_OPTIONS} "
+                && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/all_backends -DUSE_EXTERNAL_MPI=OFF -DBUILD_EXAMPLES=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_PYTHON_TESTS=OFF -DBUILD_CTESTS=OFF -DUSE_SDMA=ON -DGPU_TARGETS=${GPU_TARGETS} ${_rocshmem_cmake_opts} "
                 && ${CMAKE_COMMAND} -E chdir build ${CMAKE_COMMAND}
                     -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                     -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
