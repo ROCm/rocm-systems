@@ -628,7 +628,16 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
 }
 
 void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) {
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  // Retire the queue's waves WITHOUT holding hw_queue_mutex_. The engine thread
+  // takes the two locks the other way round: ComputeUnitCore::step() runs the
+  // whole issue loop under the CU's wave-state lock, and a wave reaching
+  // s_endpgm halts from there into ComputeUnitCore::release_wf(), which calls
+  // CommandProcessor::notify_wg_complete() and takes hw_queue_mutex_. Holding
+  // hw_queue_mutex_ across with_wave_state_locked() here would close that cycle
+  // and deadlock a DESTROY_QUEUE ioctl against the engine worker; being
+  // recursive buys nothing, because the two holders are different threads.
+  // signal_queue_exception() and update_queue() below are ordered the same way
+  // for the same reason.
   for (auto *cu : cus_) {
     cu->with_wave_state_locked([&] {
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
@@ -638,6 +647,7 @@ void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) 
       }
     });
   }
+  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
   for (size_t i = 0; i < hw_queues_.size(); ++i) {
     if (hw_queues_[i].queue_id == queue_id && hw_queues_[i].process_id == process_id) {
       hw_queues_.erase(hw_queues_.begin() + static_cast<ptrdiff_t>(i));

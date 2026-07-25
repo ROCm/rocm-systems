@@ -423,6 +423,14 @@ private:
   mutable std::mutex runtime_handshake_mutex_;
   std::condition_variable runtime_handshake_cv_;
   std::unordered_set<pid_t> runtime_acked_;
+  /// @brief Targets whose debugger went away while RUNTIME_ENABLE was waiting.
+  /// @details A detaching or dying debugger will never send the ack, so the
+  /// teardown paths record the pid here and wake the waiter instead of leaving
+  /// the inferior blocked until the safety deadline.
+  std::unordered_set<pid_t> runtime_handshake_cancelled_;
+
+  /// @brief Release any RUNTIME_ENABLE waiter for @p target_pid.
+  void cancel_runtime_handshake(pid_t target_pid);
 
   /// @brief Interrupt dispatch: process_id → EventState*.
   /// @details Protected by interrupt_mutex_. Decoupled from process_mutex_

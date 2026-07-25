@@ -341,10 +341,14 @@ void SimulatedKfd::reap_exited_debug_sessions(std::stop_token stop) {
       break;
     for (auto it = debug_sessions_.begin(); it != debug_sessions_.end();) {
       if (pidfd_is_exited(it->second.target_pidfd.get()) == 1 ||
-          pidfd_is_exited(it->second.debugger_pidfd.get()) == 1)
+          pidfd_is_exited(it->second.debugger_pidfd.get()) == 1) {
+        // The session is going away and will never ack; release any inferior
+        // blocked in the RUNTIME_ENABLE handshake for it.
+        cancel_runtime_handshake(it->first);
         it = debug_sessions_.erase(it);
-      else
+      } else {
         ++it;
+      }
     }
   }
 }
@@ -729,10 +733,14 @@ int SimulatedKfd::close(uint32_t process_id) {
     std::lock_guard<std::mutex> debug_lock(debug_sessions_mutex_);
     for (auto it = debug_sessions_.begin(); it != debug_sessions_.end();) {
       if (pidfd_is_exited(it->second.target_pidfd.get()) == 1 ||
-          pidfd_is_exited(it->second.debugger_pidfd.get()) == 1)
+          pidfd_is_exited(it->second.debugger_pidfd.get()) == 1) {
+        // The session is going away and will never ack; release any inferior
+        // blocked in the RUNTIME_ENABLE handshake for it.
+        cancel_runtime_handshake(it->first);
         it = debug_sessions_.erase(it);
-      else
+      } else {
         ++it;
+      }
     }
   }
 
@@ -882,6 +890,14 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
   if (dispatch_request == AMDKFD_IOC_WAIT_EVENTS)
     return wait_events_ioctl(proc, arg);
 
+  // RUNTIME_ENABLE blocks too: when a debugger is attached it waits for that
+  // debugger to acknowledge EC_PROCESS_RUNTIME. Holding op_mutex_ across that
+  // wait would serialize the ack behind it whenever the debugger and the target
+  // share a KfdProcess (self-debug, and daemon clients that reuse one pid), so
+  // it takes the lock itself around the state mutation only.
+  if (dispatch_request == AMDKFD_IOC_RUNTIME_ENABLE)
+    return runtime_enable_ioctl(proc, arg);
+
   std::lock_guard<std::mutex> op_lock(proc.op_mutex_);
   // A concurrent close() may have snapshotted-then-erased this process and be
   // tearing it down under op_mutex_. ioctl() holds only a shared_ptr (no open
@@ -935,8 +951,8 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
       return set_memory_policy_ioctl(proc, arg);
     case AMDKFD_IOC_AVAILABLE_MEMORY:
       return get_available_memory_ioctl(proc, arg);
-    case AMDKFD_IOC_RUNTIME_ENABLE:
-      return runtime_enable_ioctl(proc, arg);
+    // RUNTIME_ENABLE is handled before op_mutex_ above (it blocks on the
+    // debugger handshake), so it never reaches this switch.
     case AMDKFD_IOC_DBG_TRAP:
       return debug_trap_ioctl(proc, arg);
     case AMDKFD_IOC_SET_SCRATCH_BACKING_VA: {
@@ -2231,6 +2247,8 @@ int SimulatedKfd::runtime_enable_ioctl(KfdProcess &proc, void *arg) {
 
   const bool enabling = (args->mode_mask & KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK) != 0;
   {
+    // Scoped so the per-process op lock is released before the handshake below.
+    std::lock_guard<std::mutex> op_lock(proc.op_mutex_);
     std::lock_guard<std::mutex> lock(proc.runtime_mutex_);
     if (enabling) {
       if (proc.runtime_state_.pending)
@@ -2274,7 +2292,14 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
   kmd::CwsrWaveState state;
   const uint32_t raw_status = wf.status_raw();
   state.pc = wf.pc;
-  state.exec = wf.exec();
+  // A wave frozen inside the trap handler has the HANDLER's EXEC live, not the
+  // application's: the handler runs with its own mask and parks 0x80000000 (and
+  // then a doorbell id) in EXEC_LO around MSG_GET_DOORBELL. Publishing that
+  // makes the debugger report every lane active, which inverts `lane apply
+  // -active/-inactive` (gdb.rocm/lane-info.exp). trap_saved_exec_ holds the
+  // interrupted value for the whole handler, so un-shadow it here exactly as
+  // the STATUS field below un-shadows trap_saved_status().
+  state.exec = wf.in_trap_handler() ? wf.trap_saved_exec() : wf.exec();
   state.vcc = wf.vcc();
   state.flat_scratch = wf.scratch_base();
   state.m0 = wf.m0();
@@ -3074,18 +3099,64 @@ void SimulatedKfd::raise_process_debug_event(pid_t target_pid, uint64_t exceptio
   }
 }
 
+void SimulatedKfd::cancel_runtime_handshake(pid_t target_pid) {
+  {
+    std::lock_guard<std::mutex> lk(runtime_handshake_mutex_);
+    runtime_handshake_cancelled_.insert(target_pid);
+  }
+  runtime_handshake_cv_.notify_all();
+}
+
+/// @details The inferior must not run a kernel until the debugger attached to
+/// it has seen EC_PROCESS_RUNTIME and installed its breakpoints -- that is the
+/// whole point of the handshake, and amdkfd's runtime_enable blocks the caller
+/// for it. Returning early is not a graceful degradation: the code objects load
+/// unobserved, the debugger's breakpoints are never inserted, and the kernel
+/// runs to completion. Under a debugger driving many inferiors at once (see
+/// gdb.rocm/multi-inferior-stress.exp, 32 of them) a short deadline expires
+/// routinely while the debugger is simply busy servicing its queue, which
+/// showed up as rare, load-dependent "inferior exited before hitting the
+/// kernel" failures.
+///
+/// So wait for the ack itself, and treat the deadline purely as a liveness
+/// backstop against a debugger that has wedged without detaching -- long enough
+/// that a merely slow one is never cut off, and noisy when it does fire so the
+/// timeout is never again mistaken for correct behaviour. A debugger that
+/// detaches or dies cancels the wait explicitly and does not pay it at all.
 void SimulatedKfd::runtime_enable_debugger_handshake(pid_t target_pid) {
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(target_pid);
     if (session == debug_sessions_.end() || !session->second.enabled)
       return;
+    // A process debugging itself cannot answer its own handshake: the ack would
+    // have to come from a thread that is, by construction, the one blocked
+    // here. Raise the event so the state is observable and carry on rather than
+    // waiting for a reply that can never arrive. Real rocgdb is always a
+    // separate process; this is the in-process test/self-debug shape.
+    if (session->second.debugger_pid == target_pid) {
+      raise_process_debug_event(target_pid, KFD_EC_MASK(EC_PROCESS_RUNTIME));
+      return;
+    }
   }
   raise_process_debug_event(target_pid, KFD_EC_MASK(EC_PROCESS_RUNTIME));
+
+  constexpr auto kHandshakeDeadline = std::chrono::seconds(60);
   std::unique_lock<std::mutex> lk(runtime_handshake_mutex_);
-  runtime_handshake_cv_.wait_for(lk, std::chrono::seconds(2),
-                                 [&] { return runtime_acked_.contains(target_pid); });
+  const bool released = runtime_handshake_cv_.wait_for(lk, kHandshakeDeadline, [&] {
+    return runtime_acked_.contains(target_pid) || runtime_handshake_cancelled_.contains(target_pid);
+  });
+  const bool cancelled = runtime_handshake_cancelled_.erase(target_pid) != 0;
   runtime_acked_.erase(target_pid);
+  if (!released) {
+    util::Logger::warn("runtime-enable handshake timed out after ", kHandshakeDeadline.count(),
+                       "s for pid=", target_pid,
+                       "; the debugger never acknowledged EC_PROCESS_RUNTIME, so its "
+                       "breakpoints may not be installed before the first dispatch");
+  } else if (cancelled) {
+    util::Logger::vm("runtime-enable handshake cancelled for pid=", target_pid,
+                     " (debugger detached)");
+  }
 }
 
 int SimulatedKfd::debug_query_exception_info(pid_t target_pid,
@@ -3343,7 +3414,7 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     debug_sessions_cv_.notify_one();
     return 0;
   }
-  case KFD_IOC_DBG_TRAP_DISABLE:
+  case KFD_IOC_DBG_TRAP_DISABLE: {
     // Erasing the session releases the debugger notifier: in daemon mode the
     // session's UniqueHandle closes the SCM_RIGHTS-transferred fd it owns; in
     // local mode nothing is owned, so the debugger's own fd is left untouched.
@@ -3351,20 +3422,67 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     // The queued debug events and the per-queue exception status go with it.
     // Both are debugger-visible state that only has meaning inside a session:
     // leaving them behind would hand a stale EC_QUEUE_NEW, or an exception the
-    // previous debugger already consumed, to whoever attaches next.
+    // previous debugger already consumed, to whoever attaches next. Any wave
+    // the departing debugger left stopped is resumed below, so detaching never
+    // strands the inferior's GPU work.
     {
       std::lock_guard<std::mutex> event_lock(debug_events_mutex_);
       debug_events_.erase(target_pid);
     }
+    std::vector<std::pair<uint32_t, uint32_t>> queues;
     if (target_proc != nullptr) {
       std::lock_guard<std::mutex> alloc_lock(target_proc->alloc_mutex_);
-      for (auto &queue_entry : target_proc->queue_snapshot_map_)
-        queue_entry.second.exception_status = 0;
+      for (auto &[queue_id, queue] : target_proc->queue_snapshot_map_) {
+        queue.exception_status = 0;
+        queues.emplace_back(queue_id, queue.gpu_id);
+      }
     }
+    // Drop debug_sessions_mutex_ before touching any CU. The engine thread takes
+    // these two the other way round -- ComputeUnitCore::step() runs the issue
+    // loop under the CU's wave-state lock and calls back into
+    // on_wave_trap_complete()/on_wave_watchpoint()/on_wave_illegal_inst(), each
+    // of which acquires debug_sessions_mutex_ -- so holding it across
+    // with_wave_state_locked() below closes an AB-BA cycle and hangs a detach
+    // against a wave that is trapping at that moment. This is the same
+    // invariant SUSPEND_QUEUES states and observes further down.
+    lk.unlock();
+    for (const auto &[queue_id, gpu_id] : queues) {
+      auto *gpu = find_gpu(gpu_id);
+      if (!gpu || !gpu->soc)
+        continue;
+      gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+        cp->set_queue_debug_suspended(queue_id, target_proc->process_id(), false);
+        for (auto *cu : cp->compute_units()) {
+          bool wake = false;
+          cu->with_wave_state_locked([&] {
+            for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+              auto *wave = cu->wf(slot);
+              if (wave->is_halted() || wave->process_id() != target_proc->process_id() ||
+                  wave->queue_id() != queue_id || wave->fatal_exception_pending())
+                continue;
+              wave->set_debug_single_step(false);
+              wave->set_debug_halted(false);
+              wave->set_debug_suspended(false);
+              wake = true;
+            }
+          });
+          if (wake)
+            cu->schedule_work_async();
+        }
+      });
+    }
+    // Re-take it only for the table mutation itself. The session may have been
+    // reaped while the lock was dropped, so erase by key rather than through
+    // the iterator captured above.
+    lk.lock();
     debug_sessions_.erase(target_pid);
+    // An explicit detach also has to release a waiter, or the inferior pays the
+    // full liveness deadline for a debugger that is deliberately going away.
+    cancel_runtime_handshake(target_pid);
     if (debug_sessions_.empty())
       set_debug_active_on_all_cus(false);
     return 0;
+  }
   case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
     return debug_device_snapshot(args->device_snapshot);
   case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
@@ -3384,6 +3502,15 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
       auto *gpu = find_gpu(event.gpu_id);
       if (!gpu || !gpu->soc)
         return -ENODEV;
+      // Drop debug_sessions_mutex_ first: signal_queue_exception() takes the CU
+      // wave-state lock and waits up to a second for the target to observe the
+      // exception word, while the engine thread runs its issue loop under that
+      // same wave-state lock and calls back into the trap/watchpoint handlers,
+      // which take debug_sessions_mutex_. Holding it across the call inverts
+      // that order -- the inversion DISABLE and SUSPEND_QUEUES both avoid -- and
+      // would additionally stall every trap callback for the duration of the
+      // wait. Nothing below this point reads debug_sessions_ or session_it.
+      lk.unlock();
       bool delivered = false;
       gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
         delivered |= cp->signal_queue_exception(event.queue_id, target_proc->process_id(),
