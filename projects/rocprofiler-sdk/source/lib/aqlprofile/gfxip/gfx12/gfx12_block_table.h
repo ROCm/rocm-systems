@@ -233,7 +233,6 @@ static const CounterRegInfo SqcCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regSQ_PE
                                                     REG_32B_NULL,
                                                     REG_32B_NULL}};
 
-
 #if GFX12_VARIANT == GFX12_VARIANT_1250
 // SP shares the SQ perfcounter registers
 static const CounterRegInfo SpCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_SELECT),
