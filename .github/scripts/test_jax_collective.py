@@ -24,12 +24,11 @@ from pathlib import Path
 
 from rccl_ci_utils import (
     find_rccl_library,
-    override_bundled_rccl,
     parse_junit_xml,
     send_email_report,
     send_teams_webhook,
     set_github_output,
-    verify_rccl_override,
+    setup_rccl_preload,
     write_github_summary,
 )
 
@@ -384,11 +383,10 @@ def main() -> None:
     if args.discover_only:
         return
 
-    # Step 2: Set up library paths and replace pip-bundled RCCL
+    # Step 2: Set up library paths and use LD_PRELOAD for CI-built RCCL
     populate_rocm_lib_dir(lib_dirs)
     setup_ld_library_path(lib_dirs)
-    override_bundled_rccl(rccl_lib_dir)
-    verify_rccl_override(rccl_lib_dir)
+    setup_rccl_preload(rccl_lib_dir)
 
     # Step 3: Set XLA environment variables
     setup_xla_environment()
