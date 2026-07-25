@@ -3417,7 +3417,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
 
       if (p2pAllowed) {
         result = blitMgr().copyBuffer(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size,
-                                      cmd.isEntireMemory());
+                                      cmd.isEntireMemory(), cmd.copyMetadata());
       } else {
         // Sync the current queue, since P2P staging uses the device queues for transfer
         releaseGpuMemoryFence();
@@ -3441,10 +3441,12 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
 
           // Perform 2 step transfer with staging buffer
           result &= srcDevMem->dev().xferMgr().copyBuffer(*srcDevMem, *dstStgMem, srcOrigin,
-                                                          stageOffset, cpSize);
+                                                          stageOffset, cpSize, false,
+                                                          cmd.copyMetadata());
           srcOrigin.c[0] += copy_size;
           result &= dstDevMem->dev().xferMgr().copyBuffer(*srcStgMem, *dstDevMem, stageOffset,
-                                                          dstOrigin, cpSize);
+                                                          dstOrigin, cpSize, false,
+                                                          cmd.copyMetadata());
           dstOrigin.c[0] += copy_size;
         } while (left_size > 0);
       }
