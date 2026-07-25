@@ -4321,6 +4321,36 @@ TEST(ConSan, Gfx1250SharedLdsAutoScratchUsesAllOwnersAndGrowsEveryDescriptor) {
   return words;
 }
 
+[[nodiscard]] std::vector<uint8_t>
+make_gfx1250_two_full_pressure_lds_loads(uint32_t private_bytes) {
+  constexpr auto first_load = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 2, .vdst = 0});
+  constexpr auto second_load =
+      gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 18, .vdst = 16});
+  std::vector<uint32_t> words(first_load.begin(), first_load.end());
+  words.insert(words.end(), second_load.begin(), second_load.end());
+  for (uint16_t vgpr = 0; vgpr < REGISTER_SET_MAX_VGPRS; ++vgpr) {
+    words.push_back(
+        build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_GFX1250));
+  }
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  std::vector<uint8_t> bytes = make_gfx1250_code_object(words, "two_selected_spill_layouts");
+  if (private_bytes == 0u)
+    return bytes;
+
+  AmdGpuCodeObject object(bytes.data(), bytes.size());
+  EXPECT_TRUE(object.is_valid());
+  EXPECT_EQ(object.kernels().size(), 1u);
+  if (!object.is_valid() || object.kernels().size() != 1u)
+    return {};
+  const uint64_t descriptor_offset = object.kernels().front().descriptor_file_offset;
+  KD descriptor{};
+  std::memcpy(&descriptor, bytes.data() + descriptor_offset, sizeof(descriptor));
+  descriptor.private_segment_fixed_size = private_bytes;
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
+  std::memcpy(bytes.data() + descriptor_offset, &descriptor, sizeof(descriptor));
+  return bytes;
+}
+
 TEST(ConSan, Gfx1250SharedLdsPrivateSpillUsesOneLayoutForEveryOwner) {
   const std::vector<uint32_t> helper_words = make_gfx1250_full_pressure_lds_load_words();
   TwoKernelSharedFixtureOptions fixture;
@@ -4397,6 +4427,240 @@ TEST(ConSan, Gfx1250SharedLdsPrivateSpillUsesOneLayoutForEveryOwner) {
   }
 }
 
+TEST(ConSan, Gfx1250OverlappingSharedLdsSpillsAccumulateEveryOwnerRequirement) {
+  constexpr auto load_ab = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 4, .vdst = 0});
+  constexpr auto load_bc = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 18, .vdst = 16});
+  const auto make_full_pressure_helper = [](const auto &load) {
+    std::vector<uint32_t> words(load.begin(), load.end());
+    for (uint16_t vgpr = 0; vgpr < REGISTER_SET_MAX_VGPRS; ++vgpr) {
+      words.push_back(
+          build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_GFX1250));
+    }
+    return words;
+  };
+  const std::vector<uint32_t> helper_ab = make_full_pressure_helper(load_ab);
+  const std::vector<uint32_t> helper_bc = make_full_pressure_helper(load_bc);
+  std::vector<uint8_t> bytes = make_rdna4_three_kernel_overlapping_shared_helpers_code_object(
+      helper_ab, helper_bc, /*private_bytes=*/{16u, 32u, 0u});
+  mutate_elf_header(bytes,
+                    [](Elf64_Ehdr &header) { header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1250; });
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_EQ(original.kernels().size(), 3u);
+  const auto owner_offset = [&](std::string_view name) {
+    const auto owner = std::ranges::find(original.kernels(), name, &AmdGpuKernelInfo::name);
+    EXPECT_NE(owner, original.kernels().end());
+    return owner == original.kernels().end() ? uint64_t{0} : owner->descriptor_file_offset;
+  };
+  const uint64_t owner_a = owner_offset("overlap_owner_a");
+  const uint64_t owner_b = owner_offset("overlap_owner_b");
+  const uint64_t owner_c = owner_offset("overlap_owner_c");
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.max_patches = 2u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  std::vector<const ConSanPatchInfo *> spill_patches;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if ((patch.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
+         patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap) &&
+        patch.spilled_vgpr_count != 0u) {
+      spill_patches.push_back(&patch);
+    }
+  }
+  ASSERT_EQ(spill_patches.size(), 2u) << testing::PrintToString(result.patches);
+  const auto find_owner_set = [&](std::initializer_list<uint64_t> owners) {
+    const std::vector<uint64_t> expected(owners);
+    return std::ranges::find_if(spill_patches, [&](const ConSanPatchInfo *patch) {
+      return patch->owner_descriptor_file_offsets == expected;
+    });
+  };
+  std::vector<std::vector<uint64_t>> actual_owner_sets;
+  for (const ConSanPatchInfo *patch : spill_patches)
+    actual_owner_sets.push_back(patch->owner_descriptor_file_offsets);
+  const auto patch_ab_it = find_owner_set({owner_a, owner_b});
+  const auto patch_bc_it = find_owner_set({owner_b, owner_c});
+  ASSERT_NE(patch_ab_it, spill_patches.end()) << testing::PrintToString(actual_owner_sets);
+  ASSERT_NE(patch_bc_it, spill_patches.end()) << testing::PrintToString(actual_owner_sets);
+  const ConSanPatchInfo &patch_ab = **patch_ab_it;
+  const ConSanPatchInfo &patch_bc = **patch_bc_it;
+  ASSERT_TRUE(patch_ab.scratch_vgpr);
+  ASSERT_TRUE(patch_bc.scratch_vgpr);
+
+  const auto private_limit = address_free_scratch_private_limit(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(private_limit);
+  SpillManager manager_ab(/*original_private_bytes=*/32u, *private_limit);
+  SpillManager manager_bc(/*original_private_bytes=*/32u, *private_limit);
+  const auto expected_ab = build_vgpr_spill_sequence(
+      manager_ab, *patch_ab.scratch_vgpr, patch_ab.spilled_vgpr_count, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto expected_bc = build_vgpr_spill_sequence(
+      manager_bc, *patch_bc.scratch_vgpr, patch_bc.spilled_vgpr_count, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(expected_ab);
+  ASSERT_TRUE(expected_bc);
+  ASSERT_FALSE(expected_ab->slot_offsets.empty());
+  ASSERT_FALSE(expected_bc->slot_offsets.empty());
+  EXPECT_EQ(expected_ab->slot_offsets.front(), expected_bc->slot_offsets.front());
+  EXPECT_EQ(patch_ab.required_private_segment_size, expected_ab->total_private_bytes);
+  EXPECT_EQ(patch_bc.required_private_segment_size, expected_bc->total_private_bytes);
+  EXPECT_LT(patch_ab.required_private_segment_size, patch_bc.required_private_segment_size);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  for (const auto &[patch, expected] :
+       {std::pair{&patch_ab, &*expected_ab}, std::pair{&patch_bc, &*expected_bc}}) {
+    const std::vector<uint32_t> body =
+        text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+    EXPECT_TRUE(contains_subsequence(body, expected->save_words));
+    EXPECT_TRUE(contains_subsequence(body, expected->restore_words));
+  }
+  for (const auto &[name, expected_private_bytes] :
+       {std::pair{"overlap_owner_a", patch_ab.required_private_segment_size},
+        std::pair{"overlap_owner_b", std::max(patch_ab.required_private_segment_size,
+                                              patch_bc.required_private_segment_size)},
+        std::pair{"overlap_owner_c", patch_bc.required_private_segment_size}}) {
+    const auto owner = std::ranges::find(patched.kernels(), name, &AmdGpuKernelInfo::name);
+    ASSERT_NE(owner, patched.kernels().end());
+    KD descriptor{};
+    std::memcpy(&descriptor, result.elf_bytes.data() + owner->descriptor_file_offset,
+                sizeof(descriptor));
+    EXPECT_EQ(descriptor.private_segment_fixed_size, expected_private_bytes);
+  }
+}
+
+TEST(ConSan, Gfx1250SelectedLdsSpillsStackWithinOneOwnerLayout) {
+  const std::vector<uint8_t> bytes = make_gfx1250_two_full_pressure_lds_loads(/*private_bytes=*/0u);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.max_patches = 2u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  std::vector<const ConSanPatchInfo *> spill_patches;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if ((patch.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
+         patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap) &&
+        patch.spilled_vgpr_count != 0u) {
+      spill_patches.push_back(&patch);
+    }
+  }
+  ASSERT_EQ(spill_patches.size(), 2u) << testing::PrintToString(result.patches);
+  std::ranges::sort(spill_patches, [](const ConSanPatchInfo *lhs, const ConSanPatchInfo *rhs) {
+    return lhs->anchor_offset < rhs->anchor_offset;
+  });
+  EXPECT_EQ(spill_patches[0]->anchor_offset, 0u);
+  EXPECT_EQ(spill_patches[1]->anchor_offset, 2u * sizeof(uint32_t));
+  ASSERT_TRUE(spill_patches[0]->scratch_vgpr);
+  ASSERT_TRUE(spill_patches[1]->scratch_vgpr);
+
+  const auto private_limit = address_free_scratch_private_limit(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(private_limit);
+  SpillManager expected_manager(/*original_private_bytes=*/0u, *private_limit);
+  const auto expected_first =
+      build_vgpr_spill_sequence(expected_manager, *spill_patches[0]->scratch_vgpr,
+                                spill_patches[0]->spilled_vgpr_count, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto expected_second =
+      build_vgpr_spill_sequence(expected_manager, *spill_patches[1]->scratch_vgpr,
+                                spill_patches[1]->spilled_vgpr_count, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(expected_first);
+  ASSERT_TRUE(expected_second);
+  EXPECT_EQ(spill_patches[0]->required_private_segment_size, expected_first->total_private_bytes);
+  EXPECT_EQ(spill_patches[1]->required_private_segment_size, expected_second->total_private_bytes);
+  EXPECT_LT(expected_first->total_private_bytes, expected_second->total_private_bytes);
+  ASSERT_FALSE(expected_first->slot_offsets.empty());
+  ASSERT_FALSE(expected_second->slot_offsets.empty());
+  bool found_shared_register = false;
+  for (uint16_t first = 0; first < expected_first->vgpr_count; ++first) {
+    for (uint16_t second = 0; second < expected_second->vgpr_count; ++second) {
+      if (expected_first->vgpr_base + first != expected_second->vgpr_base + second)
+        continue;
+      found_shared_register = true;
+      EXPECT_EQ(expected_first->slot_offsets[first], expected_second->slot_offsets[second]);
+    }
+  }
+  EXPECT_TRUE(found_shared_register);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  EXPECT_EQ(descriptor.private_segment_fixed_size, expected_second->total_private_bytes);
+  for (const auto &[patch, expected] : {std::pair{spill_patches[0], &*expected_first},
+                                        std::pair{spill_patches[1], &*expected_second}}) {
+    const std::vector<uint32_t> body =
+        text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+    EXPECT_TRUE(contains_subsequence(body, expected->save_words));
+    EXPECT_TRUE(contains_subsequence(body, expected->restore_words));
+  }
+}
+
+TEST(ConSan, Gfx1250SelectedLdsSpillCapacityFailureRollsBackCandidate) {
+  const auto private_limit = address_free_scratch_private_limit(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(private_limit);
+  constexpr uint32_t kSelectionHeadroom = 2u * SpillManager::kDbiZoneAlignment;
+  ASSERT_GE(*private_limit, kSelectionHeadroom);
+  const uint32_t original_private_bytes = *private_limit - kSelectionHeadroom;
+  SpillManager discovery_preview(original_private_bytes, *private_limit);
+  ASSERT_TRUE(build_vgpr_spill_sequence(discovery_preview, /*vgpr_base=*/4u, /*vgpr_count=*/5u,
+                                        ROCJITSU_CODE_ARCH_GFX1250));
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_two_full_pressure_lds_loads(original_private_bytes);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.max_patches = 2u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  std::vector<const ConSanPatchInfo *> spill_patches;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if ((patch.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
+         patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap) &&
+        patch.spilled_vgpr_count != 0u) {
+      spill_patches.push_back(&patch);
+    }
+  }
+  ASSERT_EQ(spill_patches.size(), 1u) << testing::PrintToString(result.patches);
+  EXPECT_EQ(spill_patches.front()->anchor_offset, 0u);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("selected only 1/2 supported sites") != std::string::npos &&
+           warning.find("private_spill_encoding_failures=1") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+
+  ASSERT_TRUE(spill_patches.front()->scratch_vgpr);
+  SpillManager expected_manager(original_private_bytes, *private_limit);
+  const auto expected = build_vgpr_spill_sequence(
+      expected_manager, *spill_patches.front()->scratch_vgpr,
+      spill_patches.front()->spilled_vgpr_count, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(expected);
+  EXPECT_EQ(spill_patches.front()->required_private_segment_size, expected->total_private_bytes);
+  EXPECT_LT(expected->total_private_bytes, *private_limit);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  EXPECT_EQ(descriptor.private_segment_fixed_size, expected->total_private_bytes);
+}
+
 TEST(ConSan, Gfx1250SharedLdsPrivateSpillRejectsAnyDynamicStackOwner) {
   const std::vector<uint32_t> helper_words = make_gfx1250_full_pressure_lds_load_words();
   TwoKernelSharedFixtureOptions fixture;
@@ -4442,6 +4706,62 @@ TEST(ConSan, Gfx1250SharedLdsPrivateSpillCapacityFailureIsAccounted) {
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("private_spill_encoding_failures=1") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
+}
+
+TEST(ConSan, Gfx1250RejectedLdsSpillCandidateDoesNotGrowSelectedLayout) {
+  constexpr auto rejected_load =
+      gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 4, .vdst = 0});
+  constexpr auto selected_load =
+      gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 20, .vdst = 16});
+  std::vector<uint32_t> text_words = {
+      0xBF850000u, // s_clause 0: the next instruction cannot be instrumented.
+      rejected_load[0],
+      rejected_load[1],
+  };
+  const auto append_full_pressure = [&] {
+    for (uint16_t vgpr = 0; vgpr < REGISTER_SET_MAX_VGPRS; ++vgpr) {
+      text_words.push_back(
+          build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_GFX1250));
+    }
+  };
+  const uint64_t selected_anchor = text_words.size() * sizeof(uint32_t);
+  text_words.insert(text_words.end(), selected_load.begin(), selected_load.end());
+  append_full_pressure();
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+
+  const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "selected_spill_layout");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.max_patches = 1u;
+  options.max_patches_is_expert_limit = false;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &info) {
+    return info.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
+           info.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  EXPECT_EQ(patch->anchor_offset, selected_anchor);
+  ASSERT_TRUE(patch->scratch_vgpr);
+  ASSERT_GT(patch->spilled_vgpr_count, 0u);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("selected only 1/2 supported sites") != std::string::npos &&
+           warning.find("append_cave_reachable_candidates=1") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+
+  const auto private_limit = address_free_scratch_private_limit(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(private_limit);
+  SpillManager selected_only_manager(/*original_private_bytes=*/0u, *private_limit);
+  const auto selected_only_spill =
+      build_vgpr_spill_sequence(selected_only_manager, *patch->scratch_vgpr,
+                                patch->spilled_vgpr_count, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(selected_only_spill);
+  EXPECT_EQ(patch->required_private_segment_size, selected_only_spill->total_private_bytes);
 }
 
 TEST(ConSan, Gfx1250SharedLdsFarBodyUsesScalarScratchDeadInEveryOwner) {

@@ -192,6 +192,19 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     std::vector<uint64_t> return_relay_offsets = {};
   };
 
+  // The save and restore described by this type bracket one instrumentation
+  // body and complete before control returns to guest code. That lifetime
+  // contract permits independent owner sets to reuse byte offsets. A future
+  // spill that survives a call, relay, or guest-visible control-flow edge
+  // needs a separate plan type backed by a globally disjoint allocator.
+  struct ScBracketLocalPrivateSpillPlan {
+    std::vector<uint64_t> owner_descriptor_file_offsets;
+    uint32_t original_private_bytes = 0;
+    uint32_t private_limit = 0;
+    uint16_t vgpr_base = 0;
+    uint16_t vgpr_count = 0;
+  };
+
   struct ScDenseCallGroup {
     uint64_t kernel_entry_text_offset = 0;
     uint64_t descriptor_file_offset = 0;
@@ -723,14 +736,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   size_t dynamic_stack_private_spill_rejection_count = 0;
   size_t private_spill_encoding_failure_count = 0;
   uint32_t max_observed_padding_words = 0;
-  // Sites with the same complete owner set share one monotonically allocated
-  // layout above the largest original private segment in that set. Different
-  // owner sets may reuse offsets only because every sequence stored here is
-  // bracket-local: its restore completes before instrumentation returns to
-  // guest control flow. A future call-spanning or persistent spill must use a
-  // non-reusing lifetime domain rather than this map.
-  std::map<std::vector<uint64_t>, SpillManager> spill_managers;
-  std::unordered_map<const ConSanLdsSite *, VgprSpillSequence> spill_sequences;
+  // Candidate discovery records immutable requirements only. Stable private
+  // slots are assigned transactionally when a concrete placement is selected,
+  // so rejected candidates cannot inflate any descriptor.
+  std::unordered_map<const ConSanLdsSite *, ScBracketLocalPrivateSpillPlan> private_spill_plans;
   auto reachable_local_caves = [&](const ConSanLdsSite &site, uint64_t owner_entry_text_offset,
                                    uint64_t requested_words) {
     std::vector<const LocalNopCave *> caves;
@@ -887,11 +896,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           scratch = choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
           const auto private_limit = address_free_scratch_private_limit(arch);
           if (scratch && private_limit) {
-            auto [manager, inserted] = spill_managers.try_emplace(
-                site_context.owner_descriptor_file_offsets,
-                site_context.max_owner_private_segment_size, *private_limit);
-            (void)inserted;
-            auto spill = build_vgpr_spill_sequence(manager->second, *scratch, scratch_vgprs, arch);
+            SpillManager preview_manager(site_context.max_owner_private_segment_size,
+                                           *private_limit);
+            auto spill =
+                build_vgpr_spill_sequence(preview_manager, *scratch, scratch_vgprs, arch);
             if (spill) {
               requested_words += spill->save_words.size() + spill->restore_words.size();
               if (gfx1250_vgpr_msb_mode.value_or(0u) != 0u) {
@@ -899,7 +907,16 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                 if (spill_vcc_save_to_vgpr)
                   requested_words -= 2u;
               }
-              spill_sequences.insert_or_assign(&site, std::move(*spill));
+              private_spill_plans.insert_or_assign(
+                  &site, ScBracketLocalPrivateSpillPlan{
+                             .owner_descriptor_file_offsets =
+                                 site_context.owner_descriptor_file_offsets,
+                             .original_private_bytes =
+                                 site_context.max_owner_private_segment_size,
+                             .private_limit = *private_limit,
+                             .vgpr_base = *scratch,
+                             .vgpr_count = static_cast<uint16_t>(scratch_vgprs),
+                         });
             } else {
               scratch.reset();
               ++private_spill_encoding_failure_count;
@@ -1219,6 +1236,37 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   std::vector<LdsCheckTrapCandidate> selected_candidates;
   selected_candidates.reserve(std::min(max_patches, supported_candidate_count));
   std::unordered_set<const ConSanLdsSite *> selected_sites;
+  struct ScSelectedSpillState {
+    // Within this bracket-local lifetime domain, an exact owner set shares
+    // stable register-to-slot mappings while distinct sets may reuse offsets.
+    std::map<std::vector<uint64_t>, SpillManager> managers;
+    std::unordered_map<const ConSanLdsSite *, VgprSpillSequence> sequences;
+  };
+  ScSelectedSpillState selected_spills;
+  std::unordered_set<const ConSanLdsSite *> selection_spill_failure_sites;
+  const auto try_add_selected_spill = [&](ScSelectedSpillState &state,
+                                          const LdsCheckTrapCandidate &candidate) {
+    const auto plan = private_spill_plans.find(candidate.site);
+    if (plan == private_spill_plans.end())
+      return true;
+    const std::vector<uint64_t> &key = plan->second.owner_descriptor_file_offsets;
+    std::optional<SpillManager> manager;
+    if (const auto existing = state.managers.find(key); existing != state.managers.end())
+      manager = existing->second;
+    else
+      manager.emplace(plan->second.original_private_bytes, plan->second.private_limit);
+    auto sequence = build_vgpr_spill_sequence(
+        *manager, plan->second.vgpr_base, plan->second.vgpr_count, arch);
+    if (!sequence)
+      return false;
+    state.managers.insert_or_assign(key, std::move(*manager));
+    state.sequences.insert_or_assign(candidate.site, std::move(*sequence));
+    return true;
+  };
+  const auto note_selection_spill_failure = [&](const ConSanLdsSite *site) {
+    if (selection_spill_failure_sites.insert(site).second)
+      ++private_spill_encoding_failure_count;
+  };
   DbiPatchPlacementPlanner placement_planner(arch, appended_cave_offset);
   std::unordered_map<const ConSanLdsSite *, std::vector<uint64_t>> direct_body_relay_slots;
 
@@ -1498,6 +1546,21 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         ++dense_placement_failure_count;
         continue;
       }
+      std::optional<ScSelectedSpillState> tentative_spills;
+      if (std::ranges::any_of(planned_candidates, [&](const LdsCheckTrapCandidate &candidate) {
+            return private_spill_plans.contains(candidate.site);
+          })) {
+        tentative_spills = selected_spills;
+        for (const LdsCheckTrapCandidate &candidate : planned_candidates) {
+          if (!try_add_selected_spill(*tentative_spills, candidate)) {
+            note_selection_spill_failure(candidate.site);
+            complete_group = false;
+            break;
+          }
+        }
+      }
+      if (!complete_group)
+        continue;
 
       ScDenseCallGroup group;
       group.kernel_entry_text_offset = seed_group.kernel_entry_text_offset;
@@ -1519,6 +1582,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       dense_reserved_host_ranges.emplace_back(*best_host_offset, *best_host_offset + host_bytes);
       ++dense_selected_group_count;
       placement_planner = std::move(tentative_planner);
+      if (tentative_spills)
+        selected_spills = std::move(*tentative_spills);
       for (LdsCheckTrapCandidate &candidate : planned_candidates) {
         selected_sites.insert(candidate.site);
         selected_candidates.push_back(std::move(candidate));
@@ -1544,6 +1609,15 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     if (!allow_descriptor_growth && candidate.required_vgpr_allocation_count)
       return;
     const ConSanLdsSite &site = *candidate.site;
+    std::optional<ScSelectedSpillState> tentative_spills;
+    if (private_spill_plans.contains(candidate.site)) {
+      tentative_spills = selected_spills;
+      if (!try_add_selected_spill(*tentative_spills, candidate)) {
+        note_selection_spill_failure(candidate.site);
+        return;
+      }
+    }
+    DbiPatchPlacementPlanner tentative_planner = placement_planner;
     DbiPatchPlacementRequest request;
     request.anchor_offset = site.text_offset;
     request.original_size = site.size;
@@ -1562,7 +1636,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     if (candidate.entry_island != nullptr) {
       if (!candidate.indirect_pc_sgpr || !candidate.indirect_scc_save_sgpr)
         return;
-      DbiPatchPlacementPlanner tentative_planner = placement_planner;
       if (!candidate.entry_island_is_appended &&
           !tentative_planner.reserve_existing_range(candidate.entry_island->text_offset,
                                                     kLdsCheckTrapIndirectJumpWords *
@@ -1572,24 +1645,19 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
       placement =
           tentative_planner.plan_indirect_appended(site.text_offset, site.size, request.body_size);
-      if (placement)
-        placement_planner = std::move(tentative_planner);
-      else
+      if (!placement)
         ++indirect_candidate_placement_failure_count;
     } else if (auto relay_slot = direct_body_relay_slots.find(candidate.site);
                relay_slot != direct_body_relay_slots.end() && candidate.use_appended_cave) {
-      DbiPatchPlacementPlanner tentative_planner = placement_planner;
       placement = tentative_planner.plan(request);
       if (!placement || relay_slot->second.empty() ||
           tentative_planner.appended_end() != relay_slot->second.front() ||
           !tentative_planner.reserve_appended_prefix(relay_slot->second.size() *
                                                      sizeof(uint32_t))) {
         placement.reset();
-      } else {
-        placement_planner = std::move(tentative_planner);
       }
     } else {
-      placement = placement_planner.plan(request);
+      placement = tentative_planner.plan(request);
     }
     if (!placement)
       return;
@@ -1604,6 +1672,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       if (candidate.local_cave == nullptr)
         return;
     }
+    placement_planner = std::move(tentative_planner);
+    if (tentative_spills)
+      selected_spills = std::move(*tentative_spills);
     selected_candidates.push_back(candidate);
     selected_sites.insert(candidate.site);
   };
@@ -2683,8 +2754,24 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       if (!selected_any)
         break;
     };
+    std::optional<ScSelectedSpillState> accepted_spills;
+    if (routes_complete &&
+        std::ranges::any_of(accepted_candidates, [&](const LdsCheckTrapCandidate &candidate) {
+          return private_spill_plans.contains(candidate.site);
+        })) {
+      accepted_spills = selected_spills;
+      for (const LdsCheckTrapCandidate &candidate : accepted_candidates) {
+        if (!try_add_selected_spill(*accepted_spills, candidate)) {
+          note_selection_spill_failure(candidate.site);
+          routes_complete = false;
+          break;
+        }
+      }
+    }
     if (routes_complete) {
       placement_planner = std::move(accepted_planner);
+      if (accepted_spills)
+        selected_spills = std::move(*accepted_spills);
       selected_relay_reservoirs.insert(selected_relay_reservoirs.end(),
                                        branch_selected_reservoirs.begin(),
                                        branch_selected_reservoirs.end());
@@ -2786,7 +2873,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         candidate.vcc_save_sgpr, candidate.gfx1250_vgpr_msb_mode.value_or(0u), result.errors);
     if (!words)
       return;
-    const auto spill = spill_sequences.find(&site);
+    const auto spill = selected_spills.sequences.find(&site);
     std::optional<std::array<uint32_t, 2>> scalar_vcc_save_words;
     std::optional<std::array<uint32_t, 2>> scalar_vcc_restore_words;
     if (candidate.scalar_vcc_spill_vgpr) {
@@ -2812,7 +2899,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         return;
       }
       std::vector<uint32_t> wrapped;
-      const bool has_spill = spill != spill_sequences.end();
+      const bool has_spill = spill != selected_spills.sequences.end();
       wrapped.reserve(
           words->size() +
           (has_spill ? spill->second.save_words.size() + spill->second.restore_words.size() + 4u
@@ -2846,7 +2933,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                        spill->second.restore_words.end());
       wrapped.push_back(*restore_guest);
       words = std::move(wrapped);
-    } else if (spill != spill_sequences.end()) {
+    } else if (spill != selected_spills.sequences.end()) {
       std::vector<uint32_t> wrapped;
       wrapped.reserve(spill->second.save_words.size() + words->size() +
                       spill->second.restore_words.size() + (scalar_vcc_save_words ? 4u : 0u));
@@ -2905,7 +2992,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     planned.info.owner_descriptor_file_offsets = site.owner_descriptor_file_offsets;
     if (planned.info.owner_descriptor_file_offsets.empty())
       planned.info.owner_descriptor_file_offsets = {candidate.descriptor_file_offset};
-    if (spill != spill_sequences.end()) {
+    if (spill != selected_spills.sequences.end()) {
       planned.info.spilled_vgpr_count = spill->second.vgpr_count;
       planned.info.required_private_segment_size = spill->second.total_private_bytes;
     }
