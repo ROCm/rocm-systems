@@ -176,6 +176,24 @@ struct PcValue {
   friend bool operator==(const PcValue &, const PcValue &) = default;
 };
 
+struct VgprLane {
+  uint16_t vgpr = 0;
+  uint8_t lane = 0;
+
+  friend bool operator==(const VgprLane &, const VgprLane &) = default;
+};
+
+struct FixedLaneTransfer {
+  enum class Kind {
+    Write,
+    Read,
+  };
+
+  Kind kind = Kind::Write;
+  VgprLane lane;
+  uint16_t sgpr = 0;
+};
+
 struct TempDeltaPattern {
   int64_t delta = 0;
   uint64_t end_offset = 0;
@@ -207,6 +225,14 @@ struct SgprWriteMask {
     const uint16_t width = std::max<uint16_t>(1, ref.width);
     for (uint16_t i = 0; i < width; ++i)
       set(static_cast<uint16_t>(ref.index + i));
+  }
+
+  [[nodiscard]] bool contains(uint16_t sgpr) const {
+    if (sgpr < 64)
+      return (lo & (uint64_t{1} << sgpr)) != 0;
+    if (sgpr < REGISTER_SET_MAX_SGPRS)
+      return (hi & (uint64_t{1} << (sgpr - 64))) != 0;
+    return false;
   }
 
   template <typename F> void for_each(F &&f) const {
@@ -413,6 +439,62 @@ private:
   if (offset + sizeof(word) <= text.size())
     std::memcpy(&word, text.data() + offset, sizeof(word));
   return word;
+}
+
+[[nodiscard]] std::optional<FixedLaneTransfer> fixed_lane_transfer(const Instruction &inst,
+                                                                   uint32_t wavefront_size) {
+  const std::string_view mnemonic = inst.mnemonic();
+  if (mnemonic != "v_writelane_b32" && mnemonic != "v_readlane_b32")
+    return std::nullopt;
+  if (inst.num_dst_operands() < 1 || inst.num_src_operands() < 2)
+    return std::nullopt;
+
+  // The final semantic source is the lane selector on every AMDGPU encoding
+  // supported here. Accept only an inline integer lane. A register-selected or
+  // literal-selected lane is dynamic from this analysis's point of view and
+  // must not carry static target provenance.
+  const Operand *lane_operand = inst.src_operand(inst.num_src_operands() - 1);
+  if (lane_operand == nullptr || lane_operand->to_register_ref())
+    return std::nullopt;
+  const int selector = lane_operand->encoding_value();
+  if (selector < static_cast<int>(kInlineInt0) || selector >= static_cast<int>(kInlineInt0 + 64))
+    return std::nullopt;
+  const uint32_t lane = static_cast<uint32_t>(selector - kInlineInt0);
+  if (wavefront_size != 0 && lane >= wavefront_size)
+    return std::nullopt;
+
+  const auto register_ref = [](const Operand *operand, RegClass cls) {
+    if (operand == nullptr)
+      return std::optional<RegisterRef>{};
+    auto ref = operand->to_register_ref();
+    if (!ref || ref->cls != cls || ref->width != 1)
+      return std::optional<RegisterRef>{};
+    return ref;
+  };
+
+  if (mnemonic == "v_writelane_b32") {
+    const auto vgpr = register_ref(inst.dst_operand(0), RegClass::VGPR);
+    // CDNA/RDNA expose the tied VGPR as source 0 while gfx1250 omits it.
+    // In both forms the scalar value immediately precedes the lane selector.
+    const auto sgpr = register_ref(inst.src_operand(inst.num_src_operands() - 2), RegClass::SGPR);
+    if (!vgpr || !sgpr)
+      return std::nullopt;
+    return FixedLaneTransfer{
+        .kind = FixedLaneTransfer::Kind::Write,
+        .lane = VgprLane{.vgpr = vgpr->index, .lane = static_cast<uint8_t>(lane)},
+        .sgpr = sgpr->index,
+    };
+  }
+
+  const auto sgpr = register_ref(inst.dst_operand(0), RegClass::SGPR);
+  const auto vgpr = register_ref(inst.src_operand(0), RegClass::VGPR);
+  if (!vgpr || !sgpr)
+    return std::nullopt;
+  return FixedLaneTransfer{
+      .kind = FixedLaneTransfer::Kind::Read,
+      .lane = VgprLane{.vgpr = vgpr->index, .lane = static_cast<uint8_t>(lane)},
+      .sgpr = sgpr->index,
+  };
 }
 
 [[nodiscard]] std::optional<uint8_t> scalar_pc_opcode(rj_code_arch_t arch, ScalarPcOp op) {
@@ -1547,6 +1629,374 @@ void add_recovered_successors(const std::vector<IndirectCallFixup> &recovered,
   }
 }
 
+[[nodiscard]] bool register_ref_contains_vgpr(RegisterRef ref, uint16_t vgpr) {
+  if (ref.cls != RegClass::VGPR)
+    return false;
+  const uint32_t width = std::max<uint16_t>(1, ref.width);
+  return vgpr >= ref.index && static_cast<uint32_t>(vgpr) < ref.index + width;
+}
+
+[[nodiscard]] bool instruction_preserves_vgpr_lane(const AnalysisContext &ctx, size_t inst_index,
+                                                   VgprLane tracked) {
+  const Instruction &inst = *ctx.insts[inst_index];
+
+  // Relative VGPR addressing can name a register not represented by the
+  // decoder's nominal operand. It is outside this finite proof, even when the
+  // displayed base register differs from the carrier.
+  if (inst.mnemonic().starts_with("v_movrel"))
+    return false;
+
+  if (inst.mnemonic() == "v_writelane_b32") {
+    const Operand *dst = inst.dst_operand(0);
+    const auto dst_ref = dst == nullptr ? std::optional<RegisterRef>{} : dst->to_register_ref();
+    if (dst_ref && register_ref_contains_vgpr(*dst_ref, tracked.vgpr)) {
+      const auto transfer = fixed_lane_transfer(inst, ctx.wavefront_size);
+      return transfer && transfer->kind == FixedLaneTransfer::Kind::Write &&
+             transfer->lane != tracked;
+    }
+  }
+
+  for (int i = 0; i < inst.num_dst_operands(); ++i) {
+    const Operand *operand = inst.dst_operand(i);
+    if (operand == nullptr)
+      continue;
+    const auto ref = operand->to_register_ref();
+    if (ref && register_ref_contains_vgpr(*ref, tracked.vgpr))
+      return false;
+  }
+
+  RegisterSet implicit_defs;
+  inst.implicit_defs(implicit_defs);
+  return !implicit_defs.contains({RegClass::VGPR, tracked.vgpr, 1});
+}
+
+[[nodiscard]] bool instruction_writes_sgpr(AnalysisContext &ctx, size_t inst_index, uint16_t sgpr) {
+  ensure_written_sgprs(ctx, inst_index);
+  return ctx.facts[inst_index].written_sgprs.contains(sgpr);
+}
+
+[[nodiscard]] bool instruction_range_preserves_lane(const AnalysisContext &ctx, size_t begin,
+                                                    size_t end, VgprLane lane) {
+  for (size_t index = begin; index < end; ++index) {
+    if (!instruction_preserves_vgpr_lane(ctx, index, lane))
+      return false;
+  }
+  return true;
+}
+
+[[nodiscard]] bool instruction_range_preserves_sgpr(AnalysisContext &ctx, size_t begin, size_t end,
+                                                    uint16_t sgpr) {
+  for (size_t index = begin; index < end; ++index) {
+    if (instruction_writes_sgpr(ctx, index, sgpr))
+      return false;
+  }
+  return true;
+}
+
+[[nodiscard]] bool
+callee_preserves_vgpr_lanes(const AnalysisContext &ctx, const std::vector<AnalysisBlock> &blocks,
+                            std::span<const IndirectCallFixup> recovered, uint64_t target_offset,
+                            uint16_t return_sreg, std::span<const VgprLane> lanes,
+                            std::vector<std::pair<uint64_t, uint16_t>> &active_callees) {
+  const std::pair key{target_offset, return_sreg};
+  if (std::ranges::find(active_callees, key) != active_callees.end())
+    return false;
+  active_callees.push_back(key);
+
+  const bool result = [&] {
+    std::unordered_map<uint64_t, size_t> block_by_offset;
+    block_by_offset.reserve(blocks.size());
+    for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
+      block_by_offset.emplace(blocks[block_index].offset, block_index);
+    const auto entry_it = block_by_offset.find(target_offset);
+    if (entry_it == block_by_offset.end())
+      return false;
+
+    std::vector<size_t> worklist{entry_it->second};
+    std::vector<bool> visited(blocks.size(), false);
+    bool found_return = false;
+    while (!worklist.empty()) {
+      const size_t block_index = worklist.back();
+      worklist.pop_back();
+      if (block_index >= blocks.size() || visited[block_index])
+        continue;
+      visited[block_index] = true;
+
+      const AnalysisBlock &block = blocks[block_index];
+      for (size_t index = block.first_index; index <= block.last_index; ++index) {
+        for (VgprLane lane : lanes) {
+          if (!instruction_preserves_vgpr_lane(ctx, index, lane))
+            return false;
+        }
+      }
+
+      const size_t term_index = block.last_index;
+      const Instruction &term = *ctx.insts[term_index];
+      const InstructionFacts &facts = ctx.facts[term_index];
+      const uint64_t continuation_offset = term.src_loc() + static_cast<uint64_t>(term.size());
+
+      if (facts.call_sdst) {
+        const auto delta = term.branch_offset_bytes();
+        if (!delta)
+          return false;
+        const int64_t nested_target =
+            static_cast<int64_t>(continuation_offset) + static_cast<int64_t>(*delta);
+        if (nested_target < 0 || !callee_preserves_vgpr_lanes(
+                                     ctx, blocks, recovered, static_cast<uint64_t>(nested_target),
+                                     *facts.call_sdst, lanes, active_callees))
+          return false;
+        const auto continuation = block_by_offset.find(continuation_offset);
+        if (continuation == block_by_offset.end())
+          return false;
+        worklist.push_back(continuation->second);
+        continue;
+      }
+
+      if (facts.swappc_sdst) {
+        bool found_target = false;
+        for (const IndirectCallFixup &fixup : recovered) {
+          if (fixup.source_call_offset != term.src_loc() || !fixup.source_is_call ||
+              fixup.source_return_sreg != *facts.swappc_sdst)
+            continue;
+          found_target = true;
+          if (!callee_preserves_vgpr_lanes(ctx, blocks, recovered, fixup.source_target_offset,
+                                           fixup.source_return_sreg, lanes, active_callees))
+            return false;
+        }
+        if (!found_target)
+          return false;
+        const auto continuation = block_by_offset.find(continuation_offset);
+        if (continuation == block_by_offset.end())
+          return false;
+        worklist.push_back(continuation->second);
+        continue;
+      }
+
+      if (facts.setpc_ssrc) {
+        if (*facts.setpc_ssrc != return_sreg)
+          return false;
+        found_return = true;
+        continue;
+      }
+
+      if ((term.flags() & (INDIRECT_BRANCH | PROGRAM_TERMINATOR)) != 0 || block.successors.empty())
+        return false;
+      worklist.insert(worklist.end(), block.successors.begin(), block.successors.end());
+    }
+    return found_return;
+  }();
+
+  active_callees.pop_back();
+  return result;
+}
+
+void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<AnalysisBlock> &blocks,
+                                     std::span<const IndirectCallFixup> known_recovered,
+                                     std::vector<IndirectCallFixup> &recovered) {
+  // Some device-call sequences preserve a reusable static target in exact VGPR
+  // lanes while the target SGPR pair is used for call arguments:
+  //
+  //   getpc/add target
+  //   writelane carrier, target_lo, lane_a
+  //   writelane carrier, target_hi, lane_b
+  //   swappc return, target
+  //   ...
+  //   readlane target_lo, carrier, lane_a
+  //   readlane target_hi, carrier, lane_b
+  //   swappc return, target
+  //
+  // Recover the later call only when an earlier proven call establishes the
+  // value saved in both lanes, the caller does not clobber either lane, and
+  // every intervening decoded callee returns without clobbering it. This is an
+  // ISA dataflow proof; register numbers, targets, symbols, and instruction
+  // offsets are all discovered from the code object.
+
+  for (size_t consumer_index = 0; consumer_index < ctx.insts.size(); ++consumer_index) {
+    const InstructionFacts &consumer_facts = ctx.facts[consumer_index];
+    if (!consumer_facts.swappc_ssrc || !consumer_facts.swappc_sdst)
+      continue;
+    const uint64_t consumer_offset = ctx.insts[consumer_index]->src_loc();
+    if (std::ranges::any_of(known_recovered, [&](const IndirectCallFixup &fixup) {
+          return fixup.source_call_offset == consumer_offset;
+        }))
+      continue;
+
+    std::array<size_t, 2> restore_indices{};
+    std::array<VgprLane, 2> saved_lanes{};
+    bool complete = true;
+    for (uint16_t half = 0; half < 2; ++half) {
+      const uint16_t sgpr = static_cast<uint16_t>(*consumer_facts.swappc_ssrc + half);
+
+      bool found_restore = false;
+      for (size_t index = consumer_index; index-- > 0;) {
+        const auto transfer = fixed_lane_transfer(*ctx.insts[index], ctx.wavefront_size);
+        if (!transfer || transfer->kind != FixedLaneTransfer::Kind::Read || transfer->sgpr != sgpr)
+          continue;
+        restore_indices[half] = index;
+        saved_lanes[half] = transfer->lane;
+        found_restore = true;
+        break;
+      }
+
+      if (!found_restore ||
+          !instruction_range_preserves_sgpr(ctx, restore_indices[half] + 1, consumer_index, sgpr)) {
+        complete = false;
+        break;
+      }
+    }
+    if (!complete || saved_lanes[0] == saved_lanes[1])
+      continue;
+
+    std::array<size_t, 2> save_indices{};
+    std::array<uint16_t, 2> saved_sgprs{};
+    for (uint16_t half = 0; half < 2; ++half) {
+      bool found_save = false;
+      for (size_t index = restore_indices[half]; index-- > 0;) {
+        const auto transfer = fixed_lane_transfer(*ctx.insts[index], ctx.wavefront_size);
+        if (!transfer || transfer->kind != FixedLaneTransfer::Kind::Write ||
+            transfer->lane != saved_lanes[half])
+          continue;
+        save_indices[half] = index;
+        saved_sgprs[half] = transfer->sgpr;
+        found_save = true;
+        break;
+      }
+      if (!found_save ||
+          !instruction_range_preserves_lane(ctx, save_indices[half] + 1, restore_indices[half],
+                                            saved_lanes[half])) {
+        complete = false;
+        break;
+      }
+    }
+    if (!complete || saved_sgprs[0] >= kMaxTrackedSgprPair ||
+        saved_sgprs[1] != static_cast<uint16_t>(saved_sgprs[0] + 1))
+      continue;
+
+    const size_t first_save = std::min(save_indices[0], save_indices[1]);
+    const size_t last_save = std::max(save_indices[0], save_indices[1]);
+    for (size_t index = first_save; index < last_save; ++index) {
+      if (is_block_terminator(*ctx.insts[index]) ||
+          ctx.insts[index]->src_loc() + static_cast<uint64_t>(ctx.insts[index]->size()) !=
+              ctx.insts[index + 1]->src_loc()) {
+        complete = false;
+        break;
+      }
+    }
+    if (!complete)
+      continue;
+
+    std::optional<size_t> origin_call_index;
+    uint64_t origin_call_offset = 0;
+    for (const IndirectCallFixup &fixup : known_recovered) {
+      if (!fixup.source_is_call || fixup.source_call_sreg != saved_sgprs[0])
+        continue;
+      const auto call_index = instruction_index_for_offset(ctx.insts, fixup.source_call_offset);
+      if (!call_index || *call_index <= last_save || *call_index >= consumer_index)
+        continue;
+      if (fixup.source_recovery_end_offset > ctx.insts[save_indices[0]]->src_loc() ||
+          fixup.source_recovery_end_offset > ctx.insts[save_indices[1]]->src_loc() ||
+          !instruction_range_preserves_sgpr(ctx, save_indices[0] + 1, *call_index,
+                                            saved_sgprs[0]) ||
+          !instruction_range_preserves_sgpr(ctx, save_indices[1] + 1, *call_index, saved_sgprs[1]))
+        continue;
+      if (!origin_call_index || *call_index < *origin_call_index) {
+        origin_call_index = *call_index;
+        origin_call_offset = fixup.source_call_offset;
+      }
+    }
+    if (!origin_call_index)
+      continue;
+
+    std::vector<const IndirectCallFixup *> origin_fixups;
+    for (const IndirectCallFixup &fixup : known_recovered) {
+      if (fixup.source_call_offset == origin_call_offset && fixup.source_is_call &&
+          fixup.source_call_sreg == saved_sgprs[0])
+        origin_fixups.push_back(&fixup);
+    }
+    if (origin_fixups.empty())
+      continue;
+
+    const std::array<VgprLane, 2> lanes{saved_lanes[0], saved_lanes[1]};
+    bool path_preserves = true;
+    for (size_t index = last_save + 1; index < consumer_index; ++index) {
+      if (index + 1 < ctx.insts.size() &&
+          ctx.insts[index]->src_loc() + static_cast<uint64_t>(ctx.insts[index]->size()) !=
+              ctx.insts[index + 1]->src_loc()) {
+        path_preserves = false;
+        break;
+      }
+
+      for (VgprLane lane : lanes) {
+        if (!instruction_preserves_vgpr_lane(ctx, index, lane)) {
+          path_preserves = false;
+          break;
+        }
+      }
+      if (!path_preserves)
+        break;
+
+      const Instruction &inst = *ctx.insts[index];
+      const InstructionFacts &facts = ctx.facts[index];
+      if (facts.call_sdst) {
+        const auto delta = inst.branch_offset_bytes();
+        const int64_t target = delta ? static_cast<int64_t>(inst.src_loc() + inst.size()) +
+                                           static_cast<int64_t>(*delta)
+                                     : -1;
+        std::vector<std::pair<uint64_t, uint16_t>> active_callees;
+        if (target < 0 || !callee_preserves_vgpr_lanes(ctx, blocks, known_recovered,
+                                                       static_cast<uint64_t>(target),
+                                                       *facts.call_sdst, lanes, active_callees)) {
+          path_preserves = false;
+          break;
+        }
+      } else if (facts.swappc_sdst) {
+        bool found_target = false;
+        for (const IndirectCallFixup &fixup : known_recovered) {
+          if (fixup.source_call_offset != inst.src_loc() || !fixup.source_is_call ||
+              fixup.source_return_sreg != *facts.swappc_sdst)
+            continue;
+          found_target = true;
+          std::vector<std::pair<uint64_t, uint16_t>> active_callees;
+          if (!callee_preserves_vgpr_lanes(ctx, blocks, known_recovered, fixup.source_target_offset,
+                                           fixup.source_return_sreg, lanes, active_callees)) {
+            path_preserves = false;
+            break;
+          }
+        }
+        if (!found_target || !path_preserves) {
+          path_preserves = false;
+          break;
+        }
+      } else if (is_block_terminator(inst)) {
+        path_preserves = false;
+        break;
+      }
+    }
+    if (!path_preserves)
+      continue;
+
+    for (const IndirectCallFixup *fixup : origin_fixups) {
+      std::vector<std::pair<uint64_t, uint16_t>> active_callees;
+      if (!callee_preserves_vgpr_lanes(ctx, blocks, known_recovered, fixup->source_target_offset,
+                                       *consumer_facts.swappc_sdst, lanes, active_callees)) {
+        complete = false;
+        break;
+      }
+    }
+    if (!complete)
+      continue;
+
+    for (const IndirectCallFixup *fixup : origin_fixups) {
+      IndirectCallFixup restored = *fixup;
+      restored.source_call_offset = consumer_offset;
+      restored.source_call_sreg = *consumer_facts.swappc_ssrc;
+      restored.source_is_call = true;
+      restored.source_return_sreg = *consumer_facts.swappc_sdst;
+      append_unique(recovered, restored);
+    }
+  }
+}
+
 void recover_signed_delta_templates(const AnalysisContext &ctx,
                                     const std::vector<AnalysisBlock> &blocks,
                                     std::vector<IndirectCallFixup> &recovered) {
@@ -1677,6 +2127,10 @@ discover_indirect_branch_edges(std::span<const Instruction *const> insts,
     for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
       scan_block(ctx, block_index, blocks, pending_consumers, iteration_recovered);
     recover_signed_delta_templates(ctx, blocks, iteration_recovered);
+    std::vector<IndirectCallFixup> known_recovered = recovered;
+    for (const IndirectCallFixup &fixup : iteration_recovered)
+      append_unique(known_recovered, fixup);
+    recover_lane_saved_call_targets(ctx, blocks, known_recovered, iteration_recovered);
 
     size_t unresolved_consumers = 0;
     if (!pending_consumers.empty()) {

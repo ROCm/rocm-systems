@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vbuffer.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/mubuf.h"
@@ -266,6 +267,20 @@ uint32_t pack_sopc(uint16_t op, uint16_t ssrc0, uint16_t ssrc1) {
 uint32_t build_s_call_b64(uint16_t sdst, int16_t simm16) {
   return cdna3::build_sopk(cdna3::kSCallB64Sopk, {.simm16 = static_cast<uint16_t>(simm16),
                                                   .sdst = static_cast<uint8_t>(sdst)})[0];
+}
+
+std::array<uint32_t, 2> build_cdna4_writelane(uint16_t vgpr, uint16_t sgpr,
+                                              uint16_t lane_selector) {
+  return cdna4::build_vop3(
+      cdna4::kVWritelaneB32Vop3,
+      {.vdst = static_cast<uint8_t>(vgpr), .src0 = sgpr, .src1 = lane_selector, .src2 = 128});
+}
+
+std::array<uint32_t, 2> build_cdna4_readlane(uint16_t sgpr, uint16_t vgpr, uint16_t lane_selector) {
+  return cdna4::build_vop3(cdna4::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sgpr),
+                                                      .src0 = static_cast<uint16_t>(256 + vgpr),
+                                                      .src1 = lane_selector,
+                                                      .src2 = 128});
 }
 
 TEST(RegisterSetAnalysis, KeepsRegisterClassesSeparate) {
@@ -553,6 +568,125 @@ TEST(CfgAnalysis, RecoversRdna4CanonicalizedGetpcCall) {
   EXPECT_EQ(caller->call_edges()[0].kind, BasicBlock::CallEdgeKind::IndirectSwapPc);
   EXPECT_EQ(caller->call_edges()[0].callee, callee);
   EXPECT_EQ(caller->call_edges()[0].continuation, continuation);
+}
+
+enum class LaneSavedTargetMutation {
+  None,
+  DynamicLane,
+  MismatchedHalf,
+  CalleeClobber,
+  CallerClobber,
+  UnknownInterveningCall,
+};
+
+std::vector<uint32_t> build_lane_saved_target_program(LaneSavedTargetMutation mutation) {
+  constexpr uint16_t kTargetSreg = 0;
+  constexpr uint16_t kUnknownTargetSreg = 4;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint16_t kCarrierVgpr = 42;
+  constexpr uint16_t kLowLane = 128 + 7;
+  constexpr uint16_t kHighLane = 128 + 8;
+  constexpr uint32_t kLiteralOperand = 255;
+
+  std::vector<uint32_t> words;
+  const auto append = [&](const auto &encoded) {
+    words.insert(words.end(), encoded.begin(), encoded.end());
+  };
+
+  // 0x00: first callee. The negative case writes the complete carrier
+  // register before returning.
+  words.push_back(
+      mutation == LaneSavedTargetMutation::CalleeClobber
+          ? cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 128, .vdst = kCarrierVgpr})[0]
+          : build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  words.push_back(pack_sop1(0x1d, 0, kReturnSreg));
+  // 0x08: a second, preserving callee used between the save and restore.
+  words.push_back(pack_sop1(0x1d, 0, kReturnSreg));
+  words.push_back(build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+
+  // 0x10: build the first callee target in s[0:1].
+  words.push_back(pack_sop1(0x1c, kTargetSreg, 0));
+  words.push_back(pack_sop2(0, kTargetSreg, kTargetSreg, kLiteralOperand));
+  words.push_back(static_cast<uint32_t>(-20));
+  words.push_back(pack_sop2(4, kTargetSreg + 1, kTargetSreg + 1, kLiteralOperand));
+  words.push_back(UINT32_MAX);
+  append(build_cdna4_writelane(kCarrierVgpr, kTargetSreg,
+                               mutation == LaneSavedTargetMutation::DynamicLane ? kUnknownTargetSreg
+                                                                                : kLowLane));
+  append(build_cdna4_writelane(kCarrierVgpr, kTargetSreg + 1, kHighLane));
+  words.push_back(pack_sop1(0x1e, kReturnSreg, kTargetSreg)); // 0x34.
+
+  // 0x38: call a different target before restoring the saved first target.
+  if (mutation == LaneSavedTargetMutation::UnknownInterveningCall) {
+    for (size_t i = 0; i < 5; ++i)
+      words.push_back(build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  } else {
+    words.push_back(pack_sop1(0x1c, kTargetSreg, 0));
+    words.push_back(pack_sop2(0, kTargetSreg, kTargetSreg, kLiteralOperand));
+    words.push_back(static_cast<uint32_t>(-52));
+    words.push_back(pack_sop2(4, kTargetSreg + 1, kTargetSreg + 1, kLiteralOperand));
+    words.push_back(UINT32_MAX);
+  }
+  words.push_back(pack_sop1(0x1e, kReturnSreg,
+                            mutation == LaneSavedTargetMutation::UnknownInterveningCall
+                                ? kUnknownTargetSreg
+                                : kTargetSreg)); // 0x4c.
+  words.push_back(
+      mutation == LaneSavedTargetMutation::CallerClobber
+          ? cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 128, .vdst = kCarrierVgpr})[0]
+          : build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4)); // 0x50.
+
+  append(build_cdna4_readlane(kTargetSreg, kCarrierVgpr, kLowLane));
+  append(build_cdna4_readlane(kTargetSreg + 1, kCarrierVgpr,
+                              mutation == LaneSavedTargetMutation::MismatchedHalf ? kHighLane + 1
+                                                                                  : kHighLane));
+  words.push_back(pack_sop1(0x1e, kReturnSreg, kTargetSreg)); // 0x64.
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  return words;
+}
+
+TEST(CfgAnalysis, RecoversLaneSavedTargetAcrossPreservingCalls) {
+  TestCodeObject co(build_lane_saved_target_program(LaneSavedTargetMutation::None));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 3> extra_leaders{0, 8, 16};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+
+  BasicBlock *consumer = block_starting_at(blocks, 0x64);
+  BasicBlock *callee = block_starting_at(blocks, 0);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(callee, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 0u);
+  ASSERT_EQ(consumer->call_edges().size(), 1u);
+  EXPECT_EQ(consumer->call_edges()[0].callee, callee);
+}
+
+TEST(CfgAnalysis, RejectsUnprovenLaneSavedTargets) {
+  constexpr std::array mutations{
+      LaneSavedTargetMutation::DynamicLane,
+      LaneSavedTargetMutation::MismatchedHalf,
+      LaneSavedTargetMutation::CalleeClobber,
+      LaneSavedTargetMutation::CallerClobber,
+      LaneSavedTargetMutation::UnknownInterveningCall,
+  };
+
+  for (LaneSavedTargetMutation mutation : mutations) {
+    SCOPED_TRACE(static_cast<int>(mutation));
+    TestCodeObject co(build_lane_saved_target_program(mutation));
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NE(decoder, nullptr);
+    constexpr std::array<uint64_t, 3> extra_leaders{0, 8, 16};
+    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+
+    const auto consumer_it = std::ranges::find_if(blocks, [](const auto &block) {
+      return block && block->terminator() && block->terminator()->src_loc() == 0x64;
+    });
+    BasicBlock *consumer = consumer_it == blocks.end() ? nullptr : consumer_it->get();
+    ASSERT_NE(consumer, nullptr);
+    EXPECT_TRUE(consumer->static_indirect_call_fixups().empty());
+    EXPECT_TRUE(consumer->call_edges().empty());
+  }
 }
 
 TEST(CfgAnalysis, RejectsNoncanonicalRdna4GetpcSignExtensions) {
