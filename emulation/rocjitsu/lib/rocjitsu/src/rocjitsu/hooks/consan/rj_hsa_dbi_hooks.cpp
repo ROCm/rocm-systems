@@ -256,36 +256,6 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
   return WaitcheckPreflightOutcome::AnalysisFailed;
 }
 
-[[nodiscard]] bool is_supported_require_patch_flat_site(const rocjitsu::ConSanFlatSite &site) {
-  if (site.kind != rocjitsu::ConSanLdsAccessKind::Read &&
-      site.kind != rocjitsu::ConSanLdsAccessKind::Write)
-    return false;
-  if ((site.size != 2u * sizeof(uint32_t) && site.size != 3u * sizeof(uint32_t)) || !site.addr_vgpr)
-    return false;
-  if (site.width_bits != 16u && site.width_bits != 32u && site.width_bits != 64u &&
-      site.width_bits != 128u)
-    return false;
-  if (site.kind == rocjitsu::ConSanLdsAccessKind::Read) {
-    if (site.mnemonic != "flat_load_b32" && site.mnemonic != "flat_load_b64" &&
-        site.mnemonic != "flat_load_b128" && site.mnemonic != "flat_load_dword" &&
-        site.mnemonic != "flat_load_dwordx2" && site.mnemonic != "flat_load_dwordx4" &&
-        site.mnemonic != "flat_load_ushort" && site.mnemonic != "flat_load_u16")
-      return false;
-    if (!site.dst_vgpr)
-      return false;
-  } else {
-    if (site.mnemonic != "flat_store_b32" && site.mnemonic != "flat_store_b64" &&
-        site.mnemonic != "flat_store_b128" && site.mnemonic != "flat_store_dword" &&
-        site.mnemonic != "flat_store_dwordx2" && site.mnemonic != "flat_store_dwordx4" &&
-        site.mnemonic != "flat_store_short" && site.mnemonic != "flat_store_b16")
-      return false;
-    if (!site.data_vgpr)
-      return false;
-  }
-  return site.address_space_hint == rocjitsu::ConSanFlatAddressSpaceHint::Group ||
-         site.address_space_hint == rocjitsu::ConSanFlatAddressSpaceHint::MaybeGroup;
-}
-
 [[nodiscard]] bool require_patch_applies_to(const rocjitsu::ConSanResult &result,
                                             const HookConfig &config) {
   for (const rocjitsu::ConSanKernelInfo &kernel : result.kernels) {
@@ -306,7 +276,7 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
     }
     if (config.probe_flat_check_trap) {
       for (const rocjitsu::ConSanFlatSite &site : kernel.flat_sites) {
-        if (is_supported_require_patch_flat_site(site))
+        if (rocjitsu::consan_supercollider_supports_flat_site(site, config.flat_provenance_mode))
           return true;
       }
     }
@@ -314,7 +284,7 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
   if (config.probe_flat_check_trap) {
     for (const rocjitsu::ConSanFunctionInfo &function : result.functions) {
       for (const rocjitsu::ConSanFlatSite &site : function.flat_sites) {
-        if (is_supported_require_patch_flat_site(site))
+        if (rocjitsu::consan_supercollider_supports_flat_site(site, config.flat_provenance_mode))
           return true;
       }
     }
@@ -340,16 +310,13 @@ is_supported_require_patch_moi_candidate(const rocjitsu::ConSanMoiCandidate &can
   if (candidate.source != rocjitsu::ConSanMoiCandidateSource::FlatGroup &&
       candidate.source != rocjitsu::ConSanMoiCandidateSource::FlatMaybeGroup)
     return false;
-  if (candidate.size != 3u * sizeof(uint32_t))
+  if (candidate.size != 2u * sizeof(uint32_t) && candidate.size != 3u * sizeof(uint32_t))
     return false;
   if (!candidate.raw_ioffset || *candidate.raw_ioffset != 0)
     return false;
   if (*candidate.addr_vgpr >= 255)
     return false;
-  return candidate.mnemonic == "flat_load_b32" || candidate.mnemonic == "flat_load_b64" ||
-         candidate.mnemonic == "flat_load_b128" || candidate.mnemonic == "flat_store_b32" ||
-         candidate.mnemonic == "flat_store_b64" || candidate.mnemonic == "flat_store_b128" ||
-         candidate.mnemonic == "flat_load_u16" || candidate.mnemonic == "flat_store_b16";
+  return rocjitsu::consan_moi_supports_flat_access_mnemonic(candidate.mnemonic);
 }
 
 [[nodiscard]] bool require_moi_patch_applies_to(const rocjitsu::ConSanResult &result) {
@@ -605,7 +572,7 @@ compute_consan_static_coverage(const rocjitsu::ConSanResult &result, const HookC
           if (!applicable_group)
             continue;
           ++coverage.access.discovered;
-          if (is_supported_require_patch_flat_site(site))
+          if (rocjitsu::consan_supercollider_supports_flat_site(site, config.flat_provenance_mode))
             ++coverage.access.supported;
         }
       }

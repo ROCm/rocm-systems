@@ -239,6 +239,11 @@ validate_consan_input_layout(const AmdGpuCodeObject &code_object,
 
 #include "rocjitsu/code/patch/consan/consan_validation.inc"
 
+bool consan_supercollider_supports_flat_site(const ConSanFlatSite &site,
+                                             ConSanFlatProvenanceMode mode) {
+  return is_supported_flat_check_trap_site(site, mode);
+}
+
 namespace {
 
 [[nodiscard]] std::optional<std::string> access_patch_kind(ConSanPatchKind kind) {

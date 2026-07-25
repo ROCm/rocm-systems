@@ -267,6 +267,17 @@ void warn_skipped_moi_lds_candidates(std::string_view container_name, bool in_ke
           site.address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup);
 }
 
+[[nodiscard]] bool is_supported_moi_flat_access_mnemonic(std::string_view mnemonic) {
+  // D16 entries are low-half only. High-half forms require explicit
+  // upper-half normalization before they can share these lowerings.
+  return equals_any(mnemonic,
+                    {"flat_load_b32", "flat_load_b64", "flat_load_b128", "flat_store_b32",
+                     "flat_store_b64", "flat_store_b128", "flat_load_dword", "flat_load_dwordx2",
+                     "flat_load_dwordx4", "flat_store_dword", "flat_store_dwordx2",
+                     "flat_store_dwordx4", "flat_load_ushort", "flat_load_short_d16",
+                     "flat_store_short", "flat_load_u16", "flat_load_d16_b16", "flat_store_b16"});
+}
+
 struct SkippedMoiFlatCounts {
   uint32_t other_kind = 0;
   uint32_t unknown = 0;
@@ -419,12 +430,7 @@ classify_moi_access_candidate_support(std::span<const uint8_t> bytes,
     return ConSanSiteDispositionReason::NonzeroFlatOffset;
   if (*candidate.addr_vgpr >= 255)
     return ConSanSiteDispositionReason::ReservedFlatAddressRegister;
-  if (!equals_any(candidate.mnemonic,
-                  {"flat_load_b32", "flat_load_b64", "flat_load_b128", "flat_store_b32",
-                   "flat_store_b64", "flat_store_b128", "flat_load_dword", "flat_load_dwordx2",
-                   "flat_load_dwordx4", "flat_store_dword", "flat_store_dwordx2",
-                   "flat_store_dwordx4", "flat_load_ushort", "flat_store_short", "flat_load_u16",
-                   "flat_store_b16"}))
+  if (!is_supported_moi_flat_access_mnemonic(candidate.mnemonic))
     return ConSanSiteDispositionReason::UnsupportedMnemonic;
   return ConSanSiteDispositionReason::None;
 }
@@ -674,14 +680,7 @@ candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate
     return false;
   if (!candidate.addr_vgpr || *candidate.addr_vgpr >= 255)
     return false;
-  if (candidate.mnemonic != "flat_load_b32" && candidate.mnemonic != "flat_load_b64" &&
-      candidate.mnemonic != "flat_load_b128" && candidate.mnemonic != "flat_store_b32" &&
-      candidate.mnemonic != "flat_store_b64" && candidate.mnemonic != "flat_store_b128" &&
-      candidate.mnemonic != "flat_load_dword" && candidate.mnemonic != "flat_load_dwordx2" &&
-      candidate.mnemonic != "flat_load_dwordx4" && candidate.mnemonic != "flat_store_dword" &&
-      candidate.mnemonic != "flat_store_dwordx2" && candidate.mnemonic != "flat_store_dwordx4" &&
-      candidate.mnemonic != "flat_load_ushort" && candidate.mnemonic != "flat_store_short" &&
-      candidate.mnemonic != "flat_load_u16" && candidate.mnemonic != "flat_store_b16")
+  if (!is_supported_moi_flat_access_mnemonic(candidate.mnemonic))
     return false;
   return true;
 }

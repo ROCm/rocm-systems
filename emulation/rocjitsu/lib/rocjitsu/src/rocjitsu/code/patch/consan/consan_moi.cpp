@@ -119,6 +119,10 @@ bool consan_detail::validate_scalar_state_temporaries(const ConSanOptions &optio
 
 #include "rocjitsu/code/patch/consan/consan_moi_pipeline.inc"
 
+bool consan_moi_supports_flat_access_mnemonic(std::string_view mnemonic) {
+  return is_supported_moi_flat_access_mnemonic(mnemonic);
+}
+
 bool consan_moi_supports_native_lds_record_replay_mnemonic(std::string_view mnemonic) {
   return is_single_range_native_lds_mnemonic(mnemonic) ||
          two_address_native_lds_offset_scale(mnemonic).has_value();

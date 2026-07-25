@@ -32,4 +32,9 @@
 consan_gfx1250_vgpr_msb_mode_at(std::span<const uint8_t> bytes, uint64_t text_file_offset,
                                 uint64_t container_entry_text_offset, uint64_t site_file_offset);
 
+/// Return whether SuperCollider can instrument this decoded FLAT LDS site
+/// under the requested provenance policy.
+[[nodiscard]] bool consan_supercollider_supports_flat_site(const ConSanFlatSite &site,
+                                                           ConSanFlatProvenanceMode mode);
+
 } // namespace rocjitsu
