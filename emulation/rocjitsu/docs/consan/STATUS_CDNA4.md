@@ -224,8 +224,11 @@ matrix-conversion tests copy rather than mutate the process-global defaults.
 At corpus `0db836e7bd8c6400b7ffd187d749225899875d7c`, the retained
 `rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-msgpack-fixed-a4d05293-verified-20260725`
 run passes the exact numerical oracle and gfx950 ELF checks in 5.084 seconds
-with neither schema-mismatch nor `std::bad_cast` output; its `results.csv` and
-runner log hashes are
+with neither schema-mismatch nor `std::bad_cast` output.  The logged failure
+for the unqualified helper filename is an expected lazy-loading probe before
+the client tries the available `xnack-` variant; the debug-loaded evidence
+below makes that sequence explicit.  Its `results.csv` and runner log hashes
+are
 `3aa62283aa84cd32fdee46564ccb19d3cbc451411ca39c61fad4311b9db042be`
 and
 `08ab09a24a5ae86aada3bb611e3a3775e69a65b5326176c0fbc50285c4d6ccef`.
@@ -272,8 +275,61 @@ hashes are
 `d0d5957424d574c10a88fee8e951428cb03b54f6a35197da03a03144ddbe2048`
 and
 `723d71b01c4f3209b676c6242407ba0c030f71879699f83f19a38259e9a20036`.
-The distinct mixed float plus integer-sentinel contract for
-`LocalWritePerMfma` remains isolated under `bd-1w9.9.12`.
+The `bd-1w9.9.12` follow-up is pinned at rocm-libraries
+`88c30745d152f23b6955edc0fec1d30b7f7e7c7d`.  It models
+`LocalWritePerMfma` as float scheduling values plus integer sentinels derived
+from the registry.  It reuses the explicit opt-in int-to-float table established
+for `GlobalReadPerMfma`, rather than adding a bespoke conversion path; a future
+sentinel added to the registry joins the derived sentinel set.  The production
+assignment path preserves `-1` as an integer, canonicalizes the equivalent
+`-1.0` spelling to that integer sentinel, and converts valid non-sentinel
+integer shorthands to floats.  Booleans, strings, the undocumented and
+unsupported `-2`, and out-of-range integers remain strict diagnostics.  This
+is a generator-state contract: the final runtime `TensileLibrary.yaml` does
+not serialize either per-MFMA scheduling parameter.
+
+The retained sweep at
+`rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-local-write-contract-20260725`
+is exhaustive over the observed corpus population: all 4,598 explicit values
+across 106 upstream YAML files pass through the production assignment,
+validation, and MessagePack round-trip paths with zero mismatches.  The source
+and wire populations are identical: 4,596 integer `-1` sentinels and two float
+`0.5` values.  The focused suite, rather than this two-value corpus
+population, covers `-1.0` canonicalization, integer-shorthand conversion, and
+strict rejection branches.  The README, executable sweep, sweep log,
+focused-test log, and full-unit log hashes are
+`46f46b3657fdc7457de8da139e6de20c1e58c42423b6789593960edaf843562e`,
+`6e7776928318f11337cdbb5733ac9ae385100fa0d6b16e55cede1c05001dfb8c`,
+`770a2899fde1cc29bba5a8262f47489562d78da10402461ae2415eb02c6a31c7`,
+`ba899ca7b2af1d608ddf8db3df8ccc6070777556b0534c176de1991c343f61bd`,
+and
+`4bb01585606aff084922753c993d1cf934cbe6f2b41c526d83872e70ef163939`.
+The logs record 82/82 focused tests and the complete unit gate at 1,196
+passes, 202 skips, and one expected failure.  The committed-revision
+`rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-local-write-contract-88c30745-20260725`
+run passes the exact numerical oracle and gfx950 ELF checks in 5.167 seconds
+without a type warning or `std::bad_cast`; its `results.csv` and runner log
+hashes are
+`cf0109a1198dc0b57219476a363dcee2c8cf45745f11d140eb309d2fbae395aa`
+and
+`202a76d50dcd06bc32d33282adcd0958aff77f5478bd65652d0c2c6e368cc619`.
+The debug-loaded rerun at
+`rocjitsu-test-corpus/.pytest-artifacts/consan-gfx950-tensile-local-write-contract-debug-88c30745-20260725`
+shows `TensileLibrary_gfx950.co` loading, the expected miss on the unqualified
+helper name, successful fallback to
+`Kernels.so-000-gfx950-xnack-.hsaco`, the retained Stream-K kernel invocation,
+and `validation=PASSED`.  Its non-finite timer fields reflect the simulator's
+unavailable GPU event timer rather than a skipped kernel.  The debug README,
+results, and runner log hashes are
+`98e10d082e46ad5f28dc47862f6c23388aa2d3ca96a5162a8501564fa7fb3e98`,
+`2f1028f0fda675ae1ab5f2e60a98c59fde596431141e535e697891fd8073f5d5`,
+and
+`2525969cc6b114b49d0508cf335e34dea1fb69deacabdddb87f43bc13e843db2`.
+Exactly one local review round covered the original producer head
+`76ad46c3b837`; all findings were amended into final head `88c30745d152` and
+resolved without a reviewer rerun or Curator pass.  The final fixes therefore
+have focused/full test and audit coverage, but not an independent rebuttal
+review pass.
 
 The three MOI profiles fail closed before the numeric oracle executes:
 
@@ -459,14 +515,31 @@ a ConSan detection.
 
 ## Progress log
 
+- 2026-07-25: Closed `bd-1w9.9.13` after a source audit and debug-loaded rerun
+  disproved the suspected fail-open numeric runner.  TensileLite intentionally
+  probes the unqualified helper filename, clears file-not-found, and then loads
+  the matching `xnack-` variant.  The trace records that successful load, the
+  Stream-K invocation, and `validation=PASSED`; non-finite simulator timing is
+  not the output-comparison oracle.  No runner exception or filename workaround
+  was added.
+
+- 2026-07-25: Completed `bd-1w9.9.12` at rocm-libraries `88c30745d1`.
+  `LocalWritePerMfma` now reuses the explicit per-parameter normalization table
+  while preserving its registry-derived integer `-1` sentinel.  The focused
+  suite covers integer and float sentinel spellings, valid integer shorthands,
+  and strict invalid inputs; the complete unit gate and all 4,598 observed
+  upstream YAML values pass.  The retained gfx950 runner and debug trace prove
+  the warning-free assignment path, target-native loads, kernel invocation,
+  and exact numerical oracle.
+
 - 2026-07-25: Completed `bd-1w9.9.11` at rocm-libraries `ccf6befac4`.
   The parameter-aware production boundary now converts every in-range plain
   integer `GlobalReadPerMfma` shorthand to the float MessagePack wire type,
   while incompatible values retain strict diagnostics.  MessagePack
-  round-trip tests, the full unit gate, a 4,522-value upstream YAML sweep, and
-  the bounded gfx950 numerical/ELF row all pass.  The adjacent
-  `LocalWritePerMfma` sentinel contract is tracked independently by
-  `bd-1w9.9.12` rather than generalized by assumption.
+  round-trip tests, the full unit gate, and a 4,522-value upstream YAML sweep
+  all pass.  The bounded gfx950 numerical/ELF row also passes without type
+  warnings.  The adjacent `LocalWritePerMfma` sentinel contract was
+  subsequently completed under `bd-1w9.9.12`.
 
 - 2026-07-25: Completed the `bd-1w9.9.5` gfx950 Tensile msgpack producer fix
   at rocm-libraries `a4d0529339`.  The canonical scheduling default is now a
