@@ -25,6 +25,7 @@ from pathlib import Path
 
 from rccl_ci_utils import (
     find_rccl_library,
+    override_bundled_rccl,
     parse_junit_xml,
     send_email_report,
     send_teams_webhook,
@@ -424,8 +425,9 @@ def main() -> None:
     if args.discover_only:
         return
 
-    # Step 2: Set up LD_LIBRARY_PATH and verify override
+    # Step 2: Set up LD_LIBRARY_PATH and replace pip-bundled RCCL
     setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
+    override_bundled_rccl(rccl_lib_dir)
     verify_rccl_override(rccl_lib_dir)
 
     # Step 3: Clone PyTorch test sources

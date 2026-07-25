@@ -24,6 +24,7 @@ from pathlib import Path
 
 from rccl_ci_utils import (
     find_rccl_library,
+    override_bundled_rccl,
     parse_junit_xml,
     send_email_report,
     send_teams_webhook,
@@ -383,9 +384,10 @@ def main() -> None:
     if args.discover_only:
         return
 
-    # Step 2: Set up library paths and verify override
+    # Step 2: Set up library paths and replace pip-bundled RCCL
     populate_rocm_lib_dir(lib_dirs)
     setup_ld_library_path(lib_dirs)
+    override_bundled_rccl(rccl_lib_dir)
     verify_rccl_override(rccl_lib_dir)
 
     # Step 3: Set XLA environment variables
