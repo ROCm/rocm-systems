@@ -1406,6 +1406,10 @@ RjHsaLayer &layer() {
 /// not expose that value directly, so the hook reads the redirected topology
 /// tree and later compares agents by `HSA_AMD_AGENT_INFO_DRIVER_NODE_ID`.
 [[nodiscard]] std::optional<uint32_t> node_id_for_kfd_gpu_id(uint32_t gpu_id) {
+  // Unit tests provide fake HSA node IDs and a matching synthetic topology tree.
+  if (const char *root = std::getenv("ROCJITSU_HSA_HOOK_TOPOLOGY_NODES_ROOT"); root && *root)
+    return node_id_for_kfd_gpu_id_in_root(root, gpu_id);
+
   constexpr std::array<const char *, 2> kTopologyNodeRoots = {
       "/sys/devices/virtual/kfd/kfd/topology/nodes", "/sys/class/kfd/kfd/topology/nodes"};
   for (const char *root : kTopologyNodeRoots) {

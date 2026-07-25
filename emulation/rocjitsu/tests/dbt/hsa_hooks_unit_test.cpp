@@ -118,6 +118,7 @@ hsa_agent_t g_last_load_agent{};
 hsa_code_object_reader_t g_last_load_reader{};
 constexpr hsa_executable_t kFakeExecutable{123};
 constexpr hsa_executable_symbol_t kFakeKernelSymbol{500};
+constexpr uint32_t kResolvedHostGpuId = 8716;
 
 const char *isa_name(hsa_isa_t isa) {
   if (isa.handle == kGuestIsa.handle)
@@ -626,8 +627,15 @@ struct FakeApiTable {
 void write_runtime_config_path(const std::string &runtime_dir) {
   setenv("ROCJITSU_RUNTIME_DIR", runtime_dir.c_str(), 1);
 
+  const std::filesystem::path topology_root =
+      std::filesystem::path(runtime_dir) / "topology" / "nodes";
+  const std::filesystem::path host_node = topology_root / std::to_string(kHostNodeId);
+  std::filesystem::create_directories(host_node);
+  std::ofstream(host_node / "gpu_id") << kResolvedHostGpuId << '\n';
+  setenv("ROCJITSU_HSA_HOOK_TOPOLOGY_NODES_ROOT", topology_root.c_str(), 1);
+
   std::ofstream config_path(rocjitsu::rpc_default_config_file_path());
-  config_path << RJ_HOOK_UNIT_CONFIG_PATH << '\n';
+  config_path << RJ_HOOK_UNIT_CONFIG_PATH << '\n' << kResolvedHostGpuId << '\n';
 }
 
 class InstalledHook {
