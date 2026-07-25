@@ -3333,24 +3333,51 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     debug_sessions_cv_.notify_one();
     return 0;
   }
-  case KFD_IOC_DBG_TRAP_DISABLE:
+  case KFD_IOC_DBG_TRAP_DISABLE: {
     // Erasing releases the SCM_RIGHTS-transferred notifier in daemon mode. In
     // local mode the session does not own the debugger's descriptor.
     {
       std::lock_guard<std::mutex> event_lock(debug_events_mutex_);
       debug_events_.erase(target_pid);
     }
+    std::vector<std::pair<uint32_t, uint32_t>> queues;
     if (target_proc != nullptr) {
       std::lock_guard<std::mutex> alloc_lock(target_proc->alloc_mutex_);
       for (auto &[queue_id, queue] : target_proc->queue_snapshot_map_) {
-        [[maybe_unused]] const auto id = queue_id;
         queue.exception_status = 0;
+        queues.emplace_back(queue_id, queue.gpu_id);
       }
+    }
+    for (const auto &[queue_id, gpu_id] : queues) {
+      auto *gpu = find_gpu(gpu_id);
+      if (!gpu || !gpu->soc)
+        continue;
+      gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+        cp->set_queue_debug_suspended(queue_id, target_proc->process_id(), false);
+        for (auto *cu : cp->compute_units()) {
+          bool wake = false;
+          cu->with_wave_state_locked([&] {
+            for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+              auto *wave = cu->wf(slot);
+              if (wave->is_halted() || wave->process_id() != target_proc->process_id() ||
+                  wave->queue_id() != queue_id || wave->fatal_exception_pending())
+                continue;
+              wave->set_debug_single_step(false);
+              wave->set_debug_halted(false);
+              wave->set_debug_suspended(false);
+              wake = true;
+            }
+          });
+          if (wake)
+            cu->schedule_work_async();
+        }
+      });
     }
     debug_sessions_.erase(target_pid);
     if (debug_sessions_.empty())
       set_debug_active_on_all_cus(false);
     return 0;
+  }
   case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED:
     // kfd_dbg_set_enabled_debug_exception_mask(): record the exceptions the
     // debugger wants forwarded. Delivery is wired up with the event channel.

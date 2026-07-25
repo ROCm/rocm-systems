@@ -907,6 +907,50 @@ TEST_F(KfdIoctlTest, DbgTrapLocalDisableLeavesDebuggerFdOpen) {
   EXPECT_NE(fcntl(fd, F_GETFD), -1) << "local-mode DISABLE must not close the debugger's fd";
 }
 
+TEST_F(KfdIoctlTest, DbgTrapDisableResumesStoppedQueue) {
+  const int fd = make_debug_fd();
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = fd;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  rocjitsu::amdgpu::Wavefront *wave = nullptr;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (wave != nullptr || cp->compute_units().empty())
+      return;
+    wave = cp->compute_units().front()->dispatch_wf(/*wg_id=*/0, /*pc=*/0x600000000ULL,
+                                                    /*sgprs=*/16, /*vgprs=*/4);
+  });
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(driver_->local_process_id());
+  wave->set_queue_id(create.queue_id);
+  wave->set_debug_halted(true);
+  wave->set_debug_suspended(true);
+  wave->set_debug_single_step(true);
+
+  kfd_ioctl_dbg_trap_args dis{};
+  dis.pid = static_cast<uint32_t>(getpid());
+  dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &dis), 0);
+
+  EXPECT_FALSE(wave->debug_halted());
+  EXPECT_FALSE(wave->debug_suspended());
+  EXPECT_FALSE(wave->debug_single_step());
+}
+
 // The kernel copies min(user_size, sizeof(runtime_info)) bytes back and reports
 // the full struct size. An undersized buffer must truncate the copy — never
 // writing past the caller's buffer — while still reporting sizeof(kfd_runtime_info).
