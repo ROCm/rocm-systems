@@ -24,7 +24,7 @@ include(ExternalProject)
 
 # Pinned mono-repo commit for rocshmem source checkout.
 # Used by both install.sh (setup_rocshmem_worktree) and cmake (auto-detect below).
-set(ROCSHMEM_MONO_HASH "0e2998b11f99e8302c72f1ac2ce9f2b8c1816587" CACHE STRING
+set(ROCSHMEM_MONO_HASH "b76636bd9260cc307d80047b92c31b4d3e86a1e4" CACHE STRING
     "Pinned rocm-systems commit hash for rocshmem source checkout")
 
 function(add_rocshmem_targets)
