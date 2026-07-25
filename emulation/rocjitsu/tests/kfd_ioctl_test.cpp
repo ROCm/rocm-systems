@@ -2100,10 +2100,24 @@ TEST_F(KfdIoctlTest, DbgTrapQueueSnapshotEnumeratesQueues) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &null_buffer), -EFAULT);
   EXPECT_EQ(null_buffer.queue_snapshot.num_queues, 2u);
 
-  // Destroying queues removes their metadata without disturbing creation order.
+  rocjitsu::amdgpu::Wavefront *halted_wave = nullptr;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (halted_wave != nullptr || cp->compute_units().empty())
+      return;
+    halted_wave = cp->compute_units().front()->dispatch_wf(/*wg_id=*/0, /*pc=*/0x600000000ULL,
+                                                           /*sgprs=*/16, /*vgprs=*/4);
+  });
+  ASSERT_NE(halted_wave, nullptr);
+  halted_wave->set_process_id(driver_->local_process_id());
+  halted_wave->set_queue_id(q1.queue_id);
+  halted_wave->set_debug_halted(true);
+
+  // Destroying queues reclaims resident waves and removes their metadata
+  // without disturbing creation order.
   kfd_ioctl_destroy_queue_args dq{};
   dq.queue_id = q1.queue_id;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &dq), 0);
+  EXPECT_TRUE(halted_wave->is_halted());
   kfd_ioctl_dbg_trap_args count2{};
   count2.pid = static_cast<uint32_t>(getpid());
   count2.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;

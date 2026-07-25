@@ -532,6 +532,15 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
 
 void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) {
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  for (auto *cu : cus_) {
+    cu->with_wave_state_locked([&] {
+      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+        auto *wave = cu->wf(slot);
+        if (!wave->is_halted() && wave->process_id() == process_id && wave->queue_id() == queue_id)
+          wave->halt();
+      }
+    });
+  }
   for (size_t i = 0; i < hw_queues_.size(); ++i) {
     if (hw_queues_[i].queue_id == queue_id && hw_queues_[i].process_id == process_id) {
       hw_queues_.erase(hw_queues_.begin() + static_cast<ptrdiff_t>(i));
