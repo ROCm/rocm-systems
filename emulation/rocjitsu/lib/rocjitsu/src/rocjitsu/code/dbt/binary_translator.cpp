@@ -1388,25 +1388,32 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     if (options_.debug_min_free_vgpr)
       liveness_options.min_free_vgpr = *options_.debug_min_free_vgpr;
     std::vector<const Instruction *> live_before_instructions;
+    bool scope_requires_liveness = false;
     if (semantic_translator_ && semantic_translator_->has_rules()) {
-      // Semantic expansion rules are the only DBT users of instruction-level
-      // live-before data. The block dataflow still covers the full kernel, but
-      // filtering the stored snapshots avoids retaining one RegisterSet per
-      // decoded instruction in very large ML kernels.
+      // Semantic expansion rules are the only BinaryTranslator path that queries
+      // LivenessAnalysis. Other rewrites use separate resource strategies: virtual
+      // LDS grows descriptor-backed registers or explicitly saves/restores borrowed
+      // registers. Collect live-before snapshots only for rules that can query them,
+      // and skip the kernel dataflow entirely when no such rule is present.
       for (BasicBlock *block : scope.blocks) {
         if (block == nullptr)
           continue;
         for (const Instruction &inst : block->instructions()) {
-          if (semantic_translator_->has_expand_rule(inst.encoding_id(), inst.opcode()))
+          if (semantic_translator_->expand_rule_requires_liveness(inst)) {
+            scope_requires_liveness = true;
             live_before_instructions.push_back(&inst);
+          }
         }
       }
       liveness_options.restrict_live_before_to_instructions = true;
       liveness_options.live_before_instructions = std::span<const Instruction *const>(
           live_before_instructions.data(), live_before_instructions.size());
     }
-    const auto liveness_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
-    LivenessAnalysis liveness(KernelBlockScope(scope.blocks), liveness_options, liveness_edges);
+    LivenessAnalysis liveness = LivenessAnalysis::unavailable();
+    if (scope_requires_liveness) {
+      const auto liveness_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
+      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), liveness_options, liveness_edges);
+    }
 
     // Phase 4: translate each relocated body instruction at the current cursor.
     // Return-like s_setpc_b64 instructions are accepted only when they are the
