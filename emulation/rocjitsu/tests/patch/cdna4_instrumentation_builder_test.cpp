@@ -169,8 +169,22 @@ TEST(Cdna4InstrumentationBuilder, VectorAddressArithmeticMatchesLlvm) {
 TEST(Cdna4InstrumentationBuilder, VectorLiteralOverlapFailsClosed) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   EXPECT_FALSE(build_cdna4_v_add_u32_literal(10, 7, 10, kArch));
+  EXPECT_FALSE(build_cdna4_v_add_u32_literal(10, /*literal_vgpr=*/10, 7,
+                                             /*vsrc1=*/10, kArch));
   EXPECT_FALSE(build_cdna4_v_mul_lo_u32_literal(10, 10, 7, 10, kArch));
   EXPECT_FALSE(build_cdna4_v_add_u32(10, 0, 3, ROCJITSU_CODE_ARCH_RDNA4));
+}
+
+TEST(Cdna4InstrumentationBuilder, VectorLiteralOverlapUsesExplicitDeadTemporary) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto materialize = build_cdna4_v_mov_b32_literal(11, 0x12345678u, kArch);
+  const auto add = build_cdna4_v_add_u32(/*vdst=*/10, vector_source_vgpr(11), /*vsrc1=*/10, kArch);
+  const auto recipe = build_cdna4_v_add_u32_literal(
+      /*vdst=*/10, /*literal_vgpr=*/11, 0x12345678u, /*vsrc1=*/10, kArch);
+
+  ASSERT_TRUE(materialize && add && recipe);
+  EXPECT_EQ(*recipe,
+            (std::vector<uint32_t>{(*materialize)[0], (*materialize)[1], (*add)[0], (*add)[1]}));
 }
 
 TEST(Cdna4InstrumentationBuilder, SmemAndFlatPublicationMatchLlvmAndDecoder) {

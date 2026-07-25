@@ -420,15 +420,32 @@ build_v_add_u32(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arch_t arc
   return std::vector<uint32_t>{*word};
 }
 
+/// @brief Add a literal using an explicit materialization VGPR when required.
+///
+/// CDNA4 materializes the literal in @p literal_vgpr, which is clobbered and
+/// must not alias @p vsrc1. Targets with a native literal form ignore
+/// @p literal_vgpr and leave it untouched. Callers should still provide a
+/// proven-dead register so the same recipe remains valid across targets.
 [[nodiscard]] inline std::optional<std::vector<uint32_t>>
-build_v_add_u32_literal(uint16_t vdst, uint32_t literal, uint16_t vsrc1, rj_code_arch_t arch) {
+build_v_add_u32_literal(uint16_t vdst, uint16_t literal_vgpr, uint32_t literal, uint16_t vsrc1,
+                        rj_code_arch_t arch) {
   if (!is_admitted_arch(arch))
     return std::nullopt;
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
     return copy_words(build_cdna3_vop2_literal(cdna3::kVAddU32Vop2, vdst, literal, vsrc1, arch));
   return arch == ROCJITSU_CODE_ARCH_CDNA4
-             ? build_cdna4_v_add_u32_literal(vdst, literal, vsrc1, arch)
+             ? build_cdna4_v_add_u32_literal(vdst, literal_vgpr, literal, vsrc1, arch)
              : copy_words(rocjitsu::build_v_add_nc_u32_e32_literal(vdst, literal, vsrc1, arch));
+}
+
+/// @brief Add a literal using the destination as any required materialization VGPR.
+///
+/// CDNA4 deliberately rejects an in-place result through this compact overload.
+/// Call the overload with an explicit, proven-dead materialization VGPR when
+/// @p vdst aliases @p vsrc1.
+[[nodiscard]] inline std::optional<std::vector<uint32_t>>
+build_v_add_u32_literal(uint16_t vdst, uint32_t literal, uint16_t vsrc1, rj_code_arch_t arch) {
+  return build_v_add_u32_literal(vdst, vdst, literal, vsrc1, arch);
 }
 
 /// @brief Multiply a VGPR by a literal using an explicit materialization VGPR

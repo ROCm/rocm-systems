@@ -212,18 +212,30 @@ build_cdna4_v_mov_b32_literal(uint16_t vdst, uint32_t literal, rj_code_arch_t ar
 
 /// @brief Encode a literal add without using CDNA4's forbidden VOP3 literal source.
 ///
-/// The destination is written with the literal first, then read alongside
-/// @p vsrc1 by `v_add3_u32`. Therefore the destination must not alias @p vsrc1.
+/// The literal is materialized in @p literal_vgpr, then read alongside @p vsrc1
+/// by `v_add3_u32`. Therefore @p literal_vgpr must not alias @p vsrc1. The
+/// explicit materialization register lets a caller with a proven-dead
+/// temporary safely request an in-place result.
 [[nodiscard]] inline std::optional<std::vector<uint32_t>>
-build_cdna4_v_add_u32_literal(uint16_t vdst, uint32_t literal, uint16_t vsrc1,
-                              rj_code_arch_t arch) {
-  if (vdst == vsrc1)
+build_cdna4_v_add_u32_literal(uint16_t vdst, uint16_t literal_vgpr, uint32_t literal,
+                              uint16_t vsrc1, rj_code_arch_t arch) {
+  if (literal_vgpr == vsrc1)
     return std::nullopt;
-  const auto materialize = build_cdna4_v_mov_b32_literal(vdst, literal, arch);
-  const auto add = build_cdna4_v_add_u32(vdst, vector_source_vgpr(vdst), vsrc1, arch);
+  const auto materialize = build_cdna4_v_mov_b32_literal(literal_vgpr, literal, arch);
+  const auto add = build_cdna4_v_add_u32(vdst, vector_source_vgpr(literal_vgpr), vsrc1, arch);
   if (!materialize || !add)
     return std::nullopt;
   return std::vector<uint32_t>{(*materialize)[0], (*materialize)[1], (*add)[0], (*add)[1]};
+}
+
+/// @brief Encode a literal add using @p vdst as the materialization register.
+///
+/// This compact form intentionally fails closed for an in-place result. Call
+/// the overload with an explicit, proven-dead materialization VGPR instead.
+[[nodiscard]] inline std::optional<std::vector<uint32_t>>
+build_cdna4_v_add_u32_literal(uint16_t vdst, uint32_t literal, uint16_t vsrc1,
+                              rj_code_arch_t arch) {
+  return build_cdna4_v_add_u32_literal(vdst, vdst, literal, vsrc1, arch);
 }
 
 /// @brief Encode CDNA4 `v_mad_u32_u24`.

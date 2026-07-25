@@ -2292,18 +2292,12 @@ TEST(ConSanMoi, CdnaSampledBarrierMaterializesNonzeroAbsoluteSlot) {
     const uint16_t scratch_base = *barrier_patch->scratch_vgpr;
     const uint16_t value_vgpr = static_cast<uint16_t>(scratch_base + 2u);
     const uint16_t bank_vgpr = static_cast<uint16_t>(scratch_base + 6u);
-    // CDNA4 cannot alias the literal-add destination and source, so it uses
-    // the dead value temporary and copies back; CDNA3 writes the bank in place.
-    const uint16_t absolute_slot_vgpr =
-        target.arch == ROCJITSU_CODE_ARCH_CDNA4 ? value_vgpr : bank_vgpr;
+    // VALUE is dead after bank selection and is the explicit CDNA4 literal
+    // temporary. Every target leaves the absolute slot directly in BANK.
     const auto absolute_slot = instrumentation::build_v_add_u32_literal(
-        absolute_slot_vgpr, accesses.back()->sampled_first_slot, bank_vgpr, target.arch);
+        bank_vgpr, value_vgpr, accesses.back()->sampled_first_slot, bank_vgpr, target.arch);
     ASSERT_TRUE(absolute_slot);
     std::vector<uint32_t> expected = *absolute_slot;
-    if (absolute_slot_vgpr != bank_vgpr) {
-      expected.push_back(
-          build_v_mov_b32_e32(bank_vgpr, vector_source_vgpr(value_vgpr), target.arch));
-    }
     EXPECT_TRUE(contains_subsequence(cave, expected));
     EXPECT_TRUE(result.final_validation_passed);
   }

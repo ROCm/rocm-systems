@@ -571,8 +571,11 @@
     return false;
   words.push_back(*prior_inst_shift);
   if (compact_local_shadow) {
+    // The compact record address has already been formed from SLOT. The slot
+    // index is dead on this path, so use it to materialize CDNA4's literal
+    // without clobbering the in-place token payload in TMP.
     const auto tag_token = instrumentation::build_v_add_u32_literal(
-        tmp_vgpr, consan_moi_exact_shadow::compact_diagnostic_token_tag, tmp_vgpr, arch);
+        tmp_vgpr, slot_vgpr, consan_moi_exact_shadow::compact_diagnostic_token_tag, tmp_vgpr, arch);
     if (!tag_token)
       return false;
     words.insert(words.end(), tag_token->begin(), tag_token->end());
@@ -1644,8 +1647,10 @@
   if (compact_cell_count == 2u) {
     const auto next_cell = instrumentation::build_v_add_u32(
         saved_cell_vgpr, scalar_positive_inline_u32(1u), saved_cell_vgpr, arch);
+    // ADDRESS is overwritten by local_address below, after the second lazy
+    // initialization check. It is therefore a dead literal temporary here.
     const auto restore_first_cell = instrumentation::build_v_add_u32_literal(
-        saved_cell_vgpr, std::numeric_limits<uint32_t>::max(), saved_cell_vgpr, arch);
+        saved_cell_vgpr, address_vgpr, std::numeric_limits<uint32_t>::max(), saved_cell_vgpr, arch);
     if (!next_cell || !restore_first_cell) {
       errors.emplace_back("ConSan MOI paired compact publish could not advance its cell");
       return false;

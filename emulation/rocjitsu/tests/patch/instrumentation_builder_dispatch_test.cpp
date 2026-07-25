@@ -68,8 +68,16 @@ TEST(InstrumentationBuilderDispatch, VariableLengthRecipesSelectTargetBackend) {
   const auto rdna_add = ib::build_v_add_u32(10, vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_RDNA4);
   const auto cdna_literal_add =
       ib::build_v_add_u32_literal(10, 0x12345678u, 3, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto cdna_in_place_literal_add =
+      ib::build_v_add_u32_literal(10, 11, 0x12345678u, 10, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto cdna3_literal_add =
+      ib::build_v_add_u32_literal(10, 0x12345678u, 3, ROCJITSU_CODE_ARCH_CDNA3);
+  const auto cdna3_literal_add_with_unused_temp =
+      ib::build_v_add_u32_literal(10, 11, 0x12345678u, 3, ROCJITSU_CODE_ARCH_CDNA3);
   const auto rdna_literal_add =
       ib::build_v_add_u32_literal(10, 0x12345678u, 3, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto rdna_literal_add_with_unused_temp =
+      ib::build_v_add_u32_literal(10, 11, 0x12345678u, 3, ROCJITSU_CODE_ARCH_RDNA4);
   const auto cdna_multiply =
       ib::build_v_mul_lo_u32_literal(10, 11, 0x85ebca6bu, 10, ROCJITSU_CODE_ARCH_CDNA4);
   const auto rdna_multiply =
@@ -96,10 +104,12 @@ TEST(InstrumentationBuilderDispatch, VariableLengthRecipesSelectTargetBackend) {
   const auto gfx1250_bounds = ib::build_v_cmp_gt_u32_literal_vcc(
       /*literal=*/13080u, /*vsrc1=*/3, ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_TRUE(cdna_mov && rdna_mov && cdna_add && rdna_add && cdna_literal_add &&
-              rdna_literal_add && cdna_multiply && rdna_multiply && cdna_store && rdna_store &&
-              gfx1250_store && cdna_private && rdna_private && cdna_atomic && rdna_atomic &&
-              gfx1250_atomic && cdna_barrier && rdna_barrier && gfx1250_lds64 && gfx1250_lds128 &&
-              gfx1250_bounds);
+              cdna_in_place_literal_add && cdna3_literal_add &&
+              cdna3_literal_add_with_unused_temp && rdna_literal_add &&
+              rdna_literal_add_with_unused_temp && cdna_multiply && rdna_multiply && cdna_store &&
+              rdna_store && gfx1250_store && cdna_private && rdna_private && cdna_atomic &&
+              rdna_atomic && gfx1250_atomic && cdna_barrier && rdna_barrier && gfx1250_lds64 &&
+              gfx1250_lds128 && gfx1250_bounds);
 
   EXPECT_EQ(*cdna_mov, (std::vector<uint32_t>{0x7e1402ffu, 0x12345678u}));
   EXPECT_EQ(cdna_mov->size(), 2u);
@@ -107,6 +117,10 @@ TEST(InstrumentationBuilderDispatch, VariableLengthRecipesSelectTargetBackend) {
   EXPECT_EQ(*cdna_add, (std::vector<uint32_t>{0xd1ff000au, 0x02020702u}));
   EXPECT_EQ(rdna_add->size(), 1u);
   EXPECT_EQ(cdna_literal_add->size(), 4u);
+  EXPECT_EQ(cdna_in_place_literal_add->size(), 4u);
+  EXPECT_EQ(*cdna3_literal_add_with_unused_temp, *cdna3_literal_add);
+  EXPECT_EQ(cdna3_literal_add->size(), 2u);
+  EXPECT_EQ(*rdna_literal_add_with_unused_temp, *rdna_literal_add);
   EXPECT_EQ(rdna_literal_add->size(), 2u);
   EXPECT_EQ(cdna_multiply->size(), 4u);
   EXPECT_EQ(rdna_multiply->size(), 3u);
@@ -134,6 +148,7 @@ TEST(InstrumentationBuilderDispatch, VariableLengthRecipesSelectTargetBackend) {
 
 TEST(InstrumentationBuilderDispatch, VariableLengthRecipesFailClosed) {
   EXPECT_FALSE(ib::build_v_add_u32_literal(3, 0x12345678u, 3, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(ib::build_v_add_u32_literal(3, 3, 0x12345678u, 3, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(ib::build_v_and_b32_literal(3, 7, 3, ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(ib::build_v_mul_lo_u32_literal(3, 4, 7, 4, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(ib::build_v_add_u32(3, 4, 3, ROCJITSU_CODE_ARCH_CDNA2));

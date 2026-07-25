@@ -249,21 +249,15 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
       return std::nullopt;
     }
     if (window.first_slot != 0u) {
-      // CDNA4's literal-add builder rejects destination/source aliasing because
-      // it materializes the literal in the destination first. Use the
-      // already-dead value temporary and copy the absolute slot back.
-      const uint16_t absolute_slot_vgpr = arch == ROCJITSU_CODE_ARCH_CDNA4 ? value : bank_vgpr;
+      // VALUE is dead after bank selection and is distinct from BANK. Use it
+      // as CDNA4's explicit literal temporary while keeping the result in BANK.
       const auto absolute_slot = instrumentation::build_v_add_u32_literal(
-          absolute_slot_vgpr, window.first_slot, bank_vgpr, arch);
+          bank_vgpr, value, window.first_slot, bank_vgpr, arch);
       if (!absolute_slot) {
         errors.emplace_back("ConSan MOI sampled barrier failed at absolute slot materialization");
         return std::nullopt;
       }
       words.insert(words.end(), absolute_slot->begin(), absolute_slot->end());
-      if (absolute_slot_vgpr != bank_vgpr) {
-        words.push_back(
-            build_v_mov_b32_e32(bank_vgpr, vector_source_vgpr(absolute_slot_vgpr), arch));
-      }
     }
     if (!append_sampled_indexed_address(words, first_window_address,
                                         sizeof(ConSanMoiSampledCausalWindow), bank_vgpr, base,
