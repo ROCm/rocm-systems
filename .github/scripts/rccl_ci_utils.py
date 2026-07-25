@@ -28,6 +28,47 @@ def find_rccl_library(artifact_dir: Path) -> Path:
     return lib_path
 
 
+def override_bundled_rccl(rccl_lib_dir: Path) -> None:
+    """Replace pip-bundled librccl.so with the CI-built version.
+
+    LD_LIBRARY_PATH alone is insufficient because pip-installed wheels
+    (torch, jax) embed RUNPATH in their shared libraries, and the dynamic
+    linker resolves RUNPATH before LD_LIBRARY_PATH.  LD_PRELOAD causes
+    LLVM symbol conflicts.  Instead, we physically replace the bundled
+    library files so the wheel's own RUNPATH loads our build.
+    """
+    import shutil
+
+    ci_rccl = rccl_lib_dir.resolve() / "librccl.so"
+    if not ci_rccl.exists():
+        log.error("CI-built librccl.so not found at %s", ci_rccl)
+        sys.exit(1)
+    ci_size = ci_rccl.stat().st_size
+    log.info("CI-built RCCL: %s (%d bytes)", ci_rccl, ci_size)
+
+    site_packages = Path(sys.prefix) / "lib"
+    bundled = list(site_packages.rglob("_rocm_sdk_libraries/lib/librccl.so*"))
+    if not bundled:
+        bundled = list(Path(sys.prefix).rglob("librccl.so*"))
+
+    replaced = 0
+    for target in bundled:
+        if target.is_symlink():
+            continue
+        orig_size = target.stat().st_size
+        backup = target.with_suffix(target.suffix + ".pip-original")
+        shutil.copy2(str(target), str(backup))
+        shutil.copy2(str(ci_rccl), str(target))
+        new_size = target.stat().st_size
+        log.info("Replaced %s (%d -> %d bytes)", target, orig_size, new_size)
+        replaced += 1
+
+    if replaced == 0:
+        log.warning("No bundled librccl.so found to replace; LD_LIBRARY_PATH may suffice")
+    else:
+        log.info("Replaced %d bundled librccl.so file(s) with CI-built version", replaced)
+
+
 def verify_rccl_override(rccl_lib_dir: Path) -> None:
     """Verify that the CI-built librccl.so exists on disk."""
     ci_rccl = rccl_lib_dir.resolve() / "librccl.so"
