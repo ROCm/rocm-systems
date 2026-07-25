@@ -610,6 +610,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     std::optional<uint16_t> common_allocated_sgpr_count;
     std::optional<uint16_t> min_auto_scratch_vgpr;
     std::optional<uint16_t> min_preferred_vcc_save_sgpr;
+    uint32_t max_owner_private_segment_size = 0;
     bool uses_dynamic_stack = false;
   };
   std::unordered_map<uint64_t, const ConSanKernelInfo *> kernels_by_descriptor;
@@ -663,6 +664,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       KD descriptor{};
       std::memcpy(&descriptor, original_bytes.data() + owner, sizeof(descriptor));
       const uint16_t allocated_sgprs = descriptor_sgpr_allocation_count(descriptor);
+      context.max_owner_private_segment_size =
+          std::max(context.max_owner_private_segment_size, descriptor.private_segment_fixed_size);
       context.common_allocated_vgpr_count =
           first_owner ? *allocated_vgprs
                       : std::min(*context.common_allocated_vgpr_count, *allocated_vgprs);
@@ -717,8 +720,16 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   size_t indirect_candidate_placement_failure_count = 0;
   size_t local_cave_reachable_candidate_count = 0;
   size_t s_clause_blocked_candidate_count = 0;
+  size_t dynamic_stack_private_spill_rejection_count = 0;
+  size_t private_spill_encoding_failure_count = 0;
   uint32_t max_observed_padding_words = 0;
-  std::unordered_map<uint64_t, SpillManager> spill_managers;
+  // Sites with the same complete owner set share one monotonically allocated
+  // layout above the largest original private segment in that set. Different
+  // owner sets may reuse offsets only because every sequence stored here is
+  // bracket-local: its restore completes before instrumentation returns to
+  // guest control flow. A future call-spanning or persistent spill must use a
+  // non-reusing lifetime domain rather than this map.
+  std::map<std::vector<uint64_t>, SpillManager> spill_managers;
   std::unordered_map<const ConSanLdsSite *, VgprSpillSequence> spill_sequences;
   auto reachable_local_caves = [&](const ConSanLdsSite &site, uint64_t owner_entry_text_offset,
                                    uint64_t requested_words) {
@@ -809,6 +820,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       const bool spill_vcc_save_to_vgpr = scalar_vcc_spill_sgpr.has_value();
       if (!vcc_save)
         continue;
+      const uint16_t vcc_save_sgpr_width = sc_vcc_save_sgpr_width(arch);
       const uint32_t probe_scratch_vgprs =
           *required_vgprs + lds_check_trap_extra_scratch_vgprs(site) + report_alignment_padding +
           report_action_scratch_vgprs(options) + (lds_load_clobbers_address(site) ? 1u : 0u);
@@ -868,36 +880,34 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       if (!scratch && !options.scratch_vgpr && max_auto_scratch_vgpr) {
         scratch = choose_context_scratch(std::nullopt);
       }
-      if (!scratch && !options.scratch_vgpr && max_auto_scratch_vgpr &&
-          site_context.owner_descriptor_file_offsets.size() == 1u &&
-          !site_context.uses_dynamic_stack) {
-        // A shared helper needs one compatible private spill layout across
-        // every owner. Until that contract exists, fail closed instead of
-        // silently applying the primary descriptor's private layout to all.
-        scratch = choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
-        const auto private_limit = address_free_scratch_private_limit(arch);
-        if (scratch && private_limit) {
-          KD descriptor{};
-          std::memcpy(&descriptor, original_bytes.data() + primary_descriptor_file_offset,
-                      sizeof(descriptor));
-          auto [manager, inserted] =
-              spill_managers.try_emplace(primary_descriptor_file_offset,
-                                         descriptor.private_segment_fixed_size, *private_limit);
-          (void)inserted;
-          auto spill = build_vgpr_spill_sequence(manager->second, *scratch, scratch_vgprs, arch);
-          if (spill) {
-            requested_words += spill->save_words.size() + spill->restore_words.size();
-            if (gfx1250_vgpr_msb_mode.value_or(0u) != 0u) {
-              requested_words += 2u;
-              if (spill_vcc_save_to_vgpr)
-                requested_words -= 2u;
+      if (!scratch && !options.scratch_vgpr && max_auto_scratch_vgpr) {
+        if (site_context.uses_dynamic_stack) {
+          ++dynamic_stack_private_spill_rejection_count;
+        } else {
+          scratch = choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
+          const auto private_limit = address_free_scratch_private_limit(arch);
+          if (scratch && private_limit) {
+            auto [manager, inserted] = spill_managers.try_emplace(
+                site_context.owner_descriptor_file_offsets,
+                site_context.max_owner_private_segment_size, *private_limit);
+            (void)inserted;
+            auto spill = build_vgpr_spill_sequence(manager->second, *scratch, scratch_vgprs, arch);
+            if (spill) {
+              requested_words += spill->save_words.size() + spill->restore_words.size();
+              if (gfx1250_vgpr_msb_mode.value_or(0u) != 0u) {
+                requested_words += 2u;
+                if (spill_vcc_save_to_vgpr)
+                  requested_words -= 2u;
+              }
+              spill_sequences.insert_or_assign(&site, std::move(*spill));
+            } else {
+              scratch.reset();
+              ++private_spill_encoding_failure_count;
             }
-            spill_sequences.insert_or_assign(&site, std::move(*spill));
           } else {
             scratch.reset();
+            ++private_spill_encoding_failure_count;
           }
-        } else {
-          scratch.reset();
         }
       }
       if (!scratch)
@@ -994,24 +1004,23 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           candidate.scalar_vcc_spill_vgpr = scalar_vcc_spill_vgpr;
           local_cave_candidates.push_back(candidate);
         }
-        if (appended_cave_offset != 0 && !spill_vcc_save_to_vgpr &&
-            site_context.owner_descriptor_file_offsets.size() == 1u) {
-          // The indirect PC/SCC/VCC scratch must be dead in every owner of a
-          // shared helper. Multi-owner intersection is tracked separately;
-          // direct, local-cave, and branch-only placements remain available.
+        if (appended_cave_offset != 0 && !spill_vcc_save_to_vgpr) {
+          // Every scalar temporary survives a shared helper's indirect entry
+          // or return, so its complete range must be dead in every owner.
           uint16_t indirect_vcc_save_sgpr = *vcc_save;
           auto indirect_pc_sgpr = choose_lds_check_trap_indirect_pc_sgpr(
-              site_inst, owner_liveness.front(), indirect_vcc_save_sgpr,
+              site_inst, owner_liveness, indirect_vcc_save_sgpr, vcc_save_sgpr_width,
               min_preferred_vcc_save_sgpr.value_or(0));
           std::optional<uint16_t> indirect_scc_save_sgpr;
           if (indirect_pc_sgpr) {
             indirect_scc_save_sgpr = choose_lds_check_trap_indirect_scc_save_sgpr(
-                site_inst, owner_liveness.front(), indirect_vcc_save_sgpr, *indirect_pc_sgpr,
+                site_inst, owner_liveness, indirect_vcc_save_sgpr, vcc_save_sgpr_width,
+                *indirect_pc_sgpr,
                 min_preferred_vcc_save_sgpr.value_or(0));
           }
           if (!indirect_pc_sgpr || !indirect_scc_save_sgpr) {
             if (auto joint_scratch = choose_lds_check_trap_indirect_scalar_scratch(
-                    site_inst, owner_liveness.front(), min_preferred_vcc_save_sgpr)) {
+                    site_inst, owner_liveness, min_preferred_vcc_save_sgpr, arch)) {
               indirect_vcc_save_sgpr = joint_scratch->vcc_save_sgpr;
               indirect_pc_sgpr = joint_scratch->pc_sgpr_pair;
               indirect_scc_save_sgpr = joint_scratch->scc_save_sgpr;
@@ -1022,7 +1031,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           // maximally allocated kernels until scalar spilling is available.
           if ((!indirect_pc_sgpr || !indirect_scc_save_sgpr) && min_preferred_vcc_save_sgpr) {
             if (auto joint_scratch = choose_lds_check_trap_indirect_scalar_scratch(
-                    site_inst, owner_liveness.front(), std::nullopt)) {
+                    site_inst, owner_liveness, std::nullopt, arch)) {
               indirect_vcc_save_sgpr = joint_scratch->vcc_save_sgpr;
               indirect_pc_sgpr = joint_scratch->pc_sgpr_pair;
               indirect_scc_save_sgpr = joint_scratch->scc_save_sgpr;
@@ -2703,6 +2712,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         std::to_string(indirect_island_unreachable_site_count) +
         " indirect_candidate_placement_failures=" +
         std::to_string(indirect_candidate_placement_failure_count) +
+        " dynamic_stack_private_spill_rejections=" +
+        std::to_string(dynamic_stack_private_spill_rejection_count) +
+        " private_spill_encoding_failures=" +
+        std::to_string(private_spill_encoding_failure_count) +
         " uncovered_nop_caves=" + std::to_string(local_nop_caves.size()) +
         " local_entry_islands=" + std::to_string(local_entry_islands.size()) +
         " local_cave_reachable_candidates=" + std::to_string(local_cave_reachable_candidate_count));
@@ -2731,6 +2744,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         std::to_string(indirect_island_unreachable_site_count) +
         " indirect_candidate_placement_failures=" +
         std::to_string(indirect_candidate_placement_failure_count) +
+        " dynamic_stack_private_spill_rejections=" +
+        std::to_string(dynamic_stack_private_spill_rejection_count) +
+        " private_spill_encoding_failures=" +
+        std::to_string(private_spill_encoding_failure_count) +
         " uncovered_nop_caves=" + std::to_string(local_nop_caves.size()) +
         " max_uncovered_nop_cave_words=" + std::to_string(max_uncovered_nop_cave_words) +
         " local_cave_reachable_candidates=" + std::to_string(local_cave_reachable_candidate_count) +
@@ -2940,7 +2957,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         }
         const uint16_t required_sgpr_count = std::max<uint16_t>(
             std::max<uint16_t>(static_cast<uint16_t>(*candidate.indirect_pc_sgpr + 2u),
-                               static_cast<uint16_t>(candidate.vcc_save_sgpr + 1u)),
+                               static_cast<uint16_t>(candidate.vcc_save_sgpr +
+                                                     sc_vcc_save_sgpr_width(arch))),
             static_cast<uint16_t>(*candidate.indirect_scc_save_sgpr + 1u));
         planned.info.indirect_pc_sgpr = *candidate.indirect_pc_sgpr;
         planned.info.indirect_saved_scc_sgpr = *candidate.indirect_scc_save_sgpr;
@@ -3673,12 +3691,33 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       result.patches.clear();
       return;
     }
+    const std::span<const uint8_t> patched_image = patcher.image_bytes();
+    AmdGpuCodeObject patched_probe(patched_image.data(), patched_image.size());
+    if (!patched_probe.is_valid()) {
+      result.errors.emplace_back(
+          "ConSan LDS check/trap text replacement produced an invalid descriptor image");
+      result.patches.clear();
+      return;
+    }
     for (const auto &[descriptor_offset, required_private_bytes] :
          descriptor_private_requirements) {
-      std::vector<uint8_t> descriptor_probe(patcher.image_bytes().begin(),
-                                            patcher.image_bytes().end());
+      const auto original_kernel =
+          std::ranges::find(result.kernels, descriptor_offset,
+                            &ConSanKernelInfo::descriptor_file_offset);
+      const auto moved_kernel =
+          original_kernel == result.kernels.end()
+              ? patched_probe.kernels().end()
+              : std::ranges::find(patched_probe.kernels(), original_kernel->name,
+                                  &AmdGpuKernelInfo::name);
+      if (moved_kernel == patched_probe.kernels().end()) {
+        result.errors.emplace_back(
+            "ConSan LDS check/trap text replacement lost a spill owner descriptor");
+        result.patches.clear();
+        return;
+      }
+      std::vector<uint8_t> descriptor_probe(patched_image.begin(), patched_image.end());
       const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-          descriptor_probe, descriptor_offset, required_private_bytes,
+          descriptor_probe, moved_kernel->descriptor_file_offset, required_private_bytes,
           /*uses_dynamic_stack=*/false);
       if (update != SpillDescriptorUpdate::Unchanged) {
         result.errors.emplace_back(

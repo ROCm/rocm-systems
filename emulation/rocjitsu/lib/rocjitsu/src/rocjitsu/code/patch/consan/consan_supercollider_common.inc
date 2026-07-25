@@ -22,6 +22,10 @@ struct ByteRange {
   return delay_source && sc_sgpr_ranges_overlap(base, width, *delay_source, 1u);
 }
 
+[[nodiscard]] uint16_t sc_vcc_save_sgpr_width(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 2u : 1u;
+}
+
 [[nodiscard]] std::optional<uint16_t> choose_sc_borrowed_scalar_sgpr(uint16_t allocated_sgpr_count,
                                                                      const ConSanOptions &options) {
   // This scalar is live and explicitly preserved, so the only constraints are
@@ -42,8 +46,7 @@ struct ByteRange {
   if (inst == nullptr || owner_liveness.empty() ||
       std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
     return std::nullopt;
-  const uint16_t width =
-      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 2u : 1u;
+  const uint16_t width = sc_vcc_save_sgpr_width(arch);
   const uint16_t limit =
       std::min<uint16_t>(selection_limit, REGISTER_SET_ALLOCATABLE_SGPRS);
   const auto find_free = [&](uint16_t start) -> std::optional<uint16_t> {
@@ -307,12 +310,22 @@ append_lds_check_trap_indirect_return(std::vector<uint32_t> &words, uint64_t wor
 }
 
 [[nodiscard]] std::optional<uint16_t>
-choose_lds_check_trap_indirect_pc_sgpr(const Instruction *inst, const LivenessAnalysis *liveness,
-                                       uint16_t excluded_sgpr, uint16_t search_start = 0) {
-  if (inst == nullptr || liveness == nullptr)
+choose_lds_check_trap_indirect_pc_sgpr(
+    const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
+    uint16_t excluded_vcc_sgpr, uint16_t excluded_vcc_width, uint16_t search_start = 0) {
+  if (inst == nullptr || owner_liveness.empty() ||
+      std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
     return std::nullopt;
-  while (auto pair = liveness->find_free_sgpr_pair(inst, search_start)) {
-    if (excluded_sgpr < *pair || excluded_sgpr > static_cast<uint16_t>(*pair + 1u))
+  // find_free_sgpr_pair scans the full ordinary SGPR file and depends only on
+  // liveness, not descriptor allocation. The first owner is therefore a
+  // complete candidate enumerator; the all-owner predicate below computes the
+  // actual intersection without making the result owner-order-dependent.
+  while (auto pair = owner_liveness.front()->find_free_sgpr_pair(inst, search_start)) {
+    const RegisterRef ref{RegClass::SGPR, *pair, 2u};
+    if (!sc_sgpr_ranges_overlap(*pair, 2u, excluded_vcc_sgpr, excluded_vcc_width) &&
+        std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
+          return !liveness->is_live_before(*inst, ref);
+        }))
       return pair;
     if (*pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
       return std::nullopt;
@@ -322,13 +335,21 @@ choose_lds_check_trap_indirect_pc_sgpr(const Instruction *inst, const LivenessAn
 }
 
 [[nodiscard]] std::optional<uint16_t> choose_lds_check_trap_indirect_scc_save_sgpr(
-    const Instruction *inst, const LivenessAnalysis *liveness, uint16_t excluded_single,
-    uint16_t excluded_pair, uint16_t search_start = 0) {
-  if (inst == nullptr || liveness == nullptr)
+    const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
+    uint16_t excluded_vcc_sgpr, uint16_t excluded_vcc_width, uint16_t excluded_pair,
+    uint16_t search_start = 0) {
+  if (inst == nullptr || owner_liveness.empty() ||
+      std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
     return std::nullopt;
-  while (auto single = liveness->find_free_sgpr(inst, search_start)) {
-    if (*single != excluded_single &&
-        (*single < excluded_pair || *single > static_cast<uint16_t>(excluded_pair + 1u))) {
+  // As above, the front owner enumerates every ordinary SGPR that can be dead
+  // in the intersection; it does not impose that owner's allocation range.
+  while (auto single = owner_liveness.front()->find_free_sgpr(inst, search_start)) {
+    const RegisterRef ref{RegClass::SGPR, *single, 1u};
+    if (!sc_sgpr_ranges_overlap(*single, 1u, excluded_vcc_sgpr, excluded_vcc_width) &&
+        !sc_sgpr_ranges_overlap(*single, 1u, excluded_pair, 2u) &&
+        std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
+          return !liveness->is_live_before(*inst, ref);
+        })) {
       return single;
     }
     if (*single + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS)
@@ -346,32 +367,63 @@ struct LdsCheckTrapIndirectScalarScratch {
 
 [[nodiscard]] std::optional<LdsCheckTrapIndirectScalarScratch>
 choose_lds_check_trap_indirect_scalar_scratch(const Instruction *inst,
-                                              const LivenessAnalysis *liveness,
-                                              std::optional<uint16_t> min_preferred_vcc_save) {
-  if (inst == nullptr || liveness == nullptr)
+                                              std::span<const LivenessAnalysis *const> owner_liveness,
+                                              std::optional<uint16_t> min_preferred_vcc_save,
+                                              rj_code_arch_t arch) {
+  if (inst == nullptr || owner_liveness.empty() ||
+      std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
     return std::nullopt;
 
   uint16_t pair_search_start = min_preferred_vcc_save.value_or(0);
-  while (auto pair = liveness->find_free_sgpr_pair(inst, pair_search_start)) {
-    const auto find_disjoint_single = [&](uint16_t start) -> std::optional<uint16_t> {
-      while (auto single = liveness->find_free_sgpr(inst, start)) {
-        if (*single < *pair || *single > static_cast<uint16_t>(*pair + 1u))
-          return single;
-        if (*single + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS)
+  while (auto pair = owner_liveness.front()->find_free_sgpr_pair(inst, pair_search_start)) {
+    const RegisterRef pair_ref{RegClass::SGPR, *pair, 2u};
+    if (!std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
+          return !liveness->is_live_before(*inst, pair_ref);
+        })) {
+      if (*pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
+        return std::nullopt;
+      pair_search_start = static_cast<uint16_t>(*pair + 2u);
+      continue;
+    }
+    const uint16_t vcc_width = sc_vcc_save_sgpr_width(arch);
+    const auto find_disjoint_vcc = [&](uint16_t start) -> std::optional<uint16_t> {
+      if (vcc_width == 2u) {
+        while (auto vcc = owner_liveness.front()->find_free_sgpr_pair(inst, start)) {
+          const RegisterRef vcc_ref{RegClass::SGPR, *vcc, 2u};
+          if (!sc_sgpr_ranges_overlap(*vcc, 2u, *pair, 2u) &&
+              std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
+                return !liveness->is_live_before(*inst, vcc_ref);
+              }))
+            return vcc;
+          if (*vcc + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
+            return std::nullopt;
+          start = static_cast<uint16_t>(*vcc + 2u);
+        }
+        return std::nullopt;
+      }
+      while (auto vcc = owner_liveness.front()->find_free_sgpr(inst, start)) {
+        const RegisterRef vcc_ref{RegClass::SGPR, *vcc, 1u};
+        if (!sc_sgpr_ranges_overlap(*vcc, 1u, *pair, 2u) &&
+            std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
+              return !liveness->is_live_before(*inst, vcc_ref);
+            }))
+          return vcc;
+        if (*vcc + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS)
           return std::nullopt;
-        start = static_cast<uint16_t>(*single + 1u);
+        start = static_cast<uint16_t>(*vcc + 1u);
       }
       return std::nullopt;
     };
 
     std::optional<uint16_t> vcc_save;
     if (min_preferred_vcc_save)
-      vcc_save = find_disjoint_single(*min_preferred_vcc_save);
+      vcc_save = find_disjoint_vcc(*min_preferred_vcc_save);
     if (!vcc_save)
-      vcc_save = find_disjoint_single(0);
+      vcc_save = find_disjoint_vcc(0);
     if (vcc_save) {
       const auto scc_save = choose_lds_check_trap_indirect_scc_save_sgpr(
-          inst, liveness, *vcc_save, *pair, min_preferred_vcc_save.value_or(0));
+          inst, owner_liveness, *vcc_save, vcc_width, *pair,
+          min_preferred_vcc_save.value_or(0));
       if (scc_save)
         return LdsCheckTrapIndirectScalarScratch{*vcc_save, *pair, *scc_save};
     }
