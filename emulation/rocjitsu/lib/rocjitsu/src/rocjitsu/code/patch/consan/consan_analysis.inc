@@ -978,8 +978,7 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
     }
     if (!lane_selector)
       return;
-    const std::optional<uint32_t> lane = *lane_selector < 64u ? lane_selector
-                                         : *lane_selector >= 128u && *lane_selector < 192u
+    const std::optional<uint32_t> lane = *lane_selector >= 128u && *lane_selector < 192u
                                              ? std::optional<uint32_t>(*lane_selector - 128u)
                                              : std::nullopt;
     if (lane && *lane < 64u) {
@@ -1037,8 +1036,7 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
       if (mnemonic == "v_accvgpr_write") {
         dst = RegisterRef{RegClass::ACC_VGPR, static_cast<uint16_t>(raw.vdst), 1u};
       } else if (raw.src0 >= 256u && raw.src0 < 512u) {
-        source =
-            RegisterRef{RegClass::ACC_VGPR, static_cast<uint16_t>(raw.src0 - 256u), 1u};
+        source = RegisterRef{RegClass::ACC_VGPR, static_cast<uint16_t>(raw.src0 - 256u), 1u};
       } else {
         source.reset();
       }
@@ -1083,9 +1081,10 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
 
   if (mnemonic.starts_with("v_lshrrev_b64")) {
     const auto dst = register_ref(inst.dst_operand(0), RegClass::VGPR);
-    std::optional<FlatPointerPairHint> source;
-    for (int i = 0; i < inst.num_src_operands() && !source; ++i)
-      source = source_pair_hint(inst.src_operand(i), tracker);
+    // The first source is the 32-bit shift count; the second is the semantic
+    // 64-bit value whose address-space provenance survives the shift.
+    const auto source =
+        inst.num_src_operands() > 1 ? source_pair_hint(inst.src_operand(1), tracker) : std::nullopt;
     clear_destination_components(inst, tracker);
     if (dst && source) {
       // The common generic-pointer lowering shifts a 64-bit pointer right and
@@ -1100,9 +1099,8 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
 
   if (mnemonic.starts_with("v_lshlrev_b64")) {
     const auto dst = register_ref(inst.dst_operand(0), RegClass::VGPR);
-    std::optional<FlatPointerPairHint> source;
-    for (int i = 0; i < inst.num_src_operands() && !source; ++i)
-      source = source_pair_hint(inst.src_operand(i), tracker);
+    const auto source =
+        inst.num_src_operands() > 1 ? source_pair_hint(inst.src_operand(1), tracker) : std::nullopt;
     clear_destination_components(inst, tracker);
     if (dst && dst->width >= 2u && source)
       set_vgpr_pair_components(tracker, dst->index, source->space, true);
@@ -1114,9 +1112,8 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
     // V_LSHL_ADD_U64 computes (src0 << src1) + src2. The shifted value is an
     // index; the final addend is the pointer base whose address-space
     // provenance the result retains.
-    const auto base = inst.num_src_operands() > 2
-                          ? source_pair_hint(inst.src_operand(2), tracker)
-                          : std::nullopt;
+    const auto base =
+        inst.num_src_operands() > 2 ? source_pair_hint(inst.src_operand(2), tracker) : std::nullopt;
     clear_destination_components(inst, tracker);
     if (dst && dst->width >= 2u && base)
       set_vgpr_pair_components(tracker, dst->index, base->space, true);
