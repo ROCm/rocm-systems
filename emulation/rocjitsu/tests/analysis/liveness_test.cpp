@@ -34,6 +34,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -467,7 +468,7 @@ TEST(CfgAnalysis, IndirectBranchHasNoStaticSuccessor) {
   EXPECT_TRUE(blocks[1]->predecessors().empty());
 }
 
-TEST(CfgAnalysis, RecoveredIndirectBranchEdgeStartsAtConsumerBlock) {
+TEST(CfgAnalysis, IndirectRecoveryPrefilterAdmitsSetPcConsumer) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint32_t kLiteralOperand = 255;
   constexpr uint32_t kInlineInt0 = 128;
@@ -504,11 +505,34 @@ TEST(CfgAnalysis, RecoveredIndirectBranchEdgeStartsAtConsumerBlock) {
   ASSERT_EQ(builder->successors().size(), 1u);
   EXPECT_EQ(builder->successors()[0], consumer);
 
-  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u)
+      << "setpc consumer must pass the indirect-recovery prefilter";
   EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_call_offset, 16u);
   ASSERT_EQ(consumer->successors().size(), 1u);
   EXPECT_EQ(consumer->successors()[0], target);
   EXPECT_FALSE(has_predecessor(*fallthrough, consumer));
+}
+
+TEST(CfgAnalysis, PcBuilderWithoutConsumerProducesNoRecoveredEdge) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                         // s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // s_add_u32.
+      4,                                                   // Target delta.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // s_addc_u32.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_EQ(blocks.size(), 1u);
+  EXPECT_TRUE(blocks[0]->static_indirect_call_fixups().empty());
 }
 
 TEST(CfgAnalysis, RecoversMultipleSgprPairsFromOneBlockEntry) {
@@ -1135,7 +1159,7 @@ TEST(CfgAnalysis, Gfx1250SignedDeltaRejectsMoveClobberingTemporary) {
   EXPECT_EQ(resolved_to_target, 0u);
 }
 
-TEST(CfgAnalysis, Gfx1250RecoversPcStashedInVgprLanes) {
+TEST(CfgAnalysis, IndirectRecoveryPrefilterAdmitsGfx1250LaneStashSwapPc) {
   // s[0:1] builds target 0x38, is stashed in v44 lanes 0:1, then restored
   // through v_readlane immediately before swappc. This is the finite static
   // call idiom emitted in RCCL device functions.
@@ -1166,17 +1190,19 @@ TEST(CfgAnalysis, Gfx1250RecoversPcStashedInVgprLanes) {
   auto *target = block_starting_at(blocks, 56);
   ASSERT_NE(consumer, nullptr);
   ASSERT_NE(target, nullptr);
-  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u)
+      << "lane-stash swappc consumer must pass the indirect-recovery prefilter";
   EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 56u);
   EXPECT_TRUE(has_successor_start(*consumer, target->start_offset()));
 }
 
 TEST(CfgAnalysis, Gfx1250WideVgprWriteInvalidatesStashedLane) {
-  // Same stash idiom as Gfx1250RecoversPcStashedInVgprLanes, but a width-2
-  // v_mov_b64 writes v[44:45] between the writelanes and the readlanes. That wide
-  // write overwrites the stashed VGPR, so the readlane no longer reconstructs the
-  // original PC and recovery must fail closed. A width-one-only invalidation would
-  // miss the b64 write and falsely recover a target.
+  // Same stash idiom as IndirectRecoveryPrefilterAdmitsGfx1250LaneStashSwapPc,
+  // but a width-2 v_mov_b64 writes v[44:45] between the writelanes and the
+  // readlanes. That wide write overwrites the stashed VGPR, so the readlane no
+  // longer reconstructs the original PC and recovery must fail closed. A
+  // width-one-only invalidation would miss the b64 write and falsely recover a
+  // target.
   constexpr auto clobber =
       gfx1250::build_vop3(gfx1250::kVMovB64Vop3, {.vdst = 44, .src0 = 256 + 46});
   std::vector<uint32_t> words = {
@@ -1465,12 +1491,14 @@ TEST(CfgAnalysis, Gfx1250A0UsesLowByteOfWorkaroundAnnotatedVgprMsb) {
 }
 
 TEST(CfgAnalysis, Gfx1250DoesNotRecoverLaneStashWithDifferingRoleBanks) {
-  // Same straight-line stash idiom as Gfx1250RecoversPcStashedInVgprLanes, but an
+  // Same straight-line stash idiom as
+  // IndirectRecoveryPrefilterAdmitsGfx1250LaneStashSwapPc, but an
   // s_set_vgpr_msb sets the DST bank to 1 while leaving the SRC0 bank at 0. The
-  // v_writelane writes physical v[44+256] (DST bank 1) while the v_readlane reads
-  // physical v44 (SRC0 bank 0). Because the roles resolve the same low selector to
-  // different physical VGPRs, no value actually flows, and recovery must fail
-  // closed rather than key both by the low selector and falsely reconstruct a PC.
+  // v_writelane writes physical v[44+256] (DST bank 1) while the v_readlane
+  // reads physical v44 (SRC0 bank 0). Because the roles resolve the same low
+  // selector to different physical VGPRs, no value actually flows, and
+  // recovery must fail closed rather than key both by the low selector and
+  // falsely reconstruct a PC.
   //
   // s_set_vgpr_msb immediate byte is {DST[7:6], SRC2[5:4], SRC1[3:2], SRC0[1:0]};
   // 0x40 selects DST bank 1, all other roles bank 0.
@@ -1662,6 +1690,13 @@ TEST(CfgAnalysis, ReversePostOrderSelfLoop) {
   auto rpo = reverse_post_order(KernelBlockScope(scope));
   ASSERT_EQ(rpo.size(), 1u);
   EXPECT_EQ(blocks[0].get(), rpo[0]);
+}
+
+TEST(LivenessAnalysis, UnavailableQueriesFailClosed) {
+  const TestInstruction instruction("query");
+  const LivenessAnalysis liveness = LivenessAnalysis::unavailable();
+
+  EXPECT_THROW((void)liveness.live_before(instruction), std::logic_error);
 }
 
 TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {
