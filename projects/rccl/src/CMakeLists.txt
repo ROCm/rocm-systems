@@ -1143,11 +1143,20 @@ if(ENABLE_ROCSHMEM)
   list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
 elseif(ENABLE_ROCSHMEM_GIN)
-  # GIN-only: rocshmem device symbols (QueuePair methods for GDA backend)
-  # are left unresolved in librccl.so and resolved from the executable
-  # that links librocshmem.a. This avoids duplicating rocshmem device state
-  # (__constant__ memory) across librccl.so and the executable.
+  # GIN device templates (Put/Flush/etc.) reference rocshmem device symbols.
+  # Link rocshmem device bitcode (.bc) to resolve them without pulling in
+  # host-side statics from librocshmem.a (avoids duplicate state).
+  # Host symbols from GIN plugins are left unresolved via --allow-shlib-undefined.
   target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
+  set(_rocshmem_offload_arch_flags "")
+  foreach(_gpu_raw ${GPU_TARGETS})
+    string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
+    list(APPEND _rocshmem_offload_arch_flags "--offload-arch=${_gpu}")
+    set(_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${_gpu}.bc")
+    target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker-${_gpu} ${_bc}")
+  endforeach()
+  list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
+  target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
 endif()
 
 ## Set RCCL link options

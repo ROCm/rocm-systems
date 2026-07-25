@@ -31,11 +31,10 @@
 #endif
 #endif
 
-// rocshmem-gda uses QueuePair methods from librocshmem.a device bitcode.
-// Only enable in TUs that link librocshmem.a (ENABLE_ROCSHMEM), not in
-// librccl.so (ENABLE_ROCSHMEM_GIN), to avoid duplicate device state.
+
+// GIN rocshmem device templates (GDA, SDMA) gate on ENABLE_ROCSHMEM_GIN.
 #ifndef NCCL_GIN_ROCSHMEM_GDA_ENABLE
-#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM)
+#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
 #define NCCL_GIN_ROCSHMEM_GDA_ENABLE 1
 #else
 #define NCCL_GIN_ROCSHMEM_GDA_ENABLE 0
@@ -43,7 +42,7 @@
 #endif
 
 #ifndef NCCL_GIN_ANVIL_SDMA_ENABLE
-#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM)
+#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
 #define NCCL_GIN_ANVIL_SDMA_ENABLE 1
 #else
 #define NCCL_GIN_ANVIL_SDMA_ENABLE 0
