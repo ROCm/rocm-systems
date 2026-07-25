@@ -40,6 +40,15 @@ public:
     IndirectSwapPc,
   };
 
+  /// @brief First structurally-known CFG edge omitted from the decoded graph.
+  enum class StaticSuccessorIssue : uint8_t {
+    None,
+    MissingBranchTarget,
+    MissingCallTarget,
+    MissingFallthrough,
+    MissingCallContinuation,
+  };
+
   /// @brief Context-sensitive call edge from this block to a function entry.
   ///
   /// @details Calls are intentionally not ordinary BasicBlock successors. The
@@ -99,7 +108,18 @@ public:
   /// exhaustiveness and context-sensitive returns remain client-specific
   /// checks. A false result means the decoded graph omitted an edge that the
   /// instruction stream can take, for example at a symbol-range boundary.
-  [[nodiscard]] bool static_successors_complete() const { return static_successors_complete_; }
+  [[nodiscard]] bool static_successors_complete() const {
+    return static_successor_issue_ == StaticSuccessorIssue::None;
+  }
+
+  /// @brief Why a required structurally-known successor was omitted.
+  ///
+  /// @details The first issue is retained so clients can distinguish missing
+  /// branch targets, call targets, ordinary fallthroughs, and call
+  /// continuations without re-decoding the terminator.
+  [[nodiscard]] StaticSuccessorIssue static_successor_issue() const {
+    return static_successor_issue_;
+  }
 
   /// @brief Function-call edges that leave this block.
   [[nodiscard]] const std::vector<CallEdge> &call_edges() const { return call_edges_; }
@@ -161,7 +181,10 @@ private:
   void add_successor(BasicBlock &successor);
   void add_call_edge(CallEdge edge);
   void add_static_indirect_call_fixup(IndirectCallFixup fixup);
-  void mark_static_successors_incomplete() { static_successors_complete_ = false; }
+  void note_static_successor_issue(StaticSuccessorIssue issue) {
+    if (static_successor_issue_ == StaticSuccessorIssue::None)
+      static_successor_issue_ = issue;
+  }
 
   uint64_t start_offset_;
   uint32_t size_ = 0;
@@ -173,7 +196,7 @@ private:
   std::vector<BasicBlock *> predecessors_;
   std::vector<CallEdge> call_edges_;
   std::vector<IndirectCallFixup> static_indirect_call_fixups_;
-  bool static_successors_complete_ = true;
+  StaticSuccessorIssue static_successor_issue_ = StaticSuccessorIssue::None;
 };
 
 } // namespace rocjitsu

@@ -10,6 +10,8 @@
 #include <cassert>
 #include <cstring>
 #include <functional>
+#include <optional>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace rocjitsu {
@@ -94,17 +96,22 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
   return result;
 }
 
-[[nodiscard]] bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
+[[nodiscard]] std::optional<uint16_t> s_setpc_sreg(const Instruction &inst, uint32_t word) {
   if (inst.size() != sizeof(uint32_t) ||
       (inst.mnemonic() != "s_setpc_b64" && inst.mnemonic() != "s_set_pc_i64"))
-    return false;
-  return static_cast<uint16_t>(word & 0xffu) == ssrc0;
+    return std::nullopt;
+  return static_cast<uint16_t>(word & 0xffu);
 }
 
-[[nodiscard]] std::vector<BasicBlock *>
-function_return_blocks(BasicBlock &callee, uint16_t return_sreg, std::span<const uint8_t> text,
-                       const std::unordered_set<BasicBlock *> &allowed_blocks) {
-  std::vector<BasicBlock *> returns;
+struct FunctionReturnWalk {
+  std::vector<BasicBlock *> matching_returns;
+  std::vector<BasicBlock *> encountered_setpcs;
+};
+
+[[nodiscard]] FunctionReturnWalk
+walk_function_returns(BasicBlock &callee, uint16_t return_sreg, std::span<const uint8_t> text,
+                      const std::unordered_set<BasicBlock *> &allowed_blocks) {
+  FunctionReturnWalk result;
   std::vector<BasicBlock *> stack{&callee};
   std::unordered_set<BasicBlock *> visited;
 
@@ -117,9 +124,12 @@ function_return_blocks(BasicBlock &callee, uint16_t return_sreg, std::span<const
 
     const Instruction *term = block->terminator();
     assert(term != nullptr && "decoded BasicBlock should contain at least one instruction");
-    if (s_setpc_from_sreg(*term, text_word_at(text, term->src_loc()), return_sreg)) {
-      returns.push_back(block);
-      continue;
+    if (const auto setpc_sreg = s_setpc_sreg(*term, text_word_at(text, term->src_loc()))) {
+      result.encountered_setpcs.push_back(block);
+      if (*setpc_sreg == return_sreg) {
+        result.matching_returns.push_back(block);
+        continue;
+      }
     }
 
     for (BasicBlock *succ : block->successors()) {
@@ -128,7 +138,7 @@ function_return_blocks(BasicBlock &callee, uint16_t return_sreg, std::span<const
     }
   }
 
-  return returns;
+  return result;
 }
 
 void add_scoped_call_flow(KernelCfgScope &scope, std::span<const uint8_t> text) {
@@ -139,6 +149,8 @@ void add_scoped_call_flow(KernelCfgScope &scope, std::span<const uint8_t> text) 
     allowed_blocks.insert(block);
   }
 
+  std::unordered_map<BasicBlock *, std::unordered_set<uint16_t>> reaching_return_sregs;
+  std::unordered_set<BasicBlock *> matching_return_blocks;
   for (BasicBlock *block : scope.blocks) {
     for (const BasicBlock::CallEdge &call : block->call_edges()) {
       assert(call.callee != nullptr && "BasicBlock call edges should always have a callee");
@@ -148,22 +160,33 @@ void add_scoped_call_flow(KernelCfgScope &scope, std::span<const uint8_t> text) 
         continue;
 
       scope.liveness_edges.push_back({.from = block, .to = call.callee});
-      for (BasicBlock *return_block :
-           function_return_blocks(*call.callee, call.return_sreg, text, allowed_blocks)) {
+      const FunctionReturnWalk return_walk =
+          walk_function_returns(*call.callee, call.return_sreg, text, allowed_blocks);
+      for (BasicBlock *return_block : return_walk.encountered_setpcs)
+        reaching_return_sregs[return_block].insert(call.return_sreg);
+      for (BasicBlock *return_block : return_walk.matching_returns) {
         scope.liveness_edges.push_back({.from = return_block, .to = call.continuation});
-        const Instruction *term = return_block->terminator();
-        assert(term != nullptr && "return block should contain a terminator");
-        const auto owner_proof = scope.owner_proofs.find(return_block);
-        // A syntactic return is safe to exempt from ordinary indirect-branch
-        // handling only when every path to its block entered through a
-        // validated call. If the same block is also kernel-locally reachable,
-        // that path may execute setpc with an arbitrary value in the return
-        // pair.
-        if (owner_proof != scope.owner_proofs.end() &&
-            owner_proof->second != KernelCfgOwnerProofKind::KernelLocal) {
-          scope.call_return_offsets.insert(term->src_loc());
-        }
+        matching_return_blocks.insert(return_block);
       }
+    }
+  }
+
+  for (BasicBlock *return_block : matching_return_blocks) {
+    const Instruction *term = return_block->terminator();
+    assert(term != nullptr && "return block should contain a terminator");
+    const auto owner_proof = scope.owner_proofs.find(return_block);
+    const auto contexts = reaching_return_sregs.find(return_block);
+    const auto return_sreg = s_setpc_sreg(*term, text_word_at(text, term->src_loc()));
+    // A syntactic return is safe to exempt from ordinary indirect-branch
+    // handling only when every path to its block entered through a validated
+    // call and every such call expects the exact pair consumed by this setpc.
+    // Shared helper code reached from calls with different return registers is
+    // therefore left as ordinary indirect control flow.
+    if (owner_proof != scope.owner_proofs.end() &&
+        owner_proof->second != KernelCfgOwnerProofKind::KernelLocal &&
+        contexts != reaching_return_sregs.end() && contexts->second.size() == 1u && return_sreg &&
+        contexts->second.contains(*return_sreg)) {
+      scope.call_return_offsets.insert(term->src_loc());
     }
   }
 }

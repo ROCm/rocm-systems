@@ -1051,6 +1051,19 @@ struct MoiOwnerScalarReferenceSummary {
       result.first_unclosed_control_kind = kind.value_or(classify_unclosed(instruction));
     }
   };
+  const auto classify_static_issue = [](BasicBlock::StaticSuccessorIssue issue) {
+    switch (issue) {
+    case BasicBlock::StaticSuccessorIssue::MissingCallTarget:
+    case BasicBlock::StaticSuccessorIssue::MissingCallContinuation:
+      return MoiUnclosedControlKind::Call;
+    case BasicBlock::StaticSuccessorIssue::MissingBranchTarget:
+      return MoiUnclosedControlKind::Branch;
+    case BasicBlock::StaticSuccessorIssue::MissingFallthrough:
+    case BasicBlock::StaticSuccessorIssue::None:
+      return MoiUnclosedControlKind::Fallthrough;
+    }
+    return MoiUnclosedControlKind::Fallthrough;
+  };
   for (const MoiKernelResourceContext *context : owner_contexts) {
     if (context == nullptr)
       continue;
@@ -1077,8 +1090,8 @@ struct MoiOwnerScalarReferenceSummary {
         if (terminator != nullptr)
           mark_unclosed(*terminator);
       };
-      if (!block->static_successors_complete())
-        mark_unclosed_terminator();
+      if (!block->static_successors_complete() && terminator != nullptr)
+        mark_unclosed(*terminator, classify_static_issue(block->static_successor_issue()));
       if (std::ranges::any_of(block->successors(), [&](const BasicBlock *successor) {
             return successor == nullptr || !scope_blocks.contains(successor);
           })) {
