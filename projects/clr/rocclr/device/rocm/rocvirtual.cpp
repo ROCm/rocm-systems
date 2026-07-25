@@ -5007,21 +5007,33 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
 
     // SW grid.sync ASICs with DEBUG_CLR_COOP_CONCURRENT clear the AQL barrier bit
     // so coop grids can overlap; ordering is kept by the AddExternalSignal chain.
-    if (DEBUG_CLR_COOP_CONCURRENT && !dev().settings().gwsInitSupported_) {
+    const bool coop_concurrent =
+        DEBUG_CLR_COOP_CONCURRENT && !dev().settings().gwsInitSupported_;
+    if (coop_concurrent) {
       queue->setAqlHeader(dispatchPacketHeaderNoSync_);
     } else {
       queue->setAqlHeader(dispatchPacketHeader_);
     }
 
-    // Submit kernel to HW
+    // Submit kernel to HW. In concurrent mode attach a completion signal directly to
+    // the dispatch packet so completion can be tracked without a serializing barrier
+    // fence; GetLastSignal() then returns this dispatch's signal for the ordering
+    // dependency added into the user's stream below.
     if (!queue->submitKernelInternal(vcmd.sizes(), vcmd.kernel(), vcmd.parameters(),
                                      static_cast<void*>(as_cl(&vcmd.event())),
-                                     vcmd.sharedMemBytes(), &vcmd)) {
+                                     vcmd.sharedMemBytes(), &vcmd, nullptr,
+                                     /*attach_signal=*/coop_concurrent)) {
       LogError("AQL dispatch failed!");
       vcmd.setStatus(CL_INVALID_OPERATION);
     }
-    // Wait for the execution on the device queue. Keep the current queue in-order
-    queue->releaseGpuMemoryFence(kSkipCpuWait);
+    // In concurrent mode do NOT emit the serializing BARRIER_AND fence between coop
+    // dispatches -- that intervening barrier (barrier bit set) forces the next dispatch
+    // to wait for this one to retire, defeating the overlap CP firmware would otherwise
+    // provide for back-to-back barrier-bit-cleared dispatches.
+    if (!coop_concurrent) {
+      // Wait for the execution on the device queue. Keep the current queue in-order
+      queue->releaseGpuMemoryFence(kSkipCpuWait);
+    }
 
     // Add a dependency into the current queue on the coop queue
     Barriers().AddExternalSignal(queue->Barriers().GetLastSignal());
