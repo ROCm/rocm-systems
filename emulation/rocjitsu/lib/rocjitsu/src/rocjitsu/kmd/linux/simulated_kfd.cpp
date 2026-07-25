@@ -2691,6 +2691,7 @@ bool SimulatedKfd::on_wave_alu_exception(amdgpu::Wavefront &wave) {
   }
   if (ctx_base == 0)
     return false;
+  wave.set_fatal_exception_pending(true);
   wave.debug_trap(0);
   report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size,
                       KFD_EC_MASK(EC_QUEUE_WAVE_MATH_ERROR));
