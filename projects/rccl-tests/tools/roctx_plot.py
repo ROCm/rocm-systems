@@ -25,7 +25,7 @@ sys.path.insert(0, SCRIPT_DIR)
 
 from roctx_analyze import (
     BUS_BW_FACTOR,
-    correlate,
+    correlate_collective,
     discover_multi_run_groups,
     discover_trace_files,
     generate_report,
@@ -85,7 +85,7 @@ def collect_data(run_dir, outlier_fn):
             for marker_path, kernel_path in discover_trace_files(d):
                 markers = parse_marker_csv(marker_path)
                 kernels = parse_kernel_csv(kernel_path)
-                for key, durations in correlate(markers, kernels).items():
+                for key, durations in correlate_collective(markers, kernels).items():
                     all_samples[key].extend(durations)
 
         rows = generate_report(all_samples, outlier_fn)

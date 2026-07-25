@@ -21,7 +21,34 @@ from collections import defaultdict
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
-COLLECTIVE_KERNEL_RE = re.compile(r"ncclDev")
+# Kernel categorization is used ONLY for filtering/display -- never to drop data
+# at parse/correlate time. Every kernel that falls inside a marker region is
+# retained; callers decide which categories to show. This keeps otherwise
+# invisible costs (e.g. rocclr copy/fill) accountable.
+#
+# Categories, matched in order:
+#   collective : the actual reduction kernels -- RCCL generic (ncclDevKernel_*)
+#                and Meta DDA direct-data-access/IPC kernels (meta::comms::dda*).
+#   rocclr     : HIP runtime helper kernels (__amd_rocclr_copyBuffer / fill / ...).
+#   harness    : rccl-tests data-init/verify kernels (prepareInput/Expected/verify).
+#   other      : anything else, so nothing is silently ignored.
+COLLECTIVE_KERNEL_RE = re.compile(r"ncclDevKernel|meta::comms::dda")
+ROCCLR_KERNEL_RE = re.compile(r"^__amd_rocclr_")
+HARNESS_KERNEL_RE = re.compile(r"prepareInput|prepareExpected|verifyPrepared")
+
+# Display order for categories.
+CATEGORY_ORDER = ["collective", "rocclr", "harness", "other"]
+
+
+def categorize_kernel(name):
+    """Classify a kernel by name for display purposes (never drops data)."""
+    if COLLECTIVE_KERNEL_RE.search(name):
+        return "collective"
+    if ROCCLR_KERNEL_RE.search(name):
+        return "rocclr"
+    if HARNESS_KERNEL_RE.search(name):
+        return "harness"
+    return "other"
 
 BUS_BW_FACTOR = {
     "all_gather":      lambda n: (n - 1) / n,
@@ -86,7 +113,6 @@ def parse_kernel_csv(path):
                 "name": name,
                 "start": int(row["Start_Timestamp"]),
                 "end": int(row["End_Timestamp"]),
-                "is_collective": bool(COLLECTIVE_KERNEL_RE.search(name)),
             })
     return kernels
 
@@ -168,25 +194,97 @@ def discover_multi_run_groups(run_dir):
 # ---------------------------------------------------------------------------
 
 def correlate(markers, kernels):
-    """For each marker, find contained collective kernels and return their durations.
+    """Assign every contained kernel to its marker region -- no filtering.
 
-    Returns dict: (size, in_place) -> list of kernel durations in ns.
+    For each marker (a timed_loop over one (size, in_place) point) collect ALL
+    kernels whose [start, end] falls inside the marker window, keyed by kernel
+    name. Categorization/filtering happens later at display time, so nothing is
+    discarded here.
+
+    Returns dict: (size, in_place) -> {kernel_name -> [durations_ns, ...]}.
     """
     kernels_sorted = sorted(kernels, key=lambda k: k["start"])
-    samples = defaultdict(list)
+    regions = defaultdict(lambda: defaultdict(list))
 
     for mk in markers:
         key = (mk["size"], mk["in_place"])
+        bucket = regions[key]
         for k in kernels_sorted:
             if k["start"] < mk["start"]:
                 continue
             if k["start"] > mk["end"]:
                 break
-            if k["end"] <= mk["end"] and k["is_collective"]:
-                duration_ns = k["end"] - k["start"]
-                samples[key].append(duration_ns)
+            if k["end"] <= mk["end"]:
+                bucket[k["name"]].append(k["end"] - k["start"])
 
-    return samples
+    return regions
+
+
+def merge_regions(dst, src):
+    """Merge a per-file regions dict (from correlate) into an accumulator."""
+    for key, byname in src.items():
+        d = dst[key]
+        for name, durs in byname.items():
+            d[name].extend(durs)
+    return dst
+
+
+def collective_samples(regions):
+    """Collapse a regions dict to (size, in_place) -> [collective durations].
+
+    This reproduces the historical view used by the default bandwidth report,
+    but derived from the full retained data instead of a parse-time filter.
+    """
+    out = defaultdict(list)
+    for key, byname in regions.items():
+        for name, durs in byname.items():
+            if categorize_kernel(name) == "collective":
+                out[key].extend(durs)
+    return out
+
+
+def correlate_collective(markers, kernels):
+    """Convenience: per-file (size, in_place) -> [collective durations].
+
+    Equivalent to the historical ``correlate`` return shape, kept so callers that
+    only want collective-kernel samples (plot/compare) don't need the full
+    regions structure.
+    """
+    return collective_samples(correlate(markers, kernels))
+
+
+def category_durations(regions):
+    """Collapse a regions dict to (size, in_place) -> {category -> [durations]}."""
+    out = defaultdict(lambda: defaultdict(list))
+    for key, byname in regions.items():
+        for name, durs in byname.items():
+            out[key][categorize_kernel(name)].extend(durs)
+    return out
+
+
+def compute_overhead(regions):
+    """Per (size, in_place) non-collective GPU time per iteration, in ns.
+
+    For each region, sum the median duration of every *non-collective* category
+    (e.g. the DDA tree's `cudaMemcpyAsync` staging copy, which shows up as a
+    rocclr copyBuffer). One such helper runs per iteration alongside the
+    collective on the same stream, so this approximates the extra per-call cost
+    the collective kernel alone doesn't capture.
+
+    Returns dict: (size, in_place) -> {"overhead_ns": int, "detail": {cat: median}}.
+    """
+    out = {}
+    for key, bycat in category_durations(regions).items():
+        overhead = 0
+        detail = {}
+        for cat, durs in bycat.items():
+            if cat == "collective" or not durs:
+                continue
+            m = median(durs)
+            detail[cat] = m
+            overhead += m
+        out[key] = {"overhead_ns": overhead, "detail": detail}
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +297,51 @@ def median(vals):
     if n % 2 == 1:
         return s[n // 2]
     return (s[n // 2 - 1] + s[n // 2]) / 2
+
+
+def percentile(vals, q):
+    """Linear-interpolated percentile (numpy default method), pure Python.
+
+    *q* in [0, 100]. Returns None for empty input.
+    """
+    if not vals:
+        return None
+    s = sorted(vals)
+    n = len(s)
+    if n == 1:
+        return float(s[0])
+    rank = (q / 100.0) * (n - 1)
+    lo = int(math.floor(rank))
+    hi = int(math.ceil(rank))
+    if lo == hi:
+        return float(s[lo])
+    frac = rank - lo
+    return s[lo] * (1.0 - frac) + s[hi] * frac
+
+
+def summarize(vals):
+    """Distribution summary for a sample list. Returns None for empty input.
+
+    Keys: n, min, max, mean, std (population), p10, p25, p50, p75, p90.
+    """
+    if not vals:
+        return None
+    s = sorted(vals)
+    n = len(s)
+    mean = sum(s) / n
+    var = sum((v - mean) ** 2 for v in s) / n if n > 1 else 0.0
+    return {
+        "n": n,
+        "min": s[0],
+        "max": s[-1],
+        "mean": mean,
+        "std": var ** 0.5,
+        "p10": percentile(s, 10),
+        "p25": percentile(s, 25),
+        "p50": percentile(s, 50),
+        "p75": percentile(s, 75),
+        "p90": percentile(s, 90),
+    }
 
 
 def mad_outliers(vals, threshold=3.5):
@@ -287,30 +430,46 @@ def _compute_bw(size_bytes, duration_ns):
     return size_bytes / duration_ns  # bytes/ns == GB/s
 
 
-def generate_report(all_samples, outlier_fn, np_val=None, bus_factor=None):
+def generate_report(all_samples, outlier_fn, np_val=None, bus_factor=None, overhead_by_key=None):
     keys = sorted(all_samples.keys(), key=lambda k: (k[1], k[0]))
+    overhead_by_key = overhead_by_key or {}
 
     rows = []
     for (size, in_place) in keys:
         vals = all_samples[(size, in_place)]
         total = len(vals)
         inliers, n_outliers = outlier_fn(vals)
+        overhead = overhead_by_key.get((size, in_place), {}).get("overhead_ns", 0)
         if not inliers:
             rows.append({
                 "size": size, "in_place": in_place,
                 "total": total, "retained": 0, "outliers": n_outliers,
                 "min": None, "max": None, "median": None,
+                "p10": None, "p25": None, "p75": None, "p90": None,
+                "mean": None, "std": None, "samples": [],
                 "algbw": None, "busbw": None,
+                "overhead": overhead, "eff_median": None,
+                "eff_algbw": None, "eff_busbw": None,
             })
             continue
-        med = median(inliers)
+        st = summarize(inliers)
+        med = st["p50"]
         algbw = _compute_bw(size, med)
         busbw = algbw * bus_factor if algbw is not None and bus_factor is not None else None
+        # Effective = collective + per-iteration non-collective overhead (e.g. DDA
+        # staging copy), giving the true end-to-end per-call cost/bandwidth.
+        eff_med = med + overhead
+        eff_algbw = _compute_bw(size, eff_med)
+        eff_busbw = eff_algbw * bus_factor if eff_algbw is not None and bus_factor is not None else None
         rows.append({
             "size": size, "in_place": in_place,
             "total": total, "retained": len(inliers), "outliers": n_outliers,
-            "min": min(inliers), "max": max(inliers), "median": med,
+            "min": st["min"], "max": st["max"], "median": med,
+            "p10": st["p10"], "p25": st["p25"], "p75": st["p75"], "p90": st["p90"],
+            "mean": st["mean"], "std": st["std"], "samples": list(inliers),
             "algbw": algbw, "busbw": busbw,
+            "overhead": overhead, "eff_median": eff_med,
+            "eff_algbw": eff_algbw, "eff_busbw": eff_busbw,
         })
 
     return rows
@@ -322,9 +481,14 @@ def print_report(rows, method_name, show_bw=False):
 
     place_labels = {0: "oop", 1: "ip"}
 
+    # Only surface the effective columns if some region actually has overhead.
+    show_eff = show_bw and any(r.get("overhead") for r in rows)
+
     hdr = f"{'size':>10}  {'place':>5}  {'kept':>6}  {'out':>4}  {'min':>12}  {'median':>12}  {'max':>12}"
     if show_bw:
         hdr += f"  {'algbw':>10}  {'busbw':>10}"
+    if show_eff:
+        hdr += f"  {'ovhd':>10}  {'eff_busbw':>10}"
     sep = "-" * len(hdr)
 
     current_place = None
@@ -343,15 +507,73 @@ def print_report(rows, method_name, show_bw=False):
             line += f"  {'--':>12}  {'--':>12}  {'--':>12}"
             if show_bw:
                 line += f"  {'--':>10}  {'--':>10}"
+            if show_eff:
+                line += f"  {'--':>10}  {'--':>10}"
         else:
             line += f"  {fmt_ns(r['min']):>12}  {fmt_ns(r['median']):>12}  {fmt_ns(r['max']):>12}"
             if show_bw:
                 line += f"  {fmt_bw(r['algbw']):>10}  {fmt_bw(r['busbw']):>10}"
+            if show_eff:
+                ovhd = r.get("overhead") or 0
+                ovhd_str = fmt_ns(ovhd) if ovhd else "--"
+                line += f"  {ovhd_str:>10}  {fmt_bw(r['eff_busbw']):>10}"
         print(line)
 
     if show_bw:
         print()
-        print("  algbw/busbw in GB/s (computed from median kernel duration)")
+        print("  algbw/busbw in GB/s (computed from median collective kernel duration)")
+    if show_eff:
+        print("  ovhd = per-call non-collective GPU time (e.g. DDA staging copy); "
+              "eff_busbw = busbw incl. that overhead")
+    print()
+
+
+def print_breakdown(regions):
+    """Per-(size, place) accounting of ALL kernels by category.
+
+    Shows, for every marker region, how much GPU time each category consumed --
+    including rocclr copy/fill and any 'other' kernels that the collective-only
+    view hides. `share` is the category's fraction of the region's total kernel
+    time (sum of durations), so expensive-but-ignored kernels become visible.
+    """
+    cat_durs = category_durations(regions)
+    keys = sorted(cat_durs.keys(), key=lambda k: (k[1], k[0]))
+    place_labels = {0: "oop", 1: "ip"}
+
+    hdr = (f"{'size':>10}  {'place':>5}  {'category':>10}  {'count':>7}  "
+           f"{'total':>12}  {'median':>12}  {'share':>7}")
+    sep = "-" * len(hdr)
+
+    current_place = None
+    for key in keys:
+        size, in_place = key
+        if in_place != current_place:
+            if current_place is not None:
+                print()
+            current_place = in_place
+            label = "out-of-place" if current_place == 0 else "in-place"
+            print(f"  [{label}]")
+            print(f"  {hdr}")
+            print(f"  {sep}")
+
+        bycat = cat_durs[key]
+        region_total = sum(sum(v) for v in bycat.values()) or 1
+        first = True
+        for cat in CATEGORY_ORDER:
+            durs = bycat.get(cat)
+            if not durs:
+                continue
+            total = sum(durs)
+            share = 100.0 * total / region_total
+            size_col = fmt_size(size) if first else ""
+            place_col = place_labels[in_place] if first else ""
+            first = False
+            print(f"  {size_col:>10}  {place_col:>5}  {cat:>10}  {len(durs):>7}  "
+                  f"{fmt_ns(total):>12}  {fmt_ns(median(durs)):>12}  {share:>6.1f}%")
+
+    print()
+    print("  total = summed GPU time in category within the region; "
+          "share = % of region kernel time")
     print()
 
 
@@ -387,6 +609,11 @@ def parse_args(argv=None):
         "--iqr-factor", type=float, default=1.5,
         help="IQR multiplier (default: 1.5)",
     )
+    parser.add_argument(
+        "--breakdown", action="store_true",
+        help="Also print a per-(size,place) breakdown of ALL kernels by category "
+             "(collective/rocclr/harness/other), so hidden costs are visible.",
+    )
 
     return parser.parse_args(argv)
 
@@ -403,8 +630,28 @@ def _build_outlier_fn(args):
     )
 
 
+def _collect_regions(pairs_iter):
+    """Correlate every (marker, kernel) pair and merge into one regions dict.
+
+    Returns (regions, total_pairs, total_markers, total_kernels_retained).
+    """
+    regions = defaultdict(lambda: defaultdict(list))
+    total_pairs = total_markers = total_kernels = 0
+    for marker_path, kernel_path in pairs_iter:
+        total_pairs += 1
+        markers = parse_marker_csv(marker_path)
+        kernels = parse_kernel_csv(kernel_path)
+        total_markers += len(markers)
+        r = correlate(markers, kernels)
+        for byname in r.values():
+            for durs in byname.values():
+                total_kernels += len(durs)
+        merge_regions(regions, r)
+    return regions, total_pairs, total_markers, total_kernels
+
+
 def _analyze_dirs(dirs, np_val, collective, outlier_fn, method_name):
-    """Collect trace pairs from *dirs*, correlate, and return (rows, show_bw)."""
+    """Collect trace pairs from *dirs*, correlate, and return (rows, show_bw, regions)."""
     bus_factor = None
     show_bw = False
     if collective and np_val:
@@ -413,31 +660,25 @@ def _analyze_dirs(dirs, np_val, collective, outlier_fn, method_name):
             bus_factor = factor_fn(np_val)
             show_bw = True
 
-    all_samples = defaultdict(list)
-    total_pairs = 0
-    total_markers = 0
-    total_kernels_matched = 0
+    def _pairs():
+        for d in dirs:
+            for p in discover_trace_files(d):
+                yield p
 
-    for d in dirs:
-        pairs = discover_trace_files(d)
-        total_pairs += len(pairs)
-        for marker_path, kernel_path in pairs:
-            markers = parse_marker_csv(marker_path)
-            kernels = parse_kernel_csv(kernel_path)
-            samples = correlate(markers, kernels)
-            total_markers += len(markers)
-            for key, durations in samples.items():
-                total_kernels_matched += len(durations)
-                all_samples[key].extend(durations)
+    regions, total_pairs, total_markers, total_kernels = _collect_regions(_pairs())
+    all_samples = collective_samples(regions)
+    n_collective = sum(len(v) for v in all_samples.values())
 
     print(f"  Trace pairs: {total_pairs}  markers: {total_markers}  "
-          f"kernel samples: {total_kernels_matched}  "
+          f"kernels retained: {total_kernels}  collective samples: {n_collective}  "
           f"(size,place) groups: {len(all_samples)}")
     if show_bw:
         print(f"  bus_bw_factor: {bus_factor:.4f}  (np={np_val})")
 
-    rows = generate_report(all_samples, outlier_fn, np_val=np_val, bus_factor=bus_factor)
-    return rows, show_bw
+    overhead_by_key = compute_overhead(regions)
+    rows = generate_report(all_samples, outlier_fn, np_val=np_val, bus_factor=bus_factor,
+                           overhead_by_key=overhead_by_key)
+    return rows, show_bw, regions
 
 
 def main():
@@ -456,8 +697,10 @@ def main():
             print(f"{'=' * 60}")
             print(f"  {collective}  /  {dtype}  ({len(subdirs)} rep(s))")
             print(f"{'=' * 60}")
-            rows, show_bw = _analyze_dirs(subdirs, np_val, collective, outlier_fn, method_name)
+            rows, show_bw, regions = _analyze_dirs(subdirs, np_val, collective, outlier_fn, method_name)
             print_report(rows, method_name, show_bw=show_bw)
+            if args.breakdown:
+                print_breakdown(regions)
         return
 
     # Single-run directory (original behavior).
@@ -480,25 +723,21 @@ def main():
 
     print(f"Found {len(trace_pairs)} trace file pairs across {args.run_dir}")
 
-    all_samples = defaultdict(list)
-    total_markers = 0
-    total_kernels_matched = 0
+    regions, _, total_markers, total_kernels = _collect_regions(iter(trace_pairs))
+    all_samples = collective_samples(regions)
+    n_collective = sum(len(v) for v in all_samples.values())
 
-    for marker_path, kernel_path in trace_pairs:
-        markers = parse_marker_csv(marker_path)
-        kernels = parse_kernel_csv(kernel_path)
-        samples = correlate(markers, kernels)
-        total_markers += len(markers)
-        for key, durations in samples.items():
-            total_kernels_matched += len(durations)
-            all_samples[key].extend(durations)
-
-    print(f"Markers: {total_markers}, collective kernel samples: {total_kernels_matched}")
+    print(f"Markers: {total_markers}, kernels retained: {total_kernels}, "
+          f"collective samples: {n_collective}")
     print(f"Unique (size, place) groups: {len(all_samples)}")
     print()
 
-    rows = generate_report(all_samples, outlier_fn, np_val=np_val, bus_factor=bus_factor)
+    overhead_by_key = compute_overhead(regions)
+    rows = generate_report(all_samples, outlier_fn, np_val=np_val, bus_factor=bus_factor,
+                           overhead_by_key=overhead_by_key)
     print_report(rows, method_name, show_bw=show_bw)
+    if args.breakdown:
+        print_breakdown(regions)
 
 
 if __name__ == "__main__":

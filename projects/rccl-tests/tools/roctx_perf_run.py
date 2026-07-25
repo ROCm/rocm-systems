@@ -371,7 +371,8 @@ def run_matrix(args, meta, run_dir):
                 }
                 results.append(entry)
                 meta["results"].append(entry)
-                write_metadata(meta, run_dir)
+                if not args.dry_run:
+                    write_metadata(meta, run_dir)
 
                 if rc != 0:
                     errors += 1
@@ -403,7 +404,8 @@ def run_matrix(args, meta, run_dir):
                     }
                     results.append(entry)
                     meta["results"].append(entry)
-                    write_metadata(meta, run_dir)
+                    if not args.dry_run:
+                        write_metadata(meta, run_dir)
 
                     if rc != 0:
                         errors += 1

@@ -346,6 +346,9 @@ def cmd_plot(args):
     outlier_fn, method_name = _build_outlier_fn(args)
     metric = args.metric
 
+    if getattr(args, "backend", "matplotlib") == "plotly":
+        return _cmd_plot_plotly(args, outlier_fn)
+
     source = args.source
     run_dirs = args.run_dirs
 
@@ -390,6 +393,65 @@ def cmd_plot(args):
     ))
 
     _plot_overlay(lib_data, all_keys, metric, args.output)
+    return 0
+
+
+def _records_from_inputs(inputs, source, outlier_fn):
+    """Build tidy records from a mix of run directories and exported JSON files."""
+    import roctx_records as rr
+    records = []
+    for inp in inputs:
+        if inp.endswith(".json") and os.path.isfile(inp):
+            records.extend(rr.load_records(inp))
+        else:
+            records.extend(rr.build_records(inp, source=source, outlier_fn=outlier_fn))
+    return records
+
+
+def _cmd_plot_plotly(args, outlier_fn):
+    setup_tools_path(args.tools_dir)
+    try:
+        import viz
+    except ImportError as e:
+        print(f"plotly backend needs the 'plotly' package: {e}", file=sys.stderr)
+        print("  install it (e.g. into your analysis venv):  pip install plotly", file=sys.stderr)
+        return 1
+
+    records = _records_from_inputs(args.run_dirs, args.source, outlier_fn)
+    if not records:
+        print("No records to plot.", file=sys.stderr)
+        return 1
+
+    out = args.output
+    if out.endswith(".png"):  # plotly default output is html
+        out = out[:-4] + ".html"
+
+    fig = viz.build_line_figure(
+        records, metric=args.metric, band=args.band,
+        color_by=args.color_by,
+    )
+    viz.write_html(fig, out)
+    n_runs = len({r["run_dir"] for r in records})
+    print(f"Saved interactive plot: {out}  "
+          f"({len(records)} records, {n_runs} run(s), band={args.band})")
+    return 0
+
+
+def cmd_export(args):
+    setup_tools_path(args.tools_dir)
+    import roctx_records as rr
+    outlier_fn, _ = _build_outlier_fn(args)
+    records = rr.build_records_multi(args.run_dirs, source=args.source,
+                                     outlier_fn=outlier_fn)
+    if not records:
+        print("No records produced.", file=sys.stderr)
+        return 1
+    rr.export_records(records, args.output, drop_samples=args.drop_samples)
+    n_runs = len({r["run_dir"] for r in records})
+    n_groups = len({(r["collective"], r["dtype"]) for r in records})
+    size_kib = os.path.getsize(args.output) / 1024
+    print(f"Wrote {len(records)} records from {n_runs} run(s), "
+          f"{n_groups} (collective,dtype) group(s) -> {args.output} ({size_kib:.1f} KiB)")
     return 0
 
 
@@ -645,15 +707,39 @@ def main():
 
     # -- plot --
     p_plot = sub.add_parser("plot", help="Overlay plot of runs")
-    p_plot.add_argument("run_dirs", nargs="+", help="Run directories")
+    p_plot.add_argument("run_dirs", nargs="+",
+                        help="Run directories or exported records .json files")
     p_plot.add_argument("--source", choices=["auto", "baseline", "profiled", "log"],
                         default="auto")
     p_plot.add_argument("-o", "--output", default="comparison.png",
-                        help="Output image file (default: comparison.png)")
-    p_plot.add_argument("--metric", choices=["busbw", "algbw", "time"],
+                        help="Output file (.png for matplotlib, .html for plotly)")
+    p_plot.add_argument("--metric", choices=["busbw", "algbw", "time", "eff_busbw"],
                         default="busbw",
                         help="Metric to plot (default: busbw)")
+    p_plot.add_argument("--backend", choices=["matplotlib", "plotly"],
+                        default="matplotlib",
+                        help="Plot backend (default: matplotlib). plotly = "
+                             "interactive HTML with variance bands.")
+    p_plot.add_argument("--band", choices=["none", "iqr", "minmax", "std"],
+                        default="iqr",
+                        help="Variance band for plotly backend (default: iqr)")
+    p_plot.add_argument("--color-by", choices=["label", "dtype", "machine"],
+                        default=None,
+                        help="Comparison factor mapped to colour (plotly; "
+                             "auto-detected by default)")
     _add_common_args(p_plot)
+
+    # -- export --
+    p_export = sub.add_parser("export",
+                              help="Export runs to a compact tidy-records JSON")
+    p_export.add_argument("run_dirs", nargs="+", help="Run directories")
+    p_export.add_argument("-o", "--output", default="records.json",
+                          help="Output JSON file (default: records.json)")
+    p_export.add_argument("--source", choices=["auto", "baseline", "profiled", "log"],
+                          default="auto")
+    p_export.add_argument("--drop-samples", action="store_true",
+                          help="Omit per-iteration samples (smaller; no box/violin)")
+    _add_common_args(p_export)
 
     args = parser.parse_args()
 
@@ -666,6 +752,7 @@ def main():
         "report": cmd_report,
         "compare": cmd_compare,
         "plot": cmd_plot,
+        "export": cmd_export,
     }
     return dispatch[args.cmd](args)
 

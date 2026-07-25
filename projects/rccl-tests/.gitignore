@@ -5,3 +5,11 @@ build/
 *.gcov
 /coverage/
 __pycache__/
+*.pyc
+
+# Generated analysis artifacts (not source)
+/perf-runs/
+/viz-out/
+records.json
+*.png
+*.html

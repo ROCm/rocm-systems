@@ -158,11 +158,13 @@ def load_baseline_data(run_dir, outlier_fn):
                     "size": size, "in_place": in_place,
                     "total": total, "retained": 0, "outliers": n_outliers,
                     "min_us": None, "max_us": None, "median_us": None,
+                    "p10_us": None, "p25_us": None, "p75_us": None, "p90_us": None,
+                    "mean_us": None, "std_us": None, "samples_us": [],
                     "algbw": None, "busbw": None,
                 })
                 continue
 
-            med_time = ra.median(inlier_times)
+            st = ra.summarize(inlier_times)
             inlier_algbw, _ = outlier_fn(algbw_samples[key])
             inlier_busbw, _ = outlier_fn(busbw_samples[key])
             med_algbw = ra.median(inlier_algbw) if inlier_algbw else None
@@ -172,8 +174,12 @@ def load_baseline_data(run_dir, outlier_fn):
                 "size": size, "in_place": in_place,
                 "total": total, "retained": len(inlier_times),
                 "outliers": n_outliers,
-                "min_us": min(inlier_times), "max_us": max(inlier_times),
-                "median_us": med_time,
+                "min_us": st["min"], "max_us": st["max"],
+                "median_us": st["p50"],
+                "p10_us": st["p10"], "p25_us": st["p25"],
+                "p75_us": st["p75"], "p90_us": st["p90"],
+                "mean_us": st["mean"], "std_us": st["std"],
+                "samples_us": list(inlier_times),
                 "algbw": med_algbw, "busbw": med_busbw,
             })
 
@@ -270,11 +276,13 @@ def load_log_data(run_dir, outlier_fn):
                     "size": size, "in_place": in_place,
                     "total": total, "retained": 0, "outliers": n_outliers,
                     "min_us": None, "max_us": None, "median_us": None,
+                    "p10_us": None, "p25_us": None, "p75_us": None, "p90_us": None,
+                    "mean_us": None, "std_us": None, "samples_us": [],
                     "algbw": None, "busbw": None,
                 })
                 continue
 
-            med_time = ra.median(inlier_times)
+            st = ra.summarize(inlier_times)
             inlier_algbw, _ = outlier_fn(algbw_samples[key])
             inlier_busbw, _ = outlier_fn(busbw_samples[key])
             med_algbw = ra.median(inlier_algbw) if inlier_algbw else None
@@ -284,8 +292,12 @@ def load_log_data(run_dir, outlier_fn):
                 "size": size, "in_place": in_place,
                 "total": total, "retained": len(inlier_times),
                 "outliers": n_outliers,
-                "min_us": min(inlier_times), "max_us": max(inlier_times),
-                "median_us": med_time,
+                "min_us": st["min"], "max_us": st["max"],
+                "median_us": st["p50"],
+                "p10_us": st["p10"], "p25_us": st["p25"],
+                "p75_us": st["p75"], "p90_us": st["p90"],
+                "mean_us": st["mean"], "std_us": st["std"],
+                "samples_us": list(inlier_times),
                 "algbw": med_algbw, "busbw": med_busbw,
             })
 
@@ -322,7 +334,7 @@ def load_profiled_data(run_dir, outlier_fn):
                 for marker_path, kernel_path in pairs:
                     markers = ra.parse_marker_csv(marker_path)
                     kernels = ra.parse_kernel_csv(kernel_path)
-                    samples = ra.correlate(markers, kernels)
+                    samples = ra.correlate_collective(markers, kernels)
                     for key, durations in samples.items():
                         all_samples[key].extend(durations)
 
@@ -352,7 +364,7 @@ def load_profiled_data(run_dir, outlier_fn):
         for marker_path, kernel_path in pairs:
             markers = ra.parse_marker_csv(marker_path)
             kernels = ra.parse_kernel_csv(kernel_path)
-            samples = ra.correlate(markers, kernels)
+            samples = ra.correlate_collective(markers, kernels)
             for key, durations in samples.items():
                 all_samples[key].extend(durations)
 
