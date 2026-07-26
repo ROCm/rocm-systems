@@ -992,7 +992,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   ASSERT_TRUE(result.warnings.empty());
   ASSERT_EQ(result.kernels.size(), 1u);
   EXPECT_EQ(result.target_name, "gfx1201");
-  EXPECT_EQ(result.arch_name, "rdna4");
+  EXPECT_EQ(result.arch_display_name, "rdna4");
 
   const ConSanKernelInfo &kernel = result.kernels.front();
   EXPECT_EQ(kernel.name, "lds_probe");
@@ -1158,7 +1158,7 @@ TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.target_name, "gfx950");
-  ASSERT_EQ(result.arch_name, "cdna4");
+  ASSERT_EQ(result.arch_display_name, "cdna4");
   ASSERT_EQ(result.kernels.size(), 1u);
   const ConSanKernelInfo &kernel = result.kernels.front();
   EXPECT_TRUE(kernel.decoded);

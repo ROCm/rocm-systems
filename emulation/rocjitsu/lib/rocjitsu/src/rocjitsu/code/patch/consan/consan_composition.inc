@@ -592,7 +592,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     return result;
 
   result.target_name = target_name(code_object.target_id());
-  result.arch_name = arch_name(code_object.target_id());
+  result.arch_display_name = arch_name(code_object.target_id());
+  result.arch = arch_for_target(code_object.target_id());
 
   for (const Section *section : code_object.text_sections()) {
     ConSanTextSection info;
@@ -641,17 +642,18 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   if (result.kernels.empty())
     result.warnings.emplace_back("ConSan found no kernel descriptor symbols");
 
-  const rj_code_arch_t arch = arch_for_target(code_object.target_id());
+  const rj_code_arch_t arch = result.arch;
   if (arch == ROCJITSU_CODE_ARCH_INVALID) {
     result.warnings.emplace_back("ConSan does not support target '" + result.target_name + "'");
     result.outcome = ConSanTransformOutcome::Unsupported;
     return result;
   }
+  result.semantic_arch_required = true;
 
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (!decoder) {
-    result.warnings.emplace_back("ConSan could not create decoder for arch '" + result.arch_name +
-                                 "'");
+    result.warnings.emplace_back("ConSan could not create decoder for arch '" +
+                                 result.arch_display_name + "'");
     result.outcome = ConSanTransformOutcome::Unsupported;
     return result;
   }

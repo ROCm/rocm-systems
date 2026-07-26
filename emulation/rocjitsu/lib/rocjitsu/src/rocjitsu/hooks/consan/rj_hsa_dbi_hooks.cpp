@@ -27,6 +27,7 @@
 #include <cctype>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -42,6 +43,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include <sys/stat.h>
@@ -314,7 +316,8 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
 }
 
 [[nodiscard]] bool
-is_supported_require_patch_moi_candidate(const rocjitsu::ConSanMoiCandidate &candidate) {
+is_supported_require_patch_moi_candidate(const rocjitsu::ConSanMoiCandidate &candidate,
+                                         rj_code_arch_t arch) {
   if (candidate.kind != rocjitsu::ConSanLdsAccessKind::Read &&
       candidate.kind != rocjitsu::ConSanLdsAccessKind::Write)
     return false;
@@ -325,8 +328,9 @@ is_supported_require_patch_moi_candidate(const rocjitsu::ConSanMoiCandidate &can
   if (!candidate.addr_vgpr)
     return false;
 
-  if (candidate.source == rocjitsu::ConSanMoiCandidateSource::NativeLds)
-    return rocjitsu::consan_moi_supports_native_lds_record_replay_mnemonic(candidate.mnemonic);
+  if (candidate.source == rocjitsu::ConSanMoiCandidateSource::NativeLds) {
+    return rocjitsu::consan_moi_supports_native_lds_mnemonic(candidate.mnemonic, arch);
+  }
 
   if (candidate.source != rocjitsu::ConSanMoiCandidateSource::FlatGroup &&
       candidate.source != rocjitsu::ConSanMoiCandidateSource::FlatMaybeGroup)
@@ -348,7 +352,9 @@ is_supported_require_patch_moi_candidate(const rocjitsu::ConSanMoiCandidate &can
     return true;
   if (!result.resource_plans.empty())
     return true;
-  return std::ranges::any_of(result.moi_candidates, is_supported_require_patch_moi_candidate);
+  return std::ranges::any_of(result.moi_candidates, [&](const auto &candidate) {
+    return is_supported_require_patch_moi_candidate(candidate, result.arch);
+  });
 }
 
 struct ConSanStaticCoverageKind {
@@ -489,9 +495,10 @@ compute_consan_static_coverage(const rocjitsu::ConSanResult &result, const HookC
       }
     } else {
       coverage.access.discovered = result.moi_candidates.size();
-      coverage.access.supported = static_cast<uint64_t>(
-          std::count_if(result.moi_candidates.begin(), result.moi_candidates.end(),
-                        is_supported_require_patch_moi_candidate));
+      coverage.access.supported = static_cast<uint64_t>(std::count_if(
+          result.moi_candidates.begin(), result.moi_candidates.end(), [&](const auto &candidate) {
+            return is_supported_require_patch_moi_candidate(candidate, result.arch);
+          }));
     }
     const auto has_disposition_kind = [&](rocjitsu::ConSanResourceSiteKind wanted) {
       return std::ranges::any_of(result.site_dispositions,
@@ -517,9 +524,10 @@ compute_consan_static_coverage(const rocjitsu::ConSanResult &result, const HookC
     // Keep the semantic candidate inventory as the authoritative access count.
     if (result.site_dispositions.empty()) {
       coverage.access.discovered = result.moi_candidates.size();
-      coverage.access.supported = static_cast<uint64_t>(
-          std::count_if(result.moi_candidates.begin(), result.moi_candidates.end(),
-                        is_supported_require_patch_moi_candidate));
+      coverage.access.supported = static_cast<uint64_t>(std::count_if(
+          result.moi_candidates.begin(), result.moi_candidates.end(), [&](const auto &candidate) {
+            return is_supported_require_patch_moi_candidate(candidate, result.arch);
+          }));
     }
     const bool has_inline_exact_patch =
         std::ranges::any_of(result.patches, [](const rocjitsu::ConSanPatchInfo &patch) {
@@ -727,26 +735,142 @@ std::mutex &log_mutex() {
   return mutex;
 }
 
-std::atomic<size_t> &process_fault_application_count() {
-  static std::atomic<size_t> count{0};
-  return count;
+struct ProcessFaultApplicationState {
+  std::mutex mutex;
+  std::condition_variable changed;
+  bool reservation_active = false;
+  bool mutation_installed = false;
+  std::thread::id reservation_owner;
+};
+
+ProcessFaultApplicationState &process_fault_application_state() {
+  // Match the automatic-report registry's process-lifetime storage. A
+  // reservation can still unwind through a runtime-owned load callback while
+  // shared-library finalizers are running, so destroying its synchronization
+  // primitives during ordinary static teardown is unsafe.
+  static auto *state = new ProcessFaultApplicationState;
+  return *state;
 }
 
-void reset_process_fault_application_count() {
-  process_fault_application_count().store(0, std::memory_order_relaxed);
+void reset_process_fault_application_state() {
+  ProcessFaultApplicationState &state = process_fault_application_state();
+  {
+    std::lock_guard lock(state.mutex);
+    state.reservation_active = false;
+    state.mutation_installed = false;
+    state.reservation_owner = {};
+  }
+  state.changed.notify_all();
+}
+
+enum class ProcessFaultReservationOutcome : uint8_t {
+  Reserved,
+  MutationAlreadyInstalled,
+  ContentionTimeout,
+  ReentrantContention,
+};
+
+[[nodiscard]] constexpr std::string_view
+process_fault_reservation_outcome_name(ProcessFaultReservationOutcome outcome) {
+  switch (outcome) {
+  case ProcessFaultReservationOutcome::Reserved:
+    return "reserved";
+  case ProcessFaultReservationOutcome::MutationAlreadyInstalled:
+    return "mutation-already-installed";
+  case ProcessFaultReservationOutcome::ContentionTimeout:
+    return "contention-timeout";
+  case ProcessFaultReservationOutcome::ReentrantContention:
+    return "reentrant-contention";
+  }
+  return "unknown";
+}
+
+class ProcessFaultApplicationReservation {
+public:
+  ProcessFaultApplicationReservation() = default;
+  ProcessFaultApplicationReservation(const ProcessFaultApplicationReservation &) = delete;
+  ProcessFaultApplicationReservation &
+  operator=(const ProcessFaultApplicationReservation &) = delete;
+
+  ~ProcessFaultApplicationReservation() { release(); }
+
+  [[nodiscard]] ProcessFaultReservationOutcome reserve(std::chrono::milliseconds wait,
+                                                       size_t *prior_applications) {
+    ProcessFaultApplicationState &state = process_fault_application_state();
+    std::unique_lock lock(state.mutex);
+    *prior_applications = state.mutation_installed ? 1u : 0u;
+    if (state.reservation_active && state.reservation_owner == std::this_thread::get_id()) {
+      return ProcessFaultReservationOutcome::ReentrantContention;
+    }
+    // This hook must not create an unbounded process-wide blocking edge inside
+    // an interposed loader call. On timeout the contender loads unmodified and
+    // the fault harness attributes any resulting zero-application trial.
+    if (!state.changed.wait_for(lock, wait, [&] { return !state.reservation_active; })) {
+      *prior_applications = state.mutation_installed ? 1u : 0u;
+      return ProcessFaultReservationOutcome::ContentionTimeout;
+    }
+    *prior_applications = state.mutation_installed ? 1u : 0u;
+    if (state.mutation_installed)
+      return ProcessFaultReservationOutcome::MutationAlreadyInstalled;
+    state.reservation_active = true;
+    state.reservation_owner = std::this_thread::get_id();
+    reserved_ = true;
+    return ProcessFaultReservationOutcome::Reserved;
+  }
+
+  void commit_applied_mutation() {
+    if (!reserved_)
+      return;
+    ProcessFaultApplicationState &state = process_fault_application_state();
+    {
+      std::lock_guard lock(state.mutex);
+      state.reservation_active = false;
+      state.mutation_installed = true;
+      state.reservation_owner = {};
+      reserved_ = false;
+    }
+    state.changed.notify_all();
+  }
+
+private:
+  void release() {
+    if (!reserved_)
+      return;
+    ProcessFaultApplicationState &state = process_fault_application_state();
+    {
+      std::lock_guard lock(state.mutex);
+      state.reservation_active = false;
+      state.reservation_owner = {};
+      reserved_ = false;
+    }
+    state.changed.notify_all();
+  }
+
+  bool reserved_ = false;
+};
+
+using FaultMutationMember = bool rocjitsu::ConSanOptions::*;
+constexpr std::array<FaultMutationMember, 10> kFaultMutationMembers = {
+    &rocjitsu::ConSanOptions::fault_drop_barrier,
+    &rocjitsu::ConSanOptions::fault_move_barrier,
+    &rocjitsu::ConSanOptions::fault_mutate_barrier_id_scope,
+    &rocjitsu::ConSanOptions::fault_mutate_barrier_participants,
+    &rocjitsu::ConSanOptions::fault_atomic_wrong_address,
+    &rocjitsu::ConSanOptions::fault_atomic_weaken_order,
+    &rocjitsu::ConSanOptions::fault_atomic_weaken_scope,
+    &rocjitsu::ConSanOptions::fault_ordinary_wrong_address,
+    &rocjitsu::ConSanOptions::fault_ordinary_weaken_order,
+    &rocjitsu::ConSanOptions::fault_ordinary_weaken_scope,
+};
+
+[[nodiscard]] bool fault_mutations_enabled(const rocjitsu::ConSanOptions &options) {
+  return std::ranges::any_of(kFaultMutationMembers,
+                             [&options](FaultMutationMember member) { return options.*member; });
 }
 
 void disable_fault_mutations(rocjitsu::ConSanOptions *options) {
-  options->fault_drop_barrier = false;
-  options->fault_move_barrier = false;
-  options->fault_mutate_barrier_id_scope = false;
-  options->fault_mutate_barrier_participants = false;
-  options->fault_atomic_wrong_address = false;
-  options->fault_atomic_weaken_order = false;
-  options->fault_atomic_weaken_scope = false;
-  options->fault_ordinary_wrong_address = false;
-  options->fault_ordinary_weaken_order = false;
-  options->fault_ordinary_weaken_scope = false;
+  for (FaultMutationMember member : kFaultMutationMembers)
+    options->*member = false;
   options->fault_require_exactly_one = false;
 }
 
@@ -764,6 +888,36 @@ void log_message(int required_level, const char *format, ...) {
 
   std::fprintf(stderr, "\n");
 }
+
+class FaultInstallationEvidence {
+public:
+  explicit FaultInstallationEvidence(uint64_t reader) : reader_(reader) {}
+  FaultInstallationEvidence(const FaultInstallationEvidence &) = delete;
+  FaultInstallationEvidence &operator=(const FaultInstallationEvidence &) = delete;
+
+  ~FaultInstallationEvidence() { emit(); }
+
+  void emit() {
+    if (emitted_)
+      return;
+    emitted_ = true;
+    if (applied_ == 0)
+      return;
+    log_message(kLogInfo, "ConSan fault install process=%llu reader=%llu applied=%zu installed=%s",
+                static_cast<unsigned long long>(::getpid()),
+                static_cast<unsigned long long>(reader_), applied_, installed_ ? "true" : "false");
+    std::fflush(stderr);
+  }
+
+  void record_applied_mutations(size_t applied) { applied_ = applied; }
+  void mark_installed() { installed_ = true; }
+
+private:
+  uint64_t reader_ = 0;
+  size_t applied_ = 0;
+  bool installed_ = false;
+  bool emitted_ = false;
+};
 
 void dump_code_object_bytes(const HookConfig &config, uint64_t dump_id, uint64_t reader,
                             std::string_view tag, std::span<const uint8_t> bytes) {
@@ -1385,7 +1539,7 @@ public:
     core_ = table->core_;
     amd_ext_ = table->amd_ext_;
     g_log_level.store(config.log_level, std::memory_order_relaxed);
-    reset_process_fault_application_count();
+    reset_process_fault_application_state();
     config_ = config;
     moi_require_records_ = config.moi_require_records;
     moi_require_diagnostics_ = config.moi_require_diagnostics;
@@ -1456,7 +1610,8 @@ public:
         "probe_nop=%s probe_trampoline_nop=%s probe_endpgm=%s probe_lds_endpgm=%s "
         "check_trap_mode=%s sc_report_mode=%s probe_lds_check_trap=%s "
         "probe_flat_check_trap=%s probe_flat_trap=%s "
-        "fault_drop_barrier=%s moi_init_owner_epoch=%s moi_track_barriers=%s "
+        "fault_drop_barrier=%s fault_reservation_timeout_ms=%u "
+        "moi_init_owner_epoch=%s moi_track_barriers=%s "
         "moi_track_atomics=%s moi_dynamic_access_records=%s moi_require_records=%s "
         "moi_require_diagnostics=%s moi_forbid_diagnostics=%s "
         "moi_require_replay_conflict=%s moi_forbid_overflow=%s "
@@ -1477,7 +1632,7 @@ public:
         config.probe_lds_endpgm ? "true" : "false", check_trap_mode_name(config.check_trap_mode),
         sc_report_mode_name(config.sc_report_mode), config.probe_lds_check_trap ? "true" : "false",
         config.probe_flat_check_trap ? "true" : "false", config.probe_flat_trap ? "true" : "false",
-        config.fault_drop_barrier ? "true" : "false",
+        config.fault_drop_barrier ? "true" : "false", config.fault_reservation_timeout_ms,
         config.moi_init_owner_epoch ? "true" : "false",
         config.moi_track_barriers ? "true" : "false", config.moi_track_atomics ? "true" : "false",
         config.moi_dynamic_access_records ? "true" : "false",
@@ -2445,9 +2600,15 @@ hsa_status_t HSA_API rj_dbi_executable_symbol_get_info(hsa_executable_symbol_t s
 
 constexpr int kStrictLoadRejectionExitCode = 92;
 
-[[nodiscard]] hsa_status_t reject_code_object_load(const HookConfig &config, hsa_status_t status,
-                                                   uint64_t reader, std::string_view reason) {
+[[nodiscard]] hsa_status_t
+reject_code_object_load(const HookConfig &config, hsa_status_t status, uint64_t reader,
+                        std::string_view reason,
+                        FaultInstallationEvidence &fault_installation_evidence) {
   const bool terminate = config.policy == HookPolicy::Strict;
+  // Strict policy exits without unwinding this stack. Flush any applied
+  // mutation evidence before the process terminates so fault qualification can
+  // distinguish a rejected replacement from an installed one.
+  fault_installation_evidence.emit();
   std::fprintf(stderr,
                "[rocjitsu-dbi-hooks] ConSan load rejection reader=%llu reason=%.*s "
                "status=%d policy=%s action=%s exit_code=%s\n",
@@ -2463,6 +2624,20 @@ constexpr int kStrictLoadRejectionExitCode = 92;
   if (terminate)
     std::_Exit(kStrictLoadRejectionExitCode);
   return status;
+}
+
+[[nodiscard]] hsa_status_t
+reject_unresolved_semantic_arch(const HookConfig &config, uint64_t reader,
+                                FaultInstallationEvidence &fault_installation_evidence) {
+  // Reject unconditionally rather than turning an internal semantic mismatch
+  // into an apparently successful, uninstrumented sanitizer run. The original
+  // code object is intact, but this result cannot safely support either an
+  // instrumented replacement or a coverage verdict.
+  std::fprintf(stderr,
+               "[rocjitsu-dbi-hooks] ConSan internal invariant violation: transform returned "
+               "semantic inventory without a resolved target architecture\n");
+  return reject_code_object_load(config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT, reader,
+                                 "internal-semantic-arch-missing", fault_installation_evidence);
 }
 
 hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
@@ -2488,6 +2663,12 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   rocjitsu::ConSanInstallAction install_action = rocjitsu::ConSanInstallAction::LoadOriginal;
   std::optional<rocjitsu::ConSanResult> patch_result_storage;
   std::optional<rocjitsu::ConSanResult> reusable_moi_inventory;
+  std::optional<rocjitsu::ConSanMoiAutoReportInventory> live_fault_auto_report_capacity_inventory;
+  ProcessFaultApplicationReservation process_fault_application_reservation;
+  ProcessFaultReservationOutcome process_fault_reservation_outcome =
+      ProcessFaultReservationOutcome::MutationAlreadyInstalled;
+  bool process_fault_reservation_attempted = false;
+  FaultInstallationEvidence fault_installation_evidence(code_object_reader.handle);
 
   const CodeObjectReaderRegistry::ReaderBytes reader_bytes =
       CodeObjectReaderRegistry::instance().lookup(code_object_reader);
@@ -2607,7 +2788,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.moi_runtime_sample_stride = config->moi_runtime_sample_stride;
     patch_options.moi_runtime_sample_offset = config->moi_runtime_sample_offset;
     patch_options.report_marker = config->report_marker;
-    bool process_fault_application_reserved = false;
     size_t process_prior_fault_applications = 0;
     if ((config->fault_require_exactly_one && !config->fault_dry_run) ||
         config->fault_load_occurrence) {
@@ -2630,7 +2810,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                      "one reader planned %zu mutations\n",
                      probe.planned_fault_mutations);
         return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
-                                       code_object_reader.handle, "ambiguous-fault-load-selection");
+                                       code_object_reader.handle, "ambiguous-fault-load-selection",
+                                       fault_installation_evidence);
       }
       bool selected = matched;
       if (config->fault_load_occurrence) {
@@ -2649,29 +2830,56 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                     selection && selection->overflow ? "true" : "false");
         if (selection && selection->overflow)
           return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
-                                         code_object_reader.handle,
-                                         "fault-load-selection-overflow");
+                                         code_object_reader.handle, "fault-load-selection-overflow",
+                                         fault_installation_evidence);
       }
       if (selected && config->fault_require_exactly_one && !config->fault_dry_run) {
-        size_t expected = 0;
-        process_fault_application_reserved =
-            process_fault_application_count().compare_exchange_strong(
-                expected, 1, std::memory_order_acq_rel, std::memory_order_acquire);
-        process_prior_fault_applications = expected;
-        selected = process_fault_application_reserved;
+        process_fault_reservation_attempted = true;
+        process_fault_reservation_outcome = process_fault_application_reservation.reserve(
+            std::chrono::milliseconds(config->fault_reservation_timeout_ms),
+            &process_prior_fault_applications);
+        selected = process_fault_reservation_outcome == ProcessFaultReservationOutcome::Reserved;
+        if (!selected) {
+          const std::string_view outcome =
+              process_fault_reservation_outcome_name(process_fault_reservation_outcome);
+          if (process_fault_reservation_outcome ==
+                  ProcessFaultReservationOutcome::ContentionTimeout ||
+              process_fault_reservation_outcome ==
+                  ProcessFaultReservationOutcome::ReentrantContention) {
+            std::fprintf(stderr,
+                         "[rocjitsu-dbi-hooks] ConSan fault reservation warning reader=%llu "
+                         "outcome=%.*s process_prior_applied=%zu\n",
+                         static_cast<unsigned long long>(code_object_reader.handle),
+                         static_cast<int>(outcome.size()), outcome.data(),
+                         process_prior_fault_applications);
+          } else {
+            log_message(kLogInfo,
+                        "ConSan fault reservation reader=%llu outcome=%.*s "
+                        "process_prior_applied=%zu",
+                        static_cast<unsigned long long>(code_object_reader.handle),
+                        static_cast<int>(outcome.size()), outcome.data(),
+                        process_prior_fault_applications);
+          }
+        }
       }
       if (!selected)
         disable_fault_mutations(&patch_options);
     }
     if (patch_options.flavor == rocjitsu::ConSanFlavor::SuperCollider &&
         config->sc_report_mode == ScReportMode::Auto && !patch_options.report_buffer_address) {
+      rocjitsu::ConSanOptions inventory_options = patch_options;
+      const bool live_fault_transform =
+          fault_mutations_enabled(patch_options) && !patch_options.fault_dry_run;
+      if (live_fault_transform)
+        disable_fault_mutations(&inventory_options);
       rocjitsu::ConSanResult inventory =
-          run_consan_transform(std::span<const uint8_t>(bytes, size), patch_options);
+          run_consan_transform(std::span<const uint8_t>(bytes, size), inventory_options);
       if (!sc_inventory_needs_report_buffer(inventory)) {
         log_message(kLogInfo,
                     "ConSan SC auto report buffer skipped reader=%llu: no selected check sites",
                     static_cast<unsigned long long>(code_object_reader.handle));
-        patch_result_storage = std::move(inventory);
+        if (!live_fault_transform)
+          patch_result_storage = std::move(inventory);
       } else {
         uint64_t auto_report_address = 0;
         if (!AutoScReportBufferRegistry::instance().allocate(
@@ -2695,18 +2903,28 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
               "without instrumentation");
           patch_result_storage = std::move(inventory);
           if (config->fail_closed || config->require_patch)
-            return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
-                                           code_object_reader.handle,
-                                           "supercollider-report-allocation");
+            return reject_code_object_load(
+                *config, HSA_STATUS_ERROR_OUT_OF_RESOURCES, code_object_reader.handle,
+                "supercollider-report-allocation", fault_installation_evidence);
         } else {
           patch_options.report_buffer_address = auto_report_address;
         }
       }
     }
+    std::optional<uint64_t> registered_auto_moi_report_generation;
     if (patch_options.flavor == rocjitsu::ConSanFlavor::Moi &&
         !patch_options.moi_report_buffer_address && config->moi_auto_report_buffer_size != 0) {
       rocjitsu::ConSanOptions inventory_options = patch_options;
       inventory_options.moi_report_buffer_size = 0;
+      const bool live_fault_transform =
+          fault_mutations_enabled(patch_options) && !patch_options.fault_dry_run;
+      // A report-sizing pass is pristine MOI inventory, never the live
+      // mutation stage. fault_dry_run returns after fault planning and before
+      // MOI candidate/resource planning, so disable the mutation members while
+      // retaining the complete MOI inventory pass. The live transform still
+      // runs after the runtime layout is known.
+      if (live_fault_transform)
+        disable_fault_mutations(&inventory_options);
       log_message(kLogInfo, "ConSan MOI inventory begin reader=%llu bytes=%zu",
                   static_cast<unsigned long long>(code_object_reader.handle), size);
       const auto inventory_begin = std::chrono::steady_clock::now();
@@ -2717,11 +2935,18 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
                                                             inventory_begin)
                       .count());
-      if (!moi_inventory_needs_report_buffer(inventory, *config)) {
+      if (!rocjitsu::consan_result_has_resolved_semantic_arch(inventory))
+        return reject_unresolved_semantic_arch(*config, code_object_reader.handle,
+                                               fault_installation_evidence);
+      const bool inventory_requires_report_buffer =
+          moi_inventory_needs_report_buffer(inventory, *config);
+      bool auto_report_plan_available = inventory_requires_report_buffer;
+      if (!inventory_requires_report_buffer) {
         log_message(kLogInfo,
                     "ConSan MOI auto report buffer skipped reader=%llu: no MOI report sites",
                     static_cast<unsigned long long>(code_object_reader.handle));
-        patch_result_storage = std::move(inventory);
+        if (!live_fault_transform)
+          patch_result_storage = std::move(inventory);
       }
 
       uint64_t auto_report_address = 0;
@@ -2731,7 +2956,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       uint64_t requested_report_size = 0;
       rocjitsu::ConSanMoiReportBufferLayout report_layout;
       std::optional<rocjitsu::ConSanMoiReportLayoutOverride> report_layout_override;
-      if (!patch_result_storage && patch_options.moi_dynamic_access_records) {
+      std::optional<rocjitsu::ConSanMoiAutoReportInventory> planned_report_inventory;
+      if (inventory_requires_report_buffer && !patch_result_storage &&
+          patch_options.moi_dynamic_access_records) {
         if (!config->moi_auto_report_buffer_size_explicit) {
           log_message(kLogInfo,
                       "ConSan MOI auto report plan reader=%llu outcome="
@@ -2742,7 +2969,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           reject_auto_moi_report_plan(code_object_reader.handle, /*required_size=*/0,
                                       config->moi_auto_report_buffer_size,
                                       "dynamic_replay_requires_explicit_cap");
-          patch_result_storage = std::move(inventory);
+          auto_report_plan_available = false;
+          if (!live_fault_transform)
+            patch_result_storage = std::move(inventory);
         } else {
           required_report_size = config->moi_auto_report_buffer_size;
           requested_report_size = config->moi_auto_report_buffer_size;
@@ -2756,10 +2985,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                       static_cast<unsigned long long>(required_report_size),
                       static_cast<unsigned long long>(config->moi_auto_report_buffer_size));
         }
-      } else if (!patch_result_storage) {
+      } else if (inventory_requires_report_buffer && !patch_result_storage) {
         const rocjitsu::ConSanMoiAutoReportInventory report_inventory =
             rocjitsu::inventory_consan_moi_auto_report(inventory, inventory_options,
                                                        std::span<const uint8_t>(bytes, size));
+        planned_report_inventory = report_inventory;
         const rocjitsu::ConSanMoiAutoReportPlan report_plan =
             rocjitsu::plan_consan_moi_auto_report(report_inventory);
         required_report_size = report_plan.required_bytes;
@@ -2796,7 +3026,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             static_cast<unsigned long long>(report_inventory.inline_causal_snapshot_count),
             static_cast<unsigned long long>(report_inventory.inline_acquired_epoch_token_count));
       }
-      if (!patch_result_storage &&
+      if (auto_report_plan_available && !patch_result_storage &&
           allocate_auto_moi_report_buffer(
               layer().core_table(), agent, code_object_reader.handle, required_report_size,
               requested_report_size, config->moi_auto_report_buffer_size, report_layout,
@@ -2807,13 +3037,19 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         patch_options.moi_report_buffer_size = auto_report_size;
         patch_options.moi_report_layout = report_layout_override;
         patch_options.moi_report_generation = auto_report_generation;
+        registered_auto_moi_report_generation = auto_report_generation;
         patch_options.moi_report_dispatch_id = code_object_reader.handle;
-        reusable_moi_inventory = std::move(inventory);
-      } else if (!patch_result_storage && config->fail_closed) {
+        if (live_fault_transform && planned_report_inventory)
+          live_fault_auto_report_capacity_inventory = *planned_report_inventory;
+        else if (!live_fault_transform)
+          reusable_moi_inventory = std::move(inventory);
+      } else if (auto_report_plan_available && !patch_result_storage && config->fail_closed) {
         return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
-                                       code_object_reader.handle, "moi-report-allocation");
-      } else if (!patch_result_storage) {
-        patch_result_storage = std::move(inventory);
+                                       code_object_reader.handle, "moi-report-allocation",
+                                       fault_installation_evidence);
+      } else if (auto_report_plan_available && !patch_result_storage) {
+        if (!live_fault_transform)
+          patch_result_storage = std::move(inventory);
       }
     }
 
@@ -2830,9 +3066,29 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       }
     }
     const rocjitsu::ConSanResult &patch_result = *patch_result_storage;
-    register_auto_moi_report_compact_tokens(code_object_reader.handle, patch_result);
-    if (process_fault_application_reserved && patch_result.applied_fault_mutations != 1u)
-      process_fault_application_count().fetch_sub(1, std::memory_order_release);
+    fault_installation_evidence.record_applied_mutations(patch_result.applied_fault_mutations);
+    if (live_fault_auto_report_capacity_inventory) {
+      const rocjitsu::ConSanMoiAutoReportInventory live_requirement =
+          rocjitsu::inventory_consan_moi_auto_report(patch_result, patch_options,
+                                                     std::span<const uint8_t>(bytes, size));
+      if (!rocjitsu::consan_moi_auto_report_inventory_covers(
+              *live_fault_auto_report_capacity_inventory, live_requirement)) {
+        std::fprintf(stderr, "[rocjitsu-dbi-hooks] ConSan internal invariant violation: live fault "
+                             "transform grew the automatic MOI report inventory\n");
+        reject_auto_moi_report_plan(code_object_reader.handle, patch_options.moi_report_buffer_size,
+                                    config->moi_auto_report_buffer_size,
+                                    "live_fault_inventory_growth");
+        return reject_code_object_load(
+            *config, HSA_STATUS_ERROR_OUT_OF_RESOURCES, code_object_reader.handle,
+            "moi-report-live-inventory-growth", fault_installation_evidence);
+      }
+    }
+    if (!rocjitsu::consan_result_has_resolved_semantic_arch(patch_result))
+      return reject_unresolved_semantic_arch(*config, code_object_reader.handle,
+                                             fault_installation_evidence);
+    if (registered_auto_moi_report_generation)
+      register_auto_moi_report_metadata(code_object_reader.handle,
+                                        *registered_auto_moi_report_generation, patch_result);
     install_action = rocjitsu::consan_install_action(patch_result, config->fail_closed);
     log_message(kLogInfo,
                 "ConSan patch end reader=%llu visited=%s modified=%s outcome=%s errors=%zu "
@@ -2849,7 +3105,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         std::fprintf(stderr, "[rocjitsu-dbi-hooks] %s\n", error.c_str());
       if (config->fail_closed)
         return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
-                                       code_object_reader.handle, "transform-error");
+                                       code_object_reader.handle, "transform-error",
+                                       fault_installation_evidence);
     }
     for (const std::string &warning : patch_result.warnings)
       log_message(kLogVerbose, "%s", warning.c_str());
@@ -2860,8 +3117,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                    rocjitsu::consan_transform_outcome_name(patch_result.outcome),
                    config->fail_closed ? "true" : "false");
       return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
-                                     code_object_reader.handle,
-                                     "non-installable-transform-outcome");
+                                     code_object_reader.handle, "non-installable-transform-outcome",
+                                     fault_installation_evidence);
     }
 
     log_message(
@@ -2915,7 +3172,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   "ConSan code-object reader=%llu target=%s arch=%s text_sections=%zu "
                   "kernels=%zu functions=%zu",
                   static_cast<unsigned long long>(code_object_reader.handle),
-                  patch_result.target_name.c_str(), patch_result.arch_name.c_str(),
+                  patch_result.target_name.c_str(), patch_result.arch_display_name.c_str(),
                   patch_result.text_sections.size(), patch_result.kernels.size(),
                   patch_result.functions.size());
     }
@@ -3012,6 +3269,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     log_message(kLogInfo,
                 "ConSan fault summary process=%llu reader=%llu requested=%zu planned=%zu "
                 "applied=%zu process_prior_applied=%zu "
+                "reservation=%.*s "
                 "require_exactly_one=%s destructive_incomplete_barrier_drop=%s "
                 "completing_conditional_barrier_move=%s "
                 "destructive_divergent_barrier_move=%s",
@@ -3019,10 +3277,25 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 static_cast<unsigned long long>(code_object_reader.handle),
                 patch_result.requested_fault_mutations, patch_result.planned_fault_mutations,
                 patch_result.applied_fault_mutations, process_prior_fault_applications,
+                static_cast<int>(
+                    (process_fault_reservation_attempted
+                         ? process_fault_reservation_outcome_name(process_fault_reservation_outcome)
+                         : std::string_view{"not-requested"})
+                        .size()),
+                (process_fault_reservation_attempted
+                     ? process_fault_reservation_outcome_name(process_fault_reservation_outcome)
+                     : std::string_view{"not-requested"})
+                    .data(),
                 config->fault_require_exactly_one ? "true" : "false",
                 config->fault_allow_destructive_incomplete_barrier_drop ? "true" : "false",
                 config->fault_allow_completing_conditional_barrier_move ? "true" : "false",
                 config->fault_allow_destructive_divergent_barrier_move ? "true" : "false");
+    if (config->fault_require_exactly_one && !config->fault_dry_run &&
+        patch_result.applied_fault_mutations > 1u) {
+      return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
+                                     code_object_reader.handle, "multiple-fault-mutations-applied",
+                                     fault_installation_evidence);
+    }
     log_message(kLogInfo, "ConSan SC perturb inventory reader=%llu candidates=%zu",
                 static_cast<unsigned long long>(code_object_reader.handle),
                 patch_result.perturbation_candidates.size());
@@ -3756,9 +4029,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                      "[rocjitsu-dbi-hooks] RJ_CONSAN_REQUIRE_PATCH requested, but no relevant "
                      "access, barrier, atomic, or fence patch was applied to a code object with "
                      "supported ConSan sites\n");
-        return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
-                                       code_object_reader.handle,
-                                       "required-instrumentation-missing");
+        return reject_code_object_load(
+            *config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT, code_object_reader.handle,
+            "required-instrumentation-missing", fault_installation_evidence);
       }
     }
 
@@ -3789,7 +4062,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                    "[rocjitsu-dbi-hooks] failed to retain replacement code-object storage\n");
       if (config->fail_closed)
         return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
-                                       code_object_reader.handle, "replacement-storage-retention");
+                                       code_object_reader.handle, "replacement-storage-retention",
+                                       fault_installation_evidence);
       replacement_storage.reset();
       log_message(kLogInfo,
                   "ConSan replacement storage retention failed; loading original reader=%llu",
@@ -3813,7 +4087,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                    static_cast<int>(reader_status));
       if (config->fail_closed)
         return reject_code_object_load(*config, reader_status, code_object_reader.handle,
-                                       "replacement-reader-creation");
+                                       "replacement-reader-creation", fault_installation_evidence);
       log_message(kLogInfo,
                   "ConSan replacement reader creation failed; loading original reader=%llu",
                   static_cast<unsigned long long>(code_object_reader.handle));
@@ -3848,6 +4122,10 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     load_status = original_load(executable, agent, code_object_reader, options, loaded_code_object);
   }
   if (load_status == HSA_STATUS_SUCCESS && using_replacement_reader && patch_result_storage) {
+    if (patch_result_storage->applied_fault_mutations != 0u) {
+      fault_installation_evidence.mark_installed();
+      process_fault_application_reservation.commit_applied_mutation();
+    }
     KernelPrivateDispatchRegistry::instance().note_patch_requirements(executable,
                                                                       *patch_result_storage);
   }

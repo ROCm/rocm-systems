@@ -108,10 +108,11 @@ sampled_atomic_semantics_for_site(const ConSanResult &result,
   // semantic only after the shared sequence analysis has qualified the DS
   // instruction as an ordering event.
   const std::optional<uint32_t> semantic_scope =
-      sequence->raw_scope ? sequence->raw_scope
-                          : (result.arch_name == "gfx1250" && site.mnemonic.starts_with("ds_")
-                                 ? std::optional<uint32_t>(1u)
-                                 : std::nullopt);
+      sequence->raw_scope
+          ? sequence->raw_scope
+          : (result.arch == ROCJITSU_CODE_ARCH_GFX1250 && site.mnemonic.starts_with("ds_")
+                 ? std::optional<uint32_t>(1u)
+                 : std::nullopt);
   if (!semantic_scope) {
     unsupported_reason = "missing-qualified-scope";
     return std::nullopt;
@@ -388,7 +389,7 @@ void append_atomic_record_candidates(const ConSanKernelInfo &kernel, const ConSa
                                      std::vector<AtomicRecordCandidate> &candidates) {
   if (is_rocclr_runtime_kernel_name(kernel.name))
     return;
-  const bool allow_gfx1250_lds = result.arch_name == "gfx1250";
+  const bool allow_gfx1250_lds = result.arch == ROCJITSU_CODE_ARCH_GFX1250;
   for (const ConSanAtomicSite &site : kernel.atomic_sites) {
     const auto event_kind = atomic_event_kind_for_site(sync_index, kernel.name, true, site);
     const ConSanAtomicSite normalized = normalize_atomic_record_site(site, allow_gfx1250_lds);
@@ -408,7 +409,7 @@ void append_atomic_record_candidates(const ConSanKernelInfo &kernel, const ConSa
 void append_atomic_record_candidates(const ConSanFunctionInfo &function, const ConSanResult &result,
                                      const MoiSyncInventoryIndex &sync_index,
                                      std::vector<AtomicRecordCandidate> &candidates) {
-  const bool allow_gfx1250_lds = result.arch_name == "gfx1250";
+  const bool allow_gfx1250_lds = result.arch == ROCJITSU_CODE_ARCH_GFX1250;
   for (const ConSanAtomicSite &site : function.atomic_sites) {
     const auto event_kind = atomic_event_kind_for_site(sync_index, function.name, false, site);
     const ConSanAtomicSite normalized = normalize_atomic_record_site(site, allow_gfx1250_lds);

@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "target": "gfx1201",
   "evidence_model": "reviewed against the current native gfx1201 llama.cpp inventory",
   "review_required": false,

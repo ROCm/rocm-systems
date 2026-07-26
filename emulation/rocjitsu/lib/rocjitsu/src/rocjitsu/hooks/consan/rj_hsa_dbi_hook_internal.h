@@ -45,6 +45,10 @@ enum class HookPolicy : uint8_t {
 // trigger in planners while exceeding the supported-site count of current
 // production code objects by orders of magnitude.
 constexpr uint32_t kConSanAllSupportedPatchBudget = 65536;
+// Bound an interposed loader wait so a stalled owner cannot deadlock the
+// process. Campaigns whose individual code-object load can legitimately hold
+// the reservation longer must raise this alongside their workload deadline.
+constexpr uint32_t kConSanDefaultFaultReservationTimeoutMs = 30000;
 
 struct HookConfig {
   bool enabled = false;
@@ -92,6 +96,7 @@ struct HookConfig {
   uint32_t fault_ordinary_address_delta = 0;
   bool fault_dry_run = false;
   bool fault_require_exactly_one = false;
+  uint32_t fault_reservation_timeout_ms = kConSanDefaultFaultReservationTimeoutMs;
   std::optional<uint32_t> fault_load_occurrence;
   rocjitsu::ConSanPerturbationKind sc_perturb_kind = rocjitsu::ConSanPerturbationKind::None;
   rocjitsu::ConSanPerturbationEdge sc_perturb_edge = rocjitsu::ConSanPerturbationEdge::Release;
@@ -727,7 +732,8 @@ allocate_auto_moi_report_buffer(CoreApiTable *core, hsa_agent_t agent, uint64_t 
                                 ConSanMoiEngine engine, bool track_barriers, bool track_atomics,
                                 bool test_seed_inline_exact_odd, uint64_t *address,
                                 uint64_t *registered_size, uint64_t *registered_generation);
-void register_auto_moi_report_compact_tokens(uint64_t reader, const ConSanResult &result);
+void register_auto_moi_report_metadata(uint64_t reader, uint64_t generation,
+                                       const ConSanResult &result);
 [[nodiscard]] AutoMoiReportSummary summarize_and_clear_auto_moi_report_buffers(CoreApiTable *core);
 
 using ConSanTransformOverride = ConSanResult (*)(std::span<const uint8_t>, const ConSanOptions &);

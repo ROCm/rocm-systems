@@ -674,6 +674,71 @@ function(rj_add_consan_cdna_sim_cases)
     )
 endfunction()
 
+function(rj_add_consan_rdna4_b96_cases)
+    set(_one_value_args PREFIX TARGET CONFIG TIMEOUT)
+    cmake_parse_arguments(PARSE_ARGV 0 _b96 "" "${_one_value_args}" "")
+    if(_b96_UNPARSED_ARGUMENTS)
+        message(
+            FATAL_ERROR
+            "unknown ConSan RDNA4 B96 arguments: ${_b96_UNPARSED_ARGUMENTS}"
+        )
+    endif()
+    foreach(_required IN ITEMS PREFIX TARGET TIMEOUT)
+        if(NOT _b96_${_required})
+            message(FATAL_ERROR "ConSan RDNA4 B96 cases require ${_required}")
+        endif()
+    endforeach()
+    set(_config_args)
+    if(_b96_CONFIG)
+        list(APPEND _config_args CONFIG "${_b96_CONFIG}")
+    endif()
+    foreach(
+        _engine
+        IN
+        ITEMS
+            "RecordReplay|record-replay"
+            "Sampled|sampled"
+            "InlineShadow|inline-shadow"
+    )
+        string(REPLACE "|" ";" _engine_fields "${_engine}")
+        list(GET _engine_fields 0 _engine_name)
+        list(GET _engine_fields 1 _engine_mode)
+        foreach(
+            _case
+            IN
+            ITEMS
+                "Racy|ConSanMoiHipTest.NativeB96RacyAliasingLoadCompletesWithValidTupleWords|RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "Ordered|ConSanMoiHipTest.NativeB96BarrierOrderedAliasingLoadPreservesOutput|RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+        )
+            string(REPLACE "|" ";" _case_fields "${_case}")
+            list(GET _case_fields 0 _case_name)
+            list(GET _case_fields 1 _case_filter)
+            list(GET _case_fields 2 _case_diagnostic_policy)
+            rj_add_consan_hip_case(
+                NAME "${_b96_PREFIX}.NativeB96${_engine_name}${_case_name}"
+                TARGET ${_b96_TARGET}
+                FILTER "${_case_filter}"
+                ${_config_args}
+                TIMEOUT ${_b96_TIMEOUT}
+                RUN_SERIAL
+                PASS_REGEX "\\[  PASSED  \\] 1 test"
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=${_engine_mode}"
+                    "RJ_CONSAN_POLICY=strict"
+                    "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+                    "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "${_case_diagnostic_policy}"
+                    "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_native_b96_aliasing_access_for_instrumentation"
+                    "RJ_CONSAN_LOG=3"
+                    "RJ_CONSAN_MAX_PATCHES=2"
+            )
+        endforeach()
+    endforeach()
+endfunction()
+
 function(rj_add_consan_gfx1250_sim_cases)
     set(_one_value_args PREFIX LDS_TARGET MOI_TARGET CONFIG)
     cmake_parse_arguments(PARSE_ARGV 0 _sim "" "${_one_value_args}" "")
@@ -703,6 +768,12 @@ function(rj_add_consan_gfx1250_sim_cases)
         ACCESS_KERNEL "moi_forced_spill_preserves_live_vgprs_test_kernel_for_instrumentation"
         SHARED_KERNEL "moi_shared_noinline_lds_helper_for_instrumentation"
         SHARED_INIT_OWNER_EPOCH 0
+    )
+    rj_add_consan_rdna4_b96_cases(
+        PREFIX "${_sim_PREFIX}"
+        TARGET ${_sim_MOI_TARGET}
+        CONFIG "${_sim_CONFIG}"
+        TIMEOUT 60
     )
 
     rj_add_consan_hip_case(
@@ -1305,6 +1376,11 @@ function(rj_add_consan_hip_tests)
         )
         set(RJ_CONSAN_MOI_STATIC_PRIVATE_STACK_TEST
             "ConSanMoiHipTest.StaticPrivateStackForcedSpillPreservesOutput"
+        )
+        rj_add_consan_rdna4_b96_cases(
+            PREFIX "ConSanMoiHipTest"
+            TARGET hip_consan_moi_test
+            TIMEOUT 30
         )
         rj_add_consan_hip_case(
                 NAME "ConSanSpillHipTest.Gfx1201VgprScratchRoundTrip"

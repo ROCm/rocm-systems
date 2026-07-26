@@ -399,6 +399,10 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
   wrong_target.target_name = "gfx1250";
   expect_invalid(std::move(wrong_target), bytes, "code-object target");
 
+  ConSanResult wrong_arch = pristine;
+  wrong_arch.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  expect_invalid(std::move(wrong_arch), bytes, "code-object architecture");
+
   ConSanResult modified = pristine;
   modified.modified = true;
   expect_invalid(std::move(modified), bytes, "unmodified semantic inventory");
@@ -1633,7 +1637,7 @@ TEST(ConSanMoi, Cdna4FirstLightProbeEmitsNativeVariableLengthRecipes) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.target_name, "gfx950");
-  EXPECT_EQ(result.arch_name, "cdna4");
+  EXPECT_EQ(result.arch_display_name, "cdna4");
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.final_validation_passed);
@@ -4693,7 +4697,7 @@ TEST(ConSanMoi, Cdna4BarrierRecordForcedSpillUsesNativePrivateWindows) {
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " errors=" << testing::PrintToString(result.errors);
   EXPECT_EQ(result.target_name, "gfx950");
-  EXPECT_EQ(result.arch_name, "cdna4");
+  EXPECT_EQ(result.arch_display_name, "cdna4");
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.final_validation_passed);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
@@ -6135,7 +6139,7 @@ TEST(ConSanMoi, Cdna4DenseRecordReplayAccessesDoNotRequireBarrierRouter) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
   EXPECT_EQ(result.target_name, "gfx950");
-  EXPECT_EQ(result.arch_name, "cdna4");
+  EXPECT_EQ(result.arch_display_name, "cdna4");
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -6278,7 +6282,7 @@ TEST(ConSanMoi, Cdna4DenseRecordReplayBarriersUseRelocatedRouter) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
   EXPECT_EQ(result.target_name, "gfx950");
-  EXPECT_EQ(result.arch_name, "cdna4");
+  EXPECT_EQ(result.arch_display_name, "cdna4");
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kSiteCount);
@@ -7211,7 +7215,7 @@ TEST(ConSanMoi, Cdna3RecordReplayAtomicEmitsValidatedNativeTransaction) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.target_name, "gfx942");
-  EXPECT_EQ(result.arch_name, "cdna3");
+  EXPECT_EQ(result.arch_display_name, "cdna3");
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
                                &ConSanPatchInfo::kind),
             1u);
@@ -7251,7 +7255,7 @@ TEST(ConSanMoi, Cdna4AtomicRecordForcedSpillUsesNativePrivateWindow) {
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " errors=" << testing::PrintToString(result.errors);
   EXPECT_EQ(result.target_name, "gfx950");
-  EXPECT_EQ(result.arch_name, "cdna4");
+  EXPECT_EQ(result.arch_display_name, "cdna4");
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.final_validation_passed);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {

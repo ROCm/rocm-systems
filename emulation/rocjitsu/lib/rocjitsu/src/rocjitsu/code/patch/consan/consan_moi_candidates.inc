@@ -224,8 +224,6 @@ decode_relocatable_entry_instruction(std::span<const uint8_t> text, uint64_t off
   return words;
 }
 
-[[nodiscard]] bool is_single_range_native_lds_mnemonic(std::string_view mnemonic);
-
 [[nodiscard]] bool is_single_range_native_lds_mnemonic(std::string_view mnemonic,
                                                        rj_code_arch_t arch);
 
@@ -244,8 +242,6 @@ two_address_native_lds_offset_scale(std::string_view mnemonic);
   if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write &&
       !supported_atomic)
     return false;
-  if (site.mnemonic == "ds_load_b96")
-    return arch == ROCJITSU_CODE_ARCH_GFX1250;
   return is_single_range_native_lds_mnemonic(site.mnemonic, arch) ||
          two_address_native_lds_offset_scale(site.mnemonic).has_value();
 }
@@ -456,9 +452,7 @@ void append_moi_access_site_disposition(std::span<const uint8_t> bytes,
                                         const ConSanMoiCandidate &candidate, rj_code_arch_t arch,
                                         ConSanResult &result) {
   const ConSanSiteDispositionReason reason =
-      candidate.mnemonic == "ds_load_b96" && arch != ROCJITSU_CODE_ARCH_GFX1250
-          ? ConSanSiteDispositionReason::UnsupportedMnemonic
-          : classify_moi_access_candidate_support(bytes, candidate, arch);
+      classify_moi_access_candidate_support(bytes, candidate, arch);
   ConSanSiteDispositionRecord record;
   record.site_kind = ConSanResourceSiteKind::Access;
   record.disposition = reason == ConSanSiteDispositionReason::None
@@ -643,7 +637,7 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
   return site.width_bits / 8u;
 }
 
-[[nodiscard]] bool is_single_range_native_lds_mnemonic(std::string_view mnemonic) {
+[[nodiscard]] bool is_unconditionally_single_range_native_lds_mnemonic(std::string_view mnemonic) {
   if (equals_any(mnemonic,
                  {"ds_load_i8", "ds_load_u8", "ds_load_i16", "ds_load_u16", "ds_load_u8_d16",
                   "ds_load_u8_d16_hi", "ds_load_i8_d16", "ds_load_i8_d16_hi", "ds_load_u16_d16",
@@ -653,17 +647,28 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
     return true;
 
   return equals_any(mnemonic,
-                    {"ds_load_b32",         "ds_load_b64",       "ds_load_b96",  "ds_load_b128",
-                     "ds_load_tr8_b64",     "ds_load_tr16_b128", "ds_read_b32",  "ds_read_b64",
-                     "ds_read_b64_tr_b16",  "ds_read_b128",      "ds_store_b32", "ds_store_b64",
-                     "ds_store_b128",       "ds_write_b32",      "ds_write_b64", "ds_write_b128",
-                     "ds_add_f32",          "ds_add_f64",        "ds_add_u32",   "ds_add_u64",
-                     "ds_cmpstore_rtn_b32", "ds_cmpst_rtn_b32"});
+                    {"ds_load_b32",       "ds_load_b64",  "ds_load_b128",  "ds_load_tr8_b64",
+                     "ds_load_tr16_b128", "ds_read_b32",  "ds_read_b64",   "ds_read_b64_tr_b16",
+                     "ds_read_b128",      "ds_store_b32", "ds_store_b64",  "ds_store_b128",
+                     "ds_write_b32",      "ds_write_b64", "ds_write_b128", "ds_add_f32",
+                     "ds_add_f64",        "ds_add_u32",   "ds_add_u64",    "ds_cmpstore_rtn_b32",
+                     "ds_cmpst_rtn_b32"});
 }
 
 [[nodiscard]] bool is_single_range_native_lds_mnemonic(std::string_view mnemonic,
                                                        rj_code_arch_t arch) {
-  return is_single_range_native_lds_mnemonic(mnemonic) ||
+  // RDNA4 B96 is admitted as a family capability: both gfx1201 and gfx1250
+  // share the qualified three-dword resource plan and fixed-register lowering.
+  // RDNA3/RDNA3.5 encode B96 but are intentionally outside ConSan's supported
+  // target set; extend this gate only when those targets gain full support.
+  // CDNA spells the operations ds_read_b96/ds_write_b96; they are absent from
+  // both admitted mnemonic lists, and
+  // CdnaNativeB96AccessesRemainUnsupportedAtTransformBoundary pins that
+  // transform boundary.
+  if (is_rdna4_family_arch(arch) &&
+      equals_any(mnemonic, {"ds_load_b96", "ds_store_b96"}))
+    return true;
+  return is_unconditionally_single_range_native_lds_mnemonic(mnemonic) ||
          ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
           equals_any(mnemonic, {"ds_read_i8", "ds_write_b8_d16_hi", "ds_write_b16_d16_hi"}));
 }

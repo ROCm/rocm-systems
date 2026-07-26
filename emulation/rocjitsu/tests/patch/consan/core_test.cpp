@@ -157,10 +157,28 @@ TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
     EXPECT_FALSE(result.modified);
     EXPECT_TRUE(result.errors.empty());
+    EXPECT_FALSE(result.semantic_arch_required);
+    EXPECT_TRUE(consan_result_has_resolved_semantic_arch(result));
     EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
       return warning.starts_with("ConSan does not support target '");
     }));
   }
+}
+
+TEST(ConSan, SemanticArchitectureGateTracksAnalysisStageRatherThanResultMembers) {
+  ConSanResult parse_only;
+  parse_only.outcome = ConSanTransformOutcome::Unsupported;
+  parse_only.text_sections.push_back({});
+  parse_only.kernels.push_back({});
+  parse_only.functions.push_back({});
+  parse_only.input_fingerprint = "parsed";
+  EXPECT_TRUE(consan_result_has_resolved_semantic_arch(parse_only));
+
+  parse_only.semantic_arch_required = true;
+  EXPECT_FALSE(consan_result_has_resolved_semantic_arch(parse_only));
+
+  parse_only.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  EXPECT_TRUE(consan_result_has_resolved_semantic_arch(parse_only));
 }
 
 TEST(ConSan, StubRejectsEmptyCodeObject) {

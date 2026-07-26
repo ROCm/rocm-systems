@@ -1564,7 +1564,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   };
   std::vector<Candidate> candidates;
   const MoiSyncInventoryIndex sync_index(result);
-  const bool allow_gfx1250_lds = result.arch_name == "gfx1250";
+  const bool allow_gfx1250_lds = result.arch == ROCJITSU_CODE_ARCH_GFX1250;
   const auto append = [&](std::string_view name, bool in_kernel, std::optional<uint64_t> descriptor,
                           const std::vector<ConSanAtomicSite> &sites) {
     for (const ConSanAtomicSite &site : sites) {

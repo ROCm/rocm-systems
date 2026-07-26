@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "target": "gfx1201",
   "evidence_model": "reviewed after retaining the rejected 128-element hypotheses; independently confirm the exact native matvec barrier drop at the canonical 1024-element embedding",
   "review_required": false,

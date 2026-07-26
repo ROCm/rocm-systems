@@ -822,6 +822,14 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (!parse_bool_env("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", false,
                       &config.fault_require_exactly_one))
     return std::nullopt;
+  if (!parse_u32_env("RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS",
+                     kConSanDefaultFaultReservationTimeoutMs, &config.fault_reservation_timeout_ms))
+    return std::nullopt;
+  if (config.fault_reservation_timeout_ms == 0) {
+    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS='0'; "
+                         "expected >=1\n");
+    return std::nullopt;
+  }
   // Synchronization implemented by an MOI engine is part of its ordinary
   // profile, not an expert opt-in. Engine-specific lowering still reports
   // unsupported sites honestly. Explicit false values remain useful for

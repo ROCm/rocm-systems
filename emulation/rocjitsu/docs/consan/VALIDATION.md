@@ -229,7 +229,9 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
 The JSON contains all north-star workloads, four canonical profiles, admitted
 fault families, row-declared timeouts, forbidden exploratory controls, and the maximum
 GPU parallelism. Review it before starting a campaign and retain it with the
-results.
+results. Its `usability_audit.fault_qualification_exceptions` list is the
+machine-readable authority for workloads whose reviewed-fault rows are
+deliberately withheld; each entry carries the reason and owning bead.
 
 For an exact, machine-readable pre-run audit, include the reviewed fault spec:
 
@@ -301,7 +303,8 @@ continues to reject the cumulative reference file.
 
 The current gfx1201 manifest covers Qwen3-0.6B prefill; native
 PyTorch/Inductor compact and split online-softmax clients, collision-heavy
-scatter-reduce, Qwen-vocabulary top-k, causal SDPA, and histogram;
+scatter-reduce, large-object mode selection, Qwen-vocabulary top-k, causal
+SDPA, and histogram;
 native llama.cpp quantized matvec and RMSNorm; Sharktank TP1 prefill and
 decode/combined, TP2, and CLIP BF16; and the hip-moi D128, WMMA, Stream-K,
 tree-atomic-OR, and Jakub workloads. The profile IDs are `supercollider`,
@@ -338,7 +341,9 @@ An instrumented clean row is accepted only when:
 - the workload's independent numerical or semantic oracle passes;
 - ConSan reports an applicable code object and no dynamic-incomplete result;
 - every supported access, barrier, atomic, and fence site is patched;
-- MOI emits no unexpected clean diagnostic and no forbidden overflow; and
+- every `clean` row emits no unexpected MOI diagnostic and no forbidden
+  overflow; a workload/profile pair with a `coverage_output_contract` is
+  emitted under the distinct `coverage-output` phase instead; and
 - every repeated process satisfies the same coverage gate.
 
 No clean profile currently has a workload-specific tuning exception. In
@@ -348,11 +353,74 @@ settings supplied by the validation harness. `explain --json` records those
 values under `implicit_runtime_defaults`, while `workload_specific_tuning`
 remains empty.
 
+The Qwen-vocabulary top-k row has one Record/Replay
+`coverage_output_contract`. It remains a strict large-object loading, planning,
+dynamic-coverage, and exact-output oracle, while retaining a narrowly bounded
+diagnostic exception for the current rocPRIM object: at most four exact
+same-range LDS write/write reports between distinct owners. Both instructions
+must belong to the same one of four disassembly-qualified, barrier-separated
+store groups:
+`{0xfe964,0xfe96c,0xfe974,0xfe97c}`,
+`{0xfe9c4,0xfe9cc,0xfe9d4,0xfe9dc}`,
+`{0xfea68,0xfea70,0xfea78,0xfea80}`, or
+`{0xfeb40,0xfeb48,0xfeb50,0xfeb58}`. This exact grouping rejects nearby
+instructions and pairs that span groups. The contract is also pinned to
+code-object fingerprint `fnv1a64:3833562345afa454`; any regenerated object,
+even one retaining the same raw instruction offsets, requires a new retained
+disassembly and explicit contract requalification. The producer emits that
+fingerprint on the pre-replay report, replay summary, and every replay detail,
+and the runner requires all three views to agree.
+
+The runtime declares its four-entry replay-diagnostic capacity in the summary,
+and the runner rejects any other producer capacity. The workload policy
+independently caps accepted diagnostics at four and may never exceed that
+producer capacity. The runner also rejects missing replay summaries,
+per-reader summary/detail mismatches, pre-replay diagnostics or sampled
+conflicts, undeclared or malformed signatures, sites outside those groups,
+diagnostic-capacity exhaustion, metadata overflow, and unresolved provenance.
+The replay summary's `provenance_repaired` count is retained and may not exceed
+its diagnostic count. Zero reports are accepted only when an explicit replay
+summary states that the inventory is complete. Report and replay rows are
+joined by the report buffer's `(reader, report_generation)` identity; the
+diagnostic record's own generation is retained separately as provenance. Every
+report buffer with visible access, barrier, atomic, or fence events must have a
+replay summary; an allocated zero-event buffer intentionally has nothing to
+replay.
+
+These reports are not classified as benign. `bd-1w9.6.5` tracks whether they
+are a rocPRIM race or a ConSan false positive and owns removal of the exception.
+Retirement requires the corresponding implementation or model fix followed by
+repeated zero-diagnostic runs; expanding the count or qualified instruction
+groups is not a substitute. Sampled and Inline Shadow remain fail-closed clean
+gates.
+The ordinary `torch.mode` row has no coverage-output contract and supplies the
+large-object Record/Replay clean gate. The same bounded contract applies to
+the top-k Record/Replay paired-overhead execution. Fault qualification for
+top-k Record/Replay is deliberately absent: while the reports remain
+unclassified, the runner cannot distinguish one of them from a fault-induced
+diagnostic. That withholding is profile-specific; SuperCollider, Sampled, and
+Inline Shadow retain the workload's `barrier-drop` fault family and remain
+`REVIEW_REQUIRED` until separately qualified.
+
 The ordinary process deadline is 30 seconds. The Qwen-vocabulary top-k row
 declares 120 seconds because its complete Record/Replay transform patches
-63,474 accesses and 7,100 barriers and takes about 90 seconds on this machine;
-that execution bound does not change instrumentation coverage or semantics.
-An explicit `--timeout` overrides the manifest only for diagnosis.
+418,292 accesses and 50,458 barriers and takes about 73 seconds on this
+machine; that execution bound does not change instrumentation coverage,
+diagnostic reporting, or semantics. An explicit `--timeout` overrides the
+manifest only for diagnosis. The `torch.mode` 4/4 evidence consists of four
+separate physical-host runner invocations, each under its explicit 30-second
+manifest bound; it is not four iterations sharing one deadline.
+
+Campaign consumers must enumerate the manifest's workload/profile pairs and
+use `explain --json` `profile_artifact_roots` (or the persisted `phase` field)
+to locate each result. A pair missing from both `clean` and `coverage-output`
+is an incomplete campaign, not an omitted row. When one phase contains a
+profile-specific redirect, `payload_argv_by_profile` is authoritative and the
+single `payload_argv` template is null. Each result references the shared
+`$ARTIFACT_ROOT/<workload>/provenance.json`, rather than a provenance file
+under the requested phase. Reusing that workload root is accepted only when
+the hook, workload inputs, source identities, and manifest match byte for byte;
+drift fails instead of silently relabeling existing results.
 
 ## Correct-workload overhead
 
@@ -373,6 +441,15 @@ and the maximum mode ratio used for the support-table cell:
 ```text
 slowdown = instrumented median / paired baseline median
 ```
+
+When a workload/profile pair declares a `coverage_output_contract`, its
+instrumented overhead process uses that same structural diagnostic gate. The
+result phase remains `overhead`; consumers distinguish this relaxed diagnostic
+gate from ordinary overhead through the embedded `coverage_output_contract`
+metadata. The baseline processes remain uninstrumented. This keeps a
+nondeterministic but bounded report from becoming a raw runtime failure without
+accepting output outside the declared count, signature, provenance, and site
+bounds.
 
 The active `gfx950` and `gfx1250` campaigns use one benchmark repetition per
 process for Qwen, Sharktank, PyTorch, and Tensile.  These results qualify the
@@ -489,6 +566,27 @@ process group; it does not apply to the workload or mutation command.
 Promotion requires all of the following to match the reviewed spec:
 
 - mutation accounting is exactly `requested=1 planned=1 applied=1`;
+- accounting schema v2 also requires a matching `ConSan fault install` record
+  proving that each applied mutation reached the loaded replacement. Historical
+  schema-v1 logs do not contain this evidence and must be rerun rather than
+  re-parsed for current fault qualification;
+- automatic report capacity is planned from a pristine dry-run semantic
+  inventory. A live fault mutation and its final instrumentation composition
+  run only after the report buffer has been allocated, so sizing cannot consume
+  or duplicate the process-global mutation;
+- exact-one mutation selection is process-global. Concurrent code-object loads
+  reserve the single installation through the underlying HSA load because only
+  its success proves installation. A contender waits at most 30 seconds by
+  default; `RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS` sets a larger positive
+  bound for campaigns whose individual code-object load can take longer.
+  Timeout or same-thread reentry is emitted as a warning with a typed
+  reservation outcome and loads without mutation, so the trial fails exact-one
+  accounting instead of deadlocking. A transform claiming more than one
+  applied mutation is rejected before its replacement can be installed;
+- schema-v2 mutation reader records carry both `process` and `reader`
+  identities. The nested per-process view removes the repeated process field,
+  but the top-level `mutation.readers` list retains it so reader handles from
+  different processes cannot be conflated;
 - the detector result is the precommitted deterministic value, or a
   statistical campaign reaches its precommitted minimum detection count;
 - the independent oracle matches its precommitted result when not `any`;

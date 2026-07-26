@@ -1866,9 +1866,11 @@
             ? std::optional<uint16_t>(static_cast<uint16_t>(first_snapshot + 1u))
             : std::optional<uint16_t>(first_snapshot);
   } else if (moi_load_clobbers_address(candidate)) {
-    saved_lds_byte_offset_vgpr =
-        static_cast<uint16_t>(*options.scratch_vgpr + inline_shadow_scratch_count(options) +
-                              inline_shadow_loop_scratch_count(options, candidate));
+    saved_lds_byte_offset_vgpr = static_cast<uint16_t>(
+        consan_detail::inline_shadow_loop_counter_vgpr(
+            *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
+            options.moi_track_atomics) +
+        inline_shadow_loop_scratch_count(options, candidate));
   }
 
   const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
@@ -2126,7 +2128,9 @@
           if (cell_index != 0u)
             continue;
           const uint16_t loop_counter_vgpr =
-              static_cast<uint16_t>(*options.scratch_vgpr + inline_shadow_scratch_count(options));
+              consan_detail::inline_shadow_loop_counter_vgpr(
+                  *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
+                  options.moi_track_atomics);
           const uint16_t loop_offset_vgpr = static_cast<uint16_t>(loop_counter_vgpr + 1u);
           if (range.static_byte_offset == 0u) {
             words.push_back(build_v_mov_b32_e32(loop_offset_vgpr,
@@ -2214,7 +2218,9 @@
       }
       const bool loop_external_cells = cell_range.cell_count > 1u;
       const uint16_t loop_counter_vgpr =
-          static_cast<uint16_t>(*options.scratch_vgpr + inline_shadow_scratch_count(options));
+          consan_detail::inline_shadow_loop_counter_vgpr(
+              *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
+              options.moi_track_atomics);
       const uint16_t saved_workgroup_key_vgpr = static_cast<uint16_t>(loop_counter_vgpr + 1u);
       if (loop_external_cells) {
         if (cell_index != 0u)

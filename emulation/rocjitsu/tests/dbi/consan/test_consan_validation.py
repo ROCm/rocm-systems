@@ -8,6 +8,8 @@ import io
 import json
 import os
 from pathlib import Path
+import re
+import shlex
 import subprocess
 import sys
 import time
@@ -18,6 +20,118 @@ import consan_validation as validation
 import consan_llama_validation as llama_validation
 from consan_coverage_gate import _COVERAGE_COUNT_FIELDS
 from consan_validation_test_support import temporary_root
+
+TOPK_CODE_OBJECT_FINGERPRINT = "fnv1a64:3833562345afa454"
+
+
+def moi_auto_report(
+    reader: int,
+    generation: int,
+    *,
+    diagnostics: int = 0,
+    visible_records: int = 1,
+    code_object_fingerprint: str = TOPK_CODE_OBJECT_FINGERPRINT,
+) -> str:
+    return (
+        f"ConSan MOI auto report reader={reader} generation={generation} "
+        f"code_object={code_object_fingerprint} "
+        f"diagnostics={diagnostics} visible_records={visible_records} "
+        "visible_barriers=0 visible_atomics=0 visible_fences=0 "
+        "sampled_conflicts=0 sampled_immediate_conflicts=0"
+    )
+
+
+def complete_coverage_log(*extra_lines: str) -> str:
+    counts = {name: 0 for name in _COVERAGE_COUNT_FIELDS}
+    for name in (
+        "access_discovered",
+        "access_supported",
+        "access_selected",
+        "access_patched",
+    ):
+        counts[name] = 1
+    coverage = " ".join(f"{name}={counts[name]}" for name in _COVERAGE_COUNT_FIELDS)
+    return "\n".join(
+        (
+            "[rocjitsu-dbi-hooks] ConSan coverage reader=7 flavor=moi "
+            "engine=record_replay analysis_complete=true expert_limit=false "
+            f"{coverage}",
+            "[rocjitsu-dbi-hooks] ConSan analysis verdict applicable=true "
+            "analysis_complete=true static_complete=true dynamic_complete=true "
+            "applicable_code_objects=1 incomplete_code_objects=0 "
+            "access=1/1 barrier=0/0 atomic=0/0 fence=0/0 "
+            "dynamic_incomplete=0 replay_unsupported_access=0 "
+            "replay_unsupported_atomics=0 replay_unsupported_fences=0 "
+            "replay_metadata_full=0",
+            moi_auto_report(7, 1),
+            *extra_lines,
+        )
+    )
+
+
+def moi_auto_replay(
+    reader: int,
+    generation: int,
+    diagnostics: int,
+    *,
+    conflict: bool | None = None,
+    metadata_full: bool = False,
+    capacity_exhausted: bool = False,
+    diagnostic_capacity: int = 4,
+    provenance_repaired: int = 0,
+    provenance_unresolved: int = 0,
+    code_object_fingerprint: str = TOPK_CODE_OBJECT_FINGERPRINT,
+) -> str:
+    if conflict is None:
+        conflict = diagnostics != 0
+    return (
+        f"ConSan MOI auto replay reader={reader} generation={generation} "
+        f"code_object={code_object_fingerprint} diagnostics={diagnostics} "
+        f"conflict={'true' if conflict else 'false'} "
+        f"metadata_full={'true' if metadata_full else 'false'} "
+        "diagnostic_capacity_exhausted="
+        f"{'true' if capacity_exhausted else 'false'} "
+        f"diagnostic_capacity={diagnostic_capacity} "
+        f"provenance_repaired={provenance_repaired} "
+        f"provenance_unresolved={provenance_unresolved}"
+    )
+
+
+def moi_auto_replay_diagnostic(
+    reader: int,
+    report_generation: int,
+    generation: int,
+    index: int,
+    *,
+    code_object_fingerprint: str = TOPK_CODE_OBJECT_FINGERPRINT,
+) -> str:
+    return (
+        f"ConSan MOI auto replay diagnostic reader={reader} "
+        f"report_generation={report_generation} generation={generation} "
+        f"code_object={code_object_fingerprint} index={index} kind=1 "
+        "first_owner=1 second_owner=2 "
+        "first_inst=0xfe96c second_inst=0xfe974 "
+        "first_lds_known=true first_lds=[0,4) second_lds=[0,4) "
+        "first_kind=2 second_kind=2"
+    )
+
+
+def assert_current_replay_log(test: unittest.TestCase, log_text: str) -> None:
+    """Assert that test input already carries every producer-owned contract field."""
+    for line in log_text.splitlines():
+        if "ConSan MOI auto replay diagnostic reader=" in line:
+            for field in ("report_generation=", "generation=", "code_object="):
+                test.assertIn(field, line)
+        elif (
+            "ConSan MOI auto replay reader=" in line and " skipped " not in f" {line} "
+        ):
+            for field in (
+                "generation=",
+                "code_object=",
+                "diagnostic_capacity=",
+                "provenance_repaired=",
+            ):
+                test.assertIn(field, line)
 
 
 class ConSanValidationTest(unittest.TestCase):
@@ -109,17 +223,584 @@ class ConSanValidationTest(unittest.TestCase):
             },
         )
 
+    def test_coverage_output_diagnostic_inventory_accepts_declared_conflicts(
+        self,
+    ) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1),
+                    moi_auto_replay(7, 1, 2, provenance_repaired=2),
+                    moi_auto_replay_diagnostic(7, 1, 91, 0),
+                    moi_auto_replay_diagnostic(7, 1, 92, 1)
+                    .replace(
+                        "first_owner=1 second_owner=2", "first_owner=3 second_owner=4"
+                    )
+                    .replace("first_inst=0xfe96c", "first_inst=0xfe974")
+                    .replace("second_inst=0xfe974", "second_inst=0xfe97c")
+                    .replace("first_lds=[0,4)", "first_lds=[4,8)")
+                    .replace("second_lds=[0,4)", "second_lds=[4,8)"),
+                )
+            ),
+            contract,
+        )
+
+        self.assertTrue(summary["accepted"])
+        self.assertEqual(summary["replay_count"], 2)
+        self.assertEqual(summary["observed_signatures"], ["exact-lds-write-write"])
+        self.assertEqual(summary["pre_replay_count"], 0)
+        self.assertEqual(len(summary["records"]), 2)
+        self.assertEqual(summary["records"][0]["first_lds"], "[0,4)")
+        self.assertEqual(summary["records"][0]["second_lds"], "[0,4)")
+
+    def test_coverage_output_diagnostic_inventory_rejects_unbounded_output(
+        self,
+    ) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        fixture = (
+            Path(__file__).with_name("fixtures")
+            / "gfx1201_topk_record_replay_current_diagnostics.log"
+        ).read_text(encoding="utf-8")
+        baseline = validation._coverage_output_diagnostic_summary(fixture, contract)
+        self.assertTrue(baseline["accepted"], baseline["reasons"])
+        lines = fixture.splitlines()
+        pre_report = lines[0]
+        replay_summary = lines[1]
+        details = lines[2:]
+        cases = {
+            "unexpected kind": (
+                fixture.replace("kind=1", "kind=2", 1),
+                "unexpected diagnostics=metadata-full",
+            ),
+            "unknown numeric kind": (
+                fixture.replace("kind=1", "kind=7", 1),
+                "unexpected diagnostics=unknown-7",
+            ),
+            "missing kind": (
+                fixture.replace("kind=1 ", "", 1),
+                "unexpected diagnostics=malformed",
+            ),
+            "different access conflict": (
+                fixture.replace("second_lds=[2688,2692)", "second_lds=[2692,2696)", 1),
+                "unexpected diagnostics=access-conflict",
+            ),
+            "same-owner access conflict": (
+                fixture.replace(
+                    "first_owner=5 second_owner=2", "first_owner=5 second_owner=5", 1
+                ),
+                "unexpected diagnostics=access-conflict",
+            ),
+            "missing detail": (
+                "\n".join((pre_report, replay_summary, *details[:-1])),
+                "replay diagnostic inventory incomplete",
+            ),
+            "pre-replay diagnostic": (
+                fixture.replace(
+                    "diagnostics=0 visible_diagnostics",
+                    "diagnostics=1 visible_diagnostics",
+                    1,
+                ),
+                "pre-replay diagnostics=1",
+            ),
+            "missing replay summary": (
+                "\n".join((pre_report, *details)),
+                "missing replay diagnostic summary",
+            ),
+            "capacity exhausted": (
+                fixture.replace(
+                    "diagnostic_capacity_exhausted=false",
+                    "diagnostic_capacity_exhausted=true",
+                    1,
+                ),
+                "replay diagnostic capacity status invalid",
+            ),
+            "metadata full": (
+                fixture.replace("metadata_full=false", "metadata_full=true", 1),
+                "replay metadata status invalid",
+            ),
+            "unresolved provenance": (
+                fixture.replace(
+                    "provenance_unresolved=0", "provenance_unresolved=1", 1
+                ),
+                "replay provenance unresolved",
+            ),
+            "repaired provenance exceeds diagnostics": (
+                fixture.replace("provenance_repaired=3", "provenance_repaired=4", 1),
+                "replay provenance repaired exceeds diagnostics",
+            ),
+            "missing conflict status": (
+                fixture.replace("conflict=true ", "", 1),
+                "replay conflict status invalid",
+            ),
+            "malformed exact range": (
+                fixture.replace("first_lds=[2688,2692)", "first_lds=bad", 1),
+                "unexpected diagnostics=access-conflict",
+            ),
+            "outside instruction groups": (
+                fixture.replace("first_inst=0xfe96c", "first_inst=0xfe95c", 1),
+                "unexpected diagnostic sites",
+            ),
+            "spans qualified instruction groups": (
+                fixture.replace("second_inst=0xfe974", "second_inst=0xfea70", 1),
+                "unexpected diagnostic sites",
+            ),
+            "duplicate replay summary": (
+                "\n".join((pre_report, replay_summary, replay_summary, *details)),
+                "duplicate replay summary",
+            ),
+            "duplicate pre-replay summary": (
+                "\n".join((pre_report, pre_report, replay_summary, *details)),
+                "duplicate pre-replay summary",
+            ),
+            "malformed replay summary": (
+                fixture.replace("diagnostics=3 ", "diagnostic_total=3 ", 1),
+                "malformed replay diagnostic summary",
+            ),
+            "malformed explicit replay generation": (
+                "\n".join(
+                    (
+                        pre_report,
+                        replay_summary.replace("generation=3", "generation=bad", 1),
+                        *details,
+                    )
+                ),
+                "malformed replay diagnostic summary",
+            ),
+            "missing replay generation": (
+                "\n".join(
+                    (
+                        pre_report,
+                        replay_summary.replace("generation=3 ", "", 1),
+                        *details,
+                    )
+                ),
+                "malformed replay diagnostic summary",
+            ),
+            "malformed pre-replay summary": (
+                fixture.replace("sampled_conflicts=0 ", "", 1),
+                "malformed pre-replay diagnostic summary",
+            ),
+            "detail without summary": (
+                "\n".join(
+                    (
+                        pre_report,
+                        replay_summary,
+                        *details,
+                        details[0]
+                        .replace("reader=1679495808", "reader=9", 1)
+                        .replace("report_generation=3", "report_generation=2", 1),
+                    )
+                ),
+                "replay diagnostic detail has no summary",
+            ),
+            "missing diagnostic generation": (
+                fixture.replace(
+                    "report_generation=3 generation=3", "report_generation=3", 1
+                ),
+                "replay diagnostic detail has malformed generation",
+            ),
+            "sampled conflict": (
+                fixture.replace("sampled_conflicts=0", "sampled_conflicts=1", 1),
+                "pre-replay sampled conflicts=1",
+            ),
+            "malformed explicit detail generation": (
+                fixture.replace("report_generation=3", "report_generation=bad", 1),
+                "replay diagnostic detail has malformed identity",
+            ),
+            "duplicate diagnostic index": (
+                fixture.replace("index=1 kind=1", "index=0 kind=1", 1),
+                "replay diagnostic indices invalid",
+            ),
+            "missing diagnostic index": (
+                fixture.replace("index=0 kind=1", "kind=1", 1),
+                "replay diagnostic indices invalid",
+            ),
+            "noncontiguous diagnostic indices": (
+                fixture.replace("index=2 kind=1", "index=3 kind=1", 1),
+                "replay diagnostic indices invalid",
+            ),
+            "runtime diagnostic capacity mismatch": (
+                fixture.replace("diagnostic_capacity=4", "diagnostic_capacity=5", 1),
+                "replay diagnostic capacity mismatch",
+            ),
+            "code-object fingerprint drift": (
+                fixture.replace(
+                    TOPK_CODE_OBJECT_FINGERPRINT,
+                    "fnv1a64:0000000000000000",
+                ),
+                "diagnostic code-object fingerprint does not match contract",
+            ),
+            "replay skipped": (
+                "\n".join(
+                    (
+                        pre_report,
+                        "ConSan MOI auto replay reader=1679495808 generation=3 "
+                        f"code_object={TOPK_CODE_OBJECT_FINGERPRINT} skipped "
+                        "required_shadow_entries=1048577 limit=1048576",
+                    )
+                ),
+                "replay skipped",
+            ),
+        }
+        for name, (log, reason) in cases.items():
+            with self.subTest(name=name):
+                summary = validation._coverage_output_diagnostic_summary(log, contract)
+                self.assertFalse(summary["accepted"])
+                self.assertTrue(
+                    any(reason in item for item in summary["reasons"]),
+                    summary["reasons"],
+                )
+
+    def test_coverage_output_diagnostic_inventory_is_accounted_per_reader(
+        self,
+    ) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1),
+                    moi_auto_report(8, 2),
+                    moi_auto_replay(7, 1, 1),
+                    moi_auto_replay(8, 2, 0),
+                    moi_auto_replay_diagnostic(8, 2, 2, 0),
+                )
+            ),
+            contract,
+        )
+        self.assertFalse(summary["accepted"])
+        self.assertTrue(
+            any(
+                "reader=7,generation=1, reported=1, detailed=0" in reason
+                for reason in summary["reasons"]
+            ),
+            summary["reasons"],
+        )
+        self.assertTrue(
+            any(
+                "reader=8,generation=2, reported=0, detailed=1" in reason
+                for reason in summary["reasons"]
+            ),
+            summary["reasons"],
+        )
+
+    def test_coverage_output_contract_fingerprint_applies_only_to_diagnostics(
+        self,
+    ) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        clean_fingerprint = "fnv1a64:0000000000000001"
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1),
+                    moi_auto_replay(7, 1, 1, provenance_repaired=1),
+                    moi_auto_replay_diagnostic(7, 1, 91, 0),
+                    moi_auto_report(8, 2, code_object_fingerprint=clean_fingerprint),
+                    moi_auto_replay(
+                        8,
+                        2,
+                        0,
+                        code_object_fingerprint=clean_fingerprint,
+                    ),
+                )
+            ),
+            contract,
+        )
+        self.assertTrue(summary["accepted"], summary["reasons"])
+        self.assertEqual(
+            summary["observed_code_object_fingerprints"],
+            [clean_fingerprint, TOPK_CODE_OBJECT_FINGERPRINT],
+        )
+
+    def test_coverage_output_requires_contracted_object_even_without_diagnostics(
+        self,
+    ) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        other_fingerprint = "fnv1a64:0000000000000001"
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join(
+                (
+                    moi_auto_report(8, 2, code_object_fingerprint=other_fingerprint),
+                    moi_auto_replay(
+                        8,
+                        2,
+                        0,
+                        code_object_fingerprint=other_fingerprint,
+                    ),
+                )
+            ),
+            contract,
+        )
+        self.assertFalse(summary["accepted"])
+        self.assertIn(
+            "contract code-object fingerprint missing from replay summaries: "
+            f"expected={TOPK_CODE_OBJECT_FINGERPRINT}",
+            summary["reasons"],
+        )
+
+    def test_coverage_output_requires_replay_for_each_nonempty_report(
+        self,
+    ) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1),
+                    moi_auto_report(8, 2),
+                    moi_auto_replay(7, 1, 0),
+                )
+            ),
+            contract,
+        )
+        self.assertFalse(summary["accepted"])
+        self.assertTrue(
+            any(
+                "missing replay summaries: reader=8,generation=2" in reason
+                for reason in summary["reasons"]
+            ),
+            summary["reasons"],
+        )
+
+    def test_coverage_output_allows_zero_event_report_without_replay(
+        self,
+    ) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1),
+                    moi_auto_report(8, 2, visible_records=0),
+                    moi_auto_replay(7, 1, 0),
+                )
+            ),
+            contract,
+        )
+        self.assertTrue(summary["accepted"], summary["reasons"])
+
+    def test_coverage_output_identity_includes_report_generation(self) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1),
+                    moi_auto_report(7, 2),
+                    moi_auto_replay(7, 1, 0),
+                    moi_auto_replay(7, 2, 0),
+                )
+            ),
+            contract,
+        )
+        self.assertTrue(summary["accepted"], summary["reasons"])
+        self.assertEqual(
+            set(summary["readers"]),
+            {"reader=7,generation=1", "reader=7,generation=2"},
+        )
+
+    def test_coverage_output_detail_uses_report_not_record_generation(self) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1),
+                    moi_auto_replay(7, 1, 1, provenance_repaired=1),
+                    moi_auto_replay_diagnostic(7, 1, 99, 0),
+                )
+            ),
+            contract,
+        )
+        self.assertTrue(summary["accepted"], summary["reasons"])
+        self.assertEqual(summary["records"][0]["report_generation"], "1")
+        self.assertEqual(summary["records"][0]["generation"], 99)
+
+    def test_coverage_output_rejects_replay_without_matching_report(
+        self,
+    ) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1),
+                    moi_auto_replay(7, 1, 0),
+                    moi_auto_replay(8, 2, 0),
+                )
+            ),
+            contract,
+        )
+        self.assertFalse(summary["accepted"])
+        self.assertTrue(
+            any(
+                "unexpected replay summaries: reader=8,generation=2" in reason
+                for reason in summary["reasons"]
+            ),
+            summary["reasons"],
+        )
+
+    def test_coverage_output_diagnostic_inventory_enforces_maximum(self) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        reader_counts = ((7, 1, 3), (8, 2, 2))
+        lines = []
+        for reader, generation, count in reader_counts:
+            lines.extend(
+                (
+                    moi_auto_report(reader, generation),
+                    moi_auto_replay(
+                        reader,
+                        generation,
+                        count,
+                        provenance_repaired=count,
+                    ),
+                )
+            )
+            lines.extend(
+                moi_auto_replay_diagnostic(reader, generation, generation, index)
+                .replace("first_lds=[0,4)", f"first_lds=[{index},{index + 1})")
+                .replace("second_lds=[0,4)", f"second_lds=[{index},{index + 1})")
+                for index in range(count)
+            )
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join(lines),
+            contract,
+        )
+        self.assertFalse(summary["accepted"])
+        self.assertTrue(
+            any("exceed declared maximum" in reason for reason in summary["reasons"]),
+            summary["reasons"],
+        )
+
+    def test_coverage_output_rejects_hostile_report_count_without_expanding_it(
+        self,
+    ) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1),
+                    moi_auto_replay(7, 1, 1000000000000000000),
+                )
+            ),
+            contract,
+        )
+        self.assertFalse(summary["accepted"])
+        self.assertTrue(
+            any("exceed declared maximum" in reason for reason in summary["reasons"]),
+            summary["reasons"],
+        )
+
+    def test_coverage_output_current_summary_requires_diagnostic_capacity(
+        self,
+    ) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1),
+                    "ConSan MOI auto replay reader=7 generation=1 "
+                    f"code_object={TOPK_CODE_OBJECT_FINGERPRINT} "
+                    "diagnostics=0 conflict=false metadata_full=false "
+                    "diagnostic_capacity_exhausted=false provenance_repaired=0 "
+                    "provenance_unresolved=0",
+                )
+            ),
+            contract,
+        )
+        self.assertFalse(summary["accepted"])
+        self.assertTrue(
+            any(
+                "replay diagnostic capacity mismatch" in reason
+                for reason in summary["reasons"]
+            ),
+            summary["reasons"],
+        )
+
+    def test_coverage_summary_integrates_only_declared_diagnostic_contract(
+        self,
+    ) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        log = complete_coverage_log(
+            moi_auto_replay(7, 1, 1),
+            moi_auto_replay_diagnostic(7, 1, 1, 0).replace("kind=1", "kind=3", 1),
+        )
+        normal = validation._coverage_summary(log)
+        coverage_output = validation._coverage_summary(log, contract)
+
+        self.assertTrue(normal["accepted"])
+        self.assertNotIn("diagnostics", normal)
+        self.assertFalse(coverage_output["accepted"])
+        self.assertEqual(
+            coverage_output["diagnostics"]["observed_signatures"],
+            ["barrier-divergence"],
+        )
+        incomplete = validation._coverage_summary(
+            log.replace("static_complete=true", "static_complete=false"),
+            contract,
+        )
+        self.assertIn("static coverage incomplete", incomplete["reasons"])
+        self.assertTrue(
+            any("barrier-divergence" in reason for reason in incomplete["reasons"]),
+            incomplete["reasons"],
+        )
+
     def test_manifest_is_the_complete_north_star_matrix(self) -> None:
         manifest = validation._manifest("gfx1201")
-        self.assertEqual(len(manifest["workloads"]), 19)
+        self.assertEqual(len(manifest["workloads"]), 20)
         self.assertEqual(
             [profile["id"] for profile in manifest["profiles"]],
             list(validation.PROFILE_IDS),
         )
         self.assertEqual(
-            len({workload["id"] for workload in manifest["workloads"]}), 19
+            len({workload["id"] for workload in manifest["workloads"]}), 20
         )
         workloads = {workload["id"]: workload for workload in manifest["workloads"]}
+        self.assertEqual(
+            workloads["pytorch-torch-mode"]["targets"],
+            ("gfx950", "gfx1250", "gfx1201"),
+        )
+        self.assertEqual(
+            workloads["pytorch-torch-mode"]["coverage_output_contract"], None
+        )
+        self.assertEqual(workloads["pytorch-torch-mode"]["run_timeout_seconds"], 30)
         self.assertEqual(
             workloads["pytorch-rdna4-compiled-softmax"]["targets"], ("gfx1201",)
         )
@@ -128,7 +809,27 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(workloads["pytorch-rdna4-llm-topk"]["targets"], ("gfx1201",))
         self.assertEqual(
+            workloads["pytorch-rdna4-llm-topk"]["fault_families"],
+            ("barrier-drop",),
+        )
+        self.assertEqual(
             workloads["pytorch-rdna4-llm-topk"]["run_timeout_seconds"], 120
+        )
+        self.assertEqual(
+            workloads["pytorch-rdna4-llm-topk"]["coverage_output_contract"],
+            {
+                "profile": "record-replay",
+                "diagnostics": ("exact-lds-write-write",),
+                "max_diagnostics": 4,
+                "instruction_groups": validation.TOPK_RECORD_REPLAY_INSTRUCTION_GROUPS,
+                "code_object_fingerprint": TOPK_CODE_OBJECT_FINGERPRINT,
+                "tracking_issue": "bd-1w9.6.5",
+                "withhold_fault_qualification": True,
+                "fault_qualification_withheld_reason": (
+                    "baseline diagnostics remain unclassified and cannot be "
+                    "distinguished from a fault-induced report"
+                ),
+            },
         )
         self.assertEqual(workloads["pytorch-rdna4-sdpa"]["run_timeout_seconds"], 30)
         self.assertEqual(workloads["pytorch-rdna4-sdpa"]["targets"], ("gfx1201",))
@@ -140,6 +841,180 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["llama-rdna4-mul-mat-vec-q"]["targets"], ("gfx1201",)
         )
         self.assertEqual(workloads["llama-rdna4-rms-norm"]["targets"], ("gfx1201",))
+
+    def test_coverage_output_contract_rejects_unknown_profile(self) -> None:
+        workload = replace(
+            validation.WORKLOAD_BY_ID["pytorch-torch-mode"],
+            coverage_output_contract=validation.CoverageOutputContract(
+                profile="sampled",
+                diagnostics=("exact-lds-write-write",),
+                max_diagnostics=1,
+                instruction_groups=((1, 2),),
+                code_object_fingerprint=TOPK_CODE_OBJECT_FINGERPRINT,
+                tracking_issue="bd-test",
+                withhold_fault_qualification=True,
+                fault_qualification_withheld_reason="test-only exception",
+            ),
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "invalid coverage-output profile for pytorch-torch-mode: sampled",
+        ):
+            validation._validate_coverage_output_contract(workload)
+
+    def test_coverage_output_contract_validates_every_bound(self) -> None:
+        base = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(base)
+        cases = {
+            "diagnostics": (
+                replace(base, diagnostics=("test-only-conflict",)),
+                "invalid coverage-output diagnostics",
+            ),
+            "empty diagnostics": (
+                replace(base, diagnostics=()),
+                "invalid coverage-output diagnostics",
+            ),
+            "maximum": (
+                replace(base, max_diagnostics=0),
+                "max_diagnostics must be positive",
+            ),
+            "runtime capacity": (
+                replace(
+                    base,
+                    max_diagnostics=validation.MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY + 1,
+                ),
+                "max_diagnostics exceeds runtime capacity",
+            ),
+            "groups": (
+                replace(base, instruction_groups=((2, 2),)),
+                "instruction_groups are invalid",
+            ),
+            "code object": (
+                replace(base, code_object_fingerprint="nightly"),
+                "code_object_fingerprint is invalid",
+            ),
+            "tracking": (
+                replace(base, tracking_issue="none"),
+                "needs a tracking bead",
+            ),
+            "withholding reason": (
+                replace(base, fault_qualification_withheld_reason=""),
+                "needs a fault-withholding reason",
+            ),
+            "unused withholding reason": (
+                replace(base, withhold_fault_qualification=False),
+                "has an unused fault-withholding reason",
+            ),
+        }
+        for name, (contract, reason) in cases.items():
+            with self.subTest(name=name):
+                workload = replace(
+                    validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+                    coverage_output_contract=contract,
+                )
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    validation._validate_coverage_output_contract(workload)
+
+    def test_coverage_output_contract_keeps_unrelated_profile_faults(self) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        validation._validate_coverage_output_contract(
+            validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"]
+        )
+        workload = replace(
+            validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+            fault_families=(),
+            coverage_output_contract=contract,
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "must not suppress unrelated profile fault qualification",
+        ):
+            validation._validate_coverage_output_contract(workload)
+
+    def test_coverage_output_contract_can_retain_fault_qualification(self) -> None:
+        base = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(base)
+        contract = replace(
+            base,
+            withhold_fault_qualification=False,
+            fault_qualification_withheld_reason="",
+        )
+        workload = replace(
+            validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+            coverage_output_contract=contract,
+        )
+
+        validation._validate_coverage_output_contract(workload)
+        self.assertIsNone(
+            validation._fault_qualification_contract_for_profile(
+                workload, "record-replay"
+            )
+        )
+        with mock.patch.dict(
+            validation.WORKLOAD_BY_ID,
+            {workload.id: workload},
+        ):
+            audit = validation._explain_contract(
+                Path("/workspace"),
+                "gfx1201",
+                (workload.id,),
+                validation.PROFILE_IDS,
+                None,
+                allow_reference=False,
+            )
+        self.assertEqual(
+            audit["usability_audit"]["fault_qualification_exceptions"],
+            [],
+        )
+        record_replay = next(
+            expectation
+            for expectation in audit["workloads"][0]["faults"][0][
+                "profile_expectations"
+            ]
+            if expectation["profile"] == "record-replay"
+        )
+        self.assertEqual(record_replay["disposition"], "applicable")
+        self.assertEqual(record_replay["detector"], "REVIEW_REQUIRED")
+
+    def test_only_topk_record_replay_has_a_coverage_output_contract(self) -> None:
+        contracts = [
+            (workload.id, workload.coverage_output_contract.profile)
+            for workload in validation.WORKLOADS
+            if workload.coverage_output_contract is not None
+        ]
+        self.assertEqual(contracts, [("pytorch-rdna4-llm-topk", "record-replay")])
+
+    def test_workload_manifest_validates_every_declared_workload(self) -> None:
+        invalid = replace(
+            validation.WORKLOAD_BY_ID["pytorch-torch-mode"],
+            coverage_output_contract=validation.CoverageOutputContract(
+                profile="always",
+                diagnostics=("exact-lds-write-write",),
+                max_diagnostics=1,
+                instruction_groups=((1, 2),),
+                code_object_fingerprint=TOPK_CODE_OBJECT_FINGERPRINT,
+                tracking_issue="bd-test",
+                withhold_fault_qualification=True,
+                fault_qualification_withheld_reason="test-only exception",
+            ),
+        )
+        with (
+            mock.patch.object(validation, "WORKLOADS", (invalid,)),
+            self.assertRaisesRegex(
+                RuntimeError,
+                "invalid coverage-output profile for pytorch-torch-mode: always",
+            ),
+        ):
+            validation._validate_workload_manifest()
 
     def test_gfx950_manifest_includes_portable_pytorch_workloads(self) -> None:
         workload_ids = {
@@ -164,6 +1039,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertIn("pytorch-rdna4-compiled-softmax", text)
         self.assertIn("pytorch-rdna4-split-softmax", text)
         self.assertIn("pytorch-rdna4-llm-topk", text)
+        self.assertIn("pytorch-torch-mode", text)
         self.assertIn("pytorch-rdna4-sdpa", text)
         self.assertIn("pytorch-torch-histc", text)
         self.assertIn("llama-rdna4-mul-mat-vec-q", text)
@@ -939,6 +1815,474 @@ class ConSanValidationTest(unittest.TestCase):
             Path("/unused"),
         )
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
+
+    def test_coverage_output_environment_relaxes_clean_and_overhead(
+        self,
+    ) -> None:
+        hook = Path("/workspace/hook.so")
+        clean_gate = validation._clean_environment(
+            "record-replay",
+            validation.WORKLOAD_BY_ID["pytorch-torch-mode"],
+            hook,
+            "gfx1201",
+        )
+        coverage_output = validation._run_environment(
+            "record-replay",
+            validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+            hook,
+            "gfx1201",
+            "clean",
+        )
+
+        self.assertEqual(clean_gate["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
+        self.assertNotIn("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", coverage_output)
+        self.assertEqual(coverage_output["RJ_CONSAN_POLICY"], "strict")
+        overhead = validation._run_environment(
+            "record-replay",
+            validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+            hook,
+            "gfx1201",
+            "overhead",
+        )
+        self.assertNotIn("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", overhead)
+        for profile in ("sampled", "inline-shadow"):
+            with self.subTest(profile=profile):
+                other_engine = validation._run_environment(
+                    profile,
+                    validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+                    hook,
+                    "gfx1201",
+                    "clean",
+                )
+                self.assertEqual(other_engine["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
+
+    def test_run_environment_rejects_unknown_phase(self) -> None:
+        with self.assertRaisesRegex(
+            validation.ValidationError, "unsupported validation phase: fault"
+        ):
+            validation._run_environment(
+                "record-replay",
+                validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+                Path("/workspace/hook.so"),
+                "gfx1201",
+                "fault",
+            )
+
+    def test_coverage_output_overhead_uses_the_same_diagnostic_contract(
+        self,
+    ) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"]
+        contract = workload.coverage_output_contract
+        self.assertIsNotNone(contract)
+        with temporary_root() as root:
+            artifact_root = root / "artifacts"
+            hook = root / "hook.so"
+            hook.write_bytes(b"hook")
+            with (
+                mock.patch.object(validation, "_hook_path", return_value=hook),
+                mock.patch.object(
+                    validation, "_workload_command", return_value=["/bin/true"]
+                ),
+                mock.patch.object(
+                    validation,
+                    "_run_process",
+                    return_value=(0, 0.1, "runtime output"),
+                ),
+                mock.patch.object(
+                    validation, "_coverage_summary", return_value={"accepted": True}
+                ) as coverage_summary,
+                mock.patch.object(
+                    validation, "_json_medians", return_value={"topk": 1.0}
+                ),
+                mock.patch.object(validation, "_source_identities", return_value=[]),
+            ):
+                result = validation._run_profile(
+                    root,
+                    "gfx1201",
+                    workload,
+                    "record-replay",
+                    "overhead",
+                    artifact_root,
+                    120,
+                )
+
+        self.assertTrue(result["accepted"])
+        coverage_summary.assert_called_once_with("runtime output", contract)
+
+    def test_coverage_output_profile_does_not_relax_not_detected_faults(
+        self,
+    ) -> None:
+        environment = validation._fault_trial_environment(
+            "record-replay",
+            validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+            Path("/workspace/hook.so"),
+            "gfx1201",
+            {"environment": {}},
+            {"detector": "not_detected"},
+            {},
+        )
+        self.assertEqual(environment["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
+
+    def test_coverage_output_contract_separates_result_phase(self) -> None:
+        self.assertEqual(
+            validation._result_phase(
+                "clean",
+                "record-replay",
+                validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+            ),
+            "coverage-output",
+        )
+        self.assertEqual(
+            validation._result_phase(
+                "clean",
+                "sampled",
+                validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+            ),
+            "clean",
+        )
+        self.assertEqual(
+            validation._result_phase(
+                "clean",
+                "record-replay",
+                validation.WORKLOAD_BY_ID["pytorch-torch-mode"],
+            ),
+            "clean",
+        )
+        self.assertEqual(
+            validation._result_phase(
+                "overhead",
+                "record-replay",
+                validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+            ),
+            "overhead",
+        )
+
+    def test_coverage_output_result_references_workload_provenance(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"]
+        log = complete_coverage_log(moi_auto_replay(7, 1, 0))
+        with temporary_root() as root:
+            artifact_root = root / "artifacts"
+            provenance = validation._workload_provenance_path(artifact_root, workload)
+            provenance.parent.mkdir(parents=True)
+            provenance.write_text("{}\n", encoding="utf-8")
+            hook = root / "hook.so"
+            hook.write_bytes(b"hook")
+            with (
+                mock.patch.object(validation, "_hook_path", return_value=hook),
+                mock.patch.object(
+                    validation, "_workload_command", return_value=["/bin/true"]
+                ),
+                mock.patch.object(
+                    validation,
+                    "_run_process",
+                    return_value=(0, 0.1, log),
+                ),
+                mock.patch.object(validation, "_source_identities", return_value=[]),
+            ):
+                result = validation._run_profile(
+                    root,
+                    "gfx1201",
+                    workload,
+                    "record-replay",
+                    "clean",
+                    artifact_root,
+                    120,
+                )
+            self.assertTrue(provenance.exists())
+            persisted = json.loads(
+                (
+                    artifact_root
+                    / workload.id
+                    / "coverage-output"
+                    / "record-replay"
+                    / "result.json"
+                ).read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(result["phase"], "coverage-output")
+        self.assertEqual(result["provenance"], str(provenance))
+        self.assertTrue(result["accepted"])
+        self.assertEqual(
+            result["coverage"]["diagnostics"]["replay_count"],
+            0,
+        )
+        self.assertEqual(
+            persisted["coverage"]["diagnostics"],
+            json.loads(json.dumps(result["coverage"]["diagnostics"])),
+        )
+
+    def test_workload_provenance_is_shared_only_when_inputs_match(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"]
+        with temporary_root() as root:
+            hook = root / "hook.so"
+            workload_input = root / "input.py"
+            hook.write_bytes(b"hook")
+            workload_input.write_bytes(b"input")
+            workload_root = root / "artifacts" / workload.id
+            with (
+                mock.patch.object(validation, "_hook_path", return_value=hook),
+                mock.patch.object(
+                    validation, "_input_files", return_value={"input": workload_input}
+                ),
+                mock.patch.object(validation, "_source_identities", return_value=[]),
+                mock.patch.object(
+                    validation,
+                    "_manifest",
+                    return_value={"schema_version": 1, "profiles": ("a", "b")},
+                ),
+            ):
+                first = validation._write_provenance(
+                    root, "gfx1201", workload, workload_root
+                )
+                second = validation._write_provenance(
+                    root, "gfx1201", workload, workload_root
+                )
+                workload_input.write_bytes(b"changed")
+                with self.assertRaisesRegex(
+                    validation.ValidationError,
+                    "provenance conflicts with existing artifact",
+                ):
+                    validation._write_provenance(
+                        root, "gfx1201", workload, workload_root
+                    )
+
+        self.assertEqual(first, second)
+        self.assertEqual(first, workload_root / "provenance.json")
+
+    def test_coverage_output_explain_reports_actual_clean_contract(self) -> None:
+        audit = validation._explain_contract(
+            Path("/workspace"),
+            "gfx1201",
+            ("pytorch-rdna4-llm-topk",),
+            validation.PROFILE_IDS,
+            None,
+            allow_reference=False,
+        )
+        workload = audit["workloads"][0]
+        record_replay = next(
+            profile
+            for profile in workload["profiles"]
+            if profile["id"] == "record-replay"
+        )
+        settings = {
+            setting["name"]: setting["value"] for setting in record_replay["settings"]
+        }
+
+        self.assertNotIn("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", settings)
+        self.assertEqual(record_replay["clean_result_phase"], "coverage-output")
+        self.assertEqual(
+            record_replay["clean_artifact_root"],
+            "$ARTIFACT_ROOT/pytorch-rdna4-llm-topk/coverage-output/record-replay",
+        )
+        self.assertEqual(
+            workload["commands"]["clean"]["profile_artifact_roots"]["record-replay"],
+            "$ARTIFACT_ROOT/pytorch-rdna4-llm-topk/coverage-output/record-replay",
+        )
+        self.assertIsNone(workload["commands"]["clean"]["payload_argv"])
+        self.assertEqual(
+            workload["commands"]["clean"]["payload_argv_by_profile"]["record-replay"],
+            validation._workload_command(
+                Path("/workspace"),
+                "gfx1201",
+                validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+                "clean",
+                Path(
+                    "$ARTIFACT_ROOT/pytorch-rdna4-llm-topk/"
+                    "coverage-output/record-replay/benchmark-0.json"
+                ),
+            ),
+        )
+        self.assertEqual(
+            audit["usability_audit"]["coverage_output_contracts"],
+            [
+                {
+                    "workload": "pytorch-rdna4-llm-topk",
+                    "contract": {
+                        "profile": "record-replay",
+                        "diagnostics": ("exact-lds-write-write",),
+                        "max_diagnostics": 4,
+                        "instruction_groups": (
+                            validation.TOPK_RECORD_REPLAY_INSTRUCTION_GROUPS
+                        ),
+                        "code_object_fingerprint": TOPK_CODE_OBJECT_FINGERPRINT,
+                        "tracking_issue": "bd-1w9.6.5",
+                        "withhold_fault_qualification": True,
+                        "fault_qualification_withheld_reason": (
+                            "baseline diagnostics remain unclassified and cannot "
+                            "be distinguished from a fault-induced report"
+                        ),
+                    },
+                }
+            ],
+        )
+        self.assertEqual(
+            audit["usability_audit"]["fault_qualification_exceptions"],
+            [
+                {
+                    "workload": "pytorch-rdna4-llm-topk",
+                    "profile": "record-replay",
+                    "reason": (
+                        "baseline diagnostics remain unclassified and cannot be "
+                        "distinguished from a fault-induced report"
+                    ),
+                    "tracking_issue": "bd-1w9.6.5",
+                }
+            ],
+        )
+        self.assertEqual(len(workload["faults"]), 1)
+        expectations = {
+            item["profile"]: item
+            for item in workload["faults"][0]["profile_expectations"]
+        }
+        self.assertEqual(
+            expectations["record-replay"]["disposition"],
+            "not-applicable",
+        )
+        self.assertEqual(
+            expectations["record-replay"]["tracking_issue"],
+            "bd-1w9.6.5",
+        )
+        for profile in ("supercollider", "sampled", "inline-shadow"):
+            with self.subTest(profile=profile):
+                self.assertEqual(
+                    expectations[profile]["disposition"],
+                    "applicable",
+                )
+                self.assertEqual(
+                    expectations[profile]["detector"],
+                    "REVIEW_REQUIRED",
+                )
+
+    def test_coverage_output_explain_text_renders_profile_specific_commands(
+        self,
+    ) -> None:
+        audit = validation._explain_contract(
+            Path("/workspace"),
+            "gfx1201",
+            ("pytorch-rdna4-llm-topk",),
+            validation.PROFILE_IDS,
+            None,
+            allow_reference=False,
+        )
+        output = io.StringIO()
+        with redirect_stdout(output):
+            validation._print_explain(audit)
+        rendered = output.getvalue()
+        self.assertIn("clean/record-replay (1 process(es)):", rendered)
+        self.assertIn(
+            shlex.join(
+                audit["workloads"][0]["commands"]["clean"]["payload_argv_by_profile"][
+                    "record-replay"
+                ]
+            ),
+            rendered,
+        )
+
+    def test_coverage_output_contract_accepts_current_physical_runtime_fixture(
+        self,
+    ) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        fixture = (
+            Path(__file__).with_name("fixtures")
+            / "gfx1201_topk_record_replay_current_runtime.log"
+        ).read_text(encoding="utf-8")
+        assert_current_replay_log(self, fixture)
+
+        summary = validation._coverage_output_diagnostic_summary(fixture, contract)
+        self.assertTrue(summary["accepted"], summary["reasons"])
+        self.assertEqual(summary["replay_count"], 0)
+        self.assertEqual(summary["records"], [])
+        self.assertEqual(
+            set(summary["readers"]),
+            {"reader=725954112,generation=3"},
+        )
+
+        drifted = fixture.replace(
+            "diagnostics=0 conflict=false",
+            "diagnostic_total=0 conflict=false",
+            1,
+        )
+        drifted_summary = validation._coverage_output_diagnostic_summary(
+            drifted, contract
+        )
+        self.assertFalse(drifted_summary["accepted"])
+        self.assertIn(
+            "malformed replay diagnostic summary",
+            drifted_summary["reasons"],
+        )
+
+    def test_coverage_output_contract_accepts_current_physical_diagnostic_fixture(
+        self,
+    ) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        fixture = (
+            Path(__file__).with_name("fixtures")
+            / "gfx1201_topk_record_replay_current_diagnostics.log"
+        ).read_text(encoding="utf-8")
+        assert_current_replay_log(self, fixture)
+
+        summary = validation._coverage_output_diagnostic_summary(fixture, contract)
+
+        self.assertTrue(summary["accepted"], summary["reasons"])
+        self.assertEqual(summary["replay_count"], 3)
+        self.assertEqual(
+            [record["first_instruction"] for record in summary["records"]],
+            ["0xfe96c", "0xfe96c", "0xfe9c4"],
+        )
+        self.assertEqual(
+            [record["second_instruction"] for record in summary["records"]],
+            ["0xfe974", "0xfe974", "0xfe9c4"],
+        )
+        self.assertEqual(
+            [record["generation"] for record in summary["records"]],
+            [3, 3, 3],
+        )
+        self.assertEqual(
+            summary["observed_code_object_fingerprints"],
+            [TOPK_CODE_OBJECT_FINGERPRINT],
+        )
+        self.assertEqual(
+            summary["readers"]["reader=1679495808,generation=3"]["provenance_repaired"],
+            3,
+        )
+
+    def test_coverage_output_contract_accepts_alternate_store_group_fixture(
+        self,
+    ) -> None:
+        contract = validation.WORKLOAD_BY_ID[
+            "pytorch-rdna4-llm-topk"
+        ].coverage_output_contract
+        self.assertIsNotNone(contract)
+        fixture = (
+            Path(__file__).with_name("fixtures")
+            / "gfx1201_topk_record_replay_alternate_group_diagnostics.log"
+        ).read_text(encoding="utf-8")
+        assert_current_replay_log(self, fixture)
+
+        summary = validation._coverage_output_diagnostic_summary(fixture, contract)
+
+        self.assertTrue(summary["accepted"], summary["reasons"])
+        self.assertEqual(summary["replay_count"], 2)
+        self.assertEqual(
+            [
+                (
+                    record["first_instruction"],
+                    record["second_instruction"],
+                )
+                for record in summary["records"]
+            ],
+            [("0xfea68", "0xfea70"), ("0xfea68", "0xfea70")],
+        )
+        self.assertEqual(
+            summary["readers"]["reader=1142454128,generation=3"]["provenance_repaired"],
+            2,
+        )
 
     def test_native_cdna_scrubs_software_model_environment_without_changing_gfx1250(
         self,
@@ -1812,7 +3156,13 @@ class ConSanValidationTest(unittest.TestCase):
     def test_fault_acceptance_rejects_an_unattributed_process_signal(self) -> None:
         accepted, reasons = validation._fault_acceptance(
             {
-                "mutation": {"requested": 1, "planned": 1, "applied": 1},
+                "mutation": {
+                    "accounting_schema_version": 2,
+                    "requested": 1,
+                    "planned": 1,
+                    "applied": 1,
+                    "installation_evidence_complete": True,
+                },
                 "sanitizer": {"outcome": "not_detected"},
                 "oracle": {"outcome": "pass"},
                 "execution": {
@@ -1827,10 +3177,169 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertFalse(accepted)
         self.assertIn("invalid execution outcome=signal", reasons)
 
+    def test_fault_acceptance_rejects_a_discarded_mutation(self) -> None:
+        accepted, reasons = validation._fault_acceptance(
+            {
+                "mutation": {
+                    "accounting_schema_version": 2,
+                    "requested": 1,
+                    "planned": 1,
+                    "applied": 1,
+                    "installation_evidence_complete": True,
+                    "discarded_applied": 1,
+                },
+                "sanitizer": {"outcome": "detected"},
+                "oracle": {"outcome": "fail"},
+                "execution": {
+                    "outcome": "passed",
+                    "timed_out": False,
+                    "health_before": {"healthy": True},
+                    "health_after": {"healthy": True},
+                },
+            },
+            {"detector": "detected", "oracle": "fail"},
+        )
+        self.assertFalse(accepted)
+        self.assertIn("discarded_applied=1", reasons)
+
+    def test_fault_acceptance_rejects_incomplete_installation_evidence(self) -> None:
+        accepted, reasons = validation._fault_acceptance(
+            {
+                "mutation": {
+                    "accounting_schema_version": 2,
+                    "requested": 1,
+                    "planned": 1,
+                    "applied": 1,
+                    "installation_evidence_complete": False,
+                },
+                "sanitizer": {"outcome": "not_detected"},
+                "oracle": {"outcome": "pass"},
+                "execution": {
+                    "outcome": "passed",
+                    "timed_out": False,
+                    "health_before": {"healthy": True},
+                    "health_after": {"healthy": True},
+                },
+            },
+            {"detector": "not_detected", "oracle": "pass"},
+        )
+        self.assertFalse(accepted)
+        self.assertIn("installation_evidence_complete=False", reasons)
+
+        accepted, reasons = validation._fault_acceptance(
+            {
+                "mutation": {
+                    "accounting_schema_version": 1,
+                    "requested": 1,
+                    "planned": 1,
+                    "applied": 1,
+                },
+                "sanitizer": {"outcome": "not_detected"},
+                "oracle": {"outcome": "pass"},
+                "execution": {
+                    "outcome": "passed",
+                    "timed_out": False,
+                    "health_before": {"healthy": True},
+                    "health_after": {"healthy": True},
+                },
+            },
+            {"detector": "not_detected", "oracle": "pass"},
+        )
+        self.assertFalse(accepted)
+        self.assertIn(
+            "accounting_schema_version=1, expected=2; rerun required",
+            reasons,
+        )
+        self.assertFalse(
+            any("installation_evidence_complete" in reason for reason in reasons)
+        )
+
+    def test_fault_does_not_execute_a_spec_not_applicable_profile(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["d128-block"]
+        fault = {
+            "id": "drop",
+            "family": "barrier-drop",
+            "environment": {
+                "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+                "RJ_CONSAN_FAULT_SITE_IDENTITY": "site-a",
+            },
+            "profiles": {
+                "record-replay": {
+                    "disposition": "not-applicable",
+                    "reason": "profile has no qualified fault",
+                    "tracking_issue": "bd-test",
+                }
+            },
+        }
+        with temporary_root() as root:
+            spec = root / "fault.json"
+            spec.write_text("{}", encoding="utf-8")
+            args = validation._parse_args(
+                [
+                    "--target",
+                    "gfx1201",
+                    "fault",
+                    "--workload",
+                    workload.id,
+                    "--profile",
+                    "record-replay",
+                    "--spec",
+                    str(spec),
+                    "--fault",
+                    fault["id"],
+                    "--artifact-root",
+                    str(root / "artifacts"),
+                    "--allow-destructive",
+                ]
+            )
+            provenance = root / "provenance.json"
+            with (
+                mock.patch.object(
+                    validation, "_workspace_from_environment", return_value=root
+                ),
+                mock.patch.object(validation, "_doctor", return_value={"ok": True}),
+                mock.patch.object(validation, "_load_fault", return_value=fault),
+                mock.patch.object(
+                    validation, "_write_provenance", return_value=provenance
+                ),
+                mock.patch.object(
+                    validation,
+                    "_health_smoke_command",
+                    return_value=["/bin/true"],
+                ),
+                mock.patch.object(validation.subprocess, "run") as run,
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(validation._fault(args), 0)
+            run.assert_not_called()
+            summary = json.loads(
+                (
+                    root
+                    / "artifacts"
+                    / workload.id
+                    / "faults"
+                    / fault["id"]
+                    / "summary.json"
+                ).read_text(encoding="utf-8")
+            )
+        self.assertTrue(summary["accepted"])
+        self.assertEqual(
+            summary["profiles"],
+            [
+                {
+                    "accepted": True,
+                    "disposition": "not-applicable",
+                    "profile": "record-replay",
+                    "reason": "profile has no qualified fault",
+                    "tracking_issue": "bd-test",
+                }
+            ],
+        )
+
     def test_fault_spec_requires_target_workload_and_exact_mutation(self) -> None:
         workload = validation.WORKLOAD_BY_ID["d128-block"]
         document = {
-            "schema_version": 1,
+            "schema_version": validation.SCHEMA_VERSION,
             "target": "gfx1201",
             "workload": workload.id,
             "review_required": False,

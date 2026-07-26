@@ -33,7 +33,7 @@ from consan_validation_support import (
     sha256_file,
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 WORKSPACE_ENV = "CONSAN_VALIDATION_WORKSPACE_DIR"
 TARGET_ENV = "CONSAN_VALIDATION_TARGET"
 PYTORCH_PYTHON_ENV = "CONSAN_VALIDATION_PYTORCH_PYTHON"
@@ -135,6 +135,18 @@ class Profile:
 
 
 @dataclass(frozen=True)
+class CoverageOutputContract:
+    profile: str
+    diagnostics: tuple[str, ...]
+    max_diagnostics: int
+    instruction_groups: tuple[tuple[int, ...], ...]
+    code_object_fingerprint: str
+    tracking_issue: str
+    withhold_fault_qualification: bool
+    fault_qualification_withheld_reason: str
+
+
+@dataclass(frozen=True)
 class Workload:
     id: str
     priority: str
@@ -153,6 +165,7 @@ class Workload:
     targets: tuple[str, ...] | None = None
     moi_record_evidence_expected: bool = True
     run_timeout_seconds: int = TIMEOUT_SECONDS
+    coverage_output_contract: CoverageOutputContract | None = None
 
 
 PROFILES = {
@@ -199,6 +212,36 @@ PROFILES = {
 }
 
 PROFILE_IDS = tuple(PROFILES)
+# Mirrors ConSanMoiDiagnosticKind in consan_moi_core_types.h.inc. Unknown
+# numeric values remain fail-closed so a device-side enum addition cannot be
+# silently accepted by an older validation harness.
+MOI_DIAGNOSTIC_KINDS = {
+    1: "access-conflict",
+    2: "metadata-full",
+    3: "barrier-divergence",
+}
+# Mirrors ConSanMoiShadowAccessKind::Write in consan_moi_abi.h.
+MOI_SHADOW_ACCESS_WRITE = 2
+# The structural parser below currently models Record/Replay output. Do not add
+# another profile until its complete runtime diagnostic surface is parsed and
+# pinned by producer-shaped fixtures.
+COVERAGE_OUTPUT_PROFILE_IDS = ("record-replay",)
+COVERAGE_OUTPUT_DIAGNOSTICS = ("exact-lds-write-write",)
+# The hook currently retains at most four replay diagnostics per report buffer.
+# This is a producer-format invariant, separate from any workload policy bound.
+MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY = 4
+# Keep the unclassified top-k exception independently bounded. A runtime
+# capacity change must not silently widen the policy owned by bd-1w9.6.5.
+TOPK_RECORD_REPLAY_MAX_DIAGNOSTICS = 4
+# These are the four barrier-separated LDS store groups in the qualified
+# rocPRIM radix-sort kernel. A diagnostic must remain within one group; nearby
+# instructions and pairs spanning groups are not admitted.
+TOPK_RECORD_REPLAY_INSTRUCTION_GROUPS = (
+    (0xFE964, 0xFE96C, 0xFE974, 0xFE97C),
+    (0xFE9C4, 0xFE9CC, 0xFE9D4, 0xFE9DC),
+    (0xFEA68, 0xFEA70, 0xFEA78, 0xFEA80),
+    (0xFEB40, 0xFEB48, 0xFEB50, 0xFEB58),
+)
 
 
 WORKLOADS = (
@@ -495,7 +538,10 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=1,
         fault_families=("barrier-drop",),
-        targets=("gfx950", "gfx1250"),
+        targets=("gfx950", "gfx1250", "gfx1201"),
+        # This row proves the large object fits the ordinary bound even if the
+        # harness-wide default is relaxed later.
+        run_timeout_seconds=30,
     ),
     Workload(
         id="pytorch-torch-topk",
@@ -627,9 +673,24 @@ WORKLOADS = (
         tracks_barriers=True,
         tracks_atomics=False,
         overhead_processes=1,
+        # Only Record/Replay fault qualification is withheld by the bounded
+        # output contract. The other profiles retain barrier-drop coverage.
         fault_families=("barrier-drop",),
         targets=("gfx1201",),
         run_timeout_seconds=120,
+        coverage_output_contract=CoverageOutputContract(
+            profile="record-replay",
+            diagnostics=("exact-lds-write-write",),
+            max_diagnostics=TOPK_RECORD_REPLAY_MAX_DIAGNOSTICS,
+            instruction_groups=TOPK_RECORD_REPLAY_INSTRUCTION_GROUPS,
+            code_object_fingerprint="fnv1a64:3833562345afa454",
+            tracking_issue="bd-1w9.6.5",
+            withhold_fault_qualification=True,
+            fault_qualification_withheld_reason=(
+                "baseline diagnostics remain unclassified and cannot be "
+                "distinguished from a fault-induced report"
+            ),
+        ),
     ),
     Workload(
         id="pytorch-rdna4-sdpa",
@@ -865,6 +926,84 @@ WORKLOADS = (
 
 
 WORKLOAD_BY_ID = {workload.id: workload for workload in WORKLOADS}
+
+
+def _validate_coverage_output_contract(workload: Workload) -> None:
+    contract = workload.coverage_output_contract
+    if contract is None:
+        return
+    if contract.profile not in COVERAGE_OUTPUT_PROFILE_IDS:
+        raise RuntimeError(
+            f"invalid coverage-output profile for {workload.id}: {contract.profile}"
+        )
+    invalid_diagnostics = sorted(
+        set(contract.diagnostics) - set(COVERAGE_OUTPUT_DIAGNOSTICS)
+    )
+    if not contract.diagnostics or invalid_diagnostics:
+        raise RuntimeError(
+            f"invalid coverage-output diagnostics for {workload.id}: "
+            f"{', '.join(invalid_diagnostics) or 'none'}"
+        )
+    if contract.max_diagnostics < 1:
+        raise RuntimeError(
+            f"{workload.id} coverage-output max_diagnostics must be positive"
+        )
+    if contract.max_diagnostics > MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY:
+        raise RuntimeError(
+            f"{workload.id} coverage-output max_diagnostics exceeds runtime capacity"
+        )
+    instruction_sites = [
+        instruction for group in contract.instruction_groups for instruction in group
+    ]
+    if (
+        not contract.instruction_groups
+        or any(
+            not group
+            or tuple(sorted(set(group))) != group
+            or any(instruction < 0 for instruction in group)
+            for group in contract.instruction_groups
+        )
+        or len(instruction_sites) != len(set(instruction_sites))
+    ):
+        raise RuntimeError(
+            f"{workload.id} coverage-output instruction_groups are invalid"
+        )
+    if re.fullmatch(r"fnv1a64:[0-9a-f]{16}", contract.code_object_fingerprint) is None:
+        raise RuntimeError(
+            f"{workload.id} coverage-output code_object_fingerprint is invalid"
+        )
+    if not contract.tracking_issue.startswith("bd-"):
+        raise RuntimeError(
+            f"{workload.id} coverage-output contract needs a tracking bead"
+        )
+    if contract.withhold_fault_qualification and not workload.fault_families:
+        raise RuntimeError(
+            f"{workload.id} coverage-output contract must not suppress unrelated "
+            "profile fault qualification"
+        )
+    if (
+        contract.withhold_fault_qualification
+        and not contract.fault_qualification_withheld_reason.strip()
+    ):
+        raise RuntimeError(
+            f"{workload.id} coverage-output contract needs a fault-withholding reason"
+        )
+    if (
+        not contract.withhold_fault_qualification
+        and contract.fault_qualification_withheld_reason
+    ):
+        raise RuntimeError(
+            f"{workload.id} coverage-output contract has an unused "
+            "fault-withholding reason"
+        )
+
+
+def _validate_workload_manifest() -> None:
+    for workload in WORKLOADS:
+        _validate_coverage_output_contract(workload)
+
+
+_validate_workload_manifest()
 
 
 def _workloads_for_target(target: str) -> tuple[Workload, ...]:
@@ -1606,6 +1745,25 @@ def _clean_environment(
     return environment
 
 
+def _run_environment(
+    profile: str | None,
+    workload: Workload,
+    hook: Path,
+    target: str,
+    phase: str,
+) -> dict[str, str]:
+    if phase not in {"clean", "overhead"}:
+        raise ValidationError(f"unsupported validation phase: {phase}")
+    environment = _clean_environment(profile, workload, hook, target)
+    if _coverage_contract_for_profile(workload, profile):
+        # The contract is a property of this exact workload/profile execution,
+        # so both correctness and paired-overhead rows use the same bounded,
+        # structurally validated diagnostic inventory. Fault qualification is
+        # separately disabled while the exception remains open.
+        environment.pop("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", None)
+    return environment
+
+
 def _controlled_environment(environment: dict[str, str]) -> dict[str, str]:
     runtime_names = {
         "HSA_TOOLS_LIB",
@@ -1859,12 +2017,10 @@ def _write_provenance(
     workspace: Path,
     target: str,
     workload: Workload,
-    phase_root: Path,
+    workload_root: Path,
 ) -> Path:
-    phase_root.mkdir(parents=True, exist_ok=True)
-    path = phase_root / "provenance.json"
-    if path.exists():
-        raise ValidationError(f"provenance already exists: {path}")
+    workload_root.mkdir(parents=True, exist_ok=True)
+    path = workload_root / "provenance.json"
     hook = _hook_path(workspace)
     files = {"hook": hook, **_input_files(workspace, target, workload)}
     document = {
@@ -1882,6 +2038,19 @@ def _write_provenance(
         "sources": _source_identities(workspace, workload),
         "manifest": _manifest(target),
     }
+    normalized_document = json.loads(json.dumps(document))
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValidationError(
+                f"cannot read existing provenance {path}: {error}"
+            ) from error
+        if existing != normalized_document:
+            raise ValidationError(
+                f"provenance conflicts with existing artifact: {path}"
+            )
+        return path
     atomic_write_json(path, document)
     return path
 
@@ -1906,7 +2075,393 @@ def _source_identities(workspace: Path, workload: Workload) -> list[dict | None]
     return [git_identity(root) for root in roots]
 
 
-def _coverage_summary(log_text: str) -> dict:
+def _coverage_output_diagnostic_summary(
+    log_text: str, contract: CoverageOutputContract
+) -> dict:
+    def unsigned(fields: dict[str, str], name: str) -> int | None:
+        try:
+            value = int(fields[name], 0)
+        except (KeyError, TypeError, ValueError):
+            return None
+        return value if value >= 0 else None
+
+    def lds_range(value: str | None) -> tuple[int, int] | None:
+        if value is None:
+            return None
+        match = re.fullmatch(r"\[(\d+),(\d+)\)", value)
+        if match is None:
+            return None
+        begin, end = int(match.group(1)), int(match.group(2))
+        return (begin, end) if begin < end else None
+
+    def code_object_fingerprint(fields: dict[str, str]) -> str | None:
+        value = fields.get("code_object")
+        return (
+            value
+            if value is not None
+            and re.fullmatch(r"fnv1a64:[0-9a-f]{16}", value) is not None
+            else None
+        )
+
+    def replay_diagnostic_record(line: str) -> dict:
+        fields = dict(re.findall(r"\b([a-z_]+)=([^ ]+)", line))
+        try:
+            kind = int(fields["kind"], 0)
+        except (KeyError, ValueError):
+            kind = None
+        first_lds = lds_range(fields.get("first_lds"))
+        second_lds = lds_range(fields.get("second_lds"))
+        first_owner = unsigned(fields, "first_owner")
+        second_owner = unsigned(fields, "second_owner")
+        generation = unsigned(fields, "generation")
+        signature = (
+            "exact-lds-write-write"
+            if (
+                kind == 1
+                and generation is not None
+                and fields.get("first_lds_known") == "true"
+                and first_lds is not None
+                and first_lds == second_lds
+                and first_owner is not None
+                and second_owner is not None
+                and first_owner != second_owner
+                and fields.get("first_kind") == str(MOI_SHADOW_ACCESS_WRITE)
+                and fields.get("second_kind") == str(MOI_SHADOW_ACCESS_WRITE)
+            )
+            else (
+                "malformed"
+                if kind is None
+                else MOI_DIAGNOSTIC_KINDS.get(kind, f"unknown-{kind}")
+            )
+        )
+        return {
+            "signature": signature,
+            "reader": fields.get("reader"),
+            "report_generation": fields.get("report_generation"),
+            "generation": generation,
+            "code_object_fingerprint": code_object_fingerprint(fields),
+            "index": unsigned(fields, "index"),
+            "kind": kind,
+            "first_owner": first_owner,
+            "second_owner": second_owner,
+            "first_instruction": fields.get("first_inst"),
+            "second_instruction": fields.get("second_inst"),
+            "first_lds": fields.get("first_lds"),
+            "second_lds": fields.get("second_lds"),
+            "first_access_kind": fields.get("first_kind"),
+            "second_access_kind": fields.get("second_kind"),
+        }
+
+    def explicit_identity(
+        fields: dict[str, str],
+    ) -> tuple[str, int] | None:
+        reader = fields.get("reader")
+        generation = unsigned(fields, "generation")
+        if reader is None or generation is None:
+            return None
+        return reader, generation
+
+    def identity_label(identity: tuple[str, int]) -> str:
+        return f"reader={identity[0]},generation={identity[1]}"
+
+    runtime_by_identity: dict[tuple[str, int], dict] = {}
+    replay_by_identity: dict[tuple[str, int], dict] = {}
+    replay_diagnostics = []
+    reasons = []
+    for line in log_text.splitlines():
+        if "ConSan MOI auto report reader=" in line:
+            fields = dict(re.findall(r"\b([a-z_]+)=([^ ]+)", line))
+            identity = explicit_identity(fields)
+            fingerprint = code_object_fingerprint(fields)
+            diagnostics = unsigned(fields, "diagnostics")
+            sampled_counts = tuple(
+                unsigned(fields, name)
+                for name in ("sampled_conflicts", "sampled_immediate_conflicts")
+            )
+            visible_counts = tuple(
+                unsigned(fields, name)
+                for name in (
+                    "visible_records",
+                    "visible_barriers",
+                    "visible_atomics",
+                    "visible_fences",
+                )
+            )
+            if (
+                identity is None
+                or fingerprint is None
+                or diagnostics is None
+                or any(count is None for count in sampled_counts)
+                or any(count is None for count in visible_counts)
+            ):
+                reasons.append("malformed pre-replay diagnostic summary")
+            elif identity in runtime_by_identity:
+                reasons.append(
+                    f"duplicate pre-replay summary {identity_label(identity)}"
+                )
+            else:
+                runtime_by_identity[identity] = {
+                    "reported": diagnostics,
+                    "code_object_fingerprint": fingerprint,
+                    "sampled_conflicts": sum(sampled_counts),
+                    "replay_required": any(visible_counts),
+                }
+        elif "ConSan MOI auto replay diagnostic reader=" in line:
+            replay_diagnostics.append(replay_diagnostic_record(line))
+        elif "ConSan MOI auto replay reader=" in line:
+            fields = dict(re.findall(r"\b([a-z_]+)=([^ ]+)", line))
+            identity = explicit_identity(fields)
+            fingerprint = code_object_fingerprint(fields)
+            if " skipped " in f" {line} ":
+                required = unsigned(fields, "required_shadow_entries")
+                limit = unsigned(fields, "limit")
+                if (
+                    identity is None
+                    or fingerprint is None
+                    or required is None
+                    or limit is None
+                ):
+                    reasons.append("malformed replay-skipped summary")
+                else:
+                    reasons.append(
+                        f"replay skipped: {identity_label(identity)}, "
+                        f"required_shadow_entries={required}, limit={limit}"
+                    )
+                continue
+            diagnostics = unsigned(fields, "diagnostics")
+            provenance_repaired = unsigned(fields, "provenance_repaired")
+            if (
+                identity is None
+                or fingerprint is None
+                or diagnostics is None
+                or provenance_repaired is None
+            ):
+                reasons.append("malformed replay diagnostic summary")
+            elif identity in replay_by_identity:
+                reasons.append(f"duplicate replay summary {identity_label(identity)}")
+            else:
+                replay_by_identity[identity] = {
+                    "reported": diagnostics,
+                    "code_object_fingerprint": fingerprint,
+                    "diagnostic_capacity_exhausted": fields.get(
+                        "diagnostic_capacity_exhausted"
+                    ),
+                    "diagnostic_capacity": unsigned(fields, "diagnostic_capacity"),
+                    "conflict": fields.get("conflict"),
+                    "metadata_full": fields.get("metadata_full"),
+                    "provenance_repaired": provenance_repaired,
+                    "provenance_unresolved": unsigned(fields, "provenance_unresolved"),
+                }
+
+    details_by_identity: dict[tuple[str, int] | None, list[dict]] = {}
+    for record in replay_diagnostics:
+        if record["generation"] is None:
+            reasons.append("replay diagnostic detail has malformed generation")
+        fields = {
+            "reader": record["reader"],
+            "generation": record["report_generation"],
+        }
+        identity = explicit_identity(fields)
+        details_by_identity.setdefault(identity, []).append(record)
+    if not runtime_by_identity:
+        reasons.append("missing pre-replay report summary")
+    if not replay_by_identity:
+        reasons.append("missing replay diagnostic summary")
+    required_replay = {
+        identity
+        for identity, summary in runtime_by_identity.items()
+        if summary["replay_required"]
+    }
+    missing_replay = sorted(required_replay - set(replay_by_identity))
+    unexpected_replay = sorted(set(replay_by_identity) - set(runtime_by_identity))
+    if missing_replay:
+        reasons.append(
+            "missing replay summaries: "
+            + ", ".join(identity_label(identity) for identity in missing_replay)
+        )
+    if unexpected_replay:
+        reasons.append(
+            "unexpected replay summaries: "
+            + ", ".join(identity_label(identity) for identity in unexpected_replay)
+        )
+    for identity, summary in replay_by_identity.items():
+        details = details_by_identity.get(identity, ())
+        detailed = len(details)
+        summary["detailed"] = detailed
+        runtime_summary = runtime_by_identity.get(identity)
+        runtime_fingerprint = (
+            runtime_summary["code_object_fingerprint"]
+            if runtime_summary is not None
+            else None
+        )
+        if runtime_fingerprint != summary["code_object_fingerprint"]:
+            reasons.append(
+                "replay code-object fingerprint mismatch: "
+                f"{identity_label(identity)}, "
+                f"pre_report={runtime_fingerprint or 'missing'}, "
+                f"replay={summary['code_object_fingerprint'] or 'missing'}"
+            )
+        detail_fingerprints = {record["code_object_fingerprint"] for record in details}
+        if detail_fingerprints != {summary["code_object_fingerprint"]} and details:
+            reasons.append(
+                "replay diagnostic code-object fingerprint mismatch: "
+                f"{identity_label(identity)}"
+            )
+        if (summary["reported"] != 0 or details) and summary[
+            "code_object_fingerprint"
+        ] != contract.code_object_fingerprint:
+            reasons.append(
+                "diagnostic code-object fingerprint does not match contract: "
+                f"{identity_label(identity)}, "
+                f"observed={summary['code_object_fingerprint']}, "
+                f"contract={contract.code_object_fingerprint}"
+            )
+        if summary["reported"] != detailed:
+            reasons.append(
+                "replay diagnostic inventory incomplete: "
+                f"{identity_label(identity)}, "
+                f"reported={summary['reported']}, detailed={detailed}"
+            )
+        if summary["reported"] <= contract.max_diagnostics:
+            indices = [record["index"] for record in details]
+            expected_indices = list(range(summary["reported"]))
+            if (
+                any(index is None for index in indices)
+                or len(set(indices)) != len(indices)
+                or sorted(index for index in indices if index is not None)
+                != expected_indices
+            ):
+                actual_indices = ",".join(
+                    "malformed" if index is None else str(index) for index in indices
+                )
+                reasons.append(
+                    "replay diagnostic indices invalid: "
+                    f"{identity_label(identity)}, "
+                    f"expected={','.join(map(str, expected_indices)) or 'none'}, "
+                    f"actual={actual_indices or 'none'}"
+                )
+        if summary["diagnostic_capacity_exhausted"] != "false":
+            reasons.append(
+                "replay diagnostic capacity status invalid: "
+                f"{identity_label(identity)}, "
+                f"value={summary['diagnostic_capacity_exhausted'] or 'missing'}"
+            )
+        if summary["diagnostic_capacity"] != MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY:
+            reasons.append(
+                "replay diagnostic capacity mismatch: "
+                f"{identity_label(identity)}, "
+                f"value={summary['diagnostic_capacity']}, "
+                "producer=kAutoReplayDiagnosticCapacity, "
+                "consumer=MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY="
+                f"{MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY}"
+            )
+        expected_conflict = "true" if summary["reported"] else "false"
+        if summary["conflict"] != expected_conflict:
+            reasons.append(
+                f"replay conflict status invalid: {identity_label(identity)}, "
+                f"value={summary['conflict'] or 'missing'}, "
+                f"expected={expected_conflict}"
+            )
+        if summary["metadata_full"] != "false":
+            reasons.append(
+                f"replay metadata status invalid: {identity_label(identity)}, "
+                f"value={summary['metadata_full'] or 'missing'}"
+            )
+        if summary["provenance_unresolved"] != 0:
+            reasons.append(
+                f"replay provenance unresolved: {identity_label(identity)}, "
+                f"count={summary['provenance_unresolved']}"
+            )
+        if summary["provenance_repaired"] > summary["reported"]:
+            reasons.append(
+                f"replay provenance repaired exceeds diagnostics: "
+                f"{identity_label(identity)}, "
+                f"repaired={summary['provenance_repaired']}, "
+                f"diagnostics={summary['reported']}"
+            )
+    if not any(
+        summary["code_object_fingerprint"] == contract.code_object_fingerprint
+        for summary in replay_by_identity.values()
+    ):
+        reasons.append(
+            "contract code-object fingerprint missing from replay summaries: "
+            f"expected={contract.code_object_fingerprint}"
+        )
+    for identity in details_by_identity:
+        if identity is None:
+            reasons.append("replay diagnostic detail has malformed identity")
+        elif identity not in replay_by_identity:
+            reasons.append(
+                "replay diagnostic detail has no summary: "
+                f"{identity_label(identity)}"
+            )
+
+    runtime_count = sum(summary["reported"] for summary in runtime_by_identity.values())
+    sampled_conflict_count = sum(
+        summary["sampled_conflicts"] for summary in runtime_by_identity.values()
+    )
+    replay_count = sum(summary["reported"] for summary in replay_by_identity.values())
+    observed_signatures = {record["signature"] for record in replay_diagnostics}
+    unexpected = sorted(observed_signatures - set(contract.diagnostics))
+    if runtime_count:
+        reasons.append(f"pre-replay diagnostics={runtime_count}")
+    if sampled_conflict_count:
+        reasons.append(f"pre-replay sampled conflicts={sampled_conflict_count}")
+    if replay_count > contract.max_diagnostics:
+        reasons.append(
+            f"replay diagnostics exceed declared maximum: "
+            f"observed={replay_count}, maximum={contract.max_diagnostics}"
+        )
+    if unexpected:
+        reasons.append(f"unexpected diagnostics={','.join(unexpected)}")
+    unexpected_sites = []
+    for record in replay_diagnostics:
+        try:
+            first_instruction = int(record["first_instruction"], 0)
+            second_instruction = int(record["second_instruction"], 0)
+        except (TypeError, ValueError):
+            first_instruction = None
+            second_instruction = None
+        same_qualified_group = (
+            first_instruction is not None
+            and second_instruction is not None
+            and any(
+                first_instruction in group and second_instruction in group
+                for group in contract.instruction_groups
+            )
+        )
+        if not same_qualified_group:
+            unexpected_sites.append(
+                f"{record['reader'] or 'missing'}:"
+                f"{record['first_instruction'] or 'missing'}->"
+                f"{record['second_instruction'] or 'missing'}"
+            )
+    if unexpected_sites:
+        reasons.append(f"unexpected diagnostic sites={','.join(unexpected_sites)}")
+    return {
+        "accepted": not reasons,
+        "reasons": reasons,
+        "contract": asdict(contract),
+        "observed_signatures": sorted(observed_signatures),
+        "observed_code_object_fingerprints": sorted(
+            {
+                summary["code_object_fingerprint"]
+                for summary in replay_by_identity.values()
+            }
+        ),
+        "replay_count": replay_count,
+        "pre_replay_count": runtime_count,
+        "readers": {
+            identity_label(identity): replay_by_identity[identity]
+            for identity in sorted(replay_by_identity)
+        },
+        "records": replay_diagnostics,
+    }
+
+
+def _coverage_summary(
+    log_text: str, coverage_output_contract: CoverageOutputContract | None = None
+) -> dict:
     try:
         evidence = parse_coverage_evidence(log_text)
     except CoverageParseError as error:
@@ -1942,7 +2497,7 @@ def _coverage_summary(log_text: str) -> dict:
             reasons.append(f"{kind}={patched}/{supported}")
     if any(record.expert_limit for record in evidence.coverage):
         reasons.append("expert patch limit enabled")
-    return {
+    summary = {
         "accepted": not reasons,
         "reasons": reasons,
         "analysis_complete": verdict.analysis_complete,
@@ -1953,6 +2508,14 @@ def _coverage_summary(log_text: str) -> dict:
         },
         "dynamic_incomplete": verdict.counts["dynamic_incomplete"],
     }
+    if coverage_output_contract is not None:
+        diagnostics = _coverage_output_diagnostic_summary(
+            log_text, coverage_output_contract
+        )
+        summary["diagnostics"] = diagnostics
+        summary["reasons"].extend(diagnostics["reasons"])
+        summary["accepted"] = not summary["reasons"]
+    return summary
 
 
 def _benchmark_median(path: Path) -> float:
@@ -2091,6 +2654,35 @@ def _effective_workload(target: str, workload: Workload) -> Workload:
     )
 
 
+def _coverage_contract_for_profile(
+    workload: Workload, profile: str | None
+) -> CoverageOutputContract | None:
+    contract = workload.coverage_output_contract
+    return contract if contract is not None and contract.profile == profile else None
+
+
+def _fault_qualification_contract_for_profile(
+    workload: Workload, profile: str
+) -> CoverageOutputContract | None:
+    """Return the profile-specific contract that withholds fault qualification."""
+    contract = _coverage_contract_for_profile(workload, profile)
+    return (
+        contract
+        if contract is not None and contract.withhold_fault_qualification
+        else None
+    )
+
+
+def _result_phase(phase: str, profile: str | None, workload: Workload) -> str:
+    if phase == "clean" and _coverage_contract_for_profile(workload, profile):
+        return "coverage-output"
+    return phase
+
+
+def _workload_provenance_path(artifact_root: Path, workload: Workload) -> Path:
+    return artifact_root / workload.id / "provenance.json"
+
+
 def _run_profile(
     workspace: Path,
     target: str,
@@ -2103,7 +2695,8 @@ def _run_profile(
     launcher: list[str] | None = None,
 ) -> dict:
     profile_id = profile or "baseline"
-    row_dir = artifact_root / workload.id / phase / (row_label or profile_id)
+    result_phase = _result_phase(phase, profile, workload)
+    row_dir = artifact_root / workload.id / result_phase / (row_label or profile_id)
     row_dir.mkdir(parents=True, exist_ok=False)
     hook = _hook_path(workspace)
     repetitions = _outer_repetitions(target, phase, workload)
@@ -2118,7 +2711,7 @@ def _run_profile(
         if launcher:
             command = [*launcher, *command]
         log_path = row_dir / f"run-{index}.log"
-        environment = _clean_environment(profile, workload, hook, target)
+        environment = _run_environment(profile, workload, hook, target, phase)
         returncode, elapsed, output = _run_process(
             command, environment, log_path, timeout
         )
@@ -2150,17 +2743,18 @@ def _run_profile(
     coverage = None
     coverage_runs = None
     if profile is not None and logs:
-        coverage_runs = [_coverage_summary(log) for log in logs]
+        coverage_contract = _coverage_contract_for_profile(workload, profile)
+        coverage_runs = [_coverage_summary(log, coverage_contract) for log in logs]
         coverage = coverage_runs[-1]
     result = {
         "schema_version": SCHEMA_VERSION,
         "workload": workload.id,
         "profile": profile_id,
-        "phase": phase,
+        "phase": result_phase,
         "target": target,
         "commands": commands,
         "environment": _controlled_environment(
-            _clean_environment(profile, workload, hook, target)
+            _run_environment(profile, workload, hook, target, phase)
         ),
         "returncodes": returncodes,
         "elapsed_seconds": elapsed_seconds,
@@ -2182,7 +2776,7 @@ def _run_profile(
             }
         },
         "sources": _source_identities(workspace, workload),
-        "provenance": str(row_dir.parent / "provenance.json"),
+        "provenance": str(_workload_provenance_path(artifact_root, workload)),
     }
     result_path = row_dir / "result.json"
     atomic_write_json(result_path, result)
@@ -2372,10 +2966,18 @@ def _run_inventory_process(
 
 
 def _fault_template(target: str, workload: Workload) -> dict:
-    common_profiles = {
-        profile: {"detector": "REVIEW_REQUIRED", "oracle": "any"}
-        for profile in PROFILE_IDS
-    }
+    profile_policies = {}
+    for profile in PROFILE_IDS:
+        contract = _fault_qualification_contract_for_profile(workload, profile)
+        profile_policies[profile] = (
+            {
+                "disposition": "not-applicable",
+                "reason": contract.fault_qualification_withheld_reason,
+                "tracking_issue": contract.tracking_issue,
+            }
+            if contract is not None
+            else {"detector": "REVIEW_REQUIRED", "oracle": "any"}
+        )
     return {
         "schema_version": SCHEMA_VERSION,
         "target": target,
@@ -2386,7 +2988,7 @@ def _fault_template(target: str, workload: Workload) -> dict:
                 "id": family,
                 "family": family,
                 "environment": _fault_family_environment(target, family),
-                "profiles": common_profiles,
+                "profiles": profile_policies,
             }
             for family in _fault_families(target, workload)
         ],
@@ -2701,7 +3303,16 @@ def _fault_audit(
         command.append("--allow-oracle-failure")
     expectations = []
     for profile in profiles:
-        policy, trials = _fault_trials(fault, profile)
+        contract = _fault_qualification_contract_for_profile(workload, profile)
+        if contract is not None:
+            policy = {
+                "disposition": "not-applicable",
+                "reason": contract.fault_qualification_withheld_reason,
+                "tracking_issue": contract.tracking_issue,
+            }
+            trials = []
+        else:
+            policy, trials = _fault_trials(fault, profile)
         trial_audits = []
         if policy.get("disposition") != "not-applicable":
             for index, trial in enumerate(trials):
@@ -2726,6 +3337,8 @@ def _fault_audit(
                 "oracle": policy.get("oracle", "any"),
                 "required_diagnostic": _required_diagnostic(policy),
                 "minimum_detections": policy.get("minimum_detections"),
+                "reason": policy.get("reason"),
+                "tracking_issue": policy.get("tracking_issue"),
                 "policy_settings": _audited_settings(policy.get("environment", {})),
                 "policy_unsets": _audited_unsets(policy.get("unset", [])),
                 "trial_count": len(trial_audits),
@@ -2790,15 +3403,43 @@ def _explain_contract(
         output_root = Path("$ARTIFACT_ROOT") / workload.id
         commands = {}
         for phase in ("clean", "overhead"):
+            profile_artifact_roots = {
+                profile: output_root / _result_phase(phase, profile, workload) / profile
+                for profile in profiles
+            }
+            result_phases = {
+                _result_phase(phase, profile, workload) for profile in profiles
+            }
             commands[phase] = {
-                "payload_argv": _workload_command(
-                    workspace,
-                    target,
-                    workload,
-                    phase,
-                    output_root / phase / "$PROFILE" / "benchmark-0.json",
+                "payload_argv": (
+                    _workload_command(
+                        workspace,
+                        target,
+                        workload,
+                        phase,
+                        output_root
+                        / next(iter(result_phases))
+                        / "$PROFILE"
+                        / "benchmark-0.json",
+                    )
+                    if len(result_phases) == 1
+                    else None
                 ),
                 "processes": _outer_repetitions(target, phase, workload),
+                "profile_artifact_roots": {
+                    profile: str(root)
+                    for profile, root in profile_artifact_roots.items()
+                },
+                "payload_argv_by_profile": {
+                    profile: _workload_command(
+                        workspace,
+                        target,
+                        workload,
+                        phase,
+                        root / "benchmark-0.json",
+                    )
+                    for profile, root in profile_artifact_roots.items()
+                },
                 "validator_argv_template": [
                     sys.executable,
                     script,
@@ -2818,8 +3459,9 @@ def _explain_contract(
             }
         profile_audits = []
         for profile in profiles:
-            environment = _clean_environment(
-                profile, workload, _hook_path(workspace), target
+            result_phase = _result_phase("clean", profile, workload)
+            environment = _run_environment(
+                profile, workload, _hook_path(workspace), target, "clean"
             )
             inherited = _clean_environment(
                 None, workload, _hook_path(workspace), target
@@ -2838,6 +3480,8 @@ def _explain_contract(
                     "id": profile,
                     "flavor": PROFILES[profile].flavor,
                     "engine": PROFILES[profile].engine,
+                    "clean_result_phase": result_phase,
+                    "clean_artifact_root": str(output_root / result_phase / profile),
                     "settings": settings,
                     "implicit_runtime_defaults": runtime_defaults,
                     "usability_exceptions": [
@@ -2971,6 +3615,29 @@ def _explain_contract(
             ],
             "explicit_event_family_overrides": explicit_event_family_overrides,
             "fault_policy_exceptions": fault_policy_exceptions,
+            "fault_qualification_exceptions": [
+                {
+                    "workload": workload["id"],
+                    "profile": workload["coverage_output_contract"]["profile"],
+                    "reason": workload["coverage_output_contract"][
+                        "fault_qualification_withheld_reason"
+                    ],
+                    "tracking_issue": workload["coverage_output_contract"][
+                        "tracking_issue"
+                    ],
+                }
+                for workload in workloads
+                if workload["coverage_output_contract"] is not None
+                and workload["coverage_output_contract"]["withhold_fault_qualification"]
+            ],
+            "coverage_output_contracts": [
+                {
+                    "workload": workload["id"],
+                    "contract": workload["coverage_output_contract"],
+                }
+                for workload in workloads
+                if workload["coverage_output_contract"] is not None
+            ],
         },
         "fault_spec": spec_metadata,
         "workloads": workloads,
@@ -3003,13 +3670,37 @@ def _print_explain(document: dict) -> None:
             else "none"
         )
     )
+    print(
+        "coverage-output contracts: "
+        + (
+            ", ".join(
+                f"{item['workload']}/{item['contract']['profile']}"
+                f" ({item['contract']['tracking_issue']})"
+                for item in usability["coverage_output_contracts"]
+            )
+            if usability["coverage_output_contracts"]
+            else "none"
+        )
+    )
     print("exact selectors and effective per-trial environments: use --json")
     for workload in document["workloads"]:
         print(f"\n{workload['priority']} {workload['id']}")
         for phase in ("clean", "overhead"):
-            command = shlex.join(workload["commands"][phase]["payload_argv"])
-            processes = workload["commands"][phase]["processes"]
-            print(f"  {phase} ({processes} process(es)): {command}")
+            phase_command = workload["commands"][phase]
+            processes = phase_command["processes"]
+            if phase_command["payload_argv"] is not None:
+                command = shlex.join(phase_command["payload_argv"])
+                print(f"  {phase} ({processes} process(es)): {command}")
+            else:
+                for profile in workload["profiles"]:
+                    profile_id = profile["id"]
+                    command = shlex.join(
+                        phase_command["payload_argv_by_profile"][profile_id]
+                    )
+                    print(
+                        f"  {phase}/{profile_id} "
+                        f"({processes} process(es)): {command}"
+                    )
         for profile in workload["profiles"]:
             controls = ", ".join(
                 f"{setting['name']}={setting['value']} [{setting['category']}]"
@@ -3041,6 +3732,19 @@ def _fault_acceptance(result: dict, policy: dict) -> tuple[bool, list[str]]:
         reasons.append(f"planned={mutation.get('planned')}")
     if mutation.get("applied") != 1:
         reasons.append(f"applied={mutation.get('applied')}")
+    accounting_schema_version = mutation.get("accounting_schema_version")
+    if accounting_schema_version != 2:
+        reasons.append(
+            "accounting_schema_version="
+            f"{accounting_schema_version}, expected=2; rerun required"
+        )
+    elif mutation.get("installation_evidence_complete") is not True:
+        reasons.append(
+            "installation_evidence_complete="
+            f"{mutation.get('installation_evidence_complete')}"
+        )
+    if mutation.get("discarded_applied", 0):
+        reasons.append(f"discarded_applied={mutation['discarded_applied']}")
     expected_detector = policy.get("detector")
     actual_detector = result.get("sanitizer", {}).get("outcome")
     if expected_detector == "statistical":
@@ -3107,12 +3811,14 @@ def _fault(args: argparse.Namespace) -> int:
     summaries = []
     profile_summaries = []
     for profile in profiles:
-        policy, trials = _fault_trials(fault, profile)
-        if policy.get("disposition") == "not-applicable":
+        contract = _fault_qualification_contract_for_profile(workload, profile)
+        if contract is not None:
             row = {
                 "profile": profile,
                 "accepted": True,
                 "disposition": "not-applicable",
+                "reason": contract.fault_qualification_withheld_reason,
+                "tracking_issue": contract.tracking_issue,
             }
             summaries.append(row)
             profile_summaries.append(
@@ -3120,8 +3826,22 @@ def _fault(args: argparse.Namespace) -> int:
                     "profile": profile,
                     "accepted": True,
                     "disposition": "not-applicable",
+                    "reason": contract.fault_qualification_withheld_reason,
+                    "tracking_issue": contract.tracking_issue,
                 }
             )
+            continue
+        policy, trials = _fault_trials(fault, profile)
+        if policy.get("disposition") == "not-applicable":
+            row = {
+                "profile": profile,
+                "accepted": True,
+                "disposition": "not-applicable",
+                "reason": policy.get("reason"),
+                "tracking_issue": policy.get("tracking_issue"),
+            }
+            summaries.append(row)
+            profile_summaries.append(dict(row))
             continue
         profile_rows = []
         for index, trial in enumerate(trials):
@@ -3278,7 +3998,10 @@ def _run(args: argparse.Namespace) -> int:
     launcher = _launcher_from_json(args.launcher_json)
     artifact_root.mkdir(parents=True, exist_ok=True)
     _write_provenance(
-        workspace, target, workload, artifact_root / workload.id / args.phase
+        workspace,
+        target,
+        workload,
+        _workload_provenance_path(artifact_root, workload).parent,
     )
     profiles = PROFILE_IDS if args.profile == "all" else (args.profile,)
     if args.phase == "overhead" and args.include_baseline:

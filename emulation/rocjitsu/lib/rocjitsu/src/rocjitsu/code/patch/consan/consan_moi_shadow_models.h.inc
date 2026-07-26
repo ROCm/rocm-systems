@@ -904,7 +904,10 @@ consan_moi_sampled_begin_causal_claim(std::span<ConSanMoiSampledCausalWindow> wi
 
 [[nodiscard]] bool consan_moi_sampled_abort_causal_claim(ConSanMoiSampledCausalWindow &window);
 
-[[nodiscard]] bool consan_moi_supports_native_lds_record_replay_mnemonic(std::string_view mnemonic);
+/// Return whether every MOI engine can lower this native LDS mnemonic on the
+/// selected architecture.
+[[nodiscard]] bool consan_moi_supports_native_lds_mnemonic(std::string_view mnemonic,
+                                                           rj_code_arch_t arch);
 
 /// Return whether every MOI engine can lower this decoded FLAT LDS access.
 [[nodiscard]] bool consan_moi_supports_flat_access_mnemonic(std::string_view mnemonic);

@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "target": "gfx1201",
   "reference_only": true,
   "evidence_model": "cumulative rows from the retained RDNA4 status ledger",

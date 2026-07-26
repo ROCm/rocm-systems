@@ -759,7 +759,7 @@ void append_moi_atomic_site_dispositions(const Container &container, const ConSa
        container.name.find(options.test_kernel_name_filter) == std::string::npos))
     return;
   const bool in_kernel = std::is_same_v<Container, ConSanKernelInfo>;
-  const bool allow_gfx1250_lds = semantic_result.arch_name == "gfx1250";
+  const bool allow_gfx1250_lds = semantic_result.arch == ROCJITSU_CODE_ARCH_GFX1250;
   if (in_kernel && is_rocclr_runtime_kernel_name(container.name))
     return;
   for (const ConSanAtomicSite &site : container.atomic_sites) {

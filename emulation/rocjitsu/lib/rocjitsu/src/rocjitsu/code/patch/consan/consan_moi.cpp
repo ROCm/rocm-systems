@@ -227,8 +227,8 @@ bool consan_moi_supports_flat_access_mnemonic(std::string_view mnemonic) {
   return is_supported_moi_flat_access_mnemonic(mnemonic);
 }
 
-bool consan_moi_supports_native_lds_record_replay_mnemonic(std::string_view mnemonic) {
-  return is_single_range_native_lds_mnemonic(mnemonic) ||
+bool consan_moi_supports_native_lds_mnemonic(std::string_view mnemonic, rj_code_arch_t arch) {
+  return is_single_range_native_lds_mnemonic(mnemonic, arch) ||
          two_address_native_lds_offset_scale(mnemonic).has_value();
 }
 
@@ -711,11 +711,7 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
                                  std::span<const uint8_t> code_object_bytes) {
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = options.moi_engine;
-  const rj_code_arch_t arch = result.arch_name == "rdna4"     ? ROCJITSU_CODE_ARCH_RDNA4
-                              : result.arch_name == "gfx1250" ? ROCJITSU_CODE_ARCH_GFX1250
-                              : result.arch_name == "cdna3"   ? ROCJITSU_CODE_ARCH_CDNA3
-                              : result.arch_name == "cdna4"   ? ROCJITSU_CODE_ARCH_CDNA4
-                                                              : ROCJITSU_CODE_ARCH_INVALID;
+  const rj_code_arch_t arch = result.arch;
 
   size_t selected_candidate_count = 0;
   bool selected_flat_candidate = false;
@@ -873,7 +869,7 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
                                        inventory.inline_lds_bytes < selected_native_lds_extent;
     if (selected_flat_candidate || selected_dynamic_lds_owner || descriptor_opaque_lds) {
       const uint64_t external_lds_bytes = options.moi_max_workgroup_lds_bytes.value_or(
-          result.arch_name == "gfx1250"
+          result.arch == ROCJITSU_CODE_ARCH_GFX1250
               ? consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250)
               : static_cast<uint32_t>(kConSanMoiInlineShadowConservativeExactShadowEntries *
                                       consan_moi_exact_shadow::granule_bytes));

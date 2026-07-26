@@ -121,6 +121,58 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithRetainedInlineShadowProbe) {
   })) << testing::PrintToString(errors);
 }
 
+TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
+  const std::array<uint32_t, 7> text_words = {
+      0xD8340000u, 0x00000000u, // earlier ds_store_b32 destination
+      0xBE804EC1u,              // s_barrier_signal -1
+      0xBF94FFFFu,              // s_barrier_wait -1
+      0xD8D80000u, 0x00000000u, // later ds_load_b32 destination
+      0xBFB00000u,
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+  ConSanOptions selection_options;
+  selection_options.flavor = ConSanFlavor::SuperCollider;
+  const ConSanResult selection = try_patch_consan(bytes, selection_options);
+  ASSERT_EQ(selection.fault_sites.size(), 2u);
+  const auto destination = std::ranges::find(selection.barrier_move_destinations, 0u,
+                                             &ConSanBarrierMoveDestination::text_offset);
+  ASSERT_NE(destination, selection.barrier_move_destinations.end());
+
+  ConSanOptions live_options = moi_options(ConSanMoiEngine::RecordReplay);
+  live_options.moi_track_barriers = true;
+  live_options.moi_track_atomics = true;
+  live_options.moi_report_buffer_address = 0x123456780000ull;
+  live_options.moi_report_buffer_size = 64u * 1024u * 1024u;
+  live_options.max_patches = 16;
+  live_options.fault_move_barrier = true;
+  live_options.fault_require_exactly_one = true;
+  live_options.fault_site_identity = selection.fault_sites.front().identity;
+  live_options.fault_barrier_move_direction = ConSanBarrierMoveDirection::Earlier;
+  live_options.fault_barrier_destination_identity = destination->identity;
+
+  ConSanOptions pristine_options = live_options;
+  pristine_options.fault_move_barrier = false;
+  pristine_options.fault_require_exactly_one = false;
+  pristine_options.moi_report_buffer_address.reset();
+  pristine_options.moi_report_buffer_size = 0;
+  const ConSanResult pristine = try_patch_consan(bytes, pristine_options);
+  const ConSanMoiAutoReportInventory pristine_inventory =
+      inventory_consan_moi_auto_report(pristine, pristine_options, bytes);
+
+  const ConSanResult live = try_patch_consan(bytes, live_options);
+  ASSERT_EQ(live.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(live.errors) << testing::PrintToString(live.warnings);
+  ASSERT_EQ(live.applied_fault_mutations, 1u);
+  const ConSanMoiAutoReportInventory live_inventory =
+      inventory_consan_moi_auto_report(live, live_options, bytes);
+
+  EXPECT_TRUE(consan_moi_auto_report_inventory_covers(pristine_inventory, live_inventory));
+  EXPECT_EQ(pristine_inventory.access_range_count, live_inventory.access_range_count);
+  EXPECT_GE(pristine_inventory.barrier_event_count, live_inventory.barrier_event_count);
+  EXPECT_GE(pristine_inventory.atomic_event_count, live_inventory.atomic_event_count);
+  EXPECT_GE(pristine_inventory.fence_event_count, live_inventory.fence_event_count);
+}
+
 TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow) {
   const std::array<uint32_t, 9> kernel_words = {
       0xD8340000u, 0x00000000u, // ds_store_b32

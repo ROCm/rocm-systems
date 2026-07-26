@@ -12,6 +12,8 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <future>
 #include <mutex>
 #include <optional>
 #include <ranges>
@@ -148,11 +150,34 @@ std::vector<rocjitsu::ConSanMoiEngine> g_transform_override_engines;
 std::vector<bool> g_transform_override_abort_unmatched_waits;
 std::vector<bool> g_transform_override_track_barriers;
 std::vector<bool> g_transform_override_track_atomics;
+std::vector<bool> g_transform_override_fault_drop_barriers;
+std::vector<bool> g_transform_override_fault_mutations;
+std::vector<bool> g_transform_override_fault_dry_runs;
+bool g_transform_override_uses_production = false;
+bool g_transform_override_models_fault_application = false;
+size_t g_transform_override_actual_fault_applications = 1;
+std::optional<rocjitsu::ConSanResult> g_transform_override_live_fault_result;
+std::mutex g_transform_observation_mutex;
+std::mutex g_fault_application_block_mutex;
+std::condition_variable g_fault_application_block_cv;
+bool g_block_first_fault_application = false;
+bool g_first_fault_application_entered = false;
+bool g_release_first_fault_application = false;
+std::optional<rocjitsu::ConSanResult> g_first_fault_application_result;
+std::mutex g_loader_block_mutex;
+std::condition_variable g_loader_block_cv;
+bool g_block_first_loader_call = false;
+bool g_first_loader_call_entered = false;
+bool g_release_first_loader_call = false;
+std::function<hsa_status_t()> g_reentrant_fault_load;
+std::optional<hsa_status_t> g_reentrant_fault_load_status;
 std::vector<uint32_t> g_transform_override_runtime_sample_strides;
 std::vector<uint64_t> g_transform_override_report_sizes;
 std::vector<std::optional<uint64_t>> g_transform_override_sc_report_addresses;
 std::vector<std::optional<rocjitsu::ConSanMoiReportLayoutOverride>>
     g_transform_override_report_layouts;
+bool g_seed_auto_replay_report_on_load = false;
+bool g_seed_auto_replay_report_succeeded = false;
 std::vector<std::vector<uint8_t>> g_fake_allocations;
 std::vector<hsa_amd_memory_pool_t> g_fake_allocation_pools;
 std::vector<size_t> g_fake_allocation_sizes;
@@ -509,30 +534,126 @@ hsa_status_t HSA_API fake_memory_assign_agent(void *, hsa_agent_t agent, hsa_acc
 
 rocjitsu::ConSanResult transform_override(std::span<const uint8_t> bytes,
                                           const rocjitsu::ConSanOptions &options) {
-  g_transform_override_flavors.push_back(options.flavor);
-  g_transform_override_engines.push_back(options.moi_engine);
-  g_transform_override_abort_unmatched_waits.push_back(options.abort_unmatched_barrier_wait);
-  g_transform_override_track_barriers.push_back(options.moi_track_barriers);
-  g_transform_override_track_atomics.push_back(options.moi_track_atomics);
-  g_transform_override_runtime_sample_strides.push_back(options.moi_runtime_sample_stride);
-  g_transform_override_sc_report_addresses.push_back(options.report_buffer_address);
-  g_transform_override_report_sizes.push_back(options.moi_report_buffer_size);
-  g_transform_override_report_layouts.push_back(options.moi_report_layout);
+  const bool fault_mutation_enabled =
+      options.fault_drop_barrier || options.fault_move_barrier ||
+      options.fault_mutate_barrier_id_scope || options.fault_mutate_barrier_participants ||
+      options.fault_atomic_wrong_address || options.fault_atomic_weaken_order ||
+      options.fault_atomic_weaken_scope || options.fault_ordinary_wrong_address ||
+      options.fault_ordinary_weaken_order || options.fault_ordinary_weaken_scope;
+  {
+    std::lock_guard lock(g_transform_observation_mutex);
+    g_transform_override_flavors.push_back(options.flavor);
+    g_transform_override_engines.push_back(options.moi_engine);
+    g_transform_override_abort_unmatched_waits.push_back(options.abort_unmatched_barrier_wait);
+    g_transform_override_track_barriers.push_back(options.moi_track_barriers);
+    g_transform_override_track_atomics.push_back(options.moi_track_atomics);
+    g_transform_override_fault_drop_barriers.push_back(options.fault_drop_barrier);
+    g_transform_override_fault_mutations.push_back(fault_mutation_enabled);
+    g_transform_override_fault_dry_runs.push_back(options.fault_dry_run);
+    g_transform_override_runtime_sample_strides.push_back(options.moi_runtime_sample_stride);
+    g_transform_override_sc_report_addresses.push_back(options.report_buffer_address);
+    g_transform_override_report_sizes.push_back(options.moi_report_buffer_size);
+    g_transform_override_report_layouts.push_back(options.moi_report_layout);
+  }
+  if (g_transform_override_uses_production)
+    return rocjitsu::try_patch_consan(bytes, options);
   rocjitsu::ConSanResult result = g_transform_override_result;
+  if (g_transform_override_models_fault_application && fault_mutation_enabled &&
+      !options.fault_dry_run) {
+    if (g_transform_override_live_fault_result)
+      result = *g_transform_override_live_fault_result;
+    if (g_reentrant_fault_load) {
+      auto load = std::move(g_reentrant_fault_load);
+      g_reentrant_fault_load = {};
+      g_reentrant_fault_load_status = load();
+    }
+    std::unique_lock lock(g_fault_application_block_mutex);
+    if (g_block_first_fault_application && !g_first_fault_application_entered) {
+      g_first_fault_application_entered = true;
+      g_fault_application_block_cv.notify_all();
+      g_fault_application_block_cv.wait(lock, [] { return g_release_first_fault_application; });
+      if (g_first_fault_application_result)
+        result = *g_first_fault_application_result;
+    }
+  }
   result.visited_code_object = true;
   result.input_size = bytes.size();
   result.flavor = options.flavor;
   result.moi_engine = options.moi_engine;
+  if (g_transform_override_models_fault_application) {
+    result.planned_fault_mutations = fault_mutation_enabled ? 1u : 0u;
+    result.applied_fault_mutations = fault_mutation_enabled && !options.fault_dry_run
+                                         ? g_transform_override_actual_fault_applications
+                                         : 0u;
+  }
   return result;
 }
 
 hsa_status_t HSA_API fake_executable_load_agent_code_object(
     hsa_executable_t, hsa_agent_t agent, hsa_code_object_reader_t reader, const char *,
     hsa_loaded_code_object_t *loaded_code_object) {
-  ++g_fake_load_agent_calls;
-  g_last_load_agent = agent;
-  g_last_load_reader = reader;
-  g_loaded_code_object_readers.push_back(reader.handle);
+  {
+    std::lock_guard lock(g_transform_observation_mutex);
+    ++g_fake_load_agent_calls;
+    g_last_load_agent = agent;
+    g_last_load_reader = reader;
+    g_loaded_code_object_readers.push_back(reader.handle);
+  }
+  {
+    std::unique_lock lock(g_loader_block_mutex);
+    if (g_block_first_loader_call && !g_first_loader_call_entered) {
+      g_first_loader_call_entered = true;
+      g_loader_block_cv.notify_all();
+      g_loader_block_cv.wait(lock, [] { return g_release_first_loader_call; });
+    }
+  }
+  std::lock_guard observation_lock(g_transform_observation_mutex);
+  if (g_seed_auto_replay_report_on_load) {
+    g_seed_auto_replay_report_on_load = false;
+    if (g_core_memory_allocations.empty() || g_transform_override_report_layouts.empty() ||
+        !g_transform_override_report_layouts.back()) {
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
+    const rocjitsu::ConSanMoiReportLayoutOverride &layout =
+        *g_transform_override_report_layouts.back();
+    if (layout.access_record_capacity < 2u)
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+    auto *const report = static_cast<uint8_t *>(g_core_memory_allocations.back());
+    auto *const header = reinterpret_cast<rocjitsu::ConSanMoiReportHeader *>(report);
+    header->access_record_count = 2;
+    auto *const records =
+        reinterpret_cast<rocjitsu::ConSanMoiAccessRecord *>(report + layout.access_records_offset);
+    records[0] = {
+        .generation = header->generation,
+        .workgroup_x = 0,
+        .wave_id = 1,
+        .lane_mask = 0x1,
+        .instruction_offset = 0xfe96c,
+        .access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write),
+        .lds_byte_offset = 16,
+        .lds_byte_count = 4,
+        .start_cell = 4,
+        .cell_count = 1,
+        .epoch = 3,
+        .event_index = 1,
+    };
+    records[1] = {
+        .generation = header->generation,
+        .workgroup_x = 0,
+        .wave_id = 2,
+        .lane_mask = 0x2,
+        .instruction_offset = 0xfe974,
+        .access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write),
+        .lds_byte_offset = 16,
+        .lds_byte_count = 4,
+        .start_cell = 4,
+        .cell_count = 1,
+        .epoch = 3,
+        .event_index = 2,
+    };
+    g_seed_auto_replay_report_succeeded = true;
+  }
   if (loaded_code_object != nullptr)
     loaded_code_object->handle = 77;
   return HSA_STATUS_SUCCESS;
@@ -960,10 +1081,34 @@ void reset_code_object_observations() {
   g_transform_override_abort_unmatched_waits.clear();
   g_transform_override_track_barriers.clear();
   g_transform_override_track_atomics.clear();
+  g_transform_override_fault_drop_barriers.clear();
+  g_transform_override_fault_mutations.clear();
+  g_transform_override_fault_dry_runs.clear();
+  g_transform_override_uses_production = false;
+  g_transform_override_models_fault_application = false;
+  g_transform_override_actual_fault_applications = 1;
+  g_transform_override_live_fault_result.reset();
+  {
+    std::lock_guard lock(g_fault_application_block_mutex);
+    g_block_first_fault_application = false;
+    g_first_fault_application_entered = false;
+    g_release_first_fault_application = false;
+    g_first_fault_application_result.reset();
+  }
+  {
+    std::lock_guard lock(g_loader_block_mutex);
+    g_block_first_loader_call = false;
+    g_first_loader_call_entered = false;
+    g_release_first_loader_call = false;
+  }
+  g_reentrant_fault_load = {};
+  g_reentrant_fault_load_status.reset();
   g_transform_override_runtime_sample_strides.clear();
   g_transform_override_sc_report_addresses.clear();
   g_transform_override_report_sizes.clear();
   g_transform_override_report_layouts.clear();
+  g_seed_auto_replay_report_on_load = false;
+  g_seed_auto_replay_report_succeeded = false;
   g_transform_override_result = {};
 }
 
@@ -1093,6 +1238,18 @@ TEST(HsaHooksUnitTest, ConSanRejectsInvalidMode) {
   EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn, original_load);
 }
 
+TEST(HsaHooksUnitTest, ConSanRejectsZeroFaultReservationTimeout) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar reservation_timeout("RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS", "0");
+
+  reset_code_object_observations();
+  FakeApiTable api;
+  const auto original_load = api.core.hsa_executable_load_agent_code_object_fn;
+  InstalledDbiHook hook(api);
+  EXPECT_FALSE(hook.installed());
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn, original_load);
+}
+
 TEST(HsaHooksUnitTest, ConSanRejectsInvalidPolicy) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
   ScopedEnvVar policy("RJ_CONSAN_POLICY", "fatal-races");
@@ -1198,10 +1355,19 @@ void run_hook_load_case(const ConSanHookProfile &profile, bool fail_closed,
                         rocjitsu::ConSanResult transform_result, hsa_status_t expected_load_status,
                         uint64_t expected_loaded_reader,
                         std::span<const uint8_t> expected_replacement = {},
-                        bool fail_replacement_reader_create = false) {
+                        bool fail_replacement_reader_create = false,
+                        bool use_moi_auto_report = false) {
   reset_code_object_observations();
   g_fail_replacement_reader_create = fail_replacement_reader_create;
   configure_consan_profile(profile, fail_closed);
+  std::optional<ScopedEnvVar> report_buffer;
+  std::optional<ScopedEnvVar> report_buffer_size;
+  std::optional<ScopedEnvVar> auto_report_buffer_size;
+  if (use_moi_auto_report) {
+    report_buffer.emplace("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+    report_buffer_size.emplace("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+    auto_report_buffer_size.emplace("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "65536");
+  }
   g_transform_override_result = std::move(transform_result);
   FakeApiTable api;
   InstalledDbiHook hook(api);
@@ -1218,6 +1384,10 @@ void run_hook_load_case(const ConSanHookProfile &profile, bool fail_closed,
       hsa_executable_t{7}, kHostAgent, original_reader, nullptr, nullptr);
   EXPECT_EQ(status, expected_load_status) << profile.name;
   expect_transform_profile(profile);
+  if (use_moi_auto_report) {
+    ASSERT_EQ(g_transform_override_report_sizes.size(), 1u);
+    EXPECT_EQ(g_transform_override_report_sizes.front(), 0u);
+  }
   if (expected_loaded_reader == 0) {
     EXPECT_TRUE(g_loaded_code_object_readers.empty()) << profile.name;
   } else {
@@ -1238,8 +1408,9 @@ void run_hook_load_case(const ConSanHookProfile &profile, bool fail_closed,
   }
   ASSERT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
   EXPECT_EQ(g_destroyed_executables, std::vector<uint64_t>{7u}) << profile.name;
-  if (!expected_replacement.empty())
+  if (!expected_replacement.empty()) {
     EXPECT_TRUE(g_replacement_storage_valid_at_executable_destroy) << profile.name;
+  }
 }
 
 void reset_pool_blocker(bool enabled) {
@@ -1339,6 +1510,7 @@ TEST(HsaHooksUnitTest, ConSanLoaderHonorsAllTypedOutcomesAcrossAllProfiles) {
 
     const std::array<uint8_t, 7> replacement = {'p', 'a', 't', 'c', 'h', 'e', 'd'};
     rocjitsu::ConSanResult modified;
+    modified.arch = ROCJITSU_CODE_ARCH_CDNA3;
     modified.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
     modified.modified = true;
     modified.final_validation_passed = true;
@@ -1352,6 +1524,40 @@ TEST(HsaHooksUnitTest, ConSanLoaderHonorsAllTypedOutcomesAcrossAllProfiles) {
     corrupt.final_validation_passed = false;
     run_hook_load_case(profile, false, corrupt, HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
     run_hook_load_case(profile, true, corrupt, HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
+  }
+}
+
+TEST(HsaHooksUnitTest, ConSanProductionUnsupportedTargetPassesThroughWhenFailOpen) {
+  const std::vector<uint8_t> unsupported =
+      rocjitsu::waitcheck_test::make_gfx1200_code_object({0xBFB00000u});
+  rocjitsu::ConSanOptions direct_options;
+  direct_options.flavor = rocjitsu::ConSanFlavor::Moi;
+  const rocjitsu::ConSanResult direct = rocjitsu::try_patch_consan(unsupported, direct_options);
+  ASSERT_EQ(direct.outcome, rocjitsu::ConSanTransformOutcome::Unsupported);
+  ASSERT_EQ(direct.arch, ROCJITSU_CODE_ARCH_INVALID);
+  ASSERT_FALSE(direct.text_sections.empty());
+  ASSERT_FALSE(direct.kernels.empty());
+  ASSERT_FALSE(direct.semantic_arch_required);
+  ASSERT_TRUE(rocjitsu::consan_result_has_resolved_semantic_arch(direct));
+
+  for (const ConSanHookProfile &profile : kConSanHookProfiles) {
+    SCOPED_TRACE(profile.name);
+    reset_code_object_observations();
+    configure_consan_profile(profile, /*fail_closed=*/false);
+    g_transform_override_uses_production = true;
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << profile.name << ": " << hook.error();
+
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(unsupported.data(),
+                                                                    unsupported.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+    expect_transform_profile(profile);
+    EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{101u});
   }
 }
 
@@ -1472,6 +1678,7 @@ TEST(HsaHooksUnitTest, ConSanRequirePatchRejectsPrologueOnlyMoiMutation) {
   ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
 
   rocjitsu::ConSanResult prologue_only;
+  prologue_only.arch = ROCJITSU_CODE_ARCH_RDNA4;
   prologue_only.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
   prologue_only.modified = true;
   prologue_only.final_validation_passed = true;
@@ -1515,6 +1722,501 @@ TEST(HsaHooksUnitTest, ConSanRequirePatchRejectsPrologueOnlyMoiMutation) {
                      site_patched.elf_bytes);
 }
 
+rocjitsu::ConSanResult b96_require_patch_result_for_arch(rj_code_arch_t arch) {
+  rocjitsu::ConSanResult result;
+  result.arch = arch;
+  result.semantic_arch_required = true;
+  result.flavor = rocjitsu::ConSanFlavor::Moi;
+  result.moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
+  result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  result.modified = true;
+  result.final_validation_passed = true;
+  result.elf_bytes = {0x7f, 'E', 'L', 'F', 'b', '9', '6'};
+  for (const auto &[kind, mnemonic] :
+       {std::pair{rocjitsu::ConSanLdsAccessKind::Read, std::string{"ds_load_b96"}},
+        std::pair{rocjitsu::ConSanLdsAccessKind::Write, std::string{"ds_store_b96"}}}) {
+    rocjitsu::ConSanMoiCandidate candidate;
+    candidate.source = rocjitsu::ConSanMoiCandidateSource::NativeLds;
+    candidate.kind = kind;
+    candidate.size = 3u * sizeof(uint32_t);
+    candidate.width_bits = 96u;
+    candidate.addr_vgpr = 0u;
+    candidate.mnemonic = mnemonic;
+    result.moi_candidates.push_back(std::move(candidate));
+  }
+  rocjitsu::ConSanPatchInfo prologue_patch;
+  prologue_patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
+  prologue_patch.kind = rocjitsu::ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
+  result.patches.push_back(prologue_patch);
+  return result;
+}
+
+TEST(HsaHooksUnitTest, ConSanRequirePatchUsesArchitectureAwareB96Support) {
+  ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", "1");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    testing::internal::CaptureStderr();
+    run_hook_load_case(kConSanHookProfiles[1], false, b96_require_patch_result_for_arch(arch),
+                       HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
+    const std::string log = testing::internal::GetCapturedStderr();
+    EXPECT_NE(log.find("access=0/2"), std::string::npos) << log;
+  }
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    const rocjitsu::ConSanResult result = b96_require_patch_result_for_arch(arch);
+    testing::internal::CaptureStderr();
+    run_hook_load_case(kConSanHookProfiles[1], false, result, HSA_STATUS_SUCCESS, 102u,
+                       result.elf_bytes);
+    const std::string log = testing::internal::GetCapturedStderr();
+    EXPECT_NE(log.find("access=0/0"), std::string::npos) << log;
+  }
+}
+
+TEST(HsaHooksUnitTest, ConSanLoadRejectsArchitectureDependentResultWithoutResolvedArch) {
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+
+  testing::internal::CaptureStderr();
+  run_hook_load_case(kConSanHookProfiles[1], false,
+                     b96_require_patch_result_for_arch(ROCJITSU_CODE_ARCH_INVALID),
+                     HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
+  const std::string direct_error = testing::internal::GetCapturedStderr();
+  EXPECT_NE(direct_error.find("ConSan internal invariant violation"), std::string::npos);
+  EXPECT_NE(direct_error.find("reason=internal-semantic-arch-missing"), std::string::npos);
+
+  testing::internal::CaptureStderr();
+  run_hook_load_case(kConSanHookProfiles[1], false,
+                     b96_require_patch_result_for_arch(ROCJITSU_CODE_ARCH_INVALID),
+                     HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u,
+                     /*expected_replacement=*/{},
+                     /*fail_replacement_reader_create=*/false,
+                     /*use_moi_auto_report=*/true);
+  const std::string inventory_error = testing::internal::GetCapturedStderr();
+  EXPECT_NE(inventory_error.find("reason=internal-semantic-arch-missing"), std::string::npos);
+
+  rocjitsu::ConSanResult empty_moi;
+  empty_moi.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  run_hook_load_case(kConSanHookProfiles[1], false, empty_moi, HSA_STATUS_SUCCESS, 101u);
+}
+
+TEST(HsaHooksUnitTest, ConSanStrictRejectionFlushesDiscardedFaultInstallationEvidence) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
+  ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", nullptr);
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
+  ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
+  g_transform_override_result = b96_require_patch_result_for_arch(ROCJITSU_CODE_ARCH_RDNA4);
+  g_transform_override_models_fault_application = true;
+
+  ASSERT_EXIT(([] {
+                FakeApiTable api;
+                InstalledDbiHook hook(api);
+                if (!hook.installed())
+                  std::_Exit(1);
+                constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+                hsa_code_object_reader_t reader{};
+                if (api.core.hsa_code_object_reader_create_from_memory_fn(
+                        original.data(), original.size(), &reader) != HSA_STATUS_SUCCESS)
+                  std::_Exit(2);
+                (void)api.core.hsa_executable_load_agent_code_object_fn(
+                    hsa_executable_t{7}, kHostAgent, reader, nullptr, nullptr);
+                std::_Exit(3);
+              }()),
+              testing::ExitedWithCode(92), "ConSan fault install.*applied=1 installed=false");
+}
+
+TEST(HsaHooksUnitTest, ConSanFaultReservationIsReleasedAfterRejectedTransform) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
+  ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+  g_transform_override_result = b96_require_patch_result_for_arch(ROCJITSU_CODE_ARCH_INVALID);
+  g_transform_override_models_fault_application = true;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  testing::internal::CaptureStderr();
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  for (size_t load = 0; load < 2; ++load) {
+    SCOPED_TRACE(load);
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  }
+
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(g_transform_override_fault_drop_barriers, (std::vector<bool>{true, true, true, true}));
+  EXPECT_NE(log.find("applied=1 installed=false"), std::string::npos) << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanFaultReservationIsReleasedWhenReplacementIsNotInstalled) {
+  reset_code_object_observations();
+  ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
+  ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  configure_consan_profile(kConSanHookProfiles[1], false);
+
+  g_transform_override_result = b96_require_patch_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
+  g_transform_override_models_fault_application = true;
+  g_fail_replacement_reader_create = true;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+  testing::internal::CaptureStderr();
+
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t first_reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &first_reader),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                              first_reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+
+  g_fail_replacement_reader_create = false;
+  hsa_code_object_reader_t second_reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &second_reader),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                              second_reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+
+  EXPECT_EQ(g_transform_override_fault_drop_barriers, (std::vector<bool>{true, true, true, true}));
+  EXPECT_EQ(g_loaded_code_object_readers, (std::vector<uint64_t>{101u, 104u}));
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log.find("applied=1 installed=false"), std::string::npos) << log;
+  EXPECT_NE(log.find("applied=1 installed=true"), std::string::npos) << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanFaultReservationIsRetainedAfterReplacementLoads) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
+  ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+
+  g_transform_override_result = b96_require_patch_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
+  g_transform_override_models_fault_application = true;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  for (size_t load = 0; load < 2; ++load) {
+    SCOPED_TRACE(load);
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+  }
+
+  EXPECT_EQ(g_transform_override_fault_drop_barriers, (std::vector<bool>{true, true, true, false}));
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+}
+
+TEST(HsaHooksUnitTest, ConSanFaultReservationRetriesAfterConcurrentRejectedOwner) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
+  ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
+  ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", "1");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar reservation_timeout("RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS", "30000");
+
+  g_transform_override_result = b96_require_patch_result_for_arch(ROCJITSU_CODE_ARCH_RDNA4);
+  rocjitsu::ConSanPatchInfo site_patch;
+  site_patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
+  site_patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  g_transform_override_result.patches.push_back(site_patch);
+  g_transform_override_models_fault_application = true;
+  g_block_first_fault_application = true;
+  g_first_fault_application_result = b96_require_patch_result_for_arch(ROCJITSU_CODE_ARCH_RDNA4);
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  constexpr std::array<uint8_t, 8> first = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  constexpr std::array<uint8_t, 8> second = {0x7f, 'E', 'L', 'F', 5, 6, 7, 8};
+  hsa_code_object_reader_t first_reader{};
+  hsa_code_object_reader_t second_reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(first.data(), first.size(),
+                                                                  &first_reader),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(second.data(), second.size(),
+                                                                  &second_reader),
+            HSA_STATUS_SUCCESS);
+
+  auto load = [&](hsa_code_object_reader_t reader) {
+    return api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                             reader, nullptr, nullptr);
+  };
+  std::future<hsa_status_t> first_load = std::async(std::launch::async, load, first_reader);
+  {
+    std::unique_lock lock(g_fault_application_block_mutex);
+    if (!g_fault_application_block_cv.wait_for(lock, std::chrono::seconds(2),
+                                               [] { return g_first_fault_application_entered; })) {
+      g_release_first_fault_application = true;
+      lock.unlock();
+      g_fault_application_block_cv.notify_all();
+      (void)first_load.get();
+      FAIL() << "first fault application did not reach the blocked transform";
+      return;
+    }
+  }
+
+  std::future<hsa_status_t> second_load = std::async(std::launch::async, load, second_reader);
+  EXPECT_EQ(second_load.wait_for(std::chrono::milliseconds(100)), std::future_status::timeout);
+  {
+    std::lock_guard lock(g_fault_application_block_mutex);
+    g_release_first_fault_application = true;
+  }
+  g_fault_application_block_cv.notify_all();
+
+  EXPECT_EQ(first_load.get(), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  EXPECT_EQ(second_load.get(), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{103u});
+  EXPECT_TRUE(std::ranges::all_of(g_transform_override_fault_drop_barriers,
+                                  [](bool enabled) { return enabled; }));
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+}
+
+TEST(HsaHooksUnitTest, ConSanFaultReservationTimesOutWithoutApplyingASecondMutation) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
+  ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar reservation_timeout("RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS", "20");
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+  g_transform_override_result = b96_require_patch_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
+  g_transform_override_models_fault_application = true;
+  g_block_first_fault_application = true;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  constexpr std::array<uint8_t, 8> first = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  constexpr std::array<uint8_t, 8> second = {0x7f, 'E', 'L', 'F', 5, 6, 7, 8};
+  hsa_code_object_reader_t first_reader{};
+  hsa_code_object_reader_t second_reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(first.data(), first.size(),
+                                                                  &first_reader),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(second.data(), second.size(),
+                                                                  &second_reader),
+            HSA_STATUS_SUCCESS);
+
+  auto load = [&](hsa_code_object_reader_t reader) {
+    return api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                             reader, nullptr, nullptr);
+  };
+  testing::internal::CaptureStderr();
+  std::future<hsa_status_t> first_load = std::async(std::launch::async, load, first_reader);
+  {
+    std::unique_lock lock(g_fault_application_block_mutex);
+    ASSERT_TRUE(g_fault_application_block_cv.wait_for(
+        lock, std::chrono::seconds(2), [] { return g_first_fault_application_entered; }));
+  }
+
+  std::future<hsa_status_t> second_load = std::async(std::launch::async, load, second_reader);
+  EXPECT_EQ(second_load.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  EXPECT_EQ(second_load.get(), HSA_STATUS_SUCCESS);
+  {
+    std::lock_guard lock(g_fault_application_block_mutex);
+    g_release_first_fault_application = true;
+  }
+  g_fault_application_block_cv.notify_all();
+  EXPECT_EQ(first_load.get(), HSA_STATUS_SUCCESS);
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_NE(log.find("outcome=contention-timeout"), std::string::npos) << log;
+  EXPECT_NE(std::ranges::find(g_transform_override_fault_drop_barriers, false),
+            g_transform_override_fault_drop_barriers.end());
+  EXPECT_EQ(std::ranges::count(g_transform_override_fault_drop_barriers, false), 1);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+}
+
+TEST(HsaHooksUnitTest, ConSanFaultReservationTimesOutWhileOwnerIsInLoader) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
+  ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar reservation_timeout("RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS", "20");
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+  g_transform_override_result = b96_require_patch_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
+  g_transform_override_models_fault_application = true;
+  g_block_first_loader_call = true;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  constexpr std::array<uint8_t, 8> first = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  constexpr std::array<uint8_t, 8> second = {0x7f, 'E', 'L', 'F', 5, 6, 7, 8};
+  hsa_code_object_reader_t first_reader{};
+  hsa_code_object_reader_t second_reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(first.data(), first.size(),
+                                                                  &first_reader),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(second.data(), second.size(),
+                                                                  &second_reader),
+            HSA_STATUS_SUCCESS);
+
+  auto load = [&](hsa_code_object_reader_t reader) {
+    return api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                             reader, nullptr, nullptr);
+  };
+  testing::internal::CaptureStderr();
+  std::future<hsa_status_t> first_load = std::async(std::launch::async, load, first_reader);
+  {
+    std::unique_lock lock(g_loader_block_mutex);
+    if (!g_loader_block_cv.wait_for(lock, std::chrono::seconds(2),
+                                    [] { return g_first_loader_call_entered; })) {
+      g_release_first_loader_call = true;
+      lock.unlock();
+      g_loader_block_cv.notify_all();
+      (void)first_load.get();
+      FAIL() << "first fault application did not reach the blocked loader";
+      return;
+    }
+  }
+
+  std::future<hsa_status_t> second_load = std::async(std::launch::async, load, second_reader);
+  EXPECT_EQ(second_load.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  EXPECT_EQ(second_load.get(), HSA_STATUS_SUCCESS);
+  {
+    std::lock_guard lock(g_loader_block_mutex);
+    g_release_first_loader_call = true;
+  }
+  g_loader_block_cv.notify_all();
+  EXPECT_EQ(first_load.get(), HSA_STATUS_SUCCESS);
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_NE(log.find("outcome=contention-timeout"), std::string::npos) << log;
+  EXPECT_NE(std::ranges::find(g_transform_override_fault_drop_barriers, false),
+            g_transform_override_fault_drop_barriers.end());
+  EXPECT_EQ(std::ranges::count(g_transform_override_fault_drop_barriers, false), 1);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+}
+
+TEST(HsaHooksUnitTest, ConSanFaultReservationRejectsSameThreadReentry) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
+  ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+  g_transform_override_result = b96_require_patch_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
+  g_transform_override_models_fault_application = true;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  constexpr std::array<uint8_t, 8> first = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  constexpr std::array<uint8_t, 8> second = {0x7f, 'E', 'L', 'F', 5, 6, 7, 8};
+  hsa_code_object_reader_t first_reader{};
+  hsa_code_object_reader_t second_reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(first.data(), first.size(),
+                                                                  &first_reader),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(second.data(), second.size(),
+                                                                  &second_reader),
+            HSA_STATUS_SUCCESS);
+  g_reentrant_fault_load = [&] {
+    return api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                             second_reader, nullptr, nullptr);
+  };
+
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                              first_reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  ASSERT_TRUE(g_reentrant_fault_load_status.has_value());
+  EXPECT_EQ(*g_reentrant_fault_load_status, HSA_STATUS_SUCCESS);
+  EXPECT_NE(log.find("outcome=reentrant-contention"), std::string::npos) << log;
+  EXPECT_NE(std::ranges::find(g_transform_override_fault_drop_barriers, false),
+            g_transform_override_fault_drop_barriers.end());
+  EXPECT_EQ(std::ranges::count(g_transform_override_fault_drop_barriers, false), 1);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+}
+
+TEST(HsaHooksUnitTest, ConSanExactOneRejectsMultipleAppliedMutationsBeforeInstallation) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
+  ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+
+  g_transform_override_result = b96_require_patch_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
+  g_transform_override_models_fault_application = true;
+  g_transform_override_actual_fault_applications = 2;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+  testing::internal::CaptureStderr();
+
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t first_reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &first_reader),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                              first_reader, nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  EXPECT_TRUE(g_loaded_code_object_readers.empty());
+
+  g_transform_override_actual_fault_applications = 1;
+  hsa_code_object_reader_t second_reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &second_reader),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                              second_reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(g_loaded_code_object_readers.size(), 1u);
+  EXPECT_EQ(g_loaded_code_object_readers.front(), 103u);
+
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log.find("reason=multiple-fault-mutations-applied"), std::string::npos) << log;
+  EXPECT_NE(log.find("applied=2 installed=false"), std::string::npos) << log;
+  EXPECT_NE(log.find("applied=1 installed=true"), std::string::npos) << log;
+}
+
 TEST(HsaHooksUnitTest, ConSanSynchronizationDefaultsRemainExplicitlyOverridable) {
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[2], false);
@@ -1543,6 +2245,7 @@ TEST(HsaHooksUnitTest, ConSanSynchronizationDefaultsRemainExplicitlyOverridable)
 
 rocjitsu::ConSanResult diagnostic_coverage_transform_result() {
   rocjitsu::ConSanResult result;
+  result.arch = ROCJITSU_CODE_ARCH_RDNA4;
   result.flavor = rocjitsu::ConSanFlavor::Moi;
   result.moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
   result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
@@ -1636,6 +2339,7 @@ TEST(HsaHooksUnitTest, ConSanCoverageDoesNotResurrectNotApplicableResourcePlan) 
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   const ConSanHookProfile &profile = kConSanHookProfiles[1];
   rocjitsu::ConSanResult result;
+  result.arch = ROCJITSU_CODE_ARCH_RDNA4;
   result.flavor = rocjitsu::ConSanFlavor::Moi;
   result.moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
   result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
@@ -1671,6 +2375,7 @@ TEST(HsaHooksUnitTest, ConSanCoverageDoesNotResurrectNotApplicableResourcePlan) 
 
 rocjitsu::ConSanResult auto_report_atomic_transform_result() {
   rocjitsu::ConSanResult result;
+  result.arch = ROCJITSU_CODE_ARCH_RDNA4;
   result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
   result.modified = true;
   result.final_validation_passed = true;
@@ -1689,8 +2394,215 @@ rocjitsu::ConSanResult auto_report_atomic_transform_result() {
   return result;
 }
 
+rocjitsu::ConSanResult auto_report_replay_transform_result() {
+  rocjitsu::ConSanResult result = auto_report_atomic_transform_result();
+  result.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  result.input_fingerprint = "fnv1a64:0123456789abcdef";
+
+  rocjitsu::ConSanMoiCandidate candidate;
+  candidate.source = rocjitsu::ConSanMoiCandidateSource::NativeLds;
+  candidate.kind = rocjitsu::ConSanLdsAccessKind::Write;
+  candidate.size = sizeof(uint32_t);
+  candidate.width_bits = 32u;
+  candidate.file_offset = 0u;
+  candidate.text_offset = 0u;
+  candidate.container_name = "auto_report_access";
+  candidate.mnemonic = "ds_store_b32";
+  result.moi_candidates.push_back(std::move(candidate));
+  result.site_dispositions.push_back({.site_kind = rocjitsu::ConSanResourceSiteKind::Access,
+                                      .disposition = rocjitsu::ConSanSiteDisposition::Supported,
+                                      .reason = rocjitsu::ConSanSiteDispositionReason::None,
+                                      .container_name = "auto_report_access",
+                                      .in_kernel = true,
+                                      .text_offset = 0u,
+                                      .mnemonic = "ds_store_b32"});
+  return result;
+}
+
+TEST(HsaHooksUnitTest, ConSanAutoReportLiveFaultUsesPristineInventoryAndFreshLiveTransform) {
+  constexpr std::array fault_environments = {
+      "RJ_CONSAN_FAULT_DROP_BARRIER",
+      "RJ_CONSAN_FAULT_MOVE_BARRIER",
+      "RJ_CONSAN_FAULT_MUTATE_BARRIER_ID_SCOPE",
+      "RJ_CONSAN_FAULT_MUTATE_BARRIER_PARTICIPANTS",
+      "RJ_CONSAN_FAULT_ATOMIC_WRONG_ADDRESS",
+      "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER",
+      "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE",
+      "RJ_CONSAN_FAULT_ORDINARY_WRONG_ADDRESS",
+      "RJ_CONSAN_FAULT_ORDINARY_WEAKEN_ORDER",
+      "RJ_CONSAN_FAULT_ORDINARY_WEAKEN_SCOPE",
+  };
+  for (const char *fault_environment : fault_environments) {
+    SCOPED_TRACE(fault_environment);
+    ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+    ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
+    ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+    ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "262144");
+    ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+    ScopedEnvVar selected_fault(fault_environment, "1");
+    ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
+    ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+    ScopedEnvVar barrier_sequence("RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY", "sequence");
+    ScopedEnvVar barrier_target_id("RJ_CONSAN_FAULT_BARRIER_TARGET_ID", "1");
+    ScopedEnvVar participant_count("RJ_CONSAN_FAULT_BARRIER_TARGET_PARTICIPANT_COUNT", "64");
+    ScopedEnvVar atomic_address_delta("RJ_CONSAN_FAULT_ATOMIC_VALID_ADDRESS_DELTA", "4");
+    ScopedEnvVar ordinary_address_delta("RJ_CONSAN_FAULT_ORDINARY_VALID_ADDRESS_DELTA", "4");
+
+    reset_code_object_observations();
+    reset_core_memory_observations();
+    g_transform_override_result = auto_report_replay_transform_result();
+    g_transform_override_models_fault_application = true;
+    {
+      FakeApiTable api;
+      InstalledDbiHook hook(api);
+      ASSERT_TRUE(hook.installed()) << hook.error();
+
+      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+      hsa_code_object_reader_t reader{};
+      ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                      original.size(), &reader),
+                HSA_STATUS_SUCCESS);
+      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                  reader, nullptr, nullptr),
+                HSA_STATUS_SUCCESS);
+
+      EXPECT_EQ(g_transform_override_fault_dry_runs, (std::vector<bool>{true, false, false}));
+      EXPECT_EQ(g_transform_override_fault_mutations, (std::vector<bool>{true, false, true}));
+      ASSERT_EQ(g_transform_override_report_layouts.size(), 3u);
+      EXPECT_FALSE(g_transform_override_report_layouts[0]);
+      EXPECT_FALSE(g_transform_override_report_layouts[1]);
+      EXPECT_TRUE(g_transform_override_report_layouts[2]);
+      EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{102u});
+    }
+
+    EXPECT_TRUE(g_core_memory_allocations.empty());
+    EXPECT_EQ(g_core_memory_free_calls, 1);
+  }
+}
+
+TEST(HsaHooksUnitTest, ConSanAutoReportRejectsLiveFaultInventoryGrowth) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "262144");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
+  ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
+  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_replay_transform_result();
+  g_transform_override_live_fault_result = g_transform_override_result;
+  rocjitsu::ConSanMoiCandidate second_candidate =
+      g_transform_override_live_fault_result->moi_candidates.front();
+  second_candidate.file_offset = 4u;
+  second_candidate.text_offset = 4u;
+  g_transform_override_live_fault_result->moi_candidates.push_back(std::move(second_candidate));
+  rocjitsu::ConSanSiteDispositionRecord second_site =
+      g_transform_override_live_fault_result->site_dispositions.back();
+  second_site.text_offset = 4u;
+  g_transform_override_live_fault_result->site_dispositions.push_back(std::move(second_site));
+  g_transform_override_live_fault_result->resource_plans.push_back(
+      g_transform_override_live_fault_result->resource_plans.front());
+  g_transform_override_models_fault_application = true;
+
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_ERROR_OUT_OF_RESOURCES);
+    EXPECT_TRUE(g_loaded_code_object_readers.empty());
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_NE(log.find("live fault transform grew the automatic MOI report inventory"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("reason=moi-report-live-inventory-growth"), std::string::npos) << log;
+  EXPECT_NE(log.find("ConSan fault install"), std::string::npos) << log;
+  EXPECT_NE(log.find("applied=1 installed=false"), std::string::npos) << log;
+  EXPECT_TRUE(g_core_memory_allocations.empty());
+  EXPECT_EQ(g_core_memory_free_calls, 1);
+}
+
+TEST(HsaHooksUnitTest, ConSanAutoReportFallbacksStillExecuteLiveFaultTransform) {
+  struct Case {
+    const char *name;
+    bool has_report_sites;
+    bool dynamic_records;
+    bool fail_allocation;
+  };
+  constexpr std::array cases = {
+      Case{"no-report-sites", false, false, false},
+      Case{"dynamic-replay-without-explicit-cap", true, true, false},
+      Case{"report-allocation-failure", true, false, true},
+  };
+  for (const Case &test : cases) {
+    SCOPED_TRACE(test.name);
+    ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+    ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
+    ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+    ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE",
+                                  test.dynamic_records ? nullptr : "262144");
+    ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS",
+                                 test.dynamic_records ? "1" : "0");
+    ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
+    ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
+    ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+
+    reset_code_object_observations();
+    reset_core_memory_observations();
+    g_fail_core_memory_allocate = test.fail_allocation;
+    if (test.has_report_sites) {
+      g_transform_override_result = auto_report_replay_transform_result();
+    } else {
+      g_transform_override_result.arch = ROCJITSU_CODE_ARCH_RDNA4;
+      g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+      g_transform_override_result.modified = true;
+      g_transform_override_result.final_validation_passed = true;
+      g_transform_override_result.elf_bytes = {0x7f, 'E', 'L', 'F', 'n', 'o'};
+    }
+    g_transform_override_models_fault_application = true;
+    {
+      FakeApiTable api;
+      InstalledDbiHook hook(api);
+      ASSERT_TRUE(hook.installed()) << hook.error();
+
+      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+      hsa_code_object_reader_t reader{};
+      ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                      original.size(), &reader),
+                HSA_STATUS_SUCCESS);
+      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                  reader, nullptr, nullptr),
+                HSA_STATUS_SUCCESS);
+
+      EXPECT_EQ(g_transform_override_fault_dry_runs, (std::vector<bool>{true, false, false}));
+      EXPECT_EQ(g_transform_override_fault_mutations, (std::vector<bool>{true, false, true}));
+      EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{102u});
+    }
+
+    EXPECT_TRUE(g_core_memory_allocations.empty());
+  }
+}
+
 rocjitsu::ConSanResult auto_sc_transform_result() {
   rocjitsu::ConSanResult result;
+  result.arch = ROCJITSU_CODE_ARCH_CDNA3;
   result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
   result.modified = true;
   result.final_validation_passed = true;
@@ -1709,10 +2621,12 @@ TEST(HsaHooksUnitTest, ConSanScAutoReportUsesMarkerAndCleansUpWithoutTrapFallbac
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
 
   reset_code_object_observations();
   reset_core_memory_observations();
   g_transform_override_result = auto_sc_transform_result();
+  g_transform_override_models_fault_application = true;
   {
     FakeApiTable api;
     InstalledDbiHook hook(api);
@@ -1731,6 +2645,7 @@ TEST(HsaHooksUnitTest, ConSanScAutoReportUsesMarkerAndCleansUpWithoutTrapFallbac
     ASSERT_EQ(g_transform_override_sc_report_addresses.size(), 2u);
     EXPECT_FALSE(g_transform_override_sc_report_addresses[0]);
     EXPECT_TRUE(g_transform_override_sc_report_addresses[1]);
+    EXPECT_EQ(g_transform_override_fault_mutations, (std::vector<bool>{false, true}));
   }
   EXPECT_TRUE(g_core_memory_allocations.empty());
   EXPECT_EQ(g_core_memory_free_calls, 1);
@@ -2184,6 +3099,102 @@ TEST(HsaHooksUnitTest, RecordReplayModelDiagnosticRepairsWithExactEventProvenanc
   EXPECT_EQ(diagnostics[0].second_lane_mask, records[1].lane_mask);
   EXPECT_EQ(diagnostics[0].second_lds_byte_offset, records[1].lds_byte_offset);
   EXPECT_EQ(diagnostics[0].second_lds_byte_count, records[1].lds_byte_count);
+}
+
+TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageContractFields) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "262144");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_replay_transform_result();
+  g_seed_auto_replay_report_on_load = true;
+
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    EXPECT_TRUE(hook.installed()) << hook.error();
+    if (hook.installed()) {
+      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+      hsa_code_object_reader_t reader{};
+      EXPECT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                      original.size(), &reader),
+                HSA_STATUS_SUCCESS);
+      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                  reader, nullptr, nullptr),
+                HSA_STATUS_SUCCESS);
+    }
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_TRUE(g_seed_auto_replay_report_succeeded) << log;
+  EXPECT_EQ(g_core_memory_free_calls, 1);
+  for (std::string_view field :
+       {"reader=101", "generation=", "code_object=fnv1a64:0123456789abcdef", "diagnostics=1",
+        "conflict=true", "metadata_full=false", "diagnostic_capacity_exhausted=false",
+        "diagnostic_capacity=4", "provenance_repaired=1", "provenance_unresolved=0"}) {
+    EXPECT_NE(log.find(field), std::string::npos) << field << "\n" << log;
+  }
+  const size_t detail = log.find("ConSan MOI auto replay diagnostic reader=101");
+  ASSERT_NE(detail, std::string::npos) << log;
+  for (std::string_view field :
+       {"index=0", "kind=1", "code_object=fnv1a64:0123456789abcdef",
+        "report_generation=", "generation=", "first_owner=", "second_owner=", "first_inst=0xfe96c",
+        "second_inst=0xfe974", "first_lds_known=true", "first_lds=[16,20)", "second_lds=[16,20)",
+        "first_kind=2", "second_kind=2"}) {
+    EXPECT_NE(log.find(field, detail), std::string::npos) << field << "\n" << log;
+  }
+}
+
+TEST(HsaHooksUnitTest, AutoReportMetadataMatchesReaderAndGeneration) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "262144");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_replay_transform_result();
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    for (size_t load = 0; load < 2; ++load) {
+      SCOPED_TRACE(load);
+      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                  reader, nullptr, nullptr),
+                HSA_STATUS_SUCCESS);
+    }
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  constexpr std::string_view fingerprint = "code_object=fnv1a64:0123456789abcdef";
+  const size_t first_fingerprint = log.find(fingerprint);
+  ASSERT_NE(first_fingerprint, std::string::npos) << log;
+  const size_t second_fingerprint = log.find(fingerprint, first_fingerprint + fingerprint.size());
+  ASSERT_NE(second_fingerprint, std::string::npos) << log;
+  EXPECT_EQ(log.find(fingerprint, second_fingerprint + fingerprint.size()), std::string::npos)
+      << log;
+  EXPECT_EQ(log.find("code_object=missing"), std::string::npos) << log;
+  EXPECT_TRUE(g_core_memory_allocations.empty());
+  EXPECT_EQ(g_core_memory_free_calls, 2);
 }
 
 TEST(HsaHooksUnitTest, RecordReplayProvenanceMismatchRemainsUnknown) {
@@ -3381,6 +4392,7 @@ TEST(HsaHooksUnitTest, ConSanDynamicStackDispatchAddsMaximumFrameAboveRuntimePri
   configure_consan_profile(kConSanHookProfiles[1], false);
 
   g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  g_transform_override_result.arch = ROCJITSU_CODE_ARCH_CDNA3;
   g_transform_override_result.modified = true;
   g_transform_override_result.final_validation_passed = true;
   g_transform_override_result.elf_bytes = {0x7f, 'E', 'L', 'F', 'd', 'y', 'n'};

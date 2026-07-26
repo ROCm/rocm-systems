@@ -256,6 +256,7 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
         static_coverage_records = []
         coverage_site_parse_error = str(error)
     fault_summaries: list[dict[str, str]] = []
+    fault_install_summaries: list[dict[str, str]] = []
     fault_load_selections: list[dict[str, str]] = []
     fault_load_summaries: list[dict[str, str]] = []
     fault_sites = 0
@@ -417,6 +418,8 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
         fields = _key_values(record)
         if record.startswith("fault summary "):
             fault_summaries.append(fields)
+        elif record.startswith("fault install "):
+            fault_install_summaries.append(fields)
         elif record.startswith("fault load selection "):
             fault_load_selections.append(fields)
         elif record.startswith("fault load summary "):
@@ -881,57 +884,139 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
         ):
             reject_reader_evidence(record, "state_mismatches")
 
-    requested = max(
-        (_integer(fields, "requested") for fields in fault_summaries), default=0
-    )
-    planned = sum(_integer(fields, "planned") for fields in fault_summaries)
-    applied = sum(_integer(fields, "applied") for fields in fault_summaries)
-    mutation_readers = [
-        {
-            "reader": fields.get("reader", "missing"),
-            "requested": _integer(fields, "requested"),
-            "planned": _integer(fields, "planned"),
-            "applied": _integer(fields, "applied"),
+    mutation_reader_map: dict[tuple[str, str], dict[str, object]] = {}
+    for fields in fault_summaries:
+        process = fields.get("process", UNSPECIFIED)
+        reader = fields.get("reader", UNSPECIFIED)
+        record = mutation_reader_map.setdefault(
+            (process, reader),
+            {
+                "process": process,
+                "reader": reader,
+                "requested": 0,
+                "planned": 0,
+                "raw_applied": 0,
+                "applied": 0,
+                "discarded_applied": 0,
+            },
+        )
+        record["requested"] = max(record["requested"], _integer(fields, "requested"))
+        record["planned"] += _integer(fields, "planned")
+        record["raw_applied"] += _integer(fields, "applied")
+
+    install_by_identity: dict[tuple[str, str], list[dict[str, str]]] = {}
+    valid_install_evidence = True
+    for fields in fault_install_summaries:
+        process = fields.get("process")
+        reader = fields.get("reader")
+        installed = fields.get("installed")
+        applied_count = _integer(fields, "applied")
+        if (
+            not process
+            or not reader
+            or installed not in {"true", "false"}
+            or applied_count <= 0
+        ):
+            valid_install_evidence = False
+            continue
+        install_by_identity.setdefault((process, reader), []).append(fields)
+
+    # A strict load rejection can terminate after the producer flushes
+    # installed=false evidence but before the ordinary fault summary is
+    # emitted. An applied-but-discarded mutation proves its own requested and
+    # planned counts; retain that distinction instead of misclassifying the
+    # producer log as incomplete.
+    for identity, installs in install_by_identity.items():
+        if identity in mutation_reader_map or any(
+            fields["installed"] != "false" for fields in installs
+        ):
+            continue
+        process, reader = identity
+        discarded = sum(_integer(fields, "applied") for fields in installs)
+        mutation_reader_map[identity] = {
+            "process": process,
+            "reader": reader,
+            "requested": 1,
+            "planned": discarded,
+            "raw_applied": discarded,
+            "applied": 0,
+            "discarded_applied": 0,
         }
-        for fields in fault_summaries
-    ]
+
+    raw_by_identity = {
+        identity: int(record["raw_applied"])
+        for identity, record in mutation_reader_map.items()
+        if record["raw_applied"]
+    }
+    install_total_by_identity = {
+        identity: sum(_integer(fields, "applied") for fields in records)
+        for identity, records in install_by_identity.items()
+    }
+    installation_evidence_complete = (
+        not raw_by_identity and not fault_install_summaries
+    ) or (
+        bool(fault_install_summaries)
+        and valid_install_evidence
+        and install_total_by_identity == raw_by_identity
+    )
+    for identity, record in mutation_reader_map.items():
+        if installation_evidence_complete and identity in install_by_identity:
+            installs = install_by_identity[identity]
+            record["applied"] = sum(
+                _integer(fields, "applied")
+                for fields in installs
+                if fields["installed"] == "true"
+            )
+            record["discarded_applied"] = sum(
+                _integer(fields, "applied")
+                for fields in installs
+                if fields["installed"] == "false"
+            )
+        else:
+            record["applied"] = record["raw_applied"]
+
+    mutation_readers = sorted(
+        mutation_reader_map.values(),
+        key=lambda record: (record["process"], record["reader"]),
+    )
+    requested = max(
+        (int(record["requested"]) for record in mutation_readers), default=0
+    )
+    planned = sum(int(record["planned"]) for record in mutation_readers)
+    raw_applied = sum(int(record["raw_applied"]) for record in mutation_readers)
+    applied = sum(int(record["applied"]) for record in mutation_readers)
+    discarded_applied = sum(
+        int(record["discarded_applied"]) for record in mutation_readers
+    )
     applied_readers = sum(record["applied"] > 0 for record in mutation_readers)
-    fault_processes: dict[str, dict[str, object]] = {}
     process_evidence_complete = bool(fault_summaries) and all(
         fields.get("process") for fields in fault_summaries
     )
-    for fields in fault_summaries:
-        process = fields.get("process", UNSPECIFIED)
+    fault_processes: dict[str, dict[str, object]] = {}
+    for reader_record in mutation_readers:
+        process = str(reader_record["process"])
         process_record = fault_processes.setdefault(
             process,
             {
                 "process": process,
                 "requested": 0,
                 "planned": 0,
+                "raw_applied": 0,
                 "applied": 0,
+                "discarded_applied": 0,
                 "readers": {},
             },
         )
         process_record["requested"] = max(
-            process_record["requested"], _integer(fields, "requested")
+            process_record["requested"], reader_record["requested"]
         )
-        process_record["planned"] += _integer(fields, "planned")
-        process_record["applied"] += _integer(fields, "applied")
-        reader = fields.get("reader", UNSPECIFIED)
-        reader_record = process_record["readers"].setdefault(
-            reader,
-            {
-                "reader": reader,
-                "requested": 0,
-                "planned": 0,
-                "applied": 0,
-            },
-        )
-        reader_record["requested"] = max(
-            reader_record["requested"], _integer(fields, "requested")
-        )
-        reader_record["planned"] += _integer(fields, "planned")
-        reader_record["applied"] += _integer(fields, "applied")
+        process_record["planned"] += reader_record["planned"]
+        process_record["raw_applied"] += reader_record["raw_applied"]
+        process_record["applied"] += reader_record["applied"]
+        process_record["discarded_applied"] += reader_record["discarded_applied"]
+        process_record["readers"][reader_record["reader"]] = {
+            key: value for key, value in reader_record.items() if key != "process"
+        }
     fault_process_evidence = []
     for process_record in fault_processes.values():
         process_record["readers"] = sorted(
@@ -1045,10 +1130,13 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
     reader_coverage.sort(key=lambda record: record["reader"])
     return {
         "mutation": {
-            "accounting_schema_version": 1,
+            "accounting_schema_version": 2,
             "requested": requested,
             "planned": planned,
+            "raw_applied": raw_applied,
             "applied": applied,
+            "discarded_applied": discarded_applied,
+            "installation_evidence_complete": installation_evidence_complete,
             "applicability": applicability,
             "inventoried_sites": fault_sites,
             "proof_patch_kinds": proof_patch_kinds,
@@ -1692,12 +1780,24 @@ def _pair_classification(
     if not isinstance(mutation, dict):
         return "indeterminate_execution", evidence
     evidence["mutation_requested"] = mutation.get("requested")
+    evidence["mutation_planned"] = mutation.get("planned")
     evidence["mutation_applied"] = mutation.get("applied")
     evidence["mutation_applicability"] = mutation.get("applicability")
+    evidence["mutation_accounting_schema_version"] = mutation.get(
+        "accounting_schema_version"
+    )
+    evidence["mutation_installation_evidence_complete"] = mutation.get(
+        "installation_evidence_complete"
+    )
+    evidence["mutation_discarded_applied"] = mutation.get("discarded_applied", 0)
     if mutation.get("applicability") == "not_applicable":
         return "unsupported", evidence
     if (
-        mutation.get("requested") != 1
+        mutation.get("accounting_schema_version") != 2
+        or mutation.get("installation_evidence_complete") is not True
+        or mutation.get("discarded_applied", 0) != 0
+        or mutation.get("requested") != 1
+        or mutation.get("planned") != 1
         or mutation.get("applied") != 1
         or mutation.get("applicability") != "applied"
     ):

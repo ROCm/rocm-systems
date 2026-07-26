@@ -460,6 +460,10 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry does not match the original code-object target");
     }
+    if (inventory.arch != arch) {
+      inventory.errors.emplace_back(
+          "ConSan MOI inventory retry does not match the original code-object architecture");
+    }
     if (!inventory.errors.empty()) {
       inventory.outcome = ConSanTransformOutcome::Invalid;
       return finalize_consan_result(std::move(inventory), code_object_bytes);

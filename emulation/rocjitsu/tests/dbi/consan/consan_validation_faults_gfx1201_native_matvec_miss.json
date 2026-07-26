@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "target": "gfx1201",
   "evidence_model": "second reviewed hypothesis after retaining the rejected Record/Replay detection hypothesis; independently confirm the exact native matvec barrier drop as schedule-masked",
   "review_required": false,

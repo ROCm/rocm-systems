@@ -59,12 +59,12 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         }
         const bool supported_scope = sequence.raw_scope
                                          ? *sequence.raw_scope >= 1u && *sequence.raw_scope <= 3u
-                                         : result.arch_name == "gfx1250" && site != nullptr &&
-                                               site->mnemonic.starts_with("ds_");
+                                         : result.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                               site != nullptr && site->mnemonic.starts_with("ds_");
         if (site != nullptr && supported_scope &&
             (site->mnemonic.starts_with("flat_atomic") ||
              site->mnemonic.starts_with("global_atomic") ||
-             (result.arch_name == "gfx1250" && site->mnemonic.starts_with("ds_"))) &&
+             (result.arch == ROCJITSU_CODE_ARCH_GFX1250 && site->mnemonic.starts_with("ds_"))) &&
             (sequence.rmw_outcome != ConSanSyncRmwOutcome::CompareExchange ||
              site->returns_old_value.value_or(false))) {
           eligible = true;

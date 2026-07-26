@@ -673,7 +673,8 @@ struct MoiSgprRange {
   // Versioned exact publication retains the slot address, new packed access,
   // prior dispatch, ready version, and CAS operands through commit. The token
   // hash aliases the now-larger transaction window.
-  return options.moi_exec_save_sgpr ? (options.moi_track_atomics ? 24u : 16u) : 11u;
+  return consan_detail::inline_shadow_transaction_scratch_count(
+      options.moi_exec_save_sgpr.has_value(), options.moi_track_atomics);
 }
 
 [[nodiscard]] uint16_t inline_shadow_loop_scratch_count(const ConSanOptions &options,
@@ -682,7 +683,8 @@ struct MoiSgprRange {
   // Wide local accesses retain an offset and iteration counter. Wide external
   // accesses retain an iteration counter and the workgroup key, since the
   // versioned transaction reuses all of its ordinary address temporaries.
-  return candidate.width_bits > consan_moi_exact_shadow::granule_bytes * 8u ? 2u : 0u;
+  return consan_detail::inline_shadow_loop_scratch_count(
+      candidate.width_bits, consan_moi_exact_shadow::granule_bytes);
 }
 
 [[nodiscard]] uint16_t moi_exec_save_sgpr_count(const ConSanOptions &options, rj_code_arch_t arch);
@@ -3458,7 +3460,8 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         // code may reuse before any DS or group-FLAT access. Preserve the key
         // at kernel entry for every Inline access instead of limiting the
         // lifetime fix to shared helper/group-FLAT candidates.
-        return (result.arch_name == "cdna3" || result.arch_name == "cdna4") &&
+        return (result.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+                result.arch == ROCJITSU_CODE_ARCH_CDNA4) &&
                plan.site_kind == ConSanResourceSiteKind::Access;
       });
   const bool needs_record_replay_workgroup_key =
@@ -3539,7 +3542,7 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
           : named_persistent_count;
   const uint32_t persistent_end = persistent_base + persistent_count;
   const bool crosses_cdna_accvgpr_boundary =
-      (result.arch_name == "cdna3" || result.arch_name == "cdna4") &&
+      (result.arch == ROCJITSU_CODE_ARCH_CDNA3 || result.arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       (needs_record_replay_workgroup_key ||
        std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
          return !plan.owner_descriptor_file_offsets.empty() &&

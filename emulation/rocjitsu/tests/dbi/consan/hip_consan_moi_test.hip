@@ -689,6 +689,73 @@ __global__ __launch_bounds__(64) void moi_two_wave_lds_accesses(uint32_t *out) {
   }
 }
 
+__device__ __noinline__ void moi_native_b96_aliasing_access_for_instrumentation(
+    uint32_t lds_addr, uint32_t *out, bool barrier_ordered) {
+  constexpr uint32_t kNew0 = 0x13579BDFu;
+  constexpr uint32_t kNew1 = 0x2468ACE0u;
+  constexpr uint32_t kNew2 = 0xA5A55A5Au;
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  if (tid < 32) {
+    // Keep the data tuple and address in fixed, nonoverlapping VGPRs so this
+    // emits the native three-dword store on both RDNA4 targets.
+    asm volatile("v_mov_b32 v4, %0\n\t"
+                 "v_mov_b32 v5, %1\n\t"
+                 "v_mov_b32 v6, %2\n\t"
+                 "v_mov_b32 v7, %3\n\t"
+                 "ds_store_b96 v7, v[4:6]\n\t" RJ_CONSAN_MOI_RECORD_NOP_CAVE
+                 :
+                 : "v"(kNew0), "v"(kNew1), "v"(kNew2), "v"(lds_addr)
+                 : "v4", "v5", "v6", "v7", "memory");
+  }
+  if (barrier_ordered)
+    __syncthreads();
+  if (tid >= 32) {
+    uint32_t loaded0 = 0;
+    uint32_t loaded1 = 0;
+    uint32_t loaded2 = 0;
+    // Deliberately alias the address and destination at v4. The ConSan
+    // trampoline must snapshot the address before executing this load.
+    asm volatile("v_mov_b32 v4, %3\n\t"
+                 "ds_load_b96 v[4:6], v4\n\t" RJ_CONSAN_MOI_RECORD_NOP_CAVE
+                 "s_wait_loadcnt 0\n\t"
+                 "v_mov_b32 %0, v4\n\t"
+                 "v_mov_b32 %1, v5\n\t"
+                 "v_mov_b32 %2, v6\n\t"
+                 : "=v"(loaded0), "=v"(loaded1), "=v"(loaded2)
+                 : "v"(lds_addr)
+                 : "v4", "v5", "v6", "memory");
+    if (tid == 32) {
+      out[0] = loaded0;
+      out[1] = loaded1;
+      out[2] = loaded2;
+    }
+  }
+}
+
+__global__ __launch_bounds__(64) void moi_native_b96_racy_aliasing_load(uint32_t *out) {
+  __shared__ uint32_t lds[3];
+  if (threadIdx.x == 0) {
+    lds[0] = 0x01020304u;
+    lds[1] = 0x11223344u;
+    lds[2] = 0x55667788u;
+  }
+  __syncthreads();
+  const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xFFFFu);
+  moi_native_b96_aliasing_access_for_instrumentation(lds_addr, out, /*barrier_ordered=*/false);
+}
+
+__global__ __launch_bounds__(64) void moi_native_b96_barrier_ordered_aliasing_load(uint32_t *out) {
+  __shared__ uint32_t lds[3];
+  if (threadIdx.x == 0) {
+    lds[0] = 0x01020304u;
+    lds[1] = 0x11223344u;
+    lds[2] = 0x55667788u;
+  }
+  __syncthreads();
+  const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xFFFFu);
+  moi_native_b96_aliasing_access_for_instrumentation(lds_addr, out, /*barrier_ordered=*/true);
+}
+
 __global__ __launch_bounds__(64) void gfx1201_vgpr_scratch_roundtrip(uint32_t *out) {
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
   volatile uint32_t private_words[4];
@@ -1313,6 +1380,40 @@ TEST(ConSanMoiHipTest, TwoWaveAccessesWriteDynamicRecords) {
   std::memcpy(ordered_records, records, sizeof(ordered_records));
   ordered_records[1].epoch = ordered_records[0].epoch + 1;
   EXPECT_FALSE(replay_first_moi_conflict(header, ordered_records, kAccessRecords).conflict);
+}
+
+void run_native_b96_aliasing_load(bool barrier_ordered, std::array<uint32_t, 3> &out) {
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, 3u * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(d_out, 0, 3u * sizeof(uint32_t)));
+
+  if (barrier_ordered)
+    moi_native_b96_barrier_ordered_aliasing_load<<<1, 64>>>(d_out);
+  else
+    moi_native_b96_racy_aliasing_load<<<1, 64>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  HIP_ASSERT(hipMemcpy(out.data(), d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+}
+
+TEST(ConSanMoiHipTest, NativeB96RacyAliasingLoadCompletesWithValidTupleWords) {
+  constexpr std::array old_values = {0x01020304u, 0x11223344u, 0x55667788u};
+  constexpr std::array new_values = {0x13579BDFu, 0x2468ACE0u, 0xA5A55A5Au};
+  std::array<uint32_t, 3> out{};
+  ASSERT_NO_FATAL_FAILURE(
+      run_native_b96_aliasing_load(/*barrier_ordered=*/false, out));
+  for (size_t i = 0; i < out.size(); ++i)
+    EXPECT_TRUE(out[i] == old_values[i] || out[i] == new_values[i]) << "word=" << i;
+}
+
+TEST(ConSanMoiHipTest, NativeB96BarrierOrderedAliasingLoadPreservesOutput) {
+  constexpr std::array expected = {0x13579BDFu, 0x2468ACE0u, 0xA5A55A5Au};
+  std::array<uint32_t, 3> out{};
+  ASSERT_NO_FATAL_FAILURE(
+      run_native_b96_aliasing_load(/*barrier_ordered=*/true, out));
+  EXPECT_EQ(out, expected);
 }
 
 TEST(ConSanMoiHipTest, DynamicAccessRecordsAppendActiveLanes) {

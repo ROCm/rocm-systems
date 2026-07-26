@@ -290,6 +290,14 @@ dry-run inventory when the selected family needs them. If an exact site occurs
 in more than one code-object load, `RJ_CONSAN_FAULT_LOAD_OCCURRENCE=N` selects
 the one-based occurrence for a live exactly-one run.
 
+Live exactly-one mutations are reserved process-wide so concurrent code-object
+loads cannot install the same fault twice. A contender waits up to 30000 ms by
+default, matching the ordinary validation-process deadline, then loads without
+the fault and reports
+`reservation=contention-timeout`. Set
+`RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS` to a positive millisecond deadline
+when a large transform or loader needs a longer bounded wait.
+
 Fault injection is intentionally disruptive. Apply one mutation at a time,
 use an external timeout, and check device health before and after the run.
 Program corruption and a ConSan diagnostic are separate outcomes; a timeout,

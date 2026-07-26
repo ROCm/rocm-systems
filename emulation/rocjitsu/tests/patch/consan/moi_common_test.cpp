@@ -3,6 +3,7 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
 
 namespace rocjitsu {
 namespace {
@@ -198,25 +199,129 @@ TEST(ConSanMoi, Gfx1250TwoAddressLoadScratchAvoidsCompleteDestinationPair) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
 }
 
-TEST(ConSanMoi, Gfx1250RecordReplayAdmitsNativeB96Load) {
+struct NativeB96Access {
+  std::array<uint32_t, 2> words;
+  std::string_view mnemonic;
+  bool load_clobbers_address = false;
+};
+
+template <size_t AccessCount, typename CodeObjectFactory>
+void expect_moi_engines_admit_native_b96_accesses(
+    rj_code_arch_t arch, const std::array<NativeB96Access, AccessCount> &accesses,
+    CodeObjectFactory code_object_factory) {
+  for (ConSanMoiEngine engine :
+       {ConSanMoiEngine::RecordReplay, ConSanMoiEngine::InlineShadow, ConSanMoiEngine::Sampled}) {
+    for (const auto &[access, mnemonic, load_clobbers_address] : accesses) {
+      SCOPED_TRACE(std::string(consan_moi_engine_name(engine)) + " " + std::string(mnemonic));
+      const std::array<uint32_t, 3> text_words = {access[0], access[1], build_s_endpgm(arch)};
+      const std::vector<uint8_t> bytes = code_object_factory(text_words);
+      ConSanOptions options = moi_options(engine);
+      options.moi_track_atomics = false;
+      options.moi_track_barriers = false;
+      options.moi_runtime_sample_stride = engine == ConSanMoiEngine::Sampled ? 2u : 1u;
+      options.moi_report_buffer_address = 0x123456780000ull;
+      options.moi_report_buffer_size = engine == ConSanMoiEngine::InlineShadow
+                                           ? kInlineShadowFullLdsReportBufferSize
+                                           : 64u * 1024u * 1024u;
+
+      const ConSanResult result = try_patch_consan(bytes, options);
+
+      ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      ASSERT_EQ(result.moi_candidates.size(), 1u);
+      EXPECT_EQ(result.moi_candidates.front().mnemonic, mnemonic);
+      EXPECT_EQ(result.moi_candidates.front().width_bits, 96u);
+      const ConSanPatchKind expected_patch_kind =
+          engine == ConSanMoiEngine::RecordReplay ? ConSanPatchKind::TrampolineMoiAccessRecordStore
+          : engine == ConSanMoiEngine::InlineShadow
+              ? ConSanPatchKind::TrampolineMoiExactShadowStore
+              : ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+      const auto access_patch =
+          std::ranges::find(result.patches, expected_patch_kind, &ConSanPatchInfo::kind);
+      ASSERT_NE(access_patch, result.patches.end());
+      ASSERT_TRUE(access_patch->scratch_vgpr);
+      AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(patched.is_valid());
+      const std::vector<uint32_t> body = text_words_at_offset(
+          patched, access_patch->trampoline_offset, access_patch->trampoline_size);
+      if (engine == ConSanMoiEngine::RecordReplay) {
+        EXPECT_TRUE(contains_subsequence(
+            body, make_expected_literal_offset_store_words(
+                      offsetof(ConSanMoiAccessRecord, lds_byte_count), 3u * sizeof(uint32_t),
+                      *access_patch->scratch_vgpr,
+                      static_cast<uint16_t>(*access_patch->scratch_vgpr + 2u))));
+      } else if (engine == ConSanMoiEngine::InlineShadow) {
+        const uint16_t loop_counter_vgpr = consan_detail::inline_shadow_loop_counter_vgpr(
+            *access_patch->scratch_vgpr, result.resolved_moi_exec_save_sgpr.has_value(),
+            options.moi_track_atomics);
+        const auto resource_plan = std::ranges::find_if(
+            result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+              return plan.site_kind == ConSanResourceSiteKind::Access &&
+                     plan.candidate_index == 0u && plan.scratch_vgpr == access_patch->scratch_vgpr;
+            });
+        ASSERT_NE(resource_plan, result.resource_plans.end());
+        const uint16_t reserved_end =
+            static_cast<uint16_t>(*resource_plan->scratch_vgpr + resource_plan->scratch_vgpr_count);
+        EXPECT_LT(loop_counter_vgpr, reserved_end);
+        const auto three_cell_bound = instrumentation::build_v_cmp_gt_u32_vcc(
+            scalar_positive_inline_u32(3u), loop_counter_vgpr, arch);
+        ASSERT_TRUE(three_cell_bound);
+        EXPECT_NE(std::ranges::find(body, *three_cell_bound), body.end());
+        if (load_clobbers_address) {
+          const uint16_t saved_address_vgpr = static_cast<uint16_t>(
+              loop_counter_vgpr + consan_detail::inline_shadow_loop_scratch_count(
+                                      result.moi_candidates.front().width_bits,
+                                      consan_moi_exact_shadow::granule_bytes));
+          EXPECT_LT(saved_address_vgpr, reserved_end);
+          EXPECT_NE(std::ranges::find(body, build_v_mov_b32_e32(saved_address_vgpr,
+                                                                vector_source_vgpr(0u), arch)),
+                    body.end());
+        }
+      } else {
+        const uint16_t high_vgpr = static_cast<uint16_t>(*access_patch->scratch_vgpr + 3u);
+        const uint16_t tmp_vgpr = static_cast<uint16_t>(*access_patch->scratch_vgpr + 4u);
+        const uint32_t encoded_three_cell_count =
+            encode_consan_moi_sampled_cell_count(3u)
+            << (consan_moi_sampled_watchpoint::count_shift - 32u);
+        const auto cell_count_literal =
+            instrumentation::build_v_mov_b32_literal(tmp_vgpr, encoded_three_cell_count, arch);
+        const auto add_cell_count = instrumentation::build_v_add_u32(
+            high_vgpr, vector_source_vgpr(high_vgpr), tmp_vgpr, arch);
+        ASSERT_TRUE(cell_count_literal && add_cell_count);
+        std::vector<uint32_t> expected = *cell_count_literal;
+        expected.insert(expected.end(), add_cell_count->begin(), add_cell_count->end());
+        EXPECT_TRUE(contains_subsequence(body, expected));
+      }
+      EXPECT_EQ(std::ranges::count_if(result.site_dispositions,
+                                      [](const ConSanSiteDispositionRecord &site) {
+                                        return site.site_kind == ConSanResourceSiteKind::Access &&
+                                               site.disposition ==
+                                                   ConSanSiteDisposition::Supported &&
+                                               site.lowering_outcome ==
+                                                   ConSanSiteLoweringOutcome::Patched;
+                                      }),
+                1);
+    }
+  }
+}
+
+TEST(ConSanMoi, Gfx1250MoiEnginesAdmitNativeB96Accesses) {
+  constexpr auto store =
+      gfx1250::build_vds(gfx1250::kDsStoreB96Vds, {.offset0 = 12, .addr = 0, .data0 = 1});
   constexpr auto load =
       gfx1250::build_vds(gfx1250::kDsLoadB96Vds, {.offset0 = 12, .addr = 0, .vdst = 4});
-  const std::array<uint32_t, 3> text_words = {load[0], load[1],
-                                              build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
-  const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "native_b96_load");
-  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.moi_report_buffer_address = 0x123456780000ull;
-  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+  constexpr auto aliasing_load =
+      gfx1250::build_vds(gfx1250::kDsLoadB96Vds, {.offset0 = 12, .addr = 0, .vdst = 0});
+  constexpr std::array<NativeB96Access, 3> accesses = {
+      NativeB96Access{store, "ds_store_b96", false},
+      NativeB96Access{load, "ds_load_b96", false},
+      NativeB96Access{aliasing_load, "ds_load_b96", true},
+  };
 
-  const ConSanResult result = try_patch_consan(bytes, options);
-
-  ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().mnemonic, "ds_load_b96");
-  EXPECT_EQ(result.moi_candidates.front().width_bits, 96u);
-  ASSERT_EQ(result.patches.size(), 1u);
-  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
+  expect_moi_engines_admit_native_b96_accesses(
+      ROCJITSU_CODE_ARCH_GFX1250, accesses, [](const auto &text_words) {
+        return make_gfx1250_code_object(text_words, "native_b96_access");
+      });
 }
 
 TEST(ConSanMoi, Gfx1250RelaxedLdsAtomicIsAccessButNotSynchronization) {
@@ -1404,10 +1509,96 @@ TEST(ConSanMoi, InventorySkipsUnsupportedNativeLdsSites) {
   EXPECT_TRUE(saw_skipped_lds_warning);
 }
 
+TEST(ConSanMoi, Gfx1201MoiEnginesAdmitNativeB96Accesses) {
+  constexpr auto store =
+      rdna4::build_vds(rdna4::kDsStoreB96Vds, {.offset0 = 12, .addr = 0, .data0 = 1});
+  constexpr auto load =
+      rdna4::build_vds(rdna4::kDsLoadB96Vds, {.offset0 = 12, .addr = 0, .vdst = 4});
+  constexpr auto aliasing_load =
+      rdna4::build_vds(rdna4::kDsLoadB96Vds, {.offset0 = 12, .addr = 0, .vdst = 0});
+  constexpr std::array<NativeB96Access, 3> accesses = {
+      NativeB96Access{store, "ds_store_b96", false},
+      NativeB96Access{load, "ds_load_b96", false},
+      NativeB96Access{aliasing_load, "ds_load_b96", true},
+  };
+
+  expect_moi_engines_admit_native_b96_accesses(
+      ROCJITSU_CODE_ARCH_RDNA4, accesses, [](const auto &text_words) {
+        return make_rdna4_lds_code_object(text_words, "native_b96_access");
+      });
+}
+
+TEST(ConSanMoi, InventoryUsesTypedArchNotDisplayName) {
+  constexpr std::array<uint32_t, 3> text_words = {0xDB78000Cu,
+                                                  0x00000100u, // ds_store_b96 v0, v[1:3] offset:12
+                                                  build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words, "typed_arch_inventory");
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_atomics = false;
+  options.moi_track_barriers = false;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = 64u * 1024u * 1024u;
+  ConSanResult result = try_patch_consan(bytes, options);
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.arch, ROCJITSU_CODE_ARCH_RDNA4);
+
+  result.arch_display_name = "stale-display-name";
+  EXPECT_EQ(inventory_consan_moi_auto_report(result, options, bytes).access_range_count, 1u);
+}
+
+TEST(ConSanMoi, NativeB96CapabilityMatchesArchitectureBoundary) {
+  for (std::string_view mnemonic : {"ds_load_b96", "ds_store_b96"}) {
+    SCOPED_TRACE(mnemonic);
+    EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA4));
+    EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_GFX1250));
+    // RDNA3 and RDNA3.5 hardware encode B96, but they are intentionally
+    // outside ConSan's supported target set.
+    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3));
+    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3_5));
+    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA3));
+    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA4));
+  }
+}
+
+TEST(ConSanMoi, CdnaNativeB96AccessesRemainUnsupportedAtTransformBoundary) {
+  constexpr auto cdna3_store = cdna3::build_ds(cdna3::kDsWriteB96Ds, {.addr = 0, .data0 = 1});
+  constexpr auto cdna3_load = cdna3::build_ds(cdna3::kDsReadB96Ds, {.addr = 0, .vdst = 1});
+  constexpr auto cdna4_store = cdna4::build_ds(cdna4::kDsWriteB96Ds, {.addr = 0, .data0 = 1});
+  constexpr auto cdna4_load = cdna4::build_ds(cdna4::kDsReadB96Ds, {.addr = 0, .vdst = 1});
+  const std::array cases = {
+      std::pair{make_cdna3_lds_code_object(std::array{cdna3_store[0], cdna3_store[1],
+                                                      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3)},
+                                           "cdna3_b96"),
+                std::string_view{"ds_write_b96"}},
+      std::pair{make_cdna3_lds_code_object(std::array{cdna3_load[0], cdna3_load[1],
+                                                      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3)},
+                                           "cdna3_b96"),
+                std::string_view{"ds_read_b96"}},
+      std::pair{make_cdna4_lds_code_object(std::array{cdna4_store[0], cdna4_store[1],
+                                                      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)},
+                                           "cdna4_b96"),
+                std::string_view{"ds_write_b96"}},
+      std::pair{make_cdna4_lds_code_object(std::array{cdna4_load[0], cdna4_load[1],
+                                                      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)},
+                                           "cdna4_b96"),
+                std::string_view{"ds_read_b96"}},
+  };
+
+  for (const auto &[bytes, mnemonic] : cases) {
+    SCOPED_TRACE(mnemonic);
+    const ConSanResult result = try_patch_consan(bytes, moi_options(ConSanMoiEngine::RecordReplay));
+    const auto disposition = std::ranges::find(result.site_dispositions, mnemonic,
+                                               &ConSanSiteDispositionRecord::mnemonic);
+    ASSERT_NE(disposition, result.site_dispositions.end());
+    EXPECT_EQ(disposition->disposition, ConSanSiteDisposition::Unsupported);
+    EXPECT_EQ(disposition->reason, ConSanSiteDispositionReason::UnsupportedMnemonic);
+  }
+}
+
 TEST(ConSanMoi, UnsupportedOnlyAccessRemainsApplicableInPreFilterLedger) {
   const std::array<uint32_t, 3> text_words = {
-      0xDBF80000u,
-      0x00000000u, // ds_load_b96 (decoded access, unsupported by MOI)
+      0xDAC40000u,
+      0x00000000u, // ds_load_addtid_b32 (implicit address, unsupported by MOI)
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
@@ -1425,19 +1616,19 @@ TEST(ConSanMoi, UnsupportedOnlyAccessRemainsApplicableInPreFilterLedger) {
     const ConSanSiteDispositionRecord &site = result.site_dispositions.front();
     EXPECT_EQ(site.site_kind, ConSanResourceSiteKind::Access);
     EXPECT_EQ(site.disposition, ConSanSiteDisposition::Unsupported);
-    EXPECT_EQ(site.reason, ConSanSiteDispositionReason::UnsupportedMnemonic);
+    EXPECT_EQ(site.reason, ConSanSiteDispositionReason::MissingAddressOperand);
     EXPECT_EQ(site.lowering_outcome, ConSanSiteLoweringOutcome::Unsupported);
     EXPECT_EQ(site.lowering_reason, ConSanSiteLoweringReason::SemanticUnsupported);
-    EXPECT_EQ(site.mnemonic, "ds_load_b96");
+    EXPECT_EQ(site.mnemonic, "ds_load_addtid_b32");
     EXPECT_STREQ(consan_site_disposition_name(site.disposition), "unsupported");
-    EXPECT_STREQ(consan_site_disposition_reason_name(site.reason), "unsupported_mnemonic");
+    EXPECT_STREQ(consan_site_disposition_reason_name(site.reason), "missing_address_operand");
   }
 }
 
 TEST(ConSanMoi, MixedAccessLedgerRetainsSupportedAndUnsupportedFinalCodeSites) {
   const std::array<uint32_t, 5> text_words = {
       0xD8340000u, 0x00000102u, // ds_store_b32 v2, v1
-      0xDBF80000u, 0x00000000u, // ds_load_b96
+      0xDAC40000u, 0x00000000u, // ds_load_addtid_b32
       0xBFB00000u,              // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
@@ -1455,8 +1646,8 @@ TEST(ConSanMoi, MixedAccessLedgerRetainsSupportedAndUnsupportedFinalCodeSites) {
   EXPECT_EQ(result.site_dispositions[0].lowering_reason,
             ConSanSiteLoweringReason::InstrumentationPatchMissing);
   EXPECT_EQ(result.site_dispositions[1].disposition, ConSanSiteDisposition::Unsupported);
-  EXPECT_EQ(result.site_dispositions[1].reason, ConSanSiteDispositionReason::UnsupportedMnemonic);
-  EXPECT_EQ(result.site_dispositions[1].mnemonic, "ds_load_b96");
+  EXPECT_EQ(result.site_dispositions[1].reason, ConSanSiteDispositionReason::MissingAddressOperand);
+  EXPECT_EQ(result.site_dispositions[1].mnemonic, "ds_load_addtid_b32");
   EXPECT_EQ(result.site_dispositions[1].lowering_outcome, ConSanSiteLoweringOutcome::Unsupported);
 }
 
@@ -1676,7 +1867,7 @@ TEST(ConSanMoi, Cdna4OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
   EXPECT_EQ(result.target_name, "gfx950");
-  EXPECT_EQ(result.arch_name, "cdna4");
+  EXPECT_EQ(result.arch_display_name, "cdna4");
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);

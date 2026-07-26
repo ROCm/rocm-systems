@@ -36,6 +36,27 @@ struct ScalarOwnerContextResolution {
   uint32_t tail_floor = 0;
 };
 
+/// Return the inline-shadow transaction scratch size shared by placement and
+/// emission. Atomic tracking retains additional publication state.
+[[nodiscard]] constexpr uint16_t inline_shadow_transaction_scratch_count(bool has_exec_save,
+                                                                         bool track_atomics) {
+  return has_exec_save ? (track_atomics ? 24u : 16u) : 11u;
+}
+
+/// Return the first scratch VGPR reserved for a wide-access cell loop.
+[[nodiscard]] constexpr uint16_t
+inline_shadow_loop_counter_vgpr(uint16_t scratch_vgpr, bool has_exec_save, bool track_atomics) {
+  return static_cast<uint16_t>(
+      scratch_vgpr + inline_shadow_transaction_scratch_count(has_exec_save, track_atomics));
+}
+
+/// Return the offset/counter scratch reserved when one access spans multiple
+/// exact-shadow cells.
+[[nodiscard]] constexpr uint16_t inline_shadow_loop_scratch_count(uint32_t width_bits,
+                                                                  uint32_t granule_bytes) {
+  return width_bits > granule_bytes * 8u ? 2u : 0u;
+}
+
 /// Resolve every requested owner to one valid context and compute the scalar
 /// tail beyond all original allocations and statically referenced registers.
 /// Empty owner sets and every inconsistent planning state fail closed.

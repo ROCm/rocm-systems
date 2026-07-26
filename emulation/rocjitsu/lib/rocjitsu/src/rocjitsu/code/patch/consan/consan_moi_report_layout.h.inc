@@ -212,6 +212,42 @@ struct ConSanMoiAutoReportInventory {
   uint64_t inline_compact_token_mapping_count = 0;
 };
 
+using ConSanMoiAutoReportCapacityMember = uint64_t ConSanMoiAutoReportInventory::*;
+
+/// Canonical projection of every numeric report-capacity dimension. Keep
+/// capacity comparisons expressed through this list so a dimension cannot
+/// acquire a separate, silently incomplete comparison path.
+inline constexpr std::array<ConSanMoiAutoReportCapacityMember, 15>
+    kConSanMoiAutoReportCapacityMembers = {
+        &ConSanMoiAutoReportInventory::access_range_count,
+        &ConSanMoiAutoReportInventory::barrier_event_count,
+        &ConSanMoiAutoReportInventory::atomic_event_count,
+        &ConSanMoiAutoReportInventory::fence_event_count,
+        &ConSanMoiAutoReportInventory::diagnostic_count,
+        &ConSanMoiAutoReportInventory::record_replay_dispatch_token_capacity,
+        &ConSanMoiAutoReportInventory::record_replay_access_dispatch_bank_count,
+        &ConSanMoiAutoReportInventory::record_replay_access_owner_bank_count,
+        &ConSanMoiAutoReportInventory::sampled_range_bank_count,
+        &ConSanMoiAutoReportInventory::sampled_watchpoint_count,
+        &ConSanMoiAutoReportInventory::inline_lds_bytes,
+        &ConSanMoiAutoReportInventory::inline_atomic_release_count,
+        &ConSanMoiAutoReportInventory::inline_causal_snapshot_count,
+        &ConSanMoiAutoReportInventory::inline_acquired_epoch_token_count,
+        &ConSanMoiAutoReportInventory::inline_compact_token_mapping_count,
+};
+
+/// Return whether a report sized for @p capacity can represent every quantity
+/// required by @p required.
+[[nodiscard]] constexpr bool
+consan_moi_auto_report_inventory_covers(const ConSanMoiAutoReportInventory &capacity,
+                                        const ConSanMoiAutoReportInventory &required) {
+  return capacity.engine == required.engine &&
+         std::ranges::all_of(kConSanMoiAutoReportCapacityMembers,
+                             [&](ConSanMoiAutoReportCapacityMember member) {
+                               return capacity.*member >= required.*member;
+                             });
+}
+
 enum class ConSanMoiAutoReportPlanOutcome : uint8_t {
   Complete,
   InsufficientReportCapacity,
