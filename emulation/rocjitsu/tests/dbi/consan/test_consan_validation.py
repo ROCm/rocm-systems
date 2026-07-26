@@ -1094,6 +1094,50 @@ class ConSanValidationTest(unittest.TestCase):
             "PyTorch HSA runtime did not load the ConSan hook", runtime["reasons"]
         )
 
+    def test_pytorch_doctor_probes_canonical_hook_path(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        with temporary_root() as workspace:
+            python = workspace / "consan-pytorch-venv" / "bin" / "python"
+            real_build = workspace / "build"
+            hook_suffix = Path(
+                "lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
+            )
+            hook = real_build / hook_suffix
+            python.parent.mkdir(parents=True)
+            hook.parent.mkdir(parents=True)
+            python.touch()
+            hook.touch()
+            (workspace / "rocjitsu-build").symlink_to(
+                real_build, target_is_directory=True
+            )
+            completed = subprocess.CompletedProcess(
+                [str(python)],
+                0,
+                stdout=json.dumps(
+                    {
+                        "torch": "test",
+                        "hip": "test",
+                        "triton": "test",
+                        "device": "test GPU",
+                        "arch": "gfx1201",
+                        "numeric_oracle": True,
+                        "hook_loaded": True,
+                    }
+                ),
+                stderr="",
+            )
+            with mock.patch.object(
+                validation.subprocess, "run", return_value=completed
+            ) as run:
+                runtime = validation._pytorch_runtime_probe(
+                    python,
+                    workspace / "rocjitsu-build" / hook_suffix,
+                    "gfx1201",
+                    workload,
+                )
+        self.assertTrue(runtime["ok"])
+        self.assertEqual(run.call_args.args[0][-1], str(hook.resolve()))
+
     def test_pytorch_only_doctor_uses_runtime_target_probe_without_rocminfo(
         self,
     ) -> None:

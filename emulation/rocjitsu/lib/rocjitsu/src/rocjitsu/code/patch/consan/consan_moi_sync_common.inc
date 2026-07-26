@@ -6,6 +6,57 @@ struct AtomicRecordCandidate {
   bool uses_gfx1250_cluster_workgroup_id = false;
 };
 
+[[nodiscard]] bool atomic_record_candidate_semantics_equal(const AtomicRecordCandidate &lhs,
+                                                           const AtomicRecordCandidate &rhs) {
+  const ConSanAtomicSite &left = lhs.site;
+  const ConSanAtomicSite &right = rhs.site;
+  const bool lhs_in_kernel = lhs.container_name.starts_with("kernel:");
+  const bool rhs_in_kernel = rhs.container_name.starts_with("kernel:");
+  return lhs_in_kernel == rhs_in_kernel && lhs.event_kind == rhs.event_kind &&
+         lhs.uses_gfx1250_cluster_workgroup_id == rhs.uses_gfx1250_cluster_workgroup_id &&
+         std::tie(left.address_space_hint, left.text_offset, left.file_offset, left.size,
+                  left.width_bits, left.dst_vgpr, left.addr_vgpr, left.data_vgpr, left.saddr_sgpr,
+                  left.raw_op, left.raw_addr, left.raw_data0, left.raw_data1, left.raw_vdst,
+                  left.raw_saddr, left.raw_vaddr, left.raw_vsrc, left.raw_vdata, left.raw_rsrc,
+                  left.raw_soffset, left.raw_offen, left.raw_idxen, left.raw_ioffset,
+                  left.raw_scope, left.raw_th, left.returns_old_value, left.mnemonic) ==
+             std::tie(right.address_space_hint, right.text_offset, right.file_offset, right.size,
+                      right.width_bits, right.dst_vgpr, right.addr_vgpr, right.data_vgpr,
+                      right.saddr_sgpr, right.raw_op, right.raw_addr, right.raw_data0,
+                      right.raw_data1, right.raw_vdst, right.raw_saddr, right.raw_vaddr,
+                      right.raw_vsrc, right.raw_vdata, right.raw_rsrc, right.raw_soffset,
+                      right.raw_offen, right.raw_idxen, right.raw_ioffset, right.raw_scope,
+                      right.raw_th, right.returns_old_value, right.mnemonic);
+}
+
+[[nodiscard]] bool canonicalize_atomic_record_candidates_by_physical_site(
+    std::vector<AtomicRecordCandidate> &candidates, ConSanResult &result) {
+  std::unordered_map<uint64_t, size_t> canonical_index_by_file_offset;
+  canonical_index_by_file_offset.reserve(candidates.size());
+  std::vector<AtomicRecordCandidate> canonical;
+  canonical.reserve(candidates.size());
+  for (AtomicRecordCandidate &candidate : candidates) {
+    const auto [entry, inserted] =
+        canonical_index_by_file_offset.emplace(candidate.site.file_offset, canonical.size());
+    if (inserted) {
+      canonical.push_back(std::move(candidate));
+      continue;
+    }
+    AtomicRecordCandidate &retained = canonical[entry->second];
+    if (!atomic_record_candidate_semantics_equal(retained, candidate)) {
+      result.errors.emplace_back(
+          "ConSan MOI atomic site at file offset " +
+          std::to_string(candidate.site.file_offset) +
+          " was decoded inconsistently through aliases '" + retained.container_name + "' and '" +
+          candidate.container_name + "'");
+      return false;
+    }
+    retained.kernel_descriptor_file_offset.reset();
+  }
+  candidates = std::move(canonical);
+  return true;
+}
+
 struct SampledAtomicSemantics {
   ConSanMoiSampledSyncRole role = ConSanMoiSampledSyncRole::None;
   ConSanMoiSampledSyncScope scope = ConSanMoiSampledSyncScope::None;
@@ -16,18 +67,17 @@ struct SampledAtomicSemantics {
 };
 
 [[nodiscard]] std::optional<SampledAtomicSemantics>
-sampled_atomic_semantics_for_site(const ConSanResult &result, std::string_view container_name,
-                                  bool in_kernel, const ConSanAtomicSite &site,
-                                  std::string &unsupported_reason) {
-  const auto event = std::ranges::find_if(result.sync_events, [&](const ConSanSyncEvent &item) {
-    return item.kind == ConSanSyncEventKind::Atomic && item.container_name == container_name &&
-           item.in_kernel == in_kernel && item.text_offset == site.text_offset;
-  });
-  if (event == result.sync_events.end()) {
+sampled_atomic_semantics_for_site(const ConSanResult &result,
+                                  const MoiSyncInventoryIndex &sync_index,
+                                  std::string_view container_name, bool in_kernel,
+                                  const ConSanAtomicSite &site, std::string &unsupported_reason) {
+  const ConSanSyncEvent *event =
+      sync_index.event(ConSanSyncEventKind::Atomic, container_name, in_kernel, site.text_offset);
+  if (event == nullptr) {
     unsupported_reason = "missing-shared-sync-event";
     return std::nullopt;
   }
-  const ConSanSyncSequence *sequence = find_consan_sync_sequence_for_event(result, event->identity);
+  const ConSanSyncSequence *sequence = sync_index.sequence(event->identity);
   if (sequence == nullptr ||
       !consan_sync_confidence_meets(sequence->confidence, ConSanSemanticConfidence::Conservative) ||
       !consan_sync_confidence_meets(sequence->memory_role_confidence,
@@ -183,20 +233,25 @@ normalize_ordinary_fence_communication(const ConSanOrdinaryMemorySite &site) {
 }
 
 void append_fence_record_candidates(const ConSanResult &result,
+                                    const MoiSyncInventoryIndex &sync_index,
                                     std::vector<FenceRecordCandidate> &candidates) {
   for (const ConSanMoiFenceCandidate &fence : result.moi_fence_candidates) {
     if (!fence.eligible)
       continue;
-    const auto event = std::ranges::find(result.sync_events, fence.communication_event_identity,
-                                         &ConSanSyncEvent::identity);
-    if (event == result.sync_events.end() ||
-        (event->kind != ConSanSyncEventKind::Atomic &&
-         event->kind != ConSanSyncEventKind::OrdinaryMemory) ||
+    const ConSanSyncEvent *event = sync_index.event(fence.communication_event_identity);
+    if (event == nullptr || (event->kind != ConSanSyncEventKind::Atomic &&
+                             event->kind != ConSanSyncEventKind::OrdinaryMemory) ||
         event->container_name != fence.container_name || event->in_kernel != fence.in_kernel ||
         event->execution_owners.empty())
       continue;
     const auto append_from = [&](const auto &container,
                                  std::optional<uint64_t> descriptor_file_offset) {
+      if (descriptor_file_offset &&
+          (event->execution_owners.size() != 1u ||
+           event->execution_owners.front().descriptor_file_offset !=
+               *descriptor_file_offset)) {
+        descriptor_file_offset.reset();
+      }
       if (event->kind == ConSanSyncEventKind::Atomic) {
         const auto site = std::ranges::find(container.atomic_sites, event->text_offset,
                                             &ConSanAtomicSite::text_offset);
@@ -300,15 +355,14 @@ void append_fence_record_candidates(const ConSanResult &result,
 }
 
 [[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
-atomic_event_kind_for_site(const ConSanResult &result, std::string_view container_name,
-                           bool in_kernel, const ConSanAtomicSite &site) {
-  const auto event = std::ranges::find_if(result.sync_events, [&](const ConSanSyncEvent &item) {
-    return item.kind == ConSanSyncEventKind::Atomic && item.container_name == container_name &&
-           item.in_kernel == in_kernel && item.text_offset == site.text_offset;
-  });
-  if (event == result.sync_events.end())
+atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index,
+                           std::string_view container_name, bool in_kernel,
+                           const ConSanAtomicSite &site) {
+  const ConSanSyncEvent *event =
+      sync_index.event(ConSanSyncEventKind::Atomic, container_name, in_kernel, site.text_offset);
+  if (event == nullptr)
     return std::nullopt;
-  const ConSanSyncSequence *sequence = find_consan_sync_sequence_for_event(result, event->identity);
+  const ConSanSyncSequence *sequence = sync_index.sequence(event->identity);
   if (sequence == nullptr ||
       !consan_sync_confidence_meets(sequence->memory_role_confidence,
                                     ConSanSemanticConfidence::Conservative)) {
@@ -330,47 +384,64 @@ atomic_event_kind_for_site(const ConSanResult &result, std::string_view containe
 }
 
 void append_atomic_record_candidates(const ConSanKernelInfo &kernel, const ConSanResult &result,
+                                     const MoiSyncInventoryIndex &sync_index,
                                      std::vector<AtomicRecordCandidate> &candidates) {
   if (is_rocclr_runtime_kernel_name(kernel.name))
     return;
   const bool allow_gfx1250_lds = result.arch_name == "gfx1250";
   for (const ConSanAtomicSite &site : kernel.atomic_sites) {
-    const auto event_kind = atomic_event_kind_for_site(result, kernel.name, true, site);
+    const auto event_kind = atomic_event_kind_for_site(sync_index, kernel.name, true, site);
     const ConSanAtomicSite normalized = normalize_atomic_record_site(site, allow_gfx1250_lds);
-    if (is_first_light_atomic_record_candidate(normalized, allow_gfx1250_lds) && event_kind)
-      candidates.push_back({"kernel:" + kernel.name, normalized, kernel.descriptor_file_offset,
+    if (is_first_light_atomic_record_candidate(normalized, allow_gfx1250_lds) && event_kind) {
+      std::optional<uint64_t> descriptor_file_offset = kernel.descriptor_file_offset;
+      const ConSanSyncEvent *event = sync_index.event(
+          ConSanSyncEventKind::Atomic, kernel.name, true, site.text_offset);
+      if (event == nullptr || event->execution_owners.size() != 1u ||
+          event->execution_owners.front().descriptor_file_offset != kernel.descriptor_file_offset)
+        descriptor_file_offset.reset();
+      candidates.push_back({"kernel:" + kernel.name, normalized, descriptor_file_offset,
                             *event_kind, kernel.uses_gfx1250_cluster_workgroup_id});
+    }
   }
 }
 
 void append_atomic_record_candidates(const ConSanFunctionInfo &function, const ConSanResult &result,
+                                     const MoiSyncInventoryIndex &sync_index,
                                      std::vector<AtomicRecordCandidate> &candidates) {
   const bool allow_gfx1250_lds = result.arch_name == "gfx1250";
   for (const ConSanAtomicSite &site : function.atomic_sites) {
-    const auto event_kind = atomic_event_kind_for_site(result, function.name, false, site);
+    const auto event_kind = atomic_event_kind_for_site(sync_index, function.name, false, site);
     const ConSanAtomicSite normalized = normalize_atomic_record_site(site, allow_gfx1250_lds);
     if (is_first_light_atomic_record_candidate(normalized, allow_gfx1250_lds) && event_kind)
       candidates.push_back({"function:" + function.name, normalized, std::nullopt, *event_kind});
   }
 }
 
-void append_inline_atomic_candidates(const ConSanKernelInfo &kernel, const ConSanResult &result,
+void append_inline_atomic_candidates(const ConSanKernelInfo &kernel,
+                                     const MoiSyncInventoryIndex &sync_index,
                                      std::vector<AtomicRecordCandidate> &candidates) {
   if (is_rocclr_runtime_kernel_name(kernel.name))
     return;
   for (const ConSanAtomicSite &site : kernel.atomic_sites) {
-    const auto event_kind = atomic_event_kind_for_site(result, kernel.name, true, site);
+    const auto event_kind = atomic_event_kind_for_site(sync_index, kernel.name, true, site);
     if (event_kind) {
-      candidates.push_back({"kernel:" + kernel.name, site, kernel.descriptor_file_offset,
+      std::optional<uint64_t> descriptor_file_offset = kernel.descriptor_file_offset;
+      const ConSanSyncEvent *event = sync_index.event(
+          ConSanSyncEventKind::Atomic, kernel.name, true, site.text_offset);
+      if (event == nullptr || event->execution_owners.size() != 1u ||
+          event->execution_owners.front().descriptor_file_offset != kernel.descriptor_file_offset)
+        descriptor_file_offset.reset();
+      candidates.push_back({"kernel:" + kernel.name, site, descriptor_file_offset,
                             *event_kind, kernel.uses_gfx1250_cluster_workgroup_id});
     }
   }
 }
 
-void append_inline_atomic_candidates(const ConSanFunctionInfo &function, const ConSanResult &result,
+void append_inline_atomic_candidates(const ConSanFunctionInfo &function,
+                                     const MoiSyncInventoryIndex &sync_index,
                                      std::vector<AtomicRecordCandidate> &candidates) {
   for (const ConSanAtomicSite &site : function.atomic_sites) {
-    const auto event_kind = atomic_event_kind_for_site(result, function.name, false, site);
+    const auto event_kind = atomic_event_kind_for_site(sync_index, function.name, false, site);
     if (event_kind)
       candidates.push_back({"function:" + function.name, site, std::nullopt, *event_kind});
   }

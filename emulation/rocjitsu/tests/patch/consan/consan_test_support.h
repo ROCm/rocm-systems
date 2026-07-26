@@ -30,6 +30,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -223,6 +224,69 @@ void mutate_elf_symbol(std::vector<uint8_t> &bytes, uint32_t symbol_index, Mutat
   std::memcpy(&symbol, bytes.data() + offset, sizeof(symbol));
   mutator(symbol);
   std::memcpy(bytes.data() + offset, &symbol, sizeof(symbol));
+}
+
+[[nodiscard]] std::optional<uint32_t> elf_symbol_index(std::span<const uint8_t> bytes,
+                                                       std::string_view name) {
+  if (bytes.size() < sizeof(Elf64_Ehdr))
+    return std::nullopt;
+  Elf64_Ehdr header{};
+  std::memcpy(&header, bytes.data(), sizeof(header));
+  if (header.e_shentsize != sizeof(Elf64_Shdr) || header.e_shoff > bytes.size() ||
+      static_cast<uint64_t>(header.e_shnum) * sizeof(Elf64_Shdr) > bytes.size() - header.e_shoff) {
+    return std::nullopt;
+  }
+  const auto section_at = [&](uint16_t index) -> std::optional<Elf64_Shdr> {
+    if (index >= header.e_shnum)
+      return std::nullopt;
+    Elf64_Shdr section{};
+    std::memcpy(&section,
+                bytes.data() + header.e_shoff + static_cast<uint64_t>(index) * sizeof(section),
+                sizeof(section));
+    return section;
+  };
+  for (uint16_t section_index = 0; section_index < header.e_shnum; ++section_index) {
+    const auto symtab = section_at(section_index);
+    if (!symtab || symtab->sh_type != SHT_SYMTAB || symtab->sh_entsize != sizeof(Elf64_Sym) ||
+        symtab->sh_offset > bytes.size() || symtab->sh_size > bytes.size() - symtab->sh_offset) {
+      continue;
+    }
+    if (symtab->sh_link >= header.e_shnum)
+      continue;
+    const auto strtab = section_at(static_cast<uint16_t>(symtab->sh_link));
+    if (!strtab || strtab->sh_type != SHT_STRTAB || strtab->sh_offset > bytes.size() ||
+        strtab->sh_size > bytes.size() - strtab->sh_offset) {
+      continue;
+    }
+    const auto names =
+        bytes.subspan(static_cast<size_t>(strtab->sh_offset), static_cast<size_t>(strtab->sh_size));
+    const uint64_t symbol_count = symtab->sh_size / sizeof(Elf64_Sym);
+    for (uint64_t symbol_index = 0; symbol_index < symbol_count; ++symbol_index) {
+      Elf64_Sym symbol{};
+      std::memcpy(&symbol, bytes.data() + symtab->sh_offset + symbol_index * sizeof(Elf64_Sym),
+                  sizeof(symbol));
+      if (symbol.st_name >= names.size())
+        continue;
+      const char *begin = reinterpret_cast<const char *>(names.data() + symbol.st_name);
+      const size_t remaining = names.size() - symbol.st_name;
+      const void *terminator = std::memchr(begin, '\0', remaining);
+      if (terminator == nullptr)
+        continue;
+      const auto symbol_name =
+          std::string_view(begin, static_cast<const char *>(terminator) - begin);
+      if (symbol_name == name)
+        return static_cast<uint32_t>(symbol_index);
+    }
+  }
+  return std::nullopt;
+}
+
+template <typename Mutator>
+void mutate_elf_symbol_by_name(std::vector<uint8_t> &bytes, std::string_view name,
+                               Mutator mutator) {
+  const std::optional<uint32_t> index = elf_symbol_index(bytes, name);
+  ASSERT_TRUE(index) << name;
+  mutate_elf_symbol(bytes, *index, std::move(mutator));
 }
 
 bool contains_subsequence(std::span<const uint32_t> haystack, std::span<const uint32_t> needle) {

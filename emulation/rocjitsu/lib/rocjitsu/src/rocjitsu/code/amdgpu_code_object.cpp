@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -696,21 +697,46 @@ void AmdGpuCodeObject::load_sections() {
     }
   }
 
-  // Assembly-produced code objects may leave STT_FUNC sizes at zero. Infer a
+  struct FunctionEntryEvidence {
+    uint64_t explicit_code_size = 0;
+    bool conflicting_explicit_sizes = false;
+  };
+  using FunctionEntryKey = std::pair<uint64_t, uint64_t>;
+  std::map<FunctionEntryKey, FunctionEntryEvidence> function_entries;
+  for (const auto &[name, function] : function_symbols) {
+    (void)name;
+    auto &entry = function_entries[{function.text_file_offset, function.entry_text_offset}];
+    if (function.code_size == 0)
+      continue;
+    if (entry.explicit_code_size != 0 && entry.explicit_code_size != function.code_size)
+      entry.conflicting_explicit_sizes = true;
+    else
+      entry.explicit_code_size = function.code_size;
+  }
+
+  // Assembly-produced code objects may leave STT_FUNC sizes at zero. Prefer an
+  // unambiguous explicit size from another symbol at the same entry: generated
+  // device libraries commonly publish one real symbol plus many zero-sized
+  // target-selection aliases. Only when no such ELF evidence exists, infer a
   // conservative range from the next distinct function entry in the same text
-  // section, or from the section end for the final function. This is the same
-  // bound linkers and disassemblers use when no explicit symbol size exists.
+  // section, or from the section end for the final function.
   for (auto &[name, function] : function_symbols) {
     (void)name;
     if (function.code_size != 0 || function.entry_text_offset >= function.text_size)
       continue;
-    uint64_t end = function.text_size;
-    for (const auto &[other_name, other] : function_symbols) {
-      (void)other_name;
-      if (other.text_file_offset == function.text_file_offset &&
-          other.entry_text_offset > function.entry_text_offset)
-        end = std::min(end, other.entry_text_offset);
+    const FunctionEntryKey key{function.text_file_offset, function.entry_text_offset};
+    const auto evidence = function_entries.find(key);
+    if (evidence != function_entries.end() && evidence->second.explicit_code_size != 0 &&
+        !evidence->second.conflicting_explicit_sizes) {
+      function.code_size = evidence->second.explicit_code_size;
+      continue;
     }
+
+    uint64_t end = function.text_size;
+    const auto next =
+        evidence == function_entries.end() ? function_entries.end() : std::next(evidence);
+    if (next != function_entries.end() && next->first.first == function.text_file_offset)
+      end = std::min(end, next->first.second);
     function.code_size_inferred_from_zero = true;
     function.code_size = end - function.entry_text_offset;
   }

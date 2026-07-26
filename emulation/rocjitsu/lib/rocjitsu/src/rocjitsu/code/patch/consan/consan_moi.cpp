@@ -45,6 +45,7 @@ RJ_DIAGNOSTIC_POP
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -91,6 +92,109 @@ bool consan_detail::validate_scalar_state_temporaries(const ConSanOptions &optio
   return false;
 }
 
+struct MoiSyncSiteKey {
+  ConSanSyncEventKind kind = ConSanSyncEventKind::Fence;
+  std::string_view container_name;
+  bool in_kernel = true;
+  uint64_t text_offset = 0;
+
+  bool operator==(const MoiSyncSiteKey &) const = default;
+};
+
+struct MoiSyncSiteKeyHash {
+  size_t operator()(const MoiSyncSiteKey &key) const {
+    size_t hash = std::hash<std::string_view>{}(key.container_name);
+    hash ^= std::hash<uint64_t>{}(key.text_offset) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
+    hash ^= static_cast<size_t>(key.kind) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
+    hash ^= static_cast<size_t>(key.in_kernel) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
+    return hash;
+  }
+};
+
+struct MoiPhysicalSyncSiteKey {
+  ConSanSyncEventKind kind = ConSanSyncEventKind::Fence;
+  uint64_t text_offset = 0;
+
+  bool operator==(const MoiPhysicalSyncSiteKey &) const = default;
+};
+
+struct MoiPhysicalSyncSiteKeyHash {
+  size_t operator()(const MoiPhysicalSyncSiteKey &key) const {
+    size_t hash = std::hash<uint64_t>{}(key.text_offset);
+    hash ^= static_cast<size_t>(key.kind) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
+    return hash;
+  }
+};
+
+/// Immutable, transform-local lookup over ConSan's synchronization inventory.
+///
+/// Null entries preserve the public helpers' fail-closed uniqueness contract:
+/// duplicate site or sequence membership never silently selects one match.
+class MoiSyncInventoryIndex {
+public:
+  explicit MoiSyncInventoryIndex(const ConSanResult &result) {
+    events_by_identity_.reserve(result.sync_events.size());
+    events_by_site_.reserve(result.sync_events.size());
+    events_by_physical_site_.reserve(result.sync_events.size());
+    for (const ConSanSyncEvent &event : result.sync_events) {
+      insert_unique(events_by_identity_, std::string_view(event.identity), &event);
+      insert_unique(
+          events_by_site_,
+          MoiSyncSiteKey{event.kind, event.container_name, event.in_kernel, event.text_offset},
+          &event);
+      insert_unique(events_by_physical_site_, MoiPhysicalSyncSiteKey{event.kind, event.text_offset},
+                    &event);
+    }
+
+    size_t member_count = 0;
+    for (const ConSanSyncSequence &sequence : result.sync_sequences)
+      member_count += sequence.member_event_identities.size();
+    sequences_by_event_identity_.reserve(member_count);
+    for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+      for (const std::string &identity : sequence.member_event_identities)
+        insert_unique(sequences_by_event_identity_, std::string_view(identity), &sequence);
+    }
+  }
+
+  [[nodiscard]] const ConSanSyncEvent *event(std::string_view identity) const {
+    return find(events_by_identity_, identity);
+  }
+
+  [[nodiscard]] const ConSanSyncEvent *event(ConSanSyncEventKind kind,
+                                             std::string_view container_name, bool in_kernel,
+                                             uint64_t text_offset) const {
+    const ConSanSyncEvent *exact =
+        find(events_by_site_, MoiSyncSiteKey{kind, container_name, in_kernel, text_offset});
+    return exact != nullptr
+               ? exact
+               : find(events_by_physical_site_, MoiPhysicalSyncSiteKey{kind, text_offset});
+  }
+
+  [[nodiscard]] const ConSanSyncSequence *sequence(std::string_view event_identity) const {
+    return find(sequences_by_event_identity_, event_identity);
+  }
+
+private:
+  template <typename Map, typename Key, typename Value>
+  static void insert_unique(Map &map, Key key, Value value) {
+    const auto [entry, inserted] = map.emplace(std::move(key), value);
+    if (!inserted)
+      entry->second = nullptr;
+  }
+
+  template <typename Map, typename Key>
+  [[nodiscard]] static typename Map::mapped_type find(const Map &map, const Key &key) {
+    const auto entry = map.find(key);
+    return entry == map.end() ? nullptr : entry->second;
+  }
+
+  std::unordered_map<std::string_view, const ConSanSyncEvent *> events_by_identity_;
+  std::unordered_map<MoiSyncSiteKey, const ConSanSyncEvent *, MoiSyncSiteKeyHash> events_by_site_;
+  std::unordered_map<MoiPhysicalSyncSiteKey, const ConSanSyncEvent *, MoiPhysicalSyncSiteKeyHash>
+      events_by_physical_site_;
+  std::unordered_map<std::string_view, const ConSanSyncSequence *> sequences_by_event_identity_;
+};
+
 #include "rocjitsu/code/patch/consan/consan_moi_candidates.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_placement.inc"
@@ -130,18 +234,60 @@ bool consan_moi_supports_native_lds_record_replay_mnemonic(std::string_view mnem
 
 ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &options,
                                   std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch) {
+  if (result.moi_stage_warning_begin <= result.warnings.size())
+    result.warnings.resize(result.moi_stage_warning_begin);
+  else
+    result.errors.emplace_back("ConSan MOI inventory has an invalid warning boundary");
+
   ConSanOptions effective_options = options;
+  result.outcome =
+      result.errors.empty() ? ConSanTransformOutcome::Unchanged : ConSanTransformOutcome::Invalid;
   result.flavor = ConSanFlavor::Moi;
   result.moi_engine = effective_options.moi_engine;
+  result.sampled_barrier_applicable_event_count = 0;
+  result.resolved_moi_owner_vgpr.reset();
+  result.resolved_moi_epoch_vgpr.reset();
+  result.resolved_moi_workgroup_key_vgpr.reset();
+  result.resolved_moi_persistent_vgpr_assignments.clear();
+  result.resolved_moi_persistent_owner_sgpr.reset();
+  result.resolved_moi_persistent_epoch_sgpr.reset();
+  result.resolved_moi_persistent_workgroup_key_sgpr.reset();
+  result.resolved_moi_prologue_scratch_vgpr_assignments.clear();
+  result.resolved_moi_exec_save_sgpr.reset();
+  result.resolved_moi_transient_sgpr_assignments.clear();
+  result.resolved_moi_owner_sgpr.reset();
+  result.resolved_moi_dispatch_id_sgpr.reset();
   result.moi_report_dispatch_id = effective_options.moi_report_dispatch_id;
+  result.moi_persistent_vgprs_automatic = false;
+  result.moi_persistent_sgprs_automatic = false;
+  result.moi_private_epoch_automatic = false;
+  result.moi_exec_save_sgprs_automatic = false;
+  result.moi_owner_sgpr_automatic = false;
+  result.moi_dispatch_id_sgprs_automatic = false;
   result.modified = false;
+  result.final_validation_passed = false;
   result.elf_bytes.clear();
   result.moi_candidates.clear();
   result.site_dispositions.clear();
+  result.resource_plans.clear();
+  result.resource_plan_summary = {};
+  result.access_plans.clear();
+  result.composite_proof.reset();
+  result.patches.clear();
+  if (!result.errors.empty())
+    return result;
   for (const ConSanKernelInfo &kernel : result.kernels)
     append_moi_candidates(kernel, effective_options.flat_provenance_mode, arch, result);
   for (const ConSanFunctionInfo &function : result.functions)
     append_moi_candidates(function, effective_options.flat_provenance_mode, arch, result);
+  if (!effective_options.test_kernel_name_filter.empty()) {
+    std::erase_if(result.moi_candidates, [&](const ConSanMoiCandidate &candidate) {
+      return candidate.container_name.find(effective_options.test_kernel_name_filter) ==
+             std::string::npos;
+    });
+  }
+  if (!canonicalize_moi_candidates_by_physical_site(result))
+    return result;
   if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
     for (ConSanMoiCandidate &candidate : result.moi_candidates) {
       if (candidate.text_offset < candidate.container_entry_text_offset ||
@@ -152,12 +298,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
           gfx1250_vgpr_msb_mode_at(code_object_bytes, text_file_offset,
                                    candidate.container_entry_text_offset, candidate.file_offset);
     }
-  }
-  if (!effective_options.test_kernel_name_filter.empty()) {
-    std::erase_if(result.moi_candidates, [&](const ConSanMoiCandidate &candidate) {
-      return candidate.container_name.find(effective_options.test_kernel_name_filter) ==
-             std::string::npos;
-    });
   }
   for (const ConSanKernelInfo &kernel : result.kernels)
     append_moi_access_site_dispositions(code_object_bytes, kernel,
@@ -180,17 +320,19 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         "ConSan MOI sampled engine skipped atomic ordering in a code object with no selected "
         "LDS access candidates");
   }
-  ConSanResult sync_admission = result;
-  append_moi_sync_site_dispositions(effective_options, sync_admission);
-  const bool has_supported_atomic_or_fence = std::ranges::any_of(
-      sync_admission.site_dispositions, [&](const ConSanSiteDispositionRecord &site) {
+  const size_t sync_admission_begin = result.site_dispositions.size();
+  append_moi_sync_site_dispositions(effective_options, result);
+  const auto sync_admission = std::span<const ConSanSiteDispositionRecord>(result.site_dispositions)
+                                  .subspan(sync_admission_begin);
+  const bool has_supported_atomic_or_fence =
+      std::ranges::any_of(sync_admission, [&](const ConSanSiteDispositionRecord &site) {
         return site.disposition == ConSanSiteDisposition::Supported &&
                (site.site_kind == ConSanResourceSiteKind::Atomic ||
                 (effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
                  site.site_kind == ConSanResourceSiteKind::Fence));
       });
-  const bool has_supported_barrier = std::ranges::any_of(
-      sync_admission.site_dispositions, [](const ConSanSiteDispositionRecord &site) {
+  const bool has_supported_barrier =
+      std::ranges::any_of(sync_admission, [](const ConSanSiteDispositionRecord &site) {
         return site.disposition == ConSanSiteDisposition::Supported &&
                site.site_kind == ConSanResourceSiteKind::Barrier;
       });
@@ -204,8 +346,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     result.warnings.emplace_back(
         "ConSan MOI skipped barrier tracking for a code object with no admitted barrier sites");
   }
-  const size_t supported_barrier_members = std::ranges::count_if(
-      sync_admission.site_dispositions, [](const ConSanSiteDispositionRecord &site) {
+  const size_t supported_barrier_members =
+      std::ranges::count_if(sync_admission, [](const ConSanSiteDispositionRecord &site) {
         return site.disposition == ConSanSiteDisposition::Supported &&
                site.site_kind == ConSanResourceSiteKind::Barrier;
       });
@@ -222,9 +364,10 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         arch == ROCJITSU_CODE_ARCH_CDNA4) &&
        effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
        supported_barrier_members > kCompactRecordReplayBarrierMemberLimit);
+  const MoiSyncInventoryIndex sync_index(result);
   const auto has_operational_atomic = [&](const auto &container, bool in_kernel) {
     return std::ranges::any_of(container.atomic_sites, [&](const ConSanAtomicSite &site) {
-      return atomic_event_kind_for_site(result, container.name, in_kernel, site).has_value();
+      return atomic_event_kind_for_site(sync_index, container.name, in_kernel, site).has_value();
     });
   };
   const bool has_operational_atomic_or_fence =
@@ -247,7 +390,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     // release/acquire tables can never be populated in an object with no
     // admitted atomic event. Keep every typed unsupported disposition, but do
     // not impose the unusable transaction path or its extra scratch demand.
-    for (const ConSanSiteDispositionRecord &site : sync_admission.site_dispositions) {
+    for (const ConSanSiteDispositionRecord &site : sync_admission) {
       if (site.site_kind != ConSanResourceSiteKind::Atomic ||
           site.disposition != ConSanSiteDisposition::Unsupported)
         continue;
@@ -261,6 +404,9 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         "ConSan MOI skipped atomic ordering instrumentation for a code object with no relevant "
         "atomic sites");
   }
+  result.site_dispositions.erase(result.site_dispositions.begin() +
+                                     static_cast<std::ptrdiff_t>(sync_admission_begin),
+                                 result.site_dispositions.end());
   const bool explicit_persistent_state =
       effective_options.moi_owner_vgpr || effective_options.moi_epoch_vgpr;
   if (effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
@@ -402,6 +548,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
       effective_options.moi_report_buffer_size < sizeof(ConSanMoiReportHeader)) {
     result.warnings.emplace_back("ConSan MOI report buffer is smaller than the report ABI header");
   }
+  resource_planning_state.materialize_dense_liveness_for_transient_assignments(effective_options,
+                                                                               result);
   bool owner_epoch_prologue_applied_early = false;
   const bool has_usable_atomic_plan =
       std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
@@ -578,6 +726,40 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     if (kernel.has_dynamic_lds)
       dynamic_lds_descriptors.insert(kernel.descriptor_file_offset);
   }
+  struct AccessSiteKey {
+    std::string_view container_name;
+    bool in_kernel = true;
+    uint64_t text_offset = 0;
+
+    bool operator==(const AccessSiteKey &) const = default;
+  };
+  struct AccessSiteKeyHash {
+    [[nodiscard]] size_t operator()(const AccessSiteKey &key) const {
+      size_t hash = std::hash<std::string_view>{}(key.container_name);
+      hash ^= std::hash<uint64_t>{}(key.text_offset) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
+      hash ^= std::hash<bool>{}(key.in_kernel) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
+      return hash;
+    }
+  };
+  std::unordered_set<AccessSiteKey, AccessSiteKeyHash> supported_access_sites;
+  supported_access_sites.reserve(result.site_dispositions.size());
+  for (const ConSanSiteDispositionRecord &site : result.site_dispositions) {
+    if (site.site_kind == ConSanResourceSiteKind::Access &&
+        site.disposition == ConSanSiteDisposition::Supported) {
+      supported_access_sites.insert({site.container_name, site.in_kernel, site.text_offset});
+    }
+  }
+  std::vector<bool> dynamic_lds_access_candidates(result.moi_candidates.size(), false);
+  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    if (plan.site_kind != ConSanResourceSiteKind::Access ||
+        plan.candidate_index >= dynamic_lds_access_candidates.size()) {
+      continue;
+    }
+    dynamic_lds_access_candidates[plan.candidate_index] =
+        std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t owner) {
+          return dynamic_lds_descriptors.contains(owner);
+        });
+  }
   const size_t selected_candidate_limit =
       options.max_patches_is_expert_limit ? options.max_patches : result.moi_candidates.size();
   for (size_t candidate_index = 0; candidate_index < result.moi_candidates.size();
@@ -585,14 +767,8 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     if (selected_candidate_count >= selected_candidate_limit)
       break;
     const ConSanMoiCandidate &candidate = result.moi_candidates[candidate_index];
-    const bool supported =
-        std::ranges::any_of(result.site_dispositions, [&](const ConSanSiteDispositionRecord &site) {
-          return site.site_kind == ConSanResourceSiteKind::Access &&
-                 site.disposition == ConSanSiteDisposition::Supported &&
-                 site.container_name == candidate.container_name &&
-                 site.text_offset == candidate.text_offset;
-        });
-    if (!supported)
+    if (!supported_access_sites.contains(
+            {candidate.container_name, candidate.in_kernel, candidate.text_offset}))
       continue;
     const auto ranges = candidate_access_ranges(code_object_bytes, candidate, arch);
     if (!ranges || ranges->empty())
@@ -600,14 +776,7 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     ++selected_candidate_count;
     selected_flat_candidate |= candidate.source == ConSanMoiCandidateSource::FlatGroup ||
                                candidate.source == ConSanMoiCandidateSource::FlatMaybeGroup;
-    selected_dynamic_lds_owner |=
-        std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-          return plan.site_kind == ConSanResourceSiteKind::Access &&
-                 plan.candidate_index == candidate_index &&
-                 std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t owner) {
-                   return dynamic_lds_descriptors.contains(owner);
-                 });
-        });
+    selected_dynamic_lds_owner |= dynamic_lds_access_candidates[candidate_index];
     if (candidate.source == ConSanMoiCandidateSource::NativeLds) {
       for (const ConSanMoiAccessRange &range : *ranges) {
         selected_native_lds_extent =

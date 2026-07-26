@@ -316,6 +316,96 @@ TEST(ConSan, InfersZeroSizedKernelFunctionThroughTextEnd) {
   EXPECT_EQ(result.kernels.front().stats.lds_write_count, 1u);
 }
 
+TEST(ConSan, UsesExplicitAliasedFunctionSizeForZeroSizedKernelSymbol) {
+  const std::array<uint32_t, 3> kernel_words = {
+      0xD8340000u,
+      0x00000102u, // ds_store_b32 v2, v1
+      0xBFB00000u, // s_endpgm
+  };
+  const std::array<uint32_t, 3> trailing_padding = {};
+  std::vector<uint8_t> bytes =
+      make_rdna4_code_object_with_local_function(kernel_words, trailing_padding);
+  mutate_elf_symbol(bytes, 1, [](Elf64_Sym &symbol) { symbol.st_size = 0; });
+  mutate_elf_symbol(bytes, 2, [](Elf64_Sym &symbol) { symbol.st_value = 0x1100u; });
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  EXPECT_TRUE(result.kernels.front().has_text_range);
+  EXPECT_TRUE(result.kernels.front().decoded);
+  EXPECT_EQ(result.kernels.front().code_size, kernel_words.size() * sizeof(uint32_t));
+  EXPECT_FALSE(result.kernels.front().code_size_inferred_from_zero);
+  EXPECT_EQ(result.kernels.front().stats.lds_write_count, 1u);
+}
+
+TEST(ConSan, ConflictingAliasedFunctionSizesFallBackToNextDistinctEntry) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.entry_nop_words = 2u;
+  std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto first =
+      std::ranges::find(original.kernels(), "shared_owner_0", &AmdGpuKernelInfo::name);
+  const auto unrelated =
+      std::ranges::find(original.kernels(), "unrelated_kernel", &AmdGpuKernelInfo::name);
+  ASSERT_NE(first, original.kernels().end());
+  ASSERT_NE(unrelated, original.kernels().end());
+  ASSERT_FALSE(original.text_sections().empty());
+  const uint64_t first_entry_address =
+      original.text_sections().front()->vaddr() + first->entry_text_offset;
+
+  mutate_elf_symbol_by_name(bytes, "shared_owner_0",
+                            [](Elf64_Sym &symbol) { symbol.st_size = 0u; });
+  mutate_elf_symbol_by_name(bytes, "shared_owner_1", [&](Elf64_Sym &symbol) {
+    symbol.st_value = first_entry_address;
+    symbol.st_size = first->code_size;
+  });
+  mutate_elf_symbol_by_name(bytes, "shared_lds_helper", [&](Elf64_Sym &symbol) {
+    symbol.st_value = first_entry_address;
+    symbol.st_size = first->code_size + sizeof(uint32_t);
+  });
+
+  AmdGpuCodeObject conflicted(bytes.data(), bytes.size());
+  ASSERT_TRUE(conflicted.is_valid());
+  const auto inferred =
+      std::ranges::find(conflicted.kernels(), "shared_owner_0", &AmdGpuKernelInfo::name);
+  const auto next =
+      std::ranges::find(conflicted.kernels(), "unrelated_kernel", &AmdGpuKernelInfo::name);
+  ASSERT_NE(inferred, conflicted.kernels().end());
+  ASSERT_NE(next, conflicted.kernels().end());
+  EXPECT_TRUE(inferred->code_size_inferred_from_zero);
+  EXPECT_EQ(inferred->code_size, next->entry_text_offset - inferred->entry_text_offset);
+}
+
+TEST(ConSan, SkipsEmptyTargetSelectionKernelAtTextEnd) {
+  const std::array<uint32_t, 3> kernel_words = {
+      0xD8340000u,
+      0x00000102u, // ds_store_b32 v2, v1
+      0xBFB00000u, // s_endpgm
+  };
+  const std::array<uint32_t, 0> empty_specialization = {};
+  const std::vector<uint8_t> bytes = make_rdna4_code_object_with_local_function(
+      kernel_words, empty_specialization, {}, kRdna4Wave64AllVgprsGranulated,
+      /*function_is_kernel=*/true);
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.kernels.size(), 2u);
+  const auto empty = std::ranges::find(result.kernels, "lds_helper", &ConSanKernelInfo::name);
+  ASSERT_NE(empty, result.kernels.end());
+  EXPECT_TRUE(empty->has_text_range);
+  EXPECT_EQ(empty->code_size, 0u);
+  EXPECT_TRUE(empty->decoded);
+  EXPECT_EQ(empty->preflight_action, ConSanPreflightAction::Skip);
+  EXPECT_EQ(empty->stats.instruction_count, 0u);
+}
+
 TEST(ConSan, ExcessiveAllocatedSectionAlignmentCannotDriveTextGrowthAllocation) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,

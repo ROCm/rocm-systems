@@ -29,11 +29,14 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     return;
 
   std::vector<AtomicRecordCandidate> candidates;
+  const MoiSyncInventoryIndex sync_index(result);
   for (const ConSanKernelInfo &kernel : result.kernels)
-    append_inline_atomic_candidates(kernel, result, candidates);
+    append_inline_atomic_candidates(kernel, sync_index, candidates);
   for (const ConSanFunctionInfo &function : result.functions)
-    append_inline_atomic_candidates(function, result, candidates);
+    append_inline_atomic_candidates(function, sync_index, candidates);
   apply_test_container_filter(candidates, options);
+  if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result))
+    return;
   candidates.erase(
       std::remove_if(candidates.begin(), candidates.end(),
                      [&](const auto &candidate) {

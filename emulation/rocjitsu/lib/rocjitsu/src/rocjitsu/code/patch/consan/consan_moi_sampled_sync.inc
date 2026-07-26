@@ -1559,6 +1559,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     bool deferred_acquire = false;
   };
   std::vector<Candidate> candidates;
+  const MoiSyncInventoryIndex sync_index(result);
   const bool allow_gfx1250_lds = result.arch_name == "gfx1250";
   const auto append = [&](std::string_view name, bool in_kernel, std::optional<uint64_t> descriptor,
                           const std::vector<ConSanAtomicSite> &sites) {
@@ -1572,17 +1573,23 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       const ConSanAtomicSite normalized = normalize_atomic_record_site(site, allow_gfx1250_lds);
       if (!is_first_light_atomic_record_candidate(normalized, allow_gfx1250_lds))
         continue;
-      const auto event_kind = atomic_event_kind_for_site(result, name, in_kernel, normalized);
+      const auto event_kind = atomic_event_kind_for_site(sync_index, name, in_kernel, normalized);
       if (!event_kind)
         continue;
       std::string reason;
-      const auto semantics =
-          sampled_atomic_semantics_for_site(result, name, in_kernel, normalized, reason);
+      const auto semantics = sampled_atomic_semantics_for_site(
+          result, sync_index, name, in_kernel, normalized, reason);
       if (!semantics) {
         result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped " + std::string(name) +
                                      ": " + reason);
         continue;
       }
+      const ConSanSyncEvent *event =
+          sync_index.event(ConSanSyncEventKind::Atomic, name, in_kernel, site.text_offset);
+      if (descriptor &&
+          (event == nullptr || event->execution_owners.size() != 1u ||
+           event->execution_owners.front().descriptor_file_offset != *descriptor))
+        descriptor.reset();
       candidates.push_back({{(in_kernel ? "kernel:" : "function:") + std::string(name), normalized,
                              descriptor, *event_kind},
                             *semantics,
@@ -1602,6 +1609,35 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
              std::string::npos;
     });
   }
+  std::unordered_map<uint64_t, size_t> canonical_index_by_file_offset;
+  canonical_index_by_file_offset.reserve(candidates.size());
+  std::vector<Candidate> canonical_candidates;
+  canonical_candidates.reserve(candidates.size());
+  for (Candidate &candidate : candidates) {
+    const auto [entry, inserted] = canonical_index_by_file_offset.emplace(
+        candidate.atomic.site.file_offset, canonical_candidates.size());
+    if (inserted) {
+      canonical_candidates.push_back(std::move(candidate));
+      continue;
+    }
+    Candidate &retained = canonical_candidates[entry->second];
+    if (!atomic_record_candidate_semantics_equal(retained.atomic, candidate.atomic) ||
+        std::tie(retained.semantics.role, retained.semantics.scope, retained.semantics.outcome,
+                 retained.semantics.byte_count, retained.semantics.descriptor,
+                 retained.semantics.cas_failure_descriptor) !=
+            std::tie(candidate.semantics.role, candidate.semantics.scope,
+                     candidate.semantics.outcome, candidate.semantics.byte_count,
+                     candidate.semantics.descriptor, candidate.semantics.cas_failure_descriptor)) {
+      result.errors.emplace_back(
+          "ConSan MOI sampled atomic site at file offset " +
+          std::to_string(candidate.atomic.site.file_offset) +
+          " was decoded inconsistently through aliases '" + retained.atomic.container_name +
+          "' and '" + candidate.atomic.container_name + "'");
+      return;
+    }
+    retained.atomic.kernel_descriptor_file_offset.reset();
+  }
+  candidates = std::move(canonical_candidates);
   std::sort(candidates.begin(), candidates.end(), [](const Candidate &lhs, const Candidate &rhs) {
     return lhs.atomic.site.text_offset < rhs.atomic.site.text_offset;
   });
@@ -2090,6 +2126,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     info.original_size = site.size;
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.relocated_guest_instruction_offset = cave_offset + guest_instruction_offset;
+    info.sampled_access_kind = ConSanLdsAccessKind::Atomic;
     info.scratch_vgpr = planned.resources.base;
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
     if (planned.private_layout) {

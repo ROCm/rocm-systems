@@ -687,7 +687,7 @@ choose_scratch_vgpr(const ConSanLdsSite &site, const ConSanOptions &options,
 }
 
 [[nodiscard]] std::vector<BasicBlock *>
-block_ptrs_for(std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+block_ptrs_for(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   std::vector<BasicBlock *> ptrs;
   ptrs.reserve(blocks.size());
   for (const auto &block : blocks) {

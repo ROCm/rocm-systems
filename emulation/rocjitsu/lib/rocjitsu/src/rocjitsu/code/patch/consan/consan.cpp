@@ -44,6 +44,7 @@ RJ_DIAGNOSTIC_POP
 #include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -414,6 +415,84 @@ validated_composite_proof(const ConSanResult &dry_run, const ConSanResult &valid
 }
 
 } // namespace
+
+ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
+                                                   const ConSanMoiReportRetryConfig &report,
+                                                   std::span<const uint8_t> code_object_bytes) {
+  const ConSanMoiEngine inventory_engine = inventory.moi_engine;
+  try {
+    if (!inventory.moi_inventory_options)
+      inventory.errors.emplace_back("ConSan MOI inventory retry has no immutable option snapshot");
+    ConSanOptions options;
+    options.flavor = ConSanFlavor::Moi;
+    if (inventory.moi_inventory_options)
+      options = *inventory.moi_inventory_options;
+    if (options.flavor != ConSanFlavor::Moi)
+      inventory.errors.emplace_back("ConSan MOI inventory retry requires the MOI flavor");
+    if (!inventory.visited_code_object || inventory.input_size != code_object_bytes.size())
+      inventory.errors.emplace_back(
+          "ConSan MOI inventory retry does not match the original code-object size");
+    if (inventory.input_fingerprint.empty() ||
+        inventory.input_fingerprint != code_object_fingerprint(code_object_bytes)) {
+      inventory.errors.emplace_back(
+          "ConSan MOI inventory retry does not match the original code-object bytes");
+    }
+    if (inventory.flavor != ConSanFlavor::Moi || inventory.moi_engine != options.moi_engine)
+      inventory.errors.emplace_back(
+          "ConSan MOI inventory retry does not match the requested engine");
+    if (inventory.modified || !inventory.elf_bytes.empty() || !inventory.patches.empty() ||
+        inventory.applied_fault_mutations != 0u || inventory.applied_perturbations != 0u ||
+        !inventory.fault_plans.empty() || !inventory.perturbation_plans.empty()) {
+      inventory.errors.emplace_back(
+          "ConSan MOI inventory retry requires an unmodified semantic inventory");
+    }
+    if (inventory.moi_stage_warning_begin > inventory.warnings.size())
+      inventory.errors.emplace_back("ConSan MOI inventory retry has an invalid warning boundary");
+    if (!inventory.errors.empty()) {
+      inventory.outcome = ConSanTransformOutcome::Invalid;
+      return finalize_consan_result(std::move(inventory), code_object_bytes);
+    }
+
+    AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
+    const rj_code_arch_t arch = arch_for_target(code_object.target_id());
+    if (arch == ROCJITSU_CODE_ARCH_INVALID ||
+        inventory.target_name != target_name(code_object.target_id())) {
+      inventory.errors.emplace_back(
+          "ConSan MOI inventory retry does not match the original code-object target");
+    }
+    if (!inventory.errors.empty()) {
+      inventory.outcome = ConSanTransformOutcome::Invalid;
+      return finalize_consan_result(std::move(inventory), code_object_bytes);
+    }
+
+    options.moi_report_buffer_address = report.buffer_address;
+    options.moi_report_buffer_size = report.buffer_size;
+    options.moi_report_layout = report.layout;
+    options.moi_report_generation = report.generation;
+    options.moi_report_dispatch_id = report.dispatch_id;
+    ConSanResult result =
+        try_patch_consan_moi(std::move(inventory), options, code_object_bytes, arch);
+    try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
+    return finalize_consan_result(std::move(result), code_object_bytes);
+  } catch (const std::exception &error) {
+    ConSanResult result;
+    result.visited_code_object = true;
+    result.flavor = ConSanFlavor::Moi;
+    result.moi_engine = inventory_engine;
+    result.input_size = code_object_bytes.size();
+    result.errors.emplace_back(std::string("ConSan MOI inventory retry threw an exception: ") +
+                               error.what());
+    return finalize_consan_result(std::move(result), code_object_bytes);
+  } catch (...) {
+    ConSanResult result;
+    result.visited_code_object = true;
+    result.flavor = ConSanFlavor::Moi;
+    result.moi_engine = inventory_engine;
+    result.input_size = code_object_bytes.size();
+    result.errors.emplace_back("ConSan MOI inventory retry threw a non-standard exception");
+    return finalize_consan_result(std::move(result), code_object_bytes);
+  }
+}
 
 ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
                               const ConSanOptions &options) {

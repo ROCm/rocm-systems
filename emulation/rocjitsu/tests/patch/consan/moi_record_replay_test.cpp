@@ -84,6 +84,129 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   EXPECT_FALSE(result.warnings.empty());
 }
 
+TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.entry_nop_words = 2u;
+  std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto first =
+      std::ranges::find(original.kernels(), "shared_owner_0", &AmdGpuKernelInfo::name);
+  const auto alias =
+      std::ranges::find(original.kernels(), "shared_owner_1", &AmdGpuKernelInfo::name);
+  ASSERT_NE(first, original.kernels().end());
+  ASSERT_NE(alias, original.kernels().end());
+  ASSERT_EQ(first->code_size, 4u * sizeof(uint32_t));
+  ASSERT_FALSE(original.text_sections().empty());
+
+  const uint64_t target_entry_address =
+      original.text_sections().front()->vaddr() + first->entry_text_offset;
+  const uint64_t alias_descriptor_address = original.kernel_descriptor_offset(alias->name);
+  mutate_kernel_descriptor(bytes, alias->name, [&](KD &descriptor) {
+    descriptor.kernel_code_entry_byte_offset =
+        static_cast<int64_t>(target_entry_address) - static_cast<int64_t>(alias_descriptor_address);
+  });
+  mutate_elf_symbol_by_name(bytes, alias->name, [&](Elf64_Sym &symbol) {
+    symbol.st_value = target_entry_address;
+    symbol.st_size = first->code_size;
+  });
+  const std::array<uint32_t, 4> aliased_body = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+      0xBF940000u, // s_barrier_wait -1
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const uint64_t body_file_offset = first->text_file_offset + first->entry_text_offset;
+  ASSERT_LE(body_file_offset, bytes.size());
+  ASSERT_LE(sizeof(aliased_body), bytes.size() - body_file_offset);
+  std::memcpy(bytes.data() + body_file_offset, aliased_body.data(), sizeof(aliased_body));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.test_kernel_name_filter = "shared_owner";
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 30u;
+  options.moi_owner_vgpr = 14u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  EXPECT_EQ(result.moi_candidates.front().container_name, "shared_owner_0");
+  EXPECT_FALSE(result.moi_candidates.front().kernel_descriptor_file_offset);
+  ASSERT_EQ(result.sync_events.size(), 1u);
+  EXPECT_EQ(result.sync_events.front().kind, ConSanSyncEventKind::Barrier);
+  ASSERT_EQ(result.site_dispositions.size(), 4u);
+  EXPECT_TRUE(std::ranges::all_of(result.site_dispositions, [](const auto &disposition) {
+    return (disposition.site_kind == ConSanResourceSiteKind::Access ||
+            disposition.site_kind == ConSanResourceSiteKind::Barrier) &&
+           disposition.disposition == ConSanSiteDisposition::Supported;
+  }));
+  ASSERT_EQ(result.resource_plans.size(), 2u);
+  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
+    EXPECT_NE(std::ranges::find(plan.owner_descriptor_file_offsets, first->descriptor_file_offset),
+              plan.owner_descriptor_file_offsets.end());
+    EXPECT_NE(std::ranges::find(plan.owner_descriptor_file_offsets, alias->descriptor_file_offset),
+              plan.owner_descriptor_file_offsets.end());
+  }
+  const auto is_access_patch = [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  };
+  EXPECT_EQ(std::ranges::count_if(result.patches, is_access_patch), 1u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
+                               &ConSanPatchInfo::kind),
+            1u);
+  const auto access_patch = std::ranges::find_if(result.patches, is_access_patch);
+  ASSERT_NE(access_patch, result.patches.end());
+  EXPECT_EQ(access_patch->owner_descriptor_file_offsets.size(), 2u);
+  const auto barrier_patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
+  ASSERT_NE(barrier_patch, result.patches.end());
+  EXPECT_EQ(barrier_patch->owner_descriptor_file_offsets.size(), 2u);
+}
+
+TEST(ConSanMoi, RejectsPhysicalSyncAliasWithConflictingContainerSemantics) {
+  const std::array<uint32_t, 4> kernel_words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+      0xBF940000u, // s_barrier_wait -1
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const std::array<uint32_t, 1> function_words = {
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  std::vector<uint8_t> bytes =
+      make_rdna4_code_object_with_local_function(kernel_words, function_words);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_FALSE(original.text_sections().empty());
+  const auto kernel = std::ranges::find(original.kernels(), "lds_probe", &AmdGpuKernelInfo::name);
+  ASSERT_NE(kernel, original.kernels().end());
+  const uint64_t kernel_entry_address =
+      original.text_sections().front()->vaddr() + kernel->entry_text_offset;
+  mutate_elf_symbol_by_name(bytes, "lds_helper", [&](Elf64_Sym &symbol) {
+    symbol.st_value = kernel_entry_address;
+    symbol.st_size = kernel->code_size;
+  });
+
+  const ConSanResult result = try_patch_consan(bytes, moi_options(ConSanMoiEngine::RecordReplay));
+
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
+  EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
+    return error.find("synchronization site") != std::string::npos &&
+           error.find("decoded inconsistently through aliases") != std::string::npos;
+  })) << testing::PrintToString(result.errors);
+  EXPECT_FALSE(result.modified);
+  EXPECT_TRUE(result.elf_bytes.empty());
+}
+
 TEST(ConSanMoi, Rdna4RecordReplayRecordsHardwareDispatchIdentity) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
@@ -119,6 +242,85 @@ TEST(ConSanMoi, Rdna4RecordReplayRecordsHardwareDispatchIdentity) {
                         offsetof(ConSanMoiAccessRecord, generation) + sizeof(uint32_t),
                         static_cast<uint16_t>(*result.resolved_moi_dispatch_id_sgpr + 1u),
                         *access->scratch_vgpr)));
+}
+
+TEST(ConSanMoi, ReportBufferRetryMatchesFreshRecordReplayTransform) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  ConSanOptions inventory_options = moi_options(ConSanMoiEngine::RecordReplay);
+  ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
+  ASSERT_FALSE(inventory.modified);
+
+  ConSanOptions options = inventory_options;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
+  const ConSanResult fresh = try_patch_consan(bytes, options);
+  const ConSanMoiReportRetryConfig report{
+      .buffer_address = options.moi_report_buffer_address,
+      .buffer_size = options.moi_report_buffer_size,
+      .layout = options.moi_report_layout,
+      .generation = options.moi_report_generation,
+      .dispatch_id = options.moi_report_dispatch_id,
+  };
+  const ConSanResult retried =
+      retry_patch_consan_moi_from_inventory(std::move(inventory), report, bytes);
+
+  ASSERT_TRUE(consan_patch_succeeded(fresh)) << testing::PrintToString(fresh.errors);
+  ASSERT_TRUE(consan_patch_succeeded(retried)) << testing::PrintToString(retried.errors);
+  EXPECT_EQ(retried.outcome, fresh.outcome);
+  EXPECT_EQ(retried.modified, fresh.modified);
+  EXPECT_EQ(retried.final_validation_passed, fresh.final_validation_passed);
+  EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
+  EXPECT_EQ(retried.warnings, fresh.warnings);
+  ASSERT_EQ(retried.patches.size(), fresh.patches.size());
+  for (size_t index = 0; index < fresh.patches.size(); ++index) {
+    EXPECT_EQ(retried.patches[index].kind, fresh.patches[index].kind);
+    EXPECT_EQ(retried.patches[index].anchor_offset, fresh.patches[index].anchor_offset);
+    EXPECT_EQ(retried.patches[index].trampoline_offset, fresh.patches[index].trampoline_offset);
+  }
+}
+
+TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  ConSanOptions inventory_options = moi_options(ConSanMoiEngine::RecordReplay);
+  const ConSanResult pristine = try_patch_consan(bytes, inventory_options);
+  ASSERT_TRUE(pristine.errors.empty()) << testing::PrintToString(pristine.errors);
+  ASSERT_FALSE(pristine.modified);
+  ConSanMoiReportRetryConfig report;
+  report.buffer_address = 0x123456780000ull;
+  report.buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
+  const auto expect_invalid = [&](ConSanResult inventory, std::span<const uint8_t> retry_bytes,
+                                  std::string_view expected_error) {
+    const ConSanResult result =
+        retry_patch_consan_moi_from_inventory(std::move(inventory), report, retry_bytes);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
+    EXPECT_TRUE(std::ranges::any_of(result.errors, [&](const std::string &error) {
+      return error.find(expected_error) != std::string::npos;
+    })) << testing::PrintToString(result.errors);
+    EXPECT_FALSE(result.modified);
+    EXPECT_TRUE(result.elf_bytes.empty());
+  };
+
+  std::vector<uint8_t> wrong_size = bytes;
+  wrong_size.push_back(0u);
+  expect_invalid(pristine, wrong_size, "code-object size");
+
+  std::vector<uint8_t> wrong_bytes = bytes;
+  ASSERT_GT(wrong_bytes.size(), 0x100u);
+  wrong_bytes[0x100u] ^= 1u;
+  expect_invalid(pristine, wrong_bytes, "code-object bytes");
+
+  ConSanResult wrong_engine = pristine;
+  wrong_engine.moi_engine = ConSanMoiEngine::Sampled;
+  expect_invalid(std::move(wrong_engine), bytes, "requested engine");
+
+  ConSanResult wrong_target = pristine;
+  wrong_target.target_name = "gfx1250";
+  expect_invalid(std::move(wrong_target), bytes, "code-object target");
+
+  ConSanResult modified = pristine;
+  modified.modified = true;
+  expect_invalid(std::move(modified), bytes, "unmodified semantic inventory");
 }
 
 TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
@@ -3742,6 +3944,69 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostDoesNotConsumeNearbyBarrier) {
     return site.disposition != ConSanSiteDisposition::Supported ||
            site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;
   }));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, RecordReplaySpillBackedDenseHostAvoidsTransientSgprLiveRange) {
+  constexpr uint32_t kAccessCount = 9u;
+  constexpr std::array<uint16_t, 4> kTransientWindow = {0u, 1u, 4u, 6u};
+  std::vector<uint32_t> words;
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+
+  // The automatic spill router selects these four registers because the
+  // definitions keep them dead at every access anchor. They are nevertheless
+  // live across the following NOP run, which is an attractive relocatable
+  // host unless the post-planning liveness state includes arbitrary hosts.
+  for (uint16_t sgpr : kTransientWindow) {
+    words.push_back(
+        build_s_mov_b32(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_GFX1250));
+  }
+  words.resize(words.size() + 32u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  for (uint16_t sgpr : kTransientWindow)
+    words.push_back(build_s_mov_b32(/*sdst=*/20u, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+  const uint64_t first_safe_host_offset = words.size() * sizeof(uint32_t);
+
+  for (uint16_t sgpr = 0; sgpr < 106u; ++sgpr) {
+    if (std::ranges::find(kTransientWindow, sgpr) == kTransientWindow.end())
+      words.push_back(build_s_mov_b32(/*sdst=*/20u, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+  }
+  words.resize(words.size() + 16u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(make_gfx1250_code_object(words), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  EXPECT_TRUE(assignment.spill_backed);
+  EXPECT_EQ(assignment.indirect_pc_sgpr, kTransientWindow[0]);
+  EXPECT_EQ(assignment.indirect_scc_sgpr, kTransientWindow[2]);
+  EXPECT_EQ(assignment.dispatch_key_sgpr, kTransientWindow[3]);
+  bool saw_relocated_host = false;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
+        patch.original_size == 0u) {
+      continue;
+    }
+    saw_relocated_host = true;
+    EXPECT_GE(patch.anchor_offset, first_safe_host_offset);
+  }
+  EXPECT_TRUE(saw_relocated_host);
   EXPECT_TRUE(result.final_validation_passed);
 }
 

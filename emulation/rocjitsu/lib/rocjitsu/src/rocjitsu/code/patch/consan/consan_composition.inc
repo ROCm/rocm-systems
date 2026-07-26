@@ -580,6 +580,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     result.errors.emplace_back("ConSan received an empty code object");
     return result;
   }
+  result.input_fingerprint = code_object_fingerprint(code_object_bytes);
 
   AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
   if (!code_object.is_valid()) {
@@ -691,22 +692,27 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   if (needs_semantic_inventory) {
     build_fault_site_inventory(code_object_bytes, arch, result);
     build_sync_event_inventory(code_object_bytes, result);
-    build_singleton_sync_sequences(code_object, *decoder, arch, result);
+    if (options.flavor == ConSanFlavor::Moi &&
+        !canonicalize_sync_events_by_physical_site(result))
+      return result;
+    const SyncEventIdentityIndex sync_events = build_sync_event_identity_index(result);
+    const auto sync_blocks = build_sync_basic_blocks(code_object, *decoder, arch, result);
+    build_singleton_sync_sequences(sync_blocks, result);
     const bool allow_extended_barrier_pairs =
         options.fault_drop_barrier || options.fault_move_barrier ||
         options.fault_mutate_barrier_id_scope || options.fault_mutate_barrier_participants ||
         options.abort_unmatched_barrier_wait ||
         (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_track_barriers);
-    associate_barrier_sync_sequences(code_object, *decoder, arch, allow_extended_barrier_pairs,
-                                     result);
-    associate_atomic_sync_sequences(code_object, *decoder, arch, result);
+    associate_barrier_sync_sequences(sync_blocks, allow_extended_barrier_pairs, result);
+    associate_atomic_sync_sequences(sync_blocks, arch, sync_events, result);
     build_barrier_lifecycle_group_inventory(result);
     if (options.collect_barrier_move_destinations)
-      build_barrier_move_destination_inventory(code_object, *decoder, arch, result);
-    annotate_execution_owners(code_object, *decoder, arch, options, result);
-    associate_ordinary_release_sync_sequences(code_object, *decoder, arch, result);
-    associate_ordinary_acquire_sync_sequences(code_object, *decoder, arch, result);
-    build_communication_address_recipes(code_object, *decoder, arch, result);
+      build_barrier_move_destination_inventory(code_object, sync_blocks, sync_events, arch,
+                                               result);
+    annotate_execution_owners(code_object, *decoder, arch, options, &sync_blocks, result);
+    associate_ordinary_release_sync_sequences(sync_blocks, arch, sync_events, result);
+    associate_ordinary_acquire_sync_sequences(sync_blocks, sync_events, result);
+    build_communication_address_recipes(code_object, sync_blocks, sync_events, arch, result);
     build_moi_fence_candidate_inventory(result);
     build_perturbation_candidate_inventory(result);
     annotate_fault_sites_with_sync_sequences(result);
@@ -716,7 +722,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     // SuperCollider's ordinary clean transform does not consume synchronization
     // semantics. Shared-function memory sites still need kernel ownership,
     // while kernel-local sites carry their descriptor directly.
-    annotate_execution_owners(code_object, *decoder, arch, options, result);
+    annotate_execution_owners(code_object, *decoder, arch, options, nullptr, result);
   }
   if (options.fault_dry_run) {
     build_fault_mutation_plan(options, arch, result);
@@ -729,8 +735,11 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
       return result;
   }
 
-  if (options.flavor == ConSanFlavor::Moi)
+  if (options.flavor == ConSanFlavor::Moi) {
+    result.moi_stage_warning_begin = result.warnings.size();
+    result.moi_inventory_options = options;
     return try_patch_consan_moi(std::move(result), options, code_object_bytes, arch);
+  }
 
   if (options.flavor != ConSanFlavor::SuperCollider) {
     result.errors.emplace_back("ConSan selected unknown flavor");

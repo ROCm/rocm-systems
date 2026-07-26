@@ -132,7 +132,15 @@ std::vector<void *> g_core_memory_allocations;
 std::vector<rocjitsu::ConSanMoiReportHeader> g_core_memory_headers_at_free;
 std::vector<uint32_t> g_sc_markers_at_free;
 std::vector<std::vector<uint8_t>> g_code_object_reader_inputs;
+struct FakeMemoryReader {
+  uint64_t handle = 0;
+  const uint8_t *bytes = nullptr;
+  size_t size = 0;
+};
+std::vector<FakeMemoryReader> g_memory_code_object_readers;
 std::vector<uint64_t> g_destroyed_code_object_readers;
+std::vector<uint64_t> g_destroyed_executables;
+bool g_replacement_storage_valid_at_executable_destroy = false;
 std::vector<uint64_t> g_loaded_code_object_readers;
 rocjitsu::ConSanResult g_transform_override_result;
 std::vector<rocjitsu::ConSanFlavor> g_transform_override_flavors;
@@ -391,11 +399,24 @@ hsa_status_t HSA_API fake_code_object_reader_create_from_memory(
   const auto *begin = static_cast<const uint8_t *>(bytes);
   g_code_object_reader_inputs.emplace_back(begin, begin == nullptr ? begin : begin + size);
   code_object_reader->handle = 100u + static_cast<uint64_t>(g_code_object_reader_create_calls);
+  g_memory_code_object_readers.push_back({code_object_reader->handle, begin, size});
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t HSA_API fake_code_object_reader_destroy(hsa_code_object_reader_t reader) {
   g_destroyed_code_object_readers.push_back(reader.handle);
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_executable_destroy(hsa_executable_t executable) {
+  g_destroyed_executables.push_back(executable.handle);
+  if (g_memory_code_object_readers.size() > 1u && g_code_object_reader_inputs.size() > 1u) {
+    const FakeMemoryReader &replacement = g_memory_code_object_readers.back();
+    const std::vector<uint8_t> &expected = g_code_object_reader_inputs.back();
+    g_replacement_storage_valid_at_executable_destroy =
+        replacement.bytes != nullptr && replacement.size == expected.size() &&
+        std::equal(expected.begin(), expected.end(), replacement.bytes);
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -783,6 +804,7 @@ struct FakeApiTable {
     core.hsa_system_get_extension_table_fn = fake_system_get_extension_table;
     core.hsa_system_get_major_extension_table_fn = fake_system_get_major_extension_table;
     core.hsa_executable_load_agent_code_object_fn = fake_executable_load_agent_code_object;
+    core.hsa_executable_destroy_fn = fake_executable_destroy;
     core.hsa_executable_get_symbol_by_name_fn = fake_executable_get_symbol_by_name;
     core.hsa_executable_symbol_get_info_fn = fake_executable_symbol_get_info;
     core.hsa_agent_iterate_regions_fn = fake_agent_iterate_regions;
@@ -928,7 +950,10 @@ void reset_code_object_observations() {
   g_code_object_reader_create_calls = 0;
   g_fail_replacement_reader_create = false;
   g_code_object_reader_inputs.clear();
+  g_memory_code_object_readers.clear();
   g_destroyed_code_object_readers.clear();
+  g_destroyed_executables.clear();
+  g_replacement_storage_valid_at_executable_destroy = false;
   g_loaded_code_object_readers.clear();
   g_transform_override_flavors.clear();
   g_transform_override_engines.clear();
@@ -1211,6 +1236,10 @@ void run_hook_load_case(const ConSanHookProfile &profile, bool fail_closed,
     ASSERT_EQ(g_code_object_reader_inputs.size(), 1u) << profile.name;
     EXPECT_TRUE(g_destroyed_code_object_readers.empty()) << profile.name;
   }
+  ASSERT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_destroyed_executables, std::vector<uint64_t>{7u}) << profile.name;
+  if (!expected_replacement.empty())
+    EXPECT_TRUE(g_replacement_storage_valid_at_executable_destroy) << profile.name;
 }
 
 void reset_pool_blocker(bool enabled) {

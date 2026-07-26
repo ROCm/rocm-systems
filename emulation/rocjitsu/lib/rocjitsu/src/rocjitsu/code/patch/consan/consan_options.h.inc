@@ -453,6 +453,18 @@ struct ConSanOptions {
   uint32_t report_marker = 1;
 };
 
+/// Runtime report-buffer state that may change after an immutable MOI semantic
+/// inventory has been built. Retry does not accept another full ConSanOptions
+/// object, so parser, CFG, ownership, and admission semantics cannot drift
+/// between the inventory and lowering phases.
+struct ConSanMoiReportRetryConfig {
+  std::optional<uint64_t> buffer_address;
+  uint64_t buffer_size = 0;
+  std::optional<ConSanMoiReportLayoutOverride> layout;
+  uint64_t generation = 0;
+  uint64_t dispatch_id = 0;
+};
+
 [[nodiscard]] inline bool moi_uses_scalar_persistent_state(const ConSanOptions &options) {
   return options.moi_persistent_owner_sgpr && options.moi_persistent_epoch_sgpr;
 }

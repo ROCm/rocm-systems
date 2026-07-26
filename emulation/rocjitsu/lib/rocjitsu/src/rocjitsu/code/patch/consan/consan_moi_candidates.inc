@@ -568,6 +568,57 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
   warn_skipped_moi_flat_candidates(function.name, false, skipped_flat_counts, result);
 }
 
+[[nodiscard]] bool moi_candidate_semantics_equal(const ConSanMoiCandidate &lhs,
+                                                 const ConSanMoiCandidate &rhs) {
+  return std::tie(lhs.in_kernel, lhs.container_entry_text_offset, lhs.gfx1250_vgpr_msb_mode,
+                  lhs.source, lhs.kind, lhs.flat_address_space_hint, lhs.text_offset, lhs.file_offset,
+                  lhs.size, lhs.width_bits, lhs.dst_vgpr, lhs.addr_vgpr, lhs.data_vgpr,
+                  lhs.second_data_vgpr, lhs.uses_gfx1250_cluster_workgroup_id, lhs.raw_op,
+                  lhs.raw_saddr, lhs.raw_vaddr, lhs.raw_vsrc, lhs.raw_vdst, lhs.raw_ioffset,
+                  lhs.raw_segment, lhs.raw_scope, lhs.raw_th, lhs.mnemonic) ==
+         std::tie(rhs.in_kernel, rhs.container_entry_text_offset, rhs.gfx1250_vgpr_msb_mode,
+                  rhs.source, rhs.kind, rhs.flat_address_space_hint, rhs.text_offset, rhs.file_offset,
+                  rhs.size, rhs.width_bits, rhs.dst_vgpr, rhs.addr_vgpr, rhs.data_vgpr,
+                  rhs.second_data_vgpr, rhs.uses_gfx1250_cluster_workgroup_id, rhs.raw_op,
+                  rhs.raw_saddr, rhs.raw_vaddr, rhs.raw_vsrc, rhs.raw_vdst, rhs.raw_ioffset,
+                  rhs.raw_segment, rhs.raw_scope, rhs.raw_th, rhs.mnemonic);
+}
+
+[[nodiscard]] bool canonicalize_moi_candidates_by_physical_site(ConSanResult &result) {
+  std::unordered_map<uint64_t, size_t> canonical_index_by_file_offset;
+  canonical_index_by_file_offset.reserve(result.moi_candidates.size());
+  std::vector<ConSanMoiCandidate> canonical_candidates;
+  canonical_candidates.reserve(result.moi_candidates.size());
+
+  for (ConSanMoiCandidate &candidate : result.moi_candidates) {
+    const auto [entry, inserted] = canonical_index_by_file_offset.emplace(
+        candidate.file_offset, canonical_candidates.size());
+    if (inserted) {
+      canonical_candidates.push_back(std::move(candidate));
+      continue;
+    }
+
+    ConSanMoiCandidate &canonical = canonical_candidates[entry->second];
+    if (!moi_candidate_semantics_equal(canonical, candidate)) {
+      result.errors.emplace_back(
+          "ConSan MOI physical site at file offset " + std::to_string(candidate.file_offset) +
+          " was decoded inconsistently through aliases '" + canonical.container_name + "' and '" +
+          candidate.container_name + "'");
+      return false;
+    }
+
+    // A physical instruction reached through multiple kernel descriptors is
+    // emitted once, but resource planning must prove a safe register window
+    // and apply descriptor growth for every dispatch that can execute it.
+    // Clearing the single-owner hint makes plan_moi_resource_site derive that
+    // complete owner set from the shared CFG block.
+    canonical.kernel_descriptor_file_offset.reset();
+  }
+
+  result.moi_candidates = std::move(canonical_candidates);
+  return true;
+}
+
 [[nodiscard]] uint32_t count_nop_padding(std::span<const uint8_t> bytes, uint64_t offset,
                                          rj_code_arch_t arch) {
   if (offset > bytes.size())

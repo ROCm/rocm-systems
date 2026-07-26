@@ -1309,7 +1309,7 @@ os._exit(0)
     )
     try:
         probe = subprocess.run(
-            [str(python), "-c", probe_source, str(hook)],
+            [str(python), "-c", probe_source, str(hook.resolve())],
             check=False,
             capture_output=True,
             text=True,

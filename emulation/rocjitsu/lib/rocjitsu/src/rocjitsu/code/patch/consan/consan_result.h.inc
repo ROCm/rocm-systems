@@ -91,6 +91,11 @@ struct ConSanResult {
   bool moi_owner_sgpr_automatic = false;
   bool moi_dispatch_id_sgprs_automatic = false;
   size_t input_size = 0;
+  std::string input_fingerprint;
+  /// Immutable semantic options captured before the first MOI planning pass.
+  /// A report-buffer retry derives its options from this snapshot and can
+  /// change only ConSanMoiReportRetryConfig fields.
+  std::optional<ConSanOptions> moi_inventory_options;
   std::string target_name;
   std::string arch_name;
   std::vector<ConSanTextSection> text_sections;
@@ -117,6 +122,10 @@ struct ConSanResult {
   std::optional<std::string> applied_fault_logical_identity;
   std::vector<ConSanMoiCandidate> moi_candidates;
   std::vector<ConSanSiteDispositionRecord> site_dispositions;
+  /// Warning boundary immediately before MOI planning. A validated retry with
+  /// a runtime-allocated report buffer trims only the prior MOI-stage
+  /// diagnostics while retaining parser and semantic-analysis warnings.
+  size_t moi_stage_warning_begin = 0;
   std::vector<ConSanCandidateResourcePlan> resource_plans;
   ConSanResourcePlanSummary resource_plan_summary;
   std::vector<ConSanAccessPlan> access_plans;

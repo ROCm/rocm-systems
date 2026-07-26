@@ -25,7 +25,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
   }
 
   std::vector<FenceRecordCandidate> candidates;
-  append_fence_record_candidates(result, candidates);
+  const MoiSyncInventoryIndex sync_index(result);
+  append_fence_record_candidates(result, sync_index, candidates);
   if (!options.test_kernel_name_filter.empty()) {
     std::erase_if(candidates, [&](const FenceRecordCandidate &candidate) {
       return candidate.fence.container_name.find(options.test_kernel_name_filter) ==
@@ -297,7 +298,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       while (displaced_words.size() < required_island_words) {
         auto decoded = decode_relocatable_entry_instruction(
             old_text, fence.text_offset + displaced_words.size() * sizeof(uint32_t), arch,
-            decode_errors);
+            decode_errors, resource_state.decoder.get());
         if (!decoded) {
           displaced_words.clear();
           break;
@@ -563,6 +564,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
 
 void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                                            const ConSanOptions &options, ConSanResult &result) {
+  const MoiSyncInventoryIndex sync_index(result);
   if (options.moi_track_barriers) {
     std::vector<BarrierRecordCandidate> candidates;
     for (const ConSanKernelInfo &kernel : result.kernels)
@@ -580,6 +582,8 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
         return candidate.site.operation == ConSanBarrierSite::Operation::Signal;
       });
     }
+    if (!canonicalize_barrier_record_candidates_by_physical_site(candidates, result))
+      return;
     for (size_t index = 0; index < candidates.size(); ++index) {
       const BarrierRecordCandidate &candidate = candidates[index];
       result.resource_plans.push_back(plan_moi_resource_site(
@@ -599,9 +603,9 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
     std::vector<AtomicRecordCandidate> candidates;
     if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
       for (const ConSanKernelInfo &kernel : result.kernels)
-        append_inline_atomic_candidates(kernel, result, candidates);
+        append_inline_atomic_candidates(kernel, sync_index, candidates);
       for (const ConSanFunctionInfo &function : result.functions)
-        append_inline_atomic_candidates(function, result, candidates);
+        append_inline_atomic_candidates(function, sync_index, candidates);
       candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
                                       [](const auto &candidate) {
                                         return classify_consan_moi_inline_atomic_support(
@@ -611,11 +615,13 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                        candidates.end());
     } else {
       for (const ConSanKernelInfo &kernel : result.kernels)
-        append_atomic_record_candidates(kernel, result, candidates);
+        append_atomic_record_candidates(kernel, result, sync_index, candidates);
       for (const ConSanFunctionInfo &function : result.functions)
-        append_atomic_record_candidates(function, result, candidates);
+        append_atomic_record_candidates(function, result, sync_index, candidates);
     }
     apply_test_container_filter(candidates, options);
+    if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result))
+      return;
     for (size_t index = 0; index < candidates.size(); ++index) {
       const AtomicRecordCandidate &candidate = candidates[index];
       const uint16_t scratch_count =
@@ -630,7 +636,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
   }
   if (options.moi_track_atomics && options.moi_engine == ConSanMoiEngine::RecordReplay) {
     std::vector<FenceRecordCandidate> candidates;
-    append_fence_record_candidates(result, candidates);
+    append_fence_record_candidates(result, sync_index, candidates);
     if (!options.test_kernel_name_filter.empty()) {
       std::erase_if(candidates, [&](const FenceRecordCandidate &candidate) {
         return candidate.fence.container_name.find(options.test_kernel_name_filter) ==
@@ -746,6 +752,7 @@ first_light_atomic_disposition_reason(const ConSanAtomicSite &site, bool allow_g
 template <typename Container>
 void append_moi_atomic_site_dispositions(const Container &container, const ConSanOptions &options,
                                          const ConSanResult &semantic_result,
+                                         const MoiSyncInventoryIndex &sync_index,
                                          ConSanResult &result) {
   if (!options.moi_track_atomics ||
       (!options.test_kernel_name_filter.empty() &&
@@ -756,16 +763,12 @@ void append_moi_atomic_site_dispositions(const Container &container, const ConSa
   if (in_kernel && is_rocclr_runtime_kernel_name(container.name))
     return;
   for (const ConSanAtomicSite &site : container.atomic_sites) {
-    const auto event =
-        std::ranges::find_if(semantic_result.sync_events, [&](const ConSanSyncEvent &candidate) {
-          return candidate.kind == ConSanSyncEventKind::Atomic &&
-                 candidate.container_name == container.name && candidate.in_kernel == in_kernel &&
-                 candidate.text_offset == site.text_offset;
-        });
+    const ConSanSyncEvent *event =
+        sync_index.event(ConSanSyncEventKind::Atomic, container.name, in_kernel, site.text_offset);
     const std::optional<ConSanMoiAtomicEventKind> event_kind =
-        atomic_event_kind_for_site(semantic_result, container.name, in_kernel, site);
+        atomic_event_kind_for_site(sync_index, container.name, in_kernel, site);
     ConSanSiteDispositionReason reason = ConSanSiteDispositionReason::None;
-    if (event == semantic_result.sync_events.end() || event->execution_owners.empty()) {
+    if (event == nullptr || event->execution_owners.empty()) {
       // Runtime-library helpers that no inventoried kernel can execute are
       // decoded inventory, but not relevant workload support sites. Keep the
       // operational candidate path stable until report sizing and persistent
@@ -783,8 +786,8 @@ void append_moi_atomic_site_dispositions(const Container &container, const ConSa
       if (reason == ConSanSiteDispositionReason::None &&
           options.moi_engine == ConSanMoiEngine::Sampled) {
         std::string sampled_reason;
-        if (!sampled_atomic_semantics_for_site(semantic_result, container.name, in_kernel, site,
-                                               sampled_reason))
+        if (!sampled_atomic_semantics_for_site(semantic_result, sync_index, container.name,
+                                               in_kernel, site, sampled_reason))
           reason = sampled_atomic_disposition_reason(sampled_reason);
       }
     }
@@ -798,7 +801,7 @@ void append_moi_atomic_site_dispositions(const Container &container, const ConSa
 
 template <typename Container>
 void append_moi_barrier_site_dispositions(const Container &container, const ConSanOptions &options,
-                                          const ConSanResult &semantic_result,
+                                          const MoiSyncInventoryIndex &sync_index,
                                           ConSanResult &result) {
   if (!options.moi_track_barriers ||
       (!options.test_kernel_name_filter.empty() &&
@@ -824,23 +827,12 @@ void append_moi_barrier_site_dispositions(const Container &container, const ConS
     }
     ConSanSiteDispositionReason reason = ConSanSiteDispositionReason::None;
     if (options.moi_engine == ConSanMoiEngine::Sampled) {
-      const ConSanSyncEvent *event = nullptr;
-      size_t event_count = 0;
-      for (const ConSanSyncEvent &candidate : semantic_result.sync_events) {
-        if (candidate.kind != ConSanSyncEventKind::Barrier ||
-            candidate.container_name != container.name || candidate.in_kernel != in_kernel ||
-            candidate.text_offset != site.text_offset || candidate.size != site.size)
-          continue;
-        ++event_count;
-        event = &candidate;
-      }
+      const ConSanSyncEvent *event = sync_index.event(
+          ConSanSyncEventKind::Barrier, container.name, in_kernel, site.text_offset);
+      const ConSanSyncSequence *sequence =
+          event == nullptr || event->size != site.size ? nullptr : sync_index.sequence(event->identity);
       const bool qualified =
-          event_count == 1u &&
-          std::ranges::any_of(semantic_result.sync_sequences, [&](const auto &sequence) {
-            return consan_moi_sampled_qualifies_barrier_sequence(sequence) &&
-                   std::ranges::find(sequence.member_event_identities, event->identity) !=
-                       sequence.member_event_identities.end();
-          });
+          sequence != nullptr && consan_moi_sampled_qualifies_barrier_sequence(*sequence);
       if (!qualified)
         reason = ConSanSiteDispositionReason::UnqualifiedSyncSequence;
     } else if (site.size != sizeof(uint32_t)) {
@@ -855,42 +847,43 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
   // Keep the semantic inventory immutable while appending to the disposition
   // vector that is part of the same result.
   const ConSanResult &semantic_result = result;
+  const MoiSyncInventoryIndex sync_index(semantic_result);
   for (const ConSanKernelInfo &kernel : result.kernels) {
-    append_moi_atomic_site_dispositions(kernel, options, semantic_result, result);
-    append_moi_barrier_site_dispositions(kernel, options, semantic_result, result);
+    append_moi_atomic_site_dispositions(kernel, options, semantic_result, sync_index, result);
+    append_moi_barrier_site_dispositions(kernel, options, sync_index, result);
   }
   for (const ConSanFunctionInfo &function : result.functions) {
-    append_moi_atomic_site_dispositions(function, options, semantic_result, result);
-    append_moi_barrier_site_dispositions(function, options, semantic_result, result);
+    append_moi_atomic_site_dispositions(function, options, semantic_result, sync_index, result);
+    append_moi_barrier_site_dispositions(function, options, sync_index, result);
   }
 
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::RecordReplay)
     return;
   std::vector<FenceRecordCandidate> admitted;
-  append_fence_record_candidates(result, admitted);
+  append_fence_record_candidates(result, sync_index, admitted);
+  std::unordered_set<std::string_view> admitted_identities;
+  admitted_identities.reserve(admitted.size());
+  for (const FenceRecordCandidate &candidate : admitted)
+    admitted_identities.insert(candidate.fence.identity);
   for (const ConSanMoiFenceCandidate &fence : result.moi_fence_candidates) {
     if ((!options.test_kernel_name_filter.empty() &&
          fence.container_name.find(options.test_kernel_name_filter) == std::string::npos) ||
         (fence.in_kernel && is_rocclr_runtime_kernel_name(fence.container_name)))
       continue;
     ConSanSiteDispositionReason reason = ConSanSiteDispositionReason::None;
-    const auto communication = std::ranges::find(
-        result.sync_events, fence.communication_event_identity, &ConSanSyncEvent::identity);
+    const ConSanSyncEvent *communication = sync_index.event(fence.communication_event_identity);
     const bool unowned_communication =
-        communication != result.sync_events.end() && communication->execution_owners.empty();
-    const auto fence_event = std::ranges::find(result.sync_events, fence.fence_event_identity,
-                                               &ConSanSyncEvent::identity);
+        communication != nullptr && communication->execution_owners.empty();
+    const ConSanSyncEvent *fence_event = sync_index.event(fence.fence_event_identity);
     const bool unowned_fence =
-        fence_event != result.sync_events.end() && fence_event->execution_owners.empty();
+        fence_event != nullptr && fence_event->execution_owners.empty();
     const bool unassociated_cache_operation =
         fence.rejection_reason == "fence-not-associated-with-addressed-communication-sequence";
     if (!fence.eligible) {
       reason = ConSanSiteDispositionReason::IneligibleFence;
-    } else if (communication == result.sync_events.end() || unowned_communication) {
+    } else if (communication == nullptr || unowned_communication) {
       reason = ConSanSiteDispositionReason::MissingCommunicationEvent;
-    } else if (std::ranges::none_of(admitted, [&](const FenceRecordCandidate &candidate) {
-                 return candidate.fence.identity == fence.identity;
-               })) {
+    } else if (!admitted_identities.contains(fence.identity)) {
       reason = ConSanSiteDispositionReason::MissingCommunicationEvent;
     }
     append_moi_site_disposition(ConSanResourceSiteKind::Fence, fence.container_name,
@@ -902,7 +895,7 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
 }
 
 [[nodiscard]] std::optional<ConSanResourceSiteKind>
-moi_instrumentation_patch_site_kind(const ConSanPatchInfo &patch, const ConSanResult &result) {
+moi_instrumentation_patch_site_kind(const ConSanPatchInfo &patch) {
   switch (patch.kind) {
   case ConSanPatchKind::InlineMoiAccessRecordStore:
   case ConSanPatchKind::TrampolineMoiAccessRecordStore:
@@ -921,12 +914,6 @@ moi_instrumentation_patch_site_kind(const ConSanPatchInfo &patch, const ConSanRe
   case ConSanPatchKind::TrampolineMoiFenceRecord:
     return ConSanResourceSiteKind::Fence;
   case ConSanPatchKind::TrampolineMoiSampledSyncMetadata:
-    for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-      if (plan.text_offset == patch.anchor_offset &&
-          (plan.site_kind == ConSanResourceSiteKind::Barrier ||
-           plan.site_kind == ConSanResourceSiteKind::Atomic))
-        return plan.site_kind;
-    }
     return std::nullopt;
   default:
     return std::nullopt;
@@ -949,17 +936,24 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
   };
 
   std::unordered_map<uint64_t, ConSanResourceSiteKind> resource_kind_by_offset;
-  std::unordered_set<SiteKey, SiteKeyHash> failed_sites;
+  std::unordered_map<SiteKey, ConSanRegisterPlanReason, SiteKeyHash> failed_sites;
+  resource_kind_by_offset.reserve(result.resource_plans.size());
+  failed_sites.reserve(result.resource_plans.size());
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
     resource_kind_by_offset.try_emplace(plan.text_offset, plan.site_kind);
     if (plan.source == ConSanRegisterAllocationSource::Unsupported)
-      failed_sites.insert({plan.site_kind, plan.text_offset});
+      failed_sites.try_emplace({plan.site_kind, plan.text_offset}, plan.reason);
   }
 
   std::unordered_map<std::string_view, const ConSanSyncEvent *> event_by_identity;
+  std::unordered_map<uint64_t, const ConSanSyncEvent *> barrier_event_by_offset;
   event_by_identity.reserve(result.sync_events.size());
-  for (const ConSanSyncEvent &event : result.sync_events)
+  barrier_event_by_offset.reserve(result.sync_events.size());
+  for (const ConSanSyncEvent &event : result.sync_events) {
     event_by_identity.try_emplace(event.identity, &event);
+    if (event.kind == ConSanSyncEventKind::Barrier)
+      barrier_event_by_offset.try_emplace(event.text_offset, &event);
+  }
   std::unordered_map<std::string_view, const ConSanSyncSequence *> sequence_by_member;
   for (const ConSanSyncSequence &sequence : result.sync_sequences) {
     for (const std::string &identity : sequence.member_event_identities) {
@@ -975,23 +969,24 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
     if (patch.phase != ConSanPatchPhase::Instrumentation)
       continue;
     if (patch.kind != ConSanPatchKind::TrampolineMoiSampledSyncMetadata) {
-      const auto patch_kind = moi_instrumentation_patch_site_kind(patch, result);
+      const auto patch_kind = moi_instrumentation_patch_site_kind(patch);
       if (patch_kind)
         patched_sites.insert({*patch_kind, patch.anchor_offset});
       continue;
     }
 
-    const auto patch_kind = moi_instrumentation_patch_site_kind(patch, result);
-    if (patch_kind)
-      patched_sites.insert({*patch_kind, patch.anchor_offset});
+    if (patch.sampled_access_kind == ConSanLdsAccessKind::Atomic)
+      patched_sites.insert({ConSanResourceSiteKind::Atomic, patch.anchor_offset});
+    const auto patch_kind = resource_kind_by_offset.find(patch.anchor_offset);
+    if (patch.sampled_access_kind != ConSanLdsAccessKind::Atomic &&
+        patch_kind != resource_kind_by_offset.end())
+      patched_sites.insert({patch_kind->second, patch.anchor_offset});
     if (patch.covered_sync_event_count == 0)
       continue;
-    const auto anchor_event = std::ranges::find_if(result.sync_events, [&](const auto &event) {
-      return event.kind == ConSanSyncEventKind::Barrier && event.text_offset == patch.anchor_offset;
-    });
-    if (anchor_event == result.sync_events.end())
+    const auto anchor_event = barrier_event_by_offset.find(patch.anchor_offset);
+    if (anchor_event == barrier_event_by_offset.end())
       continue;
-    const auto sequence = sequence_by_member.find(anchor_event->identity);
+    const auto sequence = sequence_by_member.find(anchor_event->second->identity);
     if (sequence == sequence_by_member.end() || sequence->second == nullptr ||
         sequence->second->member_event_identities.size() != patch.covered_sync_event_count)
       continue;
@@ -1022,17 +1017,10 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
       continue;
     }
 
-    if (failed_sites.contains(key)) {
+    if (const auto failed = failed_sites.find(key); failed != failed_sites.end()) {
       site.lowering_outcome = ConSanSiteLoweringOutcome::ResourceFailed;
       site.lowering_reason = ConSanSiteLoweringReason::UnsupportedResourcePlan;
-      const auto failed_plan =
-          std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-            return plan.site_kind == site.site_kind && plan.text_offset == site.text_offset &&
-                   plan.source == ConSanRegisterAllocationSource::Unsupported;
-          });
-      site.resource_reason = failed_plan == result.resource_plans.end()
-                                 ? ConSanRegisterPlanReason::None
-                                 : failed_plan->reason;
+      site.resource_reason = failed->second;
       continue;
     }
 

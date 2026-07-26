@@ -2025,16 +2025,21 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
                           "': function text range is unavailable");
     return;
   }
-  if (kernel.code_size == 0) {
-    warnings.emplace_back("ConSan cannot decode kernel '" + kernel.name +
-                          "': function text range is empty");
-    return;
-  }
   if (kernel.entry_text_offset > code_object_bytes.size() ||
       kernel.text_file_offset > code_object_bytes.size() - kernel.entry_text_offset) {
     ++kernel.stats.decode_error_count;
     warnings.emplace_back("ConSan cannot decode kernel '" + kernel.name +
                           "': function text range starts outside the code object");
+    return;
+  }
+  if (kernel.code_size == 0) {
+    // Generated device libraries can publish descriptors for unavailable
+    // target-selection specializations whose function symbol points exactly
+    // at the end of .text and has size zero. There is no instruction to
+    // decode or instrument, so treat the empty range as a decoded, typed
+    // no-site container rather than rejecting an otherwise valid fat object.
+    kernel.decoded = true;
+    warnings.emplace_back("ConSan decoded empty kernel '" + kernel.name + "'");
     return;
   }
 

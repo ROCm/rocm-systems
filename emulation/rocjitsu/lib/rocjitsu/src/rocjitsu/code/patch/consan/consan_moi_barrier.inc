@@ -6,6 +6,57 @@ struct BarrierRecordCandidate {
   uint64_t text_file_offset = 0;
 };
 
+[[nodiscard]] bool barrier_record_candidate_semantics_equal(const BarrierRecordCandidate &lhs,
+                                                            const BarrierRecordCandidate &rhs) {
+  const ConSanBarrierSite &left = lhs.site;
+  const ConSanBarrierSite &right = rhs.site;
+  const bool lhs_in_kernel = lhs.container_name.starts_with("kernel:");
+  const bool rhs_in_kernel = rhs.container_name.starts_with("kernel:");
+  return lhs_in_kernel == rhs_in_kernel &&
+         lhs.container_entry_text_offset == rhs.container_entry_text_offset &&
+         lhs.text_file_offset == rhs.text_file_offset &&
+         std::tie(left.operation, left.text_offset, left.file_offset, left.size, left.barrier_id,
+                  left.operand_source, left.raw_operand_selector, left.literal_width_bits,
+                  left.literal_value, left.raw_simm16, left.scope, left.participant_encoding,
+                  left.participant_count, left.participant_mask,
+                  left.participant_setup_text_offset, left.participant_setup_file_offset,
+                  left.participant_setup_literal, left.mnemonic) ==
+             std::tie(right.operation, right.text_offset, right.file_offset, right.size,
+                      right.barrier_id, right.operand_source, right.raw_operand_selector,
+                      right.literal_width_bits, right.literal_value, right.raw_simm16, right.scope,
+                      right.participant_encoding, right.participant_count, right.participant_mask,
+                      right.participant_setup_text_offset, right.participant_setup_file_offset,
+                      right.participant_setup_literal, right.mnemonic);
+}
+
+[[nodiscard]] bool canonicalize_barrier_record_candidates_by_physical_site(
+    std::vector<BarrierRecordCandidate> &candidates, ConSanResult &result) {
+  std::unordered_map<uint64_t, size_t> canonical_index_by_file_offset;
+  canonical_index_by_file_offset.reserve(candidates.size());
+  std::vector<BarrierRecordCandidate> canonical;
+  canonical.reserve(candidates.size());
+  for (BarrierRecordCandidate &candidate : candidates) {
+    const auto [entry, inserted] =
+        canonical_index_by_file_offset.emplace(candidate.site.file_offset, canonical.size());
+    if (inserted) {
+      canonical.push_back(std::move(candidate));
+      continue;
+    }
+    BarrierRecordCandidate &retained = canonical[entry->second];
+    if (!barrier_record_candidate_semantics_equal(retained, candidate)) {
+      result.errors.emplace_back(
+          "ConSan MOI barrier site at file offset " +
+          std::to_string(candidate.site.file_offset) +
+          " was decoded inconsistently through aliases '" + retained.container_name + "' and '" +
+          candidate.container_name + "'");
+      return false;
+    }
+    retained.kernel_descriptor_file_offset.reset();
+  }
+  candidates = std::move(canonical);
+  return true;
+}
+
 class MoiPatchAnchorRangeIndex {
 public:
   explicit MoiPatchAnchorRangeIndex(const ConSanResult &result) {
@@ -587,6 +638,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     return candidate.site.operation == ConSanBarrierSite::Operation::Signal;
   });
   apply_test_container_filter(candidates, options);
+  if (!canonicalize_barrier_record_candidates_by_physical_site(candidates, result))
+    return;
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
     return lhs.site.text_offset < rhs.site.text_offset;
   });
@@ -1339,7 +1392,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           std::vector<std::string> decode_errors;
           while (words.size() < host_words_count) {
             auto decoded = decode_relocatable_entry_instruction(
-                old_text, candidate_host + words.size() * sizeof(uint32_t), arch, decode_errors);
+                old_text, candidate_host + words.size() * sizeof(uint32_t), arch, decode_errors,
+                resource_state.decoder.get());
             if (!decoded) {
               words.clear();
               break;
@@ -1669,6 +1723,8 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
   for (const ConSanFunctionInfo &function : result.functions)
     append_barrier_epoch_candidates(function, candidates);
   apply_test_container_filter(candidates, options);
+  if (!canonicalize_barrier_record_candidates_by_physical_site(candidates, result))
+    return;
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
     return lhs.site.text_offset < rhs.site.text_offset;
   });

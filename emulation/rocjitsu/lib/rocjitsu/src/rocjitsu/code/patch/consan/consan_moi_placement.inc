@@ -921,6 +921,7 @@ struct MoiKernelResourceContext {
   uint32_t original_private_segment_size = 0;
   bool has_indirect_vgpr_access = false;
   bool descriptor_valid = false;
+  bool liveness_is_restricted = false;
 };
 
 [[nodiscard]] const ConSanMoiPersistentVgprAssignment *
@@ -1283,6 +1284,40 @@ struct MoiResourcePlanningState {
     CodeObjectPatcher patcher(code_object);
     const std::span<const uint8_t> text = patcher.text_bytes();
 
+    // Resource planning only asks for liveness at instrumentation anchors and
+    // kernel entries. Keeping a snapshot for every decoded instruction makes
+    // large generated libraries scale with their complete instruction count,
+    // even though most instructions are never queried. Per-owner transient
+    // assignments are the one exception: their dense relay search may inspect
+    // any relocatable instruction in an owning block.
+    const bool restrict_liveness_queries = options.moi_transient_sgpr_assignments.empty();
+    std::unordered_map<BasicBlock *, std::vector<const Instruction *>>
+        liveness_queries_by_block;
+    if (restrict_liveness_queries) {
+      std::unordered_set<uint64_t> query_offsets;
+      query_offsets.reserve(result.moi_candidates.size() + result.sync_events.size() +
+                            result.resource_plans.size() + result.kernels.size());
+      for (const ConSanMoiCandidate &candidate : result.moi_candidates)
+        query_offsets.insert(candidate.text_offset);
+      for (const ConSanSyncEvent &event : result.sync_events)
+        query_offsets.insert(event.text_offset);
+      for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
+        query_offsets.insert(plan.text_offset);
+      for (const ConSanSiteDispositionRecord &site : result.site_dispositions)
+        query_offsets.insert(site.text_offset);
+      for (const ConSanMoiFenceCandidate &fence : result.moi_fence_candidates)
+        query_offsets.insert(fence.text_offset);
+      for (const ConSanKernelInfo &kernel : result.kernels) {
+        if (kernel.has_text_range)
+          query_offsets.insert(kernel.entry_text_offset);
+      }
+      for (uint64_t offset : query_offsets) {
+        BasicBlock *block = block_for_offset(block_index, offset);
+        if (const Instruction *instruction = instruction_at(block, offset))
+          liveness_queries_by_block[block].push_back(instruction);
+      }
+    }
+
     contexts.reserve(result.kernels.size());
     for (const ConSanKernelInfo &kernel : result.kernels) {
       if (!kernel.has_text_range)
@@ -1311,9 +1346,22 @@ struct MoiResourcePlanningState {
       contexts.push_back(std::move(context));
       MoiKernelResourceContext &stored = contexts.back();
       stored.block_set.insert(stored.scope.blocks.begin(), stored.scope.blocks.end());
-      stored.liveness = std::make_unique<LivenessAnalysis>(KernelBlockScope(stored.scope.blocks),
-                                                           LivenessAnalysisOptions{},
-                                                           stored.scope.liveness_edges);
+      std::vector<const Instruction *> context_liveness_queries;
+      LivenessAnalysisOptions liveness_options;
+      if (restrict_liveness_queries) {
+        for (BasicBlock *block : stored.scope.blocks) {
+          const auto queries = liveness_queries_by_block.find(block);
+          if (queries == liveness_queries_by_block.end())
+            continue;
+          context_liveness_queries.insert(context_liveness_queries.end(),
+                                          queries->second.begin(), queries->second.end());
+        }
+        liveness_options.restrict_live_before_to_instructions = true;
+        liveness_options.live_before_instructions = context_liveness_queries;
+      }
+      stored.liveness = std::make_unique<LivenessAnalysis>(
+          KernelBlockScope(stored.scope.blocks), liveness_options, stored.scope.liveness_edges);
+      stored.liveness_is_restricted = restrict_liveness_queries;
       stored.max_referenced_vgpr_count = max_referenced_vgpr_count(stored.scope);
       stored.max_referenced_sgpr_count = std::max<uint16_t>(max_referenced_sgpr_count(stored.scope),
                                                             kernel.sgpr_count.value_or(0u));
@@ -1347,6 +1395,35 @@ struct MoiResourcePlanningState {
     for (MoiKernelResourceContext &context : contexts)
       context_by_descriptor.try_emplace(context.kernel->descriptor_file_offset, &context);
     valid = true;
+  }
+
+  void materialize_dense_liveness_for_transient_assignments(const ConSanOptions &options,
+                                                             const ConSanResult &result) {
+    if (options.moi_transient_sgpr_assignments.empty())
+      return;
+
+    std::unordered_set<uint64_t> dense_owner_descriptors;
+    for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+      const bool has_transient_owner =
+          std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t owner) {
+            return find_moi_transient_sgpr_assignment(options, owner) != nullptr;
+          });
+      if (has_transient_owner) {
+        dense_owner_descriptors.insert(plan.owner_descriptor_file_offsets.begin(),
+                                       plan.owner_descriptor_file_offsets.end());
+      }
+    }
+
+    for (MoiKernelResourceContext &context : contexts) {
+      if (!context.liveness_is_restricted || context.kernel == nullptr ||
+          !dense_owner_descriptors.contains(context.kernel->descriptor_file_offset)) {
+        continue;
+      }
+      context.liveness = std::make_unique<LivenessAnalysis>(
+          KernelBlockScope(context.scope.blocks), LivenessAnalysisOptions{},
+          context.scope.liveness_edges);
+      context.liveness_is_restricted = false;
+    }
   }
 };
 
@@ -1529,6 +1606,11 @@ plan_moi_scalar_prologue_scratch(const MoiResourcePlanningState &state,
   for (const MoiKernelResourceContext *context : owner_contexts) {
     if (context == nullptr || !context->block_set.contains(&block))
       continue;
+    // A missing filtered snapshot is represented by an empty RegisterSet.
+    // Never interpret that as proof that a transient scalar window is dead at
+    // an arbitrary relay host.
+    if (context->liveness_is_restricted)
+      return false;
     if (overlaps_window(context->liveness->live_before(host_instruction)))
       return false;
     found_owner_context = true;

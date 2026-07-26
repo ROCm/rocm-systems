@@ -26,6 +26,7 @@
 #include <atomic>
 #include <cctype>
 #include <cerrno>
+#include <chrono>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -80,6 +81,26 @@ rocjitsu::ConSanResult run_consan_transform(std::span<const uint8_t> bytes,
           g_test_consan_transform_override.load(std::memory_order_acquire))
     return override(bytes, options);
   return rocjitsu::try_patch_consan(bytes, options);
+}
+
+rocjitsu::ConSanResult retry_consan_moi_transform(std::span<const uint8_t> bytes,
+                                                  const rocjitsu::ConSanOptions &options,
+                                                  rocjitsu::ConSanResult inventory) {
+  // Unit tests replace the whole transform boundary and expect both phases to
+  // flow through that seam. Production reuses the immutable semantic
+  // inventory and reruns only MOI planning/lowering with the allocated buffer.
+  if (const ConSanTransformOverride override =
+          g_test_consan_transform_override.load(std::memory_order_acquire)) {
+    return override(bytes, options);
+  }
+  const rocjitsu::ConSanMoiReportRetryConfig report{
+      .buffer_address = options.moi_report_buffer_address,
+      .buffer_size = options.moi_report_buffer_size,
+      .layout = options.moi_report_layout,
+      .generation = options.moi_report_generation,
+      .dispatch_id = options.moi_report_dispatch_id,
+  };
+  return rocjitsu::retry_patch_consan_moi_from_inventory(std::move(inventory), report, bytes);
 }
 
 struct GroupSegmentRegionSearch {
@@ -879,6 +900,77 @@ private:
   util::IntrusiveList<Entry> entries_;
 };
 
+/// Owns replacement memory for as long as the executable can expose it.
+///
+/// HSA loaded-code-object introspection reports the original memory base and
+/// size even after the temporary reader used for loading has been destroyed.
+/// ROCProfiler consumes that storage when the executable is frozen, which can
+/// happen after hsa_executable_load_agent_code_object() returns. Therefore the
+/// hook must not tie replacement storage to the load call's ConSanResult.
+class ReplacementCodeObjectStorageRegistry {
+public:
+  static ReplacementCodeObjectStorageRegistry &instance() {
+    // The HSA runtime may call OnUnload from a shared-library finalizer after
+    // ordinary function-local statics have already been destroyed. Keep the
+    // registry alive for the process lifetime and clear its contents explicitly
+    // when the hook layer is uninstalled.
+    static auto *registry = new ReplacementCodeObjectStorageRegistry;
+    return *registry;
+  }
+
+  [[nodiscard]] bool retain(hsa_executable_t executable,
+                            std::shared_ptr<const std::vector<uint8_t>> storage) {
+    std::lock_guard lock(mutex_);
+    try {
+      auto entry = std::ranges::find(entries_, executable.handle, &Entry::executable);
+      if (entry == entries_.end()) {
+        Entry new_entry{.executable = executable.handle, .objects = {}};
+        new_entry.objects.push_back(std::move(storage));
+        entries_.push_back(std::move(new_entry));
+      } else {
+        entry->objects.push_back(std::move(storage));
+      }
+    } catch (const std::bad_alloc &) {
+      return false;
+    }
+    return true;
+  }
+
+  void release(hsa_executable_t executable, const std::vector<uint8_t> *storage) {
+    std::lock_guard lock(mutex_);
+    const auto entry = std::ranges::find(entries_, executable.handle, &Entry::executable);
+    if (entry == entries_.end())
+      return;
+    const auto object =
+        std::ranges::find(entry->objects, storage, [](const auto &value) { return value.get(); });
+    if (object != entry->objects.end())
+      entry->objects.erase(object);
+    if (entry->objects.empty())
+      entries_.erase(entry);
+  }
+
+  void remove(hsa_executable_t executable) {
+    std::lock_guard lock(mutex_);
+    const auto entry = std::ranges::find(entries_, executable.handle, &Entry::executable);
+    if (entry != entries_.end())
+      entries_.erase(entry);
+  }
+
+  void clear() {
+    std::lock_guard lock(mutex_);
+    entries_.clear();
+  }
+
+private:
+  struct Entry {
+    uint64_t executable = 0;
+    std::vector<std::shared_ptr<const std::vector<uint8_t>>> objects;
+  };
+
+  std::mutex mutex_;
+  std::vector<Entry> entries_;
+};
+
 class AutoScReportBufferRegistry {
 public:
   struct Summary {
@@ -1265,6 +1357,7 @@ hsa_status_t HSA_API rj_dbi_system_get_major_extension_table(uint16_t extension,
 hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
     const char *options, hsa_loaded_code_object_t *loaded_code_object);
+hsa_status_t HSA_API rj_dbi_executable_destroy(hsa_executable_t executable);
 hsa_status_t HSA_API rj_dbi_executable_get_symbol_by_name(hsa_executable_t executable,
                                                           const char *symbol_name,
                                                           const hsa_agent_t *agent,
@@ -1308,6 +1401,7 @@ public:
     original_get_extension_table_ = core_->hsa_system_get_extension_table_fn;
     original_get_major_extension_table_ = core_->hsa_system_get_major_extension_table_fn;
     original_load_agent_code_object_ = core_->hsa_executable_load_agent_code_object_fn;
+    original_executable_destroy_ = core_->hsa_executable_destroy_fn;
     original_get_symbol_by_name_ = core_->hsa_executable_get_symbol_by_name_fn;
     original_symbol_get_info_ = core_->hsa_executable_symbol_get_info_fn;
     original_queue_create_ = core_->hsa_queue_create_fn;
@@ -1327,7 +1421,7 @@ public:
     if (original_create_from_file_ == nullptr || original_create_from_memory_ == nullptr ||
         original_destroy_ == nullptr || original_get_extension_table_ == nullptr ||
         original_get_major_extension_table_ == nullptr ||
-        original_load_agent_code_object_ == nullptr ||
+        original_load_agent_code_object_ == nullptr || original_executable_destroy_ == nullptr ||
         (intercept_dispatch_segments_ &&
          (original_get_symbol_by_name_ == nullptr || original_symbol_get_info_ == nullptr)) ||
         (require_dispatch_packets && !intercept_dispatch_packets_)) {
@@ -1343,6 +1437,7 @@ public:
     core_->hsa_system_get_extension_table_fn = rj_dbi_system_get_extension_table;
     core_->hsa_system_get_major_extension_table_fn = rj_dbi_system_get_major_extension_table;
     core_->hsa_executable_load_agent_code_object_fn = rj_dbi_executable_load_agent_code_object;
+    core_->hsa_executable_destroy_fn = rj_dbi_executable_destroy;
     if (intercept_dispatch_segments_) {
       core_->hsa_executable_get_symbol_by_name_fn = rj_dbi_executable_get_symbol_by_name;
       core_->hsa_executable_symbol_get_info_fn = rj_dbi_executable_symbol_get_info;
@@ -1455,6 +1550,8 @@ public:
       if (core_->hsa_executable_load_agent_code_object_fn ==
           rj_dbi_executable_load_agent_code_object)
         core_->hsa_executable_load_agent_code_object_fn = original_load_agent_code_object_;
+      if (core_->hsa_executable_destroy_fn == rj_dbi_executable_destroy)
+        core_->hsa_executable_destroy_fn = original_executable_destroy_;
       if (core_->hsa_executable_get_symbol_by_name_fn == rj_dbi_executable_get_symbol_by_name)
         core_->hsa_executable_get_symbol_by_name_fn = original_get_symbol_by_name_;
       if (core_->hsa_executable_symbol_get_info_fn == rj_dbi_executable_symbol_get_info)
@@ -1477,6 +1574,7 @@ public:
     const std::optional<rocjitsu::ConSanFaultLoadSelector> fault_load_selector =
         fault_load_selector_;
     CodeObjectReaderRegistry::instance().clear();
+    ReplacementCodeObjectStorageRegistry::instance().clear();
     KernelPrivateDispatchRegistry::instance().clear();
     if (fault_load_selector) {
       log_message(kLogInfo,
@@ -1843,6 +1941,11 @@ public:
     return original_load_agent_code_object_;
   }
 
+  [[nodiscard]] decltype(hsa_executable_destroy) *executable_destroy() const {
+    std::lock_guard lock(mutex_);
+    return original_executable_destroy_;
+  }
+
   [[nodiscard]] decltype(hsa_executable_get_symbol_by_name) *get_symbol_by_name() const {
     std::lock_guard lock(mutex_);
     return original_get_symbol_by_name_;
@@ -1883,6 +1986,8 @@ private:
     constexpr size_t required_size =
         std::max({offsetof(CoreApiTable, hsa_executable_load_agent_code_object_fn) +
                       sizeof(CoreApiTable::hsa_executable_load_agent_code_object_fn),
+                  offsetof(CoreApiTable, hsa_executable_destroy_fn) +
+                      sizeof(CoreApiTable::hsa_executable_destroy_fn),
                   offsetof(CoreApiTable, hsa_executable_get_symbol_by_name_fn) +
                       sizeof(CoreApiTable::hsa_executable_get_symbol_by_name_fn),
                   offsetof(CoreApiTable, hsa_executable_symbol_get_info_fn) +
@@ -1916,6 +2021,7 @@ private:
     original_get_major_extension_table_ = nullptr;
     original_loader_create_from_file_with_offset_size_ = nullptr;
     original_load_agent_code_object_ = nullptr;
+    original_executable_destroy_ = nullptr;
     original_get_symbol_by_name_ = nullptr;
     original_symbol_get_info_ = nullptr;
     original_queue_create_ = nullptr;
@@ -1944,6 +2050,7 @@ private:
   decltype(hsa_system_get_major_extension_table) *original_get_major_extension_table_ = nullptr;
   LoaderCreateFromFileWithOffsetSize original_loader_create_from_file_with_offset_size_ = nullptr;
   decltype(hsa_executable_load_agent_code_object) *original_load_agent_code_object_ = nullptr;
+  decltype(hsa_executable_destroy) *original_executable_destroy_ = nullptr;
   decltype(hsa_executable_get_symbol_by_name) *original_get_symbol_by_name_ = nullptr;
   decltype(hsa_executable_symbol_get_info) *original_symbol_get_info_ = nullptr;
   decltype(hsa_queue_create) *original_queue_create_ = nullptr;
@@ -2125,6 +2232,16 @@ rj_dbi_code_object_reader_destroy(hsa_code_object_reader_t code_object_reader) {
   if (original == nullptr)
     return HSA_STATUS_ERROR;
   return original(code_object_reader);
+}
+
+hsa_status_t HSA_API rj_dbi_executable_destroy(hsa_executable_t executable) {
+  auto *original = layer().executable_destroy();
+  if (original == nullptr)
+    return HSA_STATUS_ERROR;
+  const hsa_status_t status = original(executable);
+  if (status == HSA_STATUS_SUCCESS)
+    ReplacementCodeObjectStorageRegistry::instance().remove(executable);
+  return status;
 }
 
 struct alignas(8) InterceptPacket {
@@ -2366,8 +2483,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   hsa_code_object_reader_t reader_to_load = code_object_reader;
   hsa_code_object_reader_t replacement_reader{};
   bool using_replacement_reader = false;
+  bool replacement_storage_retained = false;
+  std::shared_ptr<const std::vector<uint8_t>> replacement_storage;
   rocjitsu::ConSanInstallAction install_action = rocjitsu::ConSanInstallAction::LoadOriginal;
   std::optional<rocjitsu::ConSanResult> patch_result_storage;
+  std::optional<rocjitsu::ConSanResult> reusable_moi_inventory;
 
   const CodeObjectReaderRegistry::ReaderBytes reader_bytes =
       CodeObjectReaderRegistry::instance().lookup(code_object_reader);
@@ -2383,7 +2503,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     dump_code_object_bytes(*config, dump_id, code_object_reader.handle, "original",
                            std::span<const uint8_t>(bytes, size));
 
+    const auto waitcheck_begin = std::chrono::steady_clock::now();
     (void)run_waitcheck_preflight(std::span<const uint8_t>(bytes, size), code_object_reader.handle);
+    log_message(kLogInfo, "ConSan waitcheck timing reader=%llu elapsed_ms=%.3f",
+                static_cast<unsigned long long>(code_object_reader.handle),
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                          waitcheck_begin)
+                    .count());
 
     rocjitsu::ConSanOptions patch_options;
     patch_options.flavor = config->flavor.value_or(rocjitsu::ConSanFlavor::None);
@@ -2581,8 +2707,16 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         !patch_options.moi_report_buffer_address && config->moi_auto_report_buffer_size != 0) {
       rocjitsu::ConSanOptions inventory_options = patch_options;
       inventory_options.moi_report_buffer_size = 0;
+      log_message(kLogInfo, "ConSan MOI inventory begin reader=%llu bytes=%zu",
+                  static_cast<unsigned long long>(code_object_reader.handle), size);
+      const auto inventory_begin = std::chrono::steady_clock::now();
       rocjitsu::ConSanResult inventory =
           run_consan_transform(std::span<const uint8_t>(bytes, size), inventory_options);
+      log_message(kLogInfo, "ConSan MOI inventory end reader=%llu elapsed_ms=%.3f",
+                  static_cast<unsigned long long>(code_object_reader.handle),
+                  std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                            inventory_begin)
+                      .count());
       if (!moi_inventory_needs_report_buffer(inventory, *config)) {
         log_message(kLogInfo,
                     "ConSan MOI auto report buffer skipped reader=%llu: no MOI report sites",
@@ -2674,6 +2808,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         patch_options.moi_report_layout = report_layout_override;
         patch_options.moi_report_generation = auto_report_generation;
         patch_options.moi_report_dispatch_id = code_object_reader.handle;
+        reusable_moi_inventory = std::move(inventory);
       } else if (!patch_result_storage && config->fail_closed) {
         return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
                                        code_object_reader.handle, "moi-report-allocation");
@@ -2685,8 +2820,14 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     log_message(kLogInfo, "ConSan patch begin reader=%llu bytes=%zu",
                 static_cast<unsigned long long>(code_object_reader.handle), size);
     if (!patch_result_storage) {
-      patch_result_storage =
-          run_consan_transform(std::span<const uint8_t>(bytes, size), patch_options);
+      if (reusable_moi_inventory) {
+        patch_result_storage =
+            retry_consan_moi_transform(std::span<const uint8_t>(bytes, size), patch_options,
+                                       std::move(*reusable_moi_inventory));
+      } else {
+        patch_result_storage =
+            run_consan_transform(std::span<const uint8_t>(bytes, size), patch_options);
+      }
     }
     const rocjitsu::ConSanResult &patch_result = *patch_result_storage;
     register_auto_moi_report_compact_tokens(code_object_reader.handle, patch_result);
@@ -3636,10 +3777,38 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     if (original_create == nullptr)
       return HSA_STATUS_ERROR;
 
+    try {
+      replacement_storage =
+          std::make_shared<const std::vector<uint8_t>>(std::move(patch_result_storage->elf_bytes));
+    } catch (const std::bad_alloc &) {
+      replacement_storage.reset();
+    }
+    if (!replacement_storage ||
+        !ReplacementCodeObjectStorageRegistry::instance().retain(executable, replacement_storage)) {
+      std::fprintf(stderr,
+                   "[rocjitsu-dbi-hooks] failed to retain replacement code-object storage\n");
+      if (config->fail_closed)
+        return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                                       code_object_reader.handle, "replacement-storage-retention");
+      replacement_storage.reset();
+      log_message(kLogInfo,
+                  "ConSan replacement storage retention failed; loading original reader=%llu",
+                  static_cast<unsigned long long>(code_object_reader.handle));
+    } else {
+      replacement_storage_retained = true;
+    }
+
     const hsa_status_t reader_status =
-        original_create(patch_result_storage->elf_bytes.data(),
-                        patch_result_storage->elf_bytes.size(), &replacement_reader);
-    if (reader_status != HSA_STATUS_SUCCESS) {
+        replacement_storage_retained
+            ? original_create(replacement_storage->data(), replacement_storage->size(),
+                              &replacement_reader)
+            : HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    if (!replacement_storage_retained) {
+      // Fail-open policy already selected the untouched reader above.
+    } else if (reader_status != HSA_STATUS_SUCCESS) {
+      ReplacementCodeObjectStorageRegistry::instance().release(executable,
+                                                               replacement_storage.get());
+      replacement_storage_retained = false;
       std::fprintf(stderr, "[rocjitsu-dbi-hooks] failed to create replacement patched reader: %d\n",
                    static_cast<int>(reader_status));
       if (config->fail_closed)
@@ -3654,7 +3823,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       log_message(kLogInfo, "ConSan replacement reader=%llu original_reader=%llu bytes=%zu",
                   static_cast<unsigned long long>(replacement_reader.handle),
                   static_cast<unsigned long long>(code_object_reader.handle),
-                  patch_result_storage->elf_bytes.size());
+                  replacement_storage->size());
     }
   }
 
@@ -3665,6 +3834,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     if (original_destroy != nullptr)
       (void)original_destroy(replacement_reader);
     using_replacement_reader = false;
+    if (replacement_storage_retained) {
+      ReplacementCodeObjectStorageRegistry::instance().release(executable,
+                                                               replacement_storage.get());
+      replacement_storage_retained = false;
+    }
     if (loaded_code_object != nullptr)
       *loaded_code_object = {};
     log_message(kLogInfo,
@@ -3682,6 +3856,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     if (original_destroy != nullptr)
       (void)original_destroy(replacement_reader);
   }
+  if (load_status != HSA_STATUS_SUCCESS && replacement_storage_retained)
+    ReplacementCodeObjectStorageRegistry::instance().release(executable, replacement_storage.get());
   return load_status;
 }
 

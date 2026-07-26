@@ -1,6 +1,7 @@
 [[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
-atomic_event_kind_for_site(const ConSanResult &result, std::string_view container_name,
-                           bool in_kernel, const ConSanAtomicSite &site);
+atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index,
+                           std::string_view container_name, bool in_kernel,
+                           const ConSanAtomicSite &site);
 
 void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                                const ConSanOptions &options, rj_code_arch_t arch,
@@ -108,11 +109,12 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   // Sampled atomic metadata wraps the relocated guest instruction in a
   // second text-growth pass. Keep dual-role access/ordering sites at the tail
   // so their one-word nested anchors remain branch-reachable in large images.
+  const MoiSyncInventoryIndex sync_index(result);
   std::unordered_set<uint64_t> ordering_atomic_offsets;
   if (options.moi_track_atomics) {
     const auto append_ordering_offsets = [&](const auto &container, bool in_kernel) {
       for (const ConSanAtomicSite &site : container.atomic_sites) {
-        if (atomic_event_kind_for_site(result, container.name, in_kernel, site))
+        if (atomic_event_kind_for_site(sync_index, container.name, in_kernel, site))
           ordering_atomic_offsets.insert(site.text_offset);
       }
     };
@@ -404,7 +406,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               while (displaced_words.size() < host_words_count) {
                 auto decoded = decode_relocatable_entry_instruction(
                     original_text, host_offset + displaced_words.size() * sizeof(uint32_t), arch,
-                    decode_errors);
+                    decode_errors, resource_state.decoder.get());
                 if (!decoded) {
                   displaced_words.clear();
                   break;
@@ -558,7 +560,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         while (displaced_words.size() < candidate_entry_island_words) {
           auto decoded = decode_relocatable_entry_instruction(
               original_text, candidate.text_offset + displaced_words.size() * sizeof(uint32_t),
-              arch, candidate_errors);
+              arch, candidate_errors, resource_state.decoder.get());
           if (!decoded) {
             displaced_words.clear();
             break;

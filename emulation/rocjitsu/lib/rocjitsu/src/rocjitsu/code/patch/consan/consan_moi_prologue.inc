@@ -1472,6 +1472,11 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     result.errors.emplace_back("ConSan MOI owner/epoch prologue found no .text section");
     return;
   }
+  std::unique_ptr<Decoder> relocation_decoder = Decoder::create(arch);
+  if (!relocation_decoder) {
+    result.errors.emplace_back("ConSan MOI owner/epoch prologue could not create decoder");
+    return;
+  }
   const uint32_t owner_required_sgpr_count =
       options.moi_owner_source == ConSanMoiOwnerSource::HwId
           ? static_cast<uint32_t>(*options.moi_owner_sgpr) + 1u
@@ -1764,7 +1769,8 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       } else {
         std::vector<std::string> relocation_errors;
         auto decoded = decode_relocatable_entry_instruction(
-            old_text, kernel.entry_text_offset, arch, relocation_errors);
+            old_text, kernel.entry_text_offset, arch, relocation_errors,
+            relocation_decoder.get());
         if (!decoded) {
           if (requires_in_place_entry) {
             result.errors.insert(result.errors.end(), relocation_errors.begin(),
@@ -1799,7 +1805,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
           std::vector<std::string> relocation_errors;
           auto decoded = decode_relocatable_entry_instruction(
               old_text, kernel.entry_text_offset + displaced_entry_words.size() * sizeof(uint32_t),
-              arch, relocation_errors);
+              arch, relocation_errors, relocation_decoder.get());
           if (!decoded) {
             if (requires_in_place_entry) {
               result.errors.insert(result.errors.end(), relocation_errors.begin(),

@@ -27,12 +27,13 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     return;
   }
   std::vector<AtomicRecordCandidate> candidates;
+  const MoiSyncInventoryIndex sync_index(result);
   auto retain_unavailable_cas = [&](std::string_view container_name, bool in_kernel,
                                     const std::vector<ConSanAtomicSite> &sites) {
     for (const ConSanAtomicSite &site : sites) {
       const bool cas = consan_atomic_is_compare_exchange(site);
       if (!cas || site.returns_old_value.value_or(false) ||
-          !atomic_event_kind_for_site(result, container_name, in_kernel, site))
+          !atomic_event_kind_for_site(sync_index, container_name, in_kernel, site))
         continue;
       result.warnings.emplace_back(
           "ConSan MOI atomic record patch skipped compare-exchange-outcome-unavailable in " +
@@ -41,13 +42,15 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
   };
   for (const ConSanKernelInfo &kernel : result.kernels) {
     retain_unavailable_cas(kernel.name, true, kernel.atomic_sites);
-    append_atomic_record_candidates(kernel, result, candidates);
+    append_atomic_record_candidates(kernel, result, sync_index, candidates);
   }
   for (const ConSanFunctionInfo &function : result.functions) {
     retain_unavailable_cas(function.name, false, function.atomic_sites);
-    append_atomic_record_candidates(function, result, candidates);
+    append_atomic_record_candidates(function, result, sync_index, candidates);
   }
   apply_test_container_filter(candidates, options);
+  if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result))
+    return;
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
     return lhs.site.text_offset < rhs.site.text_offset;
   });
