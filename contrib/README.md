@@ -1,3 +1,7 @@
+> **`nccl_ep` and `nccl_m2n` have moved.**
+> Both projects are now developed in the [NVIDIA/nccl-extensions](https://github.com/NVIDIA/nccl-extensions) repository.
+> Please open all new issues and pull requests there.
+
 # Contribution Policy for `contrib/`
 
 This directory hosts community and partner contributions that extend NCCL with
