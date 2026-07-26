@@ -78,9 +78,23 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         hsa_hotswap_rocjitsu
         PRIVATE -ffunction-sections -fdata-sections
     )
-    set(_hsa_hotswap_exports
-        ${CMAKE_CURRENT_SOURCE_DIR}/hsa_hotswap_rocjitsu.map
-    )
+    # Shipped DSO exports only OnLoad/OnUnload. A testing build additionally
+    # exports rj_test_* (via the testable version script) and compiles the gated
+    # rj_test_* entry points, so unit tests can observe internal lifecycle state
+    # without widening the shipped ABI. This DSO is never installed.
+    if(BUILD_TESTING)
+        set(_hsa_hotswap_exports
+            ${CMAKE_CURRENT_SOURCE_DIR}/hsa_hotswap_rocjitsu_testable.map
+        )
+        target_compile_definitions(
+            hsa_hotswap_rocjitsu
+            PRIVATE RJ_HOTSWAP_TEST_HOOKS
+        )
+    else()
+        set(_hsa_hotswap_exports
+            ${CMAKE_CURRENT_SOURCE_DIR}/hsa_hotswap_rocjitsu.map
+        )
+    endif()
     set_property(
         TARGET hsa_hotswap_rocjitsu
         APPEND

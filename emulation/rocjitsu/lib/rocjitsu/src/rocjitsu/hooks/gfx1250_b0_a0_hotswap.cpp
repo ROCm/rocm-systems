@@ -124,8 +124,15 @@ struct OriginalApi {
 struct HookState {
   std::mutex lifecycle_mutex;
   CoreApiTable *core = nullptr;
-  OriginalApi original;
-  std::atomic<const OriginalApi *> active_api{nullptr};
+  // The saved lower API is published as an IMMUTABLE, never-overwritten snapshot.
+  // Each install() builds a fresh const OriginalApi on the heap and publishes it;
+  // uninstall() swaps in nullptr. A hot-path callback loads the shared_ptr into a
+  // local, which keeps that exact table alive for the whole call even if a
+  // concurrent OnUnload/OnLoad swaps a new generation in underneath -- so a
+  // reinstall can never mutate the table an in-flight callback is dereferencing.
+  // (Publishing only a raw pointer to a mutated-in-place member, as before, was a
+  // data race across the reinstall window.)
+  std::atomic<std::shared_ptr<const OriginalApi>> active_api{nullptr};
   std::atomic<VendorReaderCreate> vendor_reader{nullptr};
 
   std::mutex storage_mutex;
@@ -251,8 +258,11 @@ bool install(HsaApiTable *table) {
   clear_storage();
   g_state.vendor_reader.store(nullptr, std::memory_order_release);
   g_state.core = core;
-  g_state.original = original;
-  g_state.active_api.store(&g_state.original, std::memory_order_release);
+  // Publish an immutable snapshot: a callback that already loaded the previous
+  // generation's shared_ptr keeps that table alive for its whole call, so this
+  // reinstall never mutates a table another thread is dereferencing.
+  g_state.active_api.store(std::make_shared<const OriginalApi>(original),
+                           std::memory_order_release);
   core->hsa_code_object_reader_create_from_file_fn = reader_create_from_file;
   core->hsa_code_object_reader_create_from_memory_fn = reader_create_from_memory;
   core->hsa_code_object_reader_destroy_fn = reader_destroy;
@@ -268,7 +278,11 @@ bool install(HsaApiTable *table) {
 void uninstall() {
   std::lock_guard lock(g_state.lifecycle_mutex);
   CoreApiTable *core = g_state.core;
-  const OriginalApi *original = g_state.active_api.exchange(nullptr, std::memory_order_acq_rel);
+  // Swap the published snapshot out for nullptr. Any callback still holding the
+  // previous shared_ptr keeps its table alive until that call returns; this only
+  // stops NEW callbacks from finding a table.
+  const std::shared_ptr<const OriginalApi> original =
+      g_state.active_api.exchange(nullptr, std::memory_order_acq_rel);
   if (core != nullptr && original != nullptr) {
     if (core->hsa_code_object_reader_create_from_file_fn == reader_create_from_file)
       core->hsa_code_object_reader_create_from_file_fn = original->create_file;
@@ -465,7 +479,8 @@ hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, co
 hsa_status_t HSA_API reader_create_from_memory(const void *code_object, size_t size,
                                                hsa_code_object_reader_t *reader) {
   return hsa_boundary([&] {
-    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    const std::shared_ptr<const OriginalApi> api =
+        g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
       return HSA_STATUS_ERROR;
     auto *original = api->create_memory;
@@ -479,7 +494,8 @@ hsa_status_t HSA_API reader_create_from_memory(const void *code_object, size_t s
 
 hsa_status_t HSA_API reader_create_from_file(hsa_file_t file, hsa_code_object_reader_t *reader) {
   return hsa_boundary([&] {
-    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    const std::shared_ptr<const OriginalApi> api =
+        g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
       return HSA_STATUS_ERROR;
     auto *original = api->create_file;
@@ -493,7 +509,8 @@ hsa_status_t HSA_API reader_create_from_file(hsa_file_t file, hsa_code_object_re
 hsa_status_t vendor_reader_create(hsa_file_t file, size_t offset, size_t size,
                                   hsa_code_object_reader_t *reader) {
   return hsa_boundary([&] {
-    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    const std::shared_ptr<const OriginalApi> api =
+        g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
       return HSA_STATUS_ERROR;
     auto original = g_state.vendor_reader.load(std::memory_order_acquire);
@@ -509,7 +526,8 @@ hsa_status_t vendor_reader_create(hsa_file_t file, size_t offset, size_t size,
 hsa_status_t HSA_API system_get_major_extension_table(uint16_t extension, uint16_t version_major,
                                                       size_t table_length, void *table) {
   return hsa_boundary([&] {
-    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    const std::shared_ptr<const OriginalApi> api =
+        g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
       return HSA_STATUS_ERROR;
     auto *original = api->get_extension_table;
@@ -533,7 +551,8 @@ hsa_status_t HSA_API system_get_major_extension_table(uint16_t extension, uint16
 
 hsa_status_t HSA_API reader_destroy(hsa_code_object_reader_t reader) {
   return hsa_boundary([&] {
-    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    const std::shared_ptr<const OriginalApi> api =
+        g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
       return HSA_STATUS_ERROR;
     auto *original = api->destroy_reader;
@@ -546,7 +565,8 @@ hsa_status_t HSA_API reader_destroy(hsa_code_object_reader_t reader) {
 
 hsa_status_t HSA_API executable_destroy(hsa_executable_t executable) {
   return hsa_boundary([&] {
-    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    const std::shared_ptr<const OriginalApi> api =
+        g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
       return HSA_STATUS_ERROR;
     auto *original = api->destroy_executable;
@@ -561,7 +581,8 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
                                             hsa_code_object_reader_t reader, const char *options,
                                             hsa_loaded_code_object_t *loaded) {
   return hsa_boundary([&] {
-    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    const std::shared_ptr<const OriginalApi> api =
+        g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
       return HSA_STATUS_ERROR;
     auto *original_load = api->load_agent;
@@ -608,7 +629,8 @@ hsa_status_t HSA_API load_program_code_object(hsa_executable_t executable,
                                               hsa_code_object_reader_t reader, const char *options,
                                               hsa_loaded_code_object_t *loaded) {
   return hsa_boundary([&] {
-    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    const std::shared_ptr<const OriginalApi> api =
+        g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
       return HSA_STATUS_ERROR;
     auto *original = api->load_program;
@@ -621,7 +643,8 @@ hsa_status_t HSA_API load_program_code_object(hsa_executable_t executable,
 hsa_status_t HSA_API load_code_object(hsa_executable_t executable, hsa_agent_t agent,
                                       hsa_code_object_t code_object, const char *options) {
   return hsa_boundary([&] {
-    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    const std::shared_ptr<const OriginalApi> api =
+        g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
       return HSA_STATUS_ERROR;
     auto *original = api->load_deprecated;
@@ -659,3 +682,21 @@ extern "C" RJ_HOOK_EXPORT void OnUnload() {
   } catch (...) {
   }
 }
+
+#if defined(RJ_HOTSWAP_TEST_HOOKS)
+// Test-only: total number of translated backing buffers currently retained across
+// all executables. Lets a unit test assert the storage-retention lifecycle --
+// buffers survive OnUnload() (ROCr destroys its loader after OnUnload but before
+// closing the DSO, so the bytes must outlive OnUnload) and are released at the next
+// install() (a fresh runtime generation). Never present in the shipped DSO: its
+// version script exports only OnLoad/OnUnload; the testable build adds rj_test_*.
+extern "C" RJ_HOOK_EXPORT size_t rj_test_retained_executable_buffer_count() {
+  std::lock_guard lock(g_state.storage_mutex);
+  size_t count = 0;
+  for (const auto &[handle, buffers] : g_state.executables) {
+    (void)handle;
+    count += buffers.size();
+  }
+  return count;
+}
+#endif // RJ_HOTSWAP_TEST_HOOKS

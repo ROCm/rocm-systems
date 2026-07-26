@@ -15,6 +15,7 @@
 
 extern "C" bool OnLoad(HsaApiTable *, uint64_t, uint64_t, const char *const *);
 extern "C" void OnUnload();
+extern "C" size_t rj_test_retained_executable_buffer_count();
 
 namespace {
 
@@ -235,6 +236,38 @@ TEST_F(HsaHotswapHookTest, UsesImmutableSnapshotForForwardedA0Load) {
   EXPECT_EQ(g_readers.count(g_loaded_reader.handle), 0u);
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
   EXPECT_EQ(g_reader_destroy_calls, 1);
+}
+
+// The translated backing storage retained for an A0 load must SURVIVE OnUnload()
+// (ROCr destroys its loader after OnUnload but before closing the DSO, so the bytes
+// the loader still references must outlive OnUnload), and be released only at the
+// next install() -- a fresh runtime generation. Regression guard for the storage-
+// retention lifecycle (uninstall keeps g_state.executables; install clears it).
+TEST_F(HsaHotswapHookTest, RetainedStorageSurvivesUnloadAndReleasesOnReinstall) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  ASSERT_EQ(rj_test_retained_executable_buffer_count(), 0u);
+
+  // A forwarded A0 load (non-gfx1250 source) retains its owned bytes under the
+  // executable for the loader's lifetime.
+  const std::vector<uint8_t> source{1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
+      HSA_STATUS_SUCCESS);
+  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_retained_executable_buffer_count(), 1u);
+
+  // OnUnload must NOT free the buffer: the loader still references it until ROCr
+  // destroys the loader (which happens after OnUnload, before the DSO closes).
+  OnUnload();
+  EXPECT_EQ(rj_test_retained_executable_buffer_count(), 1u);
+
+  // The next runtime generation's install() clears the previous generation's
+  // storage (safe because that generation's loader is gone by then).
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);
 }
 
 TEST_F(HsaHotswapHookTest, B0LoadsUseOnlyTheOriginalApi) {

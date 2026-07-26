@@ -845,7 +845,7 @@ class Runtime {
   /// loaded library.
   void LoadTools();
 
-  /// @brief Load the rocJitsu hotswap backend as the first HSA tool.
+  /// @brief Load the rocjitsu hotswap backend as the first HSA tool.
   hsa_status_t LoadHotswapTool();
 
   /// @brief Call OnUnload method of each tool library.

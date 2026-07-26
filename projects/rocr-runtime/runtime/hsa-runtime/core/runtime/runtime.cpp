@@ -3025,7 +3025,7 @@ void Runtime::LoadTools() {
   }
 }
 
-// Load the rocJitsu backend through the existing HSA tool lifecycle. Keeping
+// Load the rocjitsu backend through the existing HSA tool lifecycle. Keeping
 // its handle in tool_libs_ gives it the normal reverse-order OnUnload and
 // CloseTools handling without dedicated runtime state.
 hsa_status_t Runtime::LoadHotswapTool() {
@@ -3051,7 +3051,7 @@ hsa_status_t Runtime::LoadHotswapTool() {
 
 #if !defined(__linux__)
   if (flag().report_tool_load_failures())
-    fprintf(stderr, "rocJitsu hotswap is not supported on this platform.\n");
+    fprintf(stderr, "rocjitsu hotswap is not supported on this platform.\n");
   return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
 #else
   constexpr char kHookLibrary[] = "libhsa_hotswap_rocjitsu.so";
@@ -3061,7 +3061,7 @@ hsa_status_t Runtime::LoadHotswapTool() {
   if (tool == nullptr) tool = os::LoadLib(kHookLibrary);
   if (tool == nullptr) {
     if (flag().report_tool_load_failures())
-      fprintf(stderr, "rocJitsu hotswap failed to load \"%s\" or \"%s\".\n", adjacent.c_str(),
+      fprintf(stderr, "rocjitsu hotswap failed to load \"%s\" or \"%s\".\n", adjacent.c_str(),
               kHookLibrary);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
@@ -3071,7 +3071,7 @@ hsa_status_t Runtime::LoadHotswapTool() {
   if (on_load == nullptr ||
       !on_load(&hsa_api_table().hsa_api, hsa_api_table().hsa_api.version.major_id, 0, nullptr)) {
     if (flag().report_tool_load_failures())
-      fprintf(stderr, "rocJitsu hotswap tool \"%s\" failed to install.\n", adjacent.c_str());
+      fprintf(stderr, "rocjitsu hotswap tool \"%s\" failed to install.\n", adjacent.c_str());
     os::CloseLib(tool);
     return HSA_STATUS_ERROR;
   }
