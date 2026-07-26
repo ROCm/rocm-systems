@@ -76,7 +76,7 @@ flowchart TB
   R1["R1 DONE: fix RDNA4 dispatch-ID state<br/>and selective relay envelopes"]:::done
   R2["R2 DONE: 19/19 clean and 57/57 paired<br/>overhead rows; repeat TP2 clean 5/5"]:::done
   R3["R3 DONE: exact faults expose TP2 3/5<br/>and D128 pressure 0/5 detection"]:::done
-  R4["R4 DONE: bound capture to four dispatch<br/>buckets × four owner slots"]:::done
+  R4["R4 DONE: report-wide dispatch and access<br/>identity tables with bounded probes"]:::done
   R5["R5 DONE: model, emission and host tests;<br/>gfx1250/gfx942/gfx950 gates pass"]:::done
   R6["R6 ACTIVE: D128 clean/fault passes;<br/>rerun TP2 and frozen overhead/memory"]:::active
   R7["R7: publish source-matched evidence and<br/>restore only evidence-backed greens"]:::todo
@@ -90,18 +90,18 @@ flowchart TB
   classDef target fill:#ed7d31,stroke:#843c0c,stroke-width:3px,color:#000;
 ```
 
-Automatic layouts deliberately expand each logical range from the historical
-single 64-byte record to a four hardware-dispatch × four canonical-owner grid
-of 72-byte records: 1,152 bytes per range, an 18× static access-storage
-increase.  The 128 MiB per-buffer ceiling therefore rejects some inventories
-that previously fit; planner boundary tests pin that tradeoff.  A reversible
-64-bit dispatch claim owns each outer bucket.  A different dispatch colliding
-with that bucket, a different workgroup reusing a dispatch/owner slot, an owner
-outside the bounded set, or an unrepresentable/in-flight claim emits typed
-Record/Replay saturation and makes dynamic evidence incomplete.  Direct
-size-derived caller layouts remain 1 × 1, but now apply the same exact
-dispatch/workgroup reuse qualification.  This is a bounded observation policy,
-not an exhaustive trace or a workload-specific control.
+Automatic ABI-v12 layouts use a report-wide dispatch directory and a
+report-wide access-identity table. Both reserve 2× open-addressing headroom and
+use triangular probes capped at 256 slots. The access table starts from 16×16
+anticipated dispatch/owner diversity per logical range, then reduces both
+factors together for fat objects while preserving the admitted logical-range
+inventory under the 128 MiB ceiling. Each 80-byte record retains the full
+dispatch, explicit static site, three-dimensional workgroup, and wave-owner
+identity. Exhausting either table emits a typed report-wide Record/Replay
+saturation signal and makes dynamic evidence incomplete. Direct size-derived
+caller layouts remain 1 × 1 with exact dispatch/workgroup reuse qualification.
+This is a bounded observation policy, not an exhaustive trace or a
+workload-specific control.
 
 D128-pressure validates the intended behavior on physical gfx1201: five clean
 trials are complete and false-positive-free, and all five exact-drop trials

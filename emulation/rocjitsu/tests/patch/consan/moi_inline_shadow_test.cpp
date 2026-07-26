@@ -4246,7 +4246,7 @@ TEST(ConSanMoi, SharedInlineShadowUsesOnePrivateEpochLayoutForEveryOwner) {
 }
 
 TEST(ConSanMoi, InlineAbiV6LayoutIsCheckedBoundedAndNonAliasing) {
-  static_assert(sizeof(ConSanMoiReportHeader) == 176);
+  static_assert(sizeof(ConSanMoiReportHeader) == 184);
   static_assert(sizeof(ConSanMoiInlineExactShadowSlot) == 24);
   static_assert(offsetof(ConSanMoiInlineExactShadowSlot, packed_access) == 0);
   static_assert(offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id) == 8);

@@ -1096,7 +1096,7 @@ struct DynamicRecordLayout {
 
 inline constexpr DynamicRecordLayout kDynamicBarrierRecordLayout = {DynamicRecordStride::Bytes40, 5,
                                                                     false};
-inline constexpr DynamicRecordLayout kDynamicAccessRecordLayout = {DynamicRecordStride::Bytes72, 5,
+inline constexpr DynamicRecordLayout kDynamicAccessRecordLayout = {DynamicRecordStride::Bytes80, 5,
                                                                    false};
 inline constexpr DynamicRecordLayout kDynamicAtomicRecordLayout = {DynamicRecordStride::Bytes80, 4,
                                                                    true};
@@ -1105,7 +1105,7 @@ inline constexpr DynamicRecordLayout kDynamicFenceRecordLayout = {DynamicRecordS
 inline constexpr DynamicRecordLayout kDynamicDiagnosticRecordLayout = {DynamicRecordStride::Bytes80,
                                                                        4, true};
 static_assert(sizeof(ConSanMoiAtomicRecord) == 80);
-static_assert(sizeof(ConSanMoiAccessRecord) == 72);
+static_assert(sizeof(ConSanMoiAccessRecord) == 80);
 
 [[nodiscard]] bool append_dynamic_record_address(std::vector<uint32_t> &words,
                                                  const DynamicRecordLayout &layout,

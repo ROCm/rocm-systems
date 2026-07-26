@@ -937,7 +937,8 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
            record.lane_mask == 0 && record.instruction_offset == 0 &&
            record.access_kind == static_cast<uint32_t>(ConSanMoiShadowAccessKind::Empty) &&
            record.lds_byte_offset == 0 && record.lds_byte_count == 0 && record.start_cell == 0 &&
-           record.cell_count == 0 && record.epoch == 0 && record.event_index == 0;
+           record.cell_count == 0 && record.epoch == 0 && record.event_index == 0 &&
+           record.site_token == 0 && record.reserved == 0;
   };
 
   ConSanMoiRecordReplayResult replay;

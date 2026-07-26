@@ -27,7 +27,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       !options.moi_dispatch_id_sgpr) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.warnings.emplace_back(
-        "ConSan MOI dispatch/owner-banked Record/Replay requires runtime hardware dispatch "
+        "ConSan MOI automatic Record/Replay identity tables require runtime hardware dispatch "
         "identity");
     return;
   }
@@ -87,6 +87,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     std::vector<uint32_t> displaced_tail_words;
     uint32_t record_index = 0;
     uint32_t record_count = 0;
+    uint32_t logical_range_index = 0;
     ResolvedMoiScratchPlan resources;
     std::optional<VgprSpillSequence> spill;
     std::optional<InlineSgprSpillSequence> scalar_spill;
@@ -102,6 +103,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   };
   std::vector<PlannedAccessRecordPatch> planned_patches;
   uint32_t planned_record_count = 0;
+  uint32_t planned_logical_range_count = 0;
   planned_patches.reserve(candidates.size());
   AmdGpuCodeObject code_object(bytes.data(), bytes.size());
   const uint64_t original_text_size =
@@ -515,14 +517,25 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           "ConSan MOI first-light probe could not recover an admitted access range");
       continue;
     }
-    const uint32_t candidate_record_count =
-        static_cast<uint32_t>(access_ranges->size()) *
+    const uint64_t candidate_record_count_wide =
+        static_cast<uint64_t>(access_ranges->size()) *
         (options.moi_dynamic_access_records
              ? 1u
-             : layout.record_replay_access_dispatch_bank_count *
+             : static_cast<uint64_t>(layout.record_replay_access_dispatch_bank_count) *
                    layout.record_replay_access_owner_bank_count);
+    if (access_ranges->size() >
+            std::numeric_limits<uint32_t>::max() - planned_logical_range_count ||
+        candidate_record_count_wide > std::numeric_limits<uint32_t>::max()) {
+      result.warnings.emplace_back(
+          "ConSan MOI first-light probe skipped a supported load/store site whose "
+          "logical-range inventory exceeds the report ABI");
+      continue;
+    }
+    const uint32_t candidate_record_count =
+        static_cast<uint32_t>(candidate_record_count_wide);
     if (!options.moi_dynamic_access_records &&
-        candidate_record_count > layout.access_record_capacity - planned_record_count) {
+        (planned_record_count > layout.access_record_capacity ||
+         candidate_record_count > layout.access_record_capacity - planned_record_count)) {
       result.warnings.emplace_back(
           "ConSan MOI first-light probe skipped a supported load/store site without enough "
           "report-buffer access-record slots");
@@ -531,9 +544,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     std::vector<std::string> candidate_errors;
     uint32_t probe_guest_instruction_offset = 0;
     auto words = build_first_light_access_record_words(
-        bytes, candidate, candidate_options, arch, 0, 0, layout.access_record_capacity,
-        layout.record_replay_access_dispatch_bank_count,
-        layout.record_replay_access_owner_bank_count, spill ? &*spill : nullptr,
+        bytes, candidate, candidate_options, arch, 0, 0, planned_logical_range_count, layout,
+        spill ? &*spill : nullptr,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
         private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
         candidate_errors, &probe_guest_instruction_offset);
@@ -661,6 +673,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     planned.displaced_tail_words = std::move(displaced_tail_words);
     planned.record_index = planned_record_count;
     planned.record_count = candidate_record_count;
+    planned.logical_range_index = planned_logical_range_count;
     planned.probe_guest_instruction_offset = probe_guest_instruction_offset;
     planned.resources = *resources;
     planned.spill = spill;
@@ -679,6 +692,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     if (use_indirect_appended && !use_dense_call)
       planned_anchor_end = candidate.text_offset + placement->original_size;
     planned_record_count += candidate_record_count;
+    planned_logical_range_count += static_cast<uint32_t>(access_ranges->size());
     if (planned_patches.size() == selected_candidate_limit)
       break;
   }
@@ -1018,9 +1032,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       }
       auto words = build_first_light_access_record_words(
           bytes, candidate, candidate_options, arch, planned_patch.record_index,
-          planned_record_count, layout.access_record_capacity,
-          layout.record_replay_access_dispatch_bank_count,
-          layout.record_replay_access_owner_bank_count,
+          planned_record_count, planned_patch.logical_range_index, layout,
           planned_patch.spill ? &*planned_patch.spill : nullptr,
           planned_patch.private_epoch_offset,
           planned_patch.private_owner_offset, planned_patch.private_owner_shift, result.errors);
@@ -1235,9 +1247,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
               return std::optional<std::vector<uint32_t>>{};
             return build_first_light_access_record_words(
                 bytes, *planned_patch.candidate, candidate_options, arch,
-                planned_patch.record_index, planned_record_count, layout.access_record_capacity,
-                layout.record_replay_access_dispatch_bank_count,
-                layout.record_replay_access_owner_bank_count,
+                planned_patch.record_index, planned_record_count,
+                planned_patch.logical_range_index, layout,
                 planned_patch.spill ? &*planned_patch.spill : nullptr,
                 planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
                 planned_patch.private_owner_shift, result.errors);

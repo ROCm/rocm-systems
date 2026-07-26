@@ -42,6 +42,8 @@ static_assert(sizeof(ConSanMoiCompactDiagnosticTokenMapping) == 16);
 
 struct ConSanMoiReportBufferLayout {
   uint32_t access_record_capacity = 0;
+  uint32_t record_replay_logical_access_range_count = 0;
+  uint32_t record_replay_dispatch_token_capacity = 0;
   uint32_t record_replay_access_dispatch_bank_count = 1;
   uint32_t record_replay_access_owner_bank_count = 1;
   uint32_t barrier_record_capacity = 0;
@@ -58,6 +60,7 @@ struct ConSanMoiReportBufferLayout {
   uint32_t sampled_causal_window_capacity = 0;
   uint32_t sampled_sync_metadata_capacity = 0;
   uint32_t sampled_pending_acquire_capacity = 0;
+  size_t record_replay_dispatch_tokens_offset = sizeof(ConSanMoiReportHeader);
   size_t access_records_offset = sizeof(ConSanMoiReportHeader);
   size_t barrier_records_offset = sizeof(ConSanMoiReportHeader);
   size_t atomic_records_offset = sizeof(ConSanMoiReportHeader);
@@ -88,6 +91,8 @@ make_consan_moi_report_header_for_layout(uint64_t generation, uint64_t dispatch_
   header.generation = generation;
   header.dispatch_id = dispatch_id;
   header.engine = static_cast<uint32_t>(engine);
+  header.record_replay_dispatch_token_capacity =
+      layout.record_replay_dispatch_token_capacity;
   header.access_record_capacity = layout.access_record_capacity;
   header.barrier_record_capacity = layout.barrier_record_capacity;
   header.atomic_record_capacity = layout.atomic_record_capacity;
@@ -106,6 +111,58 @@ make_consan_moi_report_header_for_layout(uint64_t generation, uint64_t dispatch_
   return header;
 }
 
+/// Ordinary automatic Record/Replay uses a cheap report-wide dispatch
+/// directory plus one report-wide access-identity table. The two access-bank
+/// dimensions are sizing factors: the planner reserves that many anticipated
+/// identities per static range, applies standard open-addressing headroom,
+/// rounds the total table to a power of two, and the device probes by static
+/// range + dispatch + workgroup + wave. Hot sites can therefore borrow unused
+/// capacity from cold sites without workload-specific sizing. Large code
+/// objects halve both factors under the existing per-buffer ceiling; direct
+/// layouts keep their historical 1x1 contract.
+inline constexpr uint32_t kConSanMoiRecordReplayMaximumDispatchBankCount = 16u;
+inline constexpr uint32_t kConSanMoiRecordReplayMaximumOwnerBankCount = 16u;
+inline constexpr uint32_t kConSanMoiRecordReplayHashTableHeadroom = 2u;
+inline constexpr uint32_t kConSanMoiRecordReplayAnticipatedDispatchCount = 1024u;
+inline constexpr uint32_t kConSanMoiRecordReplayMaximumDispatchTokenCount =
+    kConSanMoiRecordReplayAnticipatedDispatchCount *
+    kConSanMoiRecordReplayHashTableHeadroom;
+inline constexpr uint32_t kConSanMoiRecordReplayIdentityHashMultiplier = 0x9e3779b1u;
+/// Device-side open-addressing must have a practical bound independent of the
+/// report allocation size. Exhaustion sets the typed saturation flag; later
+/// probes observe that flag and bypass capture instead of repeatedly walking a
+/// full table.
+inline constexpr uint32_t kConSanMoiRecordReplayProbeLimit = 256u;
+[[nodiscard]] constexpr uint32_t
+consan_moi_record_replay_fold_dispatch_token(uint64_t token) {
+  return static_cast<uint32_t>(token) ^ static_cast<uint32_t>(token >> 32u);
+}
+[[nodiscard]] constexpr uint32_t
+consan_moi_record_replay_mix_identity(uint32_t hash, uint32_t coordinate) {
+  return (hash * kConSanMoiRecordReplayIdentityHashMultiplier) ^ coordinate;
+}
+/// Advances an open-addressing probe after @p probe_count has been incremented.
+/// Repeated calls therefore visit home + 1, home + 3, home + 6, ... . This
+/// triangular sequence covers every slot in a power-of-two table.
+/// @pre @p table_capacity is a nonzero power of two.
+[[nodiscard]] constexpr uint32_t
+consan_moi_record_replay_advance_probe(uint32_t bank, uint32_t probe_count,
+                                      uint32_t table_capacity) {
+  return (bank + probe_count) & (table_capacity - 1u);
+}
+static_assert((kConSanMoiRecordReplayMaximumDispatchTokenCount &
+               (kConSanMoiRecordReplayMaximumDispatchTokenCount - 1u)) == 0u);
+static_assert(kConSanMoiRecordReplayMaximumDispatchTokenCount ==
+              kConSanMoiRecordReplayAnticipatedDispatchCount *
+                  kConSanMoiRecordReplayHashTableHeadroom);
+static_assert((kConSanMoiRecordReplayMaximumDispatchBankCount &
+               (kConSanMoiRecordReplayMaximumDispatchBankCount - 1u)) == 0u);
+static_assert((kConSanMoiRecordReplayMaximumOwnerBankCount &
+               (kConSanMoiRecordReplayMaximumOwnerBankCount - 1u)) == 0u);
+static_assert(kConSanMoiRecordReplayHashTableHeadroom >= 2u);
+static_assert((kConSanMoiRecordReplayProbeLimit &
+               (kConSanMoiRecordReplayProbeLimit - 1u)) == 0u);
+
 /// Final-code inventory reduced to the quantities needed to size one report
 /// ABI. Counts are deliberately independent: candidate extraction must not
 /// assume that one sampled causal window holds only one watchpoint, or that
@@ -117,6 +174,19 @@ struct ConSanMoiAutoReportInventory {
   uint64_t atomic_event_count = 0;
   uint64_t fence_event_count = 0;
   uint64_t diagnostic_count = 0;
+
+  /// Automatic static capture starts with bounded dispatch/owner diversity
+  /// factors used only to size the report-wide access-identity table. The
+  /// fitter reduces both factors together when a large object would exceed the
+  /// ordinary report ceiling. Its separate dispatch directory retains the full
+  /// lifetime bound while access storage adapts. Explicit plans remain exact.
+  uint64_t record_replay_dispatch_token_capacity =
+      kConSanMoiRecordReplayMaximumDispatchTokenCount;
+  uint64_t record_replay_access_dispatch_bank_count =
+      kConSanMoiRecordReplayMaximumDispatchBankCount;
+  uint64_t record_replay_access_owner_bank_count =
+      kConSanMoiRecordReplayMaximumOwnerBankCount;
+  bool record_replay_bank_count_adaptive = false;
 
   /// Total immutable banks across admitted Sampled logical ranges. One causal
   /// window, synchronization-metadata slot, and pending-acquire slot are
@@ -139,19 +209,6 @@ struct ConSanMoiAutoReportInventory {
   uint64_t inline_acquired_epoch_token_count = 0;
   uint64_t inline_compact_token_mapping_count = 0;
 };
-
-/// Ordinary automatic Record/Replay retains a bounded cross-product of
-/// hardware-dispatch buckets and canonical wave owners for every logical
-/// access range. Both dimensions are powers of two so runtime selection stays
-/// cheap. This deliberately raises static access storage from one historical
-/// 64-byte record to sixteen current 72-byte records (1,152 bytes) per range.
-/// Full dispatch claim tokens detect bucket collisions, and owners outside the
-/// represented range fail closed through typed saturation.
-inline constexpr uint32_t kConSanMoiRecordReplayAccessDispatchBankCount = 4u;
-inline constexpr uint32_t kConSanMoiRecordReplayAccessOwnerBankCount = 4u;
-static_assert(kConSanMoiRecordReplayAccessDispatchBankCount *
-                  kConSanMoiRecordReplayAccessOwnerBankCount ==
-              16u);
 
 enum class ConSanMoiAutoReportPlanOutcome : uint8_t {
   Complete,

@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 
+#include <bit>
 #include <limits>
 
 namespace rocjitsu {
@@ -54,6 +55,7 @@ namespace {
 }
 
 void alias_unused_regions(ConSanMoiReportBufferLayout &layout, size_t offset) {
+  layout.record_replay_dispatch_tokens_offset = offset;
   layout.access_records_offset = offset;
   layout.barrier_records_offset = offset;
   layout.atomic_records_offset = offset;
@@ -75,6 +77,8 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
   return {
       .engine = engine,
       .access_record_capacity = layout.access_record_capacity,
+      .record_replay_logical_access_range_count = layout.record_replay_logical_access_range_count,
+      .record_replay_dispatch_token_capacity = layout.record_replay_dispatch_token_capacity,
       .record_replay_access_dispatch_bank_count = layout.record_replay_access_dispatch_bank_count,
       .record_replay_access_owner_bank_count = layout.record_replay_access_owner_bank_count,
       .barrier_record_capacity = layout.barrier_record_capacity,
@@ -91,6 +95,7 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
       .sampled_causal_window_capacity = layout.sampled_causal_window_capacity,
       .sampled_sync_metadata_capacity = layout.sampled_sync_metadata_capacity,
       .sampled_pending_acquire_capacity = layout.sampled_pending_acquire_capacity,
+      .record_replay_dispatch_tokens_offset = layout.record_replay_dispatch_tokens_offset,
       .access_records_offset = layout.access_records_offset,
       .barrier_records_offset = layout.barrier_records_offset,
       .atomic_records_offset = layout.atomic_records_offset,
@@ -113,6 +118,10 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
   const ConSanMoiReportLayoutOverride expected =
       make_layout_override(override_layout.engine, layout);
   return override_layout.access_record_capacity == expected.access_record_capacity &&
+         override_layout.record_replay_logical_access_range_count ==
+             expected.record_replay_logical_access_range_count &&
+         override_layout.record_replay_dispatch_token_capacity ==
+             expected.record_replay_dispatch_token_capacity &&
          override_layout.record_replay_access_dispatch_bank_count ==
              expected.record_replay_access_dispatch_bank_count &&
          override_layout.record_replay_access_owner_bank_count ==
@@ -139,6 +148,8 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
              expected.sampled_sync_metadata_capacity &&
          override_layout.sampled_pending_acquire_capacity ==
              expected.sampled_pending_acquire_capacity &&
+         override_layout.record_replay_dispatch_tokens_offset ==
+             expected.record_replay_dispatch_tokens_offset &&
          override_layout.access_records_offset == expected.access_records_offset &&
          override_layout.barrier_records_offset == expected.barrier_records_offset &&
          override_layout.atomic_records_offset == expected.atomic_records_offset &&
@@ -184,15 +195,59 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
 [[nodiscard]] bool plan_record_replay(const ConSanMoiAutoReportInventory &inventory,
                                       ConSanMoiAutoReportPlan &plan, uint64_t &cursor) {
   auto &layout = plan.layout;
-  layout.record_replay_access_dispatch_bank_count = kConSanMoiRecordReplayAccessDispatchBankCount;
-  layout.record_replay_access_owner_bank_count = kConSanMoiRecordReplayAccessOwnerBankCount;
+  if (!checked_capacity(inventory.access_range_count,
+                        layout.record_replay_logical_access_range_count)) {
+    plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
+    return false;
+  }
+  if (inventory.access_range_count == 0u) {
+    layout.record_replay_access_dispatch_bank_count = 1u;
+    layout.record_replay_access_owner_bank_count = 1u;
+  } else {
+    if (inventory.record_replay_dispatch_token_capacity == 0u ||
+        inventory.record_replay_dispatch_token_capacity >
+            kConSanMoiRecordReplayMaximumDispatchTokenCount ||
+        (inventory.record_replay_dispatch_token_capacity &
+         (inventory.record_replay_dispatch_token_capacity - 1u)) != 0u ||
+        inventory.record_replay_access_dispatch_bank_count == 0u ||
+        inventory.record_replay_access_dispatch_bank_count >
+            kConSanMoiRecordReplayMaximumDispatchBankCount ||
+        (inventory.record_replay_access_dispatch_bank_count &
+         (inventory.record_replay_access_dispatch_bank_count - 1u)) != 0u ||
+        inventory.record_replay_access_owner_bank_count == 0u ||
+        inventory.record_replay_access_owner_bank_count >
+            kConSanMoiRecordReplayMaximumOwnerBankCount ||
+        (inventory.record_replay_access_owner_bank_count &
+         (inventory.record_replay_access_owner_bank_count - 1u)) != 0u) {
+      plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
+      return false;
+    }
+    if (!checked_capacity(inventory.record_replay_dispatch_token_capacity,
+                          layout.record_replay_dispatch_token_capacity) ||
+        !checked_capacity(inventory.record_replay_access_dispatch_bank_count,
+                          layout.record_replay_access_dispatch_bank_count) ||
+        !checked_capacity(inventory.record_replay_access_owner_bank_count,
+                          layout.record_replay_access_owner_bank_count)) {
+      plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
+      return false;
+    }
+  }
   uint64_t access_record_count = 0;
   if (!checked_multiply(inventory.access_range_count,
                         layout.record_replay_access_dispatch_bank_count, access_record_count) ||
       !checked_multiply(access_record_count, layout.record_replay_access_owner_bank_count,
+                        access_record_count) ||
+      !checked_multiply(access_record_count, kConSanMoiRecordReplayHashTableHeadroom,
                         access_record_count)) {
     plan.reason = ConSanMoiAutoReportPlanReason::ByteSizeOverflow;
     return false;
+  }
+  if (access_record_count != 0u) {
+    if (access_record_count > uint64_t{1} << 31u) {
+      plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
+      return false;
+    }
+    access_record_count = std::bit_ceil(access_record_count);
   }
   if (!checked_capacity(access_record_count, layout.access_record_capacity) ||
       !checked_capacity(inventory.barrier_event_count, layout.barrier_record_capacity) ||
@@ -202,7 +257,9 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
     plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
     return false;
   }
-  return append_region(access_record_count, sizeof(ConSanMoiAccessRecord),
+  return append_region(layout.record_replay_dispatch_token_capacity, sizeof(uint64_t),
+                       alignof(uint64_t), cursor, layout.record_replay_dispatch_tokens_offset) &&
+         append_region(access_record_count, sizeof(ConSanMoiAccessRecord),
                        alignof(ConSanMoiAccessRecord), cursor, layout.access_records_offset) &&
          append_region(inventory.barrier_event_count, sizeof(ConSanMoiBarrierRecord),
                        alignof(ConSanMoiBarrierRecord), cursor, layout.barrier_records_offset) &&
@@ -350,6 +407,7 @@ ConSanMoiAutoReportPlan plan_consan_moi_auto_report(const ConSanMoiAutoReportInv
     plan.layout.sampled_pending_acquires_offset = end;
     break;
   case ConSanMoiEngine::Sampled:
+    plan.layout.record_replay_dispatch_tokens_offset = end;
     plan.layout.access_records_offset = end;
     plan.layout.barrier_records_offset = end;
     plan.layout.atomic_records_offset = end;
@@ -361,6 +419,7 @@ ConSanMoiAutoReportPlan plan_consan_moi_auto_report(const ConSanMoiAutoReportInv
     plan.layout.inline_acquired_epoch_token_slots_offset = end;
     break;
   case ConSanMoiEngine::InlineShadow:
+    plan.layout.record_replay_dispatch_tokens_offset = end;
     plan.layout.access_records_offset = end;
     plan.layout.barrier_records_offset = end;
     plan.layout.atomic_records_offset = end;
@@ -388,15 +447,38 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
                : count * headroom;
   };
 
-  uint64_t headroom = kConSanMoiRecordReplayDynamicEventHeadroom;
   for (;;) {
-    ConSanMoiAutoReportInventory candidate = inventory;
-    candidate.barrier_event_count = expanded_count(static_barriers, headroom);
-    candidate.atomic_event_count = expanded_count(static_atomics, headroom);
-    candidate.fence_event_count = expanded_count(static_fences, headroom);
-    if (plan_consan_moi_auto_report(candidate).complete() || headroom == 1u)
+    uint64_t headroom = kConSanMoiRecordReplayDynamicEventHeadroom;
+    for (;;) {
+      ConSanMoiAutoReportInventory candidate = inventory;
+      candidate.barrier_event_count = expanded_count(static_barriers, headroom);
+      candidate.atomic_event_count = expanded_count(static_atomics, headroom);
+      candidate.fence_event_count = expanded_count(static_fences, headroom);
+      const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(candidate);
+      if (plan.complete())
+        return candidate;
+      if (plan.outcome != ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity ||
+          plan.reason != ConSanMoiAutoReportPlanReason::PerBufferCeiling) {
+        return candidate;
+      }
+      if (headroom == 1u)
+        break;
+      headroom = std::max<uint64_t>(headroom / 2u, 1u);
+    }
+
+    if (!inventory.record_replay_bank_count_adaptive ||
+        (inventory.record_replay_access_dispatch_bank_count == 1u &&
+         inventory.record_replay_access_owner_bank_count == 1u)) {
+      ConSanMoiAutoReportInventory candidate = inventory;
+      candidate.barrier_event_count = static_barriers;
+      candidate.atomic_event_count = static_atomics;
+      candidate.fence_event_count = static_fences;
       return candidate;
-    headroom = std::max<uint64_t>(headroom / 2u, 1u);
+    }
+    inventory.record_replay_access_dispatch_bank_count =
+        std::max<uint64_t>(inventory.record_replay_access_dispatch_bank_count / 2u, 1u);
+    inventory.record_replay_access_owner_bank_count =
+        std::max<uint64_t>(inventory.record_replay_access_owner_bank_count / 2u, 1u);
   }
 }
 
@@ -444,20 +526,45 @@ consan_moi_report_layout_from_override(const ConSanMoiReportLayoutOverride &over
   inventory.engine = engine;
   switch (engine) {
   case ConSanMoiEngine::RecordReplay: {
-    if (override_layout.record_replay_access_dispatch_bank_count == 0u ||
-        override_layout.record_replay_access_dispatch_bank_count !=
-            kConSanMoiRecordReplayAccessDispatchBankCount ||
+    const bool empty_access_layout =
+        override_layout.access_record_capacity == 0u &&
+        override_layout.record_replay_logical_access_range_count == 0u &&
+        override_layout.record_replay_dispatch_token_capacity == 0u &&
+        override_layout.record_replay_access_dispatch_bank_count == 1u &&
+        override_layout.record_replay_access_owner_bank_count == 1u;
+    if ((!empty_access_layout &&
+         (override_layout.record_replay_dispatch_token_capacity == 0u ||
+          override_layout.record_replay_dispatch_token_capacity >
+              kConSanMoiRecordReplayMaximumDispatchTokenCount ||
+          (override_layout.record_replay_dispatch_token_capacity &
+           (override_layout.record_replay_dispatch_token_capacity - 1u)) != 0u)) ||
+        override_layout.record_replay_access_dispatch_bank_count == 0u ||
+        override_layout.record_replay_access_dispatch_bank_count >
+            kConSanMoiRecordReplayMaximumDispatchBankCount ||
+        (override_layout.record_replay_access_dispatch_bank_count &
+         (override_layout.record_replay_access_dispatch_bank_count - 1u)) != 0u ||
         override_layout.record_replay_access_owner_bank_count == 0u ||
-        override_layout.record_replay_access_owner_bank_count !=
-            kConSanMoiRecordReplayAccessOwnerBankCount) {
+        override_layout.record_replay_access_owner_bank_count >
+            kConSanMoiRecordReplayMaximumOwnerBankCount ||
+        (override_layout.record_replay_access_owner_bank_count &
+         (override_layout.record_replay_access_owner_bank_count - 1u)) != 0u) {
       return {};
     }
     const uint64_t bank_count =
         static_cast<uint64_t>(override_layout.record_replay_access_dispatch_bank_count) *
         override_layout.record_replay_access_owner_bank_count;
-    if (override_layout.access_record_capacity % bank_count)
+    uint64_t minimum_access_capacity = 0;
+    if (!checked_multiply(override_layout.record_replay_logical_access_range_count, bank_count,
+                          minimum_access_capacity) ||
+        minimum_access_capacity > override_layout.access_record_capacity)
       return {};
-    inventory.access_range_count = override_layout.access_record_capacity / bank_count;
+    inventory.access_range_count = override_layout.record_replay_logical_access_range_count;
+    inventory.record_replay_dispatch_token_capacity =
+        override_layout.record_replay_dispatch_token_capacity;
+    inventory.record_replay_access_dispatch_bank_count =
+        override_layout.record_replay_access_dispatch_bank_count;
+    inventory.record_replay_access_owner_bank_count =
+        override_layout.record_replay_access_owner_bank_count;
     inventory.barrier_event_count = override_layout.barrier_record_capacity;
     inventory.atomic_event_count = override_layout.atomic_record_capacity;
     inventory.fence_event_count = override_layout.fence_record_capacity;

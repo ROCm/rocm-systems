@@ -1709,6 +1709,20 @@ TEST(ConSanMoi, RecordReplaySkipsOnlyCompletelyUnpublishedStaticSlots) {
       consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
   EXPECT_EQ(malformed.processed_access_count, 3u);
   EXPECT_EQ(malformed.unsupported_access_count, 1u);
+
+  records[2] = {};
+  records[2].site_token = 1;
+  const ConSanMoiRecordReplayResult partial_site =
+      consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
+  EXPECT_EQ(partial_site.processed_access_count, 3u);
+  EXPECT_EQ(partial_site.unsupported_access_count, 1u);
+
+  records[2] = {};
+  records[2].reserved = 1;
+  const ConSanMoiRecordReplayResult partial_reserved =
+      consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
+  EXPECT_EQ(partial_reserved.processed_access_count, 3u);
+  EXPECT_EQ(partial_reserved.unsupported_access_count, 1u);
 }
 
 TEST(ConSanMoi, RecordReplayReportsDroppedBarrierRecords) {

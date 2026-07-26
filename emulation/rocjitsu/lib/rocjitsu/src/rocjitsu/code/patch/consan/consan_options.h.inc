@@ -159,6 +159,8 @@ struct ConSanPreappliedReservedRange {
 struct ConSanMoiReportLayoutOverride {
   ConSanMoiEngine engine = ConSanMoiEngine::RecordReplay;
   uint32_t access_record_capacity = 0;
+  uint32_t record_replay_logical_access_range_count = 0;
+  uint32_t record_replay_dispatch_token_capacity = 0;
   uint32_t record_replay_access_dispatch_bank_count = 1;
   uint32_t record_replay_access_owner_bank_count = 1;
   uint32_t barrier_record_capacity = 0;
@@ -175,6 +177,7 @@ struct ConSanMoiReportLayoutOverride {
   uint32_t sampled_causal_window_capacity = 0;
   uint32_t sampled_sync_metadata_capacity = 0;
   uint32_t sampled_pending_acquire_capacity = 0;
+  uint64_t record_replay_dispatch_tokens_offset = 0;
   uint64_t access_records_offset = 0;
   uint64_t barrier_records_offset = 0;
   uint64_t atomic_records_offset = 0;

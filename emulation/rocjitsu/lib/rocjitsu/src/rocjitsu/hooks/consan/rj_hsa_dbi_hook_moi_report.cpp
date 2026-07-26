@@ -203,33 +203,37 @@ public:
     *registered_size = requested;
     if (registered_generation != nullptr)
       *registered_generation = generation;
-    log_message(
-        kLogInfo,
-        "ConSan MOI auto report buffer reader=%llu addr=0x%llx bytes=%zu "
-        "required_bytes=%llu cap_bytes=%llu process_current_bytes=%llu "
-        "process_peak_bytes=%llu process_ceiling_bytes=%llu allocation_outcome=allocated "
-        "access_record_capacity=%u barrier_record_capacity=%u atomic_record_capacity=%u "
-        "fence_record_capacity=%u "
-        "diagnostic_capacity=%u exact_shadow_entry_capacity=%u "
-        "inline_atomic_release_capacity=%u "
-        "inline_acquired_epoch_token_capacity=%u "
-        "inline_causal_snapshot_capacity=%u "
-        "sampled_watchpoint_capacity=%u sampled_causal_window_capacity=%u "
-        "sampled_sync_metadata_capacity=%u sampled_pending_acquire_capacity=%u "
-        "generation=%llu fine_grained=%s",
-        static_cast<unsigned long long>(reader), static_cast<unsigned long long>(*address),
-        requested, static_cast<unsigned long long>(required_size),
-        static_cast<unsigned long long>(configured_cap),
-        static_cast<unsigned long long>(current_live_bytes()),
-        static_cast<unsigned long long>(peak_live_bytes()),
-        static_cast<unsigned long long>(rocjitsu::kConSanMoiAutoReportProcessCeilingBytes),
-        layout.access_record_capacity, layout.barrier_record_capacity,
-        layout.atomic_record_capacity, layout.fence_record_capacity, layout.diagnostic_capacity,
-        layout.exact_shadow_entry_capacity, layout.inline_atomic_release_capacity,
-        layout.inline_acquired_epoch_token_capacity, layout.inline_causal_snapshot_capacity,
-        layout.sampled_watchpoint_capacity, layout.sampled_causal_window_capacity,
-        layout.sampled_sync_metadata_capacity, layout.sampled_pending_acquire_capacity,
-        static_cast<unsigned long long>(generation), search.fine_grained ? "true" : "false");
+    log_message(kLogInfo,
+                "ConSan MOI auto report buffer reader=%llu addr=0x%llx bytes=%zu "
+                "required_bytes=%llu cap_bytes=%llu process_current_bytes=%llu "
+                "process_peak_bytes=%llu process_ceiling_bytes=%llu allocation_outcome=allocated "
+                "dispatch_token_capacity=%u dispatch_banks=%u owner_banks=%u "
+                "access_record_capacity=%u barrier_record_capacity=%u atomic_record_capacity=%u "
+                "fence_record_capacity=%u "
+                "diagnostic_capacity=%u exact_shadow_entry_capacity=%u "
+                "inline_atomic_release_capacity=%u "
+                "inline_acquired_epoch_token_capacity=%u "
+                "inline_causal_snapshot_capacity=%u "
+                "sampled_watchpoint_capacity=%u sampled_causal_window_capacity=%u "
+                "sampled_sync_metadata_capacity=%u sampled_pending_acquire_capacity=%u "
+                "generation=%llu fine_grained=%s",
+                static_cast<unsigned long long>(reader), static_cast<unsigned long long>(*address),
+                requested, static_cast<unsigned long long>(required_size),
+                static_cast<unsigned long long>(configured_cap),
+                static_cast<unsigned long long>(current_live_bytes()),
+                static_cast<unsigned long long>(peak_live_bytes()),
+                static_cast<unsigned long long>(rocjitsu::kConSanMoiAutoReportProcessCeilingBytes),
+                layout.record_replay_dispatch_token_capacity,
+                layout.record_replay_access_dispatch_bank_count,
+                layout.record_replay_access_owner_bank_count, layout.access_record_capacity,
+                layout.barrier_record_capacity, layout.atomic_record_capacity,
+                layout.fence_record_capacity, layout.diagnostic_capacity,
+                layout.exact_shadow_entry_capacity, layout.inline_atomic_release_capacity,
+                layout.inline_acquired_epoch_token_capacity, layout.inline_causal_snapshot_capacity,
+                layout.sampled_watchpoint_capacity, layout.sampled_causal_window_capacity,
+                layout.sampled_sync_metadata_capacity, layout.sampled_pending_acquire_capacity,
+                static_cast<unsigned long long>(generation),
+                search.fine_grained ? "true" : "false");
     return true;
   }
 
@@ -779,14 +783,7 @@ private:
       }
     }
     const auto *raw_diagnostics = reinterpret_cast<const rocjitsu::ConSanMoiDiagnosticRecord *>(
-        bytes + sizeof(rocjitsu::ConSanMoiReportHeader) +
-        static_cast<size_t>(header->access_record_capacity) *
-            sizeof(rocjitsu::ConSanMoiAccessRecord) +
-        static_cast<size_t>(header->barrier_record_capacity) *
-            sizeof(rocjitsu::ConSanMoiBarrierRecord) +
-        static_cast<size_t>(header->atomic_record_capacity) *
-            sizeof(rocjitsu::ConSanMoiAtomicRecord) +
-        static_cast<size_t>(entry.fence_record_capacity) * sizeof(rocjitsu::ConSanMoiFenceRecord));
+        bytes + expected_layout.diagnostic_records_offset);
     const bool deferred_token_evidence_complete =
         entry.inline_shadow && summary.token_incomplete_snapshot_count == 0 &&
         summary.token_changed_snapshot_count == 0 && summary.token_malformed_snapshot_count == 0 &&
@@ -1037,7 +1034,14 @@ private:
           first_sampled_conflict = std::make_pair(prior, current);
       }
     }
-    summary.visible_access_record_count = visible_records;
+    const auto *records = reinterpret_cast<const rocjitsu::ConSanMoiAccessRecord *>(
+        bytes + expected_layout.access_records_offset);
+    const uint32_t committed_records = static_cast<uint32_t>(std::count_if(
+        records, records + visible_records, [](const rocjitsu::ConSanMoiAccessRecord &record) {
+          return record.access_kind !=
+                 static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Empty);
+        }));
+    summary.visible_access_record_count = committed_records;
     summary.visible_barrier_record_count = visible_barriers;
     summary.visible_atomic_record_count = visible_atomics;
     summary.visible_fence_record_count = visible_fences;
@@ -1090,82 +1094,87 @@ private:
                   static_cast<unsigned long long>(first_exchange_address),
                   static_cast<unsigned long long>(final_exchange_address));
     }
-    log_message(
-        kLogInfo,
-        "ConSan MOI auto report reader=%llu addr=0x%llx bytes=%zu generation=%llu "
-        "event_counter=%u access_records=%u visible_records=%u dropped_records=%u "
-        "capacity=%u record_replay_bank_saturated=%s "
-        "barrier_records=%u visible_barriers=%u dropped_barriers=%u barrier_capacity=%u "
-        "atomic_records=%u visible_atomics=%u dropped_atomics=%u atomic_capacity=%u "
-        "fence_records=%u visible_fences=%u dropped_fences=%u fence_capacity=%u "
-        "diagnostics=%u visible_diagnostics=%u dropped_diagnostics=%u "
-        "diagnostic_capacity=%u "
-        "exact_shadow_capacity=%u visible_exact_shadow=%zu "
-        "exact_incomplete_snapshots=%llu exact_changed_snapshots=%llu "
-        "exact_malformed_snapshots=%llu "
-        "inline_atomic_release_capacity=%u visible_inline_atomic_releases=%zu "
-        "release_incomplete_snapshots=%llu release_changed_snapshots=%llu "
-        "release_overflow_snapshots=%llu release_source_incomplete_snapshots=%llu "
-        "release_malformed_snapshots=%llu "
-        "inline_acquired_token_capacity=%u visible_inline_acquired_tokens=%zu "
-        "token_incomplete_snapshots=%llu token_changed_snapshots=%llu "
-        "token_malformed_snapshots=%llu "
-        "inline_undercoverage=%llu inline_overflow=%llu "
-        "inline_unsupported=%llu inline_malformed=%llu "
-        "sampled_watchpoints=%u visible_sampled=%zu sampled_sync_capacity=%u "
-        "visible_sampled_sync=%u sampled_unsupported_sync=%u sampled_malformed_sync=%llu "
-        "sampled_pending_acquire_capacity=%u sampled_pending_acquires=%u "
-        "sampled_pending_acquire_contention=%u "
-        "sampled_pending_acquire_collisions=%u sampled_pending_acquire_malformed=%u "
-        "sampled_conflicts=%u "
-        "sampled_immediate_conflicts=%u sampled_claimed_windows=%u "
-        "sampled_dropped_windows=%u sampled_saturated_windows=%u "
-        "sampled_stale_snapshots=%llu sampled_incomplete_snapshots=%llu "
-        "sampled_changed_snapshots=%llu sampled_malformed_snapshots=%llu "
-        "fine_grained=%s",
-        static_cast<unsigned long long>(entry.reader),
-        static_cast<unsigned long long>(reinterpret_cast<uint64_t>(entry.ptr)), entry.size,
-        static_cast<unsigned long long>(header->generation), header->event_counter,
-        access_record_count, visible_records, dropped_records, header->access_record_capacity,
-        summary.record_replay_bank_saturation_count != 0 ? "true" : "false", barrier_record_count,
-        visible_barriers, dropped_barriers, header->barrier_record_capacity, atomic_record_count,
-        visible_atomics, dropped_atomics, header->atomic_record_capacity,
-        header->fence_record_count, visible_fences, dropped_fences, entry.fence_record_capacity,
-        effective_diagnostic_count, visible_diagnostics, dropped_diagnostics,
-        header->diagnostic_capacity, header->exact_shadow_entry_capacity,
-        visible_exact_shadow.size(),
-        static_cast<unsigned long long>(summary.exact_incomplete_snapshot_count),
-        static_cast<unsigned long long>(summary.exact_changed_snapshot_count),
-        static_cast<unsigned long long>(summary.exact_malformed_snapshot_count),
-        header->inline_atomic_release_capacity, visible_inline_atomic_releases.size(),
-        static_cast<unsigned long long>(summary.release_incomplete_snapshot_count),
-        static_cast<unsigned long long>(summary.release_changed_snapshot_count),
-        static_cast<unsigned long long>(summary.release_overflow_snapshot_count),
-        static_cast<unsigned long long>(summary.release_source_incomplete_snapshot_count),
-        static_cast<unsigned long long>(summary.release_malformed_snapshot_count),
-        header->inline_acquired_epoch_token_capacity, visible_inline_acquired_tokens.size(),
-        static_cast<unsigned long long>(summary.token_incomplete_snapshot_count),
-        static_cast<unsigned long long>(summary.token_changed_snapshot_count),
-        static_cast<unsigned long long>(summary.token_malformed_snapshot_count),
-        static_cast<unsigned long long>(summary.inline_undercoverage_count),
-        static_cast<unsigned long long>(summary.inline_overflow_count),
-        static_cast<unsigned long long>(summary.inline_unsupported_count),
-        static_cast<unsigned long long>(summary.inline_malformed_count),
-        sampled_watchpoint_capacity, visible_sampled.size(), sampled_sync_metadata_capacity,
-        visible_sampled_sync_metadata, header->sampled_unsupported_sync_count,
-        static_cast<unsigned long long>(summary.sampled_malformed_sync_count),
-        header->sampled_pending_acquire_capacity, header->sampled_pending_acquire_count,
-        header->sampled_pending_acquire_contention_count,
-        header->sampled_pending_acquire_collision_count,
-        header->sampled_pending_acquire_malformed_count, sampled_conflicts,
-        static_cast<uint32_t>(summary.sampled_immediate_conflict_count),
-        header->sampled_causal_window_count, header->sampled_dropped_window_count,
-        header->sampled_saturated_window_count,
-        static_cast<unsigned long long>(summary.sampled_stale_snapshot_count),
-        static_cast<unsigned long long>(summary.sampled_incomplete_snapshot_count),
-        static_cast<unsigned long long>(summary.sampled_changed_snapshot_count),
-        static_cast<unsigned long long>(summary.sampled_malformed_snapshot_count),
-        entry.fine_grained ? "true" : "false");
+    log_message(kLogInfo,
+                "ConSan MOI auto report reader=%llu addr=0x%llx bytes=%zu generation=%llu "
+                "event_counter=%u access_records=%u visible_records=%u committed_records=%u "
+                "dropped_records=%u "
+                "capacity=%u dispatch_tokens=%u/%u record_replay_flags=0x%x "
+                "record_replay_bank_saturated=%s "
+                "barrier_records=%u visible_barriers=%u dropped_barriers=%u barrier_capacity=%u "
+                "atomic_records=%u visible_atomics=%u dropped_atomics=%u atomic_capacity=%u "
+                "fence_records=%u visible_fences=%u dropped_fences=%u fence_capacity=%u "
+                "diagnostics=%u visible_diagnostics=%u dropped_diagnostics=%u "
+                "diagnostic_capacity=%u "
+                "exact_shadow_capacity=%u visible_exact_shadow=%zu "
+                "exact_incomplete_snapshots=%llu exact_changed_snapshots=%llu "
+                "exact_malformed_snapshots=%llu "
+                "inline_atomic_release_capacity=%u visible_inline_atomic_releases=%zu "
+                "release_incomplete_snapshots=%llu release_changed_snapshots=%llu "
+                "release_overflow_snapshots=%llu release_source_incomplete_snapshots=%llu "
+                "release_malformed_snapshots=%llu "
+                "inline_acquired_token_capacity=%u visible_inline_acquired_tokens=%zu "
+                "token_incomplete_snapshots=%llu token_changed_snapshots=%llu "
+                "token_malformed_snapshots=%llu "
+                "inline_undercoverage=%llu inline_overflow=%llu "
+                "inline_unsupported=%llu inline_malformed=%llu "
+                "sampled_watchpoints=%u visible_sampled=%zu sampled_sync_capacity=%u "
+                "visible_sampled_sync=%u sampled_unsupported_sync=%u sampled_malformed_sync=%llu "
+                "sampled_pending_acquire_capacity=%u sampled_pending_acquires=%u "
+                "sampled_pending_acquire_contention=%u "
+                "sampled_pending_acquire_collisions=%u sampled_pending_acquire_malformed=%u "
+                "sampled_conflicts=%u "
+                "sampled_immediate_conflicts=%u sampled_claimed_windows=%u "
+                "sampled_dropped_windows=%u sampled_saturated_windows=%u "
+                "sampled_stale_snapshots=%llu sampled_incomplete_snapshots=%llu "
+                "sampled_changed_snapshots=%llu sampled_malformed_snapshots=%llu "
+                "fine_grained=%s",
+                static_cast<unsigned long long>(entry.reader),
+                static_cast<unsigned long long>(reinterpret_cast<uint64_t>(entry.ptr)), entry.size,
+                static_cast<unsigned long long>(header->generation), header->event_counter,
+                access_record_count, visible_records, committed_records, dropped_records,
+                header->access_record_capacity, header->record_replay_dispatch_token_count,
+                header->record_replay_dispatch_token_capacity,
+                expected_engine == ConSanMoiEngine::RecordReplay ? header->flags : 0u,
+                summary.record_replay_bank_saturation_count != 0 ? "true" : "false",
+                barrier_record_count, visible_barriers, dropped_barriers,
+                header->barrier_record_capacity, atomic_record_count, visible_atomics,
+                dropped_atomics, header->atomic_record_capacity, header->fence_record_count,
+                visible_fences, dropped_fences, entry.fence_record_capacity,
+                effective_diagnostic_count, visible_diagnostics, dropped_diagnostics,
+                header->diagnostic_capacity, header->exact_shadow_entry_capacity,
+                visible_exact_shadow.size(),
+                static_cast<unsigned long long>(summary.exact_incomplete_snapshot_count),
+                static_cast<unsigned long long>(summary.exact_changed_snapshot_count),
+                static_cast<unsigned long long>(summary.exact_malformed_snapshot_count),
+                header->inline_atomic_release_capacity, visible_inline_atomic_releases.size(),
+                static_cast<unsigned long long>(summary.release_incomplete_snapshot_count),
+                static_cast<unsigned long long>(summary.release_changed_snapshot_count),
+                static_cast<unsigned long long>(summary.release_overflow_snapshot_count),
+                static_cast<unsigned long long>(summary.release_source_incomplete_snapshot_count),
+                static_cast<unsigned long long>(summary.release_malformed_snapshot_count),
+                header->inline_acquired_epoch_token_capacity, visible_inline_acquired_tokens.size(),
+                static_cast<unsigned long long>(summary.token_incomplete_snapshot_count),
+                static_cast<unsigned long long>(summary.token_changed_snapshot_count),
+                static_cast<unsigned long long>(summary.token_malformed_snapshot_count),
+                static_cast<unsigned long long>(summary.inline_undercoverage_count),
+                static_cast<unsigned long long>(summary.inline_overflow_count),
+                static_cast<unsigned long long>(summary.inline_unsupported_count),
+                static_cast<unsigned long long>(summary.inline_malformed_count),
+                sampled_watchpoint_capacity, visible_sampled.size(), sampled_sync_metadata_capacity,
+                visible_sampled_sync_metadata, header->sampled_unsupported_sync_count,
+                static_cast<unsigned long long>(summary.sampled_malformed_sync_count),
+                header->sampled_pending_acquire_capacity, header->sampled_pending_acquire_count,
+                header->sampled_pending_acquire_contention_count,
+                header->sampled_pending_acquire_collision_count,
+                header->sampled_pending_acquire_malformed_count, sampled_conflicts,
+                static_cast<uint32_t>(summary.sampled_immediate_conflict_count),
+                header->sampled_causal_window_count, header->sampled_dropped_window_count,
+                header->sampled_saturated_window_count,
+                static_cast<unsigned long long>(summary.sampled_stale_snapshot_count),
+                static_cast<unsigned long long>(summary.sampled_incomplete_snapshot_count),
+                static_cast<unsigned long long>(summary.sampled_changed_snapshot_count),
+                static_cast<unsigned long long>(summary.sampled_malformed_snapshot_count),
+                entry.fine_grained ? "true" : "false");
 
     for (size_t i = 0; i < visible_inline_atomic_releases.size(); ++i) {
       const auto &release = visible_inline_atomic_releases[i];
@@ -1212,26 +1221,12 @@ private:
           token.source_release_version);
     }
 
-    const auto *records = reinterpret_cast<const rocjitsu::ConSanMoiAccessRecord *>(
-        static_cast<const uint8_t *>(report_ptr) + sizeof(rocjitsu::ConSanMoiReportHeader));
     const auto *barriers = reinterpret_cast<const rocjitsu::ConSanMoiBarrierRecord *>(
-        static_cast<const uint8_t *>(report_ptr) + sizeof(rocjitsu::ConSanMoiReportHeader) +
-        static_cast<size_t>(header->access_record_capacity) *
-            sizeof(rocjitsu::ConSanMoiAccessRecord));
+        static_cast<const uint8_t *>(report_ptr) + expected_layout.barrier_records_offset);
     const auto *atomics = reinterpret_cast<const rocjitsu::ConSanMoiAtomicRecord *>(
-        static_cast<const uint8_t *>(report_ptr) + sizeof(rocjitsu::ConSanMoiReportHeader) +
-        static_cast<size_t>(header->access_record_capacity) *
-            sizeof(rocjitsu::ConSanMoiAccessRecord) +
-        static_cast<size_t>(header->barrier_record_capacity) *
-            sizeof(rocjitsu::ConSanMoiBarrierRecord));
+        static_cast<const uint8_t *>(report_ptr) + expected_layout.atomic_records_offset);
     const auto *fences = reinterpret_cast<const rocjitsu::ConSanMoiFenceRecord *>(
-        static_cast<const uint8_t *>(report_ptr) + sizeof(rocjitsu::ConSanMoiReportHeader) +
-        static_cast<size_t>(header->access_record_capacity) *
-            sizeof(rocjitsu::ConSanMoiAccessRecord) +
-        static_cast<size_t>(header->barrier_record_capacity) *
-            sizeof(rocjitsu::ConSanMoiBarrierRecord) +
-        static_cast<size_t>(header->atomic_record_capacity) *
-            sizeof(rocjitsu::ConSanMoiAtomicRecord));
+        static_cast<const uint8_t *>(report_ptr) + expected_layout.fence_records_offset);
     std::vector<rocjitsu::ConSanMoiDiagnosticRecord> resolved_diagnostics;
     resolved_diagnostics.reserve(visible_diagnostics);
     for (uint32_t index : visible_diagnostic_indices)

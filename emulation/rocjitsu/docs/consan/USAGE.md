@@ -66,14 +66,15 @@ comparison in [FLAVORS.md](FLAVORS.md).
 saved command self-describing.
 
 Record/Replay's complete static-site instrumentation is not an exhaustive
-dynamic trace. The ordinary automatic layout gives every logical access range
-a 4 hardware-dispatch × 4 wave-owner first-light grid, and replay compares only
-records from the same full hardware dispatch identity. Dispatch collision or
-workgroup collision, an in-flight publication, or an owner beyond the bounded
-grid is a typed dynamic-incomplete saturation signal; it is never a silent
-cross-dispatch or cross-workgroup reuse. Caller-owned size-derived buffers
-retain single-bank behavior with the same exact dispatch/workgroup
-qualification. A clean replay remains inconclusive.
+dynamic trace. The ordinary automatic layout uses a report-wide dispatch
+directory and a report-wide access-identity table with 2× open-addressing
+headroom. The access table is sized from the admitted logical ranges and
+adaptive dispatch/owner diversity factors; records retain the full dispatch,
+static site, three-dimensional workgroup, and wave-owner identity. Either
+table reaching its bounded 256-probe limit is a typed, report-wide
+dynamic-incomplete saturation signal; it is never silent cross-identity reuse.
+Caller-owned size-derived buffers retain single-bank behavior with exact
+dispatch/workgroup qualification. A clean replay remains inconclusive.
 
 Ordinary runs do not need a register number, report-buffer size, barrier
 switch, atomic switch, or sampling setting. The hook logs

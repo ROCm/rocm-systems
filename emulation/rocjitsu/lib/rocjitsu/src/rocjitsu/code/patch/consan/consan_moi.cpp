@@ -643,6 +643,12 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
         }));
   }
   inventory.diagnostic_count = std::max<uint64_t>(inventory.access_range_count, 1u);
+  if (options.moi_engine == ConSanMoiEngine::RecordReplay && inventory.access_range_count != 0u) {
+    inventory.record_replay_access_dispatch_bank_count =
+        kConSanMoiRecordReplayMaximumDispatchBankCount;
+    inventory.record_replay_access_owner_bank_count = kConSanMoiRecordReplayMaximumOwnerBankCount;
+    inventory.record_replay_bank_count_adaptive = true;
+  }
   if (options.moi_engine == ConSanMoiEngine::InlineShadow)
     inventory.inline_compact_token_mapping_count = selected_candidate_count;
 

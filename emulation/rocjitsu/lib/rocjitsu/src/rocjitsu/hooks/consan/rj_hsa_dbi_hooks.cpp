@@ -1621,8 +1621,9 @@ public:
     if (moi_report_summary.record_replay_bank_saturation_count != 0) {
       std::fprintf(
           stderr,
-          "[rocjitsu-dbi-hooks] ConSan MOI Record/Replay dispatch/owner-bank saturation: "
-          "%llu auto report buffer(s) reused a bounded access-record bank\n",
+          "[rocjitsu-dbi-hooks] ConSan MOI Record/Replay dispatch-directory/access-table "
+          "saturation: "
+          "%llu auto report buffer(s) exhausted a bounded capture probe\n",
           static_cast<unsigned long long>(moi_report_summary.record_replay_bank_saturation_count));
       std::fflush(stderr);
       if (moi_forbid_overflow)
@@ -2636,6 +2637,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             "ConSan MOI auto report plan reader=%llu outcome=%s reason=%s "
             "required_bytes=%llu cap_bytes=%llu per_buffer_ceiling=%llu "
             "process_ceiling=%llu access_ranges=%llu barriers=%llu atomics=%llu fences=%llu "
+            "dispatch_banks=%llu owner_banks=%llu "
             "diagnostics=%llu sampled_banks=%llu sampled_watchpoints=%llu inline_lds_bytes=%llu "
             "inline_releases=%llu inline_snapshots=%llu inline_tokens=%llu",
             static_cast<unsigned long long>(code_object_reader.handle),
@@ -2649,6 +2651,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             static_cast<unsigned long long>(report_inventory.barrier_event_count),
             static_cast<unsigned long long>(report_inventory.atomic_event_count),
             static_cast<unsigned long long>(report_inventory.fence_event_count),
+            static_cast<unsigned long long>(
+                report_inventory.record_replay_access_dispatch_bank_count),
+            static_cast<unsigned long long>(report_inventory.record_replay_access_owner_bank_count),
             static_cast<unsigned long long>(report_inventory.diagnostic_count),
             static_cast<unsigned long long>(report_inventory.sampled_range_bank_count),
             static_cast<unsigned long long>(report_inventory.sampled_watchpoint_count),

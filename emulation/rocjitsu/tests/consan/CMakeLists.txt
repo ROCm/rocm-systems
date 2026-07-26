@@ -1279,6 +1279,9 @@ function(rj_add_consan_hip_tests)
         set(RJ_CONSAN_LDS_MOI_AUTO_REPLAY_CONFLICT_TEST
             "ConSanMoiHipTest.TwoWaveAccessesRunWithAutoReportBuffer"
         )
+        set(RJ_CONSAN_LDS_MOI_AUTO_REPEATED_DISPATCH_TEST
+            "ConSanMoiHipTest.RepeatedDispatchesRetainAutomaticRecords"
+        )
         set(RJ_CONSAN_LDS_MOI_WORKGROUP_RECORD_TEST
             "ConSanMoiHipTest.EquivalentAccessesInDifferentWorkgroupsDoNotConflict"
         )
@@ -2247,6 +2250,28 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
         rj_add_consan_hip_case(
+                NAME "ConSanMoiHipTest.DbiAutoReportRetainsRepeatedDispatches"
+                TARGET hip_consan_moi_test
+                FILTER "${RJ_CONSAN_LDS_MOI_AUTO_REPEATED_DISPATCH_TEST}"
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=record-replay"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_two_wave_lds_accesses"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_MAX_PATCHES=2"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiHipTest.DbiAutoReportRetainsRepeatedDispatches"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "committed_records=8.*dispatch_tokens=4/2048.*record_replay_flags=0x0"
+                FAIL_REGULAR_EXPRESSION "record_replay_bank_saturated=true"
+        )
+        rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.DbiOverflowIsVisible"
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_LDS_MOI_AUTO_REPLAY_CONFLICT_TEST}"
@@ -2254,9 +2279,9 @@ function(rj_add_consan_hip_tests)
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
-                    # Header plus one ABI-v11 access record. Keep this case at
+                    # Header plus one ABI-v12 access record. Keep this case at
                     # exactly one slot so the second active lane overflows.
-                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=248"
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=264"
                     "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_two_wave_lds_accesses"
                     "RJ_CONSAN_LOG=1"

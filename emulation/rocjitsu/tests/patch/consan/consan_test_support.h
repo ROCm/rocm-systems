@@ -1969,7 +1969,7 @@ static_assert(alignof(ConSanMoiBarrierRecord) == 8);
 static_assert(alignof(ConSanMoiAtomicRecord) == 8);
 static_assert(alignof(ConSanMoiInlineAtomicReleaseSlot) == 8);
 static_assert(alignof(ConSanMoiDiagnosticRecord) == 8);
-static_assert(sizeof(ConSanMoiAccessRecord) == 72);
+static_assert(sizeof(ConSanMoiAccessRecord) == 80);
 static_assert(sizeof(ConSanMoiBarrierRecord) == 40);
 static_assert(sizeof(ConSanMoiAtomicRecord) == 80);
 static_assert(sizeof(ConSanMoiFenceRecord) == 56);

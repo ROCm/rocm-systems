@@ -1209,7 +1209,11 @@ struct MoiOwnerScalarReferenceSummary {
                                                      rj_code_arch_t arch) {
   switch (options.moi_engine) {
   case ConSanMoiEngine::RecordReplay:
-    return static_cast<uint16_t>(6u +
+    return static_cast<uint16_t>(
+        (!options.moi_dynamic_access_records && options.moi_report_layout &&
+                 options.moi_report_layout->record_replay_dispatch_token_capacity != 0u
+             ? 10u
+             : 6u) +
                                  (candidate_requires_gfx1250_flat_offset_materialization(candidate)
                                       ? 2u
                                   : moi_load_clobbers_address(candidate) ? 1u

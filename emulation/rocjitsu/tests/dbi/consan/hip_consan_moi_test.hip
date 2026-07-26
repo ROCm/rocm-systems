@@ -1388,6 +1388,23 @@ TEST(ConSanMoiHipTest, TwoWaveAccessesRunWithAutoReportBuffer) {
   free_device_ptr(d_out);
 }
 
+TEST(ConSanMoiHipTest, RepeatedDispatchesRetainAutomaticRecords) {
+  constexpr uint32_t kDispatchCount = 4u;
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(d_out, 0, sizeof(uint32_t)));
+
+  for (uint32_t dispatch = 0; dispatch < kDispatchCount; ++dispatch) {
+    moi_two_wave_lds_accesses<<<1, 64>>>(d_out);
+    HIP_ASSERT(hipGetLastError());
+    const hipError_t sync = hipDeviceSynchronize();
+    ASSERT_EQ(sync, hipSuccess) << "dispatch " << dispatch
+                               << " HIP error: " << hipGetErrorString(sync);
+  }
+
+  free_device_ptr(d_out);
+}
+
 TEST(ConSanMoiHipTest, SampledBackendWritesDirectEntries) {
   constexpr uint32_t kSampledSlots = 2;
   constexpr size_t kReportBytes = moi_direct_sampled_report_buffer_bytes(kSampledSlots);

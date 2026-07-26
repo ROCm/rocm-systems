@@ -656,7 +656,7 @@ from final-code inventory rather than an engine-wide default:
 
 | Engine | Inventory-derived report requirement |
 | --- | --- |
-| Record/Replay | Header/alignment plus a bounded 4 hardware-dispatch × 4 wave-owner bank grid for every admitted static logical access range, and exact capacities for every enabled barrier, atomic, fence, and finite diagnostic region. Exhaustive per-lane dynamic append is excluded from the ordinary completeness contract. |
+| Record/Replay | Header/alignment, a report-wide dispatch directory with 2× open-addressing headroom, a report-wide access-identity table sized from the admitted logical ranges and adaptive dispatch/owner diversity factors with the same headroom, and exact capacities for every enabled barrier, atomic, fence, and finite diagnostic region. Exhaustive per-lane dynamic append is excluded from the ordinary completeness contract. |
 | Sampled | Header/alignment plus the admitted logical ranges, each range's configured bounded dynamic-window bank, paired synchronization metadata, pending-acquire state, and finite diagnostics. |
 | Inline Shadow | Header/alignment plus 16 dispatch banks, each with one versioned exact-shadow slot for every four-byte cell in the maximum declared LDS span of the owning kernels, finite diagnostics, and only the release, snapshot, and acquired-token tables required by enabled ordering instrumentation. |
 
@@ -712,7 +712,7 @@ Current implementation:
 - Patches every admitted supported native DS and likely-group-flat access under
   ordinary settings.
 - Emits `ConSanMoiAccessRecord` entries.
-- Supports bounded dispatch/owner-banked static per-site slots by default.
+- Supports bounded report-wide dispatch and access-identity tables by default.
 - Supports dynamic per-lane append with
   `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1`.
 - Records dynamic event indexes.
@@ -727,21 +727,30 @@ Current implementation:
 
 Important current simplifications:
 
-- An automatic static layout reserves a fixed 4 hardware-dispatch × 4
-  wave-owner grid (16 physical first-light slots) for every logical access
-  range. The low dispatch-ID bits select the dispatch bank and the canonical
-  wave owner selects the owner bank. A full-width claim token distinguishes
-  the complete hardware dispatch identity. This is an explicit storage
-  increase from one historical 64-byte record to sixteen 72-byte records
-  (1,152 bytes, or 18×) per logical range, so some formerly fitting inventories
-  now exceed the unchanged 128 MiB per-buffer ceiling.
-- A 64-bit compare-and-swap claims the bank. The payload is written before
-  an atomic `access_kind` commit consumed by host replay. A repeated publisher
+- An automatic ABI-v12 layout uses a report-wide 2,048-slot dispatch directory,
+  providing 2× open-addressing headroom for 1,024 anticipated hardware
+  dispatch identities. A separate report-wide access table is sized from the
+  number of logical access ranges, 16×16 default dispatch/owner diversity
+  factors, and the same 2× headroom, then rounded to a power of two. For large
+  code objects the fitter halves both diversity factors together until the
+  complete admitted inventory fits the unchanged 128 MiB per-buffer ceiling.
+  These factors size anticipated concurrency; they are not hard-coded
+  dispatch or owner buckets. Hot sites can use capacity left idle by cold
+  sites.
+- Both tables use bounded triangular probing. The dispatch directory qualifies
+  the complete 64-bit hardware dispatch identity. Each 80-byte access record
+  is keyed by its directory slot, an explicit static logical-range token, all
+  three workgroup coordinates, and the canonical wave owner. A 64-bit
+  compare-and-swap claims the access slot; the payload is written before an
+  atomic `access_kind` commit consumed by host replay. A repeated publisher
   leaves the immutable record alone only after observing that commit and
-  matching the full dispatch plus all three recorded workgroup coordinates.
-  An in-flight publication, a different dispatch or workgroup mapped to an
-  occupied slot, or an owner outside the four-owner budget sets a typed
-  `record_replay_bank_saturation` signal and makes dynamic completeness false.
+  matching the full identity.
+- A probe is capped at 256 slots independently of the allocated table size.
+  Exhausting either probe sets both the general saturation bit and a typed
+  dispatch-directory or access-table bit. Saturation is deliberately
+  report-wide and fail-closed: later automatic captures bypass the tables,
+  teardown makes dynamic completeness false, and no workload-specific fallback
+  silently reuses an unrelated slot.
 - Zero is the unpublished claim-token sentinel. The reversible token encoding
   has one dispatch-ID preimage for zero; that identity is rejected through the
   same fail-closed saturation path rather than silently publishing an
@@ -776,7 +785,7 @@ logging each access for host replay.
 Current implementation:
 
 - Uses the shared MOI report buffer.
-- Uses an inventory-sized ABI-v11 layout with 16 dispatch-selected banks, each
+- Uses an inventory-sized ABI-v12 layout with 16 dispatch-selected banks, each
   containing one versioned slot per four-byte cell in the maximum declared LDS
   span of the owning kernels, plus only the required finite diagnostic and
   ordering regions. Banking keeps unrelated concurrent dispatches off the same
