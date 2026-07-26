@@ -139,7 +139,11 @@ public:
         ring_buf(ring_buf), ring_buf_size(ring_buf_size),
         rptr_addr(rptr_addr), wptr_addr(wptr_addr),
         extra_va(extra_va), cu_mask(nullptr), cu_mask_count(0),
-        queue_percentage(0), hqd_queue_priority(0),
+        // queue_percentage defaults to 100 (fully scheduled). A MODIFY that
+        // leaves this at 0 tells MES the queue is 0%-scheduled, i.e. suspended,
+        // which silently stops dispatch. Callers that intend to suspend set it
+        // to 0 explicitly (see AqlQueue suspend/resume).
+        queue_percentage(100), hqd_queue_priority(0),
         pm4_target_xcc(0) { }
   };
 
