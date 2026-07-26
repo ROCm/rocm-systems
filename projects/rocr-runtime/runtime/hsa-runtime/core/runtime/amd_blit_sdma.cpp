@@ -236,7 +236,8 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
   bool drm_sdma_created = false;
 
   if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
-    // Attempt SDMA queue creation via DRM; fall back to KFD if unsupported.
+    // DRM mode: create the SDMA user queue via DRM. On failure, return an error
+    // (no KFD fallback) -- the caller skips DRM SDMA and uses a CPU blit.
     drm_amdgpu_info_uq_metadata info;
     do {
       if (static_cast<DrmDriver&>(agent_->driver()).GetUserQueueMetadata(*agent_, DrmDriver::SDMA_QUEUE, &info) != 0)

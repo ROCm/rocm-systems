@@ -146,6 +146,11 @@ struct vm_object {
 	void *user_data;
 	/* Flag to indicate imported KFD buffer */
 	bool is_imported_kfd_bo;
+	/* UKI DRM-mode MEMORY_AVAIL accounting: true if this object's VRAM bytes
+	 * were added to the owning gpu_mem's drm_vram_used counter at alloc time,
+	 * so they are subtracted again on release. */
+	bool drm_vram_counted;
+	uint32_t drm_vram_gpu_id;  /* gpu_id to credit when drm_vram_counted */
 #ifdef SANITIZER_AMDGPU
 	int mmap_flags;
 	int mmap_fd;
@@ -242,6 +247,11 @@ typedef struct {
 	int drm_render_minor;
 	uint32_t drm_vm_timeline_syncobj;   /* per GPU global timeline syncobj */
 	uint64_t drm_vm_timeline_seqnum;    /* per GPU global sequence number */
+	/* UKI DRM mode: bytes of VRAM allocated via the DRM BO path on this GPU.
+	 * KFD's AVAILABLE_MEMORY ioctl does not see these, so it is subtracted in
+	 * hsaKmtAvailableMemoryCtx() to keep HSA_AMD_AGENT_INFO_MEMORY_AVAIL correct
+	 * across DRM alloc/free. Updated atomically (concurrent alloc/free). */
+	uint64_t drm_vram_used;
 	bool use_drm;
 } gpu_mem_t;
 
@@ -459,6 +469,8 @@ static vm_object_t *vm_create_and_init_object(void *start, uint64_t size,
 		object->metadata = NULL;
 		object->user_data = NULL;
 		object->is_imported_kfd_bo = false;
+		object->drm_vram_counted = false;
+		object->drm_vram_gpu_id = 0;
 		object->node.key = rbtree_key((unsigned long)start, size);
 		object->user_node.key = rbtree_key(0, 0);
 #ifdef SANITIZER_AMDGPU
@@ -1012,6 +1024,44 @@ static int32_t gpu_mem_find_by_gpu_id(struct hsa_kfd_fmm_context *fmm_ctx, uint3
 	return -1;
 }
 
+/* UKI DRM-mode MEMORY_AVAIL accounting: adjust the per-GPU count of VRAM bytes
+ * allocated via the DRM BO path (positive delta on alloc, negative on release).
+ * KFD's AVAILABLE_MEMORY ioctl is blind to these, so hsaKmtAvailableMemoryCtx()
+ * subtracts the count to keep the reported availability accurate. */
+static void fmm_drm_vram_account(struct hsa_kfd_fmm_context *fmm_ctx,
+				 uint32_t gpu_id, int64_t delta)
+{
+	int32_t id = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
+
+	if (id < 0)
+		return;
+
+	__atomic_add_fetch(&fmm_ctx->gpu_mem[id].drm_vram_used,
+			   (uint64_t)delta, __ATOMIC_RELAXED);
+}
+
+HSAKMT_STATUS hsakmt_fmm_get_drm_vram_used(HsaKFDContext *ctx, uint32_t gpu_id,
+					   uint64_t *bytes)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx;
+	int32_t id;
+
+	if (!ctx || !bytes)
+		return HSAKMT_STATUS_ERROR;
+
+	fmm_ctx = ctx->fmm_context;
+	if (!fmm_ctx)
+		return HSAKMT_STATUS_ERROR;
+
+	id = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
+	if (id < 0)
+		return HSAKMT_STATUS_ERROR;
+
+	*bytes = __atomic_load_n(&fmm_ctx->gpu_mem[id].drm_vram_used,
+				 __ATOMIC_RELAXED);
+	return HSAKMT_STATUS_SUCCESS;
+}
+
 static int32_t gpu_mem_find_by_node_id(struct hsa_kfd_fmm_context *fmm_ctx, uint32_t node_id)
 {
 	uint32_t i;
@@ -1541,6 +1591,18 @@ static vm_object_t *fmm_allocate_memory_object_drm(
 			if (!vm_obj)
 					goto err_object_allocation_failed;
 			vm_obj->alloc_flags.domain = alloc_flags.domain;
+
+			/* UKI: KFD's AVAILABLE_MEMORY ioctl does not see DRM-BO VRAM
+			 * allocations. Track them per-GPU so MEMORY_AVAIL reflects both
+			 * this allocation and its later release. Only VRAM is charged;
+			 * GTT/system is not device memory, and contiguous VRAM never
+			 * reaches this path (it is routed through KFD). */
+			if (alloc_flags.domain == ALLOC_DOMAIN_VRAM) {
+					vm_obj->drm_vram_counted = true;
+					vm_obj->drm_vram_gpu_id = gpu_id;
+					fmm_drm_vram_account(ffm_ctx, gpu_id,
+							     (int64_t)MemorySizeInBytes);
+			}
 		}
 		return vm_obj;
 
@@ -2523,6 +2585,14 @@ static int __fmm_release(HsaKFDContext *ctx,
 
 	if (ret)
 		goto err_free_mem_failed;
+
+	/* UKI: credit back DRM-BO VRAM bytes charged at alloc time (see
+	 * fmm_allocate_memory_object_drm) so MEMORY_AVAIL recovers on free. */
+	if (object->drm_vram_counted) {
+		fmm_drm_vram_account(ctx->fmm_context, object->drm_vram_gpu_id,
+				     -(int64_t)object->size);
+		object->drm_vram_counted = false;
+	}
 
 	aperture_release_area(aperture, object->start, object->size);
 	vm_remove_object(aperture, object);

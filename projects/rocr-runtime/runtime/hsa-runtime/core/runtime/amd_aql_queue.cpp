@@ -280,7 +280,9 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   bool drm_queue_created = false;
 
   if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
-      // DRM mode: attempt queue creation via DRM, fall back to KFD if unsupported.
+      // DRM mode: create the AQL user queue via DRM. On failure, throw -- there
+      // is no KFD fallback in enable_drm mode; a silent KFD queue would mask a
+      // real DRM failure and let tests "pass" on the wrong path.
       drm_amdgpu_info_uq_metadata info;
       struct drm_amdgpu_info_cwsr cwsr_info;
 
@@ -311,16 +313,19 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       } while (false);
 
       if (!drm_queue_created) {
-        // DRM queue creation not supported on this GPU; free any allocations and fall back to KFD.
+        // Free the DRM-only buffers and fail. In enable_drm mode the DRM path
+        // is authoritative -- do NOT fall back to KFD.
         if (eop_buf_) { agent_->coarsegrain_deallocator()(eop_buf_); eop_buf_ = nullptr; }
         if (cwsr_buf_) { agent_->coarsegrain_deallocator()(cwsr_buf_); cwsr_buf_ = nullptr; }
-        debug_print("DRM queue creation failed, falling back to KFD path\n");
+        throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                                 "DRM user queue creation failed (enable_drm; no KFD fallback)\n");
       }
   }
 
   if (!drm_queue_created) {
-      // KFD mode: create the queue via the KFD driver (matches develop;
-      // KfdDriver::CreateQueue uses hsaKmtCreateQueueV2 internally).
+      // Non-DRM (KFD) mode only: enable_drm is false, so create the queue via
+      // the KFD driver (matches develop; KfdDriver::CreateQueue uses
+      // hsaKmtCreateQueueV2 internally).
       hsa_status_t status;
       if (core::Runtime::runtime_singleton_->KfdVersion().supports_exception_debugging) {
         queue_rsrc.ErrorReason = &exception_signal_->signal_.value;
@@ -348,7 +353,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   amd_queue_.hsa_queue.id = this->GetQueueId();
 
   MAKE_NAMED_SCOPE_GUARD(QueueGuard, [&]() {
-    if (core::Runtime::runtime_singleton_->flag().enable_drm() && drm_queue_id_ != 0) {
+    if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
       // DRM queue was created — destroy it via the DRM path.
       // Using queue_id_ (KFD) here leaves the kernel userq alive, which
       // causes amdgpu_userq_evict to crash when RingGuard frees EOP/CWSR.
@@ -822,14 +827,14 @@ int AqlQueue::CreateRingBufferFD(const char* ring_buf_shm_path,
 void AqlQueue::Suspend() {
   suspended_ = true;
 
-  if (core::Runtime::runtime_singleton_->flag().enable_drm() && drm_queue_id_ != 0) {
+  if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
     // DRM path - use ModifyQueue with 0% allocation to suspend
     auto queueIn = CreateModifyQueueParams();
     queueIn.queue_percentage = 0;  // 0% = suspend
     auto err = static_cast<DrmDriver&>(agent_->driver()).ModifyQueue(&queueIn);
     assert(err == HSA_STATUS_SUCCESS && "ModifyQueue suspend failed.");
   } else {
-    // KFD path (or DRM mode with KFD-created queue fallback)
+    // KFD (non-DRM) mode only.
     auto err = agent_->driver().UpdateQueue(queue_id_, 0, priority_,
                                             ring_buf_, ring_buf_alloc_bytes_, NULL);
     assert(err == HSA_STATUS_SUCCESS && "UpdateQueue failed.");
@@ -840,14 +845,14 @@ void AqlQueue::Resume() {
   if (suspended_) {
     suspended_ = false;
 
-    if (core::Runtime::runtime_singleton_->flag().enable_drm() && drm_queue_id_ != 0) {
+    if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
       // DRM path - use ModifyQueue with 100% allocation to resume
       auto queueIn = CreateModifyQueueParams();
       queueIn.queue_percentage = 100;  // 100% = resume
       auto err = static_cast<DrmDriver&>(agent_->driver()).ModifyQueue(&queueIn);
       assert(err == HSA_STATUS_SUCCESS && "ModifyQueue resume failed.");
     } else {
-      // KFD path (or DRM mode with KFD-created queue fallback)
+      // KFD (non-DRM) mode only.
       auto err = agent_->driver().UpdateQueue(queue_id_, 100, priority_,
                                               ring_buf_, ring_buf_alloc_bytes_, NULL);
       assert(err == HSA_STATUS_SUCCESS && "UpdateQueue failed.");
@@ -858,7 +863,7 @@ void AqlQueue::Resume() {
 hsa_status_t AqlQueue::Inactivate() {
   bool active = active_.exchange(false, std::memory_order_relaxed);
   if (active) {
-    if (core::Runtime::runtime_singleton_->flag().enable_drm() && drm_queue_id_ != 0) {
+    if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
       // DRM path: destroy using the DRM queue ID, not the KFD queue_id_.
       // Using queue_id_ (KFD) here leaves the kernel userq alive, which
       // causes amdgpu_userq_evict to crash when EOP/CWSR buffers are freed.
@@ -879,12 +884,19 @@ hsa_status_t AqlQueue::Inactivate() {
 }
 
 DrmDriver::ModifyQueueInParams AqlQueue::CreateModifyQueueParams() {
-  return DrmDriver::ModifyQueueInParams(
+  DrmDriver::ModifyQueueInParams params(
       *agent_, drm_queue_id_, DrmDriver::AQL_QUEUE,
       ring_buf_, ring_buf_alloc_bytes_,
       (uint64_t)&amd_queue_.read_dispatch_id,
       (uint64_t)&amd_queue_.write_dispatch_id,
       (uint64_t)eop_buf_);
+  // Seed queue_percentage from the queue's current scheduling state so a
+  // partial modify preserves it. A MODIFY reports 0% as suspended and 100% as
+  // fully scheduled; callers that change an unrelated field (e.g. SetCUMasking,
+  // which unlike SetPriority has no suspended_ guard) must not inadvertently
+  // resume a suspended queue. Suspend()/Resume() still set this explicitly.
+  params.queue_percentage = suspended_ ? 0 : 100;
+  return params;
 }
 
 hsa_status_t AqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
@@ -894,8 +906,8 @@ hsa_status_t AqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priori
 
   priority_ = priority;
 
-  if (core::Runtime::runtime_singleton_->flag().enable_drm() && drm_queue_id_ != 0) {
-    // DRM path - only when DRM actually created the queue
+  if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
+    // DRM path
     auto queueIn = CreateModifyQueueParams();
     queueIn.hqd_queue_priority = DrmDriver::MapHsaPriorityToHqd(static_cast<HSA_QUEUE_PRIORITY>(priority));
     if (static_cast<DrmDriver&>(agent_->driver()).ModifyQueue(&queueIn) != HSA_STATUS_SUCCESS) {
@@ -904,7 +916,7 @@ hsa_status_t AqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priori
     return HSA_STATUS_SUCCESS;
   }
 
-  // KFD path (or DRM mode with KFD-created queue fallback)
+  // KFD (non-DRM) mode only.
   auto err = agent_->driver().UpdateQueue(queue_id_, 100, priority_,
                          ring_buf_, ring_buf_alloc_bytes_, NULL);
   return (err == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS :
@@ -1717,8 +1729,8 @@ hsa_status_t AqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* 
       }
     }
 
-    if (core::Runtime::runtime_singleton_->flag().enable_drm() && drm_queue_id_ != 0) {
-      // DRM path - only when DRM actually created the queue
+    if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
+      // DRM path
       auto queueIn = CreateModifyQueueParams();
       queueIn.cu_mask = &mask[0];
       queueIn.cu_mask_count = mask.size() * 32;
