@@ -61,6 +61,7 @@
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/svm_memory.h"
 #include "suites/functional/queue_modify.h"
+#include "suites/functional/mmio_hdp_flush.h"
 #include "suites/functional/time_stamp.h"
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
@@ -420,6 +421,12 @@ TEST(rocrtstFunc, Queue_Modify_Test) {
     if (!RunCustomTestProlog(&qm)) return;
     qm.TestQueueModify();
     RunCustomTestEpilog(&qm);
+}
+TEST(rocrtstFunc, MMIO_HDP_Flush_Test) {
+    MMIOHdpFlushTest mt;
+    if (!RunCustomTestProlog(&mt)) return;
+    mt.TestHdpFlushMapped();
+    RunCustomTestEpilog(&mt);
 }
 
 

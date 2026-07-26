@@ -146,6 +146,11 @@ struct vm_object {
 	void *user_data;
 	/* Flag to indicate imported KFD buffer */
 	bool is_imported_kfd_bo;
+	/* UKI DRM-mode MEMORY_AVAIL accounting: true if this object's VRAM bytes
+	 * were added to the owning gpu_mem's drm_vram_used counter at alloc time,
+	 * so they are subtracted again on release. */
+	bool drm_vram_counted;
+	uint32_t drm_vram_gpu_id;  /* gpu_id to credit when drm_vram_counted */
 #ifdef SANITIZER_AMDGPU
 	int mmap_flags;
 	int mmap_fd;
@@ -242,6 +247,11 @@ typedef struct {
 	int drm_render_minor;
 	uint32_t drm_vm_timeline_syncobj;   /* per GPU global timeline syncobj */
 	uint64_t drm_vm_timeline_seqnum;    /* per GPU global sequence number */
+	/* UKI DRM mode: bytes of VRAM allocated via the DRM BO path on this GPU.
+	 * KFD's AVAILABLE_MEMORY ioctl does not see these, so it is subtracted in
+	 * hsaKmtAvailableMemoryCtx() to keep HSA_AMD_AGENT_INFO_MEMORY_AVAIL correct
+	 * across DRM alloc/free. Updated atomically (concurrent alloc/free). */
+	uint64_t drm_vram_used;
 	bool use_drm;
 } gpu_mem_t;
 
@@ -459,6 +469,8 @@ static vm_object_t *vm_create_and_init_object(void *start, uint64_t size,
 		object->metadata = NULL;
 		object->user_data = NULL;
 		object->is_imported_kfd_bo = false;
+		object->drm_vram_counted = false;
+		object->drm_vram_gpu_id = 0;
 		object->node.key = rbtree_key((unsigned long)start, size);
 		object->user_node.key = rbtree_key(0, 0);
 #ifdef SANITIZER_AMDGPU
@@ -1012,6 +1024,44 @@ static int32_t gpu_mem_find_by_gpu_id(struct hsa_kfd_fmm_context *fmm_ctx, uint3
 	return -1;
 }
 
+/* UKI DRM-mode MEMORY_AVAIL accounting: adjust the per-GPU count of VRAM bytes
+ * allocated via the DRM BO path (positive delta on alloc, negative on release).
+ * KFD's AVAILABLE_MEMORY ioctl is blind to these, so hsaKmtAvailableMemoryCtx()
+ * subtracts the count to keep the reported availability accurate. */
+static void fmm_drm_vram_account(struct hsa_kfd_fmm_context *fmm_ctx,
+				 uint32_t gpu_id, int64_t delta)
+{
+	int32_t id = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
+
+	if (id < 0)
+		return;
+
+	__atomic_add_fetch(&fmm_ctx->gpu_mem[id].drm_vram_used,
+			   (uint64_t)delta, __ATOMIC_RELAXED);
+}
+
+HSAKMT_STATUS hsakmt_fmm_get_drm_vram_used(HsaKFDContext *ctx, uint32_t gpu_id,
+					   uint64_t *bytes)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx;
+	int32_t id;
+
+	if (!ctx || !bytes)
+		return HSAKMT_STATUS_ERROR;
+
+	fmm_ctx = ctx->fmm_context;
+	if (!fmm_ctx)
+		return HSAKMT_STATUS_ERROR;
+
+	id = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
+	if (id < 0)
+		return HSAKMT_STATUS_ERROR;
+
+	*bytes = __atomic_load_n(&fmm_ctx->gpu_mem[id].drm_vram_used,
+				 __ATOMIC_RELAXED);
+	return HSAKMT_STATUS_SUCCESS;
+}
+
 static int32_t gpu_mem_find_by_node_id(struct hsa_kfd_fmm_context *fmm_ctx, uint32_t node_id)
 {
 	uint32_t i;
@@ -1243,8 +1293,7 @@ static bool is_supported_on_drm(alloc_flags_t alloc_flags) {
 	 * already handles ALLOC_DOMAIN_SYSTEM (userptr or GTT heap). */
 	return (alloc_flags.domain == ALLOC_DOMAIN_VRAM) ||
                (alloc_flags.domain == ALLOC_DOMAIN_SYSTEM) ||
-               (alloc_flags.domain == ALLOC_DOMAIN_USERMEM) ||
-               (alloc_flags.domain == ALLOC_DOMAIN_MMIO);
+               (alloc_flags.domain == ALLOC_DOMAIN_USERMEM);
 }
 
 static uint32_t fmm_translate_alloc_to_kfd_ioc_flags(
@@ -1505,9 +1554,6 @@ static vm_object_t *fmm_allocate_memory_object_drm(
 			}
 			} else if (alloc_flags.domain == ALLOC_DOMAIN_SYSTEM) {
 					gem_domain = AMDGPU_GEM_DOMAIN_GTT;
-			} else if (alloc_flags.domain == ALLOC_DOMAIN_MMIO) {
-					gem_domain = AMDGPU_GEM_DOMAIN_MMIO_REMAP;
-					gem_flags |= AMDGPU_GEM_CREATE_COHERENT;
 			} else {
 					pr_err("Unsupported allocation domain! (domain: %u)\n", alloc_flags.domain);
 					return NULL;
@@ -1545,6 +1591,18 @@ static vm_object_t *fmm_allocate_memory_object_drm(
 			if (!vm_obj)
 					goto err_object_allocation_failed;
 			vm_obj->alloc_flags.domain = alloc_flags.domain;
+
+			/* UKI: KFD's AVAILABLE_MEMORY ioctl does not see DRM-BO VRAM
+			 * allocations. Track them per-GPU so MEMORY_AVAIL reflects both
+			 * this allocation and its later release. Only VRAM is charged;
+			 * GTT/system is not device memory, and contiguous VRAM never
+			 * reaches this path (it is routed through KFD). */
+			if (alloc_flags.domain == ALLOC_DOMAIN_VRAM) {
+					vm_obj->drm_vram_counted = true;
+					vm_obj->drm_vram_gpu_id = gpu_id;
+					fmm_drm_vram_account(ffm_ctx, gpu_id,
+							     (int64_t)MemorySizeInBytes);
+			}
 		}
 		return vm_obj;
 
@@ -2528,6 +2586,14 @@ static int __fmm_release(HsaKFDContext *ctx,
 	if (ret)
 		goto err_free_mem_failed;
 
+	/* UKI: credit back DRM-BO VRAM bytes charged at alloc time (see
+	 * fmm_allocate_memory_object_drm) so MEMORY_AVAIL recovers on free. */
+	if (object->drm_vram_counted) {
+		fmm_drm_vram_account(ctx->fmm_context, object->drm_vram_gpu_id,
+				     -(int64_t)object->size);
+		object->drm_vram_counted = false;
+	}
+
 	aperture_release_area(aperture, object->start, object->size);
 	vm_remove_object(aperture, object);
 
@@ -3198,6 +3264,73 @@ static void *map_mmio(HsaKFDContext *ctx,
 	uint64_t mmap_offset;
 	alloc_flags_t alloc_flags = { .domain = ALLOC_DOMAIN_MMIO, .mflags = {{{0}}} };
 
+	/* DRM user-queue mode: the MMIO_REMAP page is a kernel-internal global BO
+	 * (kernel commit "Drop MMIO_REMAP domain bit and keep it Internal"). It is
+	 * no longer allocatable via a GEM domain; instead open the kernel's global
+	 * MMIO_REMAP BO with AMDGPU_GEM_OP_OPEN_GLOBAL and mmap it for HDP flush
+	 * register access. This uses the DRM render node only (no KFD). */
+	if (hsakmt_enable_drm) {
+		amdgpu_device_handle dev;
+		struct drm_amdgpu_gem_op gem_op = {0};
+		union drm_amdgpu_gem_mmap mmap_arg = {0};
+		int drm_fd;
+		void *cpu;
+
+		dev = fmm_get_amdgpu_device_handle(fmm_ctx, gpu_id);
+		if (!dev) {
+			pr_err("map_mmio(drm): no amdgpu device handle for gpu_id 0x%x\n", gpu_id);
+			return NULL;
+		}
+		drm_fd = hsakmt_amdgpu_device_get_fd(dev);
+		if (drm_fd < 0) {
+			pr_err("map_mmio(drm): amdgpu_device_get_fd failed: %d\n", drm_fd);
+			return NULL;
+		}
+
+		/* Open the kernel's global MMIO_REMAP BO -> per-file GEM handle. */
+		gem_op.handle = AMDGPU_GEM_GLOBAL_MMIO_REMAP;
+		gem_op.op = AMDGPU_GEM_OP_OPEN_GLOBAL;
+		gem_op.value = 0;
+		if (hsakmt_ioctl(drm_fd, DRM_IOCTL_AMDGPU_GEM_OP, &gem_op)) {
+			pr_err("map_mmio(drm): GEM_OP_OPEN_GLOBAL(MMIO_REMAP) failed: %s\n",
+			       strerror(errno));
+			return NULL;
+		}
+
+		/* Query the mmap offset and map the page for CPU (HDP flush) access. */
+		mmap_arg.in.handle = gem_op.handle;
+		if (hsakmt_ioctl(drm_fd, DRM_IOCTL_AMDGPU_GEM_MMAP, &mmap_arg)) {
+			pr_err("map_mmio(drm): GEM_MMAP failed: %s\n", strerror(errno));
+			goto drm_close;
+		}
+		cpu = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
+			   drm_fd, mmap_arg.out.addr_ptr);
+		if (cpu == MAP_FAILED) {
+			pr_err("map_mmio(drm): mmap MMIO_REMAP failed: %s\n", strerror(errno));
+			goto drm_close;
+		}
+
+		/* mmap() holds its own reference to the BO, so the per-file GEM handle
+		 * is no longer needed; close it now rather than holding it for the
+		 * process lifetime (the mapping stays valid). */
+		{
+			struct drm_gem_close gem_close = {0};
+
+			gem_close.handle = gem_op.handle;
+			hsakmt_ioctl(drm_fd, DRM_IOCTL_GEM_CLOSE, &gem_close);
+		}
+		return cpu;
+
+drm_close:
+		{
+			struct drm_gem_close gem_close = {0};
+
+			gem_close.handle = gem_op.handle;
+			hsakmt_ioctl(drm_fd, DRM_IOCTL_GEM_CLOSE, &gem_close);
+		}
+		return NULL;
+	}
+
 	/* Allocate physical memory and vm object*/
 	mem = __fmm_allocate_device(ctx,
 			gpu_id, NULL, PAGE_SIZE, aperture,
@@ -3246,6 +3379,14 @@ static void release_mmio(HsaKFDContext *ctx)
 	for (gpu_mem_id = 0; gpu_mem_id < fmm_ctx->gpu_mem_count; gpu_mem_id++) {
 		if (!fmm_ctx->gpu_mem[gpu_mem_id].mmio_aperture.base)
 			continue;
+		/* DRM mode: the MMIO_REMAP page is a plain mmap of the kernel's global
+		 * BO (opened via GEM_OP_OPEN_GLOBAL, not tracked in an SVM aperture),
+		 * so just unmap it. The per-file GEM handle was already closed in
+		 * map_mmio once the mapping was established. */
+		if (hsakmt_enable_drm) {
+			munmap(fmm_ctx->gpu_mem[gpu_mem_id].mmio_aperture.base, PAGE_SIZE);
+			continue;
+		}
 		hsakmt_fmm_unmap_from_gpu(ctx, fmm_ctx->gpu_mem[gpu_mem_id].mmio_aperture.base);
 		munmap(fmm_ctx->gpu_mem[gpu_mem_id].mmio_aperture.base, PAGE_SIZE);
 		hsakmt_fmm_release(ctx, fmm_ctx->gpu_mem[gpu_mem_id].mmio_aperture.base);
