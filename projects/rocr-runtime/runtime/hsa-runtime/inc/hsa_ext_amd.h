@@ -81,9 +81,10 @@
  * - 1.27 - hsa_amd_queue_signal_external_semaphore, hsa_amd_queue_wait_external_semaphore
  * - 1.28 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED
  * - 1.29 - hsa_amd_image_create_v2, hsa_amd_interop_map_buffer_with_size
+ * - 1.30 - hsa_amd_queue_get_info: engine type and SDMA engine ID
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 29
+#define HSA_AMD_INTERFACE_VERSION_MINOR 30
 
 #ifdef __cplusplus
 extern "C" {
@@ -3986,7 +3987,7 @@ typedef struct hsa_amd_queue_create_desc_s {
  * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION @p agent does not support
  * queues of the requested type, or a descriptor requested an @c engine_type
  * that is recognised by the API but not yet implemented by the runtime (for
- * example ::HSA_AMD_QUEUE_ENGINE_SDMA or ::HSA_AMD_QUEUE_ENGINE_AIE).
+ * example ::HSA_AMD_QUEUE_ENGINE_AIE).
  */
 hsa_status_t HSA_API hsa_amd_queue_create(
     hsa_agent_t agent,
@@ -4925,6 +4926,18 @@ typedef enum {
    * is true.  The type of this attribute is uint32_t.
    */
   HSA_AMD_QUEUE_INFO_VM_FAULT_REASON,
+  /*
+   * Hardware engine type targeted by this queue.
+   * The type of this attribute is hsa_amd_queue_engine_t.
+   */
+  HSA_AMD_QUEUE_INFO_ENGINE_TYPE,
+  /*
+   * Resolved hardware SDMA engine ID. Automatic SDMA queue creation returns
+   * the selected engine ID, never HSA_AMD_SDMA_ENGINE_ID_ANY. This attribute
+   * is valid only for queues whose engine type is HSA_AMD_QUEUE_ENGINE_SDMA.
+   * The type of this attribute is uint32_t.
+   */
+  HSA_AMD_QUEUE_INFO_SDMA_ENGINE_ID,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,
