@@ -1962,7 +1962,7 @@ static_assert(sizeof(ConSanMoiBarrierRecord) == 40);
 static_assert(sizeof(ConSanMoiAtomicRecord) == 80);
 static_assert(sizeof(ConSanMoiFenceRecord) == 56);
 static_assert(sizeof(ConSanMoiInlineAtomicReleaseSlot) == 32);
-static_assert(sizeof(ConSanMoiDiagnosticRecord) == 80);
+static_assert(sizeof(ConSanMoiDiagnosticRecord) == 88);
 static_assert(sizeof(ConSanMoiRecordReplayTraceHeader) == 72);
 static_assert(sizeof(ConSanMoiRecordReplayPcEntry) == 16);
 static_assert(sizeof(ConSanMoiRecordReplayWorkgroupRun) == 24);

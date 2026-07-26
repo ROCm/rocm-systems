@@ -265,10 +265,11 @@ void append_fence_record_candidates(const ConSanResult &result,
   // Acquire import now retains the release version across the guest, captures
   // its causal snapshot, and transactionally publishes up to five full ABI-v6
   // tokens. Release-capable events use the same window for frontier capture.
-  // CDNA3/4 additionally retain token-transaction producer state and scalar
-  // persistent owner/epoch materialization ahead of the final aligned address
-  // pair. RDNA4 keeps its established 24-register transaction layout.
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 28u : 24u;
+  // Every target retains a stable copy of the guest atomic address across the
+  // guest RMW, predecessor import, and causal-snapshot scan. CDNA3/4 also keep
+  // token-transaction producer state and scalar persistent owner/epoch
+  // materialization ahead of that final aligned address pair.
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 28u : 26u;
 }
 
 [[nodiscard]] bool is_first_light_atomic_record_candidate(const ConSanAtomicSite &site,
@@ -637,34 +638,45 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     rj_code_arch_t arch) {
   if (table_capacity == 0 || (table_capacity & (table_capacity - 1u)) != 0)
     return false;
-  const uint32_t initialize_hash =
-      build_v_mov_b32_e32(hash_vgpr, vector_source_vgpr(workgroup_key_vgpr), arch);
-  const auto key_shift = instrumentation::build_v_lshrrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(6), workgroup_key_vgpr, arch);
-  const auto mix_key = instrumentation::build_v_xor_b32(
-      hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-  const uint32_t copy_consumer =
-      build_v_mov_b32_e32(temporary_vgpr, vector_source_vgpr(consumer_owner_vgpr), arch);
+  const auto mix_workgroup = instrumentation::build_v_mul_lo_u32_literal(
+      hash_vgpr, temporary_vgpr, kConSanMoiInlineTokenWorkgroupMultiplier, workgroup_key_vgpr,
+      arch);
+  const auto multiply_consumer = instrumentation::build_v_mul_lo_u32_literal(
+      temporary_vgpr, slot_address_vgpr, kConSanMoiInlineTokenConsumerMultiplier,
+      consumer_owner_vgpr, arch);
   const auto mix_consumer = instrumentation::build_v_xor_b32(
       hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-  const auto consumer_shift = instrumentation::build_v_lshrrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(6), consumer_owner_vgpr, arch);
-  const auto mix_consumer_shift = instrumentation::build_v_xor_b32(
+  const auto multiply_producer = instrumentation::build_v_mul_lo_u32_literal(
+      temporary_vgpr, slot_address_vgpr, kConSanMoiInlineTokenProducerMultiplier,
+      producer_owner_vgpr, arch);
+  const auto mix_producer = instrumentation::build_v_xor_b32(
       hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-  const auto producer_left = instrumentation::build_v_lshlrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(1), producer_owner_vgpr, arch);
-  const auto mix_producer_left = instrumentation::build_v_xor_b32(
+  const auto fold0 = instrumentation::build_v_lshrrev_b32(
+      temporary_vgpr, scalar_positive_inline_u32(16), hash_vgpr, arch);
+  const auto mix_fold0 = instrumentation::build_v_xor_b32(
       hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-  const auto producer_right = instrumentation::build_v_lshrrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(5), producer_owner_vgpr, arch);
-  const auto mix_producer_right = instrumentation::build_v_xor_b32(
+  const auto avalanche0 = instrumentation::build_v_mul_lo_u32_literal(
+      hash_vgpr, temporary_vgpr, kConSanMoiInlineTokenAvalancheMultiplier0, hash_vgpr, arch);
+  const auto fold1 = instrumentation::build_v_lshrrev_b32(
+      temporary_vgpr, scalar_positive_inline_u32(15), hash_vgpr, arch);
+  const auto mix_fold1 = instrumentation::build_v_xor_b32(
+      hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
+  const auto avalanche1 = instrumentation::build_v_mul_lo_u32_literal(
+      hash_vgpr, temporary_vgpr, kConSanMoiInlineTokenAvalancheMultiplier1, hash_vgpr, arch);
+  const auto fold2 = instrumentation::build_v_lshrrev_b32(
+      temporary_vgpr, scalar_positive_inline_u32(16), hash_vgpr, arch);
+  const auto mix_fold2 = instrumentation::build_v_xor_b32(
       hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
   const auto masked =
       instrumentation::build_v_and_b32_literal(hash_vgpr, table_capacity - 1u, hash_vgpr, arch);
+  const auto times_eight = instrumentation::build_v_lshlrev_b32(
+      slot_address_vgpr, scalar_positive_inline_u32(3), hash_vgpr, arch);
   const auto times_sixteen = instrumentation::build_v_lshlrev_b32(
-      slot_address_vgpr, scalar_positive_inline_u32(4), hash_vgpr, arch);
+      temporary_vgpr, scalar_positive_inline_u32(4), hash_vgpr, arch);
   const auto times_thirty_two = instrumentation::build_v_lshlrev_b32(
       hash_vgpr, scalar_positive_inline_u32(5), hash_vgpr, arch);
+  const auto times_forty_eight = instrumentation::build_v_add_u32(
+      hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
   const auto times_slot_size = instrumentation::build_v_add_u32(
       hash_vgpr, vector_source_vgpr(slot_address_vgpr), hash_vgpr, arch);
   const auto base_lo = instrumentation::build_v_mov_b32_literal(
@@ -675,12 +687,12 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   const auto add_offset =
       instrumentation::build_v_add_u64_vgpr_offset(slot_address_vgpr, hash_vgpr, arch);
   InstructionSequence sequence(words);
-  if (!sequence.emit_all(initialize_hash, key_shift, mix_key, copy_consumer, mix_consumer,
-                         consumer_shift, mix_consumer_shift, producer_left, mix_producer_left,
-                         producer_right, mix_producer_right))
+  if (!sequence.emit_all(mix_workgroup, multiply_consumer, mix_consumer, multiply_producer,
+                         mix_producer))
     return false;
   if (release_sequence) {
-    const auto salt = instrumentation::build_v_mov_b32_literal(temporary_vgpr, 0x9e3779b9u, arch);
+    const auto salt = instrumentation::build_v_mov_b32_literal(
+        temporary_vgpr, kConSanMoiInlineTokenReleaseSequenceSalt, arch);
     const auto mix_salt = instrumentation::build_v_xor_b32(
         hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
     if (!salt || !mix_salt)
@@ -688,8 +700,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     words.insert(words.end(), salt->begin(), salt->end());
     words.push_back(*mix_salt);
   }
-  return sequence.emit_all(masked, times_sixteen, times_thirty_two, times_slot_size, base_lo,
-                           base_hi, add_offset);
+  return sequence.emit_all(fold0, mix_fold0, avalanche0, fold1, mix_fold1, avalanche1, fold2,
+                           mix_fold2, masked, times_eight, times_sixteen, times_thirty_two,
+                           times_forty_eight, times_slot_size, base_lo, base_hi, add_offset);
 }
 
 [[nodiscard]] bool append_moi_report_dispatch_id_word(std::vector<uint32_t> &words,
@@ -742,9 +755,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
 }
 
 // Publishes the direct acquire edge and every inherited snapshot edge as one
-// reservation transaction. The reserved field is an odd-state rollback
-// journal containing the prior even version; it is cleared before commit and
-// can never authorize a reader while the slot remains odd.
+// reservation transaction. The reservation-version field is an odd-state
+// rollback journal containing the prior even version; it is cleared before
+// commit and can never authorize a reader while the slot remains odd.
 [[nodiscard]] bool append_inline_acquired_token_transaction(
     std::vector<uint32_t> &words, const ConSanOptions &options, uint16_t source_address_vgpr,
     uint16_t workgroup_key_vgpr, uint16_t direct_owner_vgpr, uint16_t direct_epoch_vgpr,
@@ -908,7 +921,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   if (!save_exec(eligible) || !save_exec(winners))
     return false;
 
-  constexpr std::array<size_t, 11> kPayloadOffsets = {
+  constexpr std::array<size_t, 12> kPayloadOffsets = {
       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_owner_id),
       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_epoch_plus_one),
@@ -919,7 +932,8 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address),
       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address) + sizeof(uint32_t),
       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reserved),
+      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one),
+      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
   };
 
   // Phase one: reserve every required destination odd. Empty and exact stable
@@ -1054,13 +1068,32 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     words.push_back(*source_version_even);
     if (!narrow_vcc() ||
         !append_load_u32_vgpr_at_offset(
-            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reserved), value, arch))
+            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one),
+            value, arch))
       return false;
-    const auto reserved_zero =
+    const auto consumer_epoch_nonzero =
+        instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), value, arch);
+    const auto consumer_epoch_limit = instrumentation::build_v_mov_b32_literal(
+        hash, consan_moi_exact_shadow::max_epoch + 1u, arch);
+    const auto consumer_epoch_in_range =
+        instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(hash), value, arch);
+    if (!consumer_epoch_nonzero || !consumer_epoch_limit || !consumer_epoch_in_range)
+      return false;
+    words.insert(words.end(), consumer_epoch_limit->begin(), consumer_epoch_limit->end());
+    words.push_back(*consumer_epoch_nonzero);
+    if (!narrow_vcc())
+      return false;
+    words.push_back(*consumer_epoch_in_range);
+    if (!narrow_vcc() ||
+        !append_load_u32_vgpr_at_offset(
+            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
+            value, arch))
+      return false;
+    const auto reservation_clear =
         instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch);
-    if (!reserved_zero)
+    if (!reservation_clear)
       return false;
-    words.push_back(*reserved_zero);
+    words.push_back(*reservation_clear);
     if (!narrow_vcc())
       return false;
     if (!save_exec(static_cast<uint16_t>(exec_base + 4u)))
@@ -1084,7 +1117,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     if (!claim)
       return false;
     words.insert(words.end(), claim->begin(), claim->end());
-    if (!append_moi_flat_load_wait(words, arch))
+    if (!append_moi_flat_atomic_wait(words, arch))
       return false;
     const auto won =
         instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
@@ -1092,9 +1125,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       return false;
     words.push_back(*won);
     if (!narrow_vcc() ||
-        !append_store_u32_vgpr_at_offset(words, base,
-                                         offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reserved),
-                                         expected, arch) ||
+        !append_store_u32_vgpr_at_offset(
+            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
+            expected, arch) ||
         !save_exec(needed))
       return false;
     const auto combine = index == 0
@@ -1137,9 +1170,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
         return false;
     }
     if (!select_identity(index) || !derive_slot() ||
-        !append_load_u32_vgpr_at_offset(words, base,
-                                        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reserved),
-                                        expected, arch) ||
+        !append_load_u32_vgpr_at_offset(
+            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
+            expected, arch) ||
         !append_load_u32_vgpr_at_offset(
             words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version), value, arch))
       return false;
@@ -1162,7 +1195,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     if (!rollback)
       return false;
     words.insert(words.end(), rollback->begin(), rollback->end());
-    if (!append_moi_flat_load_wait(words, arch))
+    if (!append_moi_flat_atomic_wait(words, arch))
       return false;
   }
 
@@ -1220,12 +1253,25 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
             words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version),
             saved_source_version, arch))
       return false;
+    const auto consumer_epoch_plus_one = instrumentation::build_v_add_u32(
+        value, scalar_positive_inline_u32(1), *options.moi_epoch_vgpr, arch);
+    const auto bound_consumer_epoch = instrumentation::build_v_min_u32_literal(
+        value, consan_moi_exact_shadow::max_epoch, value, arch);
+    if (!consumer_epoch_plus_one || !bound_consumer_epoch)
+      return false;
+    words.insert(words.end(), consumer_epoch_plus_one->begin(), consumer_epoch_plus_one->end());
+    words.insert(words.end(), bound_consumer_epoch->begin(), bound_consumer_epoch->end());
+    if (!append_store_u32_vgpr_at_offset(
+            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one),
+            value, arch))
+      return false;
     const auto zero = instrumentation::build_v_mov_b32_literal(value, 0, arch);
     if (!zero)
       return false;
     words.insert(words.end(), zero->begin(), zero->end());
     if (!append_store_u32_vgpr_at_offset(
-            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reserved), value, arch))
+            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
+            value, arch))
       return false;
     if (!append_moi_report_dispatch_id_word(words, options, value, /*high_word=*/false, arch))
       return false;
@@ -1258,7 +1304,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     if (!commit)
       return false;
     words.insert(words.end(), commit->begin(), commit->end());
-    if (!append_moi_flat_load_wait(words, arch))
+    if (!append_moi_flat_atomic_wait(words, arch))
       return false;
   }
   return restore_exec(winners);
@@ -1292,6 +1338,46 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       !restore_workgroup_exec) {
     errors.emplace_back("ConSan MOI inline atomic acquire patch could not encode EXEC ops");
     return false;
+  }
+
+  if (!release_sequence_only) {
+    // An acquire starts a new consumer segment before any token derived from
+    // it is published. Later access checks compare their packed epoch against
+    // this token field, so a future acquire can never retroactively authorize
+    // an earlier access. Owner IDs are wave IDs, while an atomic may execute
+    // under a single-lane EXEC mask. Advance the persistent VGPR for the whole
+    // wave so later accesses by sibling lanes carry the same consumer segment.
+    // Scalar persistent state is already wave-uniform and needs no widening.
+    // Saturation stays fail-closed in the token readers.
+    const bool widen_consumer_segment =
+        options.moi_inline_access_present && !options.moi_persistent_epoch_sgpr;
+    const auto widen_exec =
+        widen_consumer_segment
+            ? instrumentation::build_s_mov_b64(kRdna4ExecLo, kScalarInlineNegativeOneOperand, arch)
+            : std::nullopt;
+    const auto advance_epoch = instrumentation::build_v_add_u32(
+        *options.moi_epoch_vgpr, scalar_positive_inline_u32(1), *options.moi_epoch_vgpr, arch);
+    const auto saturate_epoch = instrumentation::build_v_min_u32_literal(
+        *options.moi_epoch_vgpr, consan_moi_exact_shadow::max_epoch, *options.moi_epoch_vgpr, arch);
+    if ((widen_consumer_segment && !widen_exec) || !advance_epoch || !saturate_epoch) {
+      errors.emplace_back("ConSan MOI inline acquire could not advance its consumer segment");
+      return false;
+    }
+    if (widen_exec)
+      words.push_back(*widen_exec);
+    words.insert(words.end(), advance_epoch->begin(), advance_epoch->end());
+    words.insert(words.end(), saturate_epoch->begin(), saturate_epoch->end());
+    if (widen_consumer_segment)
+      words.push_back(*restore_workgroup_exec);
+    if (options.moi_persistent_epoch_sgpr) {
+      const auto persist_epoch = instrumentation::build_v_readfirstlane_b32(
+          *options.moi_persistent_epoch_sgpr, *options.moi_epoch_vgpr, arch);
+      if (!persist_epoch) {
+        errors.emplace_back("ConSan MOI inline acquire could not persist its consumer segment");
+        return false;
+      }
+      words.push_back(*persist_epoch);
+    }
   }
 
   if (!append_atomic_load_u32(words, scratch_vgpr, value_vgpr, arch)) {
@@ -1654,7 +1740,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                       version_before, arch) ||
       !require_literal(version_before, 0, /*equal=*/true))
     return false;
-  constexpr std::array<size_t, 11> kTokenPayloadOffsets = {
+  constexpr std::array<size_t, 12> kTokenPayloadOffsets = {
       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_owner_id),
       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_epoch_plus_one),
@@ -1665,7 +1751,8 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address),
       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address) + sizeof(uint32_t),
       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reserved),
+      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one),
+      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
   };
   for (size_t offset : kTokenPayloadOffsets) {
     if (!load_require_literal(offset, 0, /*equal=*/true))
@@ -1730,7 +1817,20 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     return false;
   words.insert(words.end(), source_parity->begin(), source_parity->end());
   if (!require_literal(producer, 0, /*equal=*/true) ||
-      !load_require_literal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reserved), 0,
+      !load_require_literal(
+          offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one), 0,
+          /*equal=*/false))
+    return false;
+  const auto consumer_epoch_limit = instrumentation::build_v_mov_b32_literal(
+      producer, consan_moi_exact_shadow::max_epoch + 1u, arch);
+  const auto consumer_epoch_in_range =
+      instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(producer), temporary, arch);
+  if (!consumer_epoch_limit || !consumer_epoch_in_range)
+    return false;
+  words.insert(words.end(), consumer_epoch_limit->begin(), consumer_epoch_limit->end());
+  words.push_back(*consumer_epoch_in_range);
+  if (!narrow_vcc() ||
+      !load_require_literal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version), 0,
                             /*equal=*/true) ||
       !append_load_u32_vgpr_at_offset(words, snapshot_address,
                                       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version),
@@ -1964,8 +2064,11 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     std::vector<std::string> &errors) {
   const bool has_dispatch_id =
       options.moi_dispatch_id_sgpr.has_value() || is_rdna4_family_arch(arch);
+  const uint16_t required_scratch_count =
+      inline_shadow_atomic_scratch_count(candidate.site, candidate.event_kind, arch);
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr || !options.moi_owner_vgpr ||
-      !options.moi_epoch_vgpr || !has_dispatch_id || address_plan.scratch_vgpr_count < 24u)
+      !options.moi_epoch_vgpr || !has_dispatch_id ||
+      address_plan.scratch_vgpr_count < required_scratch_count)
     return false;
   const uint16_t base = *options.scratch_vgpr;
   const uint16_t slot_address = base;
@@ -1996,6 +2099,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   // +6 is reused again as that helper's candidate mask.
   const uint16_t eligible_exec = static_cast<uint16_t>(exec_base + 6u);
   const uint16_t guest_address = address_plan.result_address_vgpr;
+  const uint16_t stable_guest_address = static_cast<uint16_t>(base + required_scratch_count - 2u);
 
   const auto restore_exec = [&](uint16_t source) -> bool {
     const auto restore = instrumentation::build_s_mov_b64(kRdna4ExecLo, source, arch);
@@ -2048,6 +2152,24 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     return narrow_vcc();
   };
 
+  if (stable_guest_address != guest_address) {
+    // Copy high first only when the destination begins at the source high
+    // word; otherwise the ordinary low/high order is alias-safe.
+    if (static_cast<uint16_t>(guest_address + 1u) == stable_guest_address) {
+      words.push_back(
+          build_v_mov_b32_e32(static_cast<uint16_t>(stable_guest_address + 1u),
+                              vector_source_vgpr(static_cast<uint16_t>(guest_address + 1u)), arch));
+      words.push_back(
+          build_v_mov_b32_e32(stable_guest_address, vector_source_vgpr(guest_address), arch));
+    } else {
+      words.push_back(
+          build_v_mov_b32_e32(stable_guest_address, vector_source_vgpr(guest_address), arch));
+      words.push_back(
+          build_v_mov_b32_e32(static_cast<uint16_t>(stable_guest_address + 1u),
+                              vector_source_vgpr(static_cast<uint16_t>(guest_address + 1u)), arch));
+    }
+  }
+
   if (!append_save_moi_special_state(words, options, arch) ||
       !append_inline_workgroup_key(words, workgroup_sources, options, workgroup_key,
                                    static_cast<uint16_t>(base + 6u), temporary,
@@ -2074,8 +2196,8 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     }
   }
   if (!save_exec(eligible_exec) ||
-      !append_inline_atomic_slot_address(words, release_table_base, release_capacity, guest_address,
-                                         slot_address, arch)) {
+      !append_inline_atomic_slot_address(words, release_table_base, release_capacity,
+                                         stable_guest_address, slot_address, arch)) {
     errors.emplace_back("ConSan MOI inline release could not initialize its version transaction");
     return false;
   }
@@ -2146,7 +2268,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   if (!claim)
     return false;
   words.insert(words.end(), claim->begin(), claim->end());
-  if (!append_moi_flat_load_wait(words, arch))
+  if (!append_moi_flat_atomic_wait(words, arch))
     return false;
   const auto claim_won =
       instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected), cas_new, arch);
@@ -2242,7 +2364,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                         vector_source_vgpr(source_version), arch));
     if (!append_save_moi_special_state(words, options, arch) || !restore_exec(claimed_exec) ||
         !append_inline_atomic_acquire_import(
-            words, options, guest_address, workgroup_key, cas_new, cas_expected, temporary,
+            words, options, stable_guest_address, workgroup_key, cas_new, cas_expected, temporary,
             snapshot_table_base, snapshot_capacity, token_table_base, token_capacity,
             /*source_slot_claimed=*/true,
             /*release_sequence_only=*/
@@ -2266,16 +2388,16 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     words.push_back(*rebuild_failed);
     if (!save_exec(failed_exec) || !restore_exec(claimed_exec) ||
         !append_inline_atomic_slot_address(words, release_table_base, release_capacity,
-                                           guest_address, slot_address, arch))
+                                           stable_guest_address, slot_address, arch))
       return false;
     words.push_back(build_v_mov_b32_e32(
         prior_version, vector_source_vgpr(static_cast<uint16_t>(base + 8u)), arch));
   }
 
   if (!restore_exec(claimed_exec) ||
-      !append_inline_release_causal_snapshot_capture(words, options, guest_address, workgroup_key,
-                                                     token_table_base, token_capacity,
-                                                     snapshot_table_base, snapshot_capacity, arch))
+      !append_inline_release_causal_snapshot_capture(
+          words, options, stable_guest_address, workgroup_key, token_table_base, token_capacity,
+          snapshot_table_base, snapshot_capacity, arch))
     return false;
 
   const auto epoch_mask = instrumentation::build_v_and_b32_literal(
@@ -2300,11 +2422,11 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                        workgroup_key, arch) ||
       !append_store_u32_vgpr_at_offset(words, slot_address,
                                        offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address),
-                                       guest_address, arch) ||
+                                       stable_guest_address, arch) ||
       !append_store_u32_vgpr_at_offset(words, slot_address,
                                        offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) +
                                            sizeof(uint32_t),
-                                       static_cast<uint16_t>(guest_address + 1u), arch))
+                                       static_cast<uint16_t>(stable_guest_address + 1u), arch))
     return false;
   if (!append_moi_report_dispatch_id_word(words, options, temporary, /*high_word=*/false, arch)) {
     errors.emplace_back("ConSan MOI inline release could not materialize dispatch ID low");
@@ -2343,9 +2465,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       !require_field(offsetof(ConSanMoiInlineAtomicReleaseSlot, workgroup_key),
                      vector_source_vgpr(workgroup_key)) ||
       !require_field(offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address),
-                     vector_source_vgpr(guest_address)) ||
+                     vector_source_vgpr(stable_guest_address)) ||
       !require_field(offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) + sizeof(uint32_t),
-                     vector_source_vgpr(static_cast<uint16_t>(guest_address + 1u))) ||
+                     vector_source_vgpr(static_cast<uint16_t>(stable_guest_address + 1u))) ||
       !save_exec(committed_exec))
     return false;
   const auto select_distinct_collision =
@@ -2394,7 +2516,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   if (!commit)
     return false;
   words.insert(words.end(), commit->begin(), commit->end());
-  if (!append_moi_flat_load_wait(words, arch))
+  if (!append_moi_flat_atomic_wait(words, arch))
     return false;
   const auto commit_won =
       instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected), cas_new, arch);

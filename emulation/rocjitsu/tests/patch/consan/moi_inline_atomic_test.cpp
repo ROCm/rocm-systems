@@ -88,7 +88,16 @@ TEST(ConSanMoi, Cdna4InlineAtomicAcquireReleaseEmitsNativeTransaction) {
   EXPECT_TRUE(contains_subsequence(cave_words, *atomic));
   EXPECT_EQ(count_subsequence(cave_words, *release_claim_and_commit), 2u);
   EXPECT_EQ(count_subsequence(cave_words, *acquired_token_transaction), 15u);
-  EXPECT_GE(std::count(cave_words.begin(), cave_words.end(), *wait), 1);
+  const auto expect_unified_atomic_wait = [&](const auto &transaction) {
+    std::vector<uint32_t> drained(transaction.begin(), transaction.end());
+    drained.push_back(*wait);
+    EXPECT_EQ(count_subsequence(cave_words, drained), count_subsequence(cave_words, transaction));
+    drained.push_back(*wait);
+    EXPECT_EQ(count_subsequence(cave_words, drained), 0u)
+        << "CDNA4 uses one unified FLAT wait, not a second store-side wait";
+  };
+  expect_unified_atomic_wait(*release_claim_and_commit);
+  expect_unified_atomic_wait(*acquired_token_transaction);
 }
 
 TEST(ConSanMoi, SupportedCdnaInlineAtomicReleaseCarriesClaimedPredecessor) {
@@ -228,14 +237,14 @@ TEST(ConSanMoi, SharedHelperInlineAtomicSpillUsesAutomaticStateAcrossOwners) {
   });
   ASSERT_NE(plan, result.resource_plans.end());
   EXPECT_EQ(plan->source, ConSanRegisterAllocationSource::SpillRequired);
-  EXPECT_EQ(plan->scratch_vgpr_count, 24u);
+  EXPECT_EQ(plan->scratch_vgpr_count, 26u);
   ASSERT_EQ(plan->owner_descriptor_file_offsets.size(), 2u);
   const auto atomic_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;
   });
   ASSERT_NE(atomic_patch, result.patches.end());
-  EXPECT_EQ(atomic_patch->spilled_vgpr_count, 24u);
-  EXPECT_EQ(atomic_patch->required_private_segment_size, 128u);
+  EXPECT_EQ(atomic_patch->spilled_vgpr_count, 26u);
+  EXPECT_EQ(atomic_patch->required_private_segment_size, 136u);
   EXPECT_EQ(atomic_patch->owner_descriptor_file_offsets, plan->owner_descriptor_file_offsets);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
@@ -313,8 +322,8 @@ TEST(ConSanMoi, GenerationTaggedLocalAtomicLookupUsesPersistentWorkgroupKey) {
   const std::vector<uint32_t> words =
       text_words_at_offset(patched, load_patch->trampoline_offset, load_patch->trampoline_size);
   const uint32_t materialize_workgroup_key = build_v_mov_b32_e32(
-      *options.scratch_vgpr, vector_source_vgpr(*options.moi_workgroup_key_vgpr),
-      ROCJITSU_CODE_ARCH_RDNA4);
+      static_cast<uint16_t>(*options.scratch_vgpr + 19u),
+      vector_source_vgpr(*options.moi_workgroup_key_vgpr), ROCJITSU_CODE_ARCH_RDNA4);
   EXPECT_NE(std::ranges::find(words, materialize_workgroup_key), words.end())
       << "local-shadow atomic tokens are keyed by workgroup, not report generation";
 }
@@ -343,6 +352,33 @@ TEST(ConSanMoi, InlineAcquiredTokenHashSeparatesAuthorizationAndReleaseSequenceN
   EXPECT_LT(authorization, capacity);
   EXPECT_LT(release_sequence, capacity);
   EXPECT_NE(authorization, release_sequence);
+}
+
+TEST(ConSanMoi, InlineAcquiredTokenHashDoesNotAliasDistinctCausalEdgesByConstruction) {
+  constexpr uint32_t capacity = 64;
+  constexpr uint32_t workgroup = 1;
+  // The former XOR/shift combiner mapped both of these release-sequence
+  // edges to slot 63. They occur naturally when waves acquire an atomic in
+  // the order 2 -> 3 -> 1.
+  const uint32_t one_after_three = consan_moi_inline_acquired_epoch_token_slot_index(
+      workgroup, /*consumer_owner_id=*/1, /*producer_owner_id=*/3, capacity,
+      /*release_sequence=*/true);
+  const uint32_t three_after_two = consan_moi_inline_acquired_epoch_token_slot_index(
+      workgroup, /*consumer_owner_id=*/3, /*producer_owner_id=*/2, capacity,
+      /*release_sequence=*/true);
+  EXPECT_NE(one_after_three, three_after_two);
+
+  // Reversing an edge must not be an algebraic alias. Direct mapping can
+  // still have ordinary finite-table collisions, but the identity combiner
+  // must preserve field roles before the final capacity mask.
+  for (uint32_t consumer = 1; consumer <= 4; ++consumer) {
+    for (uint32_t producer = consumer + 1; producer <= 4; ++producer) {
+      EXPECT_NE(consan_moi_inline_acquired_epoch_token_slot_index(workgroup, consumer, producer,
+                                                                  capacity),
+                consan_moi_inline_acquired_epoch_token_slot_index(workgroup, producer, consumer,
+                                                                  capacity));
+    }
+  }
 }
 
 TEST(ConSanMoi, InlineAtomicDirectMappedTablePinsLookupAndReplacementContract) {
@@ -414,6 +450,7 @@ TEST(ConSanMoi, InlineCausalSnapshotAbiCapturesCanonicalBoundedFrontier) {
         .kind = kind,
         .source_release_address = 0x4000,
         .source_release_version = 2,
+        .consumer_epoch_plus_one = 1,
     };
   };
   constexpr std::array tokens = {
@@ -464,6 +501,7 @@ TEST(ConSanMoi, InlineCausalSnapshotRejectsMalformedDuplicateCycleAndHiddenState
         .kind = ConSanMoiInlineTokenEvidenceKind::Direct,
         .source_release_address = 0x4000,
         .source_release_version = 2,
+        .consumer_epoch_plus_one = 1,
     };
   };
   constexpr std::array duplicate = {token(3, 11), token(3, 12)};
@@ -506,7 +544,7 @@ TEST(ConSanMoi, InlineCausalSnapshotRejectsMalformedDuplicateCycleAndHiddenState
   auto odd_source_version = token(3, 11);
   odd_source_version.source_release_version = 3;
   auto reserved_source = token(3, 11);
-  reserved_source.reserved = 1;
+  reserved_source.reservation_version = 1;
   for (const auto &bad_source : {zero_version_with_payload, unknown_kind, zero_source_version,
                                  odd_source_version, reserved_source}) {
     snapshot = consan_moi_inline_capture_causal_snapshot(
@@ -564,6 +602,7 @@ TEST(ConSanMoi, InlineCausalImportClosesNoMiddleAccessAndTwoHopChains) {
         .kind = ConSanMoiInlineTokenEvidenceKind::Direct,
         .source_release_address = source_address,
         .source_release_version = source_version,
+        .consumer_epoch_plus_one = 1,
     };
   };
   constexpr ConSanMoiInlineStableReleaseSnapshot p_release{/*version_before=*/2,
@@ -643,6 +682,7 @@ TEST(ConSanMoi, InlineCausalImportUsesImmutableReleaseTimeSnapshotAndFailsClosed
       .kind = ConSanMoiInlineTokenEvidenceKind::Direct,
       .source_release_address = 0x4000,
       .source_release_version = 2,
+      .consumer_epoch_plus_one = 1,
   }};
   const auto before =
       consan_moi_inline_capture_causal_snapshot(tokens, dispatch, workgroup, releaser);
@@ -1020,7 +1060,8 @@ TEST(ConSanMoi, InlineAcquiredEpochTokenLookupIsPairAndWorkgroupScoped) {
           .kind = static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Direct),
           .dispatch_id = 0xd150000000000001ull,
           .source_release_address = 0x4000,
-          .source_release_version = 2};
+          .source_release_version = 2,
+          .consumer_epoch_plus_one = 1};
   EXPECT_EQ(consan_moi_inline_acquired_epoch_token_lookup(slot, workgroup_key, consumer, producer),
             ConSanMoiInlineAcquiredEpochTokenLookup::Exact);
   auto incomplete = slot;
@@ -1060,7 +1101,8 @@ TEST(ConSanMoi, InlineFullTokenClassifierRequiresOneStableCompleteIdentity) {
       .kind = static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Direct),
       .dispatch_id = 0xd150000000000001ull,
       .source_release_address = 0x4000,
-      .source_release_version = 4};
+      .source_release_version = 4,
+      .consumer_epoch_plus_one = 1};
   EXPECT_EQ(consan_moi_inline_classify_acquired_token({6, token, 6}).state,
             ConSanMoiInlineAcquiredTokenState::Stable);
   token.kind = static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence);
@@ -1090,7 +1132,8 @@ TEST(ConSanMoi, InlineFullTokenTransactionRollsBackEveryReservation) {
                                                  .kind = static_cast<uint32_t>(kind),
                                                  .dispatch_id = 0xd150000000000001ull,
                                                  .source_release_address = 0x4000,
-                                                 .source_release_version = 4};
+                                                 .source_release_version = 4,
+                                                 .consumer_epoch_plus_one = 1};
   };
   std::array desired{make_token(3, ConSanMoiInlineTokenEvidenceKind::Direct),
                      make_token(5, ConSanMoiInlineTokenEvidenceKind::Inherited),
@@ -1146,7 +1189,8 @@ TEST(ConSanMoi, InlineAcquiredEpochTokenOrdersOnlyItsExactPair) {
       .kind = static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Direct),
       .dispatch_id = 0xd150000000000001ull,
       .source_release_address = 0x4000,
-      .source_release_version = 2};
+      .source_release_version = 2,
+      .consumer_epoch_plus_one = 12};
   EXPECT_TRUE(consan_moi_inline_acquired_epoch_orders(token, current, prior));
 
   auto unrelated_prior = prior;
@@ -1160,6 +1204,38 @@ TEST(ConSanMoi, InlineAcquiredEpochTokenOrdersOnlyItsExactPair) {
   token.producer_epoch_plus_one = 12;
   token.source_release_version = 3;
   EXPECT_FALSE(consan_moi_inline_acquired_epoch_orders(token, current, prior));
+}
+
+TEST(ConSanMoi, InlineAcquiredEpochTokenOrdersObservedPairInEitherDirection) {
+  constexpr uint32_t workgroup_key = 31;
+  const ConSanMoiExactShadowEntry producer{ConSanMoiShadowAccessKind::Write,
+                                           /*owner_id=*/3,
+                                           /*epoch=*/11,
+                                           /*generation=*/workgroup_key,
+                                           /*instruction_offset=*/0x100};
+  const ConSanMoiExactShadowEntry consumer{ConSanMoiShadowAccessKind::Read,
+                                           /*owner_id=*/7,
+                                           /*epoch=*/11,
+                                           /*generation=*/workgroup_key,
+                                           /*instruction_offset=*/0x200};
+  ConSanMoiInlineAcquiredEpochTokenSlot empty;
+  const ConSanMoiInlineAcquiredEpochTokenSlot consumer_after_producer{
+      .version = 2,
+      .consumer_owner_id = consumer.owner_id,
+      .producer_owner_id = producer.owner_id,
+      .producer_epoch_plus_one = 12,
+      .workgroup_key = workgroup_key,
+      .kind = static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Direct),
+      .dispatch_id = 0xd150000000000001ull,
+      .source_release_address = 0x4000,
+      .source_release_version = 2,
+      .consumer_epoch_plus_one = 12};
+
+  EXPECT_TRUE(consan_moi_inline_acquired_epoch_orders_pair(consumer_after_producer, empty, consumer,
+                                                           producer));
+  EXPECT_TRUE(consan_moi_inline_acquired_epoch_orders_pair(empty, consumer_after_producer, producer,
+                                                           consumer));
+  EXPECT_FALSE(consan_moi_inline_acquired_epoch_orders_pair(empty, empty, consumer, producer));
 }
 
 TEST(ConSanMoi, InlineStableDirectAndInheritedTokensSurviveSourceReplacement) {
@@ -1176,7 +1252,8 @@ TEST(ConSanMoi, InlineStableDirectAndInheritedTokensSurviveSourceReplacement) {
       .kind = static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Direct),
       .dispatch_id = dispatch,
       .source_release_address = 0x4000,
-      .source_release_version = 4};
+      .source_release_version = 4,
+      .consumer_epoch_plus_one = 12};
   ConSanMoiInlineReleaseSnapshotWords source{.version_before = 4,
                                              .slot = {.version = 4,
                                                       .owner_id = prior.owner_id,
@@ -1226,25 +1303,137 @@ TEST(ConSanMoi, InlineStableDirectAndInheritedTokensSurviveSourceReplacement) {
   EXPECT_FALSE(
       consan_moi_inline_stable_token_orders({6, token, 6}, source, dispatch, current, prior));
   token.dispatch_id = dispatch;
-  token.reserved = 1;
+  token.reservation_version = 1;
   EXPECT_FALSE(
       consan_moi_inline_stable_token_orders({6, token, 6}, source, dispatch, current, prior));
+}
+
+TEST(ConSanMoi, InlineDeferredQualificationRequiresExactStableCausalIdentity) {
+  constexpr uint64_t dispatch = 0xd150000000000001ull;
+  constexpr uint32_t workgroup = 31;
+  constexpr uint32_t consumer = 7;
+  constexpr uint32_t producer = 3;
+  constexpr uint32_t consumer_epoch = 17;
+  constexpr uint32_t producer_epoch = 11;
+  ConSanMoiInlineAcquiredEpochTokenSlot token{
+      .version = 2,
+      .consumer_owner_id = consumer,
+      .producer_owner_id = producer,
+      .producer_epoch_plus_one = producer_epoch + 1u,
+      .workgroup_key = workgroup,
+      .kind = static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Direct),
+      .dispatch_id = dispatch,
+      .source_release_address = 0x4000,
+      .source_release_version = 2,
+      .consumer_epoch_plus_one = consumer_epoch + 1u};
+
+  EXPECT_TRUE(consan_moi_inline_stable_token_orders_deferred(
+      token, dispatch, workgroup, consumer, producer, consumer_epoch, producer_epoch));
+  token.kind = static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Inherited);
+  EXPECT_TRUE(consan_moi_inline_stable_token_orders_deferred(
+      token, dispatch, workgroup, consumer, producer, consumer_epoch, producer_epoch));
+
+  token.kind = static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence);
+  EXPECT_FALSE(consan_moi_inline_stable_token_orders_deferred(
+      token, dispatch, workgroup, consumer, producer, consumer_epoch, producer_epoch));
+  token.kind = static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Direct);
+  EXPECT_FALSE(consan_moi_inline_stable_token_orders_deferred(
+      token, dispatch ^ 1u, workgroup, consumer, producer, consumer_epoch, producer_epoch));
+  EXPECT_FALSE(consan_moi_inline_stable_token_orders_deferred(
+      token, dispatch, workgroup + 1u, consumer, producer, consumer_epoch, producer_epoch));
+  EXPECT_FALSE(consan_moi_inline_stable_token_orders_deferred(
+      token, dispatch, workgroup, producer, consumer, consumer_epoch, producer_epoch));
+  EXPECT_FALSE(consan_moi_inline_stable_token_orders_deferred(
+      token, dispatch, workgroup, consumer, producer, consumer_epoch, producer_epoch + 1u));
+  EXPECT_FALSE(consan_moi_inline_stable_token_orders_deferred(
+      token, dispatch, workgroup, consumer, producer, consumer_epoch - 1u, producer_epoch))
+      << "a later acquire may not retroactively authorize an earlier consumer access";
+  EXPECT_FALSE(consan_moi_inline_stable_token_orders_deferred(
+      token, dispatch, workgroup, consumer, producer, consan_moi_exact_shadow::max_epoch,
+      producer_epoch));
+}
+
+TEST(ConSanMoi, DeferredInlineDiagnosticFilterIsFailClosedAndPreservesDroppedCount) {
+  constexpr uint64_t dispatch = 0xd150000000000001ull;
+  constexpr uint32_t workgroup = 31;
+  ConSanMoiInlineAcquiredEpochTokenSlot token{
+      .version = 2,
+      .consumer_owner_id = 7,
+      .producer_owner_id = 3,
+      .producer_epoch_plus_one = 12,
+      .workgroup_key = workgroup,
+      .kind = static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Direct),
+      .dispatch_id = dispatch,
+      .source_release_address = 0x4000,
+      .source_release_version = 2,
+      .consumer_epoch_plus_one = 18};
+  ConSanMoiDiagnosticRecord ordered{
+      .kind = static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict),
+      .backend = static_cast<uint32_t>(ConSanMoiEngine::InlineShadow),
+      .generation = dispatch,
+      .epoch = 17,
+      .first_epoch = 11,
+      .first_owner_id = 3,
+      .second_owner_id = 7,
+      .reserved = workgroup};
+  auto reverse_replacement = ordered;
+  reverse_replacement.epoch = ordered.first_epoch;
+  reverse_replacement.first_epoch = ordered.epoch;
+  reverse_replacement.first_owner_id = ordered.second_owner_id;
+  reverse_replacement.second_owner_id = ordered.first_owner_id;
+  auto unrelated = ordered;
+  unrelated.first_owner_id = 5;
+  const std::array diagnostics = {ordered, reverse_replacement, unrelated};
+  const std::array tokens = {token};
+
+  auto filtered = consan_moi_filter_deferred_inline_diagnostics(
+      diagnostics, /*total_diagnostic_count=*/5, tokens, /*token_evidence_complete=*/true);
+  EXPECT_EQ(filtered.qualified_count, 2u);
+  EXPECT_EQ(filtered.visible_indices, std::vector<uint32_t>({2}));
+  EXPECT_EQ(filtered.effective_diagnostic_count, 3u)
+      << "three dropped diagnostics remain part of the effective total";
+
+  filtered = consan_moi_filter_deferred_inline_diagnostics(
+      diagnostics, /*total_diagnostic_count=*/5, tokens, /*token_evidence_complete=*/false);
+  EXPECT_EQ(filtered.qualified_count, 0u);
+  EXPECT_EQ(filtered.visible_indices, (std::vector<uint32_t>{0, 1, 2}));
+  EXPECT_EQ(filtered.effective_diagnostic_count, 5u);
+
+  auto later_acquire = token;
+  later_acquire.consumer_epoch_plus_one = ordered.epoch + 2u;
+  filtered = consan_moi_filter_deferred_inline_diagnostics(
+      std::span<const ConSanMoiDiagnosticRecord>(&ordered, 1), /*total_diagnostic_count=*/1,
+      std::span<const ConSanMoiInlineAcquiredEpochTokenSlot>(&later_acquire, 1),
+      /*token_evidence_complete=*/true);
+  EXPECT_EQ(filtered.qualified_count, 0u);
+  EXPECT_EQ(filtered.visible_indices, std::vector<uint32_t>({0}));
+
+  auto wrong_backend = ordered;
+  wrong_backend.backend = static_cast<uint32_t>(ConSanMoiEngine::RecordReplay);
+  filtered = consan_moi_filter_deferred_inline_diagnostics(
+      std::span<const ConSanMoiDiagnosticRecord>(&wrong_backend, 1),
+      /*total_diagnostic_count=*/1, tokens, /*token_evidence_complete=*/true);
+  EXPECT_EQ(filtered.qualified_count, 0u);
+  EXPECT_EQ(filtered.visible_indices, std::vector<uint32_t>({0}));
 }
 
 TEST(ConSanMoi, InlineAcquiredEpochTokenPublicationIsMonotonicAndFailClosed) {
   ConSanMoiInlineAcquiredEpochTokenSlot slot;
   auto result = consan_moi_inline_publish_acquired_epoch_token(
       slot, /*workgroup_key=*/31, /*consumer_owner_id=*/7, /*producer_owner_id=*/3,
-      /*producer_epoch=*/11, /*dispatch_id=*/0xd150000000000001ull,
-      ConSanMoiInlineTokenEvidenceKind::Direct, /*source_release_address=*/0x4000,
+      /*producer_epoch=*/11, /*consumer_epoch=*/17,
+      /*dispatch_id=*/0xd150000000000001ull, ConSanMoiInlineTokenEvidenceKind::Direct,
+      /*source_release_address=*/0x4000,
       /*source_release_version=*/2);
   EXPECT_TRUE(result.updated);
   EXPECT_EQ(slot.producer_epoch_plus_one, 12u);
+  EXPECT_EQ(slot.consumer_epoch_plus_one, 18u);
 
   result = consan_moi_inline_publish_acquired_epoch_token(
       slot, /*workgroup_key=*/31, /*consumer_owner_id=*/7, /*producer_owner_id=*/3,
-      /*producer_epoch=*/5, /*dispatch_id=*/0xd150000000000001ull,
-      ConSanMoiInlineTokenEvidenceKind::Direct, /*source_release_address=*/0x4000,
+      /*producer_epoch=*/5, /*consumer_epoch=*/17,
+      /*dispatch_id=*/0xd150000000000001ull, ConSanMoiInlineTokenEvidenceKind::Direct,
+      /*source_release_address=*/0x4000,
       /*source_release_version=*/2);
   EXPECT_FALSE(result.updated);
   EXPECT_FALSE(result.collision);
@@ -1253,8 +1442,9 @@ TEST(ConSanMoi, InlineAcquiredEpochTokenPublicationIsMonotonicAndFailClosed) {
   const auto unchanged = slot;
   result = consan_moi_inline_publish_acquired_epoch_token(
       slot, /*workgroup_key=*/31, /*consumer_owner_id=*/7, /*producer_owner_id=*/4,
-      /*producer_epoch=*/20, /*dispatch_id=*/0xd150000000000001ull,
-      ConSanMoiInlineTokenEvidenceKind::Direct, /*source_release_address=*/0x5000,
+      /*producer_epoch=*/20, /*consumer_epoch=*/17,
+      /*dispatch_id=*/0xd150000000000001ull, ConSanMoiInlineTokenEvidenceKind::Direct,
+      /*source_release_address=*/0x5000,
       /*source_release_version=*/4);
   EXPECT_TRUE(result.collision);
   EXPECT_EQ(slot.producer_owner_id, unchanged.producer_owner_id);
@@ -1262,8 +1452,9 @@ TEST(ConSanMoi, InlineAcquiredEpochTokenPublicationIsMonotonicAndFailClosed) {
 
   result = consan_moi_inline_publish_acquired_epoch_token(
       slot, /*workgroup_key=*/0, /*consumer_owner_id=*/7, /*producer_owner_id=*/3,
-      /*producer_epoch=*/20, /*dispatch_id=*/0xd150000000000001ull,
-      ConSanMoiInlineTokenEvidenceKind::Direct, /*source_release_address=*/0x4000,
+      /*producer_epoch=*/20, /*consumer_epoch=*/17,
+      /*dispatch_id=*/0xd150000000000001ull, ConSanMoiInlineTokenEvidenceKind::Direct,
+      /*source_release_address=*/0x4000,
       /*source_release_version=*/2);
   EXPECT_TRUE(result.invalid_identity);
   EXPECT_EQ(slot.producer_epoch_plus_one, unchanged.producer_epoch_plus_one);
@@ -1996,6 +2187,16 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
             acquire_patch_it->trampoline_offset)
       << "stable release version capture must bracket the guest acquire";
 
+  const uint16_t stable_release_address = static_cast<uint16_t>(*options.scratch_vgpr + 24u);
+  const std::array<uint32_t, 2> retain_release_address = {
+      build_v_mov_b32_e32(stable_release_address, vector_source_vgpr(/*guest low=*/2),
+                          ROCJITSU_CODE_ARCH_RDNA4),
+      build_v_mov_b32_e32(static_cast<uint16_t>(stable_release_address + 1u),
+                          vector_source_vgpr(/*guest high=*/3), ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  EXPECT_TRUE(contains_subsequence(release_words, retain_release_address))
+      << "release publication must retain its object identity across predecessor import";
+
   const auto slot_stride = build_v_lshlrev_b32_e32(
       /*vdst=*/10, scalar_positive_inline_u32(5), /*vsrc1=*/10, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(slot_stride);
@@ -2003,19 +2204,26 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
       << "release publication imports and then replaces its 32-byte predecessor slot";
   EXPECT_EQ(std::count(acquire_words.begin(), acquire_words.end(), *slot_stride), 2)
       << "acquire pre-reads and validates its 32-byte release slot";
-  const auto token_stride_low = build_v_lshlrev_b32_e32(
-      /*vdst=*/8, scalar_positive_inline_u32(4), /*vsrc1=*/29, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto token_stride_high = build_v_lshlrev_b32_e32(
+  const auto token_stride_eight = build_v_lshlrev_b32_e32(
+      /*vdst=*/8, scalar_positive_inline_u32(3), /*vsrc1=*/29, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto token_stride_sixteen = build_v_lshlrev_b32_e32(
+      /*vdst=*/27, scalar_positive_inline_u32(4), /*vsrc1=*/29, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto token_stride_thirty_two = build_v_lshlrev_b32_e32(
       /*vdst=*/29, scalar_positive_inline_u32(5), /*vsrc1=*/29, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto token_stride_combine = build_v_add_nc_u32_e32(
+  const auto token_stride_forty_eight = build_v_add_nc_u32_e32(
+      /*vdst=*/29, vector_source_vgpr(/*vsrc0=*/27), /*vsrc1=*/29, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto token_stride_fifty_six = build_v_add_nc_u32_e32(
       /*vdst=*/29, vector_source_vgpr(/*vsrc0=*/8), /*vsrc1=*/29, ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(token_stride_low);
-  ASSERT_TRUE(token_stride_high);
-  ASSERT_TRUE(token_stride_combine);
+  ASSERT_TRUE(token_stride_eight);
+  ASSERT_TRUE(token_stride_sixteen);
+  ASSERT_TRUE(token_stride_thirty_two);
+  ASSERT_TRUE(token_stride_forty_eight);
+  ASSERT_TRUE(token_stride_fifty_six);
   EXPECT_TRUE(contains_subsequence(
       acquire_words,
-      std::vector<uint32_t>{*token_stride_low, *token_stride_high, *token_stride_combine}))
-      << "48-byte token slots require index*16 + index*32";
+      std::vector<uint32_t>{*token_stride_eight, *token_stride_sixteen, *token_stride_thirty_two,
+                            *token_stride_forty_eight, *token_stride_fifty_six}))
+      << "56-byte token slots require index*8 + index*16 + index*32";
 
   const ConSanMoiReportBufferLayout layout =
       consan_moi_inline_shadow_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
@@ -2034,18 +2242,24 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
   EXPECT_TRUE(contains_subsequence(
       release_words,
       make_expected_offset_store_words(offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address),
-                                       /*value_vgpr=*/2, *options.scratch_vgpr)));
+                                       stable_release_address, *options.scratch_vgpr)));
   EXPECT_TRUE(contains_subsequence(
       release_words,
-      make_expected_offset_store_words(offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) +
-                                           sizeof(uint32_t),
-                                       /*value_vgpr=*/3, *options.scratch_vgpr)));
+      make_expected_offset_store_words(
+          offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) + sizeof(uint32_t),
+          static_cast<uint16_t>(stable_release_address + 1u), *options.scratch_vgpr)));
   const auto release_claim_and_commit = build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(
       /*vaddr=*/8, /*vsrc=*/13, /*vdst=*/13, /*return_old_value=*/true,
       /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(release_claim_and_commit);
   EXPECT_EQ(count_subsequence(release_words, *release_claim_and_commit), 2u)
       << "release publication must use odd claim then even commit CAS";
+  std::vector<uint32_t> drained_release_transaction(release_claim_and_commit->begin(),
+                                                    release_claim_and_commit->end());
+  drained_release_transaction.push_back(*wait_loadcnt0);
+  drained_release_transaction.push_back(*wait_storecnt0);
+  EXPECT_EQ(count_subsequence(release_words, drained_release_transaction), 2u)
+      << "every gfx12 release claim and commit must drain both sides of the returning CAS";
   const uint16_t release_retry_count_sgpr = 100u;
   const std::array<uint32_t, 2> initialize_release_retries = {
       build_s_mov_b32(release_retry_count_sgpr, /*literal source=*/255u, ROCJITSU_CODE_ARCH_RDNA4),
@@ -2111,6 +2325,25 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
       acquire_words, make_expected_offset_store_words(
                          offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_epoch_plus_one),
                          /*value_vgpr=*/13, *options.scratch_vgpr)));
+  EXPECT_TRUE(contains_subsequence(
+      acquire_words, make_expected_offset_store_words(
+                         offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one),
+                         /*value_vgpr=*/27, *options.scratch_vgpr)));
+  const auto advance_consumer_segment =
+      instrumentation::build_v_add_u32(*options.moi_epoch_vgpr, scalar_positive_inline_u32(1),
+                                       *options.moi_epoch_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto saturate_consumer_segment = instrumentation::build_v_min_u32_literal(
+      *options.moi_epoch_vgpr, consan_moi_exact_shadow::max_epoch, *options.moi_epoch_vgpr,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(advance_consumer_segment);
+  ASSERT_TRUE(saturate_consumer_segment);
+  std::vector<uint32_t> consumer_segment_advance(advance_consumer_segment->begin(),
+                                                 advance_consumer_segment->end());
+  consumer_segment_advance.insert(consumer_segment_advance.end(),
+                                  saturate_consumer_segment->begin(),
+                                  saturate_consumer_segment->end());
+  EXPECT_TRUE(contains_subsequence(acquire_words, consumer_segment_advance))
+      << "the acquire must establish its consumer segment before token publication";
   const auto token_claim_or_update = build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(
       /*vaddr=*/8, /*vsrc=*/27, /*vdst=*/27, /*return_old_value=*/true,
       /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
@@ -2189,6 +2422,38 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const auto *text_section = patched.text_sections().front();
+  const auto acquire_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering &&
+           patch.anchor_offset == 8u * sizeof(uint32_t);
+  });
+  ASSERT_NE(acquire_patch, result.patches.end());
+  std::vector<uint32_t> acquire_words(acquire_patch->trampoline_size / sizeof(uint32_t));
+  std::memcpy(acquire_words.data(), text_section->data() + acquire_patch->trampoline_offset,
+              acquire_patch->trampoline_size);
+  constexpr uint16_t kScalarInlineNegativeOneOperand = 193u;
+  const auto widen_consumer_segment = instrumentation::build_s_mov_b64(
+      kRdna4ExecLo, kScalarInlineNegativeOneOperand, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto advance_consumer_segment =
+      instrumentation::build_v_add_u32(*options.moi_epoch_vgpr, scalar_positive_inline_u32(1),
+                                       *options.moi_epoch_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto saturate_consumer_segment = instrumentation::build_v_min_u32_literal(
+      *options.moi_epoch_vgpr, consan_moi_exact_shadow::max_epoch, *options.moi_epoch_vgpr,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_atomic_exec = instrumentation::build_s_mov_b64(
+      kRdna4ExecLo, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u),
+      ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(widen_consumer_segment && advance_consumer_segment && saturate_consumer_segment &&
+              restore_atomic_exec);
+  std::vector<uint32_t> owner_wide_consumer_segment = {*widen_consumer_segment};
+  owner_wide_consumer_segment.insert(owner_wide_consumer_segment.end(),
+                                     advance_consumer_segment->begin(),
+                                     advance_consumer_segment->end());
+  owner_wide_consumer_segment.insert(owner_wide_consumer_segment.end(),
+                                     saturate_consumer_segment->begin(),
+                                     saturate_consumer_segment->end());
+  owner_wide_consumer_segment.push_back(*restore_atomic_exec);
+  EXPECT_TRUE(contains_subsequence(acquire_words, owner_wide_consumer_segment))
+      << "an acquire must advance every lane of the wave owner before later accesses";
   std::vector<uint32_t> words(load_patch->trampoline_size / sizeof(uint32_t));
   std::memcpy(words.data(), text_section->data() + load_patch->trampoline_offset,
               load_patch->trampoline_size);
@@ -2209,28 +2474,35 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   constexpr uint32_t low_generation_bits = 32u - consan_moi_exact_shadow::generation_shift;
   constexpr uint32_t high_generation_bits =
       consan_moi_exact_shadow::generation_bits - low_generation_bits;
+  constexpr uint16_t retained_workgroup_key = scratch + 19u;
   const auto extract_high_first =
       build_v_and_b32_e32_literal(temporary, (uint32_t{1} << high_generation_bits) - 1u,
                                   current_field, ROCJITSU_CODE_ARCH_RDNA4);
   const auto extract_low_after = build_v_lshrrev_b32_e32(
-      current_field, scalar_positive_inline_u32(consan_moi_exact_shadow::generation_shift),
+      retained_workgroup_key, scalar_positive_inline_u32(consan_moi_exact_shadow::generation_shift),
       /*current low=*/scratch + 2u, ROCJITSU_CODE_ARCH_RDNA4);
   const auto shift_high =
       build_v_lshlrev_b32_e32(temporary, scalar_positive_inline_u32(low_generation_bits), temporary,
                               ROCJITSU_CODE_ARCH_RDNA4);
-  const auto combine_key = build_v_add_nc_u32_e32(current_field, vector_source_vgpr(current_field),
-                                                  temporary, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto combine_key =
+      build_v_add_nc_u32_e32(retained_workgroup_key, vector_source_vgpr(retained_workgroup_key),
+                             temporary, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(extract_high_first);
   ASSERT_TRUE(extract_low_after);
   ASSERT_TRUE(shift_high);
   ASSERT_TRUE(combine_key);
-  std::vector<uint32_t> alias_safe_key_extract(extract_high_first->begin(),
-                                               extract_high_first->end());
-  alias_safe_key_extract.push_back(*extract_low_after);
-  alias_safe_key_extract.push_back(*shift_high);
-  alias_safe_key_extract.push_back(*combine_key);
-  EXPECT_TRUE(contains_subsequence(words, alias_safe_key_extract))
-      << "packed-high must be read before its aliased destination is overwritten";
+  std::vector<uint32_t> retained_key_extract(extract_high_first->begin(),
+                                             extract_high_first->end());
+  retained_key_extract.push_back(*extract_low_after);
+  retained_key_extract.push_back(*shift_high);
+  retained_key_extract.push_back(*combine_key);
+  const auto retained_key_position = std::search(
+      words.begin(), words.end(), retained_key_extract.begin(), retained_key_extract.end());
+  const auto same_workgroup_position = std::ranges::find(words, *same_workgroup);
+  ASSERT_NE(retained_key_position, words.end());
+  ASSERT_NE(same_workgroup_position, words.end());
+  EXPECT_LT(retained_key_position, same_workgroup_position)
+      << "token lookup must retain the workgroup key after packed metadata is reused";
 
   const auto save_valid_exec = build_s_mov_b64(exec, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto select_unsupported = build_s_and_not1_b64(
@@ -2278,14 +2550,17 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   EXPECT_EQ(std::find(words.begin(), words.end(), *disable_legacy_token_authority), words.end())
       << "the stable full-token reader replaces unconditional legacy suppression disablement";
 
+  // The access-time token reader runs inside the wave-coalesced address
+  // partition loop. scratch+7..scratch+10 are the loop's live saved address
+  // and packed current value, so token fields must use the diagnostic-only
+  // tail instead of corrupting the next address partition.
   for (const auto &[offset, destination] : std::array<std::pair<size_t, uint16_t>, 12>{
-           {{offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version), scratch + 7u},
-            {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key), temporary},
+           {{offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key), temporary},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id), temporary},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_owner_id), temporary},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_epoch_plus_one),
-             scratch + 9u},
-            {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, kind), scratch + 8u},
+             scratch + 17u},
+            {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, kind), scratch + 16u},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id), temporary},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id) + sizeof(uint32_t),
              temporary},
@@ -2295,17 +2570,43 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
                  sizeof(uint32_t),
              scratch + 13u},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version),
-             scratch + 10u},
-            {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reserved), temporary}}}) {
+             scratch + 18u},
+            {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one),
+             scratch + 11u},
+            {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version), temporary}}}) {
     EXPECT_TRUE(
         contains_subsequence(words, make_expected_offset_load_words(offset, destination, scratch)))
         << "missing acquired-token field at offset " << offset;
   }
 
+  const auto coherent_token_version_load = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/scratch, /*vsrc=*/scratch + 15u, /*vdst=*/scratch + 15u,
+      /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto coherent_token_version_reread = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/scratch, /*vsrc=*/scratch + 14u, /*vdst=*/scratch + 14u,
+      /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto token_version_wait = build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(coherent_token_version_load);
+  ASSERT_TRUE(coherent_token_version_reread);
+  ASSERT_TRUE(token_version_wait);
+  for (const auto &[load, destination] :
+       std::array<std::pair<std::array<uint32_t, 3>, uint16_t>, 2>{
+           {{*coherent_token_version_load, scratch + 15u},
+            {*coherent_token_version_reread, scratch + 14u}}}) {
+    std::vector<uint32_t> expected = {
+        build_v_mov_b32_e32(destination, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4)};
+    expected.insert(expected.end(), load.begin(), load.end());
+    expected.push_back(*token_version_wait);
+    EXPECT_TRUE(contains_subsequence(words, expected))
+        << "acquired-token version snapshots must use coherent device-scope loads";
+    EXPECT_EQ(count_subsequence(words, expected), 2u)
+        << "both possible happens-before directions require a stable token snapshot";
+  }
+
   const auto authorize_stable_access_token =
       build_v_cmp_gt_u32_e32_vcc(scalar_positive_inline_u32(static_cast<uint32_t>(
                                      ConSanMoiInlineTokenEvidenceKind::ReleaseSequence)),
-                                 scratch + 8u, ROCJITSU_CODE_ARCH_RDNA4);
+                                 scratch + 16u, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(authorize_stable_access_token);
   EXPECT_NE(std::ranges::find(words.begin(), words.end(), *authorize_stable_access_token),
             words.end())
@@ -2363,8 +2664,8 @@ TEST(ConSanMoi, InlineAtomicRetainsDisplacedVglobalAcquireAndPublishesToken) {
       << " patches=" << testing::PrintToString(result.patches)
       << " resources=" << testing::PrintToString(result.resource_plans);
   ASSERT_EQ(result.resource_plans.size(), 2u);
-  EXPECT_EQ(result.resource_plans[0].scratch_vgpr_count, 24u);
-  EXPECT_EQ(result.resource_plans[1].scratch_vgpr_count, 24u);
+  EXPECT_EQ(result.resource_plans[0].scratch_vgpr_count, 26u);
+  EXPECT_EQ(result.resource_plans[1].scratch_vgpr_count, 26u);
 
   const auto acquire_patch = std::ranges::find_if(result.patches, [](const auto &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering &&
@@ -2382,7 +2683,7 @@ TEST(ConSanMoi, InlineAtomicRetainsDisplacedVglobalAcquireAndPublishesToken) {
   ASSERT_EQ(result.kernels.front().atomic_sites.size(), 2u);
   const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
       result.kernels.front().atomic_sites[1], /*scratch_vgpr=*/12,
-      /*scratch_vgpr_count=*/24, ConSanRegisterAllocationSource::Explicit,
+      /*scratch_vgpr_count=*/26, ConSanRegisterAllocationSource::Explicit,
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(address_plan.supported());
   const auto address_words = build_consan_moi_atomic_address_materialization(
@@ -2403,6 +2704,24 @@ TEST(ConSanMoi, InlineAtomicRetainsDisplacedVglobalAcquireAndPublishesToken) {
       acquire_words, make_expected_offset_store_words(
                          offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
                          /*value_vgpr=*/40, /*address_vgpr=*/12)));
+
+  const auto token_transaction_cas = build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(
+      /*vaddr=*/12, /*vsrc=*/31, /*vdst=*/31, /*return_old_value=*/true,
+      /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto token_load_wait = build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto token_store_wait = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(token_transaction_cas);
+  ASSERT_TRUE(token_load_wait);
+  ASSERT_TRUE(token_store_wait);
+  std::vector<uint32_t> drained_token_transaction(token_transaction_cas->begin(),
+                                                  token_transaction_cas->end());
+  drained_token_transaction.push_back(*token_load_wait);
+  drained_token_transaction.push_back(*token_store_wait);
+  const size_t token_transaction_count = count_subsequence(acquire_words, *token_transaction_cas);
+  ASSERT_GT(token_transaction_count, 0u);
+  EXPECT_EQ(count_subsequence(acquire_words, drained_token_transaction), token_transaction_count)
+      << "every gfx12 token claim, rollback, and commit must drain both sides of "
+         "the returning FLAT atomic";
 }
 
 TEST(ConSanMoi, InlineAtomicRetainsIsolatedNoReturnReleaseAndExactShadowAccess) {
@@ -2460,16 +2779,16 @@ TEST(ConSanMoi, InlineVglobalReleaseMaterializesAddressWithTransactionPlan) {
     return item.site_kind == ConSanResourceSiteKind::Atomic;
   });
   ASSERT_NE(plan, result.resource_plans.end());
-  EXPECT_EQ(plan->scratch_vgpr_count, 24u);
+  EXPECT_EQ(plan->scratch_vgpr_count, 26u);
   ASSERT_EQ(result.kernels.size(), 1u);
   ASSERT_EQ(result.kernels.front().atomic_sites.size(), 1u);
   const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
       result.kernels.front().atomic_sites.front(), /*scratch_vgpr=*/8,
-      /*scratch_vgpr_count=*/24, ConSanRegisterAllocationSource::Explicit,
+      /*scratch_vgpr_count=*/26, ConSanRegisterAllocationSource::Explicit,
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(address_plan.supported());
   EXPECT_EQ(address_plan.kind, ConSanMoiAtomicAddressKind::VglobalMaterialized);
-  EXPECT_EQ(address_plan.result_address_vgpr, 30u);
+  EXPECT_EQ(address_plan.result_address_vgpr, 32u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -2509,7 +2828,7 @@ TEST(ConSanMoi, InlineAtomicReturningCasPublishesOnlyOnSuccess) {
         return item.site_kind == ConSanResourceSiteKind::Atomic;
       });
   ASSERT_NE(resource_plan, result.resource_plans.end());
-  EXPECT_EQ(resource_plan->scratch_vgpr_count, 24u);
+  EXPECT_EQ(resource_plan->scratch_vgpr_count, 26u);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> cave_words =
@@ -2577,7 +2896,7 @@ TEST(ConSanMoi, InlineVglobalReturningCasPublishesTokenBeforeSuccessPredicatedRe
           return item.site_kind == ConSanResourceSiteKind::Atomic;
         });
     ASSERT_NE(resource_plan, result.resource_plans.end());
-    EXPECT_EQ(resource_plan->scratch_vgpr_count, 24u);
+    EXPECT_EQ(resource_plan->scratch_vgpr_count, 26u);
 
     const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
         site, /*scratch_vgpr=*/8, resource_plan->scratch_vgpr_count,
@@ -2911,7 +3230,7 @@ TEST(ConSanMoi, Gfx1250InlineAtomicOrdersReleaseAndAcquire) {
                site.raw_scope == 2u && site.raw_ioffset == 0;
       }));
   EXPECT_TRUE(std::ranges::any_of(result.resource_plans, [](const auto &plan) {
-    return plan.site_kind == ConSanResourceSiteKind::Atomic && plan.scratch_vgpr_count == 24u;
+    return plan.site_kind == ConSanResourceSiteKind::Atomic && plan.scratch_vgpr_count == 26u;
   }));
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                                &ConSanPatchInfo::kind),

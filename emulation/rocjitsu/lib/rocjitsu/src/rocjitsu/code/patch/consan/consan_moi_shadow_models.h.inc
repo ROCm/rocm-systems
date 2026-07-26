@@ -387,7 +387,7 @@ struct ConSanMoiInlineAcquiredEpochTokenPublishResult {
 consan_moi_inline_publish_acquired_epoch_token(ConSanMoiInlineAcquiredEpochTokenSlot &slot,
                                                uint32_t workgroup_key, uint32_t consumer_owner_id,
                                                uint32_t producer_owner_id, uint32_t producer_epoch,
-                                               uint64_t dispatch_id,
+                                               uint32_t consumer_epoch, uint64_t dispatch_id,
                                                ConSanMoiInlineTokenEvidenceKind kind,
                                                uint64_t source_release_address,
                                                uint32_t source_release_version) {
@@ -395,6 +395,7 @@ consan_moi_inline_publish_acquired_epoch_token(ConSanMoiInlineAcquiredEpochToken
   if (workgroup_key == 0 || consumer_owner_id == 0 || producer_owner_id == 0 ||
       consumer_owner_id == producer_owner_id || dispatch_id == 0 || source_release_address == 0 ||
       !consan_moi_inline_release_version_is_ready(source_release_version) ||
+      consumer_epoch >= consan_moi_exact_shadow::max_epoch ||
       (kind != ConSanMoiInlineTokenEvidenceKind::Direct &&
        kind != ConSanMoiInlineTokenEvidenceKind::Inherited &&
        kind != ConSanMoiInlineTokenEvidenceKind::ReleaseSequence)) {
@@ -408,8 +409,11 @@ consan_moi_inline_publish_acquired_epoch_token(ConSanMoiInlineAcquiredEpochToken
     return result;
   }
   const uint32_t token_value = consan_moi_inline_acquired_epoch_token_value(producer_epoch);
+  const uint32_t consumer_token_value =
+      consan_moi_inline_acquired_epoch_token_value(consumer_epoch);
   if (lookup == ConSanMoiInlineAcquiredEpochTokenLookup::Exact &&
-      slot.producer_epoch_plus_one >= token_value)
+      slot.producer_epoch_plus_one >= token_value &&
+      slot.consumer_epoch_plus_one >= consumer_token_value)
     return result;
   slot = {.version = 2,
           .consumer_owner_id = consumer_owner_id,
@@ -419,7 +423,8 @@ consan_moi_inline_publish_acquired_epoch_token(ConSanMoiInlineAcquiredEpochToken
           .kind = static_cast<uint32_t>(kind),
           .dispatch_id = dispatch_id,
           .source_release_address = source_release_address,
-          .source_release_version = source_release_version};
+          .source_release_version = source_release_version,
+          .consumer_epoch_plus_one = consumer_token_value};
   result.updated = true;
   return result;
 }
@@ -434,7 +439,21 @@ consan_moi_inline_acquired_epoch_orders(const ConSanMoiInlineAcquiredEpochTokenS
                                                     prior.owner_id) !=
       ConSanMoiInlineAcquiredEpochTokenLookup::Exact)
     return false;
-  return slot.producer_epoch_plus_one >= consan_moi_inline_acquired_epoch_token_value(prior.epoch);
+  return current.epoch < consan_moi_exact_shadow::max_epoch &&
+         slot.consumer_epoch_plus_one <=
+             consan_moi_inline_acquired_epoch_token_value(current.epoch) &&
+         slot.producer_epoch_plus_one >= consan_moi_inline_acquired_epoch_token_value(prior.epoch);
+}
+
+/// Exact-shadow replacement order is not itself a happens-before clock.
+/// Accept either directed token when it proves that the two observed accesses
+/// are causally ordered.
+[[nodiscard]] constexpr bool consan_moi_inline_acquired_epoch_orders_pair(
+    const ConSanMoiInlineAcquiredEpochTokenSlot &current_after_prior,
+    const ConSanMoiInlineAcquiredEpochTokenSlot &prior_after_current,
+    const ConSanMoiExactShadowEntry &current, const ConSanMoiExactShadowEntry &prior) {
+  return consan_moi_inline_acquired_epoch_orders(current_after_prior, current, prior) ||
+         consan_moi_inline_acquired_epoch_orders(prior_after_current, prior, current);
 }
 
 /// A stable full token records causal evidence from one source-release
@@ -454,10 +473,83 @@ consan_moi_inline_acquired_epoch_orders(const ConSanMoiInlineAcquiredEpochTokenS
   const auto &token = classified_token.token;
   if (token.dispatch_id != dispatch_id || token.workgroup_key != current.generation ||
       token.consumer_owner_id != current.owner_id || token.producer_owner_id != prior.owner_id ||
+      current.epoch >= consan_moi_exact_shadow::max_epoch ||
+      token.consumer_epoch_plus_one > consan_moi_inline_acquired_epoch_token_value(current.epoch) ||
       token.producer_epoch_plus_one < consan_moi_inline_acquired_epoch_token_value(prior.epoch))
     return false;
   return token.kind == static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Direct) ||
          token.kind == static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Inherited);
+}
+
+/// Qualify one directed edge in a deferred diagnostic. The diagnostic retains
+/// both access epochs and the persistent workgroup key, so a stable final token
+/// can safely prove that this consumer observed this producer segment even
+/// when the token transaction completed after the device-side lookup.
+[[nodiscard]] constexpr bool consan_moi_inline_stable_token_orders_deferred(
+    const ConSanMoiInlineAcquiredEpochTokenSlot &token, uint64_t dispatch_id,
+    uint32_t workgroup_key, uint32_t consumer_owner_id, uint32_t producer_owner_id,
+    uint32_t consumer_epoch, uint32_t producer_epoch) {
+  if (dispatch_id == 0 || workgroup_key == 0 || consumer_owner_id == 0 || producer_owner_id == 0 ||
+      consumer_owner_id == producer_owner_id ||
+      consumer_epoch >= consan_moi_exact_shadow::max_epoch ||
+      producer_epoch > consan_moi_exact_shadow::max_epoch || token.version == 0 ||
+      (token.version & 1u) != 0 || token.source_release_address == 0 ||
+      !consan_moi_inline_release_version_is_ready(token.source_release_version) ||
+      !consan_moi_inline_causal_epoch_is_valid(token.consumer_epoch_plus_one) ||
+      !consan_moi_inline_causal_epoch_is_valid(token.producer_epoch_plus_one) ||
+      token.reservation_version != 0)
+    return false;
+  if (token.dispatch_id != dispatch_id || token.workgroup_key != workgroup_key ||
+      token.consumer_owner_id != consumer_owner_id ||
+      token.producer_owner_id != producer_owner_id ||
+      token.consumer_epoch_plus_one >
+          consan_moi_inline_acquired_epoch_token_value(consumer_epoch) ||
+      token.producer_epoch_plus_one < consan_moi_inline_acquired_epoch_token_value(producer_epoch))
+    return false;
+  return token.kind == static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Direct) ||
+         token.kind == static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Inherited);
+}
+
+struct ConSanMoiDeferredDiagnosticFilterResult {
+  std::vector<uint32_t> visible_indices;
+  uint32_t qualified_count = 0;
+  uint32_t effective_diagnostic_count = 0;
+};
+
+/// Filters only diagnostics whose access pair is ordered in either direction
+/// by a stable acquired token. The total count includes dropped records, so
+/// the effective count retains overflow evidence while subtracting qualified
+/// visible records. Incomplete token evidence fails closed.
+[[nodiscard]] inline ConSanMoiDeferredDiagnosticFilterResult
+consan_moi_filter_deferred_inline_diagnostics(
+    std::span<const ConSanMoiDiagnosticRecord> visible_diagnostics, uint32_t total_diagnostic_count,
+    std::span<const ConSanMoiInlineAcquiredEpochTokenSlot> stable_tokens,
+    bool token_evidence_complete) {
+  ConSanMoiDeferredDiagnosticFilterResult result;
+  result.visible_indices.reserve(visible_diagnostics.size());
+  for (uint32_t i = 0; i < visible_diagnostics.size(); ++i) {
+    const auto &diagnostic = visible_diagnostics[i];
+    const bool ordered =
+        token_evidence_complete &&
+        diagnostic.kind == static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict) &&
+        diagnostic.backend == static_cast<uint32_t>(ConSanMoiEngine::InlineShadow) &&
+        diagnostic.reserved != 0 && std::ranges::any_of(stable_tokens, [&](const auto &token) {
+          return consan_moi_inline_stable_token_orders_deferred(
+                     token, diagnostic.generation, diagnostic.reserved, diagnostic.second_owner_id,
+                     diagnostic.first_owner_id, diagnostic.epoch, diagnostic.first_epoch) ||
+                 consan_moi_inline_stable_token_orders_deferred(
+                     token, diagnostic.generation, diagnostic.reserved, diagnostic.first_owner_id,
+                     diagnostic.second_owner_id, diagnostic.first_epoch, diagnostic.epoch);
+        });
+    if (ordered)
+      ++result.qualified_count;
+    else
+      result.visible_indices.push_back(i);
+  }
+  result.effective_diagnostic_count = total_diagnostic_count >= result.qualified_count
+                                          ? total_diagnostic_count - result.qualified_count
+                                          : 0;
+  return result;
 }
 
 [[nodiscard]] constexpr uint32_t consan_moi_acquired_epoch_token_value(uint32_t epoch) {

@@ -23,7 +23,8 @@ constexpr ConSanMoiInlineAcquiredEpochTokenSlot make_token(uint64_t dispatch_id,
           .kind = static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Direct),
           .dispatch_id = dispatch_id,
           .source_release_address = 0x4000,
-          .source_release_version = 2};
+          .source_release_version = 2,
+          .consumer_epoch_plus_one = 1};
 }
 
 constexpr ConSanMoiInlineCausalTokenView make_token_view(uint64_t dispatch_id,
@@ -39,7 +40,8 @@ constexpr ConSanMoiInlineCausalTokenView make_token_view(uint64_t dispatch_id,
           .producer_epoch_plus_one = epoch_plus_one,
           .kind = ConSanMoiInlineTokenEvidenceKind::Direct,
           .source_release_address = 0x4000,
-          .source_release_version = 2};
+          .source_release_version = 2,
+          .consumer_epoch_plus_one = 1};
 }
 
 TEST(ConSanMoiAdversarial, MultipleProducerClaimLossRollsBackAndDispatchReuseCollides) {

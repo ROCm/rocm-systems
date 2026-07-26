@@ -15,6 +15,8 @@ artifact provenance.  A bounded 4-dispatch × 4-owner capture candidate has
 since passed five clean and five reviewed-fault D128-pressure trials with hook
 SHA-256
 `07bba71e8826d33fa6328b2e79268df926f7d8b2e189bb2a0cf6e95635fc0839`.
+The current Inline Shadow ownership checkpoint uses hook SHA-256
+`74cf5fcdbeb87b56ce6f257e4965a47c047ca655e51828cee8f880e828fe26b3`.
 It is not yet a frozen release checkpoint: TP2 is unavailable in this workspace
 and source-matched overhead and memory requalification remain.
 
@@ -50,9 +52,9 @@ where other engines report logical barriers.
 | **P1 PyTorch collision-heavy scatter-reduce** | 🟩 Exact BF16/FP32 oracle; clean-complete 27/27 LDS accesses; exact global-atomic scope weakening is a precommitted qualified miss; overhead 1.010x | 🟩 Exact oracle; clean-complete 27/27 accesses; exact scope weakening is a precommitted qualified miss; overhead 1.006x (0.996x BF16) | 🟩 Exact oracle; clean-complete 27/27 accesses; exact scope weakening is a precommitted qualified miss; overhead 0.993x | 🟩 Exact oracle; clean-complete 27/27 accesses; exact scope weakening is a precommitted qualified miss; overhead 1.031x |
 | **P2 PyTorch/Inductor compiled softmax** | 🟩 Exact oracle; clean 4/4; exact third barrier drop is a precommitted qualified miss; overhead 0.960x | 🟩 Exact oracle; clean 4/4 + 3/3; exact drop emits an attributed replay diagnostic; overhead 1.065x | 🟩 Exact oracle; clean 4/4 + 6/6 barrier members; exact drop emits a causal diagnostic; overhead 1.204x | 🟩 Exact oracle; clean 4/4 + 3/3; exact drop emits attributed diagnostics; overhead 0.937x |
 | **P2 PyTorch split online softmax** | 🟩 Exact CPU-derived BF16 oracle; clean 8/8 across two stages; exact drop is a precommitted qualified miss; overhead 0.977x | 🟩 Exact oracle; clean 8/8 + 6/6; exact drop is a qualified replay miss; overhead 0.982x | 🟩 Exact oracle; clean 8/8 + 12/12 barrier members; exact drop emits a causal diagnostic; overhead 1.257x | 🟩 Exact oracle; clean 8/8 + 6/6; independently confirmed exact drop emits diagnostics; overhead 4.012x |
-| **P2 PyTorch Qwen-vocabulary top-k** | 🟥 Exact oracle and typed verdict in 54.00 seconds, but only 2,039/63,474 supported accesses patch | 🟨 Exact oracle; clean-complete 63,474/63,474 accesses + 7,100/7,100 barriers in 89.39 seconds without diagnostics or tuning; overhead 1.316x; reviewed fault pending | 🟧 Exact oracle and clean execution; 57,153/63,474 accesses + 12,978/14,200 barrier members in 102.05 seconds; overhead and fault pending | 🟧 Exact oracle; 38,365/63,474 accesses + 3,450/7,100 barriers in 99.84 seconds, but one clean diagnostic rejects strict execution |
+| **P2 PyTorch Qwen-vocabulary top-k** | 🟥 Exact oracle and typed verdict in 54.00 seconds, but only 2,039/63,474 supported accesses patch | 🟨 Exact oracle; clean-complete 63,474/63,474 accesses + 7,100/7,100 barriers in 89.39 seconds without diagnostics or tuning; overhead 1.316x; reviewed fault pending | 🟧 Exact oracle and clean execution; 57,153/63,474 accesses + 12,978/14,200 barrier members in 102.05 seconds; overhead and fault pending | 🟥 Current nightly objects fail strict placement before any probe; the default numeric run is uninstrumented and `applicable=false` |
 | **P2 PyTorch causal SDPA** | 🟩 Independent CPU oracle; clean 158/158; exact barrier drop emits an attributed diagnostic and breaks the oracle; overhead 1.946x | 🟨 Independent CPU oracle; clean-complete 158/158 accesses + 22/22 barriers + 2/2 atomics + 2/2 fences; overhead 7.894x; reviewed drops cause unattributed traps | 🟥 The attention kernel lacks safe transient scalar probe/router state; only the separate 27/27-access fill object patches | 🟥 The attention kernel lacks a common dead scalar pair for its indirect router; 131 accesses + 22 barriers + 2 atomics remain unpatched |
-| **P2 llama.cpp quantized matvec** | 🟩 Independent CPU oracle; clean-complete 462/462 accesses; reviewed exact drop is a qualified miss; overhead 19.225x | 🟩 Independent CPU oracle; clean-complete 462/462 accesses + 44/44 barriers + 63/63 atomics + 72/72 fences; reviewed drop breaks the oracle; overhead 14.493x | 🟩 Independent CPU oracle; clean-complete 462/462 accesses + 88/88 barrier members; reviewed drop breaks the oracle; overhead 17.548x | 🟧 Exact oracle; 132/462 accesses + 18/44 barriers, but one clean diagnostic and 221,184 unsupported dynamic events reject strict execution |
+| **P2 llama.cpp quantized matvec** | 🟩 Independent CPU oracle; clean-complete 462/462 accesses; reviewed exact drop is a qualified miss; overhead 19.225x | 🟩 Independent CPU oracle; clean-complete 462/462 accesses + 44/44 barriers + 63/63 atomics + 72/72 fences; reviewed drop breaks the oracle; overhead 14.493x | 🟩 Independent CPU oracle; clean-complete 462/462 accesses + 88/88 barrier members; reviewed drop breaks the oracle; overhead 17.548x | 🟧 Exact oracle and zero diagnostics; 81/462 accesses + 44/44 barriers, but 49,152 unsupported dynamic events reject strict execution |
 | **P2 Sharktank TP2 family** | 🟩 Exact oracle; clean 2,976/2,976; exact drop is a precommitted qualified miss; overhead 1.28x | 🟨 Exact oracle; five clean-complete trials at 2,976/2,976 + 228/228 with no diagnostics; exact drop detected in 3/5 contained trials; overhead 1.806x prefill / 1.319x combined / 1.270x decode | 🟩 Exact oracle; clean 2,976/2,976 + 420/420; exact drop is a precommitted qualified miss; overhead 1.24x | 🟩 Exact oracle; clean 2,976/2,976 + 228/228; exact drop detected 16/16; overhead 2.17x |
 | **P3 CLIP BF16** | 🟩 Exact oracle; clean 85/85; exact drop and move are precommitted qualified misses; overhead 0.98x | 🟩 Exact oracle; clean 85/85 + 36/36; exact drop and move are qualified misses; overhead 1.380x | 🟩 Exact oracle; clean 85/85 + 72/72; exact drop and move are qualified misses; overhead 0.97x | 🟩 Exact oracle; clean 85/85 + 36/36; exact move emits a diagnostic and drop is a qualified miss; overhead 1.51x |
 | **P3 PyTorch native histogram** | 🟩 Exact oracle; clean-complete 135/135; exact drop is a qualified miss; overhead 0.966x | 🟩 Exact oracle; clean-complete 135/135 + 84/84; exact initialization drop breaks the oracle and is a qualified miss; overhead 1.041x | 🟩 Exact oracle; clean-complete 135/135 + 168/168 barrier members; exact drop is schedule-masked; overhead 1.094x | 🟩 Exact oracle; clean-complete 135/135 + 84/84; exact drop breaks the oracle and is a qualified miss; overhead 5.301x |
@@ -61,7 +63,7 @@ where other engines report logical barriers.
 | **P4 hip-moi D128 pressure attention** | 🟩 Exact oracle; clean 12/12; exact drop breaks the oracle and is a qualified miss; overhead 11.25x | 🟨 Exact oracle; bounded-capture candidate is clean-complete at 12/12 + 4/4 in 5/5 trials and diagnoses the exact drop with oracle failure in 5/5; frozen-tip overhead and memory requalification pending | 🟩 Exact oracle; clean 12/12 + 8/8 barrier members; confirmed exact drop emits a diagnostic and breaks the oracle; overhead 18.531x | 🟩 Exact oracle; clean 12/12 + 4/4; exact drop emits a diagnostic; overhead 13.72x |
 | **P4 hip-moi WMMA attention** | 🟩 Exact oracle; clean 12/12; exact drop breaks the oracle and is a qualified miss; overhead 158.07x | 🟩 Exact oracle; clean 12/12 + 4/4; exact drop emits a diagnostic and breaks the oracle; overhead 13.856x | 🟩 Exact oracle; clean 12/12 + 8/8 barrier members; exact drop breaks the oracle and is a qualified miss; overhead 14.50x | 🟩 Exact oracle; clean 12/12 + 4/4; exact drop emits a diagnostic and breaks the oracle; overhead 13.24x |
 | **P4 hip-moi Stream-K arrival** | 🟩 Exact oracle; clean 4/4; exact order/scope weakenings are qualified misses; overhead 558.83x | 🟩 Exact oracle; clean 4/4 + 15/15 atomics + 4/4 barriers + 16/16 fences; exact weakenings are qualified misses; overhead 48.889x | 🟩 Exact oracle; clean 4/4 + 15/15 atomics + 8/8 barrier members; exact weakenings are qualified misses; overhead 48.21x | 🟩 Exact oracle; clean 4/4 + 15/15 atomics + 4/4 barriers; exact weakenings emit diagnostics; overhead 50.93x |
-| **P4 hip-moi tree atomic-OR** | 🟩 Exact oracle; clean 4/4; exact order/scope weakenings are qualified misses; overhead 591.81x | 🟩 Exact oracle; clean 4/4 + 15/15 atomics + 4/4 barriers + 16/16 fences; order weakening is a qualified miss and scope weakening emits a replay diagnostic; overhead 50.635x | 🟩 Exact oracle; clean 4/4 + 15/15 atomics + 8/8 barrier members; exact weakenings are qualified misses; overhead 49.91x | 🟧 Exact oracle and complete 4/4 accesses + 15/15 atomics + 4/4 barriers, but repeated processes intermittently diagnose a correct owner-4 read after owner 2 |
+| **P4 hip-moi tree atomic-OR** | 🟩 Exact oracle; clean 4/4; exact order/scope weakenings are qualified misses; overhead 591.81x | 🟩 Exact oracle; clean 4/4 + 15/15 atomics + 4/4 barriers + 16/16 fences; order weakening is a qualified miss and scope weakening emits a replay diagnostic; overhead 50.635x | 🟩 Exact oracle; clean 4/4 + 15/15 atomics + 8/8 barrier members; exact weakenings are qualified misses; overhead 49.91x | 🟩 Exact oracle; 10/10 current-checkpoint processes clean-complete at 4/4 accesses + 15/15 atomics + 4/4 barriers; relaxed producer bits emit the expected diagnostic |
 | **P4 hip-moi Jakub attention variants** | 🟩 Exact oracle; clean 31/31; exact drop is a qualified miss; overhead 103.75x | 🟩 Exact oracle; clean 31/31 + 4/4; exact drop is a qualified miss; overhead 10.255x | 🟩 Exact oracle; clean 31/31 + 8/8 barrier members; exact drop is a qualified miss; overhead 10.87x | 🟩 Exact oracle; clean 31/31 + 4/4; exact drop emits a diagnostic; overhead 11.03x |
 
 ## Non-green handoff
@@ -90,9 +92,12 @@ rows pass; the reviewed-fault campaign accepts 17/19 rows.
   placement/lowering gaps before collecting overhead and reviewed-fault
   evidence.  Artifact: `rdna4-topk-sampled-relay-scaled-final-20260722`.
 - **Inline Shadow:** `rdna4-topk-inline-indexed-final-20260722` reaches a typed
-  verdict, but coverage is about 60% of accesses and 49% of barriers, and a
-  clean owner-1 store versus owner-4 load conflict over LDS `[4096,4104)` is a
-  false positive.  Fix that ownership conflict before expanding coverage.
+  historical verdict with about 60% of accesses and 49% of barriers.  With the
+  current PyTorch nightly, both large bundled objects fail strict transform
+  placement before any probes are applied.  A default run still passes its
+  numeric oracle, but reports `applicable=false` and therefore is not ConSan
+  evidence.  Close the large-object access/relay placement gap before retrying
+  ownership, overhead, or fault acceptance on this workload.
 
 ### PyTorch causal SDPA
 
@@ -127,10 +132,12 @@ acceptance from the smaller D128 workload.
 ### llama.cpp quantized matvec
 
 Inline Shadow is the only non-green engine.  The 1,024-element shape passes its
-independent GPU/CPU oracle but reaches only 132/462 accesses and 18/44 barriers,
-then reports one clean conflict and 221,184 unsupported dynamic events.  Use
-`rdna4-llama-matvec-1024-all-clean-20260722` to separate the false positive
-from the placement shortfall before adding more fault work.
+independent GPU/CPU oracle with zero diagnostics.  Preventing access entry
+relays from consuming adjacent synchronization sites restores all 44/44
+barriers; access placement remains incomplete at 81/462, with 49,152
+unsupported dynamic events.  Artifact:
+`gfx1201-inline-owner-token-sync-guard-20260726`.  The remaining blocker is
+access placement, not ownership correctness.
 
 ### llama.cpp RMS norm
 
@@ -167,14 +174,24 @@ transform startup with `requested=planned=applied=0`, and both post-timeout
 health probes passed.  Keep the cell yellow until a frozen checkpoint also
 carries paired overhead and memory evidence.
 
-### hip-moi tree atomic-OR
+## Resolved Inline Shadow ownership checkpoint
 
-Inline Shadow remains intermittently false-positive on a correct owner-4 read
-after owner 2.  Ten isolated clean processes pass, but
-`rdna4-inline-durable-token-final3-overhead` reproduces the diagnostic in two
-of three instrumented processes.  Committed inherited tokens no longer reread
-a mutable source slot, but an access-time token-visibility gap remains.  Fix
-that clean-input race before claiming overhead or repeating fault acceptance.
+The tree atomic-OR workload is clean-complete in 10/10 final physical `gfx1201`
+processes with 4/4 accesses, 15/15 atomics, and 4/4 barriers.  The relaxed
+producer-bits discriminator still emits one exact access diagnostic.  An
+earlier 20/20 clean campaign exercised deferred teardown qualification in four
+processes, proving that a stable token published after the device-side
+diagnostic is qualified only when its dispatch, workgroup, owner direction,
+producer epoch, and acquire-established consumer segment all match.  A later
+acquire therefore cannot retroactively suppress an earlier access diagnostic;
+incomplete token snapshots and saturated consumer epochs remain fail-closed.
+
+The implementation also keeps access placement independent from
+synchronization placement: a far access entry relay cannot relocate a decoded
+barrier, atomic, or fence as an uninstrumented tail.  This removes the llama
+clean-input ownership diagnostic while leaving its incomplete access count
+explicit.  No workload instruction offsets, owner IDs, register numbers, or
+fixed runtime LDS sizes participate in either decision.
 
 ## Green requirements
 

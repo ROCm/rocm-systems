@@ -17,6 +17,29 @@
   if (!special_state_already_saved && !append_save_moi_special_state(words, options, arch))
     return false;
 
+  const uint16_t workgroup_key = static_cast<uint16_t>(*options.scratch_vgpr + 19u);
+  if (options.moi_track_atomics) {
+    if (workgroup_local_shadow) {
+      // An LDS shadow is workgroup-local. Its optional generation tag guards
+      // reuse of the local cells; it is not the identity used by the global
+      // atomic release/token tables. Validate those tables with the persistent
+      // workgroup key for every local-shadow representation.
+      if (options.moi_workgroup_key_vgpr) {
+        words.push_back(build_v_mov_b32_e32(
+            workgroup_key, vector_source_vgpr(*options.moi_workgroup_key_vgpr), arch));
+      } else if (options.moi_persistent_workgroup_key_sgpr) {
+        words.push_back(
+            build_v_mov_b32_e32(workgroup_key, *options.moi_persistent_workgroup_key_sgpr, arch));
+      } else {
+        return false;
+      }
+    } else if (!append_extract_exact_shadow_generation(
+                   words, workgroup_key, current_value_vgpr,
+                   static_cast<uint16_t>(current_value_vgpr + 1u), tmp_vgpr, arch)) {
+      return false;
+    }
+  }
+
   // Conflict diagnostics are the cold path. Each predicate below can empty
   // EXEC, but merely leaving the remaining vector and memory instructions
   // predicated off still makes scalar execution walk the complete record
@@ -134,39 +157,20 @@
       return false;
   }
 
-  const auto append_current_workgroup_key = [&](uint16_t destination_vgpr,
-                                                uint16_t temporary_vgpr) {
-    if (workgroup_local_shadow) {
-      // An LDS shadow is workgroup-local. Its optional generation tag guards
-      // reuse of the local cells; it is not the identity used by the global
-      // atomic release/token tables. Validate those tables with the persistent
-      // workgroup key for every local-shadow representation.
-      if (options.moi_workgroup_key_vgpr) {
-        words.push_back(build_v_mov_b32_e32(
-            destination_vgpr, vector_source_vgpr(*options.moi_workgroup_key_vgpr), arch));
-        return true;
-      }
-      if (options.moi_persistent_workgroup_key_sgpr) {
-        words.push_back(build_v_mov_b32_e32(destination_vgpr,
-                                            *options.moi_persistent_workgroup_key_sgpr, arch));
-        return true;
-      }
-      return false;
-    }
-    return append_extract_exact_shadow_generation(words, destination_vgpr, current_value_vgpr,
-                                                  static_cast<uint16_t>(current_value_vgpr + 1u),
-                                                  temporary_vgpr, arch);
-  };
-
   if (options.moi_track_atomics) {
     const uint16_t base = *options.scratch_vgpr;
     const uint16_t exec_base = *options.moi_exec_save_sgpr;
     const uint16_t conflict_exec = static_cast<uint16_t>(exec_base + 2u);
     const uint16_t predicate_exec = static_cast<uint16_t>(exec_base + 6u);
-    const uint16_t token_version = static_cast<uint16_t>(base + 7u);
-    const uint16_t token_kind = static_cast<uint16_t>(base + 8u);
-    const uint16_t token_epoch = static_cast<uint16_t>(base + 9u);
-    const uint16_t source_version = static_cast<uint16_t>(base + 10u);
+    // The wave-coalesced exact-shadow caller keeps +7:+10 live across this
+    // helper as its saved address and packed current value. A multi-address
+    // wave returns to the partition loop after token filtering, so borrowing
+    // those registers here corrupts the next partition's publication. Keep
+    // access-time token state in the cold diagnostic-only tail instead.
+    const uint16_t token_version = static_cast<uint16_t>(base + 15u);
+    const uint16_t token_kind = static_cast<uint16_t>(base + 16u);
+    const uint16_t token_epoch = static_cast<uint16_t>(base + 17u);
+    const uint16_t source_version = static_cast<uint16_t>(base + 18u);
     const uint16_t token_hash = static_cast<uint16_t>(base + 11u);
     const uint16_t source_address = static_cast<uint16_t>(base + 12u);
     const uint16_t prior_owner = static_cast<uint16_t>(base + 23u);
@@ -178,202 +182,244 @@
       words.push_back(
           build_v_mov_b32_e32(consumer_owner, *options.moi_persistent_owner_sgpr, arch));
     }
-    const auto save_conflict = instrumentation::build_s_mov_b64(conflict_exec, kRdna4ExecLo, arch);
-    if (!save_conflict)
-      return false;
-    words.push_back(*save_conflict);
-
-    if (!append_current_workgroup_key(address_lo_vgpr, current_field_vgpr) ||
-        !append_extract_exact_shadow_field(words, current_field_vgpr, current_value_vgpr,
+    if (!append_extract_exact_shadow_field(words, current_field_vgpr, current_value_vgpr,
                                            consan_moi_exact_shadow::owner_shift,
                                            consan_moi_exact_shadow::max_owner, arch) ||
         !append_extract_exact_shadow_field(words, prior_owner, old_value_vgpr,
                                            consan_moi_exact_shadow::owner_shift,
-                                           consan_moi_exact_shadow::max_owner, arch) ||
-        !append_inline_acquired_token_slot_address(
-            words,
-            *options.moi_report_buffer_address + layout.inline_acquired_epoch_token_slots_offset,
-            layout.inline_acquired_epoch_token_capacity, address_lo_vgpr, current_field_vgpr,
-            prior_owner, address_lo_vgpr, token_hash, static_cast<uint16_t>(address_lo_vgpr + 1u),
-            /*release_sequence=*/false, arch))
+                                           consan_moi_exact_shadow::max_owner, arch))
       return false;
-    const auto narrow = [&]() {
-      const auto instruction =
-          instrumentation::build_s_and_saveexec_b64(predicate_exec, kRdna4VccLo, arch);
-      if (!instruction)
+
+    const auto filter_ordered_pair = [&](uint16_t token_consumer_owner,
+                                         uint16_t token_producer_owner,
+                                         uint16_t consumer_packed_value,
+                                         uint16_t producer_packed_value) {
+      const auto save_conflict =
+          instrumentation::build_s_mov_b64(conflict_exec, kRdna4ExecLo, arch);
+      if (!save_conflict)
         return false;
-      words.push_back(*instruction);
+      words.push_back(*save_conflict);
+      if (!append_inline_acquired_token_slot_address(
+              words,
+              *options.moi_report_buffer_address + layout.inline_acquired_epoch_token_slots_offset,
+              layout.inline_acquired_epoch_token_capacity, workgroup_key, token_consumer_owner,
+              token_producer_owner, address_lo_vgpr, token_hash,
+              static_cast<uint16_t>(address_lo_vgpr + 1u),
+              /*release_sequence=*/false, arch))
+        return false;
+
+      const auto narrow = [&]() {
+        const auto instruction =
+            instrumentation::build_s_and_saveexec_b64(predicate_exec, kRdna4VccLo, arch);
+        if (!instruction)
+          return false;
+        words.push_back(*instruction);
+        return true;
+      };
+      const auto require_equal = [&](size_t offset, uint16_t expected) {
+        if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch))
+          return false;
+        const auto equal =
+            instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), tmp_vgpr, arch);
+        if (!equal)
+          return false;
+        words.push_back(*equal);
+        return narrow();
+      };
+      const auto require_scalar_equal = [&](size_t offset, uint16_t expected) {
+        if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch))
+          return false;
+        const auto equal = instrumentation::build_v_cmp_eq_u32_vcc(expected, tmp_vgpr, arch);
+        if (!equal)
+          return false;
+        words.push_back(*equal);
+        return narrow();
+      };
+      const auto require_zero = [&](size_t offset) {
+        if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch))
+          return false;
+        const auto zero =
+            instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
+        if (!zero)
+          return false;
+        words.push_back(*zero);
+        return narrow();
+      };
+
+      // The acquiring atomic can populate this direct-mapped slot immediately
+      // before the same wave reaches its ordered LDS access. Use a coherent
+      // device-scope version read at both ends of the snapshot; an ordinary
+      // flat load may otherwise reuse the zero observed while reserving the
+      // slot and miss the completed token publication.
+      if (!append_atomic_load_u32(words, address_lo_vgpr, token_version, arch))
+        return false;
+      const auto token_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
+          scalar_positive_inline_u32(0), token_version, arch);
+      const auto token_parity =
+          instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, token_version, arch);
+      if (!token_nonzero || !token_parity)
+        return false;
+      words.push_back(*token_nonzero);
+      if (!narrow())
+        return false;
+      words.insert(words.end(), token_parity->begin(), token_parity->end());
+      const auto token_even =
+          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
+      if (!token_even)
+        return false;
+      words.push_back(*token_even);
+      if (!narrow() ||
+          !require_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key),
+                         workgroup_key) ||
+          !require_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
+                         token_consumer_owner) ||
+          !require_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_owner_id),
+                         token_producer_owner))
+        return false;
+      if (!append_load_u32_vgpr_at_offset(
+              words, address_lo_vgpr,
+              offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_epoch_plus_one), token_epoch,
+              arch) ||
+          !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
+                                          offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, kind),
+                                          token_kind, arch) ||
+          !require_scalar_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id),
+                                *options.moi_dispatch_id_sgpr) ||
+          !require_scalar_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id) +
+                                    sizeof(uint32_t),
+                                static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u)) ||
+          !append_load_u32_vgpr_at_offset(
+              words, address_lo_vgpr,
+              offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address),
+              source_address, arch) ||
+          !append_load_u32_vgpr_at_offset(
+              words, address_lo_vgpr,
+              offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address) +
+                  sizeof(uint32_t),
+              static_cast<uint16_t>(source_address + 1u), arch) ||
+          !append_load_u32_vgpr_at_offset(
+              words, address_lo_vgpr,
+              offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version),
+              source_version, arch) ||
+          !append_load_u32_vgpr_at_offset(
+              words, address_lo_vgpr,
+              offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one), token_hash,
+              arch) ||
+          !require_zero(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version)) ||
+          !append_atomic_load_u32(words, address_lo_vgpr, static_cast<uint16_t>(base + 14u), arch))
+        return false;
+      const auto source_address_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
+          scalar_positive_inline_u32(0), source_address, arch);
+      const auto source_version_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
+          scalar_positive_inline_u32(0), source_version, arch);
+      const auto source_version_parity =
+          instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, source_version, arch);
+      if (!source_address_nonzero || !source_version_nonzero || !source_version_parity)
+        return false;
+      words.push_back(*source_address_nonzero);
+      if (!narrow())
+        return false;
+      words.push_back(*source_version_nonzero);
+      if (!narrow())
+        return false;
+      words.insert(words.end(), source_version_parity->begin(), source_version_parity->end());
+      const auto source_version_even =
+          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
+      if (!source_version_even)
+        return false;
+      words.push_back(*source_version_even);
+      if (!narrow())
+        return false;
+      const auto token_unchanged = instrumentation::build_v_cmp_eq_u32_vcc(
+          vector_source_vgpr(token_version), static_cast<uint16_t>(base + 14u), arch);
+      if (!token_unchanged)
+        return false;
+      words.push_back(*token_unchanged);
+      if (!narrow() ||
+          !append_extract_exact_shadow_field(words, source_version, consumer_packed_value,
+                                             consan_moi_exact_shadow::epoch_shift,
+                                             consan_moi_exact_shadow::max_epoch, arch))
+        return false;
+      const auto max_epoch = instrumentation::build_v_mov_b32_literal(
+          tmp_vgpr, consan_moi_exact_shadow::max_epoch, arch);
+      const auto consumer_below_max = instrumentation::build_v_cmp_ne_u32_vcc(
+          vector_source_vgpr(source_version), tmp_vgpr, arch);
+      if (!max_epoch || !consumer_below_max)
+        return false;
+      words.insert(words.end(), max_epoch->begin(), max_epoch->end());
+      words.push_back(*consumer_below_max);
+      if (!narrow())
+        return false;
+      const auto add_consumer_one = instrumentation::build_v_add_u32(
+          source_version, scalar_positive_inline_u32(1), source_version, arch);
+      if (!add_consumer_one)
+        return false;
+      words.insert(words.end(), add_consumer_one->begin(), add_consumer_one->end());
+      const auto token_too_new = instrumentation::build_v_cmp_gt_u32_vcc(
+          vector_source_vgpr(token_hash), source_version, arch);
+      if (!token_too_new)
+        return false;
+      words.push_back(*token_too_new);
+      const auto remove_token_too_new =
+          instrumentation::build_s_andn2_b64(kRdna4ExecLo, kRdna4ExecLo, kRdna4VccLo, arch);
+      if (!remove_token_too_new)
+        return false;
+      words.push_back(*remove_token_too_new);
+      if (!append_extract_exact_shadow_field(words, token_hash, producer_packed_value,
+                                             consan_moi_exact_shadow::epoch_shift,
+                                             consan_moi_exact_shadow::max_epoch, arch))
+        return false;
+      const auto producer_max_epoch = instrumentation::build_v_mov_b32_literal(
+          tmp_vgpr, consan_moi_exact_shadow::max_epoch, arch);
+      const auto producer_below_max =
+          instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(token_hash), tmp_vgpr, arch);
+      if (!producer_max_epoch || !producer_below_max)
+        return false;
+      words.insert(words.end(), producer_max_epoch->begin(), producer_max_epoch->end());
+      words.push_back(*producer_below_max);
+      if (!narrow())
+        return false;
+      const auto add_producer_one = instrumentation::build_v_add_u32(
+          token_hash, scalar_positive_inline_u32(1), token_hash, arch);
+      if (!add_producer_one)
+        return false;
+      words.insert(words.end(), add_producer_one->begin(), add_producer_one->end());
+      const auto token_insufficient = instrumentation::build_v_cmp_gt_u32_vcc(
+          vector_source_vgpr(token_hash), token_epoch, arch);
+      if (!token_insufficient)
+        return false;
+      words.push_back(*token_insufficient);
+      const auto remove_insufficient =
+          instrumentation::build_s_andn2_b64(kRdna4ExecLo, kRdna4ExecLo, kRdna4VccLo, arch);
+      if (!remove_insufficient)
+        return false;
+      words.push_back(*remove_insufficient);
+
+      // Direct and inherited tokens are committed only after a stable source
+      // release has been acquired and the guest RMW has completed. The token
+      // is therefore the durable causal fact. Release-sequence tokens carry
+      // ancestry between releases and never authorize an ordinary access.
+      const auto access_authorized = instrumentation::build_v_cmp_gt_u32_vcc(
+          scalar_positive_inline_u32(
+              static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence)),
+          token_kind, arch);
+      const auto remove_ordered =
+          instrumentation::build_s_andn2_b64(kRdna4ExecLo, conflict_exec, kRdna4VccLo, arch);
+      if (!access_authorized || !remove_ordered)
+        return false;
+      words.push_back(*access_authorized);
+      words.push_back(*remove_ordered);
       return true;
     };
-    const auto require_equal = [&](size_t offset, uint16_t expected) {
-      if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch))
-        return false;
-      const auto equal =
-          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), tmp_vgpr, arch);
-      if (!equal)
-        return false;
-      words.push_back(*equal);
-      return narrow();
-    };
-    const auto require_scalar_equal = [&](size_t offset, uint16_t expected) {
-      if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch))
-        return false;
-      const auto equal = instrumentation::build_v_cmp_eq_u32_vcc(expected, tmp_vgpr, arch);
-      if (!equal)
-        return false;
-      words.push_back(*equal);
-      return narrow();
-    };
-    const auto require_zero = [&](size_t offset) {
-      if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch))
-        return false;
-      const auto zero =
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
-      if (!zero)
-        return false;
-      words.push_back(*zero);
-      return narrow();
-    };
 
-    if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version),
-                                        token_version, arch))
+    // A conflicting pair is ordered when either access happens-before the
+    // other. The LDS exchange is an observation mechanism, not the memory
+    // model's clock: a logically later access can become the stored
+    // representative before an earlier wave finishes its own exchange.
+    // Check both directed acquired-token identities before reporting.
+    if (!filter_ordered_pair(current_field_vgpr, prior_owner, current_value_vgpr, old_value_vgpr) ||
+        !filter_ordered_pair(prior_owner, current_field_vgpr, old_value_vgpr, current_value_vgpr))
       return false;
-    const auto token_nonzero =
-        instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), token_version, arch);
-    const auto token_parity =
-        instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, token_version, arch);
-    if (!token_nonzero || !token_parity)
-      return false;
-    words.push_back(*token_nonzero);
-    if (!narrow())
-      return false;
-    words.insert(words.end(), token_parity->begin(), token_parity->end());
-    const auto token_even =
-        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
-    if (!token_even)
-      return false;
-    words.push_back(*token_even);
-    if (!narrow())
-      return false;
-    if (!append_current_workgroup_key(current_field_vgpr, tmp_vgpr) ||
-        !require_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key),
-                       current_field_vgpr))
-      return false;
-    if (!append_extract_exact_shadow_field(words, current_field_vgpr, current_value_vgpr,
-                                           consan_moi_exact_shadow::owner_shift,
-                                           consan_moi_exact_shadow::max_owner, arch) ||
-        !require_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
-                       current_field_vgpr) ||
-        !require_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_owner_id),
-                       prior_owner))
-      return false;
-    if (!append_load_u32_vgpr_at_offset(
-            words, address_lo_vgpr,
-            offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_epoch_plus_one), token_epoch,
-            arch) ||
-        !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, kind),
-                                        token_kind, arch) ||
-        !require_scalar_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id),
-                              *options.moi_dispatch_id_sgpr) ||
-        !require_scalar_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id) +
-                                  sizeof(uint32_t),
-                              static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u)) ||
-        !append_load_u32_vgpr_at_offset(
-            words, address_lo_vgpr,
-            offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address), source_address,
-            arch) ||
-        !append_load_u32_vgpr_at_offset(
-            words, address_lo_vgpr,
-            offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address) +
-                sizeof(uint32_t),
-            static_cast<uint16_t>(source_address + 1u), arch) ||
-        !append_load_u32_vgpr_at_offset(
-            words, address_lo_vgpr,
-            offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version), source_version,
-            arch) ||
-        !require_zero(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reserved)) ||
-        !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version),
-                                        static_cast<uint16_t>(base + 14u), arch))
-      return false;
-    const auto source_address_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
-        scalar_positive_inline_u32(0), source_address, arch);
-    const auto source_version_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
-        scalar_positive_inline_u32(0), source_version, arch);
-    const auto source_version_parity =
-        instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, source_version, arch);
-    if (!source_address_nonzero || !source_version_nonzero || !source_version_parity)
-      return false;
-    words.push_back(*source_address_nonzero);
-    if (!narrow())
-      return false;
-    words.push_back(*source_version_nonzero);
-    if (!narrow())
-      return false;
-    words.insert(words.end(), source_version_parity->begin(), source_version_parity->end());
-    const auto source_version_even =
-        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
-    if (!source_version_even)
-      return false;
-    words.push_back(*source_version_even);
-    if (!narrow())
-      return false;
-    const auto token_unchanged = instrumentation::build_v_cmp_eq_u32_vcc(
-        vector_source_vgpr(token_version), static_cast<uint16_t>(base + 14u), arch);
-    if (!token_unchanged)
-      return false;
-    words.push_back(*token_unchanged);
-    if (!narrow())
-      return false;
-
-    if (!append_extract_exact_shadow_field(words, current_field_vgpr, old_value_vgpr,
-                                           consan_moi_exact_shadow::epoch_shift,
-                                           consan_moi_exact_shadow::max_epoch, arch))
-      return false;
-    const auto max_epoch = instrumentation::build_v_mov_b32_literal(
-        tmp_vgpr, consan_moi_exact_shadow::max_epoch, arch);
-    const auto below_max = instrumentation::build_v_cmp_ne_u32_vcc(
-        vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
-    if (!max_epoch || !below_max)
-      return false;
-    words.insert(words.end(), max_epoch->begin(), max_epoch->end());
-    words.push_back(*below_max);
-    if (!narrow())
-      return false;
-    const auto add_one = instrumentation::build_v_add_u32(
-        current_field_vgpr, scalar_positive_inline_u32(1), current_field_vgpr, arch);
-    if (!add_one)
-      return false;
-    words.insert(words.end(), add_one->begin(), add_one->end());
-    const auto token_insufficient = instrumentation::build_v_cmp_gt_u32_vcc(
-        vector_source_vgpr(current_field_vgpr), token_epoch, arch);
-    if (!token_insufficient)
-      return false;
-    words.push_back(*token_insufficient);
-    const auto remove_insufficient =
-        instrumentation::build_s_andn2_b64(kRdna4ExecLo, kRdna4ExecLo, kRdna4VccLo, arch);
-    if (!remove_insufficient)
-      return false;
-    words.push_back(*remove_insufficient);
-
-    // Direct and inherited tokens are committed only after a stable source
-    // release has been acquired and the guest RMW has completed. The token is
-    // therefore the durable causal fact. Re-reading the direct-mapped source
-    // slot here would race with later release publication and could transiently
-    // revoke already-established order. Release-sequence tokens carry ancestry
-    // between releases and never authorize an ordinary access directly.
-    const auto access_authorized = instrumentation::build_v_cmp_gt_u32_vcc(
-        scalar_positive_inline_u32(
-            static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence)),
-        token_kind, arch);
-    const auto remove_ordered =
-        instrumentation::build_s_andn2_b64(kRdna4ExecLo, conflict_exec, kRdna4VccLo, arch);
-    if (!access_authorized || !remove_ordered)
-      return false;
-    words.push_back(*access_authorized);
-    words.push_back(*remove_ordered);
   }
 
   // Writes do not have the read/read kind predicate, and atomic ordering can
@@ -525,14 +571,22 @@
     return append_dynamic_diagnostic_store_u32_scalar_src(
         words, diagnostic_base + offset, scalar_src, slot_vgpr, *options.scratch_vgpr, arch);
   };
-  if (!store_literal(offsetof(ConSanMoiDiagnosticRecord, kind),
+  const bool stored_generation =
+      options.moi_track_atomics
+          ? options.moi_dispatch_id_sgpr &&
+                store_scalar(offsetof(ConSanMoiDiagnosticRecord, generation),
+                             *options.moi_dispatch_id_sgpr) &&
+                store_scalar(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t),
+                             static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u))
+          : store_literal(offsetof(ConSanMoiDiagnosticRecord, generation),
+                          static_cast<uint32_t>(options.moi_report_generation)) &&
+                store_literal(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t),
+                              static_cast<uint32_t>(options.moi_report_generation >> 32u));
+  if (!stored_generation ||
+      !store_literal(offsetof(ConSanMoiDiagnosticRecord, kind),
                      static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict)) ||
       !store_literal(offsetof(ConSanMoiDiagnosticRecord, backend),
                      static_cast<uint32_t>(ConSanMoiEngine::InlineShadow)) ||
-      !store_literal(offsetof(ConSanMoiDiagnosticRecord, generation),
-                     static_cast<uint32_t>(options.moi_report_generation)) ||
-      !store_literal(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t),
-                     static_cast<uint32_t>(options.moi_report_generation >> 32u)) ||
       !store_literal(offsetof(ConSanMoiDiagnosticRecord, second_instruction_offset),
                      static_cast<uint32_t>(candidate.text_offset)) ||
       !store_literal(offsetof(ConSanMoiDiagnosticRecord, second_access_kind),
@@ -545,6 +599,9 @@
       !store_scalar(offsetof(ConSanMoiDiagnosticRecord, second_lane_mask) + sizeof(uint32_t),
                     static_cast<uint16_t>(
                         diagnostic_lane_mask_sgpr.value_or(*options.moi_exec_save_sgpr + 2u) + 1u)))
+    return false;
+  if (options.moi_track_atomics &&
+      !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, reserved), workgroup_key))
     return false;
 
   if (!append_extract_exact_shadow_field(words, tmp_vgpr, old_value_vgpr,
@@ -588,7 +645,11 @@
     return false;
   }
   if (has_epoch) {
-    if (!append_extract_exact_shadow_field(words, tmp_vgpr, current_value_vgpr,
+    if (!append_extract_exact_shadow_field(words, tmp_vgpr, old_value_vgpr,
+                                           consan_moi_exact_shadow::epoch_shift,
+                                           consan_moi_exact_shadow::max_epoch, arch) ||
+        !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_epoch), tmp_vgpr) ||
+        !append_extract_exact_shadow_field(words, tmp_vgpr, current_value_vgpr,
                                            consan_moi_exact_shadow::epoch_shift,
                                            consan_moi_exact_shadow::max_epoch, arch) ||
         !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, epoch), tmp_vgpr)) {
@@ -1329,6 +1390,11 @@
   const size_t loop_branch = words.size();
   words.push_back(0);
   words.push_back(*restore_incoming_exec);
+  // The diagnostic path uses current_high_vgpr as a field temporary. Restore
+  // both packed words before returning so a following cell of the same wide
+  // access starts from the original owner/epoch/workgroup metadata.
+  words.push_back(restore_current_low);
+  words.push_back(restore_current_high);
   if (!append_restore_moi_special_state(words, options, arch))
     return false;
 
@@ -1916,11 +1982,9 @@
     errors.emplace_back("ConSan MOI inline-shadow probe could not derive workgroup identity");
     return std::nullopt;
   }
-  if (generation_tagged_local_shadow &&
-      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)) {
+  if (generation_tagged_local_shadow) {
     if (!options.moi_dispatch_id_sgpr) {
-      errors.emplace_back(
-          "ConSan MOI CDNA generation-tagged local shadow requires dispatch identity");
+      errors.emplace_back("ConSan MOI generation-tagged local shadow requires dispatch identity");
       return std::nullopt;
     }
     // Workgroup coordinates alone repeat across dispatches. Fold the native
@@ -1936,8 +2000,7 @@
     const auto make_nonzero_generation = instrumentation::build_v_add_u32(
         workgroup_key_vgpr, scalar_positive_inline_u32(1u), workgroup_key_vgpr, arch);
     if (!mix_dispatch_low || !mix_dispatch_high || !bound_generation || !make_nonzero_generation) {
-      errors.emplace_back(
-          "ConSan MOI CDNA local shadow could not derive dispatch-qualified generation");
+      errors.emplace_back("ConSan MOI local shadow could not derive dispatch-qualified generation");
       return std::nullopt;
     }
     words.push_back(*mix_dispatch_low);

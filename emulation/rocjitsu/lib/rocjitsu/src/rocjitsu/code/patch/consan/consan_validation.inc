@@ -3021,7 +3021,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     bool valid = cas_positions.size() == 2u &&
                  (owner_between == 1u || (claimed_acquire_release_arch && owner_between == 6u));
 
-    constexpr std::array<size_t, 11> kTokenPayloadOffsets = {
+    constexpr std::array<size_t, 12> kTokenPayloadOffsets = {
         offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
         offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_owner_id),
         offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_epoch_plus_one),
@@ -3032,7 +3032,8 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
         offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address),
         offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address) + sizeof(uint32_t),
         offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version),
-        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reserved),
+        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one),
+        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
     };
     const auto version_before = instrumentation::build_flat_load_b32(
         snapshot_address, static_cast<uint16_t>(scratch + 17u), arch,
@@ -3222,11 +3223,10 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
       }
       for (uint64_t owner : patch.owner_descriptor_file_offsets) {
         const auto owner_name = owner_names.find(owner);
-        const auto owner_kernel =
-            owner_name == owner_names.end()
-                ? original.kernels().end()
-                : std::ranges::find(original.kernels(), owner_name->second,
-                                    &AmdGpuKernelInfo::name);
+        const auto owner_kernel = owner_name == owner_names.end()
+                                      ? original.kernels().end()
+                                      : std::ranges::find(original.kernels(), owner_name->second,
+                                                          &AmdGpuKernelInfo::name);
         if (owner_kernel == original.kernels().end() ||
             !owner_kernel->uses_dynamic_stack.value_or(false)) {
           errors.emplace_back(

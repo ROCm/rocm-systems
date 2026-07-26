@@ -1,10 +1,19 @@
 struct alignas(8) ConSanMoiDiagnosticRecord {
   uint32_t kind = static_cast<uint32_t>(ConSanMoiDiagnosticKind::None);
   uint32_t backend = static_cast<uint32_t>(ConSanMoiEngine::RecordReplay);
+  // Report generation for ordinary records; native dispatch identity for
+  // InlineShadow atomic-tracking diagnostics.
   uint64_t generation = 0;
   uint32_t epoch = 0;
+  // Epoch of the prior exact-shadow access. InlineShadow atomic-tracking
+  // diagnostics use this with the token's consumer segment epoch to prove
+  // that an acquire preceded that specific access.
+  uint32_t first_epoch = 0;
   uint32_t first_owner_id = 0;
   uint32_t second_owner_id = 0;
+  // InlineShadow atomic-tracking diagnostics retain the persistent workgroup
+  // key here so teardown can qualify a token publication that completed after
+  // the device-side diagnostic snapshot. Zero for other engines/configurations.
   uint32_t reserved = 0;
   uint64_t first_lane_mask = 0;
   uint64_t second_lane_mask = 0;

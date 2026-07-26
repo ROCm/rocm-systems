@@ -253,12 +253,19 @@ struct alignas(8) ConSanMoiInlineAcquiredEpochTokenSlot {
   uint64_t dispatch_id = 0;
   uint64_t source_release_address = 0;
   uint32_t source_release_version = 0;
-  uint32_t reserved = 0;
+  // Segment epoch established by the acquire that published this token.
+  // Access authorization also checks this bound so a later acquire cannot
+  // retroactively order an earlier consumer access.
+  uint32_t consumer_epoch_plus_one = 0;
+  // Odd-version publication journal. Stable tokens always keep this zero;
+  // publishers temporarily retain the replaced version here so a failed
+  // multi-token transaction can roll back without losing payload state.
+  uint32_t reservation_version = 0;
 
   constexpr auto operator<=>(const ConSanMoiInlineAcquiredEpochTokenSlot &) const = default;
 };
 
-static_assert(sizeof(ConSanMoiInlineAcquiredEpochTokenSlot) == 48);
+static_assert(sizeof(ConSanMoiInlineAcquiredEpochTokenSlot) == 56);
 
 inline constexpr uint32_t kConSanMoiInlineCausalSnapshotEntryCapacity = 4;
 
@@ -302,7 +309,8 @@ struct alignas(8) ConSanMoiInlineCausalTokenView {
   ConSanMoiInlineTokenEvidenceKind kind = ConSanMoiInlineTokenEvidenceKind::Direct;
   uint64_t source_release_address = 0;
   uint32_t source_release_version = 0;
-  uint32_t reserved = 0;
+  uint32_t consumer_epoch_plus_one = 0;
+  uint32_t reservation_version = 0;
 };
 
 [[nodiscard]] constexpr uint32_t
@@ -335,7 +343,8 @@ consan_moi_inline_capture_causal_snapshot(std::span<const ConSanMoiInlineCausalT
         token.workgroup_key == 0 && token.consumer_owner_id == 0 && token.producer_owner_id == 0 &&
         token.producer_epoch_plus_one == 0 && token.source_release_address == 0 &&
         token.source_release_version == 0 &&
-        token.kind == ConSanMoiInlineTokenEvidenceKind::Direct && token.reserved == 0)
+        token.kind == ConSanMoiInlineTokenEvidenceKind::Direct &&
+        token.consumer_epoch_plus_one == 0 && token.reservation_version == 0)
       continue;
     if (token.version_before != token.version_after || token.version_before == 0 ||
         (token.version_before & 1u) != 0 || token.dispatch_id == 0 || token.workgroup_key == 0 ||
@@ -346,7 +355,8 @@ consan_moi_inline_capture_causal_snapshot(std::span<const ConSanMoiInlineCausalT
          token.kind != ConSanMoiInlineTokenEvidenceKind::ReleaseSequence) ||
         token.source_release_address == 0 ||
         !consan_moi_inline_release_version_is_ready(token.source_release_version) ||
-        token.reserved != 0) {
+        !consan_moi_inline_causal_epoch_is_valid(token.consumer_epoch_plus_one) ||
+        token.reservation_version != 0) {
       snapshot.flags |=
           consan_moi_inline_causal_snapshot_flag(ConSanMoiInlineCausalSnapshotFlag::Malformed);
       continue;

@@ -584,7 +584,7 @@ private:
     const uint32_t visible_atomics = std::min(atomic_record_count, header->atomic_record_capacity);
     const uint32_t visible_fences =
         std::min(header->fence_record_count, entry.fence_record_capacity);
-    const uint32_t visible_diagnostics =
+    const uint32_t raw_visible_diagnostics =
         std::min(header->diagnostic_count, header->diagnostic_capacity);
     const uint32_t dropped_records =
         access_record_count > visible_records ? access_record_count - visible_records : 0;
@@ -596,8 +596,8 @@ private:
         entry.fence_record_capacity != 0 && header->fence_record_count > visible_fences
             ? header->fence_record_count - visible_fences
             : 0;
-    const uint32_t dropped_diagnostics = header->diagnostic_count > visible_diagnostics
-                                             ? header->diagnostic_count - visible_diagnostics
+    const uint32_t dropped_diagnostics = header->diagnostic_count > raw_visible_diagnostics
+                                             ? header->diagnostic_count - raw_visible_diagnostics
                                              : 0;
     const auto *bytes = static_cast<const uint8_t *>(report_ptr);
     const auto *exact_shadow = reinterpret_cast<const rocjitsu::ConSanMoiInlineExactShadowSlot *>(
@@ -742,6 +742,7 @@ private:
       rocjitsu::ConSanMoiInlineAcquiredEpochTokenSlot token;
     };
     std::vector<InlineAcquiredTokenEntry> visible_inline_acquired_tokens;
+    std::vector<rocjitsu::ConSanMoiInlineAcquiredEpochTokenSlot> stable_inline_acquired_tokens;
     for (uint32_t i = 0; i < inline_acquired_token_capacity; ++i) {
       const volatile auto &slot = inline_acquired_tokens[i];
       rocjitsu::ConSanMoiInlineAcquiredTokenSnapshot snapshot;
@@ -755,7 +756,8 @@ private:
       snapshot.payload.dispatch_id = slot.dispatch_id;
       snapshot.payload.source_release_address = slot.source_release_address;
       snapshot.payload.source_release_version = slot.source_release_version;
-      snapshot.payload.reserved = slot.reserved;
+      snapshot.payload.consumer_epoch_plus_one = slot.consumer_epoch_plus_one;
+      snapshot.payload.reservation_version = slot.reservation_version;
       snapshot.version_after = slot.version;
       const auto classified = rocjitsu::consan_moi_inline_classify_acquired_token(snapshot);
       switch (classified.state) {
@@ -763,6 +765,7 @@ private:
         break;
       case rocjitsu::ConSanMoiInlineAcquiredTokenState::Stable:
         visible_inline_acquired_tokens.push_back({i, classified.token});
+        stable_inline_acquired_tokens.push_back(classified.token);
         break;
       case rocjitsu::ConSanMoiInlineAcquiredTokenState::Publishing:
         ++summary.token_incomplete_snapshot_count;
@@ -774,6 +777,32 @@ private:
         ++summary.token_malformed_snapshot_count;
         break;
       }
+    }
+    const auto *raw_diagnostics = reinterpret_cast<const rocjitsu::ConSanMoiDiagnosticRecord *>(
+        bytes + sizeof(rocjitsu::ConSanMoiReportHeader) +
+        static_cast<size_t>(header->access_record_capacity) *
+            sizeof(rocjitsu::ConSanMoiAccessRecord) +
+        static_cast<size_t>(header->barrier_record_capacity) *
+            sizeof(rocjitsu::ConSanMoiBarrierRecord) +
+        static_cast<size_t>(header->atomic_record_capacity) *
+            sizeof(rocjitsu::ConSanMoiAtomicRecord) +
+        static_cast<size_t>(entry.fence_record_capacity) * sizeof(rocjitsu::ConSanMoiFenceRecord));
+    const bool deferred_token_evidence_complete =
+        entry.inline_shadow && summary.token_incomplete_snapshot_count == 0 &&
+        summary.token_changed_snapshot_count == 0 && summary.token_malformed_snapshot_count == 0 &&
+        header->inline_overflow_count == 0 && header->inline_malformed_count == 0;
+    const auto deferred_filter = rocjitsu::consan_moi_filter_deferred_inline_diagnostics(
+        std::span<const rocjitsu::ConSanMoiDiagnosticRecord>(raw_diagnostics,
+                                                             raw_visible_diagnostics),
+        header->diagnostic_count, stable_inline_acquired_tokens, deferred_token_evidence_complete);
+    const auto &visible_diagnostic_indices = deferred_filter.visible_indices;
+    const uint32_t deferred_token_qualified_diagnostics = deferred_filter.qualified_count;
+    const uint32_t visible_diagnostics = static_cast<uint32_t>(visible_diagnostic_indices.size());
+    const uint32_t effective_diagnostic_count = deferred_filter.effective_diagnostic_count;
+    if (deferred_token_qualified_diagnostics != 0) {
+      log_message(
+          kLogInfo, "ConSan MOI deferred-token qualification reader=%llu ordered_diagnostics=%u",
+          static_cast<unsigned long long>(entry.reader), deferred_token_qualified_diagnostics);
     }
     struct SampledEntry {
       uint32_t index = 0;
@@ -1102,7 +1131,7 @@ private:
         visible_barriers, dropped_barriers, header->barrier_record_capacity, atomic_record_count,
         visible_atomics, dropped_atomics, header->atomic_record_capacity,
         header->fence_record_count, visible_fences, dropped_fences, entry.fence_record_capacity,
-        header->diagnostic_count, visible_diagnostics, dropped_diagnostics,
+        effective_diagnostic_count, visible_diagnostics, dropped_diagnostics,
         header->diagnostic_capacity, header->exact_shadow_entry_capacity,
         visible_exact_shadow.size(),
         static_cast<unsigned long long>(summary.exact_incomplete_snapshot_count),
@@ -1166,8 +1195,9 @@ private:
       log_message(
           kLogInfo,
           "ConSan MOI auto inline-acquired-token reader=%llu index=%u version=%u "
-          "kind=%s consumer=%u producer=%u epoch_plus_one=%u workgroup=%u "
-          "dispatch=0x%llx source_address=0x%llx source_version=%u",
+          "kind=%s consumer=%u producer=%u producer_epoch_plus_one=%u "
+          "consumer_epoch_plus_one=%u workgroup=%u dispatch=0x%llx "
+          "source_address=0x%llx source_version=%u",
           static_cast<unsigned long long>(entry.reader), entry_token.index, token.version,
           token.kind == static_cast<uint32_t>(rocjitsu::ConSanMoiInlineTokenEvidenceKind::Direct)
               ? "direct"
@@ -1176,7 +1206,8 @@ private:
               ? "inherited"
               : "release-sequence",
           token.consumer_owner_id, token.producer_owner_id, token.producer_epoch_plus_one,
-          token.workgroup_key, static_cast<unsigned long long>(token.dispatch_id),
+          token.consumer_epoch_plus_one, token.workgroup_key,
+          static_cast<unsigned long long>(token.dispatch_id),
           static_cast<unsigned long long>(token.source_release_address),
           token.source_release_version);
     }
@@ -1201,20 +1232,14 @@ private:
             sizeof(rocjitsu::ConSanMoiBarrierRecord) +
         static_cast<size_t>(header->atomic_record_capacity) *
             sizeof(rocjitsu::ConSanMoiAtomicRecord));
-    const auto *diagnostics = reinterpret_cast<const rocjitsu::ConSanMoiDiagnosticRecord *>(
-        static_cast<const uint8_t *>(report_ptr) + sizeof(rocjitsu::ConSanMoiReportHeader) +
-        static_cast<size_t>(header->access_record_capacity) *
-            sizeof(rocjitsu::ConSanMoiAccessRecord) +
-        static_cast<size_t>(header->barrier_record_capacity) *
-            sizeof(rocjitsu::ConSanMoiBarrierRecord) +
-        static_cast<size_t>(header->atomic_record_capacity) *
-            sizeof(rocjitsu::ConSanMoiAtomicRecord) +
-        static_cast<size_t>(entry.fence_record_capacity) * sizeof(rocjitsu::ConSanMoiFenceRecord));
     std::vector<rocjitsu::ConSanMoiDiagnosticRecord> resolved_diagnostics;
+    resolved_diagnostics.reserve(visible_diagnostics);
+    for (uint32_t index : visible_diagnostic_indices)
+      resolved_diagnostics.push_back(raw_diagnostics[index]);
+    const auto *diagnostics = resolved_diagnostics.data();
     if (entry.compact_token_mapping_malformed)
       ++summary.inline_malformed_count;
     if (visible_diagnostics != 0u && entry.compact_token_mapping_count != 0u) {
-      resolved_diagnostics.assign(diagnostics, diagnostics + visible_diagnostics);
       const auto *mappings =
           reinterpret_cast<const rocjitsu::ConSanMoiCompactDiagnosticTokenMapping *>(
               static_cast<const uint8_t *>(report_ptr) +
@@ -1274,7 +1299,6 @@ private:
         }
         diagnostic.first_instruction_offset = resolved->instruction_offset;
       }
-      diagnostics = resolved_diagnostics.data();
     }
     for (uint32_t i = 0; i < visible_fences; ++i) {
       const rocjitsu::ConSanMoiFenceRecord &fence = fences[i];
@@ -1442,12 +1466,14 @@ private:
       log_message(
           kLogInfo,
           "ConSan MOI auto diagnostic reader=%llu index=%u backend=%u kind=%u "
-          "generation=%llu epoch=%u first_owner=%u second_owner=%u first_inst=0x%x "
-          "second_inst=0x%x first_kind=%u second_kind=%u first_lanes=0x%llx "
-          "second_lanes=0x%llx first_lds=[%u,%u) second_lds=[%u,%u)",
+          "generation=%llu workgroup=%u first_epoch=%u second_epoch=%u "
+          "first_owner=%u second_owner=%u first_inst=0x%x second_inst=0x%x "
+          "first_kind=%u second_kind=%u first_lanes=0x%llx second_lanes=0x%llx "
+          "first_lds=[%u,%u) second_lds=[%u,%u)",
           static_cast<unsigned long long>(entry.reader), i, record.backend, record.kind,
-          static_cast<unsigned long long>(record.generation), record.epoch, record.first_owner_id,
-          record.second_owner_id, record.first_instruction_offset, record.second_instruction_offset,
+          static_cast<unsigned long long>(record.generation), record.reserved, record.first_epoch,
+          record.epoch, record.first_owner_id, record.second_owner_id,
+          record.first_instruction_offset, record.second_instruction_offset,
           record.first_access_kind, record.second_access_kind,
           static_cast<unsigned long long>(record.first_lane_mask),
           static_cast<unsigned long long>(record.second_lane_mask), record.first_lds_byte_offset,

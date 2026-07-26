@@ -226,6 +226,40 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     original_text =
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
   }
+  std::vector<std::pair<uint64_t, uint64_t>> synchronization_ranges;
+  const auto append_synchronization_ranges = [&](const auto &sites) {
+    for (const auto &site : sites) {
+      if (site.size != 0u)
+        synchronization_ranges.emplace_back(site.text_offset, site.text_offset + site.size);
+    }
+  };
+  for (const ConSanKernelInfo &kernel : result.kernels) {
+    append_synchronization_ranges(kernel.barrier_sites);
+    append_synchronization_ranges(kernel.atomic_sites);
+    append_synchronization_ranges(kernel.fence_sites);
+  }
+  for (const ConSanFunctionInfo &function : result.functions) {
+    append_synchronization_ranges(function.barrier_sites);
+    append_synchronization_ranges(function.atomic_sites);
+    append_synchronization_ranges(function.fence_sites);
+  }
+  std::ranges::sort(synchronization_ranges);
+  size_t merged_synchronization_range_count = 0u;
+  for (const auto &range : synchronization_ranges) {
+    if (merged_synchronization_range_count != 0u &&
+        synchronization_ranges[merged_synchronization_range_count - 1u].second >= range.first) {
+      synchronization_ranges[merged_synchronization_range_count - 1u].second = std::max(
+          synchronization_ranges[merged_synchronization_range_count - 1u].second, range.second);
+    } else {
+      synchronization_ranges[merged_synchronization_range_count++] = range;
+    }
+  }
+  synchronization_ranges.resize(merged_synchronization_range_count);
+  const auto relocation_overlaps_synchronization = [&](uint64_t begin, uint64_t end) {
+    const auto after = std::ranges::lower_bound(synchronization_ranges, end, {},
+                                                [](const auto &range) { return range.first; });
+    return after != synchronization_ranges.begin() && std::prev(after)->second > begin;
+  };
   std::optional<MoiLocalNopIslandAllocator> local_entry_islands;
   if (use_indirect_appended && !original_text.empty())
     local_entry_islands.emplace(original_text, result, arch, kIndirectIslandWords,
@@ -451,6 +485,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
 
   MoiSpillManagers spill_managers;
   uint64_t planned_anchor_end = 0;
+  bool warned_access_relay_sync_overlap = false;
   std::unordered_map<uint64_t, uint16_t> next_compact_token_by_descriptor;
   for (const ConSanMoiCandidate *candidate_ptr : candidates) {
     const ConSanMoiCandidate &candidate = *candidate_ptr;
@@ -723,8 +758,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           }
           displaced_words.insert(displaced_words.end(), decoded->begin(), decoded->end());
         }
+        const uint64_t displaced_end =
+            candidate.text_offset + displaced_words.size() * sizeof(uint32_t);
         if (displaced_words.size() >= kIndirectIslandWords &&
-            displaced_words.size() * sizeof(uint32_t) <= std::numeric_limits<uint32_t>::max()) {
+            displaced_words.size() * sizeof(uint32_t) <= std::numeric_limits<uint32_t>::max() &&
+            !relocation_overlaps_synchronization(candidate.text_offset + candidate.size,
+                                                 displaced_end)) {
           const size_t candidate_words = candidate.size / sizeof(uint32_t);
           if (candidate_words <= displaced_words.size()) {
             displaced_tail_words.assign(displaced_words.begin() + candidate_words,
@@ -735,6 +774,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             entry_island_reachable = true;
             entry_island_at_anchor = true;
           }
+        } else if (!warned_access_relay_sync_overlap &&
+                   displaced_words.size() >= kIndirectIslandWords &&
+                   relocation_overlaps_synchronization(candidate.text_offset + candidate.size,
+                                                       displaced_end)) {
+          result.warnings.emplace_back(
+              "ConSan MOI inline-shadow probe did not relocate a synchronization site through "
+              "an uninstrumented access entry relay");
+          warned_access_relay_sync_overlap = true;
         }
       }
       if (entry_island_reachable) {
@@ -1206,8 +1253,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         info.persistent_private_state_end = persistent_state_end;
       }
       info.required_private_segment_size = planned_patch.required_private_bytes;
-      note_dynamic_stack_private_requirement(
-          info, planned_patch.spill ? &*planned_patch.spill : nullptr);
+      note_dynamic_stack_private_requirement(info,
+                                             planned_patch.spill ? &*planned_patch.spill : nullptr);
       if (planned_patch.workgroup_shadow) {
         info.workgroup_shadow_base = planned_patch.workgroup_shadow->base;
         info.workgroup_shadow_size = planned_patch.workgroup_shadow->size;

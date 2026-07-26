@@ -5,6 +5,8 @@ inline constexpr uint16_t kRdna4ExecHi = 127;
 inline constexpr uint16_t kRdna4VccLo = 106;
 inline constexpr uint16_t kRdna4VccHi = 107;
 inline constexpr uint16_t kRdna4WorkitemIdX = 0;
+// Architectural scalar-source encoding for the inline constant -1.
+inline constexpr uint16_t kScalarInlineNegativeOneOperand = 193;
 inline constexpr uint16_t kScalarOperandTtmpBase = 108;
 inline constexpr uint16_t kScalarOperandSharedBase = 235;
 inline constexpr uint16_t kTtmpRdna4GridYz = 7;
@@ -42,6 +44,22 @@ inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(gfx1
   if (!wait)
     return false;
   words.push_back(*wait);
+  return true;
+}
+[[nodiscard]] bool append_moi_flat_atomic_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
+  if (!append_moi_flat_load_wait(words, arch))
+    return false;
+  // Returning FLAT atomics have both a result dependency and a memory-side
+  // effect on gfx12. LOADCNT makes the returned value consumable; STORECNT
+  // makes the update visible before a later LDS shadow publication can expose
+  // causally ordered work to another wave. CDNA's unified wait already drains
+  // both sides.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return true;
+  const auto store_wait = instrumentation::build_s_wait_flat_store0(arch);
+  if (!store_wait)
+    return false;
+  words.push_back(*store_wait);
   return true;
 }
 [[nodiscard]] bool append_moi_lds_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
@@ -898,16 +916,15 @@ private:
 [[nodiscard]] bool append_atomic_or_u32_literal(std::vector<uint32_t> &words, uint64_t address,
                                                 uint32_t value, uint16_t scratch_vgpr,
                                                 rj_code_arch_t arch) {
-  const auto mov_address_lo = instrumentation::build_v_mov_b32_literal(
-      scratch_vgpr, static_cast<uint32_t>(address), arch);
+  const auto mov_address_lo =
+      instrumentation::build_v_mov_b32_literal(scratch_vgpr, static_cast<uint32_t>(address), arch);
   const auto mov_address_hi = instrumentation::build_v_mov_b32_literal(
       static_cast<uint16_t>(scratch_vgpr + 1u), static_cast<uint32_t>(address >> 32u), arch);
   const auto mov_value = instrumentation::build_v_mov_b32_literal(
       static_cast<uint16_t>(scratch_vgpr + 2u), value, arch);
   const auto atomic_or = instrumentation::build_flat_atomic_or_u32(
       scratch_vgpr, static_cast<uint16_t>(scratch_vgpr + 2u),
-      static_cast<uint16_t>(scratch_vgpr + 2u), /*return_old_value=*/true,
-      kRdna4ScopeDevice, arch);
+      static_cast<uint16_t>(scratch_vgpr + 2u), /*return_old_value=*/true, kRdna4ScopeDevice, arch);
   const auto wait = instrumentation::build_s_wait_flat_load0(arch);
   InstructionSequence sequence(words);
   return sequence.emit_all(mov_address_lo, mov_address_hi, mov_value, atomic_or, wait);

@@ -2015,6 +2015,7 @@ TEST(HsaHooksUnitTest, InlineTokenRenderingAdmitsOnlyStableDirectOrInheritedStat
       .dispatch_id = 0x500000006ull,
       .source_release_address = 0x4000,
       .source_release_version = 4,
+      .consumer_epoch_plus_one = 1,
   };
   EXPECT_EQ(rocjitsu::consan_moi_inline_classify_acquired_token({2, token, 2}).state,
             State::Stable);

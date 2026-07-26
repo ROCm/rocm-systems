@@ -206,6 +206,13 @@ enum class ConSanMoiInlineAtomicLookup : uint8_t {
   Collision,
 };
 
+inline constexpr uint32_t kConSanMoiInlineTokenWorkgroupMultiplier = 0x9e3779b1u;
+inline constexpr uint32_t kConSanMoiInlineTokenConsumerMultiplier = 0x85ebca6bu;
+inline constexpr uint32_t kConSanMoiInlineTokenProducerMultiplier = 0xc2b2ae35u;
+inline constexpr uint32_t kConSanMoiInlineTokenReleaseSequenceSalt = 0x9e3779b9u;
+inline constexpr uint32_t kConSanMoiInlineTokenAvalancheMultiplier0 = 0x7feb352du;
+inline constexpr uint32_t kConSanMoiInlineTokenAvalancheMultiplier1 = 0x846ca68bu;
+
 /// @brief Reference contract for the direct-mapped inline atomic table.
 [[nodiscard]] constexpr ConSanMoiInlineAtomicLookup
 consan_moi_inline_atomic_release_lookup(const ConSanMoiInlineAtomicReleaseSlot &slot,
@@ -226,10 +233,16 @@ consan_moi_inline_atomic_release_lookup(const ConSanMoiInlineAtomicReleaseSlot &
     uint32_t table_capacity, bool release_sequence = false) {
   if (table_capacity == 0 || (table_capacity & (table_capacity - 1u)) != 0)
     return 0;
-  const uint32_t mixed = workgroup_key ^ (workgroup_key >> 6u) ^ consumer_owner_id ^
-                         (consumer_owner_id >> 6u) ^ (producer_owner_id << 1u) ^
-                         (producer_owner_id >> 5u) ^
-                         (release_sequence ? 0x9e3779b9u : 0u);
+  uint32_t mixed = workgroup_key * kConSanMoiInlineTokenWorkgroupMultiplier;
+  mixed ^= consumer_owner_id * kConSanMoiInlineTokenConsumerMultiplier;
+  mixed ^= producer_owner_id * kConSanMoiInlineTokenProducerMultiplier;
+  if (release_sequence)
+    mixed ^= kConSanMoiInlineTokenReleaseSequenceSalt;
+  mixed ^= mixed >> 16u;
+  mixed *= kConSanMoiInlineTokenAvalancheMultiplier0;
+  mixed ^= mixed >> 15u;
+  mixed *= kConSanMoiInlineTokenAvalancheMultiplier1;
+  mixed ^= mixed >> 16u;
   return mixed & (table_capacity - 1u);
 }
 
@@ -258,8 +271,8 @@ struct ConSanMoiInlineAcquiredTokenClassification {
   ConSanMoiInlineAcquiredEpochTokenSlot token{};
 };
 
-/// Classifies one complete ABI-v6 token read. A token is usable only when the
-/// same nonzero even version brackets all 48 bytes of identity and provenance.
+/// Classifies one complete token read. A token is usable only when the
+/// same nonzero even version brackets all 56 bytes of identity and provenance.
 [[nodiscard]] constexpr ConSanMoiInlineAcquiredTokenClassification
 consan_moi_inline_classify_acquired_token(ConSanMoiInlineAcquiredTokenSnapshot snapshot) {
   const auto &token = snapshot.payload;
@@ -267,7 +280,8 @@ consan_moi_inline_classify_acquired_token(ConSanMoiInlineAcquiredTokenSnapshot s
                              token.producer_owner_id == 0 && token.producer_epoch_plus_one == 0 &&
                              token.workgroup_key == 0 && token.kind == 0 &&
                              token.dispatch_id == 0 && token.source_release_address == 0 &&
-                             token.source_release_version == 0 && token.reserved == 0;
+                             token.source_release_version == 0 &&
+                             token.consumer_epoch_plus_one == 0 && token.reservation_version == 0;
   if (snapshot.version_before != snapshot.version_after)
     return {.state = ConSanMoiInlineAcquiredTokenState::Changed};
   if (snapshot.version_before == 0)
@@ -282,7 +296,8 @@ consan_moi_inline_classify_acquired_token(ConSanMoiInlineAcquiredTokenSnapshot s
       token.kind > static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence) ||
       token.dispatch_id == 0 || token.source_release_address == 0 ||
       !consan_moi_inline_release_version_is_ready(token.source_release_version) ||
-      token.reserved != 0)
+      !consan_moi_inline_causal_epoch_is_valid(token.consumer_epoch_plus_one) ||
+      token.reservation_version != 0)
     return {.state = ConSanMoiInlineAcquiredTokenState::Malformed};
   return {.state = ConSanMoiInlineAcquiredTokenState::Stable, .token = token};
 }
@@ -297,7 +312,8 @@ consan_moi_inline_classify_acquired_token(ConSanMoiInlineAcquiredTokenSnapshot s
          actual.dispatch_id == expected.dispatch_id &&
          actual.source_release_address == expected.source_release_address &&
          actual.source_release_version == expected.source_release_version &&
-         actual.reserved == expected.reserved;
+         actual.consumer_epoch_plus_one == expected.consumer_epoch_plus_one &&
+         actual.reservation_version == expected.reservation_version;
 }
 
 struct ConSanMoiInlineAcquiredTokenTransactionResult {
@@ -334,14 +350,14 @@ consan_moi_inline_publish_acquired_token_transaction(
         token.kind > static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence) ||
         token.dispatch_id == 0 || token.source_release_address == 0 ||
         !consan_moi_inline_release_version_is_ready(token.source_release_version) ||
-        token.reserved != 0) {
+        !consan_moi_inline_causal_epoch_is_valid(token.consumer_epoch_plus_one) ||
+        token.reservation_version != 0) {
       result.invalid = true;
       return result;
     }
     destinations[i] = consan_moi_inline_acquired_epoch_token_slot_index(
         token.workgroup_key, token.consumer_owner_id, token.producer_owner_id, table.size(),
-        token.kind ==
-            static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence));
+        token.kind == static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence));
     for (size_t prior = 0; prior < i; ++prior) {
       if (destinations[prior] == destinations[i]) {
         result.duplicate_destination = true;
@@ -398,7 +414,8 @@ consan_moi_inline_acquired_epoch_token_lookup(const ConSanMoiInlineAcquiredEpoch
     return slot.consumer_owner_id == 0 && slot.producer_owner_id == 0 &&
                    slot.producer_epoch_plus_one == 0 && slot.workgroup_key == 0 && slot.kind == 0 &&
                    slot.dispatch_id == 0 && slot.source_release_address == 0 &&
-                   slot.source_release_version == 0 && slot.reserved == 0
+                   slot.source_release_version == 0 && slot.consumer_epoch_plus_one == 0 &&
+                   slot.reservation_version == 0
                ? ConSanMoiInlineAcquiredEpochTokenLookup::Empty
                : ConSanMoiInlineAcquiredEpochTokenLookup::Collision;
   }
@@ -411,10 +428,10 @@ consan_moi_inline_acquired_epoch_token_lookup(const ConSanMoiInlineAcquiredEpoch
       slot.kind > static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence) ||
       slot.dispatch_id == 0 || slot.source_release_address == 0 ||
       !consan_moi_inline_release_version_is_ready(slot.source_release_version) ||
-      slot.reserved != 0)
+      !consan_moi_inline_causal_epoch_is_valid(slot.consumer_epoch_plus_one) ||
+      slot.reservation_version != 0)
     return ConSanMoiInlineAcquiredEpochTokenLookup::Collision;
-  if (slot.kind ==
-          static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence) ||
+  if (slot.kind == static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence) ||
       slot.workgroup_key != workgroup_key || slot.consumer_owner_id != consumer_owner_id ||
       slot.producer_owner_id != producer_owner_id)
     return ConSanMoiInlineAcquiredEpochTokenLookup::Collision;
