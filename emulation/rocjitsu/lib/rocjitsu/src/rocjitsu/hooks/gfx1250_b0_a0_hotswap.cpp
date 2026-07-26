@@ -125,6 +125,7 @@ struct HookState {
   std::mutex lifecycle_mutex;
   CoreApiTable *core = nullptr;
   OriginalApi original;
+  std::atomic<const OriginalApi *> active_api{nullptr};
   std::atomic<VendorReaderCreate> vendor_reader{nullptr};
 
   std::mutex storage_mutex;
@@ -244,8 +245,14 @@ bool install(HsaApiTable *table) {
       original.agent_iterate_isas == nullptr || original.isa_get_info == nullptr)
     return false;
 
+  // OnUnload precedes ROCr loader destruction. A same-DSO reinstall can only
+  // occur after that runtime generation has finished, so stale backing storage
+  // is safe to release here.
+  clear_storage();
+  g_state.vendor_reader.store(nullptr, std::memory_order_release);
   g_state.core = core;
   g_state.original = original;
+  g_state.active_api.store(&g_state.original, std::memory_order_release);
   core->hsa_code_object_reader_create_from_file_fn = reader_create_from_file;
   core->hsa_code_object_reader_create_from_memory_fn = reader_create_from_memory;
   core->hsa_code_object_reader_destroy_fn = reader_destroy;
@@ -261,29 +268,29 @@ bool install(HsaApiTable *table) {
 void uninstall() {
   std::lock_guard lock(g_state.lifecycle_mutex);
   CoreApiTable *core = g_state.core;
-  const OriginalApi original = g_state.original;
-  if (core != nullptr) {
+  const OriginalApi *original = g_state.active_api.exchange(nullptr, std::memory_order_acq_rel);
+  if (core != nullptr && original != nullptr) {
     if (core->hsa_code_object_reader_create_from_file_fn == reader_create_from_file)
-      core->hsa_code_object_reader_create_from_file_fn = original.create_file;
+      core->hsa_code_object_reader_create_from_file_fn = original->create_file;
     if (core->hsa_code_object_reader_create_from_memory_fn == reader_create_from_memory)
-      core->hsa_code_object_reader_create_from_memory_fn = original.create_memory;
+      core->hsa_code_object_reader_create_from_memory_fn = original->create_memory;
     if (core->hsa_code_object_reader_destroy_fn == reader_destroy)
-      core->hsa_code_object_reader_destroy_fn = original.destroy_reader;
+      core->hsa_code_object_reader_destroy_fn = original->destroy_reader;
     if (core->hsa_executable_destroy_fn == executable_destroy)
-      core->hsa_executable_destroy_fn = original.destroy_executable;
+      core->hsa_executable_destroy_fn = original->destroy_executable;
     if (core->hsa_executable_load_agent_code_object_fn == load_agent_code_object)
-      core->hsa_executable_load_agent_code_object_fn = original.load_agent;
+      core->hsa_executable_load_agent_code_object_fn = original->load_agent;
     if (core->hsa_executable_load_program_code_object_fn == load_program_code_object)
-      core->hsa_executable_load_program_code_object_fn = original.load_program;
+      core->hsa_executable_load_program_code_object_fn = original->load_program;
     if (core->hsa_executable_load_code_object_fn == load_code_object)
-      core->hsa_executable_load_code_object_fn = original.load_deprecated;
+      core->hsa_executable_load_code_object_fn = original->load_deprecated;
     if (core->hsa_system_get_major_extension_table_fn == system_get_major_extension_table)
-      core->hsa_system_get_major_extension_table_fn = original.get_extension_table;
+      core->hsa_system_get_major_extension_table_fn = original->get_extension_table;
   }
-  clear_storage();
+  // ROCr destroys its loader after OnUnload but before closing tool DSOs.
+  // Keep code-object backing storage alive until that later DSO close.
   g_state.vendor_reader.store(nullptr, std::memory_order_release);
   g_state.core = nullptr;
-  g_state.original = {};
 }
 
 Blob copy_bytes(const void *data, size_t size) {
@@ -330,10 +337,10 @@ Blob read_file_region(hsa_file_t file, size_t offset, size_t requested_size) {
   return bytes;
 }
 
-hsa_status_t capture_reader(hsa_code_object_reader_t *reader, Blob bytes) {
+hsa_status_t capture_reader(const OriginalApi &api, hsa_code_object_reader_t *reader, Blob bytes) {
   if (bytes != nullptr && store_reader(*reader, std::move(bytes)))
     return HSA_STATUS_SUCCESS;
-  (void)g_state.original.destroy_reader(*reader);
+  (void)api.destroy_reader(*reader);
   *reader = {};
   return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 }
@@ -351,10 +358,10 @@ bool is_gfx1250(const Blob &bytes) {
 
 enum class AgentStepping { kOther, kA0, kB0OrLater, kUnknown };
 
-AgentStepping classify_agent(hsa_agent_t agent) {
-  auto *iterate = g_state.original.agent_iterate_isas;
-  auto *get_isa_info = g_state.original.isa_get_info;
-  auto *get_agent_info = g_state.original.agent_get_info;
+AgentStepping classify_agent(const OriginalApi &api, hsa_agent_t agent) {
+  auto *iterate = api.agent_iterate_isas;
+  auto *get_isa_info = api.isa_get_info;
+  auto *get_agent_info = api.agent_get_info;
   if (iterate == nullptr || get_isa_info == nullptr || get_agent_info == nullptr)
     return AgentStepping::kUnknown;
 
@@ -403,31 +410,36 @@ AgentStepping classify_agent(hsa_agent_t agent) {
   return revision == 0 ? AgentStepping::kA0 : AgentStepping::kB0OrLater;
 }
 
-bool any_agent_could_be_a0() {
-  auto *iterate = g_state.original.iterate_agents;
+bool any_agent_could_be_a0(const OriginalApi &api) {
+  auto *iterate = api.iterate_agents;
   if (iterate == nullptr)
     return true;
-  bool found = false;
+  struct IterateData {
+    const OriginalApi *api;
+    bool found = false;
+  } data{&api, false};
   const hsa_status_t status = iterate(
       [](hsa_agent_t agent, void *opaque) -> hsa_status_t {
-        const AgentStepping stepping = classify_agent(agent);
+        auto *data = static_cast<IterateData *>(opaque);
+        const AgentStepping stepping = classify_agent(*data->api, agent);
         if (stepping == AgentStepping::kA0 || stepping == AgentStepping::kUnknown) {
-          *static_cast<bool *>(opaque) = true;
+          data->found = true;
           return HSA_STATUS_INFO_BREAK;
         }
         return HSA_STATUS_SUCCESS;
       },
-      &found);
-  return found || (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK);
+      &data);
+  return data.found || (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK);
 }
 
 hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, const Blob &bytes,
                               const char *options, hsa_loaded_code_object_t *loaded,
+                              const OriginalApi &api,
                               decltype(hsa_executable_load_agent_code_object) *original_load) {
   if (bytes == nullptr)
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  auto *create = g_state.original.create_memory;
-  auto *destroy = g_state.original.destroy_reader;
+  auto *create = api.create_memory;
+  auto *destroy = api.destroy_reader;
   if (create == nullptr || destroy == nullptr || original_load == nullptr)
     return HSA_STATUS_ERROR;
 
@@ -453,48 +465,54 @@ hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, co
 hsa_status_t HSA_API reader_create_from_memory(const void *code_object, size_t size,
                                                hsa_code_object_reader_t *reader) {
   return hsa_boundary([&] {
-    auto *original = g_state.original.create_memory;
-    if (original == nullptr)
+    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    if (api == nullptr)
       return HSA_STATUS_ERROR;
+    auto *original = api->create_memory;
     const hsa_status_t status = original(code_object, size, reader);
     if (status != HSA_STATUS_SUCCESS || reader == nullptr)
       return status;
 
-    return capture_reader(reader, copy_bytes(code_object, size));
+    return capture_reader(*api, reader, copy_bytes(code_object, size));
   });
 }
 
 hsa_status_t HSA_API reader_create_from_file(hsa_file_t file, hsa_code_object_reader_t *reader) {
   return hsa_boundary([&] {
-    auto *original = g_state.original.create_file;
-    if (original == nullptr)
+    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    if (api == nullptr)
       return HSA_STATUS_ERROR;
+    auto *original = api->create_file;
     const hsa_status_t status = original(file, reader);
     if (status != HSA_STATUS_SUCCESS || reader == nullptr)
       return status;
-    return capture_reader(reader, read_file_region(file, 0, 0));
+    return capture_reader(*api, reader, read_file_region(file, 0, 0));
   });
 }
 
 hsa_status_t vendor_reader_create(hsa_file_t file, size_t offset, size_t size,
                                   hsa_code_object_reader_t *reader) {
   return hsa_boundary([&] {
+    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    if (api == nullptr)
+      return HSA_STATUS_ERROR;
     auto original = g_state.vendor_reader.load(std::memory_order_acquire);
     if (original == nullptr)
       return HSA_STATUS_ERROR;
     const hsa_status_t status = original(file, offset, size, reader);
     if (status != HSA_STATUS_SUCCESS || reader == nullptr)
       return status;
-    return capture_reader(reader, read_file_region(file, offset, size));
+    return capture_reader(*api, reader, read_file_region(file, offset, size));
   });
 }
 
 hsa_status_t HSA_API system_get_major_extension_table(uint16_t extension, uint16_t version_major,
                                                       size_t table_length, void *table) {
   return hsa_boundary([&] {
-    auto *original = g_state.original.get_extension_table;
-    if (original == nullptr)
+    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    if (api == nullptr)
       return HSA_STATUS_ERROR;
+    auto *original = api->get_extension_table;
     const hsa_status_t status = original(extension, version_major, table_length, table);
     constexpr size_t reader_field_end =
         offsetof(VendorLoaderTable, create_reader_from_file) + sizeof(VendorReaderCreate);
@@ -515,9 +533,10 @@ hsa_status_t HSA_API system_get_major_extension_table(uint16_t extension, uint16
 
 hsa_status_t HSA_API reader_destroy(hsa_code_object_reader_t reader) {
   return hsa_boundary([&] {
-    auto *original = g_state.original.destroy_reader;
-    if (original == nullptr)
+    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    if (api == nullptr)
       return HSA_STATUS_ERROR;
+    auto *original = api->destroy_reader;
     const hsa_status_t status = original(reader);
     if (status == HSA_STATUS_SUCCESS)
       erase_reader(reader);
@@ -527,9 +546,10 @@ hsa_status_t HSA_API reader_destroy(hsa_code_object_reader_t reader) {
 
 hsa_status_t HSA_API executable_destroy(hsa_executable_t executable) {
   return hsa_boundary([&] {
-    auto *original = g_state.original.destroy_executable;
-    if (original == nullptr)
+    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    if (api == nullptr)
       return HSA_STATUS_ERROR;
+    auto *original = api->destroy_executable;
     const hsa_status_t status = original(executable);
     if (status == HSA_STATUS_SUCCESS)
       release(executable);
@@ -541,11 +561,12 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
                                             hsa_code_object_reader_t reader, const char *options,
                                             hsa_loaded_code_object_t *loaded) {
   return hsa_boundary([&] {
-    auto *original_load = g_state.original.load_agent;
-    if (original_load == nullptr)
+    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    if (api == nullptr)
       return HSA_STATUS_ERROR;
+    auto *original_load = api->load_agent;
 
-    const AgentStepping stepping = classify_agent(agent);
+    const AgentStepping stepping = classify_agent(*api, agent);
     if (stepping == AgentStepping::kOther || stepping == AgentStepping::kB0OrLater)
       return original_load(executable, agent, reader, options, loaded);
     if (stepping == AgentStepping::kUnknown)
@@ -555,7 +576,7 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
     if (source == nullptr)
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
     if (!is_gfx1250(source))
-      return load_owned_bytes(executable, agent, source, options, loaded, original_load);
+      return load_owned_bytes(executable, agent, source, options, loaded, *api, original_load);
 
     // gfx1250 A0 and B0 code objects carry the same machine identity. Mode 2 is
     // intentionally a B0-input environment, so every gfx1250 object reaching an
@@ -576,7 +597,7 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
     const hsa_status_t load_status =
-        load_owned_bytes(executable, agent, translated, options, loaded, original_load);
+        load_owned_bytes(executable, agent, translated, options, loaded, *api, original_load);
     log("eager translated input_bytes=%zu output_bytes=%zu status=%d", source->size(),
         translated_size, static_cast<int>(load_status));
     return load_status;
@@ -587,10 +608,11 @@ hsa_status_t HSA_API load_program_code_object(hsa_executable_t executable,
                                               hsa_code_object_reader_t reader, const char *options,
                                               hsa_loaded_code_object_t *loaded) {
   return hsa_boundary([&] {
-    auto *original = g_state.original.load_program;
-    if (original == nullptr)
+    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    if (api == nullptr)
       return HSA_STATUS_ERROR;
-    if (any_agent_could_be_a0())
+    auto *original = api->load_program;
+    if (any_agent_could_be_a0(*api))
       return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
     return original(executable, reader, options, loaded);
   });
@@ -599,10 +621,11 @@ hsa_status_t HSA_API load_program_code_object(hsa_executable_t executable,
 hsa_status_t HSA_API load_code_object(hsa_executable_t executable, hsa_agent_t agent,
                                       hsa_code_object_t code_object, const char *options) {
   return hsa_boundary([&] {
-    auto *original = g_state.original.load_deprecated;
-    if (original == nullptr)
+    const OriginalApi *api = g_state.active_api.load(std::memory_order_acquire);
+    if (api == nullptr)
       return HSA_STATUS_ERROR;
-    const AgentStepping stepping = classify_agent(agent);
+    auto *original = api->load_deprecated;
+    const AgentStepping stepping = classify_agent(*api, agent);
     if (stepping == AgentStepping::kA0 || stepping == AgentStepping::kUnknown)
       return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
     return original(executable, agent, code_object, options);

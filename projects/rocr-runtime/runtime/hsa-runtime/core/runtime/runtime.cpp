@@ -78,6 +78,7 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/inc/exceptions.h"
 #include "core/inc/host_queue.h"
 #include "core/inc/hotswap.hpp"
+#include "core/inc/hotswap_gfx_query.hpp"
 #include "core/inc/hsa_api_trace_int.h"
 #include "core/inc/hsa_ext_amd_impl.h"
 #include "core/inc/hsa_ext_interface.h"
@@ -2582,6 +2583,7 @@ hsa_status_t Runtime::Load() {
   }
 
   flag_.Refresh();
+  hotswap::ConfigureHotswapBackend();
 
   thunkLoader_ = new ThunkLoader();
   thunkLoader_->LoadThunkApiTable();
@@ -3029,14 +3031,27 @@ void Runtime::LoadTools() {
 // CloseTools handling without dedicated runtime state.
 hsa_status_t Runtime::LoadHotswapTool() {
   if (!hotswap::IsRocjitsuHotswapEnabled()) return HSA_STATUS_SUCCESS;
+  const bool has_supported_agent =
+      std::any_of(gpu_agents_.begin(), gpu_agents_.end(), [](const Agent* agent) {
+        return hotswap::IsHotswapSupportedGfxRevision(
+            hotswap::GetAgentGfxRevision(agent->public_handle()));
+      });
+  if (!has_supported_agent) return HSA_STATUS_SUCCESS;
 
+#if !defined(__linux__)
+  if (flag().report_tool_load_failures())
+    fprintf(stderr, "rocJitsu hotswap is not supported on this platform.\n");
+  return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+#else
   constexpr char kHookLibrary[] = "libhsa_hotswap_rocjitsu.so";
   const std::string adjacent =
       os::GetAdjacentLibraryPath(reinterpret_cast<const void*>(&Runtime::Acquire), kHookLibrary);
   os::LibHandle tool = os::LoadLib(adjacent);
   if (tool == nullptr) tool = os::LoadLib(kHookLibrary);
   if (tool == nullptr) {
-    fprintf(stderr, "[hsa-runtime] failed to load '%s'\n", kHookLibrary);
+    if (flag().report_tool_load_failures())
+      fprintf(stderr, "rocJitsu hotswap failed to load \"%s\" or \"%s\".\n", adjacent.c_str(),
+              kHookLibrary);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -3044,13 +3059,15 @@ hsa_status_t Runtime::LoadHotswapTool() {
   auto on_load = reinterpret_cast<tool_init_t>(os::GetExportAddress(tool, "OnLoad"));
   if (on_load == nullptr ||
       !on_load(&hsa_api_table().hsa_api, hsa_api_table().hsa_api.version.major_id, 0, nullptr)) {
-    fprintf(stderr, "[hsa-runtime] '%s' failed to install\n", kHookLibrary);
+    if (flag().report_tool_load_failures())
+      fprintf(stderr, "rocJitsu hotswap tool \"%s\" failed to install.\n", adjacent.c_str());
     os::CloseLib(tool);
     return HSA_STATUS_ERROR;
   }
 
   tool_libs_.push_back(tool);
   return HSA_STATUS_SUCCESS;
+#endif
 }
 
 void Runtime::UnloadTools() {

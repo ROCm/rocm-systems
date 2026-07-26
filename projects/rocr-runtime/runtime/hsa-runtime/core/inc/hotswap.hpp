@@ -92,6 +92,14 @@ struct RetargetCodeObjectResult {
   bool rewrite_required = false;
 };
 
+enum class HotswapBackend {
+  kDisabled,
+  kComgr,
+  kRocjitsu,
+};
+
+void ConfigureHotswapBackend();
+HotswapBackend GetHotswapBackend();
 bool IsRocjitsuHotswapEnabled();
 
 using LoadOriginalCodeObjectFn = hsa_status_t (*)(void* context, hsa_agent_t agent,

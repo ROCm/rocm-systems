@@ -71,6 +71,7 @@ namespace {
 
 std::mutex g_retained_rewritten_elf_buffers_mutex;
 std::unordered_map<uint64_t, std::vector<OwnedElfBuffer>> g_retained_rewritten_elf_buffers;
+std::atomic<HotswapBackend> g_hotswap_backend{HotswapBackend::kComgr};
 #ifdef ROCR_HOTSWAP_TESTING
 std::atomic<bool> g_force_retarget_code_object_failure_for_testing{false};
 #endif
@@ -144,10 +145,8 @@ bool IsEnvFlagEnabled(const char* name) {
       value != "f";
 }
 
-bool IsHotswapDisabledByEnv() {
-  // HSA_HOTSWAP_ENABLE defaults to 1 (the existing COMGR path). Value 2
-  // selects the rocJITsu HSA hook, so COMGR must not also rewrite the object.
-  return IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE") || os::GetEnvVar("HSA_HOTSWAP_ENABLE") == "2";
+bool IsComgrHotswapDisabled() {
+  return g_hotswap_backend.load(std::memory_order_acquire) != HotswapBackend::kComgr;
 }
 
 bool AreEntryTrampolinesRequested() {
@@ -383,9 +382,19 @@ std::optional<RewriteDecision> DecideHotswapRewrite(const AgentGfxRevision& gfx,
 
 }  // namespace
 
-bool IsRocjitsuHotswapEnabled() {
-  return os::GetEnvVar("HSA_HOTSWAP_ENABLE") == "2" && !IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE");
+void ConfigureHotswapBackend() {
+  HotswapBackend backend = HotswapBackend::kComgr;
+  if (IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE")) {
+    backend = HotswapBackend::kDisabled;
+  } else if (os::GetEnvVar("HSA_HOTSWAP_ENABLE") == "2") {
+    backend = HotswapBackend::kRocjitsu;
+  }
+  g_hotswap_backend.store(backend, std::memory_order_release);
 }
+
+HotswapBackend GetHotswapBackend() { return g_hotswap_backend.load(std::memory_order_acquire); }
+
+bool IsRocjitsuHotswapEnabled() { return GetHotswapBackend() == HotswapBackend::kRocjitsu; }
 
 std::string GetCodeObjectIsaName(const void* elf_data, size_t elf_size) {
   ComgrApi* api = GetComgrApi();
@@ -519,7 +528,7 @@ bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* sourc
 RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
                                                OwnedElfBuffer* out_elf_buffer,
                                                size_t* out_elf_size) {
-  if (IsHotswapDisabledByEnv() || !code_object.data || code_object.size == 0) {
+  if (IsComgrHotswapDisabled() || !code_object.data || code_object.size == 0) {
     return {};
   }
 

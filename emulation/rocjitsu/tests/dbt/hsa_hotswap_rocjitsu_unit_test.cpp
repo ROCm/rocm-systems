@@ -5,9 +5,11 @@
 
 #include "hsa/hsa_api_trace_minimal.h"
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <new>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -31,6 +33,7 @@ std::vector<uint8_t> g_loaded_bytes;
 hsa_code_object_reader_t g_loaded_reader{};
 hsa_status_t g_reader_destroy_status = HSA_STATUS_SUCCESS;
 hsa_status_t g_executable_destroy_status = HSA_STATUS_SUCCESS;
+hsa_status_t g_load_agent_status = HSA_STATUS_SUCCESS;
 uint32_t g_asic_revision = 0;
 int g_reader_destroy_calls = 0;
 int g_load_agent_calls = 0;
@@ -45,6 +48,7 @@ void reset_fakes() {
   g_loaded_reader = {};
   g_reader_destroy_status = HSA_STATUS_SUCCESS;
   g_executable_destroy_status = HSA_STATUS_SUCCESS;
+  g_load_agent_status = HSA_STATUS_SUCCESS;
   g_asic_revision = 0;
   g_reader_destroy_calls = 0;
   g_load_agent_calls = 0;
@@ -121,6 +125,8 @@ hsa_status_t HSA_API fake_load_agent(hsa_executable_t, hsa_agent_t, hsa_code_obj
                                      const char *, hsa_loaded_code_object_t *loaded) {
   ++g_load_agent_calls;
   g_loaded_reader = reader;
+  if (g_load_agent_status != HSA_STATUS_SUCCESS)
+    return g_load_agent_status;
   const auto it = g_readers.find(reader.handle);
   if (it == g_readers.end())
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
@@ -225,7 +231,54 @@ TEST_F(HsaHotswapHookTest, UsesImmutableSnapshotForForwardedA0Load) {
   EXPECT_EQ(g_loaded_bytes, expected);
   EXPECT_NE(g_loaded_reader.handle, reader.handle);
   EXPECT_EQ(g_load_agent_calls, 1);
+  EXPECT_EQ(g_reader_destroy_calls, 1);
+  EXPECT_EQ(g_readers.count(g_loaded_reader.handle), 0u);
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_reader_destroy_calls, 1);
+}
+
+TEST_F(HsaHotswapHookTest, B0LoadsUseOnlyTheOriginalApi) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_asic_revision = 1;
+  const std::vector<uint8_t> source{1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
+      HSA_STATUS_SUCCESS);
+
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_loaded_reader.handle, reader.handle);
+  EXPECT_EQ(g_loaded_bytes, source);
+  EXPECT_EQ(g_reader_destroy_calls, 0);
+
+  EXPECT_EQ(
+      api.core.hsa_executable_load_program_code_object_fn(kExecutable, reader, nullptr, nullptr),
+      HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_load_program_calls, 1);
+  EXPECT_EQ(api.core.hsa_executable_load_code_object_fn(kExecutable, kA0Agent, hsa_code_object_t{1},
+                                                        nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_load_deprecated_calls, 1);
+}
+
+TEST_F(HsaHotswapHookTest, FailedLoadDestroysTransientReaderImmediately) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source{1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
+      HSA_STATUS_SUCCESS);
+
+  g_load_agent_status = HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  EXPECT_EQ(g_reader_destroy_calls, 1);
+  EXPECT_EQ(g_readers.count(g_loaded_reader.handle), 0u);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_reader_destroy_calls, 1);
 }
 
 TEST_F(HsaHotswapHookTest, FailedReaderDestroyKeepsCapturedBytes) {
@@ -273,6 +326,32 @@ TEST_F(HsaHotswapHookTest, ContainsExceptionsAtTheHsaBoundary) {
                                                         nullptr),
             HSA_STATUS_ERROR_OUT_OF_RESOURCES);
   EXPECT_EQ(g_load_deprecated_calls, 1);
+}
+
+TEST_F(HsaHotswapHookTest, CallbackApiSnapshotIsSafeDuringUnload) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  auto create = api.core.hsa_code_object_reader_create_from_memory_fn;
+  std::atomic<bool> started{false};
+  std::atomic<bool> stop{false};
+  std::atomic<int> unexpected_statuses{0};
+  const std::vector<uint8_t> source{1, 2, 3, 4};
+
+  std::thread worker([&] {
+    started.store(true, std::memory_order_release);
+    while (!stop.load(std::memory_order_acquire)) {
+      hsa_code_object_reader_t reader{};
+      const hsa_status_t status = create(source.data(), source.size(), &reader);
+      if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_ERROR)
+        unexpected_statuses.fetch_add(1, std::memory_order_relaxed);
+    }
+  });
+  while (!started.load(std::memory_order_acquire)) {
+  }
+  OnUnload();
+  stop.store(true, std::memory_order_release);
+  worker.join();
+
+  EXPECT_EQ(unexpected_statuses.load(std::memory_order_relaxed), 0);
 }
 
 } // namespace
