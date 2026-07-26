@@ -1209,7 +1209,7 @@ struct MoiOwnerScalarReferenceSummary {
                                                      rj_code_arch_t arch) {
   switch (options.moi_engine) {
   case ConSanMoiEngine::RecordReplay:
-    return static_cast<uint16_t>((options.moi_dynamic_access_records ? 6u : 3u) +
+    return static_cast<uint16_t>(6u +
                                  (candidate_requires_gfx1250_flat_offset_materialization(candidate)
                                       ? 2u
                                   : moi_load_clobbers_address(candidate) ? 1u
@@ -3422,6 +3422,23 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         "ConSan MOI could not derive automatic persistent VGPRs without an owned candidate "
         "scope");
     return false;
+  }
+  if (is_rdna4_family_arch(arch) && options.moi_engine == ConSanMoiEngine::RecordReplay) {
+    // Persistent owner/epoch state and a site-local Record/Replay probe share
+    // the ordinary VGPR file. Keep the tuple above the largest operational
+    // scratch window so a small kernel can still spill v0..vN when no
+    // liveness-dead window exists. Guest access operands may overlap that
+    // spilled window because emission recovers them from the spill frame;
+    // persistent values cannot overlap it because they must survive for the
+    // complete dispatch.
+    uint32_t scratch_floor = 0;
+    for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+      if (plan.source != ConSanRegisterAllocationSource::Unsupported &&
+          !plan.owner_descriptor_file_offsets.empty()) {
+        scratch_floor = std::max<uint32_t>(scratch_floor, plan.scratch_vgpr_count);
+      }
+    }
+    persistent_base = std::max(persistent_base, scratch_floor);
   }
   // The gfx1250 Inline local-shadow prologue uses three additional tail VGPRs
   // only while clearing with a 128-bit LDS store. They must lie above every

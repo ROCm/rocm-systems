@@ -895,6 +895,24 @@ private:
   return sequence.emit_all(mov_address_lo, mov_address_hi, mov_one, atomic_add, wait);
 }
 
+[[nodiscard]] bool append_atomic_or_u32_literal(std::vector<uint32_t> &words, uint64_t address,
+                                                uint32_t value, uint16_t scratch_vgpr,
+                                                rj_code_arch_t arch) {
+  const auto mov_address_lo = instrumentation::build_v_mov_b32_literal(
+      scratch_vgpr, static_cast<uint32_t>(address), arch);
+  const auto mov_address_hi = instrumentation::build_v_mov_b32_literal(
+      static_cast<uint16_t>(scratch_vgpr + 1u), static_cast<uint32_t>(address >> 32u), arch);
+  const auto mov_value = instrumentation::build_v_mov_b32_literal(
+      static_cast<uint16_t>(scratch_vgpr + 2u), value, arch);
+  const auto atomic_or = instrumentation::build_flat_atomic_or_u32(
+      scratch_vgpr, static_cast<uint16_t>(scratch_vgpr + 2u),
+      static_cast<uint16_t>(scratch_vgpr + 2u), /*return_old_value=*/true,
+      kRdna4ScopeDevice, arch);
+  const auto wait = instrumentation::build_s_wait_flat_load0(arch);
+  InstructionSequence sequence(words);
+  return sequence.emit_all(mov_address_lo, mov_address_hi, mov_value, atomic_or, wait);
+}
+
 [[nodiscard]] bool append_atomic_load_u32(std::vector<uint32_t> &words, uint16_t address_vgpr,
                                           uint16_t result_vgpr, rj_code_arch_t arch) {
   const auto atomic_load = instrumentation::build_flat_atomic_add_u32(
@@ -934,7 +952,7 @@ append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t c
   return append_atomic_fetch_add_one_u32(words, counter_address, result_vgpr, scratch_vgpr, arch);
 }
 
-enum class DynamicRecordStride : uint8_t { Bytes40, Bytes56, Bytes64, Bytes80 };
+enum class DynamicRecordStride : uint8_t { Bytes40, Bytes56, Bytes64, Bytes72, Bytes80 };
 
 struct DynamicRecordLayout {
   DynamicRecordStride stride;
@@ -944,7 +962,7 @@ struct DynamicRecordLayout {
 
 inline constexpr DynamicRecordLayout kDynamicBarrierRecordLayout = {DynamicRecordStride::Bytes40, 5,
                                                                     false};
-inline constexpr DynamicRecordLayout kDynamicAccessRecordLayout = {DynamicRecordStride::Bytes64, 5,
+inline constexpr DynamicRecordLayout kDynamicAccessRecordLayout = {DynamicRecordStride::Bytes72, 5,
                                                                    false};
 inline constexpr DynamicRecordLayout kDynamicAtomicRecordLayout = {DynamicRecordStride::Bytes80, 4,
                                                                    true};
@@ -953,6 +971,7 @@ inline constexpr DynamicRecordLayout kDynamicFenceRecordLayout = {DynamicRecordS
 inline constexpr DynamicRecordLayout kDynamicDiagnosticRecordLayout = {DynamicRecordStride::Bytes80,
                                                                        4, true};
 static_assert(sizeof(ConSanMoiAtomicRecord) == 80);
+static_assert(sizeof(ConSanMoiAccessRecord) == 72);
 
 [[nodiscard]] bool append_dynamic_record_address(std::vector<uint32_t> &words,
                                                  const DynamicRecordLayout &layout,
@@ -1005,11 +1024,21 @@ static_assert(sizeof(ConSanMoiAtomicRecord) == 80);
       if (!sequence.emit_all(slot_times_16, slot_times_56))
         return false;
     }
-  } else if (layout.stride == DynamicRecordStride::Bytes64) {
+  } else if (layout.stride == DynamicRecordStride::Bytes64 ||
+             layout.stride == DynamicRecordStride::Bytes72) {
     const auto slot_times_64 = instrumentation::build_v_lshlrev_b32(
         scaled_slot_vgpr, scalar_positive_inline_u32(6), slot_vgpr, arch);
     if (!sequence.emit(slot_times_64))
       return false;
+    if (layout.stride == DynamicRecordStride::Bytes72) {
+      const uint16_t tmp_vgpr = static_cast<uint16_t>(scratch_vgpr + 4u);
+      const auto slot_times_8 = instrumentation::build_v_lshlrev_b32(
+          tmp_vgpr, scalar_positive_inline_u32(3), slot_vgpr, arch);
+      const auto slot_times_72 = instrumentation::build_v_add_u32(
+          scaled_slot_vgpr, vector_source_vgpr(scaled_slot_vgpr), tmp_vgpr, arch);
+      if (!sequence.emit_all(slot_times_8, slot_times_72))
+        return false;
+    }
   }
 
   const auto address_with_slot = instrumentation::build_v_add_u32(

@@ -1877,6 +1877,29 @@ class ConSanValidationTest(unittest.TestCase):
             fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
         )
 
+    def test_gfx1201_reference_retains_repeated_d128_record_replay_detection(
+        self,
+    ) -> None:
+        path = Path(__file__).with_name(
+            "consan_validation_faults_gfx1201_reference.json"
+        )
+        workload = validation.WORKLOAD_BY_ID["d128-pressure"]
+        fault = validation._load_fault(
+            path,
+            "gfx1201",
+            workload,
+            "barrier-drop",
+            allow_reference=True,
+        )
+        policy, trials = validation._fault_trials(fault, "record-replay")
+        self.assertEqual(policy["detector"], "detected")
+        self.assertEqual(policy["oracle"], "fail")
+        self.assertEqual(trials, [{}, {}, {}, {}, {}])
+        self.assertIn(
+            "pc=0x000000000000a51c",
+            fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
+        )
+
     def test_checked_in_gfx1201_native_matvec_miss_is_runnable(self) -> None:
         path = Path(__file__).with_name(
             "consan_validation_faults_gfx1201_native_matvec_miss.json"

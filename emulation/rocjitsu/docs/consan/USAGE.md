@@ -66,11 +66,14 @@ comparison in [FLAVORS.md](FLAVORS.md).
 saved command self-describing.
 
 Record/Replay's complete static-site instrumentation is not an exhaustive
-dynamic trace. Each static slot retains its first publisher for the lifetime
-of the loaded code object, and replay compares only records from the same
-hardware dispatch generation. Repeated dispatches can therefore leave a
-mixed-generation snapshot without a useful pair. A clean replay remains
-inconclusive.
+dynamic trace. The ordinary automatic layout gives every logical access range
+a 4 hardware-dispatch × 4 wave-owner first-light grid, and replay compares only
+records from the same full hardware dispatch identity. Dispatch collision or
+workgroup collision, an in-flight publication, or an owner beyond the bounded
+grid is a typed dynamic-incomplete saturation signal; it is never a silent
+cross-dispatch or cross-workgroup reuse. Caller-owned size-derived buffers
+retain single-bank behavior with the same exact dispatch/workgroup
+qualification. A clean replay remains inconclusive.
 
 Ordinary runs do not need a register number, report-buffer size, barrier
 switch, atomic switch, or sampling setting. The hook logs

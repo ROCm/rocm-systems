@@ -2240,7 +2240,9 @@ function(rj_add_consan_hip_tests)
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
-                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=240"
+                    # Header plus one ABI-v11 access record. Keep this case at
+                    # exactly one slot so the second active lane overflows.
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=248"
                     "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_two_wave_lds_accesses"
                     "RJ_CONSAN_LOG=1"

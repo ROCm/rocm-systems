@@ -675,7 +675,7 @@ from final-code inventory rather than an engine-wide default:
 
 | Engine | Inventory-derived report requirement |
 | --- | --- |
-| Record/Replay | Header/alignment plus exact capacities for every admitted static logical access range and every enabled barrier, atomic, fence, and finite diagnostic region. Exhaustive per-lane dynamic append is excluded from the ordinary completeness contract. |
+| Record/Replay | Header/alignment plus a bounded 4 hardware-dispatch × 4 wave-owner bank grid for every admitted static logical access range, and exact capacities for every enabled barrier, atomic, fence, and finite diagnostic region. Exhaustive per-lane dynamic append is excluded from the ordinary completeness contract. |
 | Sampled | Header/alignment plus the admitted logical ranges, each range's configured bounded dynamic-window bank, paired synchronization metadata, pending-acquire state, and finite diagnostics. |
 | Inline Shadow | Header/alignment plus 16 dispatch banks, each with one versioned exact-shadow slot for every four-byte cell in the maximum declared LDS span of the owning kernels, finite diagnostics, and only the release, snapshot, and acquired-token tables required by enabled ordering instrumentation. |
 
@@ -717,7 +717,8 @@ Runtime self-checks:
 - `RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1`: stricter `record_replay` guard
   that requires host replay to emit a conflict.
 - `RJ_CONSAN_MOI_FORBID_OVERFLOW=1`: fail at teardown if an auto buffer dropped
-  access, barrier, atomic, or diagnostic records. Overflow is always printed to
+  access, barrier, atomic, or diagnostic records, or if a Record/Replay
+  dispatch/owner bank saturated. Overflow and saturation are always printed to
   stderr even without this guard.
 
 ### Record/Replay engine
@@ -730,7 +731,7 @@ Current implementation:
 - Patches every admitted supported native DS and likely-group-flat access under
   ordinary settings.
 - Emits `ConSanMoiAccessRecord` entries.
-- Supports static per-site slots by default.
+- Supports bounded dispatch/owner-banked static per-site slots by default.
 - Supports dynamic per-lane append with
   `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1`.
 - Records dynamic event indexes.
@@ -745,11 +746,29 @@ Current implementation:
 
 Important current simplifications:
 
-- A static access-record slot is claimed once and never rewritten during the
-  lifetime of the loaded code object. Its hardware dispatch ID prevents replay
-  across distinct dispatch generations, so a multi-dispatch workload can
-  retain a bounded mixed-generation snapshot with no comparable pair for a
-  particular fault.
+- An automatic static layout reserves a fixed 4 hardware-dispatch × 4
+  wave-owner grid (16 physical first-light slots) for every logical access
+  range. The low dispatch-ID bits select the dispatch bank and the canonical
+  wave owner selects the owner bank. A full-width claim token distinguishes
+  the complete hardware dispatch identity. This is an explicit storage
+  increase from one historical 64-byte record to sixteen 72-byte records
+  (1,152 bytes, or 18×) per logical range, so some formerly fitting inventories
+  now exceed the unchanged 128 MiB per-buffer ceiling.
+- A 64-bit compare-and-swap claims the bank. The payload is written before
+  an atomic `access_kind` commit consumed by host replay. A repeated publisher
+  leaves the immutable record alone only after observing that commit and
+  matching the full dispatch plus all three recorded workgroup coordinates.
+  An in-flight publication, a different dispatch or workgroup mapped to an
+  occupied slot, or an owner outside the four-owner budget sets a typed
+  `record_replay_bank_saturation` signal and makes dynamic completeness false.
+- Zero is the unpublished claim-token sentinel. The reversible token encoding
+  has one dispatch-ID preimage for zero; that identity is rejected through the
+  same fail-closed saturation path rather than silently publishing an
+  ambiguous record.
+- Caller-owned size-derived layouts remain single-bank first-light buffers.
+  They are bounded and do not gain automatic multi-dispatch retention, but
+  occupied-slot reuse is now qualified by exact dispatch and workgroup
+  identity rather than silently accepting a different workgroup.
 - Dynamic access append automatically allocates its EXEC/VCC/SCC scalar window;
   `RJ_CONSAN_MOI_EXEC_SAVE_SGPR` is an optional debug override.
 - Dynamic append can consume records quickly because it writes per active lane.
@@ -762,9 +781,9 @@ Design role:
 
 - Provide the clearest inspectable semantics with modest program overhead.
 - Serve as the reference model for Inline Shadow and Sampled behavior.
-- Report bounded-snapshot limits honestly: static slots are first-light
-  evidence rather than execution history, so a clean replay is not proof of
-  race freedom.
+- Report bounded-snapshot limits honestly: each dispatch/owner bank retains
+  first-light evidence rather than execution history, so a clean replay is not
+  proof of race freedom.
 - Preserve clarity rather than optimizing away the reference semantics.
 
 ### Inline Shadow engine
@@ -776,7 +795,7 @@ logging each access for host replay.
 Current implementation:
 
 - Uses the shared MOI report buffer.
-- Uses an inventory-sized ABI-v9 layout with 16 dispatch-selected banks, each
+- Uses an inventory-sized ABI-v11 layout with 16 dispatch-selected banks, each
   containing one versioned slot per four-byte cell in the maximum declared LDS
   span of the owning kernels, plus only the required finite diagnostic and
   ordering regions. Banking keeps unrelated concurrent dispatches off the same

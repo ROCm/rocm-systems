@@ -522,6 +522,16 @@ build_cdna3_flat_atomic_cmpswap_b32(uint16_t vaddr, uint16_t vsrc, uint16_t vdst
                                  scope, arch);
 }
 
+/// @brief Encode returning CDNA3 64-bit FLAT compare-and-swap.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_cdna3_flat_atomic_cmpswap_b64(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
+                                    bool return_old_value, uint8_t scope, rj_code_arch_t arch) {
+  if (!return_old_value || vsrc > 252 || vsrc % 2u != 0 || vdst > 254 || vdst % 2u != 0)
+    return std::nullopt;
+  return build_cdna3_flat_atomic(cdna3::kFlatAtomicCmpswapX2Flat, vaddr, vsrc, vdst,
+                                 return_old_value, scope, arch);
+}
+
 /// @brief Encode returning CDNA3 64-bit FLAT swap with even source/destination tuples.
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
 build_cdna3_flat_atomic_swap_b64(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,

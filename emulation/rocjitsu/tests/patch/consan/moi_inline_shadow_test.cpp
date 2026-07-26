@@ -4597,8 +4597,8 @@ TEST(ConSanMoi, FirstLightProbeUsesAppendedCaveWhenInlinePaddingIsUnavailable) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   ConSanOptions options = moi_options();
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.moi_owner_vgpr = 14;
+  options.moi_epoch_vgpr = 15;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 

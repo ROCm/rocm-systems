@@ -66,10 +66,12 @@ TEST(Cdna3InstrumentationBuilder, MemoryAndAtomicEncodingsMatchLlvmAndDecoder) {
   const auto add = build_cdna3_flat_atomic_add_u32(2, 4, 5, true, 2, kArch);
   const auto bit_or = build_cdna3_flat_atomic_or_u32(2, 4, 5, true, 2, kArch);
   const auto cmp_swap = build_cdna3_flat_atomic_cmpswap_b32(2, 4, 6, true, 2, kArch);
+  const auto cmp_swap64 = build_cdna3_flat_atomic_cmpswap_b64(2, 4, 6, true, 2, kArch);
   const auto swap64 = build_cdna3_flat_atomic_swap_b64(2, 4, 6, true, 2, kArch);
   const auto add64 = build_cdna3_flat_atomic_add_u64(2, 4, 6, true, 2, kArch);
   ASSERT_TRUE(buffer_inv && store && load && ds_store && ds_store64 && ds_store128 && ds_xchg &&
-              ds_xchg32 && ds_or && ds_load && add && bit_or && cmp_swap && swap64 && add64);
+              ds_xchg32 && ds_or && ds_load && add && bit_or && cmp_swap && cmp_swap64 && swap64 &&
+              add64);
   EXPECT_EQ(*buffer_inv, (std::array<uint32_t, 2>{0xe0a48000u, 0x00000000u}));
   EXPECT_EQ(*store, (std::array<uint32_t, 2>{0xdc700004u, 0x00000c0au}));
   EXPECT_EQ(*load, (std::array<uint32_t, 2>{0xdc500004u, 0x0d00000au}));
@@ -83,13 +85,14 @@ TEST(Cdna3InstrumentationBuilder, MemoryAndAtomicEncodingsMatchLlvmAndDecoder) {
   EXPECT_EQ(*add, (std::array<uint32_t, 2>{0xdd090000u, 0x05000402u}));
   EXPECT_EQ(*bit_or, (std::array<uint32_t, 2>{0xdd250000u, 0x05000402u}));
   EXPECT_EQ(*cmp_swap, (std::array<uint32_t, 2>{0xdd050000u, 0x06000402u}));
+  EXPECT_EQ(*cmp_swap64, (std::array<uint32_t, 2>{0xdd850000u, 0x06000402u}));
   EXPECT_EQ(*swap64, (std::array<uint32_t, 2>{0xdd810000u, 0x06000402u}));
   EXPECT_EQ(*add64, (std::array<uint32_t, 2>{0xdd890000u, 0x06000402u}));
 
   auto decoder = Decoder::create(kArch);
   ASSERT_NE(decoder, nullptr);
   for (const auto &[words, mnemonic] :
-       std::array<std::pair<const uint32_t *, std::string_view>, 14>{{
+       std::array<std::pair<const uint32_t *, std::string_view>, 15>{{
            {store->data(), "flat_store_dword"},
            {load->data(), "flat_load_dword"},
            {ds_store->data(), "ds_write_b32"},
@@ -102,6 +105,7 @@ TEST(Cdna3InstrumentationBuilder, MemoryAndAtomicEncodingsMatchLlvmAndDecoder) {
            {add->data(), "flat_atomic_add"},
            {bit_or->data(), "flat_atomic_or"},
            {cmp_swap->data(), "flat_atomic_cmpswap"},
+           {cmp_swap64->data(), "flat_atomic_cmpswap_x2"},
            {swap64->data(), "flat_atomic_swap_x2"},
            {add64->data(), "flat_atomic_add_x2"},
        }}) {

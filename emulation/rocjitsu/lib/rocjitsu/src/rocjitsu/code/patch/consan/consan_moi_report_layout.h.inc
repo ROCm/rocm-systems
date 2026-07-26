@@ -33,6 +33,8 @@ static_assert(sizeof(ConSanMoiCompactDiagnosticTokenMapping) == 16);
 
 struct ConSanMoiReportBufferLayout {
   uint32_t access_record_capacity = 0;
+  uint32_t record_replay_access_dispatch_bank_count = 1;
+  uint32_t record_replay_access_owner_bank_count = 1;
   uint32_t barrier_record_capacity = 0;
   uint32_t atomic_record_capacity = 0;
   uint32_t fence_record_capacity = 0;
@@ -128,6 +130,19 @@ struct ConSanMoiAutoReportInventory {
   uint64_t inline_acquired_epoch_token_count = 0;
   uint64_t inline_compact_token_mapping_count = 0;
 };
+
+/// Ordinary automatic Record/Replay retains a bounded cross-product of
+/// hardware-dispatch buckets and canonical wave owners for every logical
+/// access range. Both dimensions are powers of two so runtime selection stays
+/// cheap. This deliberately raises static access storage from one historical
+/// 64-byte record to sixteen current 72-byte records (1,152 bytes) per range.
+/// Full dispatch claim tokens detect bucket collisions, and owners outside the
+/// represented range fail closed through typed saturation.
+inline constexpr uint32_t kConSanMoiRecordReplayAccessDispatchBankCount = 4u;
+inline constexpr uint32_t kConSanMoiRecordReplayAccessOwnerBankCount = 4u;
+static_assert(kConSanMoiRecordReplayAccessDispatchBankCount *
+                  kConSanMoiRecordReplayAccessOwnerBankCount ==
+              16u);
 
 enum class ConSanMoiAutoReportPlanOutcome : uint8_t {
   Complete,

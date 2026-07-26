@@ -43,7 +43,13 @@ enum class ConSanMoiFenceEventKind : uint8_t {
 };
 
 inline constexpr uint32_t kConSanMoiReportMagic = 0x494f4d43u; // "CMOI" little-endian.
-inline constexpr uint32_t kConSanMoiReportAbiVersion = 9;
+inline constexpr uint32_t kConSanMoiReportAbiVersion = 11;
+inline constexpr uint32_t kConSanMoiReportFlagRecordReplayBankSaturated = 1u << 0u;
+inline constexpr uint64_t kConSanMoiRecordReplayClaimTokenXorMask = 0x7f4a7c159e3779b9ull;
+
+[[nodiscard]] constexpr uint64_t consan_moi_record_replay_claim_token(uint64_t dispatch_id) {
+  return dispatch_id ^ kConSanMoiRecordReplayClaimTokenXorMask;
+}
 
 struct alignas(8) ConSanMoiReportHeader {
   uint32_t magic = kConSanMoiReportMagic;
@@ -91,6 +97,14 @@ struct alignas(8) ConSanMoiReportHeader {
 };
 
 struct alignas(8) ConSanMoiAccessRecord {
+  /// Internal publication identity. Record/Replay atomically claims a bounded
+  /// dispatch/owner bank with a reversible encoding of the hardware dispatch ID.
+  /// Zero remains the unpublished sentinel; the one dispatch ID that maps to
+  /// zero fails closed through the report saturation flag. access_kind is the
+  /// atomic payload commit; occupied-slot reuse additionally requires exact
+  /// workgroup coordinates after that commit. Host replay deliberately ignores
+  /// the claim field.
+  uint64_t claim_token = 0;
   uint64_t generation = 0;
   uint32_t workgroup_x = 0;
   uint32_t workgroup_y = 0;
@@ -196,7 +210,7 @@ struct alignas(8) ConSanMoiSampledPendingAcquireSlot {
 };
 
 static_assert(sizeof(ConSanMoiReportHeader) == 176);
-static_assert(sizeof(ConSanMoiAccessRecord) == 64);
+static_assert(sizeof(ConSanMoiAccessRecord) == 72);
 static_assert(sizeof(ConSanMoiBarrierRecord) == 40);
 static_assert(sizeof(ConSanMoiAtomicRecord) == 80);
 static_assert(sizeof(ConSanMoiFenceRecord) == 56);

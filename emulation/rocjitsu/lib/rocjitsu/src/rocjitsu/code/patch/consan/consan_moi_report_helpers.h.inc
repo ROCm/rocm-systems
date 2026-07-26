@@ -512,6 +512,16 @@ consan_moi_report_layout_has_required_capacities(const ConSanMoiReportBufferLayo
             (layout.inline_exact_dispatch_bank_count - 1u)) == 0u &&
            (!track_atomics || layout.inline_atomic_release_capacity != 0);
   return layout.access_record_capacity != 0 &&
+         layout.record_replay_access_dispatch_bank_count != 0 &&
+         (layout.record_replay_access_dispatch_bank_count &
+          (layout.record_replay_access_dispatch_bank_count - 1u)) == 0u &&
+         layout.record_replay_access_owner_bank_count != 0 &&
+         (layout.record_replay_access_owner_bank_count &
+          (layout.record_replay_access_owner_bank_count - 1u)) == 0u &&
+         layout.access_record_capacity %
+                 (static_cast<uint64_t>(layout.record_replay_access_dispatch_bank_count) *
+                  layout.record_replay_access_owner_bank_count) ==
+             0u &&
          (!track_barriers || layout.barrier_record_capacity != 0) &&
          (!track_atomics || layout.atomic_record_capacity != 0);
 }

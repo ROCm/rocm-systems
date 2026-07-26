@@ -31,14 +31,21 @@ TEST(ConSanMoiAutoReportPlan, RecordReplayUsesIndependentExactRegionCounts) {
                                                .diagnostic_count = 13};
   const auto plan = plan_consan_moi_auto_report(inventory);
   ASSERT_TRUE(plan.complete());
-  EXPECT_EQ(plan.layout.access_record_capacity, 3u);
+  EXPECT_EQ(plan.layout.record_replay_access_dispatch_bank_count,
+            kConSanMoiRecordReplayAccessDispatchBankCount);
+  EXPECT_EQ(plan.layout.record_replay_access_owner_bank_count,
+            kConSanMoiRecordReplayAccessOwnerBankCount);
+  EXPECT_EQ(plan.layout.access_record_capacity, 3u * kConSanMoiRecordReplayAccessDispatchBankCount *
+                                                    kConSanMoiRecordReplayAccessOwnerBankCount);
   EXPECT_EQ(plan.layout.barrier_record_capacity, 5u);
   EXPECT_EQ(plan.layout.atomic_record_capacity, 7u);
   EXPECT_EQ(plan.layout.fence_record_capacity, 11u);
   EXPECT_EQ(plan.layout.diagnostic_capacity, 13u);
   EXPECT_EQ(plan.layout.access_records_offset, sizeof(ConSanMoiReportHeader));
   EXPECT_EQ(plan.layout.barrier_records_offset,
-            plan.layout.access_records_offset + 3 * sizeof(ConSanMoiAccessRecord));
+            plan.layout.access_records_offset + 3 * kConSanMoiRecordReplayAccessDispatchBankCount *
+                                                    kConSanMoiRecordReplayAccessOwnerBankCount *
+                                                    sizeof(ConSanMoiAccessRecord));
   EXPECT_EQ(plan.layout.atomic_records_offset,
             plan.layout.barrier_records_offset + 5 * sizeof(ConSanMoiBarrierRecord));
   EXPECT_EQ(plan.layout.fence_records_offset,
@@ -47,6 +54,81 @@ TEST(ConSanMoiAutoReportPlan, RecordReplayUsesIndependentExactRegionCounts) {
             plan.layout.fence_records_offset + 11 * sizeof(ConSanMoiFenceRecord));
   EXPECT_EQ(plan.required_bytes,
             plan.layout.diagnostic_records_offset + 13 * sizeof(ConSanMoiDiagnosticRecord));
+}
+
+TEST(ConSanMoiAutoReportPlan, RecordReplayBankGridMakesTheSizingIncreaseExplicit) {
+  constexpr uint64_t kHistoricalAccessRecordBytes = 64u;
+  constexpr uint64_t kFormerlyFittingLogicalRanges = 120000u;
+  constexpr uint64_t kBankCount =
+      static_cast<uint64_t>(kConSanMoiRecordReplayAccessDispatchBankCount) *
+      kConSanMoiRecordReplayAccessOwnerBankCount;
+  static_assert(sizeof(ConSanMoiAccessRecord) == 72u);
+  static_assert(sizeof(ConSanMoiReportHeader) +
+                    kFormerlyFittingLogicalRanges * kHistoricalAccessRecordBytes <
+                kConSanMoiAutoReportBufferCeilingBytes);
+
+  const ConSanMoiAutoReportInventory inventory{
+      .engine = ConSanMoiEngine::RecordReplay,
+      .access_range_count = kFormerlyFittingLogicalRanges,
+  };
+  const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
+
+  EXPECT_EQ(plan.outcome, ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
+  EXPECT_EQ(plan.reason, ConSanMoiAutoReportPlanReason::PerBufferCeiling);
+  EXPECT_EQ(plan.layout.access_record_capacity, kFormerlyFittingLogicalRanges * kBankCount);
+  EXPECT_EQ(plan.required_bytes, sizeof(ConSanMoiReportHeader) + kFormerlyFittingLogicalRanges *
+                                                                     kBankCount *
+                                                                     sizeof(ConSanMoiAccessRecord));
+  EXPECT_GT(plan.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
+}
+
+TEST(ConSanMoiAutoReportPlan, RecordReplayOverrideRoundTripsDispatchOwnerBankedLayout) {
+  const ConSanMoiAutoReportInventory inventory{
+      .engine = ConSanMoiEngine::RecordReplay,
+      .access_range_count = 3,
+      .barrier_event_count = 5,
+      .atomic_event_count = 7,
+      .fence_event_count = 11,
+      .diagnostic_count = 13,
+  };
+  const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(plan.complete());
+  const auto override_layout = consan_moi_auto_report_layout_override(plan);
+  ASSERT_TRUE(override_layout);
+
+  const ConSanMoiReportBufferLayout restored = consan_moi_report_layout_from_override(
+      *override_layout, ConSanMoiEngine::RecordReplay, plan.required_bytes);
+  EXPECT_TRUE(restored.valid);
+  EXPECT_EQ(restored.record_replay_access_dispatch_bank_count,
+            kConSanMoiRecordReplayAccessDispatchBankCount);
+  EXPECT_EQ(restored.record_replay_access_owner_bank_count,
+            kConSanMoiRecordReplayAccessOwnerBankCount);
+  EXPECT_EQ(restored.access_record_capacity, plan.layout.access_record_capacity);
+  EXPECT_EQ(restored.required_bytes, plan.required_bytes);
+
+  auto corrupt = *override_layout;
+  corrupt.record_replay_access_dispatch_bank_count /= 2u;
+  EXPECT_FALSE(consan_moi_report_layout_from_override(corrupt, ConSanMoiEngine::RecordReplay,
+                                                      plan.required_bytes)
+                   .valid);
+  corrupt = *override_layout;
+  corrupt.record_replay_access_owner_bank_count /= 2u;
+  EXPECT_FALSE(consan_moi_report_layout_from_override(corrupt, ConSanMoiEngine::RecordReplay,
+                                                      plan.required_bytes)
+                   .valid);
+  corrupt = *override_layout;
+  --corrupt.access_record_capacity;
+  EXPECT_FALSE(consan_moi_report_layout_from_override(corrupt, ConSanMoiEngine::RecordReplay,
+                                                      plan.required_bytes)
+                   .valid);
+}
+
+TEST(ConSanMoiAutoReportPlan, RecordReplayClaimTokenPreservesDispatchIdentityAndZeroSentinel) {
+  constexpr uint64_t dispatch_id = 0x123456789abcdef0ull;
+  constexpr uint64_t token = consan_moi_record_replay_claim_token(dispatch_id);
+  EXPECT_NE(token, 0u);
+  EXPECT_EQ(consan_moi_record_replay_claim_token(token), dispatch_id);
+  EXPECT_EQ(consan_moi_record_replay_claim_token(kConSanMoiRecordReplayClaimTokenXorMask), 0u);
 }
 
 TEST(ConSanMoiAutoReportPlan, SampledSeparatesBanksFromMultiCellWatchpoints) {
@@ -177,26 +259,31 @@ TEST(ConSanMoiAutoReportPlan, InlineExactOverrideRoundTripsDispatchBankedLayout)
 }
 
 TEST(ConSanMoiAutoReportPlan, PerBufferCeilingIsInclusiveAndRetainsRequiredBytes) {
+  constexpr uint64_t kAccessBankCount =
+      static_cast<uint64_t>(kConSanMoiRecordReplayAccessDispatchBankCount) *
+      kConSanMoiRecordReplayAccessOwnerBankCount;
   // Solve a small two-region Diophantine boundary instead of assuming the
   // header happens to divide the access-record stride.
-  uint64_t access_count = 0;
+  uint64_t physical_access_count = 0;
   uint64_t fence_count = 0;
-  for (uint64_t candidate_fences = 0; candidate_fences <= sizeof(ConSanMoiAccessRecord);
-       ++candidate_fences) {
+  for (uint64_t candidate_fences = 0;
+       candidate_fences <= sizeof(ConSanMoiAccessRecord) * kAccessBankCount; ++candidate_fences) {
     const uint64_t fence_bytes = candidate_fences * sizeof(ConSanMoiFenceRecord);
     if (sizeof(ConSanMoiReportHeader) + fence_bytes > kConSanMoiAutoReportBufferCeilingBytes)
       break;
     const uint64_t remaining =
         kConSanMoiAutoReportBufferCeilingBytes - sizeof(ConSanMoiReportHeader) - fence_bytes;
-    if (remaining % sizeof(ConSanMoiAccessRecord) == 0) {
-      access_count = remaining / sizeof(ConSanMoiAccessRecord);
+    if (remaining % sizeof(ConSanMoiAccessRecord) == 0 &&
+        (remaining / sizeof(ConSanMoiAccessRecord)) % kAccessBankCount == 0u) {
+      physical_access_count = remaining / sizeof(ConSanMoiAccessRecord);
       fence_count = candidate_fences;
       break;
     }
   }
-  ASSERT_NE(access_count, 0u);
+  ASSERT_NE(physical_access_count, 0u);
   const ConSanMoiAutoReportInventory fitting{.engine = ConSanMoiEngine::RecordReplay,
-                                             .access_range_count = access_count,
+                                             .access_range_count =
+                                                 physical_access_count / kAccessBankCount,
                                              .fence_event_count = fence_count};
   const auto accepted = plan_consan_moi_auto_report(fitting);
   ASSERT_TRUE(accepted.complete());
@@ -210,7 +297,8 @@ TEST(ConSanMoiAutoReportPlan, PerBufferCeilingIsInclusiveAndRetainsRequiredBytes
   EXPECT_EQ(rejected.reason, ConSanMoiAutoReportPlanReason::PerBufferCeiling);
   EXPECT_GT(rejected.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
   EXPECT_FALSE(rejected.layout.valid);
-  EXPECT_EQ(rejected.layout.access_record_capacity, too_large.access_range_count);
+  EXPECT_EQ(rejected.layout.access_record_capacity,
+            too_large.access_range_count * kAccessBankCount);
   EXPECT_EQ(consan_moi_auto_report_plan_outcome_name(rejected.outcome),
             "insufficient_report_capacity");
 }

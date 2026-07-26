@@ -157,12 +157,16 @@
           "family": "barrier-drop",
           "environment": {
             "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:3f3019f785822c61|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x000000000000a49c|mnemonic=s_barrier_signal|occurrence=0",
-            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:3f3019f785822c61|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000a49c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:3f3019f785822c61|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000a4a0|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:3794bb6547353d1b|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x000000000000a51c|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:3794bb6547353d1b|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000a51c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:3794bb6547353d1b|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000a520|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
           },
           "profiles": {
             "supercollider": {"detector": "not_detected", "oracle": "fail"},
-            "record-replay": {"detector": "not_detected", "oracle": "fail"},
+            "record-replay": {
+              "detector": "detected",
+              "oracle": "fail",
+              "trials": [{}, {}, {}, {}, {}]
+            },
             "sampled": {"detector": "not_detected", "oracle": "fail"},
             "inline-shadow": {"detector": "detected", "oracle": "any", "environment": {"RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"}, "unset": ["RJ_CONSAN_MOI_FORBID_OVERFLOW"]}
           }

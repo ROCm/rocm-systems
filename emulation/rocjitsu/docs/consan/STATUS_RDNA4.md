@@ -11,7 +11,12 @@ The executable authority is
 Record/Replay checkpoint is `5af82ade33`, using hook SHA-256
 `0edfe1985a2ee4512b65185a6ad625fe1160e0d080be5edd160d2a12b75dd82b`.
 Individual cells may cite another retained current-tip checkpoint in their
-artifact provenance.
+artifact provenance.  A bounded 4-dispatch × 4-owner capture candidate has
+since passed five clean and five reviewed-fault D128-pressure trials with hook
+SHA-256
+`07bba71e8826d33fa6328b2e79268df926f7d8b2e189bb2a0cf6e95635fc0839`.
+It is not yet a frozen release checkpoint: TP2 is unavailable in this workspace
+and source-matched overhead and memory requalification remain.
 
 ## Status legend
 
@@ -53,7 +58,7 @@ where other engines report logical barriers.
 | **P3 PyTorch native histogram** | 🟩 Exact oracle; clean-complete 135/135; exact drop is a qualified miss; overhead 0.966x | 🟩 Exact oracle; clean-complete 135/135 + 84/84; exact initialization drop breaks the oracle and is a qualified miss; overhead 1.041x | 🟩 Exact oracle; clean-complete 135/135 + 168/168 barrier members; exact drop is schedule-masked; overhead 1.094x | 🟩 Exact oracle; clean-complete 135/135 + 84/84; exact drop breaks the oracle and is a qualified miss; overhead 5.301x |
 | **P3 llama.cpp RMS norm** | 🟨 Exact CPU oracle; clean-complete 22/22 accesses; overhead 1.194x; reviewed effective fault pending | 🟨 Exact oracle; clean-complete 22/22 + 11/11; overhead 1.327x; reviewed effective fault pending | 🟨 Exact oracle; clean-complete 22/22 + 22/22 barrier members; overhead 1.404x; reviewed effective fault pending | 🟨 Exact oracle; clean-complete 22/22 + 11/11; overhead 1.375x; reviewed effective fault pending |
 | **P4 hip-moi D128 block attention** | 🟩 Exact oracle; clean 12/12; exact drop breaks the oracle and is a qualified miss; overhead 164.77x | 🟩 Exact oracle; clean 12/12 + 4/4; exact drop emits a diagnostic and breaks the oracle; overhead 13.216x | 🟩 Exact oracle; clean 12/12 + 8/8 barrier members; exact drop breaks the oracle and is a qualified miss; overhead 14.03x | 🟩 Exact oracle; clean 12/12 + 4/4; exact drop emits a diagnostic and breaks the oracle; overhead 12.83x |
-| **P4 hip-moi D128 pressure attention** | 🟩 Exact oracle; clean 12/12; exact drop breaks the oracle and is a qualified miss; overhead 11.25x | 🟨 Exact oracle; clean-complete 12/12 + 4/4; exact drop breaks the oracle but produced no replay diagnostic in 5/5 contained trials; overhead 17.354x | 🟩 Exact oracle; clean 12/12 + 8/8 barrier members; confirmed exact drop emits a diagnostic and breaks the oracle; overhead 18.531x | 🟩 Exact oracle; clean 12/12 + 4/4; exact drop emits a diagnostic; overhead 13.72x |
+| **P4 hip-moi D128 pressure attention** | 🟩 Exact oracle; clean 12/12; exact drop breaks the oracle and is a qualified miss; overhead 11.25x | 🟨 Exact oracle; bounded-capture candidate is clean-complete at 12/12 + 4/4 in 5/5 trials and diagnoses the exact drop with oracle failure in 5/5; frozen-tip overhead and memory requalification pending | 🟩 Exact oracle; clean 12/12 + 8/8 barrier members; confirmed exact drop emits a diagnostic and breaks the oracle; overhead 18.531x | 🟩 Exact oracle; clean 12/12 + 4/4; exact drop emits a diagnostic; overhead 13.72x |
 | **P4 hip-moi WMMA attention** | 🟩 Exact oracle; clean 12/12; exact drop breaks the oracle and is a qualified miss; overhead 158.07x | 🟩 Exact oracle; clean 12/12 + 4/4; exact drop emits a diagnostic and breaks the oracle; overhead 13.856x | 🟩 Exact oracle; clean 12/12 + 8/8 barrier members; exact drop breaks the oracle and is a qualified miss; overhead 14.50x | 🟩 Exact oracle; clean 12/12 + 4/4; exact drop emits a diagnostic and breaks the oracle; overhead 13.24x |
 | **P4 hip-moi Stream-K arrival** | 🟩 Exact oracle; clean 4/4; exact order/scope weakenings are qualified misses; overhead 558.83x | 🟩 Exact oracle; clean 4/4 + 15/15 atomics + 4/4 barriers + 16/16 fences; exact weakenings are qualified misses; overhead 48.889x | 🟩 Exact oracle; clean 4/4 + 15/15 atomics + 8/8 barrier members; exact weakenings are qualified misses; overhead 48.21x | 🟩 Exact oracle; clean 4/4 + 15/15 atomics + 4/4 barriers; exact weakenings emit diagnostics; overhead 50.93x |
 | **P4 hip-moi tree atomic-OR** | 🟩 Exact oracle; clean 4/4; exact order/scope weakenings are qualified misses; overhead 591.81x | 🟩 Exact oracle; clean 4/4 + 15/15 atomics + 4/4 barriers + 16/16 fences; order weakening is a qualified miss and scope weakening emits a replay diagnostic; overhead 50.635x | 🟩 Exact oracle; clean 4/4 + 15/15 atomics + 8/8 barrier members; exact weakenings are qualified misses; overhead 49.91x | 🟧 Exact oracle and complete 4/4 accesses + 15/15 atomics + 4/4 barriers, but repeated processes intermittently diagnose a correct owner-4 read after owner 2 |
@@ -105,17 +110,19 @@ rows pass; the reviewed-fault campaign accepts 17/19 rows.
 
 ### Sharktank TP2 family
 
-Record/Replay is clean-complete and false-positive-free in five consecutive
-trials, but the reviewed exact barrier drop is diagnosed in only three of five
-contained trials.  Static first-light slots are claimed once for the lifetime
-of a loaded code object; the hardware dispatch ID now prevents invalid
-cross-dispatch comparisons, but a multi-dispatch workload can consequently
-retain a mixed-generation snapshot with no comparable pair for the fault.
-Artifacts: `rdna4-rr-final-tp2-repeat-{2..5}-20260722` and
+The retained checkpoint is clean-complete and false-positive-free in five
+consecutive trials, but diagnoses the reviewed exact barrier drop in only three
+of five contained trials.  Artifacts: `rdna4-rr-final-tp2-repeat-{2..5}-20260722` and
 `rdna4-rr-final-fault-repeat-tp2-{2..5}-20260722`, in addition to the main
-clean and fault campaigns above.  Restore deterministic detection with a
-bounded dispatch-coherent capture design; do not revert generation filtering
-or use unbounded dynamic append as an ordinary-mode workaround.
+clean and fault campaigns above.
+
+The current candidate replaces the lifetime-static slot with a bounded
+4-dispatch × 4-owner capture while keeping direct caller layouts unchanged.
+Its host, model, emission, gfx1250, gfx942, gfx950, and physical gfx1201 D128
+gates pass.  TP2 could not be requalified because neither `iree-test-suites`
+nor `iree-test-suites-build` is present in this workspace.  Retain the
+historical 3/5 result until those dependencies are restored; do not infer TP2
+acceptance from the smaller D128 workload.
 
 ### llama.cpp quantized matvec
 
@@ -141,14 +148,24 @@ the already-disqualified pair.  Retained evidence:
 
 ### hip-moi D128 pressure attention
 
-Record/Replay remains clean-complete and the exact barrier drop breaks the
-independent oracle, but five consecutive contained trials produce no replay
-diagnostic.  This is the same dispatch-coherence limitation exposed by TP2,
-not a coverage, mutation, timeout, containment, or device-health failure.
-Artifacts: `rdna4-rr-final-faults-20260722` and
-`rdna4-rr-final-fault-repeat-pressure-{2..5}-20260722`.  Requalify this cell
-after the bounded dispatch-coherent capture work tracked in
-[FUTURE_WORK.md](FUTURE_WORK.md).
+The retained release checkpoint is clean-complete and its exact barrier drop
+breaks the independent oracle, but five consecutive contained trials produce
+no replay diagnostic.  Artifacts: `rdna4-rr-final-faults-20260722` and
+`rdna4-rr-final-fault-repeat-pressure-{2..5}-20260722`.
+
+The bounded-capture candidate closes that detection gap:
+`consan-validation-gfx1201-clean-owner-banks-final-20260725-{1..5}` is accepted
+with 12/12 accesses, 4/4 barriers, complete dynamic evidence, and no
+diagnostics;
+`consan-validation-gfx1201-fault-owner-banks-final-60s-5x-20260725` diagnoses
+the exact drop with oracle failure in all five contained trials.  Both use hook
+SHA-256
+`07bba71e8826d33fa6328b2e79268df926f7d8b2e189bb2a0cf6e95635fc0839`.
+The fault campaign retains a 60-second bound; an immediately preceding
+30-second campaign accepted four trials before one trial timed out during
+transform startup with `requested=planned=applied=0`, and both post-timeout
+health probes passed.  Keep the cell yellow until a frozen checkpoint also
+carries paired overhead and memory evidence.
 
 ### hip-moi tree atomic-OR
 

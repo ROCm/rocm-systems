@@ -32,6 +32,7 @@
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
 #include "rocjitsu/kmd/linux/rpc.h"
@@ -1005,6 +1006,24 @@ TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay
   EXPECT_EQ(g_transform_override_flavors.front(), rocjitsu::ConSanFlavor::Moi);
   ASSERT_EQ(g_transform_override_engines.size(), 1u);
   EXPECT_EQ(g_transform_override_engines.front(), rocjitsu::ConSanMoiEngine::RecordReplay);
+}
+
+TEST(HsaHooksUnitTest, RecordReplayBankSaturationIsTypedByEngine) {
+  rocjitsu::ConSanMoiReportHeader header;
+  EXPECT_EQ(rocjitsu::consan_hook::record_replay_bank_saturation_count(
+                header, rocjitsu::ConSanMoiEngine::RecordReplay),
+            0u);
+
+  header.flags |= rocjitsu::kConSanMoiReportFlagRecordReplayBankSaturated;
+  EXPECT_EQ(rocjitsu::consan_hook::record_replay_bank_saturation_count(
+                header, rocjitsu::ConSanMoiEngine::RecordReplay),
+            1u);
+  EXPECT_EQ(rocjitsu::consan_hook::record_replay_bank_saturation_count(
+                header, rocjitsu::ConSanMoiEngine::InlineShadow),
+            0u);
+  EXPECT_EQ(rocjitsu::consan_hook::record_replay_bank_saturation_count(
+                header, rocjitsu::ConSanMoiEngine::Sampled),
+            0u);
 }
 
 TEST(HsaHooksUnitTest, ConSanLegacySelectionRemainsActive) {

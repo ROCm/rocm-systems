@@ -495,7 +495,7 @@ TEST(ConSanMoi, SharedHelperPlanUsesCommonDeadWindowAcrossTwoOwners) {
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::LivenessDead);
   EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::None);
   EXPECT_EQ(plan.scratch_vgpr, 1);
-  EXPECT_EQ(plan.scratch_vgpr_count, 3u);
+  EXPECT_EQ(plan.scratch_vgpr_count, 6u);
 }
 
 TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
@@ -740,7 +740,7 @@ TEST(ConSanMoi, SharedHelperPlanGrowsEveryOwnerForOneFreshWindow) {
   const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::DescriptorGrowth);
   EXPECT_EQ(plan.scratch_vgpr, 4);
-  EXPECT_EQ(plan.required_vgpr_count, 7u);
+  EXPECT_EQ(plan.required_vgpr_count, 10u);
   ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
@@ -752,7 +752,7 @@ TEST(ConSanMoi, SharedHelperPlanGrowsEveryOwnerForOneFreshWindow) {
     const uint32_t granulated = AMDHSA_BITS_GET(
         descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
     if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1") {
-      EXPECT_EQ(granulated, 1u);
+      EXPECT_EQ(granulated, 2u);
     } else if (kernel.name == "unrelated_kernel") {
       EXPECT_EQ(granulated, kRdna4Wave64AllVgprsGranulated);
     }
@@ -778,15 +778,15 @@ TEST(ConSanMoi, SharedHelperSpillUsesOneLayoutAndGrowsEveryOwner) {
   EXPECT_EQ(result.resource_plans.front().original_private_segment_size, 20u);
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
-  EXPECT_EQ(patch.spilled_vgpr_count, 3u);
-  EXPECT_EQ(patch.required_private_segment_size, 44u);
+  EXPECT_EQ(patch.spilled_vgpr_count, 6u);
+  EXPECT_EQ(patch.required_private_segment_size, 56u);
   ASSERT_EQ(patch.owner_descriptor_file_offsets.size(), 2u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const std::vector<uint32_t> expected_save =
-      expected_vgpr_spill_words(/*base=*/1, /*count=*/3, /*restore=*/false, /*slot_base=*/32);
+      expected_vgpr_spill_words(/*base=*/1, /*count=*/6, /*restore=*/false, /*slot_base=*/32);
   ASSERT_FALSE(expected_save.empty());
   const std::vector<uint32_t> trampoline_words =
       text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
@@ -798,7 +798,7 @@ TEST(ConSanMoi, SharedHelperSpillUsesOneLayoutAndGrowsEveryOwner) {
     std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
                 sizeof(descriptor));
     if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1") {
-      EXPECT_EQ(descriptor.private_segment_fixed_size, 44u);
+      EXPECT_EQ(descriptor.private_segment_fixed_size, 56u);
     } else if (kernel.name == "unrelated_kernel") {
       EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
     }
@@ -830,8 +830,11 @@ TEST(ConSanMoi, IndirectSharedHelperSpillUsesEveryRecoveredOwner) {
 
 TEST(ConSanMoi, ScopedSpillPlanningExcludesUnselectedFullVgprCandidate) {
   TwoKernelSharedFixtureOptions fixture;
-  fixture.first_vgpr_granulated = 0;
-  fixture.second_vgpr_granulated = 0;
+  // Keep the selected owners large enough for the six-VGPR static
+  // Record/Replay spill window. The unrelated full-VGPR candidate remains the
+  // part this test proves is excluded from scoped planning.
+  fixture.first_vgpr_granulated = 1;
+  fixture.second_vgpr_granulated = 1;
   fixture.first_private_bytes = 20;
   fixture.unrelated_has_lds = true;
   const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
@@ -846,7 +849,7 @@ TEST(ConSanMoi, ScopedSpillPlanningExcludesUnselectedFullVgprCandidate) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.patches.size(), 1u);
-  EXPECT_EQ(result.patches.front().required_private_segment_size, 44u);
+  EXPECT_EQ(result.patches.front().required_private_segment_size, 56u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().text_offset, result.patches.front().anchor_offset);
   EXPECT_LT(result.resource_plans.front().required_vgpr_count, 256u);
@@ -858,7 +861,7 @@ TEST(ConSanMoi, ScopedSpillPlanningExcludesUnselectedFullVgprCandidate) {
     std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
                 sizeof(descriptor));
     if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1") {
-      EXPECT_EQ(descriptor.private_segment_fixed_size, 44u);
+      EXPECT_EQ(descriptor.private_segment_fixed_size, 56u);
     } else if (kernel.name == "unrelated_kernel") {
       EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
     }

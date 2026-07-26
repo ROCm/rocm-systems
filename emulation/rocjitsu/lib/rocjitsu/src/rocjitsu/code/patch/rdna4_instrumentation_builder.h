@@ -634,6 +634,25 @@ build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uin
                                  static_cast<uint32_t>(vaddr)};
 }
 
+/// @brief Encode RDNA4 `flat_atomic_cmpswap_b64 v[vdst:vdst+1],
+///        v[vaddr:vaddr+1], v[vsrc:vsrc+3]` with
+///        `v[vsrc:vsrc+1]=new_value` and
+///        `v[vsrc+2:vsrc+3]=compare_value`.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+build_flat_atomic_cmpswap_b64_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
+                                              bool return_old_value, uint8_t scope,
+                                              rj_code_arch_t arch) {
+  if (!is_rdna4_family_arch(arch) || vaddr > 254 || vsrc > 252 || vdst > 254 || scope > 3)
+    return std::nullopt;
+  constexpr uint32_t kRdna4AtomicReturnTh = 1;
+  const uint32_t th = return_old_value ? kRdna4AtomicReturnTh : 0u;
+  return std::array<uint32_t, 3>{0xEC108000u | flat_no_saddr_encoding(arch),
+                                 static_cast<uint32_t>(vdst) |
+                                     (static_cast<uint32_t>(scope) << 18u) | (th << 20u) |
+                                     (static_cast<uint32_t>(vsrc) << 23u),
+                                 static_cast<uint32_t>(vaddr)};
+}
+
 /// @brief Encode RDNA4 `flat_atomic_swap_b64 v[vdst:vdst+1], v[vaddr:vaddr+1],
 ///        v[vsrc:vsrc+1]`.
 ///

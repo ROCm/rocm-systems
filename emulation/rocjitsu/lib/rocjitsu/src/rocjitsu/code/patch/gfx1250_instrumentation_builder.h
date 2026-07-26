@@ -142,6 +142,15 @@ build_gfx1250_flat_atomic_cmpswap_b32(uint16_t vaddr, uint16_t vsrc, uint16_t vd
 }
 
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+build_gfx1250_flat_atomic_cmpswap_b64(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
+                                      bool return_old_value, uint8_t scope, rj_code_arch_t arch) {
+  if (vaddr > 254 || vsrc > 252 || vdst > 254)
+    return std::nullopt;
+  return build_gfx1250_flat_atomic<gfx1250::kFlatAtomicCmpswapB64Vflat>(
+      vaddr, vsrc, vdst, return_old_value, scope, arch);
+}
+
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
 build_gfx1250_flat_atomic_swap_b64(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
                                    bool return_old_value, uint8_t scope, rj_code_arch_t arch) {
   if (vaddr > 254 || vsrc > 254 || vdst > 254)

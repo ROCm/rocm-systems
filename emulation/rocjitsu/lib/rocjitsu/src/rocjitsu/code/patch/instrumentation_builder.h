@@ -704,6 +704,22 @@ build_flat_atomic_cmpswap_b32(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool
 }
 
 [[nodiscard]] inline std::optional<std::vector<uint32_t>>
+build_flat_atomic_cmpswap_b64(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool return_old_value,
+                              uint8_t scope, rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return copy_words(
+        build_gfx1250_flat_atomic_cmpswap_b64(vaddr, vsrc, vdst, return_old_value, scope, arch));
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+    return copy_words(
+        build_cdna3_flat_atomic_cmpswap_b64(vaddr, vsrc, vdst, return_old_value, scope, arch));
+  return arch == ROCJITSU_CODE_ARCH_CDNA4
+             ? copy_words(build_cdna4_flat_atomic_cmpswap_b64(vaddr, vsrc, vdst, return_old_value,
+                                                              scope, arch))
+             : copy_words(rocjitsu::build_flat_atomic_cmpswap_b64_vaddr_vsrc_vdst(
+                   vaddr, vsrc, vdst, return_old_value, scope, arch));
+}
+
+[[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_flat_atomic_swap_b64(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool return_old_value,
                            uint8_t scope, rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_GFX1250)

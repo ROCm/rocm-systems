@@ -1544,6 +1544,7 @@ public:
         moi_report_summary.dropped_atomic_record_count +
         moi_report_summary.dropped_fence_record_count +
         moi_report_summary.dropped_diagnostic_record_count +
+        moi_report_summary.record_replay_bank_saturation_count +
         moi_report_summary.sampled_dropped_window_count +
         moi_report_summary.sampled_unusable_snapshot_count() +
         moi_report_summary.exact_unusable_snapshot_count() +
@@ -1569,6 +1570,7 @@ public:
         "static_complete=%s dynamic_complete=%s applicable_code_objects=%llu "
         "incomplete_code_objects=%llu access=%llu/%llu barrier=%llu/%llu "
         "atomic=%llu/%llu fence=%llu/%llu visible_evidence=%llu dynamic_incomplete=%llu "
+        "record_replay_bank_saturation=%llu "
         "replay_unsupported_access=%llu replay_unsupported_atomics=%llu "
         "replay_unsupported_fences=%llu replay_metadata_full=%llu\n",
         static_coverage_summary.applicable_code_objects != 0 ? "true" : "false",
@@ -1586,6 +1588,7 @@ public:
         static_cast<unsigned long long>(static_coverage_summary.supported_fence),
         static_cast<unsigned long long>(visible_evidence_count),
         static_cast<unsigned long long>(dynamic_incomplete_count),
+        static_cast<unsigned long long>(moi_report_summary.record_replay_bank_saturation_count),
         static_cast<unsigned long long>(moi_report_summary.replay_unsupported_access_count),
         static_cast<unsigned long long>(moi_report_summary.replay_unsupported_atomic_count),
         static_cast<unsigned long long>(moi_report_summary.replay_unsupported_fence_count),
@@ -1611,6 +1614,16 @@ public:
           static_cast<unsigned long long>(moi_report_summary.dropped_diagnostic_record_count),
           static_cast<unsigned long long>(moi_report_summary.sampled_dropped_window_count),
           static_cast<unsigned long long>(moi_report_summary.buffer_count));
+      std::fflush(stderr);
+      if (moi_forbid_overflow)
+        std::_Exit(90);
+    }
+    if (moi_report_summary.record_replay_bank_saturation_count != 0) {
+      std::fprintf(
+          stderr,
+          "[rocjitsu-dbi-hooks] ConSan MOI Record/Replay dispatch/owner-bank saturation: "
+          "%llu auto report buffer(s) reused a bounded access-record bank\n",
+          static_cast<unsigned long long>(moi_report_summary.record_replay_bank_saturation_count));
       std::fflush(stderr);
       if (moi_forbid_overflow)
         std::_Exit(90);

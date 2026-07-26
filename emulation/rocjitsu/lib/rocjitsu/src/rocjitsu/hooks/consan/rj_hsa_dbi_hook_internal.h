@@ -666,6 +666,7 @@ struct AutoMoiReportSummary {
   uint64_t dropped_atomic_record_count = 0;
   uint64_t dropped_fence_record_count = 0;
   uint64_t dropped_diagnostic_record_count = 0;
+  uint64_t record_replay_bank_saturation_count = 0;
   uint64_t replay_conflict_count = 0;
   uint64_t replay_diagnostic_count = 0;
   uint64_t replay_dropped_access_count = 0;
@@ -708,6 +709,14 @@ struct AutoMoiReportSummary {
            token_malformed_snapshot_count;
   }
 };
+
+[[nodiscard]] constexpr uint64_t
+record_replay_bank_saturation_count(const ConSanMoiReportHeader &header, ConSanMoiEngine engine) {
+  return engine == ConSanMoiEngine::RecordReplay &&
+                 (header.flags & kConSanMoiReportFlagRecordReplayBankSaturated) != 0u
+             ? 1u
+             : 0u;
+}
 
 void reject_auto_moi_report_plan(uint64_t reader, uint64_t required_size, uint64_t configured_cap,
                                  std::string_view reason);

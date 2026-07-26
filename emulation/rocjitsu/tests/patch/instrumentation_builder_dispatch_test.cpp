@@ -146,6 +146,28 @@ TEST(InstrumentationBuilderDispatch, VariableLengthRecipesSelectTargetBackend) {
   EXPECT_EQ(*gfx1250_bounds, (std::vector<uint32_t>{0x7C9806FFu, 0x00003318u}));
 }
 
+TEST(InstrumentationBuilderDispatch, CompareSwapB64SelectsEveryAdmittedBackend) {
+  const auto rdna = ib::build_flat_atomic_cmpswap_b64(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto gfx1250 =
+      ib::build_flat_atomic_cmpswap_b64(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto cdna3 =
+      ib::build_flat_atomic_cmpswap_b64(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_CDNA3);
+  const auto cdna4 =
+      ib::build_flat_atomic_cmpswap_b64(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto expected_rdna =
+      build_flat_atomic_cmpswap_b64_vaddr_vsrc_vdst(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto expected_gfx1250 =
+      build_gfx1250_flat_atomic_cmpswap_b64(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_TRUE(rdna && gfx1250 && cdna3 && cdna4 && expected_rdna && expected_gfx1250);
+  EXPECT_EQ(*rdna, std::vector<uint32_t>(expected_rdna->begin(), expected_rdna->end()));
+  EXPECT_EQ(*gfx1250, std::vector<uint32_t>(expected_gfx1250->begin(), expected_gfx1250->end()));
+  EXPECT_EQ(cdna3->size(), 2u);
+  EXPECT_EQ(cdna4->size(), 2u);
+  EXPECT_FALSE(ib::build_flat_atomic_cmpswap_b64(8, 11, 10, true, 2, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_FALSE(ib::build_flat_atomic_cmpswap_b64(8, 11, 10, true, 2, ROCJITSU_CODE_ARCH_CDNA4));
+}
+
 TEST(InstrumentationBuilderDispatch, VariableLengthRecipesFailClosed) {
   EXPECT_FALSE(ib::build_v_add_u32_literal(3, 0x12345678u, 3, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(ib::build_v_add_u32_literal(3, 3, 0x12345678u, 3, ROCJITSU_CODE_ARCH_CDNA4));

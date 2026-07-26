@@ -1957,7 +1957,7 @@ static_assert(alignof(ConSanMoiBarrierRecord) == 8);
 static_assert(alignof(ConSanMoiAtomicRecord) == 8);
 static_assert(alignof(ConSanMoiInlineAtomicReleaseSlot) == 8);
 static_assert(alignof(ConSanMoiDiagnosticRecord) == 8);
-static_assert(sizeof(ConSanMoiAccessRecord) == 64);
+static_assert(sizeof(ConSanMoiAccessRecord) == 72);
 static_assert(sizeof(ConSanMoiBarrierRecord) == 40);
 static_assert(sizeof(ConSanMoiAtomicRecord) == 80);
 static_assert(sizeof(ConSanMoiFenceRecord) == 56);
@@ -1970,11 +1970,24 @@ static_assert(sizeof(ConSanMoiRecordReplayCompactEvent) == 32);
 static_assert(sizeof(ConSanMoiRecordReplayCaptureWindow) == 40);
 
 std::vector<uint32_t> make_padded_moi_first_light_text(uint32_t word0, uint32_t word1) {
-  std::vector<uint32_t> text_words(170, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  // Leave enough real padding for the complete dispatch/workgroup-qualified
+  // publication protocol so tests that exercise in-place lowering do not
+  // accidentally become trampoline tests as the safety contract grows.
+  std::vector<uint32_t> text_words(320, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   text_words[0] = word0;
   text_words[1] = word1;
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
   return text_words;
+}
+
+void expect_bounded_static_record_replay_probe_size(uint64_t probe_bytes) {
+  constexpr uint64_t kMinimumUsefulProbeBytes = 64u * sizeof(uint32_t);
+  constexpr uint64_t kMaximumProbeBytes = 1280u;
+  EXPECT_EQ(probe_bytes % sizeof(uint32_t), 0u);
+  EXPECT_GE(probe_bytes, kMinimumUsefulProbeBytes)
+      << "the static probe must contain the complete claim, payload, and commit protocol";
+  EXPECT_LT(probe_bytes, kMaximumProbeBytes)
+      << "the bounded static Record/Replay probe must remain below 1.25 KiB";
 }
 
 void expect_moi_first_light_width(uint32_t word0, uint32_t word1, uint32_t expected_width_bits,
@@ -1997,7 +2010,7 @@ void expect_moi_first_light_width(uint32_t word0, uint32_t word1, uint32_t expec
   EXPECT_EQ(result.moi_candidates.front().width_bits, expected_width_bits);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiAccessRecordStore);
-  EXPECT_EQ(result.patches.front().original_size, 116u * sizeof(uint32_t));
+  expect_bounded_static_record_replay_probe_size(result.patches.front().original_size);
 }
 
 std::vector<uint32_t> make_padded_moi_flat_first_light_function_words() {
@@ -2007,7 +2020,7 @@ std::vector<uint32_t> make_padded_moi_flat_first_light_function_words() {
       0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
       0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
   };
-  function_words.resize(180, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  function_words.resize(330, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   function_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
   return function_words;
 }

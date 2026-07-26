@@ -72,38 +72,40 @@ void alias_unused_regions(ConSanMoiReportBufferLayout &layout, size_t offset) {
 
 [[nodiscard]] ConSanMoiReportLayoutOverride
 make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &layout) {
-  return {.engine = engine,
-          .access_record_capacity = layout.access_record_capacity,
-          .barrier_record_capacity = layout.barrier_record_capacity,
-          .atomic_record_capacity = layout.atomic_record_capacity,
-          .fence_record_capacity = layout.fence_record_capacity,
-          .diagnostic_capacity = layout.diagnostic_capacity,
-          .exact_shadow_entry_capacity = layout.exact_shadow_entry_capacity,
-          .inline_exact_dispatch_bank_count = layout.inline_exact_dispatch_bank_count,
-          .inline_atomic_release_capacity = layout.inline_atomic_release_capacity,
-          .inline_acquired_epoch_token_capacity = layout.inline_acquired_epoch_token_capacity,
-          .inline_causal_snapshot_capacity = layout.inline_causal_snapshot_capacity,
-          .inline_compact_token_mapping_capacity = layout.inline_compact_token_mapping_capacity,
-          .sampled_watchpoint_capacity = layout.sampled_watchpoint_capacity,
-          .sampled_causal_window_capacity = layout.sampled_causal_window_capacity,
-          .sampled_sync_metadata_capacity = layout.sampled_sync_metadata_capacity,
-          .sampled_pending_acquire_capacity = layout.sampled_pending_acquire_capacity,
-          .access_records_offset = layout.access_records_offset,
-          .barrier_records_offset = layout.barrier_records_offset,
-          .atomic_records_offset = layout.atomic_records_offset,
-          .fence_records_offset = layout.fence_records_offset,
-          .diagnostic_records_offset = layout.diagnostic_records_offset,
-          .exact_shadow_entries_offset = layout.exact_shadow_entries_offset,
-          .inline_atomic_release_slots_offset = layout.inline_atomic_release_slots_offset,
-          .inline_acquired_epoch_token_slots_offset =
-              layout.inline_acquired_epoch_token_slots_offset,
-          .inline_causal_snapshots_offset = layout.inline_causal_snapshots_offset,
-          .inline_compact_token_mappings_offset = layout.inline_compact_token_mappings_offset,
-          .sampled_watchpoints_offset = layout.sampled_watchpoints_offset,
-          .sampled_causal_windows_offset = layout.sampled_causal_windows_offset,
-          .sampled_sync_metadata_offset = layout.sampled_sync_metadata_offset,
-          .sampled_pending_acquires_offset = layout.sampled_pending_acquires_offset,
-          .required_bytes = layout.required_bytes};
+  return {
+      .engine = engine,
+      .access_record_capacity = layout.access_record_capacity,
+      .record_replay_access_dispatch_bank_count = layout.record_replay_access_dispatch_bank_count,
+      .record_replay_access_owner_bank_count = layout.record_replay_access_owner_bank_count,
+      .barrier_record_capacity = layout.barrier_record_capacity,
+      .atomic_record_capacity = layout.atomic_record_capacity,
+      .fence_record_capacity = layout.fence_record_capacity,
+      .diagnostic_capacity = layout.diagnostic_capacity,
+      .exact_shadow_entry_capacity = layout.exact_shadow_entry_capacity,
+      .inline_exact_dispatch_bank_count = layout.inline_exact_dispatch_bank_count,
+      .inline_atomic_release_capacity = layout.inline_atomic_release_capacity,
+      .inline_acquired_epoch_token_capacity = layout.inline_acquired_epoch_token_capacity,
+      .inline_causal_snapshot_capacity = layout.inline_causal_snapshot_capacity,
+      .inline_compact_token_mapping_capacity = layout.inline_compact_token_mapping_capacity,
+      .sampled_watchpoint_capacity = layout.sampled_watchpoint_capacity,
+      .sampled_causal_window_capacity = layout.sampled_causal_window_capacity,
+      .sampled_sync_metadata_capacity = layout.sampled_sync_metadata_capacity,
+      .sampled_pending_acquire_capacity = layout.sampled_pending_acquire_capacity,
+      .access_records_offset = layout.access_records_offset,
+      .barrier_records_offset = layout.barrier_records_offset,
+      .atomic_records_offset = layout.atomic_records_offset,
+      .fence_records_offset = layout.fence_records_offset,
+      .diagnostic_records_offset = layout.diagnostic_records_offset,
+      .exact_shadow_entries_offset = layout.exact_shadow_entries_offset,
+      .inline_atomic_release_slots_offset = layout.inline_atomic_release_slots_offset,
+      .inline_acquired_epoch_token_slots_offset = layout.inline_acquired_epoch_token_slots_offset,
+      .inline_causal_snapshots_offset = layout.inline_causal_snapshots_offset,
+      .inline_compact_token_mappings_offset = layout.inline_compact_token_mappings_offset,
+      .sampled_watchpoints_offset = layout.sampled_watchpoints_offset,
+      .sampled_causal_windows_offset = layout.sampled_causal_windows_offset,
+      .sampled_sync_metadata_offset = layout.sampled_sync_metadata_offset,
+      .sampled_pending_acquires_offset = layout.sampled_pending_acquires_offset,
+      .required_bytes = layout.required_bytes};
 }
 
 [[nodiscard]] bool layout_override_matches(const ConSanMoiReportLayoutOverride &override_layout,
@@ -111,6 +113,10 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
   const ConSanMoiReportLayoutOverride expected =
       make_layout_override(override_layout.engine, layout);
   return override_layout.access_record_capacity == expected.access_record_capacity &&
+         override_layout.record_replay_access_dispatch_bank_count ==
+             expected.record_replay_access_dispatch_bank_count &&
+         override_layout.record_replay_access_owner_bank_count ==
+             expected.record_replay_access_owner_bank_count &&
          override_layout.barrier_record_capacity == expected.barrier_record_capacity &&
          override_layout.atomic_record_capacity == expected.atomic_record_capacity &&
          override_layout.fence_record_capacity == expected.fence_record_capacity &&
@@ -178,7 +184,17 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
 [[nodiscard]] bool plan_record_replay(const ConSanMoiAutoReportInventory &inventory,
                                       ConSanMoiAutoReportPlan &plan, uint64_t &cursor) {
   auto &layout = plan.layout;
-  if (!checked_capacity(inventory.access_range_count, layout.access_record_capacity) ||
+  layout.record_replay_access_dispatch_bank_count = kConSanMoiRecordReplayAccessDispatchBankCount;
+  layout.record_replay_access_owner_bank_count = kConSanMoiRecordReplayAccessOwnerBankCount;
+  uint64_t access_record_count = 0;
+  if (!checked_multiply(inventory.access_range_count,
+                        layout.record_replay_access_dispatch_bank_count, access_record_count) ||
+      !checked_multiply(access_record_count, layout.record_replay_access_owner_bank_count,
+                        access_record_count)) {
+    plan.reason = ConSanMoiAutoReportPlanReason::ByteSizeOverflow;
+    return false;
+  }
+  if (!checked_capacity(access_record_count, layout.access_record_capacity) ||
       !checked_capacity(inventory.barrier_event_count, layout.barrier_record_capacity) ||
       !checked_capacity(inventory.atomic_event_count, layout.atomic_record_capacity) ||
       !checked_capacity(inventory.fence_event_count, layout.fence_record_capacity) ||
@@ -186,7 +202,7 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
     plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
     return false;
   }
-  return append_region(inventory.access_range_count, sizeof(ConSanMoiAccessRecord),
+  return append_region(access_record_count, sizeof(ConSanMoiAccessRecord),
                        alignof(ConSanMoiAccessRecord), cursor, layout.access_records_offset) &&
          append_region(inventory.barrier_event_count, sizeof(ConSanMoiBarrierRecord),
                        alignof(ConSanMoiBarrierRecord), cursor, layout.barrier_records_offset) &&
@@ -427,13 +443,27 @@ consan_moi_report_layout_from_override(const ConSanMoiReportLayoutOverride &over
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = engine;
   switch (engine) {
-  case ConSanMoiEngine::RecordReplay:
-    inventory.access_range_count = override_layout.access_record_capacity;
+  case ConSanMoiEngine::RecordReplay: {
+    if (override_layout.record_replay_access_dispatch_bank_count == 0u ||
+        override_layout.record_replay_access_dispatch_bank_count !=
+            kConSanMoiRecordReplayAccessDispatchBankCount ||
+        override_layout.record_replay_access_owner_bank_count == 0u ||
+        override_layout.record_replay_access_owner_bank_count !=
+            kConSanMoiRecordReplayAccessOwnerBankCount) {
+      return {};
+    }
+    const uint64_t bank_count =
+        static_cast<uint64_t>(override_layout.record_replay_access_dispatch_bank_count) *
+        override_layout.record_replay_access_owner_bank_count;
+    if (override_layout.access_record_capacity % bank_count)
+      return {};
+    inventory.access_range_count = override_layout.access_record_capacity / bank_count;
     inventory.barrier_event_count = override_layout.barrier_record_capacity;
     inventory.atomic_event_count = override_layout.atomic_record_capacity;
     inventory.fence_event_count = override_layout.fence_record_capacity;
     inventory.diagnostic_count = override_layout.diagnostic_capacity;
     break;
+  }
   case ConSanMoiEngine::Sampled:
     inventory.diagnostic_count = override_layout.diagnostic_capacity;
     inventory.sampled_range_bank_count = override_layout.sampled_causal_window_capacity;

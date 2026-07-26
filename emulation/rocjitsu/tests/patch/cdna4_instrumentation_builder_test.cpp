@@ -230,26 +230,29 @@ TEST(Cdna4InstrumentationBuilder, DsAndFlatAtomicsMatchLlvmAndDecoder) {
   const auto add = build_cdna4_flat_atomic_add_u32(2, 4, 5, true, 2, kArch);
   const auto bit_or = build_cdna4_flat_atomic_or_u32(2, 4, 5, true, 2, kArch);
   const auto cmp_swap = build_cdna4_flat_atomic_cmpswap_b32(2, 4, 6, true, 2, kArch);
+  const auto cmp_swap64 = build_cdna4_flat_atomic_cmpswap_b64(2, 4, 6, true, 2, kArch);
   const auto swap64 = build_cdna4_flat_atomic_swap_b64(2, 4, 6, true, 2, kArch);
   const auto add64 = build_cdna4_flat_atomic_add_u64(2, 4, 6, true, 2, kArch);
-  ASSERT_TRUE(ds_store && ds_xchg && add && bit_or && cmp_swap && swap64 && add64);
+  ASSERT_TRUE(ds_store && ds_xchg && add && bit_or && cmp_swap && cmp_swap64 && swap64 && add64);
   EXPECT_EQ(*ds_store, (std::array<uint32_t, 2>{0xd81a0004u, 0x00000302u}));
   EXPECT_EQ(*ds_xchg, (std::array<uint32_t, 2>{0xd8da0004u, 0x04000602u}));
   EXPECT_EQ(*add, (std::array<uint32_t, 2>{0xdd090000u, 0x05000402u}));
   EXPECT_EQ(*bit_or, (std::array<uint32_t, 2>{0xdd250000u, 0x05000402u}));
   EXPECT_EQ(*cmp_swap, (std::array<uint32_t, 2>{0xdd050000u, 0x06000402u}));
+  EXPECT_EQ(*cmp_swap64, (std::array<uint32_t, 2>{0xdd850000u, 0x06000402u}));
   EXPECT_EQ(*swap64, (std::array<uint32_t, 2>{0xdd810000u, 0x06000402u}));
   EXPECT_EQ(*add64, (std::array<uint32_t, 2>{0xdd890000u, 0x06000402u}));
 
   auto decoder = Decoder::create(kArch);
   ASSERT_NE(decoder, nullptr);
   for (const auto &[words, mnemonic] :
-       std::array<std::pair<const uint32_t *, std::string_view>, 7>{{
+       std::array<std::pair<const uint32_t *, std::string_view>, 8>{{
            {ds_store->data(), "ds_write_b32"},
            {ds_xchg->data(), "ds_wrxchg_rtn_b64"},
            {add->data(), "flat_atomic_add"},
            {bit_or->data(), "flat_atomic_or"},
            {cmp_swap->data(), "flat_atomic_cmpswap"},
+           {cmp_swap64->data(), "flat_atomic_cmpswap_x2"},
            {swap64->data(), "flat_atomic_swap_x2"},
            {add64->data(), "flat_atomic_add_x2"},
        }}) {

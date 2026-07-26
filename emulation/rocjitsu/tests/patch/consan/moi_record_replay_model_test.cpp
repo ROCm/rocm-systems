@@ -1702,7 +1702,9 @@ TEST(ConSanMoi, RecordReplaySkipsOnlyCompletelyUnpublishedStaticSlots) {
   EXPECT_EQ(replay.unsupported_access_count, 0u);
   EXPECT_TRUE(replay.conflict);
 
-  records[2].instruction_offset = 4;
+  // A claimed-but-not-committed bank is not an unpublished zero slot. Treat
+  // it as malformed/incomplete evidence instead of silently dropping it.
+  records[2].claim_token = 1;
   const ConSanMoiRecordReplayResult malformed =
       consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
   EXPECT_EQ(malformed.processed_access_count, 3u);

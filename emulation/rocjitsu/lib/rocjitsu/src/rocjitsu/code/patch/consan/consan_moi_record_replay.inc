@@ -22,6 +22,15 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       options, options.moi_track_barriers, options.moi_track_atomics, options.moi_track_atomics);
   if (options.max_patches == 0 || layout.access_record_capacity == 0)
     return;
+  if (!options.moi_dynamic_access_records &&
+      layout.record_replay_access_dispatch_bank_count > 1u &&
+      !options.moi_dispatch_id_sgpr) {
+    result.outcome = ConSanTransformOutcome::Unsupported;
+    result.warnings.emplace_back(
+        "ConSan MOI dispatch/owner-banked Record/Replay requires runtime hardware dispatch "
+        "identity");
+    return;
+  }
   if (options.moi_dynamic_access_records && !options.moi_exec_save_sgpr) {
     result.warnings.emplace_back(
         "ConSan MOI dynamic access-record probe requires RJ_CONSAN_MOI_EXEC_SAVE_SGPR");
@@ -480,8 +489,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     if (spill)
       required_private_bytes = std::max(required_private_bytes, spill->total_private_bytes);
     bool spill_overlaps_guest_operands = false;
-    if (spill && (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-        !options.moi_dynamic_access_records) {
+    if (spill && !options.moi_dynamic_access_records) {
       std::vector<std::string> ignored_overlap_errors;
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);
@@ -507,7 +515,12 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           "ConSan MOI first-light probe could not recover an admitted access range");
       continue;
     }
-    const uint32_t candidate_record_count = static_cast<uint32_t>(access_ranges->size());
+    const uint32_t candidate_record_count =
+        static_cast<uint32_t>(access_ranges->size()) *
+        (options.moi_dynamic_access_records
+             ? 1u
+             : layout.record_replay_access_dispatch_bank_count *
+                   layout.record_replay_access_owner_bank_count);
     if (!options.moi_dynamic_access_records &&
         candidate_record_count > layout.access_record_capacity - planned_record_count) {
       result.warnings.emplace_back(
@@ -519,6 +532,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     uint32_t probe_guest_instruction_offset = 0;
     auto words = build_first_light_access_record_words(
         bytes, candidate, candidate_options, arch, 0, 0, layout.access_record_capacity,
+        layout.record_replay_access_dispatch_bank_count,
+        layout.record_replay_access_owner_bank_count, spill ? &*spill : nullptr,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
         private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
         candidate_errors, &probe_guest_instruction_offset);
@@ -1003,7 +1018,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       }
       auto words = build_first_light_access_record_words(
           bytes, candidate, candidate_options, arch, planned_patch.record_index,
-          planned_record_count, layout.access_record_capacity, planned_patch.private_epoch_offset,
+          planned_record_count, layout.access_record_capacity,
+          layout.record_replay_access_dispatch_bank_count,
+          layout.record_replay_access_owner_bank_count,
+          planned_patch.spill ? &*planned_patch.spill : nullptr,
+          planned_patch.private_epoch_offset,
           planned_patch.private_owner_offset, planned_patch.private_owner_shift, result.errors);
       if (!words)
         return;
@@ -1217,6 +1236,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             return build_first_light_access_record_words(
                 bytes, *planned_patch.candidate, candidate_options, arch,
                 planned_patch.record_index, planned_record_count, layout.access_record_capacity,
+                layout.record_replay_access_dispatch_bank_count,
+                layout.record_replay_access_owner_bank_count,
+                planned_patch.spill ? &*planned_patch.spill : nullptr,
                 planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
                 planned_patch.private_owner_shift, result.errors);
           },

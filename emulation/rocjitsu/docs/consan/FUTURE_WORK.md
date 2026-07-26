@@ -6,8 +6,11 @@ the gfx1250-focused work: hardware dispatch identity is now used on RDNA4, and
 RDNA4 relay sizing no longer applies a large-object envelope indiscriminately.
 All 19 clean and paired-overhead rows pass at one source-matched tip.  The same
 audit corrected two overstated fault claims: TP2 detects its exact drop in 3/5
-trials and D128 pressure in 0/5.  Restoring bounded, dispatch-coherent replay
-evidence is the active release-certificate gap.
+trials and D128 pressure in 0/5.  The bounded 4-dispatch × 4-owner candidate
+now restores D128-pressure detection to 5/5 while remaining clean in 5/5
+trials.  TP2 cannot be rerun in the current workspace because its IREE test
+suite and build are absent, so source-matched TP2 and overhead/memory evidence
+remain the active release-certificate gap.
 
 Prioritize demonstrable end-to-end LLM value over isolated-kernel breadth. Do
 not reopen a completed cell merely to accumulate more worklog. If new evidence
@@ -73,9 +76,9 @@ flowchart TB
   R1["R1 DONE: fix RDNA4 dispatch-ID state<br/>and selective relay envelopes"]:::done
   R2["R2 DONE: 19/19 clean and 57/57 paired<br/>overhead rows; repeat TP2 clean 5/5"]:::done
   R3["R3 DONE: exact faults expose TP2 3/5<br/>and D128 pressure 0/5 detection"]:::done
-  R4["R4 NEXT: design bounded per-dispatch<br/>or multi-generation first-light capture"]:::active
-  R5["R5: implement model, emission and host<br/>tests; preserve gfx1250 sentinels"]:::todo
-  R6["R6: rerun TP2 and pressure clean/fault/<br/>overhead plus Qwen and gfx1250 sentinels"]:::todo
+  R4["R4 DONE: bound capture to four dispatch<br/>buckets × four owner slots"]:::done
+  R5["R5 DONE: model, emission and host tests;<br/>gfx1250/gfx942/gfx950 gates pass"]:::done
+  R6["R6 ACTIVE: D128 clean/fault passes;<br/>rerun TP2 and frozen overhead/memory"]:::active
   R7["R7: publish source-matched evidence and<br/>restore only evidence-backed greens"]:::todo
   RG{"gfx1201 RECORD/REPLAY<br/>CERTIFICATE RESTORED"}:::target
 
@@ -87,14 +90,24 @@ flowchart TB
   classDef target fill:#ed7d31,stroke:#843c0c,stroke-width:3px,color:#000;
 ```
 
-The current fixed-slot implementation claims each static site once for the
-lifetime of its loaded code object.  Hardware dispatch IDs correctly prevent
-cross-dispatch replay, but repeated launches can leave different slots owned
-by different generations.  `R4` should retain a bounded useful set from one or
-more dispatches without turning the ordinary engine into an exhaustive trace.
-Acceptance requires a clean committed tree and a hook rebuilt from exactly
-that tree.  Run no more than four GPU jobs in parallel and keep ordinary
-operation free of workload-specific controls.
+Automatic layouts deliberately expand each logical range from the historical
+single 64-byte record to a four hardware-dispatch × four canonical-owner grid
+of 72-byte records: 1,152 bytes per range, an 18× static access-storage
+increase.  The 128 MiB per-buffer ceiling therefore rejects some inventories
+that previously fit; planner boundary tests pin that tradeoff.  A reversible
+64-bit dispatch claim owns each outer bucket.  A different dispatch colliding
+with that bucket, a different workgroup reusing a dispatch/owner slot, an owner
+outside the bounded set, or an unrepresentable/in-flight claim emits typed
+Record/Replay saturation and makes dynamic evidence incomplete.  Direct
+size-derived caller layouts remain 1 × 1, but now apply the same exact
+dispatch/workgroup reuse qualification.  This is a bounded observation policy,
+not an exhaustive trace or a workload-specific control.
+
+D128-pressure validates the intended behavior on physical gfx1201: five clean
+trials are complete and false-positive-free, and all five exact-drop trials
+diagnose the fault while the oracle fails.  Acceptance still requires TP2 plus
+paired overhead and memory on a clean committed tree with a hook rebuilt from
+exactly that tree.  Run no more than four GPU jobs in parallel.
 
 ## D: stronger fault detection
 

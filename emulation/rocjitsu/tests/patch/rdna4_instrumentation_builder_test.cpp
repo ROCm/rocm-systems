@@ -839,6 +839,25 @@ TEST(InstructionBuilder, BuildFlatAtomicOrU32ReturnDeviceScope) {
       build_flat_atomic_or_u32_vaddr_vsrc_vdst(0, 0, 0, true, 2, ROCJITSU_CODE_ARCH_RDNA3));
 }
 
+TEST(InstructionBuilder, BuildFlatAtomicCompareSwapB64ReturnDeviceScope) {
+  const auto words = build_flat_atomic_cmpswap_b64_vaddr_vsrc_vdst(
+      /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/10, /*return_old_value=*/true,
+      /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(words);
+  EXPECT_EQ(*words, (std::array<uint32_t, 3>{0xEC10807Cu, 0x0518000Au, 0x00000008u}));
+
+  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(decoder);
+  std::unique_ptr<Instruction> inst(decoder->decode(words->data()));
+  ASSERT_TRUE(inst);
+  EXPECT_EQ(std::string_view(inst->mnemonic()), "flat_atomic_cmpswap_b64");
+
+  EXPECT_FALSE(
+      build_flat_atomic_cmpswap_b64_vaddr_vsrc_vdst(0, 253, 0, true, 2, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(
+      build_flat_atomic_cmpswap_b64_vaddr_vsrc_vdst(0, 0, 0, true, 2, ROCJITSU_CODE_ARCH_RDNA3));
+}
+
 TEST(InstructionBuilder, BuildFlatAtomicSwapB64ReturnDeviceScope) {
   const auto words = build_flat_atomic_swap_b64_vaddr_vsrc_vdst(
       /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/12, /*return_old_value=*/true, /*scope=*/2,
