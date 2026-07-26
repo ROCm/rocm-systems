@@ -521,35 +521,16 @@ happens-before reconstruction.
 
 ### Current instruction coverage
 
-Native LDS check/trap supports:
-
-- `ds_load_b32`
-- `ds_load_b64`
-- `ds_load_b128`
-- `ds_load_2addr_b32`
-- `ds_load_2addr_b64`
-- `ds_load_2addr_stride64_b32`
-- `ds_load_2addr_stride64_b64`
-- `ds_load_u16_d16`
-- `ds_load_u16_d16_hi`
-- `ds_store_b32`
-- `ds_store_b64`
-- `ds_store_b128`
-
-Likely group/LDS flat check/trap supports the target-specific admitted VFLAT
-encodings for:
-
-- `flat_load_b32`
-- `flat_load_b64`
-- `flat_load_b128`
-- `flat_store_b32`
-- `flat_store_b64`
-- `flat_store_b128`
+The normative target-by-engine form list is
+[CAPABILITIES.md](CAPABILITIES.md). Native LDS check/trap covers the common
+single- and dual-range forms plus the target-specific subword, 96-bit, and
+transpose extensions named there. Likely group/LDS FLAT check/trap covers the
+target-specific admitted 16, 32, 64, and 128-bit VFLAT encodings.
 
 Current exclusions:
 
 - ordinary global-memory instrumentation;
-- unsupported flat widths such as b8, b16, and b96;
+- unsupported group-FLAT widths such as b8 and b96;
 - arbitrary flat accesses with unknown provenance;
 - atomics as SuperCollider duplicate-access checks;
 - async copies;

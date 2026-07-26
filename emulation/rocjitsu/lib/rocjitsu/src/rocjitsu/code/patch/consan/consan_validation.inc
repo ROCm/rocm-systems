@@ -2989,9 +2989,33 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     const auto version_cas = instrumentation::build_flat_atomic_cmpswap_b32(
         scratch, version_cas_value, version_cas_value, /*return_old_value=*/true, /*scope=*/2,
         arch);
-    const uint16_t owner_vgpr = result.resolved_moi_owner_vgpr
-                                    ? *result.resolved_moi_owner_vgpr
-                                    : static_cast<uint16_t>(scratch + 24u);
+    uint16_t owner_vgpr = 0;
+    if (result.resolved_moi_persistent_owner_sgpr) {
+      const auto resource_plan =
+          std::ranges::find_if(result.resource_plans, [&](const auto &plan) {
+            return plan.site_kind == ConSanResourceSiteKind::Atomic &&
+                   plan.text_offset == patch.anchor_offset &&
+                   plan.scratch_vgpr == patch.scratch_vgpr;
+          });
+      if (resource_plan == result.resource_plans.end() ||
+          resource_plan->scratch_vgpr_count < 4u) {
+        errors.emplace_back(
+            "ConSan final validation could not resolve release-transaction scalar owner state");
+        continue;
+      }
+      // Scalar-persistent atomic emission materializes owner/epoch in the
+      // four-register tail reserved by the selected resource plan. Derive the
+      // owner from that plan rather than duplicating an architecture-specific
+      // scratch-window size in validation.
+      owner_vgpr =
+          static_cast<uint16_t>(scratch + resource_plan->scratch_vgpr_count - 4u);
+    } else if (result.resolved_moi_owner_vgpr) {
+      owner_vgpr = *result.resolved_moi_owner_vgpr;
+    } else {
+      errors.emplace_back(
+          "ConSan final validation could not resolve release-transaction owner state");
+      continue;
+    }
     const auto owner_store = instrumentation::build_flat_store_b32(
         scratch, owner_vgpr, arch, offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id));
     const auto wait_store = instrumentation::build_s_wait_flat_store0(arch);

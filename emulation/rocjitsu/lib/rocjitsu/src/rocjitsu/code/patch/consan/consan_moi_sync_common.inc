@@ -258,10 +258,7 @@ void append_fence_record_candidates(const ConSanResult &result,
   return std::max<uint16_t>(inline_atomic_scratch_count(site, arch), 7u);
 }
 
-[[nodiscard]] uint16_t inline_shadow_atomic_scratch_count(const ConSanAtomicSite &,
-                                                          ConSanMoiAtomicEventKind event_kind,
-                                                          rj_code_arch_t arch) {
-  (void)event_kind;
+[[nodiscard]] uint16_t inline_shadow_atomic_scratch_count(rj_code_arch_t arch) {
   // Acquire import now retains the release version across the guest, captures
   // its causal snapshot, and transactionally publishes up to five full ABI-v6
   // tokens. Release-capable events use the same window for frontier capture.
@@ -1340,46 +1337,6 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     return false;
   }
 
-  if (!release_sequence_only) {
-    // An acquire starts a new consumer segment before any token derived from
-    // it is published. Later access checks compare their packed epoch against
-    // this token field, so a future acquire can never retroactively authorize
-    // an earlier access. Owner IDs are wave IDs, while an atomic may execute
-    // under a single-lane EXEC mask. Advance the persistent VGPR for the whole
-    // wave so later accesses by sibling lanes carry the same consumer segment.
-    // Scalar persistent state is already wave-uniform and needs no widening.
-    // Saturation stays fail-closed in the token readers.
-    const bool widen_consumer_segment =
-        options.moi_inline_access_present && !options.moi_persistent_epoch_sgpr;
-    const auto widen_exec =
-        widen_consumer_segment
-            ? instrumentation::build_s_mov_b64(kRdna4ExecLo, kScalarInlineNegativeOneOperand, arch)
-            : std::nullopt;
-    const auto advance_epoch = instrumentation::build_v_add_u32(
-        *options.moi_epoch_vgpr, scalar_positive_inline_u32(1), *options.moi_epoch_vgpr, arch);
-    const auto saturate_epoch = instrumentation::build_v_min_u32_literal(
-        *options.moi_epoch_vgpr, consan_moi_exact_shadow::max_epoch, *options.moi_epoch_vgpr, arch);
-    if ((widen_consumer_segment && !widen_exec) || !advance_epoch || !saturate_epoch) {
-      errors.emplace_back("ConSan MOI inline acquire could not advance its consumer segment");
-      return false;
-    }
-    if (widen_exec)
-      words.push_back(*widen_exec);
-    words.insert(words.end(), advance_epoch->begin(), advance_epoch->end());
-    words.insert(words.end(), saturate_epoch->begin(), saturate_epoch->end());
-    if (widen_consumer_segment)
-      words.push_back(*restore_workgroup_exec);
-    if (options.moi_persistent_epoch_sgpr) {
-      const auto persist_epoch = instrumentation::build_v_readfirstlane_b32(
-          *options.moi_persistent_epoch_sgpr, *options.moi_epoch_vgpr, arch);
-      if (!persist_epoch) {
-        errors.emplace_back("ConSan MOI inline acquire could not persist its consumer segment");
-        return false;
-      }
-      words.push_back(*persist_epoch);
-    }
-  }
-
   if (!append_atomic_load_u32(words, scratch_vgpr, value_vgpr, arch)) {
     errors.emplace_back("ConSan MOI inline atomic acquire patch could not load release version");
     return false;
@@ -1545,7 +1502,6 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     return false;
   words.push_back(*final_version_matches);
   words.push_back(*narrow_if_valid);
-  words.push_back(*save_matching_exec);
   const auto epoch_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
                                                                      token_value_vgpr, arch);
   const auto epoch_limit = instrumentation::build_v_mov_b32_literal(
@@ -1553,12 +1509,74 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   const auto epoch_in_range = instrumentation::build_v_cmp_gt_u32_vcc(
       vector_source_vgpr(value_vgpr), token_value_vgpr, arch);
   const auto narrow_epoch = instrumentation::build_s_and_saveexec_b64(exec_base, kRdna4VccLo, arch);
-  const auto restore_matching_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, static_cast<uint16_t>(exec_base + 16u), arch);
-  if (!sequence.emit_all(epoch_nonzero, narrow_epoch, epoch_limit, epoch_in_range, narrow_epoch,
-                         restore_matching_exec)) {
+  if (!sequence.emit_all(epoch_nonzero, narrow_epoch, epoch_limit, epoch_in_range, narrow_epoch)) {
     errors.emplace_back("ConSan MOI inline atomic acquire patch could not validate token epoch");
     return false;
+  }
+
+  if (!release_sequence_only) {
+    // Only a fully validated acquire establishes a new consumer segment. In
+    // particular, a mismatched or unstable release slot must not make
+    // conflicting accesses appear barrier-ordered merely because the guest
+    // atomic had acquire semantics.
+    //
+    // Owner IDs are wave IDs, while an atomic may execute under a single-lane
+    // EXEC mask. Advance a VGPR-backed epoch for the whole wave, but preserve
+    // the validated acquire mask for token publication. An empty mask branches
+    // around the widening so a failed acquire cannot resurrect inactive lanes.
+    // Scalar persistent state is already wave-uniform and needs no widening.
+    // Saturation stays fail-closed in the token readers.
+    const bool widen_consumer_segment =
+        options.moi_inline_access_present && !options.moi_persistent_epoch_sgpr;
+    const auto widen_exec =
+        widen_consumer_segment
+            ? instrumentation::build_s_mov_b64(kRdna4ExecLo, kScalarInlineNegativeOneOperand, arch)
+            : std::nullopt;
+    const auto restore_matching_exec =
+        widen_consumer_segment
+            ? instrumentation::build_s_mov_b64(kRdna4ExecLo,
+                                               static_cast<uint16_t>(exec_base + 16u), arch)
+            : std::nullopt;
+    const auto advance_epoch = instrumentation::build_v_add_u32(
+        *options.moi_epoch_vgpr, scalar_positive_inline_u32(1), *options.moi_epoch_vgpr, arch);
+    const auto saturate_epoch = instrumentation::build_v_min_u32_literal(
+        *options.moi_epoch_vgpr, consan_moi_exact_shadow::max_epoch, *options.moi_epoch_vgpr, arch);
+    if ((widen_consumer_segment && (!widen_exec || !restore_matching_exec)) || !advance_epoch ||
+        !saturate_epoch) {
+      errors.emplace_back("ConSan MOI inline acquire could not advance its consumer segment");
+      return false;
+    }
+
+    std::vector<uint32_t> advance_words;
+    if (widen_exec)
+      advance_words.push_back(*widen_exec);
+    advance_words.insert(advance_words.end(), advance_epoch->begin(), advance_epoch->end());
+    advance_words.insert(advance_words.end(), saturate_epoch->begin(), saturate_epoch->end());
+    if (restore_matching_exec)
+      advance_words.push_back(*restore_matching_exec);
+    if (options.moi_persistent_epoch_sgpr) {
+      const auto persist_epoch = instrumentation::build_v_readfirstlane_b32(
+          *options.moi_persistent_epoch_sgpr, *options.moi_epoch_vgpr, arch);
+      if (!persist_epoch) {
+        errors.emplace_back("ConSan MOI inline acquire could not persist its consumer segment");
+        return false;
+      }
+      advance_words.push_back(*persist_epoch);
+    }
+    if (advance_words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
+      errors.emplace_back("ConSan MOI inline acquire consumer segment guard exceeds branch range");
+      return false;
+    }
+    const auto skip_empty_acquire = instrumentation::build_s_cbranch_execz(
+        static_cast<int16_t>(advance_words.size()), arch);
+    if (!skip_empty_acquire) {
+      errors.emplace_back("ConSan MOI inline acquire could not guard its consumer segment");
+      return false;
+    }
+    if (widen_consumer_segment)
+      words.push_back(*save_matching_exec);
+    words.push_back(*skip_empty_acquire);
+    words.insert(words.end(), advance_words.begin(), advance_words.end());
   }
 
   if (!append_inline_acquired_token_transaction(
@@ -2064,8 +2082,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     std::vector<std::string> &errors) {
   const bool has_dispatch_id =
       options.moi_dispatch_id_sgpr.has_value() || is_rdna4_family_arch(arch);
-  const uint16_t required_scratch_count =
-      inline_shadow_atomic_scratch_count(candidate.site, candidate.event_kind, arch);
+  const uint16_t required_scratch_count = inline_shadow_atomic_scratch_count(arch);
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr || !options.moi_owner_vgpr ||
       !options.moi_epoch_vgpr || !has_dispatch_id ||
       address_plan.scratch_vgpr_count < required_scratch_count)
@@ -2563,8 +2580,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     return std::nullopt;
   }
   const uint16_t scratch_count = address_plan.scratch_vgpr_count;
-  const uint16_t required_scratch_count =
-      inline_shadow_atomic_scratch_count(candidate.site, candidate.event_kind, arch);
+  const uint16_t required_scratch_count = inline_shadow_atomic_scratch_count(arch);
   if (!address_plan.supported()) {
     errors.emplace_back("ConSan MOI inline atomic patch requires a supported address plan");
     return std::nullopt;

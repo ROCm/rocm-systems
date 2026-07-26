@@ -202,6 +202,41 @@ TEST(CdnaF16DeclaredLiteralDecodeTest, MasksExtensionToDeclaredOperandWidth) {
   }
 }
 
+TEST(CdnaVop3DecodeTest, WritelaneSrc0Encoding255DoesNotConsumeLiteralWord) {
+  struct Case {
+    rj_code_arch_t arch;
+    const char *arch_name;
+  };
+  constexpr std::array cases = {
+      Case{ROCJITSU_CODE_ARCH_CDNA3, "cdna3"},
+      Case{ROCJITSU_CODE_ARCH_CDNA4, "cdna4"},
+  };
+  // v_writelane_b32 v141, src0=255, lane 2 followed by a standalone s_nop.
+  // CDNA VOP3 has a fixed two-dword encoding: unlike VOP1/VOP2, operand
+  // encoding 255 does not add a literal dword.
+  constexpr std::array<uint32_t, 3> words = {
+      0xd28a008du,
+      0x000104ffu,
+      S_NOP,
+  };
+
+  for (const Case &tc : cases) {
+    SCOPED_TRACE(tc.arch_name);
+    auto decoder = Decoder::create(tc.arch);
+    ASSERT_NE(decoder, nullptr);
+
+    std::unique_ptr<Instruction> writelane(decoder->decode(words.data()));
+    ASSERT_NE(writelane, nullptr);
+    EXPECT_EQ(writelane->mnemonic(), "v_writelane_b32");
+    EXPECT_EQ(writelane->size(), 2 * static_cast<int>(sizeof(uint32_t)));
+
+    std::unique_ptr<Instruction> trailing(decoder->decode(words.data() + 2, 2 * sizeof(uint32_t)));
+    ASSERT_NE(trailing, nullptr);
+    EXPECT_EQ(trailing->mnemonic(), "s_nop");
+    EXPECT_EQ(trailing->size(), static_cast<int>(sizeof(uint32_t)));
+  }
+}
+
 TEST(LiteralDisassemblyTest, Simm32HexUsesUnsignedEncodingBits) {
   rdna4::Operand literal(32, rdna4::OperandType::OPR_SIMM32, static_cast<int>(0x80000000u));
   EXPECT_EQ(literal.name(), "0x80000000");

@@ -382,6 +382,14 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     result.resolved_moi_epoch_vgpr = effective_options.moi_epoch_vgpr;
   if (!result.resolved_moi_workgroup_key_vgpr)
     result.resolved_moi_workgroup_key_vgpr = effective_options.moi_workgroup_key_vgpr;
+  if (!result.resolved_moi_persistent_owner_sgpr)
+    result.resolved_moi_persistent_owner_sgpr = effective_options.moi_persistent_owner_sgpr;
+  if (!result.resolved_moi_persistent_epoch_sgpr)
+    result.resolved_moi_persistent_epoch_sgpr = effective_options.moi_persistent_epoch_sgpr;
+  if (!result.resolved_moi_persistent_workgroup_key_sgpr) {
+    result.resolved_moi_persistent_workgroup_key_sgpr =
+        effective_options.moi_persistent_workgroup_key_sgpr;
+  }
   if (!result.resolved_moi_exec_save_sgpr)
     result.resolved_moi_exec_save_sgpr = effective_options.moi_exec_save_sgpr;
   if (!result.resolved_moi_owner_sgpr)

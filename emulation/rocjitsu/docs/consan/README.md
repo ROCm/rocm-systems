@@ -77,6 +77,8 @@ or GPU reset is not by itself a ConSan diagnostic.
 - [USAGE.md](USAGE.md): public controls, defaults, coverage, and diagnostics.
 - [DESIGN.md](DESIGN.md): architecture, implemented behavior, and semantic
   boundaries.
+- [CAPABILITIES.md](CAPABILITIES.md): normative target-by-engine access,
+  barrier, atomic, fence, and typed-exclusion matrix.
 - [SPILLING.md](SPILLING.md): ConSan register selection, ownership, private
   layout, and runtime integration.
 - [AMDGPU register spilling](../spilling.md): reusable RocJitsu allocation and

@@ -13,7 +13,7 @@ code object is loaded:
 | Target | Waitcheck | ConSan |
 | --- | --- | --- |
 | `gfx942` | Yes | Yes |
-| `gfx950` | Yes | Partial |
+| `gfx950` | Yes | Yes |
 | `gfx1100` | Yes | — |
 | `gfx1150` | Yes | — |
 | `gfx1151` | Yes | — |
@@ -23,9 +23,9 @@ code object is loaded:
 
 Support is for native code objects; neither tool translates between GPU ISAs.
 On waitcheck-only targets, the combined hook reports wait hazards and leaves
-the original code object uninstrumented. “Partial” means native instrumentation
-exists for only a subset of ConSan forms; “Yes” still denotes supported-form
-coverage, not every ISA memory operation.
+the original code object uninstrumented. “Yes” denotes the supported semantic
+forms in the [ConSan capability matrix](consan/CAPABILITIES.md), not every ISA
+memory operation.
 
 ConSan takes the active workgroup-LDS capacity from the runtime agent rather
 than baking a gfx942 size into its instrumentation. Simulator and offline tests
