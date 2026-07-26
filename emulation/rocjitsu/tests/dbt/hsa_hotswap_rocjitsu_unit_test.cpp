@@ -220,6 +220,21 @@ TEST_F(HsaHotswapHookTest, UnloadRestoresAndAllowsReinstall) {
   EXPECT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
 }
 
+// A rejected install must not leave the hook stuck. install() commits g_state.core
+// only AFTER its one fallible step (building the saved-table snapshot), so a
+// rejected or throwing install cannot latch core non-null and permanently reject
+// every later install. A failed OnLoad is followed by a successful one here.
+TEST_F(HsaHotswapHookTest, RejectedInstallLeavesHookInstallable) {
+  // Missing a required lower entry makes install() reject before committing state.
+  FakeApi incomplete;
+  incomplete.core.hsa_executable_load_agent_code_object_fn = nullptr;
+  EXPECT_FALSE(OnLoad(&incomplete.table, 0, 0, nullptr));
+
+  // The hook is not latched: a subsequent valid install succeeds.
+  EXPECT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  EXPECT_NE(api.core.hsa_executable_load_agent_code_object_fn, fake_load_agent);
+}
+
 TEST_F(HsaHotswapHookTest, UsesImmutableSnapshotForForwardedA0Load) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   std::vector<uint8_t> source{1, 2, 3, 4};
@@ -392,6 +407,24 @@ TEST_F(HsaHotswapHookTest, FileCaptureFailureDestroysCreatedReader) {
             HSA_STATUS_ERROR_OUT_OF_RESOURCES);
   EXPECT_EQ(reader.handle, 0u);
   EXPECT_EQ(g_reader_destroy_calls, 1);
+}
+
+// A null output reader pointer is rejected BEFORE forwarding to the lower/vendor
+// API, which may write through it without checking. Fast-fail with
+// INVALID_ARGUMENT and never invoke the underlying create (g_next_reader unchanged).
+TEST_F(HsaHotswapHookTest, RejectsNullReaderPointerBeforeForwarding) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const uint64_t reader_id_before = g_next_reader;
+
+  const std::vector<uint8_t> source{1, 2, 3, 4};
+  EXPECT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), nullptr),
+      HSA_STATUS_ERROR_INVALID_ARGUMENT);
+  EXPECT_EQ(api.core.hsa_code_object_reader_create_from_file_fn(0, nullptr),
+            HSA_STATUS_ERROR_INVALID_ARGUMENT);
+
+  // The underlying create was never called, so no reader handle was allocated.
+  EXPECT_EQ(g_next_reader, reader_id_before);
 }
 
 TEST_F(HsaHotswapHookTest, RefusesAgentlessAndDeprecatedA0Loads) {

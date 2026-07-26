@@ -194,6 +194,28 @@ bool retain(hsa_executable_t executable, Blob bytes) noexcept {
   }
 }
 
+// Drop a single reserved blob for @p executable (matched by identity), erasing the
+// map entry when its last blob is removed. Used to roll back a reservation when the
+// lower load fails.
+void unretain(hsa_executable_t executable, const Blob &bytes) noexcept {
+  try {
+    std::lock_guard lock(g_state.storage_mutex);
+    const auto map_it = g_state.executables.find(executable.handle);
+    if (map_it == g_state.executables.end())
+      return;
+    auto &buffers = map_it->second;
+    for (auto it = buffers.begin(); it != buffers.end(); ++it) {
+      if (it->get() == bytes.get()) {
+        buffers.erase(it);
+        break;
+      }
+    }
+    if (buffers.empty())
+      g_state.executables.erase(map_it);
+  } catch (...) {
+  }
+}
+
 void release(hsa_executable_t executable) noexcept {
   try {
     std::lock_guard lock(g_state.storage_mutex);
@@ -248,13 +270,18 @@ bool install(HsaApiTable *table) {
   // generations, so retaining across reinstall is sound. This bounds growth by the
   // number of never-destroyed executables across runtime generations, which is
   // small; correctness (no dangling profiler/debugger pointer) takes precedence.
+  // Build the immutable snapshot FIRST -- this is the only fallible step. If the
+  // allocation throws, we must not have committed any install state: g_state.core
+  // stays null so a later install is not permanently rejected by the "already
+  // installed" guard above (the earlier order assigned core before this alloc, so a
+  // throw left the hook sticky-uninstallable). A callback that already loaded the
+  // previous generation's shared_ptr keeps that table alive for its whole call, so
+  // publishing a fresh snapshot never mutates a table another thread dereferences.
+  auto snapshot = std::make_shared<const OriginalApi>(original);
+
   g_state.vendor_reader.store(nullptr, std::memory_order_release);
   g_state.core = core;
-  // Publish an immutable snapshot: a callback that already loaded the previous
-  // generation's shared_ptr keeps that table alive for its whole call, so this
-  // reinstall never mutates a table another thread is dereferencing.
-  g_state.active_api.store(std::make_shared<const OriginalApi>(original),
-                           std::memory_order_release);
+  g_state.active_api.store(std::move(snapshot), std::memory_order_release);
   core->hsa_code_object_reader_create_from_file_fn = reader_create_from_file;
   core->hsa_code_object_reader_create_from_memory_fn = reader_create_from_memory;
   core->hsa_code_object_reader_destroy_fn = reader_destroy;
@@ -455,40 +482,48 @@ hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, co
     return reader_status;
   auto reader_guard = make_scope_guard([&] { (void)destroy(owned_reader); });
 
-  // Retain the translated bytes ONLY on a successful load. ROCr aliases (does not
-  // copy) the ELF pointer -- CodeObjectReaderImpl::SetMemory stores it directly and
-  // the loader hands code->ElfData() to the LoadedCodeObjectImpl -- so a loaded
-  // object that survives references these bytes for its lifetime; hence retention
-  // until executable destroy.
-  //
-  // We do NOT retain on failure. A failure can be rejected BEFORE the loader
-  // publishes anything (a null/invalid executable, a profile/ISA mismatch), and the
-  // rejection status is not distinguishable from a post-publication failure (e.g.
-  // INCOMPATIBLE_ARGUMENTS occurs on both sides of the LoadedCodeObjectImpl append).
-  // Retaining on every failure would strand a blob under an executable handle that
-  // no successful destroy ever releases -- unbounded growth on repeated invalid
-  // loads. KNOWN LIMITATION: if ROCr publishes the loaded object and then a LATER
-  // stage (segment/symbol/relocation/trampoline) fails, ROCr does not roll back the
-  // appended object, so it briefly holds a pointer into bytes we free here. Closing
-  // that window requires a transactional lower loader (or a published-object query)
-  // upstream in ROCr; it is not fixable from the hook without a status-guessing
-  // heuristic that would reintroduce the unbounded-growth bug.
+  // RESERVE the ownership slot BEFORE entering the lower loader. ROCr aliases (does
+  // not copy) the ELF pointer -- CodeObjectReaderImpl::SetMemory stores it directly
+  // and the loader hands code->ElfData() to the LoadedCodeObjectImpl -- so once a
+  // load succeeds, ROCr references these bytes until the executable is destroyed.
+  // The map insertion is fallible (allocation); doing it AFTER a successful load
+  // would mean a successful publish could be followed by a failed retain, leaving
+  // ROCr with an unowned raw pointer. Reserving first makes retention a no-fail fact
+  // by the time the load returns success.
+  if (!retain(executable, bytes))
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  // On FAILURE, drop the reservation. A failure may be a pre-publication rejection
+  // (null/invalid executable, profile/ISA mismatch) where ROCr never referenced the
+  // bytes, so keeping the blob would strand it under a handle no destroy releases --
+  // unbounded growth on repeated invalid loads. The rejection status is not
+  // distinguishable from a post-publication failure, so we drop on all failures.
+  // KNOWN LIMITATION: if ROCr publishes the loaded object and then a LATER stage
+  // (segment/symbol/relocation/trampoline) fails, it does not roll back the appended
+  // object, so it briefly holds a pointer into bytes we drop here. Closing that
+  // window needs a transactional lower loader (or a published-object query) upstream
+  // in ROCr; it is not fixable from the hook without a status-guessing heuristic that
+  // reintroduces the unbounded-growth bug.
   const hsa_status_t status = original_load(executable, agent, owned_reader, options, loaded);
-  if (status == HSA_STATUS_SUCCESS)
-    (void)retain(executable, bytes);
+  if (status != HSA_STATUS_SUCCESS)
+    unretain(executable, bytes);
   return status;
 }
 
 hsa_status_t HSA_API reader_create_from_memory(const void *code_object, size_t size,
                                                hsa_code_object_reader_t *reader) {
   return hsa_boundary([&] {
+    // Reject a null output pointer before forwarding: the lower/vendor API may write
+    // through it without checking, so fail fast the way ROCr's own layer does.
+    if (reader == nullptr)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     const std::shared_ptr<const OriginalApi> api =
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
       return HSA_STATUS_ERROR;
     auto *original = api->create_memory;
     const hsa_status_t status = original(code_object, size, reader);
-    if (status != HSA_STATUS_SUCCESS || reader == nullptr)
+    if (status != HSA_STATUS_SUCCESS)
       return status;
 
     return capture_reader(*api, reader, copy_bytes(code_object, size));
@@ -497,13 +532,15 @@ hsa_status_t HSA_API reader_create_from_memory(const void *code_object, size_t s
 
 hsa_status_t HSA_API reader_create_from_file(hsa_file_t file, hsa_code_object_reader_t *reader) {
   return hsa_boundary([&] {
+    if (reader == nullptr)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     const std::shared_ptr<const OriginalApi> api =
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
       return HSA_STATUS_ERROR;
     auto *original = api->create_file;
     const hsa_status_t status = original(file, reader);
-    if (status != HSA_STATUS_SUCCESS || reader == nullptr)
+    if (status != HSA_STATUS_SUCCESS)
       return status;
     return capture_reader(*api, reader, read_file_region(file, 0, 0));
   });
@@ -512,6 +549,8 @@ hsa_status_t HSA_API reader_create_from_file(hsa_file_t file, hsa_code_object_re
 hsa_status_t vendor_reader_create(hsa_file_t file, size_t offset, size_t size,
                                   hsa_code_object_reader_t *reader) {
   return hsa_boundary([&] {
+    if (reader == nullptr)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     const std::shared_ptr<const OriginalApi> api =
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
@@ -520,7 +559,7 @@ hsa_status_t vendor_reader_create(hsa_file_t file, size_t offset, size_t size,
     if (original == nullptr)
       return HSA_STATUS_ERROR;
     const hsa_status_t status = original(file, offset, size, reader);
-    if (status != HSA_STATUS_SUCCESS || reader == nullptr)
+    if (status != HSA_STATUS_SUCCESS)
       return status;
     return capture_reader(*api, reader, read_file_region(file, offset, size));
   });
