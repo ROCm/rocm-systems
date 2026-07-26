@@ -60,6 +60,7 @@
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/svm_memory.h"
+#include "suites/functional/queue_modify.h"
 #include "suites/functional/mmio_hdp_flush.h"
 #include "suites/functional/time_stamp.h"
 #include "suites/performance/dispatch_time.h"
@@ -415,6 +416,12 @@ TEST(rocrtstFunc, FP_Exception_Shutdown) {
     RunCustomTestEpilog(&fpx);
 }
 
+TEST(rocrtstFunc, Queue_Modify_Test) {
+    QueueModifyTest qm;
+    if (!RunCustomTestProlog(&qm)) return;
+    qm.TestQueueModify();
+    RunCustomTestEpilog(&qm);
+}
 TEST(rocrtstFunc, MMIO_HDP_Flush_Test) {
     MMIOHdpFlushTest mt;
     if (!RunCustomTestProlog(&mt)) return;
