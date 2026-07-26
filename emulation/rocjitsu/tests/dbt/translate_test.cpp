@@ -71,6 +71,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/encodings.h"
@@ -8470,6 +8471,28 @@ TEST(BinaryTranslatorE2E, Gfx1250Ds2AdjustsDestinationBankForSecondLoad) {
     generated_modes.push_back(static_cast<uint16_t>(decoded[index]->raw_encoding()[0] & 0xffffu));
   }
   EXPECT_EQ(generated_modes, (std::vector<uint16_t>{0x0040, 0x4000}));
+}
+
+TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
+  std::vector<uint32_t> liveness_free_rules;
+  for (const rocjitsu::TranslationRule &rule : rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0()) {
+    if (!rule.requires_liveness) {
+      liveness_free_rules.push_back((static_cast<uint32_t>(rule.src_encoding_id) << 16) |
+                                    rule.src_opcode);
+    }
+  }
+
+  const std::vector<uint32_t> expected = {
+      (static_cast<uint32_t>(gfx1250::encoding::kSopp) << 16) | gfx1250::kSClauseSopp,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3p) << 16) |
+          gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3p) << 16) | gfx1250::kVWmmaI3216x16x64Iu8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3p) << 16) |
+          gfx1250::kVSwmmacI3216x16x128Iu8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF3232x16x128F4Vop3p,
+  };
+  EXPECT_EQ(liveness_free_rules, expected);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250LowersF32K128Fp8Bf8WmmaToNeutralRegularScale) {
