@@ -261,6 +261,25 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAvailableMemoryCtx(HsaKFDContext *ctx,
 		return HSAKMT_STATUS_ERROR;
 
 	*AvailableBytes = args.available;
+
+	/* UKI: in DRM mode, ROCr allocates device (VRAM) memory via the DRM BO
+	 * path (amdgpu_bo_alloc / GEM_CREATE), which the KFD AVAILABLE_MEMORY ioctl
+	 * above does not account for: the kernel's amdgpu_amdkfd_get_available_memory()
+	 * derives VRAM availability from KFD's own accounting
+	 * (adev->kfd.vram_used_aligned) plus pinned VRAM (adev->vram_pin_size),
+	 * neither of which is touched by unpinned DRM-path BOs -- so subtracting our
+	 * tracked DRM VRAM here does not double-count. Note: args.available and
+	 * drm_used are read without a shared lock, so a concurrent alloc/free can
+	 * make this hint momentarily stale, which is acceptable for an availability
+	 * query. */
+	if (hsakmt_enable_drm) {
+		uint64_t drm_used = 0;
+
+		if (hsakmt_fmm_get_drm_vram_used(ctx, args.gpu_id, &drm_used) ==
+		    HSAKMT_STATUS_SUCCESS)
+			*AvailableBytes = (drm_used < *AvailableBytes) ?
+					  (*AvailableBytes - drm_used) : 0;
+	}
 	return HSAKMT_STATUS_SUCCESS;
 }
 
