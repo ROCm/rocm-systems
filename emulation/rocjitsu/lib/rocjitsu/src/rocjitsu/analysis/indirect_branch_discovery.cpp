@@ -1789,6 +1789,25 @@ struct VectorLaneFlowState {
   return ref;
 }
 
+// Whether a physical VGPR is callee-saved under the AMDGPU device calling
+// convention (CSR_AMDGPU_VGPRs). The callee-saved VGPRs are interleaved with
+// scratch registers in stripes of eight at a stride of sixteen starting at
+// v40: v40-47, v56-63, v72-79, ... A conforming callee must preserve these
+// across a call, so a PC stashed in one survives an intervening call even
+// though the analysis does not descend into the callee body. Non-conforming
+// callee code (which clobbers a callee-saved VGPR without saving it) would
+// violate this assumption; that risk is accepted until deployment shows a
+// violation, at which point this predicate is the single seam to replace with
+// a verified-conformance analysis. See llvm AMDGPUCallingConv.td.
+//
+// @p phys_vgpr is the resolved physical index, which for gfx1250 VGPR_MSB
+// banking may exceed 255 (bank*256 + selector). The ABI table only defines the
+// convention for v0-255, so a banked register above that range is NOT proven
+// callee-saved and must fail closed rather than be masked down to its selector.
+[[nodiscard]] bool is_callee_saved_vgpr(uint16_t phys_vgpr) {
+  return phys_vgpr >= 40 && phys_vgpr <= 255 && ((phys_vgpr - 40) % 16) < 8;
+}
+
 void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
                                      std::vector<IndirectCallFixup> &recovered,
                                      std::span<const uint64_t> extra_leaders) {
@@ -1869,10 +1888,13 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
 
       if (facts.call_sdst) {
         // A direct call can clobber any caller-saved VGPR before its
-        // fallthrough continuation executes. The temporary CFG has no
-        // context-sensitive return edge, so no pre-call lane stash is proven
-        // to survive into either successor.
-        state.slots.clear();
+        // fallthrough continuation executes, and the temporary CFG has no
+        // context-sensitive return edge. Drop every stash in a caller-saved
+        // VGPR; a conforming callee must preserve a callee-saved VGPR, so a
+        // stash there survives (see is_callee_saved_vgpr).
+        std::erase_if(state.slots, [](const auto &item) {
+          return !is_callee_saved_vgpr(item.first.vgpr);
+        });
       }
 
       if (mnemonic == "v_writelane_b32") {
@@ -1935,9 +1957,13 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
       if (facts.swappc_sdst) {
         // A returning indirect call may execute arbitrary callee code before
         // the fallthrough continuation. Resolve this call from the pre-call
-        // state above, then discard every lane stash before publishing the
-        // block exit so a callee-clobbered value cannot reach the continuation.
-        state.slots.clear();
+        // state above, then drop every stash in a caller-saved VGPR before
+        // publishing the block exit so a callee-clobbered value cannot reach
+        // the continuation. A callee-saved VGPR is preserved by a conforming
+        // callee, so a stash there survives (see is_callee_saved_vgpr).
+        std::erase_if(state.slots, [](const auto &item) {
+          return !is_callee_saved_vgpr(item.first.vgpr);
+        });
       }
 
       RegisterSet vgpr_defs;
