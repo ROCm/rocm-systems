@@ -62,9 +62,6 @@ def make_policy(**overrides: Any) -> pc.Policy:
         description_checklist_patterns=[re.compile(p) for p in _CHECKLIST_PATTERNS],
         block_draft=True,
         forbidden_title_patterns=[re.compile(r"(?i)\bWIP\b")],
-        max_files_changed=50,
-        max_total_changes=2000,
-        max_single_file_changes=700,
         forbidden_paths=["**/*.pem", "**/.env", "**/id_rsa"],
         unit_test_code_extensions=[".py", ".cpp"],
         unit_test_patterns=[
@@ -72,10 +69,11 @@ def make_policy(**overrides: Any) -> pc.Policy:
             "testing_*",
             "*_test.*",
             "*_tests.*",
+            "*_gtest.*",
             "**/test/gtest/**",
         ],
         unit_test_exempt_paths=[],
-        bump_bot_authors=["assistant-librarian", "systems-assistant"],
+        bump_bot_authors=["assistant-librarian", "systems-assistant", "dependabot"],
         required_checks=["pre-commit"],
         precommit_failure_comment=None,
     )
@@ -196,6 +194,28 @@ class DescriptionTests(unittest.TestCase):
         pc.ensure_pr_description(policy, "A long enough description with no ref.", e)
         self.assertTrue(any("must reference a JIRA ID" in x for x in e))
 
+    def test_issue_reference_in_comment_does_not_pass(self) -> None:
+        # Isolate reference detection (skip min-length and checklist).
+        policy = make_policy(
+            description_min_length=0, description_checklist_patterns=[]
+        )
+        multiline_comment = """<!--
+Fixes #1234
+-->"""
+        multiple_comments = """This description has no visible issue reference.
+<!-- Related to #1234 -->
+Some visible text between the comments.
+<!-- https://github.com/ROCm/TheRock/issues/5678 -->"""
+        for body in [
+            "<!-- GitHub issue: https://github.com/ROCm/TheRock/issues/1234 -->",
+            multiline_comment,
+            multiple_comments,
+        ]:
+            with self.subTest(body=body):
+                e: List[str] = []
+                pc.ensure_pr_description(policy, body, e)
+                self.assertTrue(any("must reference a JIRA ID" in x for x in e))
+
     def test_issue_reference_variants_pass(self) -> None:
         # Isolate reference detection (skip min-length and checklist).
         policy = make_policy(
@@ -309,6 +329,22 @@ class ForbiddenFileTests(unittest.TestCase):
     def test_removed_forbidden_file_is_ignored(self) -> None:
         self.assertEqual(self._errs([make_file("secret.pem", status="removed")]), [])
 
+    def test_forbidden_files_is_warning_only_row(self) -> None:
+        # The Forbidden Files row is warning-only: passed=True + warn=True when a
+        # forbidden file is present, so it never blocks the workflow.
+        result = pc.CheckResult(
+            "Forbidden Files",
+            "⛔",
+            passed=True,
+            details=["Forbidden file present in PR: `secret.pem`"],
+            warn=True,
+        )
+        marker = "<!-- test -->"
+        body = pc.build_policy_table_comment([result], marker, ready=True)
+        self.assertIn("⚠️ Warning", body)
+        self.assertIn("secret.pem", body)
+        self.assertNotIn("Forbidden Files", pc.LABEL_TRIGGER_CHECKS)
+
 
 # ----------------------------- unit tests check ------------------------------
 
@@ -359,6 +395,18 @@ class UnitTestRuleTests(unittest.TestCase):
                 files = [make_file("src/module.py"), make_file(test_path)]
                 self.assertEqual(self._errs(files), [])
 
+    def test_unit_test_is_warning_only_row(self) -> None:
+        # The Unit Test row is warning-only: passed=True + warn=True when a
+        # code file has no accompanying test, so it never blocks the workflow.
+        result = pc.CheckResult(
+            "Unit Test", "🧪", passed=True, details=["missing test"], warn=True
+        )
+        marker = "<!-- test -->"
+        body = pc.build_policy_table_comment([result], marker, ready=True)
+        self.assertIn("⚠️ Warning", body)
+        self.assertIn("missing test", body)
+        self.assertNotIn("Unit Test", pc.LABEL_TRIGGER_CHECKS)
+
 
 # ----------------------------- draft + bump ----------------------------------
 
@@ -381,6 +429,8 @@ class DraftAndBumpTests(unittest.TestCase):
         self.assertTrue(pc.is_bump_pr(policy, "assistant-librarian"))
         self.assertTrue(pc.is_bump_pr(policy, "assistant-librarian[bot]"))
         self.assertTrue(pc.is_bump_pr(policy, "SYSTEMS-ASSISTANT"))
+        self.assertTrue(pc.is_bump_pr(policy, "dependabot"))
+        self.assertTrue(pc.is_bump_pr(policy, "dependabot[bot]"))
         self.assertFalse(pc.is_bump_pr(policy, "some-human"))
         self.assertFalse(pc.is_bump_pr(policy, ""))
 
@@ -516,7 +566,7 @@ class LoadPolicyTests(unittest.TestCase):
         self.assertIn("test_*", policy.unit_test_patterns)
         self.assertIn("*_test.*", policy.unit_test_patterns)
         self.assertIn("*_tests.*", policy.unit_test_patterns)
-        self.assertIn("Test*", policy.unit_test_patterns)
+        self.assertIn("*_gtest.*", policy.unit_test_patterns)
         self.assertIn("**/test/gtest/**", policy.unit_test_patterns)
 
 
