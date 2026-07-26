@@ -44,6 +44,26 @@ namespace {
   return std::nullopt;
 }
 
+[[nodiscard]] uint16_t required_descriptor_count(const ConSanRegisterRequest &request,
+                                                 uint16_t base) {
+  return static_cast<uint16_t>(std::max<uint32_t>(request.current_allocation_count,
+                                                  static_cast<uint32_t>(base) + request.count));
+}
+
+[[nodiscard]] std::optional<ConSanRegisterPlan>
+plan_spill_window(const ConSanRegisterRequest &request, const RegisterSet &live_before,
+                  uint16_t limit) {
+  const auto victim = find_window(request, live_before, limit, /*require_dead=*/false);
+  if (!victim)
+    return std::nullopt;
+  ConSanRegisterPlan plan;
+  plan.source = ConSanRegisterAllocationSource::SpillRequired;
+  plan.base = victim;
+  plan.count = request.count;
+  plan.required_descriptor_count = required_descriptor_count(request, *victim);
+  return plan;
+}
+
 } // namespace
 
 ConSanRegisterPlan plan_consan_registers(const ConSanRegisterRequest &request,
@@ -79,19 +99,17 @@ ConSanRegisterPlan plan_consan_registers(const ConSanRegisterRequest &request,
     }
     plan.source = ConSanRegisterAllocationSource::Explicit;
     plan.base = base;
-    plan.required_descriptor_count = static_cast<uint16_t>(std::max<uint32_t>(
-        request.current_allocation_count, static_cast<uint32_t>(base) + request.count));
+    plan.required_descriptor_count = required_descriptor_count(request, base);
     return plan;
   }
 
   if (request.force_spill) {
     if (request.allow_spill) {
-      if (auto victim = find_window(request, live_before, request.current_allocation_count,
-                                    /*require_dead=*/false)) {
-        plan.source = ConSanRegisterAllocationSource::SpillRequired;
-        plan.base = victim;
-        return plan;
-      }
+      const uint16_t spill_limit = request.allow_spill_descriptor_growth
+                                       ? request.architecture_limit
+                                       : request.current_allocation_count;
+      if (auto spill = plan_spill_window(request, live_before, spill_limit))
+        return *spill;
     }
     plan.reason = ConSanRegisterPlanReason::NoLegalWindow;
     return plan;
@@ -121,13 +139,24 @@ ConSanRegisterPlan plan_consan_registers(const ConSanRegisterRequest &request,
     return plan;
   }
 
+  // Shared physical code can have owners with different descriptor allocations:
+  // max_referenced_count reflects the largest owner, while current_allocation_count
+  // is the largest window available to every owner without descriptor growth. If
+  // no fresh window exists above the largest guest reference, a liveness-dead
+  // window below it is still valid after growing the smaller descriptors.
+  if (auto dead = find_window(request, live_before, request.architecture_limit,
+                              /*require_dead=*/true)) {
+    plan.source = ConSanRegisterAllocationSource::DescriptorGrowth;
+    plan.base = dead;
+    plan.required_descriptor_count = required_descriptor_count(request, *dead);
+    return plan;
+  }
+
   if (request.allow_spill) {
-    if (auto victim = find_window(request, live_before, request.current_allocation_count,
-                                  /*require_dead=*/false)) {
-      plan.source = ConSanRegisterAllocationSource::SpillRequired;
-      plan.base = victim;
-      return plan;
-    }
+    // Descriptor-growing spill is an opt-in force-spill fallback. Ordinary
+    // allocation may only spill inside the currently declared allocation.
+    if (auto spill = plan_spill_window(request, live_before, request.current_allocation_count))
+      return *spill;
   }
 
   plan.reason = ConSanRegisterPlanReason::NoLegalWindow;

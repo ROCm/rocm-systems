@@ -1829,9 +1829,12 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
     // Sampled stores execute the guest before clobbering an overlapping saved
     // window; Record/Replay access bodies restore the window before the
     // displaced guest. Persistent state remains forbidden because it must
-    // survive the complete kernel lifetime.
+    // survive the complete kernel lifetime. Shared physical code can have
+    // owners with different descriptor allocations, so this capability-gated
+    // fallback may also grow the smaller descriptors to hold the spill window.
     ConSanRegisterRequest spill_request = request;
     spill_request.force_spill = true;
+    spill_request.allow_spill_descriptor_growth = true;
     spill_request.forbidden = {};
     if (options.moi_owner_vgpr)
       spill_request.forbidden.expand({RegClass::VGPR, *options.moi_owner_vgpr, 1});

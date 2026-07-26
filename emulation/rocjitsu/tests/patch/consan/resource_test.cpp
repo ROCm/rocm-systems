@@ -153,6 +153,44 @@ TEST(ConSanResourcePlan, GrowsPastReservedTailWindow) {
   EXPECT_EQ(plan.required_descriptor_count, 13);
 }
 
+TEST(ConSanResourcePlan, GrowsIntoDeadWindowBelowHighGuestReference) {
+  RegisterSet live;
+  live.expand({RegClass::VGPR, 0, 8});
+  live.expand({RegClass::VGPR, 18, 230});
+  ConSanRegisterRequest request = vgpr_request(10, 8, 248);
+
+  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::DescriptorGrowth);
+  EXPECT_EQ(plan.base, 8);
+  EXPECT_EQ(plan.required_descriptor_count, 18);
+}
+
+TEST(ConSanResourcePlan, SpillWindowCanGrowMixedOwnerDescriptors) {
+  RegisterSet live;
+  expand_all_vgprs(live);
+  ConSanRegisterRequest request = vgpr_request(10, 8, 248);
+  request.force_spill = true;
+  request.allow_spill_descriptor_growth = true;
+  request.forbidden.expand({RegClass::VGPR, 248, 2});
+
+  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(plan.base, 0);
+  EXPECT_EQ(plan.required_descriptor_count, 10);
+}
+
+TEST(ConSanResourcePlan, ForceSpillWithoutGrowthRejectsWindowAboveAllocation) {
+  RegisterSet live;
+  expand_all_vgprs(live);
+  ConSanRegisterRequest request = vgpr_request(10, 8, 248);
+  request.force_spill = true;
+  request.forbidden.expand({RegClass::VGPR, 248, 2});
+
+  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::NoLegalWindow);
+}
+
 TEST(ConSanResourcePlan, FullRegisterFileSelectsAllowedLiveVictim) {
   RegisterSet live;
   expand_all_vgprs(live);

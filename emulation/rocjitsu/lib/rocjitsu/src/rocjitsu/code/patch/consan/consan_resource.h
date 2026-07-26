@@ -27,6 +27,7 @@ struct ConSanRegisterRequest {
   RegisterSet forbidden;
   bool allow_spill = true;
   bool force_spill = false;
+  bool allow_spill_descriptor_growth = false;
 };
 
 /// @brief Read-only result of planning one register request.

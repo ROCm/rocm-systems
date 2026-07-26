@@ -172,6 +172,87 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   EXPECT_EQ(barrier_patch->owner_descriptor_file_offsets.size(), 2u);
 }
 
+TEST(ConSanMoi, RecordReplayDenseAliasedKernelBarriersUseKernelRelayBounds) {
+  constexpr uint32_t kSiteCount = 17u;
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.entry_nop_words = 33'000u;
+  std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto first =
+      std::ranges::find(original.kernels(), "shared_owner_0", &AmdGpuKernelInfo::name);
+  const auto alias =
+      std::ranges::find(original.kernels(), "shared_owner_1", &AmdGpuKernelInfo::name);
+  ASSERT_NE(first, original.kernels().end());
+  ASSERT_NE(alias, original.kernels().end());
+  ASSERT_EQ(first->code_size, alias->code_size);
+  ASSERT_FALSE(original.text_sections().empty());
+
+  const uint64_t target_entry_address =
+      original.text_sections().front()->vaddr() + first->entry_text_offset;
+  const uint64_t alias_descriptor_address = original.kernel_descriptor_offset(alias->name);
+  mutate_kernel_descriptor(bytes, alias->name, [&](KD &descriptor) {
+    descriptor.kernel_code_entry_byte_offset =
+        static_cast<int64_t>(target_entry_address) - static_cast<int64_t>(alias_descriptor_address);
+  });
+  mutate_elf_symbol_by_name(bytes, alias->name, [&](Elf64_Sym &symbol) {
+    symbol.st_value = target_entry_address;
+    symbol.st_size = first->code_size;
+  });
+
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, ROCJITSU_CODE_ARCH_RDNA4);
+  std::vector<uint32_t> body(first->code_size / sizeof(uint32_t), filler);
+  size_t cursor = 32u;
+  for (uint32_t index = 0u; index < kSiteCount; ++index) {
+    body[cursor++] = 0xD8340000u | index * sizeof(uint32_t);
+    body[cursor++] = 0x00000000u; // ds_store_b32 v0, v0 offset:index*4
+    body[cursor++] = 0xBE804EC1u; // s_barrier_signal -1
+    body[cursor++] = 0xBF94FFFFu; // s_barrier_wait -1
+  }
+  body.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  const uint64_t body_file_offset = first->text_file_offset + first->entry_text_offset;
+  ASSERT_LE(body_file_offset, bytes.size());
+  ASSERT_LE(body.size() * sizeof(uint32_t), bytes.size() - body_file_offset);
+  std::memcpy(bytes.data() + body_file_offset, body.data(), body.size() * sizeof(uint32_t));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.test_kernel_name_filter = "shared_owner";
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size =
+      consan_moi_report_buffer_min_bytes(kSiteCount, 0, 0, 0, kSiteCount);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 4u * kSiteCount;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            kSiteCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
+                               &ConSanPatchInfo::kind),
+            kSiteCount);
+  EXPECT_EQ(std::ranges::count_if(result.site_dispositions,
+                                  [](const ConSanSiteDispositionRecord &site) {
+                                    return site.site_kind == ConSanResourceSiteKind::Barrier &&
+                                           site.lowering_outcome ==
+                                               ConSanSiteLoweringOutcome::Patched;
+                                  }),
+            2u * kSiteCount);
+  EXPECT_TRUE(std::ranges::all_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind != ConSanPatchKind::TrampolineMoiInlineEpochBarrier ||
+           patch.owner_descriptor_file_offsets.size() == 2u;
+  }));
+}
+
 TEST(ConSanMoi, RejectsPhysicalSyncAliasWithConflictingContainerSemantics) {
   const std::array<uint32_t, 4> kernel_words = {
       0xD8340000u,

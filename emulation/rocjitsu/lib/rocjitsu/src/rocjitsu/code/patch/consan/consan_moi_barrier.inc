@@ -1,8 +1,10 @@
 struct BarrierRecordCandidate {
   std::string container_name;
+  bool in_kernel = true;
   ConSanBarrierSite site;
   std::optional<uint64_t> kernel_descriptor_file_offset;
   uint64_t container_entry_text_offset = 0;
+  uint64_t container_code_size = 0;
   uint64_t text_file_offset = 0;
 };
 
@@ -10,10 +12,9 @@ struct BarrierRecordCandidate {
                                                             const BarrierRecordCandidate &rhs) {
   const ConSanBarrierSite &left = lhs.site;
   const ConSanBarrierSite &right = rhs.site;
-  const bool lhs_in_kernel = lhs.container_name.starts_with("kernel:");
-  const bool rhs_in_kernel = rhs.container_name.starts_with("kernel:");
-  return lhs_in_kernel == rhs_in_kernel &&
+  return lhs.in_kernel == rhs.in_kernel &&
          lhs.container_entry_text_offset == rhs.container_entry_text_offset &&
+         lhs.container_code_size == rhs.container_code_size &&
          lhs.text_file_offset == rhs.text_file_offset &&
          std::tie(left.operation, left.text_offset, left.file_offset, left.size, left.barrier_id,
                   left.operand_source, left.raw_operand_selector, left.literal_width_bits,
@@ -96,15 +97,17 @@ void append_barrier_epoch_candidates(const ConSanKernelInfo &kernel,
   if (is_rocclr_runtime_kernel_name(kernel.name))
     return;
   for (const ConSanBarrierSite &site : kernel.barrier_sites)
-    candidates.push_back({"kernel:" + kernel.name, site, kernel.descriptor_file_offset,
-                          kernel.entry_text_offset, kernel.text_file_offset});
+    candidates.push_back({"kernel:" + kernel.name, true, site, kernel.descriptor_file_offset,
+                          kernel.entry_text_offset, kernel.has_text_range ? kernel.code_size : 0u,
+                          kernel.text_file_offset});
 }
 
 void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
                                      std::vector<BarrierRecordCandidate> &candidates) {
   for (const ConSanBarrierSite &site : function.barrier_sites)
-    candidates.push_back({"function:" + function.name, site, std::nullopt,
-                          function.entry_text_offset, function.text_file_offset});
+    candidates.push_back({"function:" + function.name, false, site, std::nullopt,
+                          function.entry_text_offset, function.code_size,
+                          function.text_file_offset});
 }
 
 [[nodiscard]] uint16_t inline_shadow_barrier_scratch_count(const ConSanOptions &options) {
@@ -1197,8 +1200,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     std::map<std::pair<bool, std::string>, std::vector<size_t>> owner_groups;
     for (size_t index : dense_fallback_indices) {
       const BarrierRecordCandidate &candidate = planned_candidates[index].candidate;
-      owner_groups[{candidate.kernel_descriptor_file_offset.has_value(), candidate.container_name}]
-          .push_back(index);
+      owner_groups[{candidate.in_kernel, candidate.container_name}].push_back(index);
     }
     constexpr uint64_t kMaxCommonRelayAnchorSpan =
         static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
@@ -1257,33 +1259,16 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       return claimed_after != claimed_hosts.begin() && std::prev(claimed_after)->second > begin;
     };
 
-    for (const auto &[owner_key, indices] : groups) {
+    for (const auto &group : groups) {
+      const std::vector<size_t> &indices = group.second;
       if (indices.empty())
         continue;
-      const bool in_kernel = owner_key.first;
       const BarrierRecordCandidate &first_candidate = planned_candidates[indices.front()].candidate;
-      const ConSanKernelInfo *kernel =
-          in_kernel && first_candidate.kernel_descriptor_file_offset
-              ? kernel_for_descriptor(result, *first_candidate.kernel_descriptor_file_offset)
-              : nullptr;
-      const auto function =
-          !in_kernel
-              ? std::ranges::find_if(result.functions,
-                                     [&](const auto &candidate) {
-                                       return candidate.entry_text_offset ==
-                                                  first_candidate.container_entry_text_offset &&
-                                              "function:" + candidate.name == owner_key.second;
-                                     })
-              : result.functions.end();
-      if ((in_kernel &&
-           (kernel == nullptr || !kernel->has_text_range || kernel->code_size == 0u)) ||
-          (!in_kernel && (function == result.functions.end() || function->code_size == 0u)))
+      if (first_candidate.container_code_size == 0u)
         continue;
-      const uint64_t owner_begin =
-          in_kernel ? kernel->entry_text_offset : function->entry_text_offset;
-      const uint64_t owner_end =
-          owner_begin + (in_kernel ? kernel->code_size : function->code_size);
-      const std::string &owner_name = in_kernel ? kernel->name : function->name;
+      const uint64_t owner_begin = first_candidate.container_entry_text_offset;
+      const uint64_t owner_end = owner_begin + first_candidate.container_code_size;
+      const std::string &owner_name = first_candidate.container_name;
       const std::vector<uint64_t> &group_owner =
           planned_candidates[indices.front()].owner_descriptor_file_offsets;
       if (group_owner.empty() || std::ranges::any_of(indices, [&](size_t index) {

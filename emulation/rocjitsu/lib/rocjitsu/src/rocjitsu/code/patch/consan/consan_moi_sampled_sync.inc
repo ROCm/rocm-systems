@@ -716,6 +716,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       continue;
     const std::vector<ConSanBarrierSite> *barrier_sites = nullptr;
     uint64_t container_entry_text_offset = 0;
+    uint64_t container_code_size = 0;
     uint64_t container_text_file_offset = 0;
     if (sequence.in_kernel) {
       const auto found = kernel_by_name.find(sequence.container_name);
@@ -723,6 +724,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         continue;
       barrier_sites = &found->second->barrier_sites;
       container_entry_text_offset = found->second->entry_text_offset;
+      container_code_size = found->second->code_size;
       container_text_file_offset = found->second->text_file_offset;
     } else {
       const auto found = function_by_name.find(sequence.container_name);
@@ -730,6 +732,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         continue;
       barrier_sites = &found->second->barrier_sites;
       container_entry_text_offset = found->second->entry_text_offset;
+      container_code_size = found->second->code_size;
       container_text_file_offset = found->second->text_file_offset;
     }
     std::vector<ConSanBarrierSite> completing_sites;
@@ -841,8 +844,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         sequence.execution_owners.front().descriptor_file_offset;
     candidates.push_back({&sequence,
                           {(sequence.in_kernel ? "kernel:" : "function:") + sequence.container_name,
-                           completing_sites.front(), representative_descriptor,
-                           container_entry_text_offset, container_text_file_offset},
+                           sequence.in_kernel, completing_sites.front(), representative_descriptor,
+                           container_entry_text_offset, container_code_size,
+                           container_text_file_offset},
                           std::move(windows),
                           uses_cluster_workgroup_id});
   }
