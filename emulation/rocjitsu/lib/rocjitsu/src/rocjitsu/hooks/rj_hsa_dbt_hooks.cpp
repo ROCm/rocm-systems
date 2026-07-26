@@ -1252,6 +1252,98 @@ private:
   std::unordered_map<uint64_t, uint32_t> in_flight_;
 };
 
+/// @brief In-process cache of B0->A0 translation results, keyed by source content.
+///
+/// @details Deduplicates the heavy DBT run across identical loads within one process
+/// (§14.8, in-process scope): the same fatbin loaded twice, or two executables that
+/// carry byte-identical code objects, translate ONCE and share the resulting ELF.
+/// Two outcomes are cached, both permanent for the process lifetime:
+///  - **positive** -- a dispatchable translation; the shared translated ELF bytes
+///    are returned for every later identical source. Warning-only families
+///    (s_sleep, s_get_barrier_state, ...) are dispatchable successes, NOT poison,
+///    so they cache positively and are never re-translated.
+///  - **negative** -- a deterministic non-dispatchable result (error or skipped
+///    kernel). Cached permanently and never retried; the caller fails closed and
+///    routes to eager (it never falls back to raw-B0 pass-through). A retranslation
+///    of the same bytes would deterministically fail again, so retrying is waste.
+///
+/// The key is a content hash of the source bytes. The B0->A0 revisions and the
+/// translator configuration are fixed for the auto-A0 lazy path (the only caller),
+/// so they are not part of the key; if a second translation configuration is ever
+/// added, fold it into the key. Process-wide singleton; cleared on hook unload.
+class LazyTranslationCache {
+public:
+  static LazyTranslationCache &instance() {
+    static LazyTranslationCache cache;
+    return cache;
+  }
+
+  /// @brief FNV-1a 64-bit hash of @p bytes (fast, adequate for a content key).
+  [[nodiscard]] static uint64_t content_key(const std::vector<uint8_t> &bytes) {
+    uint64_t hash = 1469598103934665603ull; // FNV offset basis
+    for (uint8_t byte : bytes)
+      hash = (hash ^ byte) * 1099511628211ull; // FNV prime
+    // Fold the length in so two sources that differ only by trailing-zero length
+    // (same running hash) still separate.
+    return hash ^ (bytes.size() * 1099511628211ull);
+  }
+
+  /// @brief A cache lookup outcome.
+  enum class Status : uint8_t {
+    kMiss,     ///< Not cached; the caller must translate and publish the result.
+    kPositive, ///< Cached dispatchable translation; @ref bytes is the shared ELF.
+    kNegative, ///< Cached deterministic failure; the caller must fail closed.
+  };
+
+  struct Lookup {
+    Status status = Status::kMiss;
+    std::shared_ptr<const std::vector<uint8_t>> bytes; ///< Set only for kPositive.
+  };
+
+  [[nodiscard]] Lookup find(uint64_t key) {
+    std::lock_guard lock(mutex_);
+    auto it = entries_.find(key);
+    if (it == entries_.end())
+      return {};
+    return it->second.translated ? Lookup{Status::kPositive, it->second.translated}
+                                 : Lookup{Status::kNegative, nullptr};
+  }
+
+  /// @brief Record a dispatchable translation for @p key (idempotent).
+  void put_positive(uint64_t key, std::shared_ptr<const std::vector<uint8_t>> bytes) {
+    if (bytes == nullptr)
+      return;
+    std::lock_guard lock(mutex_);
+    entries_[key].translated = std::move(bytes);
+  }
+
+  /// @brief Record a permanent deterministic failure for @p key (idempotent).
+  void put_negative(uint64_t key) {
+    std::lock_guard lock(mutex_);
+    entries_.try_emplace(key); // null translated == negative
+  }
+
+  void clear() {
+    std::lock_guard lock(mutex_);
+    entries_.clear();
+  }
+
+  [[nodiscard]] size_t size() {
+    std::lock_guard lock(mutex_);
+    return entries_.size();
+  }
+
+private:
+  struct Entry {
+    // Non-null => positive (the shared translated ELF). Null => negative (a cached
+    // deterministic failure). Presence of the key alone already means "seen".
+    std::shared_ptr<const std::vector<uint8_t>> translated;
+  };
+
+  std::mutex mutex_;
+  std::unordered_map<uint64_t, Entry> entries_;
+};
+
 /// @brief Outcome of a single-flight materialization attempt.
 enum class MaterializeResult : uint8_t {
   kReady,  ///< The object is translated and its hidden child is loaded.
@@ -1853,6 +1945,7 @@ public:
       ExecutableAgentRegistry::instance().clear();
       DeferredObjectRegistry::instance().clear();
       DestroyCoordinator::instance().clear();
+      LazyTranslationCache::instance().clear();
       // NOTE: released here on hook uninstall to keep test/reload state clean. The
       // plan's process-lifetime pinning of translated storage across a real
       // hsa_shut_down (Sec. 7.4/B3) is separate, later lifecycle work.
@@ -5229,18 +5322,35 @@ create_hidden_child_executable(const std::shared_ptr<const std::vector<uint8_t>>
   if (!source.is_valid())
     return false;
 
-  BinaryTranslatorOptions translator_options;
-  translator_options.skip_failed_kernels = true;
-  translator_options.input_revision = ProcessorRevision::Gfx1250B0;
-  translator_options.output_revision = ProcessorRevision::Gfx1250A0;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250,
-                              /*target_mach=*/0, translator_options);
-  rocjitsu::TranslatedCodeObject translated = translator.translate(source);
-  if (!translated.dispatchable())
+  // In-process translation cache (§14.8): dedupe the heavy DBT run across identical
+  // source loads. A cached negative fails closed WITHOUT re-translating (a
+  // deterministic failure would recur); a cached positive skips straight to child
+  // creation with the shared translated ELF.
+  const uint64_t cache_key = LazyTranslationCache::content_key(*object.source_bytes);
+  std::shared_ptr<const std::vector<uint8_t>> translated_owned;
+  const LazyTranslationCache::Lookup cached = LazyTranslationCache::instance().find(cache_key);
+  if (cached.status == LazyTranslationCache::Status::kNegative)
     return false;
-
-  auto translated_owned =
-      std::make_shared<const std::vector<uint8_t>>(std::move(translated.elf_bytes));
+  if (cached.status == LazyTranslationCache::Status::kPositive) {
+    translated_owned = cached.bytes;
+  } else {
+    BinaryTranslatorOptions translator_options;
+    translator_options.skip_failed_kernels = true;
+    translator_options.input_revision = ProcessorRevision::Gfx1250B0;
+    translator_options.output_revision = ProcessorRevision::Gfx1250A0;
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250,
+                                /*target_mach=*/0, translator_options);
+    rocjitsu::TranslatedCodeObject translated = translator.translate(source);
+    if (!translated.dispatchable()) {
+      // Deterministic failure: cache it permanently so an identical later load fails
+      // closed immediately instead of re-running the doomed translation.
+      LazyTranslationCache::instance().put_negative(cache_key);
+      return false;
+    }
+    translated_owned =
+        std::make_shared<const std::vector<uint8_t>>(std::move(translated.elf_bytes));
+    LazyTranslationCache::instance().put_positive(cache_key, translated_owned);
+  }
 
   hsa_executable_t child{};
   if (create_hidden_child_executable(translated_owned, object.agent, object.parent_executable,
@@ -6072,5 +6182,48 @@ extern "C" RJ_HOOK_EXPORT bool rj_test_is_lazy_safe(const void *bytes, size_t si
     return false;
   AmdGpuCodeObject object(static_cast<const uint8_t *>(bytes), size);
   return is_lazy_safe(object);
+}
+
+/// @brief Test-only: in-process translation-cache probe/populate (§14.8).
+///
+/// @details Drives LazyTranslationCache directly so a test can prove the content
+/// key, positive dedup, and permanent-negative behavior without the full DBT run.
+/// @p op selects the action: 0 = clear, 1 = put_positive (store @p bytes), 2 =
+/// put_negative, 3 = find. Returns the lookup status for op 3 (0 miss / 1 positive /
+/// 2 negative) and the current entry count for op 0-2. For a positive hit the shared
+/// bytes are compared by size only via the return's high bits (see the test).
+extern "C" RJ_HOOK_EXPORT unsigned rj_test_translation_cache(unsigned op, const void *bytes,
+                                                             size_t size) {
+  auto &cache = LazyTranslationCache::instance();
+  std::vector<uint8_t> source;
+  if (bytes != nullptr && size > 0)
+    source.assign(static_cast<const uint8_t *>(bytes), static_cast<const uint8_t *>(bytes) + size);
+  const uint64_t key = LazyTranslationCache::content_key(source);
+  switch (op) {
+  case 0:
+    cache.clear();
+    return static_cast<unsigned>(cache.size());
+  case 1:
+    cache.put_positive(key, std::make_shared<const std::vector<uint8_t>>(source));
+    return static_cast<unsigned>(cache.size());
+  case 2:
+    cache.put_negative(key);
+    return static_cast<unsigned>(cache.size());
+  case 3:
+  default: {
+    const LazyTranslationCache::Lookup hit = cache.find(key);
+    switch (hit.status) {
+    case LazyTranslationCache::Status::kMiss:
+      return 0;
+    case LazyTranslationCache::Status::kPositive:
+      // High bits carry the cached byte length so the test can confirm the SHARED
+      // bytes came back (not a re-translation).
+      return 1u | (static_cast<unsigned>(hit.bytes ? hit.bytes->size() : 0) << 8);
+    case LazyTranslationCache::Status::kNegative:
+      return 2;
+    }
+    return 0;
+  }
+  }
 }
 #endif // RJ_HOOK_TEST_HOOKS

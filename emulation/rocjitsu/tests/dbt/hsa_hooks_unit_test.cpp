@@ -57,6 +57,7 @@ extern "C" bool rj_test_is_lazy_safe(const void *bytes, size_t size);
 extern "C" void rj_test_record_deferred_with_child(uint64_t parent_handle, uint64_t agent_handle,
                                                    uint64_t child_handle);
 extern "C" bool rj_test_destroy_in_flight(uint64_t executable_handle);
+extern "C" unsigned rj_test_translation_cache(unsigned op, const void *bytes, size_t size);
 
 namespace {
 
@@ -1896,6 +1897,42 @@ TEST(HsaHooksUnitTest, OuterDestroyIsIdempotentOnRepeat) {
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(kFakeExecutable), HSA_STATUS_SUCCESS);
   EXPECT_EQ(g_fake_destroy_order.size(), after_first + 1);
   EXPECT_EQ(g_fake_destroy_order.back(), kFakeExecutable.handle);
+}
+
+// §14.8 in-process cache: a positive entry is returned for an identical source, a
+// distinct source misses, and content that differs by even one byte gets its own
+// key. op codes: 0 clear, 1 put_positive, 2 put_negative, 3 find.
+TEST(HsaHooksUnitTest, TranslationCachePositiveDedupAndDistinctKeys) {
+  rj_test_translation_cache(0, nullptr, 0); // clear
+  const std::vector<uint8_t> a{0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  const std::vector<uint8_t> b{0x7f, 'E', 'L', 'F', 1, 2, 3, 5}; // one byte different
+
+  // Cold: both miss.
+  EXPECT_EQ(rj_test_translation_cache(3, a.data(), a.size()), 0u);
+  EXPECT_EQ(rj_test_translation_cache(3, b.data(), b.size()), 0u);
+
+  // Store a positive for A; A now hits positive (status 1) and carries A's length in
+  // the high bits, proving the SHARED bytes came back. B still misses (distinct key).
+  EXPECT_EQ(rj_test_translation_cache(1, a.data(), a.size()), 1u); // one entry
+  const unsigned hit = rj_test_translation_cache(3, a.data(), a.size());
+  EXPECT_EQ(hit & 0xFFu, 1u);
+  EXPECT_EQ(hit >> 8, a.size());
+  EXPECT_EQ(rj_test_translation_cache(3, b.data(), b.size()), 0u);
+}
+
+// §14.8 permanent negative cache: a deterministic failure is recorded and returned
+// as negative (status 2) for every later identical source -- the caller must fail
+// closed, never re-translate, never fall back to raw B0.
+TEST(HsaHooksUnitTest, TranslationCacheNegativeIsPermanent) {
+  rj_test_translation_cache(0, nullptr, 0); // clear
+  const std::vector<uint8_t> bad{0x7f, 'E', 'L', 'F', 9, 9, 9};
+
+  EXPECT_EQ(rj_test_translation_cache(3, bad.data(), bad.size()), 0u); // miss
+  EXPECT_EQ(rj_test_translation_cache(2, bad.data(), bad.size()), 1u); // put_negative
+  EXPECT_EQ(rj_test_translation_cache(3, bad.data(), bad.size()), 2u); // negative
+  // Idempotent: a second put_negative does not grow the cache or flip the verdict.
+  EXPECT_EQ(rj_test_translation_cache(2, bad.data(), bad.size()), 1u);
+  EXPECT_EQ(rj_test_translation_cache(3, bad.data(), bad.size()), 2u);
 }
 
 // Retained translated storage is dropped when the hook is uninstalled.
