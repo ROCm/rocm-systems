@@ -879,12 +879,19 @@ hsa_status_t AqlQueue::Inactivate() {
 }
 
 DrmDriver::ModifyQueueInParams AqlQueue::CreateModifyQueueParams() {
-  return DrmDriver::ModifyQueueInParams(
+  DrmDriver::ModifyQueueInParams params(
       *agent_, drm_queue_id_, DrmDriver::AQL_QUEUE,
       ring_buf_, ring_buf_alloc_bytes_,
       (uint64_t)&amd_queue_.read_dispatch_id,
       (uint64_t)&amd_queue_.write_dispatch_id,
       (uint64_t)eop_buf_);
+  // Seed queue_percentage from the queue's current scheduling state so a
+  // partial modify preserves it. A MODIFY reports 0% as suspended and 100% as
+  // fully scheduled; callers that change an unrelated field (e.g. SetCUMasking,
+  // which unlike SetPriority has no suspended_ guard) must not inadvertently
+  // resume a suspended queue. Suspend()/Resume() still set this explicitly.
+  params.queue_percentage = suspended_ ? 0 : 100;
+  return params;
 }
 
 hsa_status_t AqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
