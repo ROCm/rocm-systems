@@ -3078,7 +3078,18 @@ hsa_status_t Runtime::LoadHotswapTool() {
   // push_back would leave the hook installed in the live API table but absent from
   // the only reverse-unload/close list -- and because the hook rejects a second
   // OnLoad while already active, that would permanently poison a later hsa_init.
-  tool_libs_.reserve(tool_libs_.size() + 1);
+  // The reservation itself can throw (bad_alloc); handle it here so the loaded
+  // library is closed rather than leaked, since this runs before OnLoad and the
+  // library owns no runtime state yet.
+  try {
+    tool_libs_.reserve(tool_libs_.size() + 1);
+  } catch (...) {
+    if (flag().report_tool_load_failures())
+      fprintf(stderr, "rocjitsu hotswap tool \"%s\" could not be tracked for unload.\n",
+              loaded_name.c_str());
+    os::CloseLib(tool);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
 
   // Invoke OnLoad through the same exception-containing wrapper LoadTools() uses, so
   // an exception thrown by the tool during install cannot cross the C tool boundary
