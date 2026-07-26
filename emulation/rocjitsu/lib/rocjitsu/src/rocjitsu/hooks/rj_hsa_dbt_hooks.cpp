@@ -17,6 +17,7 @@
 /// the original ELF may target a different GPU ISA.
 
 #include "hsa/amd_ext_aql_packet.h"
+#include "hsa/amd_hsa_signal.h"
 #include "hsa/hsa_api_trace_minimal.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -166,6 +167,26 @@ template <typename Fn> [[nodiscard]] ScopeGuard<Fn> make_scope_guard(Fn fn) {
 std::atomic<int> g_log_level{kLogDisabled};
 std::atomic<bool> g_signal_backtrace_enabled{false};
 std::atomic<bool> g_signal_backtrace_installed{false};
+// True only while an auto-A0 lazy hook is installed. The lazy doorbell path checks
+// this first and no-ops otherwise, so a doorbell rung during ROCr/HIP teardown --
+// after OnUnload, and potentially after the queue registry static is destroyed --
+// never touches torn-down hook state (static-destruction-order safety).
+std::atomic<bool> g_lazy_dispatch_active{false};
+
+// Set true once C++ process-exit static teardown has begun. Our hook state lives
+// in function-local-static singletons; their destruction order relative to the
+// CLR/ROCr static destructor that invokes OnUnload (RuntimeTearDown ->
+// hsa_shut_down -> UnloadTools -> OnUnload) is unspecified across DSOs, and in
+// practice a lazy registry can be destroyed BEFORE that late OnUnload runs.
+// uninstall()'s per-registry clear() calls are redundant at process exit (each
+// singleton's own destructor already frees its maps) but are needed on the
+// in-process reload path (a test calling OnUnload then OnLoad). Any teardown-
+// critical singleton flips this latch in its destructor; uninstall() then skips
+// the clear() block during process exit (turning a would-be use-after-free into a
+// no-op) while still clearing on reload, where no destructor has run and the latch
+// is still false. Namespace-scope + trivially destructible, so it outlives every
+// singleton. This is the leak-free alternative to never-destroyed singletons.
+std::atomic<bool> g_hook_in_process_exit{false};
 
 /// @brief Saved original AMD-loader vendor reader constructor.
 ///
@@ -1030,6 +1051,17 @@ public:
     return registry;
   }
 
+  /// @brief Latch process-exit so uninstall() skips the now-redundant clear().
+  ///
+  /// @details At C++ process exit this function-local static is destroyed, freeing
+  /// map_/by_proxy_kernel_object_. ROCr/HIP invoke OnUnload from a LATER static
+  /// destructor, and uninstall() calls clear() on this registry -- which would be a
+  /// use-after-free on the just-freed maps. Setting g_hook_in_process_exit here
+  /// makes uninstall() skip its clear() block during process exit (this destructor
+  /// already frees everything), while the in-process reload path (OnUnload then
+  /// OnLoad, no destructor run) keeps the latch false and clears normally.
+  ~DeferredObjectRegistry() { g_hook_in_process_exit.store(true, std::memory_order_release); }
+
   /// @brief Record a newly-deferred object; returns the shared record.
   std::shared_ptr<DeferredObject> record(std::shared_ptr<DeferredObject> object) {
     std::lock_guard lock(mutex_);
@@ -1612,9 +1644,12 @@ void clear_virtual_lds_dispatch_queues();
   if (!lazy)
     return false;
   // Lazy adds the dispatch-publication surface so the doorbell seam can rewrite a
-  // proxy dispatch's kernel_object to its translated child (§14.3). queue_create/
-  // destroy track the ring for the seam; the signal stores are the doorbell path.
-  return name == "queue_create" ||         // track the ring for dispatch rewrite
+  // proxy dispatch's kernel_object to its translated child (§14.3). The signal
+  // stores are the doorbell path: the seam resolves the ring straight from the
+  // doorbell signal (ring_from_doorbell_signal), so it needs no queue-create hook
+  // -- queue_create/destroy track the ring only for the simulation virtual-LDS
+  // path, which auto-A0 does not use, but are kept patched for parity/bookkeeping.
+  return name == "queue_create" ||         // ring bookkeeping (unused by lazy seam)
          name == "queue_destroy" ||        // stop tracking on queue teardown
          name == "signal_store_relaxed" || // doorbell path: rewrite before publish
          name == "signal_store_screlease"; // doorbell path: rewrite before publish
@@ -1674,11 +1709,13 @@ public:
     const bool lazy = config_->mode == HookMode::kAutoA0 && config_->lazy_enabled;
 #define RJ_INSTALL_PATCH(name, table_ptr, present, patch_if_original, field, wrapper, type)        \
   if ((present) && (!(patch_if_original) || original_##name##_ != nullptr) &&                      \
-      (install_all || auto_a0_patches(#name, lazy)))                                               \
-    (table_ptr)->field = wrapper;
+      (install_all || auto_a0_patches(#name, lazy))) {                                             \
+    (table_ptr)->field = wrapper;                                                                  \
+  }
     RJ_HSA_PATCH_ENTRIES(RJ_INSTALL_PATCH)
 #undef RJ_INSTALL_PATCH
 
+    g_lazy_dispatch_active.store(lazy, std::memory_order_release);
     active_ = true;
 
     log_message(kLogInfo, "installed DBT hook target=%s arch=%s mach=0x%x",
@@ -1703,16 +1740,30 @@ public:
       active_ = false;
     }
 
-    CodeObjectReaderRegistry::instance().clear();
-    ExecutableAgentRegistry::instance().clear();
-    DeferredObjectRegistry::instance().clear();
-    // NOTE: released here on hook uninstall to keep test/reload state clean. The
-    // plan's process-lifetime pinning of translated storage across a real
-    // hsa_shut_down (Sec. 7.4/B3) is separate, later lifecycle work.
-    TranslatedExecutableRegistry::instance().clear();
-    clear_agent_mapper();
-    VirtualLdsRuntimeRegistry::instance().clear();
-    clear_virtual_lds_dispatch_queues();
+    // Stop the lazy doorbell path before tearing down registries: a doorbell rung
+    // during teardown (e.g. HIP's fatbin-unregister cache-flush barrier) must not
+    // walk a half-cleared registry.
+    g_lazy_dispatch_active.store(false, std::memory_order_release);
+
+    // Skip the per-registry clear() during C++ process-exit teardown: the
+    // singletons' own destructors have already begun freeing their maps (a
+    // teardown-critical destructor sets g_hook_in_process_exit before this late
+    // OnUnload runs -- see DeferredObjectRegistry::~DeferredObjectRegistry). Calling
+    // clear() on an already-destroyed singleton is a use-after-free. On the
+    // in-process reload path no destructor has run, the latch is false, and the
+    // registries are cleared normally so a subsequent OnLoad starts clean.
+    if (!g_hook_in_process_exit.load(std::memory_order_acquire)) {
+      CodeObjectReaderRegistry::instance().clear();
+      ExecutableAgentRegistry::instance().clear();
+      DeferredObjectRegistry::instance().clear();
+      // NOTE: released here on hook uninstall to keep test/reload state clean. The
+      // plan's process-lifetime pinning of translated storage across a real
+      // hsa_shut_down (Sec. 7.4/B3) is separate, later lifecycle work.
+      TranslatedExecutableRegistry::instance().clear();
+      clear_agent_mapper();
+      VirtualLdsRuntimeRegistry::instance().clear();
+      clear_virtual_lds_dispatch_queues();
+    }
     // Drop the installed runtime-API table so a later OnLoad cannot race readers
     // against stale entry points and post-unload callbacks become no-ops.
     rocjitsu::hooks::clear_virtual_lds_runtime_api();
@@ -2953,6 +3004,38 @@ void map_pointer_info_accessible_agents(uint32_t *num_agents_accessible, hsa_age
   return is_kernel_dispatch_packet(packet) || is_ext_kernel_dispatch_packet(packet);
 }
 
+/// @brief The AQL ring backing a queue: packet array base and slot count.
+struct DoorbellRing {
+  void *base = nullptr;
+  uint32_t size = 0;
+  [[nodiscard]] explicit operator bool() const { return base != nullptr && size != 0; }
+};
+
+/// @brief Resolve a doorbell signal directly to its queue's AQL ring.
+///
+/// @details A public `hsa_signal_t.handle` is the address of the embedded
+/// `amd_signal_t` (ROCr's `SharedSignal::Convert` subtracts the offset the other
+/// way). For a doorbell signal (`kind == kAmdSignalKindDoorbell`), `queue_ptr`
+/// points at the owning `amd_queue_t`, whose `hsa_queue` prefix carries the ring
+/// `base_address` and `size`. This lets the dispatch seam find the ring from the
+/// doorbell alone -- no queue-create interception, and immune to which queue
+/// creation API the runtime used (`hsa_queue_create` vs. the newer
+/// `hsa_amd_queue_create`). Returns an empty ring for a non-doorbell signal or a
+/// doorbell with no queue back-pointer.
+[[nodiscard]] DoorbellRing ring_from_doorbell_signal(hsa_signal_t signal) {
+  if (signal.handle == 0)
+    return {};
+  const auto *amd_signal =
+      reinterpret_cast<const rocjitsu::amdgpu::AmdSignal *>(static_cast<uintptr_t>(signal.handle));
+  if (amd_signal->kind != rocjitsu::amdgpu::kAmdSignalKindDoorbell &&
+      amd_signal->kind != rocjitsu::amdgpu::kAmdSignalKindLegacyDoorbell)
+    return {};
+  const ::amd_queue_t *queue = amd_signal->queue_ptr;
+  if (queue == nullptr || queue->hsa_queue.base_address == nullptr || queue->hsa_queue.size == 0)
+    return {};
+  return DoorbellRing{queue->hsa_queue.base_address, queue->hsa_queue.size};
+}
+
 /// @brief Return a copy of @p header with the packet type forced to INVALID.
 ///
 /// @details Used only as a transient "not ready" marker while the ring rewrite
@@ -2983,6 +3066,24 @@ public:
   static VirtualLdsDispatchQueueRegistry &instance() {
     static VirtualLdsDispatchQueueRegistry registry;
     return registry;
+  }
+
+  /// @brief Disarm the lazy seam and latch process-exit before maps are freed.
+  ///
+  /// @details This registry is a function-local static, so its destructor runs at
+  /// C++ process exit. ROCr/HIP invoke OnUnload from a LATER static destructor
+  /// (RuntimeTearDown -> hsa_shut_down -> UnloadTools -> OnUnload), and ROCr/HIP
+  /// also ring queue doorbells during their own teardown, so both a doorbell and
+  /// OnUnload's clear() can reach this singleton AFTER it has been destroyed.
+  /// Clearing g_lazy_dispatch_active makes any post-destruction doorbell a no-op
+  /// (rewrite_lazy_dispatches_for_doorbell gates on it), and setting
+  /// g_hook_in_process_exit tells uninstall() to skip its now-redundant clear()
+  /// block (this destructor already frees the maps). Both flags are namespace-scope
+  /// atomics that outlive every singleton. On the in-process reload path no
+  /// destructor has run, so both stay armed and clear() runs normally.
+  ~VirtualLdsDispatchQueueRegistry() {
+    g_lazy_dispatch_active.store(false, std::memory_order_release);
+    g_hook_in_process_exit.store(true, std::memory_order_release);
   }
 
 #if defined(RJ_HOOK_TEST_HOOKS)
@@ -3101,44 +3202,107 @@ public:
     }
   }
 
-  /// @brief Materialize deferred proxy dispatches for a doorbell, holding no lock.
+  /// @brief Translate + rewrite every proxy dispatch a doorbell just published.
   ///
-  /// @details Snapshots the target queue's ring pointer + published packet range
-  /// under a brief queue lock, releases it, then runs the (heavy, single-flight)
-  /// translation for every not-yet-ready proxy in that range OUTSIDE the queue
-  /// lock (§14.4). The ring memory stays valid for the read because the queue is
-  /// live while its doorbell is being rung.
-  void materialize_pending_lazy_dispatch_for_doorbell(hsa_signal_t signal,
-                                                      hsa_signal_value_t value) {
-    void *ring_base = nullptr;
-    uint32_t ring_size = 0;
-    uint64_t begin_packet_id = 0;
-    uint64_t end_packet_id = 0;
+  /// @details The auto-A0 lazy doorbell path. Resolves the ring straight from the
+  /// doorbell signal (`ring_from_doorbell_signal`) -- these queues are created via
+  /// `hsa_amd_queue_create` and never enter the queue registry, and the signal-walk
+  /// is immune to which queue-create API the runtime used. Computes the newly
+  /// published range `(cursor, packet_id]` from this queue's private lazy cursor,
+  /// single-flight-materializes every not-yet-ready proxy in that range with NO
+  /// lock held (§14.4), then rewrites each packet's kernel_object and advances the
+  /// cursor. When the doorbell signal is not a real doorbell (no queue back-pointer)
+  /// this is a no-op, so it is safe to call for every signal store.
+  void rewrite_lazy_dispatches_for_doorbell(hsa_signal_t signal, hsa_signal_value_t value) {
+    // Re-entrancy guard: materialize below creates/loads/freezes the hidden child
+    // executable through saved HSA APIs, and ROCr rings doorbells internally during
+    // those calls (e.g. cache-flush barrier packets). Those nested doorbells route
+    // back here on THIS thread. Without this guard the nested call would mutate the
+    // cursor map while an outer operator[] up the stack still holds it -> UB/crash.
+    // A nested doorbell has nothing new of ours to translate, so make it a no-op.
+    static thread_local bool in_lazy_doorbell = false;
+    if (in_lazy_doorbell)
+      return;
+    // No-op once the lazy hook is uninstalled (or was never active): a doorbell rung
+    // during ROCr/HIP teardown must not touch torn-down registries.
+    if (!g_lazy_dispatch_active.load(std::memory_order_acquire))
+      return;
+    const DoorbellRing ring = ring_from_doorbell_signal(signal);
+    if (!ring)
+      return;
+    in_lazy_doorbell = true;
+    auto reentry_guard = make_scope_guard([&] { in_lazy_doorbell = false; });
+
+    const uint64_t packet_id = static_cast<uint64_t>(value);
+    uint64_t begin_packet_id = packet_id;
     {
-      std::lock_guard lock(mutex_);
-      auto doorbell_it = queues_by_doorbell_.find(signal.handle);
-      if (doorbell_it == queues_by_doorbell_.end())
-        return;
-      auto queue_it = queues_by_ptr_.find(doorbell_it->second);
-      if (queue_it == queues_by_ptr_.end())
-        return;
-      QueueState &qs = queue_it->second;
-      if (qs.queue == nullptr || qs.queue->base_address == nullptr || qs.queue->size == 0)
-        return;
-      if (qs.uses_packet_interceptor)
-        return;
-      const uint64_t packet_id = static_cast<uint64_t>(value);
-      begin_packet_id =
-          (packet_id >= qs.next_packet_id && packet_id - qs.next_packet_id < qs.queue->size)
-              ? qs.next_packet_id
-              : packet_id;
-      end_packet_id = packet_id + 1;
-      // Copy the ring pointer + size out under the lock; do NOT retain a reference
-      // to qs. The app owns the queue's lifetime while ringing its doorbell.
-      ring_base = qs.queue->base_address;
-      ring_size = qs.queue->size;
+      std::lock_guard lock(lazy_cursor_mutex_);
+      auto it = lazy_cursor_by_doorbell_.find(signal.handle);
+      if (it != lazy_cursor_by_doorbell_.end() && it->second <= packet_id &&
+          packet_id - it->second < ring.size)
+        begin_packet_id = it->second;
     }
-    materialize_pending_lazy_dispatch(ring_base, ring_size, begin_packet_id, end_packet_id);
+
+    // Phase 1 -- FENCE BEFORE TRANSLATE. Mark every not-yet-rewritten lazy proxy
+    // in the range INVALID *before* the slow translation runs. This closes the
+    // visibility race: materialize below (child executable create/load/freeze)
+    // internally rings doorbells through the saved HSA APIs, and the re-entrancy
+    // guard forwards those raw stores to the emulated CP. If the proxy slot were
+    // still its original (valid) header, the CP would fetch and dispatch the proxy
+    // s_endpgm before our rewrite lands -- the kernel becomes a no-op (e.g. an H2D
+    // copy that never runs, so its destination reads as zero). An INVALID header
+    // instead tells the CP the producer has not finished, so it stalls-and-retries
+    // (its invalid_pending_ poll) until Phase 3 republishes a valid header. Record
+    // each fenced slot with its original header and proxy kernel_object so Phase 2
+    // can translate it (materialize skips INVALID headers) and Phase 3 can restore
+    // it. Packets not tracked as proxies are left untouched.
+    struct FencedProxy {
+      uint32_t slot;
+      uint16_t header;
+      uint64_t proxy_ko;
+    };
+    std::vector<FencedProxy> fenced;
+    auto *packets = static_cast<hsa_kernel_dispatch_packet_t *>(ring.base);
+    for (uint64_t id = begin_packet_id; id <= packet_id; ++id) {
+      const uint32_t slot = static_cast<uint32_t>(id % ring.size);
+      hsa_kernel_dispatch_packet_t &packet = packets[slot];
+      const uint16_t header =
+          std::atomic_ref<uint16_t>(packet.header).load(std::memory_order_acquire);
+      if (aql_packet_type(header) == HSA_PACKET_TYPE_INVALID)
+        continue; // already fenced (this doorbell re-covers an in-flight range).
+      if (!is_lazy_dispatch_packet(packet))
+        continue;
+      const uint64_t proxy_ko = packet.kernel_object;
+      if (DeferredObjectRegistry::instance().find_by_proxy_kernel_object(proxy_ko) == nullptr)
+        continue; // not a tracked proxy: an ordinary non-lazy dispatch.
+      publish_packet_header(packet, make_invalid_packet_header(header));
+      fenced.push_back({slot, header, proxy_ko});
+    }
+
+    // Phase 2 -- translate the fenced proxies (heavy, NO lock held). Drive it from
+    // the recorded proxy kernel_objects, since their headers are now INVALID and a
+    // header rescan would skip them. single_flight_materialize translates each
+    // object exactly once even under concurrent doorbells.
+    for (const FencedProxy &f : fenced) {
+      auto object = DeferredObjectRegistry::instance().find_by_proxy_kernel_object(f.proxy_ko);
+      if (object == nullptr)
+        continue;
+      (void)single_flight_materialize(*object,
+                                      [&] { return materialize_deferred_object(*object); });
+    }
+
+    // Phase 3 -- restore each fenced slot to the translated kernel_object and a
+    // valid header (rewrite_lazy_kernel_object republishes a valid header on every
+    // path, including a failed translation, so no slot is ever left INVALID).
+    for (const FencedProxy &f : fenced) {
+      rewrite_lazy_kernel_object(packets[f.slot], f.header);
+    }
+    {
+      std::lock_guard lock(lazy_cursor_mutex_);
+      uint64_t &cursor = lazy_cursor_by_doorbell_[signal.handle];
+      if (packet_id + 1 > cursor)
+        cursor = packet_id + 1;
+    }
   }
 
   /// @brief Rewrite any kernel dispatch packet made visible by this doorbell.
@@ -3146,12 +3310,12 @@ public:
     if (value < 0)
       return;
 
-    // Lazy pre-pass: translate any not-yet-ready proxy dispatch in the newly
-    // published range BEFORE taking the queue lock, because materialization runs
-    // the DBT core + saved HSA APIs and must never hold this mutex (§14.4). This
-    // briefly locks only to snapshot the queue pointer + range, then materializes
-    // unlocked; the locked rewrite below then just swaps kernel_objects O(1).
-    materialize_pending_lazy_dispatch_for_doorbell(signal, value);
+    // Auto-A0 lazy path (registry-free). These queues are created via
+    // hsa_amd_queue_create and never enter the queue registry, so resolve the ring
+    // straight from the doorbell signal and rewrite proxy dispatches to their
+    // translated children. Translation (heavy) runs with NO lock held (§14.4); the
+    // kernel_object swap is a fast per-packet map lookup.
+    rewrite_lazy_dispatches_for_doorbell(signal, value);
 
     std::lock_guard lock(mutex_);
     auto doorbell_it = queues_by_doorbell_.find(signal.handle);
@@ -3235,6 +3399,10 @@ public:
     }
     queues_by_ptr_.clear();
     queues_by_doorbell_.clear();
+    {
+      std::lock_guard cursor_lock(lazy_cursor_mutex_);
+      lazy_cursor_by_doorbell_.clear();
+    }
     VirtualLdsDispatchAllocator::instance().clear();
     // Allow the scanner to start again if the registry is reused after a clear
     // (e.g. an in-process reload). Safe under mutex_ because start is gated by
@@ -3709,13 +3877,13 @@ private:
 
   /// @brief Swap a proxy kernel_object for its translated child, if ready.
   ///
-  /// @details Called from rewrite_packet under the queue lock. Only a fast,
+  /// @details Called from the doorbell seam's fence-before-translate phase 3
+  /// (rewrite_lazy_dispatches_for_doorbell) after the object has been materialized,
+  /// and from rewrite_packet on the standard/extended dispatch path. Only a fast,
   /// read-only map lookup runs here (find_by_proxy_kernel_object takes the
-  /// DeferredObjectRegistry lock, never this queue lock). The heavy translation
-  /// happened earlier in the pre-doorbell materialize pass, which runs OUTSIDE
-  /// this lock. A proxy dispatch that is not yet kReady here is left unchanged;
-  /// materialize_pending_lazy_dispatch guarantees it was made ready before the
-  /// doorbell forwards, so this is the common (already-ready) path.
+  /// DeferredObjectRegistry lock). Always republishes a valid header before
+  /// returning -- including the not-yet-ready path -- so a slot the caller pre-fenced
+  /// to INVALID is never left stalled forever.
   static void rewrite_lazy_kernel_object(hsa_kernel_dispatch_packet_t &packet, uint16_t header) {
     const uint64_t proxy_ko = packet.kernel_object;
     auto object = DeferredObjectRegistry::instance().find_by_proxy_kernel_object(proxy_ko);
@@ -3723,13 +3891,23 @@ private:
       return; // Not a tracked proxy: an ordinary non-lazy dispatch.
 
     uint64_t translated_ko = 0;
+    DeferredTranslationState st;
+    bool in_map = false;
     {
       std::lock_guard object_lock(object->mutex);
-      if (object->state != DeferredTranslationState::kReady)
-        return; // Not ready (or failed): leave the packet; fail-closed elsewhere.
+      st = object->state;
       auto it = object->kernel_object_map.find(proxy_ko);
-      if (it == object->kernel_object_map.end())
+      in_map = it != object->kernel_object_map.end();
+      if (st != DeferredTranslationState::kReady || !in_map) {
+        // Leave a valid header: the caller may have pre-fenced this slot to INVALID
+        // (fence-before-translate). If the translation is not ready (e.g. it failed),
+        // restore the original header so the CP is never stalled forever on an
+        // INVALID slot -- the proxy s_endpgm then runs and the output check catches
+        // the miss. Re-publishing an already-valid header is a harmless no-op for the
+        // non-fenced registry caller.
+        publish_packet_header(packet, header);
         return;
+      }
       translated_ko = it->second;
     }
     if (translated_ko == 0 || translated_ko == proxy_ko)
@@ -3739,42 +3917,6 @@ private:
     publish_packet_header(packet, make_invalid_packet_header(header));
     packet.kernel_object = translated_ko;
     publish_packet_header(packet, header);
-  }
-
-  /// @brief Materialize (translate + load child) any proxy dispatch in a range.
-  ///
-  /// @details Runs BEFORE the queue lock is taken (§14.4): it single-flights the
-  /// translation of every not-yet-ready proxy kernel about to be published, so the
-  /// subsequent locked rewrite_packet only does the O(1) kernel_object swap. The
-  /// heavy work (DBT, child create/load/freeze) must never run under the queue
-  /// mutex. Takes the ring pointer + size by value (captured under the queue lock
-  /// by the caller) so it holds NO reference to the QueueState, which a concurrent
-  /// queue destroy could invalidate. Reads packets from the ring read-only.
-  static void materialize_pending_lazy_dispatch(void *ring_base, uint32_t ring_size,
-                                                uint64_t begin_packet_id, uint64_t end_packet_id) {
-    if (ring_base == nullptr || ring_size == 0)
-      return;
-    auto *packets = static_cast<hsa_kernel_dispatch_packet_t *>(ring_base);
-    for (uint64_t packet_id = begin_packet_id; packet_id < end_packet_id; ++packet_id) {
-      const uint32_t slot = static_cast<uint32_t>(packet_id % ring_size);
-      hsa_kernel_dispatch_packet_t &packet = packets[slot];
-      const uint16_t header =
-          std::atomic_ref<uint16_t>(packet.header).load(std::memory_order_acquire);
-      if (aql_packet_type(header) == HSA_PACKET_TYPE_INVALID)
-        continue;
-      // Accept BOTH standard and extended kernel-dispatch packets: the normal
-      // gfx1250 HIP launch is an extended (vendor-specific) packet (§14.3a).
-      if (!is_lazy_dispatch_packet(packet))
-        continue;
-      auto object =
-          DeferredObjectRegistry::instance().find_by_proxy_kernel_object(packet.kernel_object);
-      if (object == nullptr)
-        continue;
-      // Single-flight: translate exactly once even if several queues/threads reach
-      // this proxy concurrently. Runs outside the queue lock (we hold none here).
-      (void)single_flight_materialize(*object,
-                                      [&] { return materialize_deferred_object(*object); });
-    }
   }
 
   static void rewrite_packet_range(QueueState &state, uint64_t begin_packet_id,
@@ -3921,6 +4063,15 @@ private:
   std::mutex mutex_;
   std::unordered_map<uint64_t, QueueState> queues_by_ptr_;
   std::unordered_map<uint64_t, uint64_t> queues_by_doorbell_;
+  // Lazy dispatch cursor keyed by doorbell signal handle: the highest contiguous
+  // packet id this hook has already rewritten+forwarded for that queue. Auto-A0
+  // lazy queues are not in the queue registry (created via hsa_amd_queue_create,
+  // which bypasses the queue-create wrapper), so the lazy doorbell path derives
+  // the ring from the signal and tracks its own frontier here. Guarded by its own
+  // mutex (NOT mutex_) so the lazy doorbell path never contends with, or nests
+  // under, the virtual-LDS queue lock.
+  std::mutex lazy_cursor_mutex_;
+  std::unordered_map<uint64_t, uint64_t> lazy_cursor_by_doorbell_;
   // Serializes scanner start (ensure_scanner_started_locked) against stop/join
   // (clear). Separate from mutex_ because clear() must join the scanner thread,
   // which itself takes mutex_ — joining under mutex_ would deadlock.
