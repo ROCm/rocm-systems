@@ -190,7 +190,7 @@ def cmd_report(args):
                 print(f"{'=' * 60}")
                 print(f"  {collective}  /  {dtype}  ({len(subdirs)} rep(s))")
                 print(f"{'=' * 60}")
-                rows, show_bw = ra._analyze_dirs(
+                rows, show_bw, _regions = ra._analyze_dirs(
                     subdirs, np_val, collective, outlier_fn, method_name)
                 ra.print_report(rows, method_name, show_bw=show_bw)
         else:
@@ -203,6 +203,71 @@ def cmd_report(args):
         for (collective, dtype), rows in sorted(data.items()):
             _print_baseline_report(rows, collective, dtype, method_name, np_val)
 
+    return 0
+
+
+def _fmt_us_stat(ns):
+    if ns is None:
+        return "--"
+    return f"{ns / 1000.0:.2f}"
+
+
+def cmd_variance(args):
+    """GPU-time jitter per (size, place) from profiled traces.
+
+    Reports, per point: per-launch on-GPU duration (End-Start; the accurate
+    rocprofv3 HW timestamp) and inter-launch gap (next.Start - this.End), with
+    median/std/p90, plus the fraction of wall time spent in gaps. This exposes
+    launch jitter/stalls that rccl-tests' host_time/N averaging hides.
+    """
+    setup_tools_path(args.tools_dir)
+    import roctx_analyze as ra
+
+    run_dir = args.run_dir
+    groups = ra.discover_multi_run_groups(run_dir)
+    if not groups:
+        print("No profiled trace directories found (variance needs profiled "
+              "runs).", file=sys.stderr)
+        return 1
+
+    print(f"Run: {os.path.basename(run_dir)}   (profiled GPU-time jitter)")
+    print("  dur = per-launch on-GPU duration (End-Start); "
+          "gap = inter-launch (next.Start - prev.End); us.")
+    print()
+
+    for (collective, dtype), subdirs in sorted(groups.items()):
+        samples = ra.collective_timing_samples(subdirs)
+        if not samples:
+            continue
+        print(f"{'=' * 78}")
+        print(f"  {collective}  /  {dtype}  ({len(subdirs)} trace dir(s))")
+        print(f"{'=' * 78}")
+        hdr = (f"{'size':>10}  {'place':>5}  {'n':>6}  "
+               f"{'dur_med':>8}  {'dur_std':>8}  {'dur_p90':>8}  "
+               f"{'gap_med':>8}  {'gap_std':>8}  {'gap_p90':>8}  {'%gap':>6}")
+        print(hdr)
+        print("-" * len(hdr))
+        place_labels = {0: "oop", 1: "ip"}
+        for (size, in_place) in sorted(samples, key=lambda k: (k[1], k[0])):
+            durs = samples[(size, in_place)]["dur"]
+            gaps = samples[(size, in_place)]["gap"]
+            ds = ra.summarize(durs)
+            gs = ra.summarize(gaps)
+            if ds is None:
+                continue
+            sum_dur = sum(durs)
+            sum_gap = sum(gaps) if gaps else 0
+            pct_gap = (100.0 * sum_gap / (sum_dur + sum_gap)) if (sum_dur + sum_gap) else 0.0
+            print(
+                f"{size:>10}  {place_labels.get(in_place, in_place):>5}  {ds['n']:>6}  "
+                f"{_fmt_us_stat(ds['p50']):>8}  {_fmt_us_stat(ds['std']):>8}  "
+                f"{_fmt_us_stat(ds['p90']):>8}  "
+                f"{_fmt_us_stat(gs['p50']) if gs else '--':>8}  "
+                f"{_fmt_us_stat(gs['std']) if gs else '--':>8}  "
+                f"{_fmt_us_stat(gs['p90']) if gs else '--':>8}  "
+                f"{pct_gap:>5.1f}%"
+            )
+        print()
     return 0
 
 
@@ -757,6 +822,14 @@ def main():
                           help="Omit per-iteration samples (smaller; no box/violin)")
     _add_common_args(p_export)
 
+    # -- variance --
+    p_var = sub.add_parser(
+        "variance",
+        help="Per-size GPU-time jitter from profiled traces: per-launch "
+             "duration spread and inter-launch gaps")
+    p_var.add_argument("run_dir", help="Run directory (profiled traces)")
+    p_var.add_argument("--tools-dir", default=None)
+
     args = parser.parse_args()
 
     if args.cmd is None:
@@ -769,6 +842,7 @@ def main():
         "compare": cmd_compare,
         "plot": cmd_plot,
         "export": cmd_export,
+        "variance": cmd_variance,
     }
     return dispatch[args.cmd](args)
 

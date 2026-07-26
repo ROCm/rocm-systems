@@ -287,6 +287,52 @@ def compute_overhead(regions):
     return out
 
 
+def collective_timing_samples(subdirs):
+    """Per (size, in_place) GPU-timing samples for collective kernels.
+
+    Unlike ``correlate``/``collective_samples`` (which keep only per-kernel
+    durations), this preserves the launch *sequence* so we can measure the
+    gaps between launches -- the thing rccl-tests' host_time/N cannot see.
+
+    For every trace file, the collective kernels (``ncclDevKernel*`` /
+    ``meta::comms::dda*``) inside each marker window are taken in start-time
+    order, and we record:
+      * ``dur`` = per-launch on-GPU duration (End - Start), in ns. This is the
+        rocprofv3 hardware timestamp, accurate even when host/launch time is
+        inflated by the profiler.
+      * ``gap`` = inter-launch gap (next.Start - this.End), in ns, between
+        consecutive collective launches within the *same* file's window. Gaps
+        are per-rank/per-stream only and never span files.
+
+    Returns dict: (size, in_place) -> {"dur": [ns, ...], "gap": [ns, ...]}.
+    """
+    out = defaultdict(lambda: {"dur": [], "gap": []})
+    for d in subdirs:
+        for marker_path, kernel_path in discover_trace_files(d):
+            markers = parse_marker_csv(marker_path)
+            kernels = parse_kernel_csv(kernel_path)
+            coll = sorted(
+                (k for k in kernels if categorize_kernel(k["name"]) == "collective"),
+                key=lambda k: k["start"],
+            )
+            for mk in markers:
+                key = (mk["size"], mk["in_place"])
+                lo, hi = mk["start"], mk["end"]
+                prev_end = None
+                for k in coll:
+                    if k["start"] < lo:
+                        continue
+                    if k["start"] > hi:
+                        break
+                    if k["end"] > hi:
+                        continue
+                    out[key]["dur"].append(k["end"] - k["start"])
+                    if prev_end is not None:
+                        out[key]["gap"].append(k["start"] - prev_end)
+                    prev_end = k["end"]
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Outlier detection
 # ---------------------------------------------------------------------------
