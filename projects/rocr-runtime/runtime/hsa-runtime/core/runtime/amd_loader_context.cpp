@@ -334,6 +334,12 @@ bool RegionMemory::Allocate(size_t size, size_t align, bool zero) {
     ptr_ = nullptr;
     return false;
   }
+  // A successful allocation must yield a usable VA: Freeze() and Copy() dereference
+  // ptr_ directly. Fail loudly instead of returning a null ptr_ that segfaults later
+  // (the alignment assert below is compiled out in release builds).
+  if (ptr_ == nullptr) {
+    return false;
+  }
   assert(0 == ((uintptr_t)ptr_) % align);
   if (HSA_STATUS_SUCCESS !=
       core::Runtime::runtime_singleton_->AllocateMemory(
