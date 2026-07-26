@@ -62,7 +62,7 @@
 
                      "pytorch_trace": {
                           "type": "boolean",
-                          "description": "Emit PyTorch record_function ranges as ROCTx markers"
+                          "description": "Profile only inside PyTorch record_function regions and emit them as ROCTx ranges; implies marker_trace, selected_regions, and selected_regions_ref_count"
                      },
 
                      "kernel_trace": {

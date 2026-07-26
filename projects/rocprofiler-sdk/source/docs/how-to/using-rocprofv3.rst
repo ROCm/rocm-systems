@@ -290,14 +290,26 @@ Run the application with ``--pytorch-trace``:
 
     rocprofv3 --pytorch-trace --output-format csv -- python train.py
 
-The option enables ``--marker-trace`` and requests ROCTx emission from PyTorch.
-The rocprofiler-sdk ``roctx`` Python module must be importable by the same Python
+The option limits collection to ``record_function`` regions, enables
+``--marker-trace``, and requests ROCTx range emission from PyTorch. It also
+enables ``--selected-regions`` and ``--selected-regions-ref-count`` so
+collection starts paused, resumes when the first region begins, and pauses when
+the last active region ends. Reference counting keeps collection enabled for
+nested or overlapping regions.
+
+Kernel dispatches, counter records, and other pause/resume-aware activity
+outside all ``record_function`` regions aren't collected. Process metadata
+needed to interpret the trace can still be recorded outside those regions. The
+rocprofiler-sdk ``roctx`` Python module must be importable by the same Python
 interpreter that imports PyTorch. If it is not already importable, add
 ``<rocm-root>/lib/pythonX.Y/site-packages`` to ``PYTHONPATH`` as described in
 :ref:`using-rocprofiler-sdk-roctx`.
 
 ``--pytorch-trace`` isn't supported with ``--attach`` because PyTorch must read
-the marker-emission setting when the target process starts.
+the marker-emission and selected-region settings when the target process
+starts. It also can't be combined with ``--collection-period``,
+``--att-consecutive-kernels``, or ``--att-no-intercept`` because those modes
+can't provide the same ``record_function`` collection boundary.
 
 Kokkos trace
 ++++++++++++++

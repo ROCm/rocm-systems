@@ -68,13 +68,16 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pytorch-trace-environment
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pytorch-trace --marker-trace=no --
-        ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/validate-pytorch-trace-env.cmake
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pytorch-trace --marker-trace=no
+        --selected-regions=no --selected-regions-ref-count=no -- ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/validate-pytorch-trace-env.cmake
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    ENVIRONMENT "TORCH_PROFILER_EMIT_ROCTX=0;ROCPROF_MARKER_API_TRACE=0")
+    ENVIRONMENT
+        "TORCH_PROFILER_EMIT_ROCTX=0;TORCH_PROFILER_ROCTX_SELECTED_REGIONS=0;ROCPROF_MARKER_API_TRACE=0;ROCPROF_SELECTED_REGIONS=0;ROCPROF_SELECTED_REGIONS_REF_COUNT=0"
+    )
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pytorch-trace-disabled-environment
@@ -85,12 +88,45 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    ENVIRONMENT "TORCH_PROFILER_EMIT_ROCTX=1")
+    ENVIRONMENT "TORCH_PROFILER_EMIT_ROCTX=1;TORCH_PROFILER_ROCTX_SELECTED_REGIONS=1")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pytorch-trace-attach-will-fail
     COMMAND ${CMAKE_COMMAND} -DROCPROFV3=$<TARGET_FILE:rocprofiler-sdk::rocprofv3> -P
             ${CMAKE_CURRENT_SOURCE_DIR}/validate-pytorch-trace-attach.cmake
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-pytorch-trace-collection-period-will-fail
+    COMMAND
+        ${CMAKE_COMMAND} -DROCPROFV3=$<TARGET_FILE:rocprofiler-sdk::rocprofv3>
+        -DCONFLICT=collection-period -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/validate-pytorch-trace-conflict.cmake
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-pytorch-trace-att-consecutive-kernels-will-fail
+    COMMAND
+        ${CMAKE_COMMAND} -DROCPROFV3=$<TARGET_FILE:rocprofiler-sdk::rocprofv3>
+        -DCONFLICT=att-consecutive-kernels -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/validate-pytorch-trace-conflict.cmake
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-pytorch-trace-att-no-intercept-will-fail
+    COMMAND
+        ${CMAKE_COMMAND} -DROCPROFV3=$<TARGET_FILE:rocprofiler-sdk::rocprofv3>
+        -DCONFLICT=att-no-intercept -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/validate-pytorch-trace-conflict.cmake
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests"

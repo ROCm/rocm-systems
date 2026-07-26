@@ -97,7 +97,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                 </tr>
                 <tr>
                     <td>--pytorch-trace [BOOL]</td>
-                    <td>Emits PyTorch record_function labels as ROCTx ranges and implies --marker-trace. The rocprofiler-sdk roctx Python module must be importable by PyTorch.</td>
+                    <td>Profiles only inside PyTorch record_function regions, emits their labels as ROCTx ranges, and implies --marker-trace, --selected-regions, and --selected-regions-ref-count. The rocprofiler-sdk roctx Python module must be importable by PyTorch.</td>
                 </tr>
                 <tr>
                     <td>--kernel-trace [BOOL]</td>

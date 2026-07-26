@@ -30,7 +30,8 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
+rocprofiler_configure_pytest_files(CONFIG pytest.ini
+                                   COPY validate.py validate-pytorch-trace.py conftest.py)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -60,3 +61,27 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;pause-resume"
     FIXTURES_REQUIRED rocprofv3-test-roctx-pause-resume-tracing
     FAIL_REGULAR_EXPRESSION "AssertionError")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-pytorch-trace-selected-regions
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pytorch-trace --kernel-trace --pmc
+        SQ_WAVES -d ${CMAKE_CURRENT_BINARY_DIR}/pytorch-trace-selected-regions-trace -o
+        out --output-format json --log-level info -- $<TARGET_FILE:roctx-pause-resume>
+    DEPENDS roctx-pause-resume
+    TIMEOUT 120
+    LABELS "integration-tests;pause-resume;pytorch-trace;selected-regions"
+    ENVIRONMENT "${roctx-pause-resume-env}"
+    FIXTURES_SETUP rocprofv3-test-pytorch-trace-selected-regions)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-pytorch-trace-selected-regions
+    TEST_PATHS validate-pytorch-trace.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/pytorch-trace-selected-regions-trace/out_results.json
+    TIMEOUT 120
+    LABELS "integration-tests;pause-resume;pytorch-trace;selected-regions"
+    FIXTURES_REQUIRED rocprofv3-test-pytorch-trace-selected-regions
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

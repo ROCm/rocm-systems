@@ -544,7 +544,7 @@ For attachment profiling of running processes:
     add_parser_bool_argument(
         basic_tracing_options,
         "--pytorch-trace",
-        help="Emit PyTorch record_function ranges as ROCTx markers (implies --marker-trace and requires the rocprofiler-sdk roctx Python module)",
+        help="Profile only inside PyTorch record_function ranges and emit them as ROCTx markers (implies --marker-trace, --selected-regions, and --selected-regions-ref-count; requires the rocprofiler-sdk roctx Python module)",
     )
     add_parser_bool_argument(
         basic_tracing_options,
@@ -1675,6 +1675,7 @@ def run(app_args, args, **kwargs):
 
     if args.pytorch_trace is not None:
         update_env("TORCH_PROFILER_EMIT_ROCTX", args.pytorch_trace)
+        update_env("TORCH_PROFILER_ROCTX_SELECTED_REGIONS", args.pytorch_trace)
         if args.pytorch_trace:
             if args.pid:
                 fatal_error(
@@ -1682,6 +1683,8 @@ def run(app_args, args, **kwargs):
                     "emission must be enabled before PyTorch starts"
                 )
             args.marker_trace = True
+            args.selected_regions = True
+            args.selected_regions_ref_count = True
 
     if args.sys_trace:
         for itr in (
@@ -2400,8 +2403,21 @@ def main(argv=None):
             "Multi-pass counter collection (multiple --pmc flags) is not compatible with --collection-period"
         )
 
+    def apply_pytorch_trace_implications(_args):
+        if getattr(_args, "pytorch_trace", False):
+            _args.marker_trace = True
+            _args.selected_regions = True
+            _args.selected_regions_ref_count = True
+
     def validate_selected_regions_conflicts(_args):
-        if getattr(_args, "selected_regions", False) and getattr(
+        if getattr(_args, "pytorch_trace", False) and getattr(
+            _args, "att_no_intercept", False
+        ):
+            fatal_error(
+                "--pytorch-trace cannot be used with --att-no-intercept because "
+                "that ATT mode cannot be limited to record_function ranges"
+            )
+        elif getattr(_args, "selected_regions", False) and getattr(
             _args, "att_no_intercept", False
         ):
             warning(
@@ -2438,6 +2454,7 @@ def main(argv=None):
             cmd_args.pmc = cmd_args.pmc[0]
 
         args = get_args(cmd_args, inp_args[0])
+        apply_pytorch_trace_implications(args)
         validate_selected_regions_conflicts(args)
 
         if args.pid and args.pytorch_trace:
@@ -2562,6 +2579,7 @@ def main(argv=None):
                 # Input file pass: merge cmd_args with the full job config
                 pass_args = get_args(cmd_args, pass_config["config"])
 
+            apply_pytorch_trace_implications(pass_args)
             validate_selected_regions_conflicts(pass_args)
 
             _ec = run(

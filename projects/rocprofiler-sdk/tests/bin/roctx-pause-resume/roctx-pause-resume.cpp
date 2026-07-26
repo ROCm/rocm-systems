@@ -134,6 +134,10 @@ main()
     // pause API tracing
     roctxProfilerPause(tid);
 
+    // This range is deliberately outside every resume window.
+    roctxRangePush("record_function: outside");
+    roctxRangePop();
+
     // Set up matrices
     float* gpuMatrix          = nullptr;
     float* gpuTransposeMatrix = nullptr;
@@ -171,6 +175,7 @@ main()
         if(i % TARGET_KERNEL_ITERATIONS == 0)
         {
             roctxProfilerResume(tid);
+            roctxRangePush("record_function: target");
             hipLaunchKernelGGL(target_kernel,
                                dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
                                dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y),
@@ -184,13 +189,18 @@ main()
             pc_sampling_kernel<<<num_blocks, threads_per_block>>>(threads_per_block);
             // Check for kernel launch errors
             checkHipErrors(hipGetLastError());
+            roctxRangePop();
             roctxProfilerPause(tid);
         }
     }
 
-    // Nested test here
+    // Match nested PyTorch record_function entry and exit ordering. The inner
+    // pause must not disable collection until the outer range also pauses.
     roctxProfilerResume(tid);
+    roctxRangePush("record_function: outer");
     roctxProfilerResume(tid);
+    roctxRangePush("record_function: inner");
+    roctxRangePop();
     roctxProfilerPause(tid);
     // Kernel should appear only with --selected-regions-ref-count
     hipLaunchKernelGGL(nested_kernel,
@@ -201,6 +211,7 @@ main()
                        gpuTransposeMatrix,
                        gpuMatrix,
                        WIDTH);
+    roctxRangePop();
     roctxProfilerPause(tid);
     // Should not appear in trace
     hipLaunchKernelGGL(nested_kernel,
