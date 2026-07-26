@@ -11,9 +11,11 @@ struct alignas(8) ConSanMoiDiagnosticRecord {
   uint32_t first_epoch = 0;
   uint32_t first_owner_id = 0;
   uint32_t second_owner_id = 0;
-  // InlineShadow atomic-tracking diagnostics retain the persistent workgroup
-  // key here so teardown can qualify a token publication that completed after
-  // the device-side diagnostic snapshot. Zero for other engines/configurations.
+  // Record/Replay host diagnostics retain the current event index here so
+  // byte-range provenance can be joined to the exact dynamic record.
+  // InlineShadow atomic-tracking diagnostics instead retain the persistent
+  // workgroup key so teardown can qualify a token publication that completed
+  // after the device-side diagnostic snapshot.
   uint32_t reserved = 0;
   uint64_t first_lane_mask = 0;
   uint64_t second_lane_mask = 0;

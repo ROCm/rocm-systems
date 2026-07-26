@@ -1227,7 +1227,9 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     replay.conflict = true;
     replay.metadata_full |= access_result.metadata_full;
     if (header.diagnostic_count < diagnostic_capacity) {
-      diagnostic_records[header.diagnostic_count] = access_result.diagnostic;
+      ConSanMoiDiagnosticRecord diagnostic = access_result.diagnostic;
+      diagnostic.reserved = record.event_index;
+      diagnostic_records[header.diagnostic_count] = diagnostic;
       ++header.diagnostic_count;
       ++replay.emitted_diagnostic_count;
     } else {

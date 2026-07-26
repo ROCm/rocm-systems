@@ -2100,6 +2100,7 @@ TEST(HsaHooksUnitTest, RecordReplayProvenanceUsesActualConflictingWorkgroupCell)
       .epoch = 1,
       .first_owner_id = 1,
       .second_owner_id = 3,
+      .reserved = 4,
       .first_instruction_offset = 0x11,
       .second_instruction_offset = 0x20,
       .first_access_kind = static_cast<uint32_t>(AccessKind::Write),
@@ -2120,6 +2121,69 @@ TEST(HsaHooksUnitTest, RecordReplayProvenanceUsesActualConflictingWorkgroupCell)
   EXPECT_EQ(diagnostic.second_lane_mask, 0xcu);
   EXPECT_EQ(diagnostic.second_lds_byte_offset, 8u);
   EXPECT_EQ(diagnostic.second_lds_byte_count, 8u);
+}
+
+TEST(HsaHooksUnitTest, RecordReplayModelDiagnosticRepairsWithExactEventProvenance) {
+  using AccessKind = rocjitsu::ConSanMoiShadowAccessKind;
+  rocjitsu::ConSanMoiReportHeader header = rocjitsu::make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/2,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/4,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = 2;
+
+  const std::array records = {
+      rocjitsu::ConSanMoiAccessRecord{
+          .generation = 7,
+          .workgroup_x = 2,
+          .wave_id = 1,
+          .lane_mask = 0x5,
+          .instruction_offset = 0x10,
+          .access_kind = static_cast<uint32_t>(AccessKind::Write),
+          .lds_byte_offset = 12,
+          .lds_byte_count = 4,
+          .start_cell = 3,
+          .cell_count = 1,
+          .epoch = 4,
+          .event_index = 41,
+      },
+      rocjitsu::ConSanMoiAccessRecord{
+          .generation = 7,
+          .workgroup_x = 2,
+          .wave_id = 2,
+          .lane_mask = 0xa,
+          .instruction_offset = 0x20,
+          .access_kind = static_cast<uint32_t>(AccessKind::Write),
+          .lds_byte_offset = 12,
+          .lds_byte_count = 4,
+          .start_cell = 3,
+          .cell_count = 1,
+          .epoch = 4,
+          .event_index = 57,
+      },
+  };
+  std::array<rocjitsu::ConSanMoiDiagnosticRecord, 1> diagnostics{};
+  std::array<uint64_t, 4> shadow{};
+
+  const rocjitsu::ConSanMoiRecordReplayResult replay =
+      rocjitsu::consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
+
+  ASSERT_EQ(replay.emitted_diagnostic_count, 1u);
+  ASSERT_EQ(header.diagnostic_count, 1u);
+  EXPECT_EQ(diagnostics[0].reserved, records[1].event_index);
+  EXPECT_EQ(diagnostics[0].first_lane_mask, 0u);
+  EXPECT_EQ(diagnostics[0].first_lds_byte_count, 0u);
+
+  const rocjitsu::ConSanMoiReplayProvenanceRepair repair =
+      rocjitsu::repair_consan_moi_record_replay_provenance(records, diagnostics);
+
+  EXPECT_EQ(repair.repaired_diagnostic_count, 1u);
+  EXPECT_EQ(repair.unresolved_diagnostic_count, 0u);
+  EXPECT_EQ(diagnostics[0].first_lane_mask, records[0].lane_mask);
+  EXPECT_EQ(diagnostics[0].first_lds_byte_offset, records[0].lds_byte_offset);
+  EXPECT_EQ(diagnostics[0].first_lds_byte_count, records[0].lds_byte_count);
+  EXPECT_EQ(diagnostics[0].second_lane_mask, records[1].lane_mask);
+  EXPECT_EQ(diagnostics[0].second_lds_byte_offset, records[1].lds_byte_offset);
+  EXPECT_EQ(diagnostics[0].second_lds_byte_count, records[1].lds_byte_count);
 }
 
 TEST(HsaHooksUnitTest, RecordReplayProvenanceMismatchRemainsUnknown) {
@@ -2165,8 +2229,111 @@ TEST(HsaHooksUnitTest, RecordReplayProvenanceMismatchRemainsUnknown) {
       .epoch = 1,
       .first_owner_id = 1,
       .second_owner_id = 2,
+      .reserved = 2,
       .first_instruction_offset = 0xdead,
       .second_instruction_offset = 0x20,
+      .first_access_kind = static_cast<uint32_t>(AccessKind::Write),
+      .second_access_kind = static_cast<uint32_t>(AccessKind::Write),
+  };
+
+  const rocjitsu::ConSanMoiReplayProvenanceRepair repair =
+      rocjitsu::repair_consan_moi_record_replay_provenance(records, {&diagnostic, 1});
+
+  EXPECT_EQ(repair.repaired_diagnostic_count, 0u);
+  EXPECT_EQ(repair.unresolved_diagnostic_count, 1u);
+  EXPECT_EQ(diagnostic.first_lane_mask, 0u);
+  EXPECT_EQ(diagnostic.first_lds_byte_count, 0u);
+}
+
+TEST(HsaHooksUnitTest, RecordReplayProvenanceTracksSparseCellsAndExactCurrentEvent) {
+  using AccessKind = rocjitsu::ConSanMoiShadowAccessKind;
+  constexpr uint32_t kHighCell = 2047;
+  std::vector<rocjitsu::ConSanMoiAccessRecord> records;
+  records.reserve(514);
+  const auto access = [](uint32_t event_index, uint32_t workgroup_x, uint32_t owner,
+                         uint32_t instruction, uint64_t lanes) {
+    return rocjitsu::ConSanMoiAccessRecord{
+        .generation = 9,
+        .workgroup_x = workgroup_x,
+        .wave_id = owner,
+        .lane_mask = lanes,
+        .instruction_offset = instruction,
+        .access_kind = static_cast<uint32_t>(AccessKind::Write),
+        .lds_byte_offset = kHighCell * 4u,
+        .lds_byte_count = 4,
+        .start_cell = kHighCell,
+        .cell_count = 1,
+        .epoch = 36,
+        .event_index = event_index,
+    };
+  };
+  for (uint32_t workgroup = 0; workgroup < 512; ++workgroup)
+    records.push_back(access(workgroup + 1u, workgroup, 2, 0xfea78, 0x1));
+  records.push_back(access(513, 512, 3, 0xfea70, 0x8));
+  records.push_back(access(514, 512, 2, 0xfea78, 0x4));
+
+  rocjitsu::ConSanMoiDiagnosticRecord diagnostic{
+      .kind = static_cast<uint32_t>(rocjitsu::ConSanMoiDiagnosticKind::AccessConflict),
+      .backend = static_cast<uint32_t>(rocjitsu::ConSanMoiEngine::RecordReplay),
+      .generation = 9,
+      .epoch = 36,
+      .first_owner_id = 3,
+      .second_owner_id = 2,
+      .reserved = 514,
+      .first_instruction_offset = 0xfea70,
+      .second_instruction_offset = 0xfea78,
+      .first_access_kind = static_cast<uint32_t>(AccessKind::Write),
+      .second_access_kind = static_cast<uint32_t>(AccessKind::Write),
+  };
+
+  const rocjitsu::ConSanMoiReplayProvenanceRepair repair =
+      rocjitsu::repair_consan_moi_record_replay_provenance(records, {&diagnostic, 1});
+
+  EXPECT_EQ(repair.repaired_diagnostic_count, 1u);
+  EXPECT_EQ(repair.unresolved_diagnostic_count, 0u);
+  EXPECT_EQ(diagnostic.first_lane_mask, 0x8u);
+  EXPECT_EQ(diagnostic.first_lds_byte_offset, kHighCell * 4u);
+  EXPECT_EQ(diagnostic.first_lds_byte_count, 4u);
+  EXPECT_EQ(diagnostic.second_lane_mask, 0x4u);
+  EXPECT_EQ(diagnostic.second_lds_byte_offset, kHighCell * 4u);
+  EXPECT_EQ(diagnostic.second_lds_byte_count, 4u);
+}
+
+TEST(HsaHooksUnitTest, RecordReplayProvenanceFailsClosedAfterGlobalBudgetExhaustion) {
+  using AccessKind = rocjitsu::ConSanMoiShadowAccessKind;
+  constexpr uint32_t kCompanionCellCapacity = 1u << 20u;
+  const auto access = [](uint32_t event_index, uint32_t workgroup_x, uint32_t owner,
+                         uint32_t start_cell, uint32_t cell_count) {
+    return rocjitsu::ConSanMoiAccessRecord{
+        .generation = 5,
+        .workgroup_x = workgroup_x,
+        .wave_id = owner,
+        .lane_mask = uint64_t{1} << owner,
+        .instruction_offset = 0x10u * event_index,
+        .access_kind = static_cast<uint32_t>(AccessKind::Write),
+        .lds_byte_offset = start_cell * 4u,
+        .lds_byte_count = cell_count * 4u,
+        .start_cell = start_cell,
+        .cell_count = cell_count,
+        .epoch = 2,
+        .event_index = event_index,
+    };
+  };
+  const std::array records = {
+      access(1, 0, 1, 0, kCompanionCellCapacity),
+      access(2, 1, 2, 0, 1),
+      access(3, 1, 3, 0, 1),
+  };
+  rocjitsu::ConSanMoiDiagnosticRecord diagnostic{
+      .kind = static_cast<uint32_t>(rocjitsu::ConSanMoiDiagnosticKind::AccessConflict),
+      .backend = static_cast<uint32_t>(rocjitsu::ConSanMoiEngine::RecordReplay),
+      .generation = 5,
+      .epoch = 2,
+      .first_owner_id = 2,
+      .second_owner_id = 3,
+      .reserved = 3,
+      .first_instruction_offset = 0x20,
+      .second_instruction_offset = 0x30,
       .first_access_kind = static_cast<uint32_t>(AccessKind::Write),
       .second_access_kind = static_cast<uint32_t>(AccessKind::Write),
   };

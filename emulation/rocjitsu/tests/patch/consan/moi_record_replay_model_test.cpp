@@ -1364,8 +1364,10 @@ TEST(ConSanMoi, RecordReplayAccessRecordsRetainsEveryBoundedDiagnostic) {
   EXPECT_FALSE(replay.diagnostic_capacity_exhausted);
   EXPECT_EQ(diagnostics[0].first_instruction_offset, 0x10u);
   EXPECT_EQ(diagnostics[0].second_instruction_offset, 0x30u);
+  EXPECT_EQ(diagnostics[0].reserved, 2u);
   EXPECT_EQ(diagnostics[1].first_instruction_offset, 0x20u);
   EXPECT_EQ(diagnostics[1].second_instruction_offset, 0x40u);
+  EXPECT_EQ(diagnostics[1].reserved, 3u);
 }
 
 TEST(ConSanMoi, RecordReplayBarrierEventsAdvanceEpochsInEventOrder) {

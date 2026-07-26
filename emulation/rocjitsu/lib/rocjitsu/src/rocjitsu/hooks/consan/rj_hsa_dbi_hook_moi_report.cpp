@@ -1458,16 +1458,22 @@ private:
     const uint32_t diagnostic_sample_count = std::min<uint32_t>(visible_diagnostics, 4u);
     for (uint32_t i = 0; i < diagnostic_sample_count; ++i) {
       const rocjitsu::ConSanMoiDiagnosticRecord &record = diagnostics[i];
+      const char *backend_key_label =
+          record.backend == static_cast<uint32_t>(rocjitsu::ConSanMoiEngine::RecordReplay)
+              ? "event_index"
+          : record.backend == static_cast<uint32_t>(rocjitsu::ConSanMoiEngine::InlineShadow)
+              ? "workgroup"
+              : "reserved";
       log_message(
           kLogInfo,
           "ConSan MOI auto diagnostic reader=%llu index=%u backend=%u kind=%u "
-          "generation=%llu workgroup=%u first_epoch=%u second_epoch=%u "
+          "generation=%llu %s=%u first_epoch=%u second_epoch=%u "
           "first_owner=%u second_owner=%u first_inst=0x%x second_inst=0x%x "
           "first_kind=%u second_kind=%u first_lanes=0x%llx second_lanes=0x%llx "
           "first_lds=[%u,%u) second_lds=[%u,%u)",
           static_cast<unsigned long long>(entry.reader), i, record.backend, record.kind,
-          static_cast<unsigned long long>(record.generation), record.reserved, record.first_epoch,
-          record.epoch, record.first_owner_id, record.second_owner_id,
+          static_cast<unsigned long long>(record.generation), backend_key_label, record.reserved,
+          record.first_epoch, record.epoch, record.first_owner_id, record.second_owner_id,
           record.first_instruction_offset, record.second_instruction_offset,
           record.first_access_kind, record.second_access_kind,
           static_cast<unsigned long long>(record.first_lane_mask),

@@ -8,8 +8,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <span>
+#include <tuple>
+#include <unordered_map>
 #include <vector>
 
 namespace rocjitsu {
@@ -34,36 +37,15 @@ struct ConSanMoiReplayProvenanceRepair {
   ConSanMoiReplayProvenanceRepair result;
 
   struct WorkgroupState {
-    uint64_t generation = 0;
-    uint32_t x = 0;
-    uint32_t y = 0;
-    uint32_t z = 0;
-    std::vector<const ConSanMoiAccessRecord *> cells;
+    std::unordered_map<uint32_t, const ConSanMoiAccessRecord *> cells;
+    bool complete = true;
   };
-  std::vector<WorkgroupState> workgroups;
+  using WorkgroupKey = std::tuple<uint64_t, uint32_t, uint32_t, uint32_t>;
+  std::map<WorkgroupKey, WorkgroupState> workgroups;
   uint64_t allocated_cells = 0;
-  auto workgroup_for = [&](const ConSanMoiAccessRecord &record,
-                           uint32_t required_cells) -> WorkgroupState * {
-    for (WorkgroupState &state : workgroups) {
-      if (state.generation == record.generation && state.x == record.workgroup_x &&
-          state.y == record.workgroup_y && state.z == record.workgroup_z) {
-        if (state.cells.size() < required_cells) {
-          const uint64_t growth = required_cells - state.cells.size();
-          if (growth > kMaxCompanionCells - allocated_cells)
-            return nullptr;
-          state.cells.resize(required_cells);
-          allocated_cells += growth;
-        }
-        return &state;
-      }
-    }
-    if (required_cells > kMaxCompanionCells - allocated_cells)
-      return nullptr;
-    workgroups.push_back({record.generation, record.workgroup_x, record.workgroup_y,
-                          record.workgroup_z,
-                          std::vector<const ConSanMoiAccessRecord *>(required_cells)});
-    allocated_cells += required_cells;
-    return &workgroups.back();
+  auto workgroup_for = [&](const ConSanMoiAccessRecord &record) -> WorkgroupState & {
+    return workgroups[{record.generation, record.workgroup_x, record.workgroup_y,
+                       record.workgroup_z}];
   };
 
   const auto range_for =
@@ -92,6 +74,7 @@ struct ConSanMoiReplayProvenanceRepair {
   const auto diagnostic_matches_current = [](const ConSanMoiDiagnosticRecord &diagnostic,
                                              const ConSanMoiAccessRecord &record) {
     return diagnostic.backend == static_cast<uint32_t>(ConSanMoiEngine::RecordReplay) &&
+           diagnostic.reserved == record.event_index &&
            diagnostic.second_owner_id == record.wave_id &&
            diagnostic.second_instruction_offset == record.instruction_offset &&
            diagnostic.second_access_kind == record.access_kind;
@@ -128,8 +111,8 @@ struct ConSanMoiReplayProvenanceRepair {
         ++result.unresolved_diagnostic_count;
       continue;
     }
-    WorkgroupState *state = workgroup_for(record, range->start_cell + range->cell_count);
-    if (state == nullptr) {
+    WorkgroupState &state = workgroup_for(record);
+    if (!state.complete) {
       if (diagnostic != nullptr &&
           diagnostic->kind == static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict))
         ++result.unresolved_diagnostic_count;
@@ -141,9 +124,10 @@ struct ConSanMoiReplayProvenanceRepair {
       const ConSanMoiAccessRecord *prior = nullptr;
       const uint32_t end = range->start_cell + range->cell_count;
       for (uint32_t cell = range->start_cell; cell < end; ++cell) {
-        const ConSanMoiAccessRecord *candidate = state->cells[cell];
-        if (candidate != nullptr && diagnostic_matches_prior(*diagnostic, *candidate)) {
-          prior = candidate;
+        const auto candidate = state.cells.find(cell);
+        if (candidate != state.cells.end() &&
+            diagnostic_matches_prior(*diagnostic, *candidate->second)) {
+          prior = candidate->second;
           break;
         }
       }
@@ -162,8 +146,20 @@ struct ConSanMoiReplayProvenanceRepair {
     }
 
     const uint32_t end = range->start_cell + range->cell_count;
+    uint64_t growth = 0;
+    for (uint32_t cell = range->start_cell; cell < end; ++cell) {
+      if (!state.cells.contains(cell))
+        ++growth;
+    }
+    if (growth > kMaxCompanionCells - allocated_cells) {
+      // The cap is global, but a miss poisons only this workgroup: a partial
+      // shadow must never be mistaken for exact provenance after exhaustion.
+      state.complete = false;
+      continue;
+    }
     for (uint32_t cell = range->start_cell; cell < end; ++cell)
-      state->cells[cell] = &record;
+      state.cells[cell] = &record;
+    allocated_cells += growth;
   }
 
   for (; diagnostic_index < diagnostic_records.size(); ++diagnostic_index) {
