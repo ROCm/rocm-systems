@@ -221,48 +221,62 @@ function(
         )
     endif()
 
-    rj_add_consan_cdna_hip_moi_sim_case(
-        "${target_name}"
-        "${target}"
-        "${build_dir}"
-        JakubMatmul
-        jakub-matmul
+    set(_runner
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../dbi/consan/consan_cdna_hip_moi_sim.py"
     )
-    rj_add_consan_cdna_hip_moi_sim_case(
-        "${target_name}"
-        "${target}"
-        "${build_dir}"
-        MfmaAttention
-        mfma-attention
+    set(_suite_registry
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../dbi/consan/consan_cdna_hip_moi_registry.py"
     )
-    rj_add_consan_cdna_hip_moi_sim_case(
-        "${target_name}"
-        "${target}"
-        "${build_dir}"
-        D128Block
-        d128-block
+    set(_validation_registry
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../dbi/consan/consan_validation.py"
     )
-    rj_add_consan_cdna_hip_moi_sim_case(
-        "${target_name}"
-        "${target}"
-        "${build_dir}"
-        D128Pressure
-        d128-pressure
+    # These scripts generate the CTest rows below at configure time. Make any
+    # registry or validation-contract edit regenerate those rows automatically.
+    set_property(
+        DIRECTORY
+        APPEND
+        PROPERTY
+            CMAKE_CONFIGURE_DEPENDS
+                "${_runner}"
+                "${_suite_registry}"
+                "${_validation_registry}"
     )
-    rj_add_consan_cdna_hip_moi_sim_case(
-        "${target_name}"
-        "${target}"
-        "${build_dir}"
-        StreamKArrival
-        streamk-arrival
+    execute_process(
+        COMMAND "${_runner}" --list-suites
+        RESULT_VARIABLE _suite_registry_result
+        OUTPUT_VARIABLE _suite_registry
+        ERROR_VARIABLE _suite_registry_error
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        TIMEOUT 10
     )
-    rj_add_consan_cdna_hip_moi_sim_case(
-        "${target_name}"
-        "${target}"
-        "${build_dir}"
-        TreeAtomicOr
-        tree-atomic-or
-    )
+    if(NOT _suite_registry_result EQUAL 0)
+        message(
+            FATAL_ERROR
+            "failed to read the CDNA hip-moi suite registry: "
+            "${_suite_registry_error}"
+        )
+    endif()
+    string(REPLACE "\r\n" "\n" _suite_registry "${_suite_registry}")
+    string(REPLACE "\n" ";" _suite_specs "${_suite_registry}")
+    foreach(_suite_spec IN LISTS _suite_specs)
+        string(REPLACE "|" ";" _suite_fields "${_suite_spec}")
+        list(LENGTH _suite_fields _suite_field_count)
+        if(NOT _suite_field_count EQUAL 2)
+            message(
+                FATAL_ERROR
+                "malformed CDNA hip-moi suite registry row: ${_suite_spec}"
+            )
+        endif()
+        list(GET _suite_fields 0 _ctest_name)
+        list(GET _suite_fields 1 _suite_id)
+        rj_add_consan_cdna_hip_moi_sim_case(
+            "${target_name}"
+            "${target}"
+            "${build_dir}"
+            "${_ctest_name}"
+            "${_suite_id}"
+        )
+    endforeach()
 endfunction()
 
 set(RJ_CONSAN_LDS_CLEAN_TEST "ConSanLdsTest.PaddedCleanStoreCompletes")

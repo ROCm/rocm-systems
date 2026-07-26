@@ -60,8 +60,10 @@ reported by `manifest` and `doctor`; it does not require a generic
 ### CDNA hip-moi simulator smoke
 
 The gfx942 and gfx950 target-native hip-moi executables share a compact
-simulator gate.  Each target has six suites totaling 14 tests.  The runner
-resolves every executable through that target's validation manifest and rejects
+simulator gate. Each target has 13 binaries totaling 33 tests: one reference
+binary plus all 12 shared CDNA instrumented sources. The offline suite registry
+owns their exact target-specific executable names and cross-checks the six
+campaign workload roles against the validation manifest. The runner rejects
 missing, failed, timed-out, or miscounted suites:
 
 ```sh
@@ -84,7 +86,7 @@ cmake -S "$CONSAN_VALIDATION_WORKSPACE_DIR/rocm-systems/emulation/rocjitsu" \
   -DRJ_CONSAN_GFX950_HIP_MOI_BUILD_DIR="$CONSAN_VALIDATION_WORKSPACE_DIR/hip-moi-build-gfx950-tests"
 ```
 
-Then run all 12 entries, or narrow the regular expression to one target:
+Then run all 26 entries, or narrow the regular expression to one target:
 
 ```sh
 ctest --test-dir "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build" \

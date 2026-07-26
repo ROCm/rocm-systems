@@ -65,9 +65,9 @@ scratch before promotion.
 
 The exact validation IDs below are the workload definitions used by
 `consan_validation.py --target gfx950`.  The original workload-scoped `doctor`
-audit ran on 2026-07-22; the Jakub row and complete six-workload hip-moi audit
-were refreshed on 2026-07-23.  “Runnable” means that all required sources,
-assets, target-native executables, and workspace tools resolve in this
+audit ran on 2026-07-22; the Jakub row and complete six-workload hip-moi
+campaign audit were refreshed on 2026-07-26. “Runnable” means that all required
+sources, assets, target-native executables, and workspace tools resolve in this
 workspace now; it is not an instrumentation acceptance claim or a claim that
 an unpublished companion repository commit is remotely reachable.
 
@@ -83,7 +83,7 @@ an unpublished companion repository commit is remotely reachable.
 | `wmma-attention` | **Runnable and smoke-passed** | `hip_moi_instrumented_cdna4_mfma_attention_block_test`, `HipMoiCdna4MfmaAttentionBlock.ExactContextMatchesHostReference`; physical gfx950 oracle passes in 142 ms.  The historical validation ID is retained, but the native operation is MFMA rather than WMMA. |
 | `streamk-arrival` | **Runnable and smoke-passed** | `hip_moi_instrumented_cdna4_mfma_streamk_arrival_counter_test`, `HipMoiCdna4MfmaStreamKArrivalCounter.AcqRelFetchAddOrdersMfmaPartials`; physical gfx950 oracle passes in 92 ms. |
 | `tree-atomic-or` | **Runnable and smoke-passed** | `hip_moi_instrumented_cdna4_mfma_streamk_tree_atomic_or_test`, `HipMoiCdna4MfmaStreamKTreeAtomicOr.AcqRelBitmaskOrdersMfmaPartials`; physical gfx950 oracle passes in 101 ms. |
-| `jakub-attention` | **Locally runnable and simulator-smoke-passed** | hip-moi `288b3c17a7bfd9e28966a754f453fa69cb9616c1` builds `hip_moi_reference_cdna4_jakub_matmul`; `SafeFp16Packed/JakubCdna4MatmulReference.MatchesHostReference/*` passes both parameterized cases through the gfx950 RocJITsu simulator.  That companion commit is not yet contained by a fetched remote ref. |
+| `jakub-attention` | **Locally runnable and simulator-smoke-passed** | hip-moi `29a1c212183b65f1ec9200b24a445862532e4dd8` builds `hip_moi_reference_cdna4_jakub_matmul`; `SafeFp16Packed/JakubCdna4MatmulReference.MatchesHostReference/*` passes both parameterized cases through the gfx950 RocJITsu simulator. That companion commit is not yet contained by a fetched remote ref. |
 
 The five previously available smoke commands use the physical device through
 the workspace TheRock runtime, with software-model environment variables
@@ -533,14 +533,14 @@ instrumentation acceptance evidence.
 | ISA | `amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-` |
 | Driver/runtime | ROCk 6.14.14; workspace TheRock HSA runtime 1.21 |
 | ROCm distribution | `$WORKSPACE_ROOT/TheRock/build/dist/rocm` |
-| hip-moi source | Local commit `288b3c17a7bfd9e28966a754f453fa69cb9616c1` supplies the shared CDNA Jakub source and distinct gfx942/gfx950 targets.  At validation time it is seven commits ahead of `origin/main` and is not contained by a fetched remote ref, so clean remote reproduction requires publishing or otherwise transferring that exact companion commit. |
-| Physical dispatch smoke | On 2026-07-22, workspace TheRock `rocminfo` reports MI355X / `gfx950:sramecc+:xnack-`.  Five native CDNA4 hip-moi host-reference tests pass in 92--188 ms, and corpus `hip_matmul` m128³ passes correctness for all three selected MFMA/shared-memory kernels.  Separately, all six target-native hip-moi executables, including both Jakub parameterizations, pass 14/14 tests through the gfx950 RocJITsu simulator. |
+| hip-moi source | Local commit `29a1c212183b65f1ec9200b24a445862532e4dd8` supplies the shared CDNA source set and distinct gfx942/gfx950 targets. At validation time it is eight commits ahead of `origin/main` and is not contained by a fetched remote ref, so clean remote reproduction requires publishing or otherwise transferring that exact companion commit. |
+| Physical dispatch smoke | On 2026-07-22, workspace TheRock `rocminfo` reports MI355X / `gfx950:sramecc+:xnack-`. Five native CDNA4 hip-moi host-reference tests pass in 92--188 ms, and corpus `hip_matmul` m128³ passes correctness for all three selected MFMA/shared-memory kernels. Separately, all 13 target-native hip-moi binaries pass 33/33 tests through the gfx950 RocJITsu simulator. |
 | Validation corpus | `iree-test-suites` `49f46d6d4370e5aa0a6367751474e20c6c4e95c0`; required Sharktank assets present; LFS fsck clean |
 | Validation doctor | The target-aware registry and workload-scoped doctor resolve all six native hip-moi roles through the explicit `hip-moi-build-gfx950-tests` build tree, including the Jakub counterpart. |
 | RocJitsu test corpus | Local commit `0db836e7bd8c6400b7ffd187d749225899875d7c`; gfx950 enables source-built HIP matmul, HipKittens, HIP Stream-K, and rocBLAS cases and packages the bounded `gfx950_sk_sgemm_streamk` runtime row.  Commits `61b5af0b5ee9ef9221391f5f81550b5e295e7e59` and `46a4c58a7be89b4118c2e3f94081591783d5391a` introduced the Stream-K and Tensile rows, respectively; commits after the earlier `f88d4583022d438ea72fb82c0e89143ccbf61843` snapshot harden Tensile runner provenance and isolation.  No fetched remote ref contains the current commit, so clean remote reproduction requires publishing or transferring it.  The historical pre-generated Tensile artifact tree remains gfx1250-only. |
 | gfx950 Tensile source pool | The 36-YAML pool was surveyed and the bounded Stream-K candidate selected at `rocm-libraries` `c2fafc16393d0ce47a0a5801d827d43f0d3714a4`; the packaged `gfx950_sk_sgemm_streamk` row was reduced from `a8f0845f87ab50adc3dc8d0edd86693cb31065b1`.  The remaining source pool is not part of the validation denominator. |
 | PyTorch discovery | The gfx1250-only thin-wheel mismatch is diagnosed and isolated.  The separate official nightly environment passes `torch.arange` plus all six portable one-repetition exact oracles on gfx950.  Workload-scoped doctor confirms gfx950 numeric dispatch and exact-hook mapping. |
-| Registry boundary | The six portable PyTorch rows and native hip-moi roles are registered validation IDs for gfx950.  The bounded Tensile and HIP Stream-K rows are external corpus executable denominators, not yet `consan_validation.py` workloads.  Remaining source-built rows stay planned expansion until they are built and registered. |
+| Registry boundary | The six portable PyTorch rows and six hip-moi campaign roles are registered validation IDs for gfx950. Seven additional hip-moi binaries are offline simulator prerequisites, not campaign workload IDs. The bounded Tensile and HIP Stream-K rows are external corpus executable denominators, not yet `consan_validation.py` workloads. Remaining source-built rows stay planned expansion until they are built and registered. |
 
 ## Implementation evidence
 
@@ -756,6 +756,12 @@ a ConSan detection.
   `consan-gfx950-streamk-{baseline,supercollider,record-replay,sampled,inline-shadow}-provenance-20260724`
   under `rocjitsu-test-corpus/.pytest-artifacts`; `bd-1w9.9.10` tracks the
   provenance-unknown FLAT and function synchronization work.
+
+- 2026-07-26: hip-moi `29a1c212183b` makes all 12 instrumented CDNA sources
+  common to gfx942 and gfx950. The target-specific offline gate now registers
+  13 binaries per family and passes 33/33 tests through each RocJITsu
+  simulator. The seven additional functional suites remain simulator
+  prerequisites rather than being mislabeled as campaign workload rows.
 
 - 2026-07-24: Advanced the gfx950 corpus evidence baseline to local commit
   `0db836e7bd8c6400b7ffd187d749225899875d7c`, regenerated the bounded Tensile

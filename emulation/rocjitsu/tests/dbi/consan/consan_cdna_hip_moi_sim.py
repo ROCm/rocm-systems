@@ -10,29 +10,16 @@ import re
 import subprocess
 import sys
 
+import consan_cdna_hip_moi_registry as registry
 import consan_validation
 
-EXPECTED_TESTS = 14
+EXPECTED_TESTS = registry.EXPECTED_TESTS
 _PASSED_TESTS = re.compile(r"^\[  PASSED  \] ([0-9]+) tests?\.$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
-class Target:
-    id: str
-    build_dir_name: str
-    default_config_name: str
-
-
-@dataclass(frozen=True)
-class Suite:
-    id: str
-    workload_id: str
-    expected_tests: int
-
-
-@dataclass(frozen=True)
 class SuiteResult:
-    suite: Suite
+    suite: registry.Suite
     passed_tests: int
     error: str | None
 
@@ -41,46 +28,26 @@ class SuiteResult:
         return self.error is None and self.passed_tests == self.suite.expected_tests
 
 
-SUITES = (
-    Suite("jakub-matmul", "jakub-attention", 2),
-    Suite("mfma-attention", "wmma-attention", 2),
-    Suite("d128-block", "d128-block", 2),
-    Suite("d128-pressure", "d128-pressure", 4),
-    Suite("streamk-arrival", "streamk-arrival", 2),
-    Suite("tree-atomic-or", "tree-atomic-or", 2),
-)
-SUITE_BY_ID = {suite.id: suite for suite in SUITES}
-TARGETS = {
-    target.id: target
-    for target in (
-        Target("gfx942", "hip-moi-build-gfx942-tests", "gfx942_cdna3_kmd.json"),
-        # The gfx950 KMD config has an unbounded tick budget.  Keep this smoke
-        # gate on the standalone config's 100000-tick bound.
-        Target("gfx950", "hip-moi-build-gfx950-tests", "gfx950_cdna4.json"),
-    )
-}
+SUITES = registry.SUITES
+SUITE_BY_ID = registry.SUITE_BY_ID
+TARGETS = registry.TARGETS
 
 
-def _executable_suffix(target: Target, suite: Suite) -> Path:
-    relative_path = Path(
-        consan_validation.resolved_workload_relative_path(
-            target.id,
-            suite.workload_id,
-        )
-    )
+def _executable_suffix(target: registry.Target, suite: registry.Suite) -> Path:
+    relative_path = registry.relative_executable_path(target.id, suite.id)
     try:
         return relative_path.relative_to(target.build_dir_name)
     except ValueError as error:
         raise consan_validation.ValidationError(
-            f"{target.id} {suite.workload_id} must resolve beneath "
+            f"{target.id} {suite.id} must resolve beneath "
             f"{target.build_dir_name}: "
             f"{relative_path}"
         ) from error
 
 
 def _suite_command(
-    target: Target,
-    suite: Suite,
+    target: registry.Target,
+    suite: registry.Suite,
     rocjitsu: Path,
     config: Path,
     hip_moi_build: Path,
@@ -107,8 +74,8 @@ def _print_child_output(completed: subprocess.CompletedProcess[str]) -> None:
 
 
 def _run_suite(
-    target: Target,
-    suite: Suite,
+    target: registry.Target,
+    suite: registry.Suite,
     rocjitsu: Path,
     config: Path,
     hip_moi_build: Path,
@@ -159,21 +126,71 @@ def _run_suite(
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--target", choices=tuple(TARGETS), required=True)
-    parser.add_argument("--rocjitsu", type=Path, required=True)
+    parser.add_argument(
+        "--list-suites",
+        action="store_true",
+        help="print CTest-name/suite-id pairs and exit",
+    )
+    parser.add_argument("--target", choices=tuple(TARGETS))
+    parser.add_argument("--rocjitsu", type=Path)
     parser.add_argument("--config", type=Path)
-    parser.add_argument("--hip-moi-build", type=Path, required=True)
+    parser.add_argument("--hip-moi-build", type=Path)
     parser.add_argument("--suite", choices=tuple(SUITE_BY_ID))
     parser.add_argument("--timeout", type=float, default=60.0)
     args = parser.parse_args(argv)
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
+    if not args.list_suites:
+        missing = [
+            option
+            for option, value in (
+                ("--target", args.target),
+                ("--rocjitsu", args.rocjitsu),
+                ("--hip-moi-build", args.hip_moi_build),
+            )
+            if value is None
+        ]
+        if missing:
+            parser.error(f"the following arguments are required: {', '.join(missing)}")
     return args
+
+
+def _validate_registry() -> None:
+    registry.validate()
+    for target in TARGETS.values():
+        for suite in SUITES:
+            if suite.validation_workload_id is None:
+                continue
+            manifest_path = Path(
+                consan_validation.resolved_workload_relative_path(
+                    target.id,
+                    suite.validation_workload_id,
+                )
+            )
+            registry_path = registry.relative_executable_path(target.id, suite.id)
+            if manifest_path != registry_path:
+                raise registry.RegistryError(
+                    f"{target.id} {suite.id} resolves to {registry_path}, "
+                    f"but validation workload {suite.validation_workload_id} "
+                    f"resolves to {manifest_path}"
+                )
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    try:
+        _validate_registry()
+    except (consan_validation.ValidationError, registry.RegistryError) as error:
+        print(f"CDNA hip-moi simulator registry error: {error}", file=sys.stderr)
+        return 2
+    if args.list_suites:
+        for suite in SUITES:
+            print(f"{suite.ctest_name}|{suite.id}")
+        return 0
+
     target = TARGETS[args.target]
+    assert args.rocjitsu is not None
+    assert args.hip_moi_build is not None
     rocjitsu = args.rocjitsu.expanduser().resolve()
     config = (
         (
@@ -188,14 +205,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     hip_moi_build = args.hip_moi_build.expanduser().resolve()
     try:
-        if (
-            len(SUITE_BY_ID) != len(SUITES)
-            or sum(suite.expected_tests for suite in SUITES) != EXPECTED_TESTS
-        ):
-            raise consan_validation.ValidationError(
-                f"CDNA suite registry must contain unique IDs for "
-                f"{EXPECTED_TESTS} tests"
-            )
         if not rocjitsu.is_file():
             raise consan_validation.ValidationError(
                 f"rocjitsu executable is missing: {rocjitsu}"
@@ -222,7 +231,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             for suite in suites
         )
-    except (OSError, consan_validation.ValidationError) as error:
+    except (
+        OSError,
+        consan_validation.ValidationError,
+        registry.RegistryError,
+    ) as error:
         print(f"{target.id} hip-moi simulator error: {error}", file=sys.stderr)
         return 2
 

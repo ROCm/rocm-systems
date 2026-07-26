@@ -37,12 +37,14 @@ and records a typed reason.
 
 ## Current matrix
 
-Every selected workload remains gray. The validator resolves gfx942 gtest
-roles only to explicitly named CDNA3 artifacts, and all six artifacts now
-exist and pass their target-specific suites under the gfx942 simulator. That
-is a build and simulator prerequisite, not physical target qualification. The
-other five workloads have not completed a current-tip gfx942 campaign. No
-status below is promoted from a simulator smoke.
+Every selected workload remains gray. The validator resolves its six gfx942
+gtest campaign roles only to explicitly named CDNA3 artifacts, and all six
+artifacts pass their target-specific suites under the gfx942 simulator. The
+broader offline gate also runs the seven register-handoff, no-score, ping-pong,
+and LDS-alias suites, for 13 binaries and 33 tests in total. That is a build and
+simulator prerequisite, not physical target qualification. The other five
+campaign workloads have not completed a current-tip gfx942 campaign. No status
+below is promoted from a simulator smoke.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
@@ -62,7 +64,7 @@ status below is promoted from a simulator smoke.
 
 The non-gtest rows use the same target-independent source roles as the other
 ledgers, but their VMFBs and executions must still identify gfx942. The six
-gtest roles deliberately require these target-native definitions:
+gtest campaign roles deliberately require these target-native definitions:
 
 | Validation ID | Required gfx942 definition |
 |---|---|
@@ -73,7 +75,7 @@ gtest roles deliberately require these target-native definitions:
 | `tree-atomic-or` | `hip_moi_instrumented_cdna3_mfma_streamk_tree_atomic_or_test`; ordering-oracle test only |
 | `jakub-attention` | `hip_moi_reference_cdna3_jakub_matmul`; `SafeFp16Packed/JakubCdna3MatmulReference.MatchesHostReference/*` |
 
-At hip-moi source revision `ded161ce2577`, the validator's workload-scoped
+At hip-moi source revision `29a1c212183b`, the validator's workload-scoped
 `doctor` command resolves all six exact paths directly under the retained
 `hip-moi-build-gfx942-tests` build. It must never substitute a mutable generic
 build link or an RDNA4 or CDNA4 executable.
@@ -82,9 +84,9 @@ build link or an RDNA4 or CDNA4 executable.
 
 Manual runs through
 `rocjitsu --config emulation/rocjitsu/configs/gfx942_cdna3_kmd.json` pass all
-14 tests in the six target-native hip-moi suites, including binaries from a
-build configured for `gfx942:xnack-`. Automated registration of those external
-suites is tracked by `bd-1w9.1.3`.
+33 tests in the 13 target-native hip-moi binaries, including binaries from a
+build configured for `gfx942:xnack-`. RocJITsu exposes each binary as an
+independent bounded CTest entry from the shared offline suite registry.
 
 Separately, the focused in-repo CTest gate exercises gfx942 simulator coverage
 for:
