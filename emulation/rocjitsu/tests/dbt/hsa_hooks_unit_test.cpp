@@ -61,6 +61,10 @@ extern "C" bool rj_test_reverse_index_resolves(uint64_t parent_handle);
 extern "C" unsigned rj_test_translation_cache(unsigned op, const void *bytes, size_t size);
 extern "C" unsigned rj_test_doorbell_batch_rewrite(unsigned packet_count,
                                                    uint64_t read_dispatch_id);
+extern "C" uint32_t rj_test_lazy_rewrite_private_size(uint32_t packet_private,
+                                                      uint32_t child_private, bool ext);
+extern "C" bool rj_test_untracked_queue_destroy_clears_cursor();
+extern "C" unsigned rj_test_fenced_slot_restored_when_object_erased();
 
 namespace {
 
@@ -1957,6 +1961,77 @@ TEST(HsaHooksUnitTest, DoorbellBatchRewritesEveryProxyNotJustLast) {
 
   // Single dispatch (the vadd shape) is unaffected: one packet, rewritten.
   EXPECT_EQ(rj_test_doorbell_batch_rewrite(/*packet_count=*/1, /*read_dispatch_id=*/0), 1u);
+}
+
+// Review fix #B: destroying an untracked auto-A0 lazy queue erases its lazy cursor,
+// so a later queue that recycles the same doorbell signal handle does not inherit a
+// stale cursor that would skip its first batch.
+TEST(HsaHooksUnitTest, UntrackedQueueDestroyClearsLazyCursor) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  EXPECT_TRUE(rj_test_untracked_queue_destroy_clears_cursor());
+}
+
+// Review fix #C: if a DeferredObject is erased (concurrent executable destroy)
+// between phase-1 fence and phase-3 restore, the rewrite must still restore the
+// slot's saved header rather than leave it INVALID and stall the CP.
+TEST(HsaHooksUnitTest, FencedSlotRestoredWhenObjectErasedMidFence) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  // The restored header's type must be the original KERNEL_DISPATCH, not INVALID.
+  EXPECT_EQ(rj_test_fenced_slot_restored_when_object_erased(),
+            static_cast<unsigned>(HSA_PACKET_TYPE_KERNEL_DISPATCH));
+}
+
+// Review fix #A: B0->A0 translation can grow the child kernel's private (scratch)
+// beyond the source, but CLR fills the dispatch packet's private_segment_size from
+// the source metadata. The rewrite raises the packet's private_segment_size to the
+// child's size (real HW allocates scratch from the packet, not the KD), and never
+// shrinks a caller's larger dynamic request. Verified for both packet layouts.
+TEST(HsaHooksUnitTest, LazyRewriteRaisesGrownPrivateSegmentSize) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  // Standard packet: source metadata said 0 scratch, translation grew it to 256 ->
+  // the packet is raised to 256.
+  EXPECT_EQ(rj_test_lazy_rewrite_private_size(/*packet_private=*/0, /*child_private=*/256,
+                                              /*ext=*/false),
+            256u);
+  // Extended packet (the real gfx1250 HIP shape): same growth is applied.
+  EXPECT_EQ(rj_test_lazy_rewrite_private_size(/*packet_private=*/0, /*child_private=*/256,
+                                              /*ext=*/true),
+            256u);
+  // A caller's larger dynamic scratch request is preserved (max, not overwrite).
+  EXPECT_EQ(rj_test_lazy_rewrite_private_size(/*packet_private=*/1024, /*child_private=*/256,
+                                              /*ext=*/false),
+            1024u);
+  // No growth (child == source): packet is left unchanged.
+  EXPECT_EQ(rj_test_lazy_rewrite_private_size(/*packet_private=*/128, /*child_private=*/128,
+                                              /*ext=*/true),
+            128u);
 }
 
 // §14.8 in-process cache: a positive entry is returned for an identical source, a

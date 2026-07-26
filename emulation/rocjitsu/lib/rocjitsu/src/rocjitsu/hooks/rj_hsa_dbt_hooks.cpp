@@ -1033,6 +1033,13 @@ struct DeferredObject {
   /// (KD address in the hidden child). The dispatch rewrite (Step 4.2) uses this
   /// to redirect a proxy dispatch to its translated kernel.
   std::unordered_map<uint64_t, uint64_t> kernel_object_map;
+  /// Proxy kernel_object -> the CHILD kernel's private (scratch) segment size, in
+  /// bytes. B0->A0 translation can grow per-lane private beyond the source, but CLR
+  /// fills the dispatch packet's private_segment_size from the SOURCE msgpack note
+  /// and real HW sizes scratch from that packet field (not the child KD). The
+  /// dispatch rewrite raises the packet's private_segment_size to this value when it
+  /// is larger, so the translated kernel's spill space is actually allocated.
+  std::unordered_map<uint64_t, uint32_t> child_private_size_by_proxy;
 
   /// True once the hidden child's lower destroy has succeeded (§14.5a). Makes the
   /// child-destroy transition idempotent: a reentrant/retried teardown of an
@@ -3317,6 +3324,16 @@ public:
     rewrite_lazy_kernel_object(packet, header);
   }
 
+  /// @brief Test shim: rewrite with an explicit saved header (phase-3 semantics).
+  ///
+  /// @details Unlike the shim above, this passes @p saved_header rather than reading
+  /// the packet's current header, so a test can drive the fenced-then-erased case
+  /// (the slot is INVALID on entry, and the rewrite must restore saved_header).
+  static void rewrite_lazy_kernel_object_for_test_with_header(hsa_kernel_dispatch_packet_t &packet,
+                                                              uint16_t saved_header) {
+    rewrite_lazy_kernel_object(packet, saved_header);
+  }
+
   /// @brief Test shim: run the full doorbell seam against a synthetic signal.
   ///
   /// @details Exercises rewrite_lazy_dispatches_for_doorbell -- including the
@@ -3334,6 +3351,18 @@ public:
   void clear_lazy_cursor_for_test() {
     std::lock_guard lock(lazy_cursor_mutex_);
     lazy_cursor_by_doorbell_.clear();
+  }
+
+  /// @brief Test shim: seed a lazy cursor for @p doorbell_handle.
+  void set_lazy_cursor_for_test(uint64_t doorbell_handle, uint64_t cursor) {
+    std::lock_guard lock(lazy_cursor_mutex_);
+    lazy_cursor_by_doorbell_[doorbell_handle] = cursor;
+  }
+
+  /// @brief Test shim: true if a lazy cursor exists for @p doorbell_handle.
+  [[nodiscard]] bool has_lazy_cursor_for_test(uint64_t doorbell_handle) {
+    std::lock_guard lock(lazy_cursor_mutex_);
+    return lazy_cursor_by_doorbell_.find(doorbell_handle) != lazy_cursor_by_doorbell_.end();
   }
 #endif
 
@@ -3395,6 +3424,16 @@ public:
   void erase_queue(hsa_queue_t *queue) {
     if (queue == nullptr)
       return;
+    // Drop this queue's lazy doorbell cursor FIRST, keyed by the doorbell signal --
+    // regardless of whether the queue is tracked in queues_by_ptr_. Auto-A0 lazy
+    // queues are created via hsa_amd_queue_create and never enter queues_by_ptr_, so
+    // without this their cursor would outlive the queue; ROCr can then recycle the
+    // doorbell signal handle for a NEW queue, whose first batch would inherit the
+    // stale cursor and skip its early proxies. Uses lazy_cursor_mutex_, not mutex_.
+    if (queue->doorbell_signal.handle != 0) {
+      std::lock_guard cursor_lock(lazy_cursor_mutex_);
+      lazy_cursor_by_doorbell_.erase(queue->doorbell_signal.handle);
+    }
     std::lock_guard lock(mutex_);
     const uint64_t queue_key = reinterpret_cast<uintptr_t>(queue);
     auto it = queues_by_ptr_.find(queue_key);
@@ -4134,10 +4173,20 @@ private:
   static void rewrite_lazy_kernel_object(hsa_kernel_dispatch_packet_t &packet, uint16_t header) {
     const uint64_t proxy_ko = packet.kernel_object;
     auto object = DeferredObjectRegistry::instance().find_by_proxy_kernel_object(proxy_ko);
-    if (object == nullptr)
-      return; // Not a tracked proxy: an ordinary non-lazy dispatch.
+    if (object == nullptr) {
+      // No tracked object for this proxy. This is either an ordinary non-lazy
+      // dispatch (header already valid -> republish is a no-op) OR a slot the caller
+      // pre-fenced to INVALID whose DeferredObject was erased between the fence and
+      // now (a concurrent executable destroy). In the latter case the slot would be
+      // stranded INVALID forever and stall the CP, so ALWAYS restore the saved
+      // header. The proxy s_endpgm then runs; the lazy tests' output check catches a
+      // genuinely missed rewrite.
+      publish_packet_header(packet, header);
+      return;
+    }
 
     uint64_t translated_ko = 0;
+    uint32_t child_private_size = 0;
     DeferredTranslationState st;
     bool in_map = false;
     {
@@ -4156,14 +4205,43 @@ private:
         return;
       }
       translated_ko = it->second;
+      if (auto pit = object->child_private_size_by_proxy.find(proxy_ko);
+          pit != object->child_private_size_by_proxy.end())
+        child_private_size = pit->second;
     }
     if (translated_ko == 0 || translated_ko == proxy_ko)
       return;
 
-    // INVALID->restore sandwich so the CP never reads a half-updated packet.
+    // INVALID->restore sandwich so the CP never reads a half-updated packet, and
+    // raise private_segment_size if B0->A0 translation grew the child's scratch
+    // beyond what CLR put in the packet (from the source metadata). Real HW sizes
+    // scratch from the packet's private_segment_size, not the child KD, so an
+    // under-sized packet would starve the translated kernel's spill slots. Only ever
+    // RAISE it -- never shrink a caller's larger dynamic request.
     publish_packet_header(packet, make_invalid_packet_header(header));
     packet.kernel_object = translated_ko;
+    apply_translated_private_size(packet, child_private_size);
     publish_packet_header(packet, header);
+  }
+
+  /// @brief Raise a dispatch packet's private_segment_size to @p child_private_size
+  /// when translation grew scratch, for BOTH the standard and extended layouts.
+  ///
+  /// @details private_segment_size lives at a different offset in the two layouts
+  /// (standard hsa_kernel_dispatch_packet_t vs AmdExtKernelDispatchPacket), so this
+  /// dispatches on the packet type. Only raises (max), never lowers, so a caller's
+  /// larger dynamic scratch request is preserved.
+  static void apply_translated_private_size(hsa_kernel_dispatch_packet_t &packet,
+                                            uint32_t child_private_size) {
+    if (child_private_size == 0)
+      return;
+    if (is_ext_kernel_dispatch_packet(packet)) {
+      auto *ext = reinterpret_cast<rocjitsu::amdgpu::AmdExtKernelDispatchPacket *>(&packet);
+      if (child_private_size > ext->private_segment_size)
+        ext->private_segment_size = child_private_size;
+    } else if (child_private_size > packet.private_segment_size) {
+      packet.private_segment_size = child_private_size;
+    }
   }
 
   static void rewrite_packet_range(QueueState &state, uint64_t begin_packet_id,
@@ -5361,6 +5439,28 @@ create_hidden_child_executable(const std::shared_ptr<const std::vector<uint8_t>>
   return kernel_object;
 }
 
+/// @brief Read @p kernel_name's private (scratch) segment size in @p executable.
+///
+/// @details Uses the saved symbol getters (unpatched), mirroring kernel_object_for.
+/// Returns 0 when the symbol or its private-segment size cannot be read; a real
+/// zero-scratch kernel also reads back 0, which is correct (no packet bump needed).
+[[nodiscard]] uint32_t kernel_private_size_for(hsa_executable_t executable, hsa_agent_t agent,
+                                               const std::string &kernel_name) {
+  auto *get_symbol = layer().executable_get_symbol_by_name();
+  auto *symbol_get_info = layer().executable_symbol_get_info();
+  if (get_symbol == nullptr || symbol_get_info == nullptr)
+    return 0;
+  const std::string symbol_name = kernel_name + ".kd";
+  hsa_executable_symbol_t symbol{};
+  if (get_symbol(executable, symbol_name.c_str(), &agent, &symbol) != HSA_STATUS_SUCCESS)
+    return 0;
+  uint32_t private_size = 0;
+  if (symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE,
+                      &private_size) != HSA_STATUS_SUCCESS)
+    return 0;
+  return private_size;
+}
+
 /// @brief The single-flight producer: translate @p object and load its child.
 ///
 /// @details Runs OUTSIDE any registry or queue lock (§14.4): it invokes the DBT
@@ -5414,8 +5514,11 @@ create_hidden_child_executable(const std::shared_ptr<const std::vector<uint8_t>>
                                      &child) != HSA_STATUS_SUCCESS)
     return false;
 
-  // Join proxy and child kernels by name to build the dispatch rewrite map.
+  // Join proxy and child kernels by name to build the dispatch rewrite map, and
+  // capture each child kernel's private (scratch) size so the dispatch seam can
+  // raise the packet's private_segment_size if translation grew it.
   std::unordered_map<uint64_t, uint64_t> kernel_object_map;
+  std::unordered_map<uint64_t, uint32_t> child_private_size_by_proxy;
   for (const std::string &kernel_name : source.kernel_names()) {
     const uint64_t proxy_ko =
         kernel_object_for(object.parent_executable, object.agent, kernel_name);
@@ -5426,6 +5529,8 @@ create_hidden_child_executable(const std::shared_ptr<const std::vector<uint8_t>>
       return false;
     }
     kernel_object_map[proxy_ko] = child_ko;
+    child_private_size_by_proxy[proxy_ko] =
+        kernel_private_size_for(child, object.agent, kernel_name);
   }
 
   // Publish the ready fields. The single-flight producer runs with object.mutex
@@ -5435,6 +5540,7 @@ create_hidden_child_executable(const std::shared_ptr<const std::vector<uint8_t>>
   object.child_executable = child;
   object.translated_bytes = std::move(translated_owned);
   object.kernel_object_map = std::move(kernel_object_map);
+  object.child_private_size_by_proxy = std::move(child_private_size_by_proxy);
   // Retain the translated bytes for the child executable's lifetime, matching the
   // eager path's contract that ROCR aliases loaded ELF until destroy.
   TranslatedExecutableRegistry::instance().retain(child, object.translated_bytes);
@@ -6247,6 +6353,115 @@ extern "C" RJ_HOOK_EXPORT uint64_t rj_test_lazy_rewrite_kernel_object(uint64_t p
 
   VirtualLdsDispatchQueueRegistry::rewrite_lazy_kernel_object_for_test(packet);
   return packet.kernel_object;
+}
+
+/// @brief Test-only: does erase_queue drop an UNTRACKED lazy queue's cursor (#B)?
+///
+/// @details Seeds a lazy cursor for a synthetic doorbell handle, builds a queue
+/// carrying that doorbell (never recorded, mimicking an auto-A0 hsa_amd_queue_create
+/// queue absent from queues_by_ptr_), calls erase_queue, and returns whether the
+/// cursor survived. Before the fix the untracked-queue early return left the cursor;
+/// after it, erase_queue drops the cursor by doorbell handle regardless of tracking.
+extern "C" RJ_HOOK_EXPORT bool rj_test_untracked_queue_destroy_clears_cursor() {
+  auto &registry = VirtualLdsDispatchQueueRegistry::instance();
+  hsa_queue_t queue{};
+  hsa_signal_t doorbell{0xD00D};
+  queue.doorbell_signal = doorbell;
+  registry.set_lazy_cursor_for_test(doorbell.handle, 7);
+  const bool present_before = registry.has_lazy_cursor_for_test(doorbell.handle);
+  registry.erase_queue(&queue);
+  const bool present_after = registry.has_lazy_cursor_for_test(doorbell.handle);
+  // Return true only if the cursor was present before and gone after (the fix).
+  return present_before && !present_after;
+}
+
+/// @brief Test-only: a fenced slot whose object is erased is restored, not stranded.
+///
+/// @details Fences a synthetic proxy packet to INVALID (as phase 1 does), erases the
+/// tracked object (as a concurrent executable destroy would), then calls the rewrite
+/// as phase 3 does. Returns the packet's header type afterward. Before fix #C the
+/// null-object branch returned without restoring the header, leaving the slot
+/// INVALID; after it, the saved header is restored (a valid kernel-dispatch type).
+extern "C" RJ_HOOK_EXPORT unsigned rj_test_fenced_slot_restored_when_object_erased() {
+  constexpr uint64_t kProxyKo = 0x8100;
+  auto object = std::make_shared<DeferredObject>();
+  object->parent_executable = hsa_executable_t{0xE1};
+  object->agent = hsa_agent_t{0xE2};
+  {
+    std::lock_guard lock(object->mutex);
+    object->state = DeferredTranslationState::kReady;
+    object->kernel_object_map[kProxyKo] = 0x8200;
+  }
+  DeferredObjectRegistry::instance().record(object);
+  DeferredObjectRegistry::instance().register_proxy_kernel_object(kProxyKo, object);
+
+  hsa_kernel_dispatch_packet_t packet{};
+  const uint16_t original_header =
+      static_cast<uint16_t>(HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+  packet.header = original_header;
+  packet.kernel_object = kProxyKo;
+
+  // Phase 1: fence to INVALID.
+  std::atomic_ref<uint16_t>(packet.header)
+      .store(static_cast<uint16_t>(HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE),
+             std::memory_order_release);
+
+  // Concurrent destroy erased the object before phase 3.
+  DeferredObjectRegistry::instance().erase_executable(hsa_executable_t{0xE1});
+
+  // Phase 3: rewrite must restore the ORIGINAL header even though the object is gone.
+  VirtualLdsDispatchQueueRegistry::rewrite_lazy_kernel_object_for_test_with_header(packet,
+                                                                                   original_header);
+
+  const uint16_t header = std::atomic_ref<uint16_t>(packet.header).load(std::memory_order_acquire);
+  return (header >> HSA_PACKET_HEADER_TYPE) & ((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u);
+}
+
+/// @brief Test-only: verify the rewrite raises packet private_segment_size (#A).
+///
+/// @details Builds a READY object whose child kernel has private size
+/// @p child_private, writes a dispatch packet (standard or extended per @p ext) with
+/// @p packet_private as its private_segment_size, runs the rewrite, and returns the
+/// packet's private_segment_size afterward. Proves translation-grown scratch is
+/// propagated to the packet for both layouts, and that a caller's larger dynamic
+/// request is never shrunk (max semantics).
+extern "C" RJ_HOOK_EXPORT uint32_t rj_test_lazy_rewrite_private_size(uint32_t packet_private,
+                                                                     uint32_t child_private,
+                                                                     bool ext) {
+  constexpr uint64_t kProxyKo = 0x7100;
+  constexpr uint64_t kChildKo = 0x7200;
+  auto object = std::make_shared<DeferredObject>();
+  object->parent_executable = hsa_executable_t{0xAB1};
+  object->agent = hsa_agent_t{0xDE1};
+  {
+    std::lock_guard lock(object->mutex);
+    object->state = DeferredTranslationState::kReady;
+    object->kernel_object_map[kProxyKo] = kChildKo;
+    object->child_private_size_by_proxy[kProxyKo] = child_private;
+  }
+  DeferredObjectRegistry::instance().record(object);
+  DeferredObjectRegistry::instance().register_proxy_kernel_object(kProxyKo, object);
+
+  hsa_kernel_dispatch_packet_t packet{};
+  if (ext) {
+    auto *ep = reinterpret_cast<rocjitsu::amdgpu::AmdExtKernelDispatchPacket *>(&packet);
+    ep->header = static_cast<uint16_t>(HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE);
+    ep->amd_format = rocjitsu::amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+    ep->kernel_object = kProxyKo;
+    ep->private_segment_size = packet_private;
+  } else {
+    packet.header =
+        static_cast<uint16_t>(HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    packet.kernel_object = kProxyKo;
+    packet.private_segment_size = packet_private;
+  }
+
+  VirtualLdsDispatchQueueRegistry::rewrite_lazy_kernel_object_for_test(packet);
+
+  if (ext)
+    return reinterpret_cast<const rocjitsu::amdgpu::AmdExtKernelDispatchPacket *>(&packet)
+        ->private_segment_size;
+  return packet.private_segment_size;
 }
 
 /// @brief Test-only: drive the doorbell seam over a synthetic batched ring (#1).
