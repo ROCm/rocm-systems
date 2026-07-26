@@ -322,6 +322,7 @@ TEST(ConSanMoi, Cdna4DirectSampledProbeEmitsNativePublicationRecipes) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiSampledWatchpointStore);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
@@ -342,6 +343,19 @@ TEST(ConSanMoi, Cdna4DirectSampledProbeEmitsNativePublicationRecipes) {
   EXPECT_EQ(count_subsequence(rewritten_words, *atomic_publish), 1u);
   EXPECT_EQ(count_subsequence(rewritten_words, *atomic_claim), 1u);
   EXPECT_EQ(count_subsequence(rewritten_words, *window_counter), 2u);
+  for (const bool high_word : {false, true}) {
+    SCOPED_TRACE(high_word ? "dispatch high word" : "dispatch low word");
+    const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
+    const uint32_t literal = high_word
+                                 ? static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u)
+                                 : static_cast<uint32_t>(options.moi_report_dispatch_id);
+    const auto materialize =
+        instrumentation::build_v_mov_b32_literal(value_vgpr, literal, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_TRUE(materialize);
+    EXPECT_TRUE(contains_subsequence(rewritten_words, *materialize))
+        << "expected=" << testing::PrintToString(*materialize)
+        << " words=" << testing::PrintToString(rewritten_words);
+  }
   EXPECT_GE(std::count(rewritten_words.begin(), rewritten_words.end(), 0xbf8c0070u), 1);
   EXPECT_TRUE(
       contains_subsequence(rewritten_words, std::array<uint32_t, 2>{text_words[0], text_words[1]}));
@@ -1657,7 +1671,9 @@ TEST(ConSanMoi, SampledAtomicEdgesAssociateWithTheirOrderedAccessWindows) {
   options.scratch_vgpr = 24;
   options.moi_owner_vgpr = 20;
   options.moi_epoch_vgpr = 21;
+  options.moi_dispatch_id_sgpr = 22;
   options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
   constexpr uint64_t slot_bytes = direct_sampled_report_bytes(1) - sizeof(ConSanMoiReportHeader);
   options.moi_report_buffer_size = sizeof(ConSanMoiReportHeader) + 4u * slot_bytes;
   options.max_patches = 4;
@@ -1702,7 +1718,26 @@ TEST(ConSanMoi, SampledAtomicEdgesAssociateWithTheirOrderedAccessWindows) {
     const std::vector<uint32_t> trampoline =
         text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
     EXPECT_TRUE(contains_subsequence(trampoline, *materialize));
-    if (slot == 1) {
+    if (slot == 0) {
+      const uint16_t value_vgpr = static_cast<uint16_t>(*patch.scratch_vgpr + 2u);
+      for (const uint16_t dispatch_sgpr :
+           {*options.moi_dispatch_id_sgpr,
+            static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u)}) {
+        const auto compare =
+            build_v_cmp_eq_u32_e32_vcc(dispatch_sgpr, value_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
+        ASSERT_TRUE(compare);
+        EXPECT_NE(std::find(trampoline.begin(), trampoline.end(), *compare), trampoline.end());
+      }
+    } else {
+      EXPECT_TRUE(contains_subsequence(
+          trampoline, make_expected_scalar_offset_store_words(
+                          offsetof(ConSanMoiSampledPendingAcquireSlot, dispatch_id),
+                          *options.moi_dispatch_id_sgpr, *patch.scratch_vgpr)));
+      EXPECT_TRUE(contains_subsequence(
+          trampoline,
+          make_expected_scalar_offset_store_words(
+              offsetof(ConSanMoiSampledPendingAcquireSlot, dispatch_id) + sizeof(uint32_t),
+              static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), *patch.scratch_vgpr)));
       EXPECT_TRUE(contains_subsequence(
           trampoline, make_expected_offset_store_words(
                           offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
@@ -2959,6 +2994,44 @@ TEST(ConSanMoi, Gfx1250RuntimeSamplingUsesLiteralDispatchIdAtFullScalarPressure)
             1u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
+
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
+    return candidate.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+           candidate.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_TRUE(patch->scratch_vgpr);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const uint64_t patch_offset = patch->kind == ConSanPatchKind::InlineMoiSampledWatchpointStore
+                                    ? patch->anchor_offset
+                                    : patch->trampoline_offset;
+  const uint32_t patch_size = patch->kind == ConSanPatchKind::InlineMoiSampledWatchpointStore
+                                  ? patch->original_size
+                                  : patch->trampoline_size;
+  const std::vector<uint32_t> patch_words = text_words_at_offset(patched, patch_offset, patch_size);
+  const uint16_t address_vgpr = *patch->scratch_vgpr;
+  const uint16_t value_vgpr = static_cast<uint16_t>(address_vgpr + 2u);
+  const uint16_t literal_temporary_vgpr = static_cast<uint16_t>(address_vgpr + 3u);
+  const uint16_t record_temporary_vgpr = static_cast<uint16_t>(address_vgpr + 4u);
+  for (const bool high_word : {false, true}) {
+    const uint32_t offset =
+        offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + (high_word ? sizeof(uint32_t) : 0u);
+    const uint32_t literal = high_word
+                                 ? static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u)
+                                 : static_cast<uint32_t>(options.moi_report_dispatch_id);
+    EXPECT_TRUE(contains_subsequence(
+        patch_words, make_expected_literal_offset_store_words(offset, literal, address_vgpr,
+                                                              record_temporary_vgpr)));
+    const auto materialize = instrumentation::build_v_mov_b32_literal(
+        literal_temporary_vgpr, literal, ROCJITSU_CODE_ARCH_GFX1250);
+    const auto compare = instrumentation::build_v_cmp_eq_u32_vcc(
+        vector_source_vgpr(literal_temporary_vgpr), value_vgpr, ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_TRUE(materialize && compare);
+    std::vector<uint32_t> expected_compare = *materialize;
+    expected_compare.push_back(*compare);
+    EXPECT_TRUE(contains_subsequence(patch_words, expected_compare));
+  }
 }
 
 TEST(ConSanMoi, DirectSampledProbeCanCheckPriorSlotInKernel) {

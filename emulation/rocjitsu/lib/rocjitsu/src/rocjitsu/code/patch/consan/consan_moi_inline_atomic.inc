@@ -612,15 +612,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
        !append_dynamic_atomic_store_u32_scalar_src(
            record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, owner_id),
            *options.moi_persistent_owner_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
-      (options.moi_dispatch_id_sgpr &&
-       (!append_dynamic_atomic_store_u32_scalar_src(
-            record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, generation),
-            *options.moi_dispatch_id_sgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
-        !append_dynamic_atomic_store_u32_scalar_src(
-            record_words,
-            atomic_record_base + offsetof(ConSanMoiAtomicRecord, generation) + sizeof(uint32_t),
-            static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), slot_vgpr,
-            *options.scratch_vgpr, arch))) ||
+      !append_dynamic_record_store_moi_report_dispatch_id_pair(
+          record_words, kDynamicAtomicRecordLayout,
+          atomic_record_base + offsetof(ConSanMoiAtomicRecord, generation), options, slot_vgpr,
+          *options.scratch_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
       !append_dynamic_atomic_event_index_store(
           record_words, base + offsetof(ConSanMoiReportHeader, event_counter),
           atomic_record_base + offsetof(ConSanMoiAtomicRecord, event_index), slot_vgpr,
@@ -1110,10 +1105,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                             static_cast<uint32_t>(options.moi_report_generation)) ||
       !record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, generation) + 4u,
                             static_cast<uint32_t>(options.moi_report_generation >> 32u)) ||
-      !record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, dispatch_id),
-                            static_cast<uint32_t>(options.moi_report_dispatch_id)) ||
-      !record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, dispatch_id) + 4u,
-                            static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u)) ||
+      !append_store_moi_report_dispatch_id_pair(
+          record, options, offsetof(ConSanMoiSampledPendingAcquireSlot, dispatch_id), arch,
+          ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_x),
                               workgroup_sources->x) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_y),
@@ -1362,6 +1356,20 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       return false;
     return sequence.emit_branch(restore_label, InstructionSequence::BranchKind::SccZero);
   };
+  const auto narrow_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
+    if (!append_load_u32_vgpr_at_offset(words, base, offset, value, arch) ||
+        !append_compare_moi_report_dispatch_id_word(words, options, value, expected, high_word,
+                                                    arch,
+                                                    ConSanMoiLiteralDispatchIdPolicy::
+                                                        AnyArchitecture)) {
+      return false;
+    }
+    const auto narrow =
+        instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+    if (!sequence.emit(narrow))
+      return false;
+    return sequence.emit_branch(restore_label, InstructionSequence::BranchKind::SccZero);
+  };
   const auto narrow_equal_workgroup = [&](uint32_t offset,
                                           const ConSanMoiWorkgroupSource &source) -> bool {
     if (!source.scalar_src)
@@ -1387,10 +1395,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                             static_cast<uint32_t>(options.moi_report_generation)) ||
       !narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, generation) + 4u,
                             static_cast<uint32_t>(options.moi_report_generation >> 32u)) ||
-      !narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, dispatch_id),
-                            static_cast<uint32_t>(options.moi_report_dispatch_id)) ||
-      !narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + 4u,
-                            static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u)) ||
+      !narrow_equal_dispatch_id(offsetof(ConSanMoiSampledCausalWindow, dispatch_id),
+                                /*high_word=*/false) ||
+      !narrow_equal_dispatch_id(offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + 4u,
+                                /*high_word=*/true) ||
       !narrow_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_x),
                               workgroup_sources->x) ||
       !narrow_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_y),

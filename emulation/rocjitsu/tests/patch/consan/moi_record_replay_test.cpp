@@ -2363,6 +2363,100 @@ TEST(ConSanMoi, DynamicAccessRecordProbeAppendsPerLaneRecords) {
   EXPECT_LT(restore_vcc_it, restore_scc_it);
 }
 
+TEST(ConSanMoi, DynamicRecordKindsUseLiteralDispatchIdentityAtFullScalarPressure) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  const auto atomic = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2, kArch);
+  const auto wait_store = build_s_wait_storecnt0(kArch);
+  ASSERT_TRUE(atomic && wait_store);
+
+  std::vector<uint32_t> text_words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+      0xBF940000u, // s_barrier_wait -1
+      0xEE0B0000u, 0x00000000u,
+      0x00000000u, // global_wb
+      *wait_store, (*atomic)[0], (*atomic)[1], (*atomic)[2], *wait_store, 0xEE0AC000u, 0x00000000u,
+      0x00000000u, // global_inv
+  };
+  text_words.resize(800u, build_s_nop(0, kArch));
+
+  // This is fixture pressure, not a production register convention. Leave
+  // one explicitly configured transient window dead while keeping every
+  // other ordinary SGPR live across every record-producing site.
+  constexpr uint16_t kOrdinarySgprCount = 106u;
+  constexpr uint16_t kExecSaveSgpr = 90u;
+  constexpr uint16_t kExecSaveSgprCount = 7u;
+  for (uint16_t sgpr = 0; sgpr < kOrdinarySgprCount; ++sgpr) {
+    if (sgpr >= kExecSaveSgpr && sgpr < kExecSaveSgpr + kExecSaveSgprCount)
+      continue;
+    const auto use = build_s_cmp_eq_u32(sgpr, scalar_positive_inline_u32(0), kArch);
+    ASSERT_TRUE(use);
+    text_words.push_back(*use);
+  }
+  text_words.push_back(build_s_endpgm(kArch));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = kExecSaveSgpr;
+  options.moi_owner_vgpr = 20u;
+  options.moi_epoch_vgpr = 21u;
+  options.moi_dynamic_access_records = true;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(
+      /*access_record_capacity=*/8, /*diagnostic_capacity=*/0,
+      /*exact_shadow_entry_capacity=*/0, /*sampled_watchpoint_capacity=*/0,
+      /*barrier_record_capacity=*/2, /*atomic_record_capacity=*/2,
+      /*fence_record_capacity=*/2);
+  options.max_patches = 8u;
+
+  const ConSanResult result =
+      try_patch_consan(make_rdna4_lds_code_object(text_words, "literal_dynamic_records"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
+  EXPECT_TRUE(result.final_validation_passed);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto expect_literals = [&](const ConSanPatchInfo &patch, uint16_t value_vgpr_offset) {
+    ASSERT_TRUE(patch.scratch_vgpr);
+    const std::vector<uint32_t> words =
+        patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore
+            ? patched_words_at_file_offset(result, 0x100u + patch.anchor_offset,
+                                           patch.original_size)
+            : text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+    for (const bool high_word : {false, true}) {
+      const uint32_t literal = high_word
+                                   ? static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u)
+                                   : static_cast<uint32_t>(options.moi_report_dispatch_id);
+      const uint16_t value_vgpr = static_cast<uint16_t>(*patch.scratch_vgpr + value_vgpr_offset);
+      const auto materialize = instrumentation::build_v_mov_b32_literal(value_vgpr, literal, kArch);
+      ASSERT_TRUE(materialize);
+      EXPECT_TRUE(contains_subsequence(words, *materialize));
+    }
+  };
+
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  });
+  const auto barrier = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
+  const auto atomic_patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_NE(barrier, result.patches.end());
+  ASSERT_NE(atomic_patch, result.patches.end());
+  expect_literals(*access, /*value_vgpr_offset=*/5u);
+  expect_literals(*barrier, /*value_vgpr_offset=*/5u);
+  expect_literals(*atomic_patch, /*value_vgpr_offset=*/4u);
+}
+
 TEST(ConSanMoi, DynamicAccessRecordReportsBoundedFullSgprFileFailure) {
   std::vector<uint32_t> text_words = {
       0xD8340000u,

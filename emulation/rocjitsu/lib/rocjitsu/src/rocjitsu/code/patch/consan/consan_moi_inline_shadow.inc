@@ -2133,16 +2133,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
                             static_cast<uint32_t>(options.moi_report_generation)) ||
       !record.store_literal(offsetof(ConSanMoiSampledCausalWindow, generation) + 4u,
                             static_cast<uint32_t>(options.moi_report_generation >> 32u)) ||
-      !(options.moi_dispatch_id_sgpr
-            ? record.store_sgpr(offsetof(ConSanMoiSampledCausalWindow, dispatch_id),
-                                *options.moi_dispatch_id_sgpr)
-            : record.store_literal(offsetof(ConSanMoiSampledCausalWindow, dispatch_id),
-                                   static_cast<uint32_t>(options.moi_report_dispatch_id))) ||
-      !(options.moi_dispatch_id_sgpr
-            ? record.store_sgpr(offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + 4u,
-                                static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u))
-            : record.store_literal(offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + 4u,
-                                   static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u))) ||
+      !append_store_moi_report_dispatch_id_pair(
+          record, options, offsetof(ConSanMoiSampledCausalWindow, dispatch_id), arch,
+          ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_x),
                               workgroup_sources->x,
                               ConSanMoiRecordEmitter::MissingWorkgroupSource::StoreZero) ||
@@ -2286,9 +2279,15 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     words.insert(words.end(), expected->begin(), expected->end());
     return reject_unless_equal_vgpr(offset, high_vgpr);
   };
-  const auto reject_unless_equal_sgpr = [&](uint32_t offset, uint16_t expected_sgpr) -> bool {
-    words.push_back(build_v_mov_b32_e32(high_vgpr, expected_sgpr, arch));
-    return reject_unless_equal_vgpr(offset, high_vgpr);
+  const auto reject_unless_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
+    if (!record.load(offset, low_vgpr) ||
+        !append_compare_moi_report_dispatch_id_word(words, options, low_vgpr, high_vgpr, high_word,
+                                                    arch,
+                                                    ConSanMoiLiteralDispatchIdPolicy::
+                                                        AnyArchitecture)) {
+      return false;
+    }
+    return sequence.emit_branch(different_identity_label, InstructionSequence::BranchKind::VccZero);
   };
   const auto reject_unless_equal_workgroup = [&](uint32_t offset,
                                                  const ConSanMoiWorkgroupSource &source) -> bool {
@@ -2310,17 +2309,10 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
                                    static_cast<uint32_t>(options.moi_report_generation)) ||
       !reject_unless_equal_literal(offsetof(ConSanMoiSampledCausalWindow, generation) + 4u,
                                    static_cast<uint32_t>(options.moi_report_generation >> 32u)) ||
-      !(options.moi_dispatch_id_sgpr
-            ? reject_unless_equal_sgpr(offsetof(ConSanMoiSampledCausalWindow, dispatch_id),
-                                       *options.moi_dispatch_id_sgpr)
-            : reject_unless_equal_literal(offsetof(ConSanMoiSampledCausalWindow, dispatch_id),
-                                          static_cast<uint32_t>(options.moi_report_dispatch_id))) ||
-      !(options.moi_dispatch_id_sgpr
-            ? reject_unless_equal_sgpr(offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + 4u,
-                                       static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u))
-            : reject_unless_equal_literal(
-                  offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + 4u,
-                  static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u))) ||
+      !reject_unless_equal_dispatch_id(offsetof(ConSanMoiSampledCausalWindow, dispatch_id),
+                                       /*high_word=*/false) ||
+      !reject_unless_equal_dispatch_id(offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + 4u,
+                                       /*high_word=*/true) ||
       !reject_unless_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_x),
                                      workgroup_sources->x) ||
       !reject_unless_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_y),

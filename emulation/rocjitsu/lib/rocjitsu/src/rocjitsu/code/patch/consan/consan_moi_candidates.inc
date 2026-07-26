@@ -872,6 +872,123 @@ private:
   rj_code_arch_t arch_;
 };
 
+struct ConSanMoiReportDispatchIdWordSource {
+  std::optional<uint16_t> sgpr;
+  uint32_t literal = 0;
+};
+
+// Code-object-wide CDNA instrumentation keeps the preloaded-SGPR contract
+// until its dispatch-identity resolver and final validation accept literal
+// state. Per-record and causal-metadata emitters may use the configured
+// literal after owner-local resolution has established that no SGPR pair is
+// available. Keep every caller explicit so a new path cannot silently choose
+// the wrong side of that contract.
+enum class ConSanMoiLiteralDispatchIdPolicy : uint8_t {
+  Rdna4FamilyOnly,
+  AnyArchitecture
+};
+
+[[nodiscard]] ConSanMoiReportDispatchIdWordSource
+moi_report_dispatch_id_word_source(const ConSanOptions &options, bool high_word) {
+  if (options.moi_dispatch_id_sgpr) {
+    return ConSanMoiReportDispatchIdWordSource{
+        .sgpr =
+            static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + (high_word ? 1u : 0u))};
+  }
+  return ConSanMoiReportDispatchIdWordSource{
+      .sgpr = std::nullopt,
+      .literal = high_word ? static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u)
+                           : static_cast<uint32_t>(options.moi_report_dispatch_id)};
+}
+
+[[nodiscard]] bool moi_report_dispatch_id_source_permitted(
+    const ConSanMoiReportDispatchIdWordSource &source,
+    ConSanMoiLiteralDispatchIdPolicy policy, rj_code_arch_t arch) {
+  return source.sgpr || policy == ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture ||
+         is_rdna4_family_arch(arch);
+}
+
+[[nodiscard]] bool append_moi_report_dispatch_id_word(std::vector<uint32_t> &words,
+                                                      const ConSanOptions &options,
+                                                      uint16_t destination_vgpr, bool high_word,
+                                                      rj_code_arch_t arch,
+                                                      ConSanMoiLiteralDispatchIdPolicy policy) {
+  const ConSanMoiReportDispatchIdWordSource source =
+      moi_report_dispatch_id_word_source(options, high_word);
+  if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
+    return false;
+  if (source.sgpr) {
+    words.push_back(build_v_mov_b32_e32(destination_vgpr, *source.sgpr, arch));
+    return true;
+  }
+  const auto materialize =
+      instrumentation::build_v_mov_b32_literal(destination_vgpr, source.literal, arch);
+  if (!materialize)
+    return false;
+  words.insert(words.end(), materialize->begin(), materialize->end());
+  return true;
+}
+
+[[nodiscard]] bool append_moi_report_dispatch_id_pair(std::vector<uint32_t> &words,
+                                                      const ConSanOptions &options,
+                                                      uint16_t low_vgpr, uint16_t high_vgpr,
+                                                      rj_code_arch_t arch,
+                                                      ConSanMoiLiteralDispatchIdPolicy policy) {
+  return append_moi_report_dispatch_id_word(words, options, low_vgpr, /*high_word=*/false, arch,
+                                            policy) &&
+         append_moi_report_dispatch_id_word(words, options, high_vgpr, /*high_word=*/true, arch,
+                                            policy);
+}
+
+[[nodiscard]] bool append_compare_moi_report_dispatch_id_word(
+    std::vector<uint32_t> &words, const ConSanOptions &options, uint16_t value_vgpr,
+    uint16_t clobberable_literal_temporary_vgpr, bool high_word, rj_code_arch_t arch,
+    ConSanMoiLiteralDispatchIdPolicy policy) {
+  const ConSanMoiReportDispatchIdWordSource source =
+      moi_report_dispatch_id_word_source(options, high_word);
+  if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
+    return false;
+  uint16_t expected = 0u;
+  if (source.sgpr) {
+    expected = *source.sgpr;
+  } else {
+    // The literal path clobbers this temporary. Every caller must pass a dead
+    // VGPR whose next use either overwrites or explicitly reloads it.
+    assert(clobberable_literal_temporary_vgpr != value_vgpr);
+    if (clobberable_literal_temporary_vgpr == value_vgpr ||
+        !append_moi_report_dispatch_id_word(words, options,
+                                            clobberable_literal_temporary_vgpr, high_word, arch,
+                                            policy)) {
+      return false;
+    }
+    expected = vector_source_vgpr(clobberable_literal_temporary_vgpr);
+  }
+  const auto equal = instrumentation::build_v_cmp_eq_u32_vcc(expected, value_vgpr, arch);
+  if (!equal)
+    return false;
+  words.push_back(*equal);
+  return true;
+}
+
+[[nodiscard]] bool append_store_moi_report_dispatch_id_pair(ConSanMoiRecordEmitter &record,
+                                                            const ConSanOptions &options,
+                                                            uint32_t low_offset,
+                                                            rj_code_arch_t arch,
+                                                            ConSanMoiLiteralDispatchIdPolicy policy) {
+  for (const bool high_word : {false, true}) {
+    const ConSanMoiReportDispatchIdWordSource source =
+        moi_report_dispatch_id_word_source(options, high_word);
+    if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
+      return false;
+    const uint32_t offset = low_offset + (high_word ? sizeof(uint32_t) : 0u);
+    if (source.sgpr ? !record.store_sgpr(offset, *source.sgpr)
+                    : !record.store_literal(offset, source.literal)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 [[nodiscard]] bool append_atomic_event_index_store(std::vector<uint32_t> &words,
                                                    uint64_t counter_address,
                                                    uint64_t event_index_address,
@@ -1116,6 +1233,31 @@ static_assert(sizeof(ConSanMoiAccessRecord) == 72);
   if (!store)
     return false;
   words.insert(words.end(), store->begin(), store->end());
+  return true;
+}
+
+[[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
+    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
+    const ConSanOptions &options, uint16_t slot_vgpr, uint16_t scratch_vgpr,
+    rj_code_arch_t arch, ConSanMoiLiteralDispatchIdPolicy policy) {
+  for (const bool high_word : {false, true}) {
+    const ConSanMoiReportDispatchIdWordSource source =
+        moi_report_dispatch_id_word_source(options, high_word);
+    if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
+      return false;
+    const uint64_t field_address =
+        low_field_address + (high_word ? sizeof(uint32_t) : 0u);
+    const bool stored =
+        source.sgpr
+            ? append_dynamic_record_store_u32_scalar_src(words, layout, field_address,
+                                                         *source.sgpr, slot_vgpr, scratch_vgpr,
+                                                         arch)
+            : append_dynamic_record_store_u32_literal(words, layout, field_address,
+                                                      source.literal, slot_vgpr, scratch_vgpr,
+                                                      arch);
+    if (!stored)
+      return false;
+  }
   return true;
 }
 

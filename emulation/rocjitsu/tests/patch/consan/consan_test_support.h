@@ -1642,19 +1642,31 @@ std::vector<uint8_t> make_rdna4_ordered_flat_atomic_code_object(bool return_old_
   return make_rdna4_lds_code_object(text_words);
 }
 
-std::vector<uint8_t> make_rdna4_atomic_fence_sequence_code_object() {
+std::vector<uint8_t>
+make_rdna4_atomic_fence_sequence_code_object(std::span<const uint16_t> trailing_live_sgprs = {}) {
   const auto atomic = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
   if (!atomic || !wait_store)
     return {};
-  const std::array<uint32_t, 12> text_words = {
+  std::vector<uint32_t> text_words = {
       0xEE0B0000u, 0x00000000u,  0x00000000u, // global_wb
       *wait_store, (*atomic)[0], (*atomic)[1], (*atomic)[2],
       *wait_store, 0xEE0AC000u,  0x00000000u,  0x00000000u, // global_inv
       0xBFB00000u,                                          // s_endpgm
   };
+  if (!trailing_live_sgprs.empty()) {
+    text_words.pop_back();
+    for (const uint16_t sgpr : trailing_live_sgprs) {
+      const auto use =
+          build_s_cmp_eq_u32(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+      if (!use)
+        return {};
+      text_words.push_back(*use);
+    }
+    text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  }
   return make_rdna4_lds_code_object(text_words);
 }
 

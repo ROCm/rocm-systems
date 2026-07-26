@@ -999,16 +999,11 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
            !append_dynamic_access_store_u32_scalar_src(
                words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
                *options.moi_persistent_owner_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
-          (options.moi_dispatch_id_sgpr &&
-           (!append_dynamic_access_store_u32_scalar_src(
-                words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation),
-                *options.moi_dispatch_id_sgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
-            !append_dynamic_access_store_u32_scalar_src(
-                words,
-                dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation) +
-                    sizeof(uint32_t),
-                static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), slot_vgpr,
-                *options.scratch_vgpr, arch))) ||
+          !append_dynamic_record_store_moi_report_dispatch_id_pair(
+              words, kDynamicAccessRecordLayout,
+              dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation), options,
+              slot_vgpr, *options.scratch_vgpr, arch,
+              ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
           !append_dynamic_access_event_index_store(
               words, base + offsetof(ConSanMoiReportHeader, event_counter),
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, event_index), slot_vgpr,
@@ -1133,23 +1128,10 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     errors.emplace_back("ConSan MOI first-light probe has an invalid dispatch/owner-bank layout");
     return std::nullopt;
   }
-  const auto append_dispatch_id_pair = [&](uint16_t low_vgpr, uint16_t high_vgpr) {
-    if (options.moi_dispatch_id_sgpr) {
-      words.push_back(build_v_mov_b32_e32(low_vgpr, *options.moi_dispatch_id_sgpr, arch));
-      words.push_back(build_v_mov_b32_e32(
-          high_vgpr, static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), arch));
-      return true;
-    }
-    const auto low = instrumentation::build_v_mov_b32_literal(
-        low_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id), arch);
-    const auto high = instrumentation::build_v_mov_b32_literal(
-        high_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u), arch);
-    InstructionSequence append(words);
-    return append.emit_all(low, high);
-  };
   const auto append_claim_token = [&](uint16_t low_vgpr, uint16_t high_vgpr,
                                       uint16_t temporary_vgpr) {
-    if (!append_dispatch_id_pair(low_vgpr, high_vgpr))
+    if (!append_moi_report_dispatch_id_pair(words, options, low_vgpr, high_vgpr, arch,
+                                            ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture))
       return false;
     const auto low_xor_literal = instrumentation::build_v_mov_b32_literal(
         temporary_vgpr, static_cast<uint32_t>(kConSanMoiRecordReplayClaimTokenXorMask), arch);
@@ -1400,16 +1382,9 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       return std::nullopt;
     }
     if (!record.store_vgpr(offsetof(ConSanMoiAccessRecord, event_index), record_compare_vgpr) ||
-        !(options.moi_dispatch_id_sgpr
-              ? (record.store_sgpr(offsetof(ConSanMoiAccessRecord, generation),
-                                   *options.moi_dispatch_id_sgpr) &&
-                 record.store_sgpr(offsetof(ConSanMoiAccessRecord, generation) + sizeof(uint32_t),
-                                   static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u)))
-              : (record.store_literal(offsetof(ConSanMoiAccessRecord, generation),
-                                      static_cast<uint32_t>(options.moi_report_dispatch_id)) &&
-                 record.store_literal(
-                     offsetof(ConSanMoiAccessRecord, generation) + sizeof(uint32_t),
-                     static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u)))) ||
+        !append_store_moi_report_dispatch_id_pair(
+            record, options, offsetof(ConSanMoiAccessRecord, generation), arch,
+            ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
         !record.store_workgroup(offsetof(ConSanMoiAccessRecord, workgroup_x),
                                 workgroup_sources.x) ||
         !record.store_workgroup(offsetof(ConSanMoiAccessRecord, workgroup_y),
@@ -1543,16 +1518,10 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     }
     words.insert(words.end(), low_xor_literal->begin(), low_xor_literal->end());
     words.push_back(*low_xor);
-    if (options.moi_dispatch_id_sgpr) {
-      words.push_back(
-          build_v_mov_b32_e32(record_compare_vgpr, *options.moi_dispatch_id_sgpr, arch));
-    } else {
-      const auto expected_low = instrumentation::build_v_mov_b32_literal(
-          record_compare_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id), arch);
-      if (!expected_low)
-        return std::nullopt;
-      words.insert(words.end(), expected_low->begin(), expected_low->end());
-    }
+    if (!append_moi_report_dispatch_id_word(words, options, record_compare_vgpr,
+                                            /*high_word=*/false, arch,
+                                            ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture))
+      return std::nullopt;
     const auto low_mismatch = instrumentation::build_v_cmp_ne_u32_vcc(
         vector_source_vgpr(record_compare_vgpr), record_value_vgpr, arch);
     if (!low_mismatch)
@@ -1573,16 +1542,10 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     }
     words.insert(words.end(), high_xor_literal->begin(), high_xor_literal->end());
     words.push_back(*high_xor);
-    if (options.moi_dispatch_id_sgpr) {
-      words.push_back(build_v_mov_b32_e32(
-          record_compare_vgpr, static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), arch));
-    } else {
-      const auto expected_high = instrumentation::build_v_mov_b32_literal(
-          record_compare_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u), arch);
-      if (!expected_high)
-        return std::nullopt;
-      words.insert(words.end(), expected_high->begin(), expected_high->end());
-    }
+    if (!append_moi_report_dispatch_id_word(words, options, record_compare_vgpr,
+                                            /*high_word=*/true, arch,
+                                            ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture))
+      return std::nullopt;
     const auto high_mismatch = instrumentation::build_v_cmp_ne_u32_vcc(
         vector_source_vgpr(record_compare_vgpr), record_value_high_vgpr, arch);
     const auto access_kind_address = instrumentation::build_v_add_u64_signed_i24(

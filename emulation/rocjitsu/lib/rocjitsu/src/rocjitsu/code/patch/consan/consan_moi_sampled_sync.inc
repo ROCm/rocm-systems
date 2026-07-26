@@ -295,9 +295,15 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
       words.push_back(*compare);
       return narrow_current();
     };
-    const auto narrow_equal_sgpr = [&](uint32_t offset, uint16_t expected_sgpr) -> bool {
-      words.push_back(build_v_mov_b32_e32(expected, expected_sgpr, arch));
-      return narrow_equal_vgpr(offset, expected);
+    const auto narrow_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
+      if (!record.load(offset, value) ||
+          !append_compare_moi_report_dispatch_id_word(words, options, value, expected, high_word,
+                                                      arch,
+                                                      ConSanMoiLiteralDispatchIdPolicy::
+                                                          AnyArchitecture)) {
+        return false;
+      }
+      return narrow_current();
     };
     const auto narrow_equal_workgroup = [&](uint32_t offset,
                                             const ConSanMoiWorkgroupSource &source) -> bool {
@@ -327,17 +333,10 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
                               static_cast<uint32_t>(options.moi_report_generation)) ||
         !narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, generation) + 4u,
                               static_cast<uint32_t>(options.moi_report_generation >> 32u)) ||
-        !(options.moi_dispatch_id_sgpr
-              ? narrow_equal_sgpr(offsetof(ConSanMoiSampledCausalWindow, dispatch_id),
-                                  *options.moi_dispatch_id_sgpr)
-              : narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, dispatch_id),
-                                     static_cast<uint32_t>(options.moi_report_dispatch_id))) ||
-        !(options.moi_dispatch_id_sgpr
-              ? narrow_equal_sgpr(offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + 4u,
-                                  static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u))
-              : narrow_equal_literal(
-                    offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + 4u,
-                    static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u))) ||
+        !narrow_equal_dispatch_id(offsetof(ConSanMoiSampledCausalWindow, dispatch_id),
+                                  /*high_word=*/false) ||
+        !narrow_equal_dispatch_id(offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + 4u,
+                                  /*high_word=*/true) ||
         !narrow_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_x),
                                 workgroup_sources->x) ||
         !narrow_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_y),
@@ -2294,15 +2293,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
             record_words, base + offsetof(ConSanMoiReportHeader, event_counter),
             record_base + offsetof(ConSanMoiFenceRecord, event_index), slot_vgpr,
             *options.scratch_vgpr, arch) ||
-        (options.moi_dispatch_id_sgpr &&
-         (!append_dynamic_fence_store_u32_scalar_src(
-              record_words, record_base + offsetof(ConSanMoiFenceRecord, generation),
-              *options.moi_dispatch_id_sgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
-          !append_dynamic_fence_store_u32_scalar_src(
-              record_words,
-              record_base + offsetof(ConSanMoiFenceRecord, generation) + sizeof(uint32_t),
-              static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), slot_vgpr,
-              *options.scratch_vgpr, arch))) ||
+        !append_dynamic_record_store_moi_report_dispatch_id_pair(
+            record_words, kDynamicFenceRecordLayout,
+            record_base + offsetof(ConSanMoiFenceRecord, generation), options, slot_vgpr,
+            *options.scratch_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
         !append_dynamic_fence_store_workgroup_source(
             record_words, record_base + offsetof(ConSanMoiFenceRecord, workgroup_x),
             workgroup_sources.x, slot_vgpr, *options.scratch_vgpr, arch) ||
@@ -2380,11 +2374,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         !append_store_u32_literal(words, base + offsetof(ConSanMoiReportHeader, fence_record_count),
                                   record_capacity_or_count, *options.scratch_vgpr, arch) ||
         !record.materialize_address(record_base) ||
-        (options.moi_dispatch_id_sgpr &&
-         (!record.store_sgpr(offsetof(ConSanMoiFenceRecord, generation),
-                             *options.moi_dispatch_id_sgpr) ||
-          !record.store_sgpr(offsetof(ConSanMoiFenceRecord, generation) + sizeof(uint32_t),
-                             static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u)))) ||
+        !append_store_moi_report_dispatch_id_pair(
+            record, options, offsetof(ConSanMoiFenceRecord, generation), arch,
+            ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
         !record.store_workgroup(offsetof(ConSanMoiFenceRecord, workgroup_x), workgroup_sources.x) ||
         !record.store_workgroup(offsetof(ConSanMoiFenceRecord, workgroup_y), workgroup_sources.y) ||
         !record.store_workgroup(offsetof(ConSanMoiFenceRecord, workgroup_z), workgroup_sources.z) ||

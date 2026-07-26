@@ -2006,21 +2006,31 @@ TEST(ConSanMoi, SampledAccessAndAtomicShareSelectedCausalSlot) {
 }
 
 TEST(ConSanMoi, FenceRecordPatchesCarryExactAtomicAddressIntoAbiV4Input) {
-  const std::vector<uint8_t> bytes = make_rdna4_atomic_fence_sequence_code_object();
+  constexpr uint16_t kExecSaveSgpr = 90u;
+  constexpr uint16_t kExecSaveSgprCount = 7u;
+  std::vector<uint16_t> live_sgprs;
+  for (uint16_t sgpr = 0; sgpr <= 105u; ++sgpr) {
+    if (sgpr < kExecSaveSgpr || sgpr >= kExecSaveSgpr + kExecSaveSgprCount)
+      live_sgprs.push_back(sgpr);
+  }
+  const std::vector<uint8_t> bytes = make_rdna4_atomic_fence_sequence_code_object(live_sgprs);
   ASSERT_FALSE(bytes.empty());
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
   options.max_patches = 3;
   options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = kExecSaveSgpr;
   options.moi_owner_vgpr = 11;
   options.moi_epoch_vgpr = 12;
   options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(3, 0, 0, 0, 0, 3, 3);
 
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
   ASSERT_EQ(result.moi_fence_candidates.size(), 2u);
   EXPECT_TRUE(std::ranges::all_of(result.moi_fence_candidates, &ConSanMoiFenceCandidate::eligible));
   std::vector<const ConSanPatchInfo *> fences;
@@ -2063,6 +2073,10 @@ TEST(ConSanMoi, FenceRecordPatchesCarryExactAtomicAddressIntoAbiV4Input) {
     };
     expect_vgpr(offsetof(ConSanMoiFenceRecord, communication_token), 2);
     expect_vgpr(offsetof(ConSanMoiFenceRecord, communication_token) + sizeof(uint32_t), 3);
+    expect_literal(offsetof(ConSanMoiFenceRecord, generation),
+                   static_cast<uint32_t>(options.moi_report_dispatch_id));
+    expect_literal(offsetof(ConSanMoiFenceRecord, generation) + sizeof(uint32_t),
+                   static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u));
     EXPECT_TRUE(contains_subsequence(
         words,
         make_expected_literal_store_words(*options.moi_report_buffer_address +

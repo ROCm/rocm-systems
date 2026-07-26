@@ -702,55 +702,6 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                            times_forty_eight, times_slot_size, base_lo, base_hi, add_offset);
 }
 
-[[nodiscard]] bool append_moi_report_dispatch_id_word(std::vector<uint32_t> &words,
-                                                      const ConSanOptions &options,
-                                                      uint16_t destination_vgpr, bool high_word,
-                                                      rj_code_arch_t arch) {
-  if (options.moi_dispatch_id_sgpr) {
-    words.push_back(build_v_mov_b32_e32(
-        destination_vgpr,
-        static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + (high_word ? 1u : 0u)), arch));
-    return true;
-  }
-  // CDNA keeps the preloaded-SGPR contract until its code-object-wide
-  // dispatch-identity resolver and final validation accept literal state too.
-  // Keep this emitter gate aligned with that policy.
-  if (!is_rdna4_family_arch(arch))
-    return false;
-  const uint32_t literal = high_word ? static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u)
-                                     : static_cast<uint32_t>(options.moi_report_dispatch_id);
-  const auto materialize =
-      instrumentation::build_v_mov_b32_literal(destination_vgpr, literal, arch);
-  if (!materialize)
-    return false;
-  words.insert(words.end(), materialize->begin(), materialize->end());
-  return true;
-}
-
-[[nodiscard]] bool append_compare_moi_report_dispatch_id_word(
-    std::vector<uint32_t> &words, const ConSanOptions &options, uint16_t value_vgpr,
-    uint16_t clobberable_literal_temporary_vgpr, bool high_word, rj_code_arch_t arch) {
-  uint16_t expected = 0u;
-  if (options.moi_dispatch_id_sgpr) {
-    expected = static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + (high_word ? 1u : 0u));
-  } else {
-    // The no-SGPR path clobbers this temporary. Every caller must pass a dead
-    // VGPR whose next use either overwrites or explicitly reloads it.
-    assert(clobberable_literal_temporary_vgpr != value_vgpr);
-    if (clobberable_literal_temporary_vgpr == value_vgpr ||
-        !append_moi_report_dispatch_id_word(words, options, clobberable_literal_temporary_vgpr,
-                                            high_word, arch)) {
-      return false;
-    }
-    expected = vector_source_vgpr(clobberable_literal_temporary_vgpr);
-  }
-  const auto equal = instrumentation::build_v_cmp_eq_u32_vcc(expected, value_vgpr, arch);
-  if (!equal)
-    return false;
-  words.push_back(*equal);
-  return true;
-}
-
 // Publishes the direct acquire edge and every inherited snapshot edge as one
 // reservation transaction. The reservation-version field is an odd-state
 // rollback journal containing the prior even version; it is cleared before
@@ -1019,7 +970,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     // Slot derivation is complete. `hash` is dead here and its next use
     // overwrites it with the source-version parity bit.
     if (!append_compare_moi_report_dispatch_id_word(words, options, value, hash,
-                                                    /*high_word=*/false, arch))
+                                                    /*high_word=*/false, arch,
+                                                    ConSanMoiLiteralDispatchIdPolicy::
+                                                        Rdna4FamilyOnly))
       return false;
     if (!narrow_vcc() ||
         !append_load_u32_vgpr_at_offset(
@@ -1028,7 +981,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
             arch))
       return false;
     if (!append_compare_moi_report_dispatch_id_word(words, options, value, hash,
-                                                    /*high_word=*/true, arch))
+                                                    /*high_word=*/true, arch,
+                                                    ConSanMoiLiteralDispatchIdPolicy::
+                                                        Rdna4FamilyOnly))
       return false;
     if (!narrow_vcc() ||
         !append_load_u32_vgpr_at_offset(
@@ -1270,12 +1225,16 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
             words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
             value, arch))
       return false;
-    if (!append_moi_report_dispatch_id_word(words, options, value, /*high_word=*/false, arch))
+    if (!append_moi_report_dispatch_id_word(
+            words, options, value, /*high_word=*/false, arch,
+            ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly))
       return false;
     if (!append_store_u32_vgpr_at_offset(
             words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id), value, arch))
       return false;
-    if (!append_moi_report_dispatch_id_word(words, options, value, /*high_word=*/true, arch))
+    if (!append_moi_report_dispatch_id_word(
+            words, options, value, /*high_word=*/true, arch,
+            ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly))
       return false;
     if (!append_store_u32_vgpr_at_offset(
             words, base,
@@ -1443,7 +1402,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   // Release-slot addressing is complete. `temporary_vgpr` is dead here and
   // the later snapshot construction overwrites it before any read.
   if (!append_compare_moi_report_dispatch_id_word(words, options, value_vgpr, temporary_vgpr,
-                                                  /*high_word=*/false, arch))
+                                                  /*high_word=*/false, arch,
+                                                  ConSanMoiLiteralDispatchIdPolicy::
+                                                      Rdna4FamilyOnly))
     return false;
   words.push_back(*narrow_if_valid);
   if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
@@ -1452,7 +1413,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                       value_vgpr, arch))
     return false;
   if (!append_compare_moi_report_dispatch_id_word(words, options, value_vgpr, temporary_vgpr,
-                                                  /*high_word=*/true, arch))
+                                                  /*high_word=*/true, arch,
+                                                  ConSanMoiLiteralDispatchIdPolicy::
+                                                      Rdna4FamilyOnly))
     return false;
   words.push_back(*narrow_if_valid);
   // CDNA3/4 FLAT memory instructions require an even-aligned address pair.
@@ -1885,7 +1848,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     // the next scan iteration reloads it before use.
     if (!append_load_u32_vgpr_at_offset(words, snapshot_address, offset, temporary, arch) ||
         !append_compare_moi_report_dispatch_id_word(words, options, temporary, version_before,
-                                                    high_word, arch)) {
+                                                    high_word, arch,
+                                                    ConSanMoiLiteralDispatchIdPolicy::
+                                                        Rdna4FamilyOnly)) {
       return false;
     }
     return narrow_vcc();
@@ -2163,7 +2128,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     // overwrites it before the first use of the compare-swap operand.
     if (!append_load_u32_vgpr_at_offset(words, slot_address, offset, temporary, arch) ||
         !append_compare_moi_report_dispatch_id_word(words, options, temporary, cas_new, high_word,
-                                                    arch)) {
+                                                    arch,
+                                                    ConSanMoiLiteralDispatchIdPolicy::
+                                                        Rdna4FamilyOnly)) {
       return false;
     }
     return narrow_vcc();
@@ -2445,7 +2412,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                            sizeof(uint32_t),
                                        static_cast<uint16_t>(stable_guest_address + 1u), arch))
     return false;
-  if (!append_moi_report_dispatch_id_word(words, options, temporary, /*high_word=*/false, arch)) {
+  if (!append_moi_report_dispatch_id_word(
+          words, options, temporary, /*high_word=*/false, arch,
+          ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly)) {
     errors.emplace_back("ConSan MOI inline release could not materialize dispatch ID low");
     return false;
   }
@@ -2453,7 +2422,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                        offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id),
                                        temporary, arch))
     return false;
-  if (!append_moi_report_dispatch_id_word(words, options, temporary, /*high_word=*/true, arch)) {
+  if (!append_moi_report_dispatch_id_word(
+          words, options, temporary, /*high_word=*/true, arch,
+          ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly)) {
     errors.emplace_back("ConSan MOI inline release could not materialize dispatch ID high");
     return false;
   }
