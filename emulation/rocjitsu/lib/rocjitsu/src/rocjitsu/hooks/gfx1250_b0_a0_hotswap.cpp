@@ -642,8 +642,8 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
       return load_owned_bytes(executable, agent, source, options, loaded, *api, original_load);
 
     // gfx1250 A0 and B0 code objects carry the same machine identity. Mode 2 is
-    // intentionally a B0-input environment, so every gfx1250 object reaching an
-    // A0 agent is translated with the fixed B0-to-A0 profile.
+    // a B0-input environment, so gfx1250 input targeting an A0 agent uses the
+    // fixed B0-to-A0 profile.
     uint8_t *translated_data = nullptr;
     size_t translated_size = 0;
     const rj_status_t translate_status = rj_gfx1250_b0_to_a0_translate(
