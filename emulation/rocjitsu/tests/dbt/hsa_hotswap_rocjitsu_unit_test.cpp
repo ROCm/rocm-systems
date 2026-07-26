@@ -16,6 +16,7 @@
 extern "C" bool OnLoad(HsaApiTable *, uint64_t, uint64_t, const char *const *);
 extern "C" void OnUnload();
 extern "C" size_t rj_test_retained_executable_buffer_count();
+extern "C" void rj_test_clear_retained_storage();
 
 namespace {
 
@@ -182,6 +183,9 @@ class HsaHotswapHookTest : public ::testing::Test {
 protected:
   void SetUp() override {
     OnUnload();
+    // Production storage is process-lifetime (not freed on reinstall), so clear it
+    // here to isolate the retention lifecycle between test cases.
+    rj_test_clear_retained_storage();
     reset_fakes();
   }
   void TearDown() override { OnUnload(); }
@@ -240,10 +244,13 @@ TEST_F(HsaHotswapHookTest, UsesImmutableSnapshotForForwardedA0Load) {
 
 // The translated backing storage retained for an A0 load must SURVIVE OnUnload()
 // (ROCr destroys its loader after OnUnload but before closing the DSO, so the bytes
-// the loader still references must outlive OnUnload), and be released only at the
-// next install() -- a fresh runtime generation. Regression guard for the storage-
-// retention lifecycle (uninstall keeps g_state.executables; install clears it).
-TEST_F(HsaHotswapHookTest, RetainedStorageSurvivesUnloadAndReleasesOnReinstall) {
+// the loader still references must outlive OnUnload) AND a runtime-generation
+// reinstall (OnLoad again): a consumer whose lifetime is not bounded by the HSA
+// generation -- rocprofiler-register, which finalizes its records at process-exit
+// atexit -- can still reference these bytes, so a reinstall must not free them. They
+// are released only at executable destroy (or process exit). Regression guard for
+// the process-lifetime storage-retention lifecycle.
+TEST_F(HsaHotswapHookTest, RetainedStorageSurvivesUnloadAndReinstall) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   ASSERT_EQ(rj_test_retained_executable_buffer_count(), 0u);
 
@@ -264,9 +271,13 @@ TEST_F(HsaHotswapHookTest, RetainedStorageSurvivesUnloadAndReleasesOnReinstall) 
   OnUnload();
   EXPECT_EQ(rj_test_retained_executable_buffer_count(), 1u);
 
-  // The next runtime generation's install() clears the previous generation's
-  // storage (safe because that generation's loader is gone by then).
+  // A reinstall (next runtime generation) must NOT free the previous generation's
+  // storage either: an old-generation profiler record can still point into it.
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  EXPECT_EQ(rj_test_retained_executable_buffer_count(), 1u);
+
+  // Storage is released when the executable is destroyed.
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
   EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);
 }
 
@@ -312,6 +323,36 @@ TEST_F(HsaHotswapHookTest, FailedLoadDestroysTransientReaderImmediately) {
   EXPECT_EQ(g_readers.count(g_loaded_reader.handle), 0u);
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
   EXPECT_EQ(g_reader_destroy_calls, 1);
+}
+
+// A late lower-load failure must KEEP the translated bytes retained, not free them:
+// ROCr's loader appends a loaded-code-object holding the raw ELF pointer before the
+// fallible stages and does not roll it back on failure, so freeing the bytes would
+// leave ROCr/debugger/profiler enumeration with a dangling pointer. The bytes are
+// released only at executable destroy.
+TEST_F(HsaHotswapHookTest, FailedLoadRetainsTranslatedBytesUntilDestroy) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  ASSERT_EQ(rj_test_retained_executable_buffer_count(), 0u);
+
+  const std::vector<uint8_t> source{1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
+      HSA_STATUS_SUCCESS);
+
+  // The lower load fails AFTER load_owned_bytes has retained the bytes and entered
+  // the lower loader (modeling ROCr appending its loaded-object then failing a later
+  // stage).
+  g_load_agent_status = HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+
+  // Bytes are retained despite the failure (would have been freed by the old
+  // unretain-on-failure), and are released only when the executable is destroyed.
+  EXPECT_EQ(rj_test_retained_executable_buffer_count(), 1u);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);
 }
 
 TEST_F(HsaHotswapHookTest, FailedReaderDestroyKeepsCapturedBytes) {

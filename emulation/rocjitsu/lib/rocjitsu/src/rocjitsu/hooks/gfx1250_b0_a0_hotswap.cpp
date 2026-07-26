@@ -182,38 +182,10 @@ bool retain(hsa_executable_t executable, Blob bytes) noexcept {
   }
 }
 
-void unretain(hsa_executable_t executable, const Blob &bytes) noexcept {
-  try {
-    std::lock_guard lock(g_state.storage_mutex);
-    const auto map_it = g_state.executables.find(executable.handle);
-    if (map_it == g_state.executables.end())
-      return;
-    auto &buffers = map_it->second;
-    for (auto it = buffers.begin(); it != buffers.end(); ++it) {
-      if (it->get() == bytes.get()) {
-        buffers.erase(it);
-        break;
-      }
-    }
-    if (buffers.empty())
-      g_state.executables.erase(map_it);
-  } catch (...) {
-  }
-}
-
 void release(hsa_executable_t executable) noexcept {
   try {
     std::lock_guard lock(g_state.storage_mutex);
     g_state.executables.erase(executable.handle);
-  } catch (...) {
-  }
-}
-
-void clear_storage() noexcept {
-  try {
-    std::lock_guard lock(g_state.storage_mutex);
-    g_state.readers.clear();
-    g_state.executables.clear();
   } catch (...) {
   }
 }
@@ -252,10 +224,18 @@ bool install(HsaApiTable *table) {
       original.agent_iterate_isas == nullptr || original.isa_get_info == nullptr)
     return false;
 
-  // OnUnload precedes ROCr loader destruction. A same-DSO reinstall can only
-  // occur after that runtime generation has finished, so stale backing storage
-  // is safe to release here.
-  clear_storage();
+  // Do NOT free the previous generation's translated backing storage here. Those
+  // buffers can still be referenced by consumers whose lifetime is NOT bounded by
+  // the HSA runtime generation -- notably rocprofiler-register, which is not in
+  // tool_libs_ and finalizes its code-object records (each holding a memory_base
+  // into these bytes) at process-exit atexit, not at hsa_shut_down. A reinstall
+  // (next hsa_init after a shutdown that left a live executable) would otherwise
+  // free bytes an old-generation profiler record still points into. The buffers are
+  // therefore process-lifetime: released only at executable destroy (release()) or
+  // when the process exits. RTLD_NODELETE keeps this DSO (and g_state) mapped across
+  // generations, so retaining across reinstall is sound. This bounds growth by the
+  // number of never-destroyed executables across runtime generations, which is
+  // small; correctness (no dangling profiler/debugger pointer) takes precedence.
   g_state.vendor_reader.store(nullptr, std::memory_order_release);
   g_state.core = core;
   // Publish an immutable snapshot: a callback that already loaded the previous
@@ -465,14 +445,18 @@ hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, co
 
   if (!retain(executable, bytes))
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  bool committed = false;
-  auto retention_guard = make_scope_guard([&] {
-    if (!committed)
-      unretain(executable, bytes);
-  });
 
+  // Retain the translated bytes until the executable is destroyed, EVEN IF the
+  // lower load returns failure. ROCr's loader is not transactional: LoadCodeObject
+  // appends a LoadedCodeObjectImpl holding the raw ELF pointer BEFORE the fallible
+  // segment/symbol/relocation/trampoline stages, and those stages' error paths do
+  // not remove the appended object (each does a bare `return status`). So on a late
+  // failure ROCr -- and any debugger/profiler that enumerates loaded code objects --
+  // keeps a pointer into these bytes. Freeing them here (the previous
+  // unretain-on-failure) would leave that pointer dangling. The bytes are released
+  // only on hsa_executable_destroy (release()) or at process exit; they are NOT
+  // freed on a runtime-generation reinstall (see install()).
   const hsa_status_t status = original_load(executable, agent, owned_reader, options, loaded);
-  committed = status == HSA_STATUS_SUCCESS;
   return status;
 }
 
@@ -698,5 +682,14 @@ extern "C" RJ_HOOK_EXPORT size_t rj_test_retained_executable_buffer_count() {
     count += buffers.size();
   }
   return count;
+}
+
+// Test-only: drop all retained storage. Production storage is process-lifetime (not
+// cleared on reinstall), so a test fixture needs this to isolate the retention
+// lifecycle between test cases; production never calls it.
+extern "C" RJ_HOOK_EXPORT void rj_test_clear_retained_storage() {
+  std::lock_guard lock(g_state.storage_mutex);
+  g_state.readers.clear();
+  g_state.executables.clear();
 }
 #endif // RJ_HOTSWAP_TEST_HOOKS
