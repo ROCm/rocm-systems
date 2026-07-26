@@ -18,13 +18,16 @@
 #include "../test_paths.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/proxy_code_object.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace {
@@ -101,6 +104,72 @@ TEST(ProxyCodeObject, LoadsIntoMemoryWithResolvableDescriptor) {
   const uint32_t group_segment_fixed_size = memory.read32(kernel_object);
   EXPECT_EQ(group_segment_fixed_size, 0u)
       << "proxy descriptor group_segment_fixed_size should be the stub's zeroed plan";
+}
+
+// §14.6 eligibility (review fix #6): the real self-contained vector_add object has
+// no undefined global symbols, so it is NOT flagged as carrying executable-global
+// state -- it stays lazy-eligible. (Regression guard: an over-broad "any
+// allocatable data" check would wrongly reject it.)
+TEST(LazyEligibility, SelfContainedObjectHasNoExternalState) {
+  Executable executable(test::kernel_path("vector_add_gfx1250"));
+  const auto *source = load_source(executable);
+  ASSERT_NE(source, nullptr);
+
+  CodeObjectPatcher patcher(*source);
+  EXPECT_FALSE(patcher.has_external_or_allocatable_data())
+      << "self-contained vector_add wrongly classified as carrying external state";
+}
+
+// §14.6 eligibility (review fix #6): an object with an UNDEFINED GLOBAL symbol names
+// a definition only another executable provides (a host __device__/__constant__
+// global, a device-enqueue runtime handle, a cross-object ref). The standalone
+// hidden child cannot resolve it, so such an object must route to eager. Synthesize
+// the case by flipping one defined global symbol to SHN_UNDEF in a copy of the real
+// object.
+TEST(LazyEligibility, UndefinedGlobalSymbolIsRejected) {
+  Executable executable(test::kernel_path("vector_add_gfx1250"));
+  const auto *source = load_source(executable);
+  ASSERT_NE(source, nullptr);
+
+  const auto *image = reinterpret_cast<const uint8_t *>(source->image_data());
+  std::vector<uint8_t> bytes(image, image + source->image_size());
+
+  // Baseline: the untouched object is self-contained.
+  {
+    AmdGpuCodeObject baseline(bytes.data(), bytes.size());
+    CodeObjectPatcher patcher(baseline);
+    ASSERT_FALSE(patcher.has_external_or_allocatable_data());
+  }
+
+  // Walk the section headers, find a symbol table, and set the first GLOBAL,
+  // section-defined symbol's st_shndx to SHN_UNDEF to model an unresolved external.
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, bytes.data(), sizeof(ehdr));
+  bool mutated = false;
+  for (uint16_t s = 0; s < ehdr.e_shnum && !mutated; ++s) {
+    Elf64_Shdr sh{};
+    std::memcpy(&sh, bytes.data() + ehdr.e_shoff + s * sizeof(sh), sizeof(sh));
+    if (sh.sh_type != SHT_SYMTAB && sh.sh_type != SHT_DYNSYM)
+      continue;
+    const size_t count = sh.sh_size / sizeof(Elf64_Sym);
+    for (size_t i = 1; i < count; ++i) {
+      const uint64_t off = sh.sh_offset + i * sizeof(Elf64_Sym);
+      Elf64_Sym sym{};
+      std::memcpy(&sym, bytes.data() + off, sizeof(sym));
+      if (sym.st_shndx != SHN_UNDEF && elf_symbol_bind(sym.st_info) == kElfSymbolBindGlobal) {
+        sym.st_shndx = SHN_UNDEF;
+        std::memcpy(bytes.data() + off, &sym, sizeof(sym));
+        mutated = true;
+        break;
+      }
+    }
+  }
+  ASSERT_TRUE(mutated) << "test object had no defined global symbol to mutate";
+
+  AmdGpuCodeObject mutated_obj(bytes.data(), bytes.size());
+  CodeObjectPatcher patcher(mutated_obj);
+  EXPECT_TRUE(patcher.has_external_or_allocatable_data())
+      << "an undefined global symbol must force eager (not lazy)";
 }
 
 } // namespace

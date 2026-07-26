@@ -951,6 +951,46 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
   return false;
 }
 
+bool CodeObjectPatcher::has_external_or_allocatable_data() const {
+  if (image_.size() < sizeof(Elf64_Ehdr))
+    return false;
+  const auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
+  const auto shdrs = read_section_headers(image_, header);
+
+  // The single discriminator that matters is an UNDEFINED GLOBAL symbol: it names a
+  // definition the loader must resolve from ANOTHER executable (a host
+  // __device__/__constant__ global, a device-enqueue runtime handle, or any
+  // cross-object reference). The lazy hidden child is a standalone executable that
+  // cannot provide such a definition, so any object carrying one must translate
+  // eagerly (into the app's own executable) instead. Deliberately narrow to avoid
+  // false rejects that only cost correctness headroom:
+  //  - a self-contained object whose symbols all resolve within itself (including a
+  //    function-pointer table in its own .data resolved by internal relocations) is
+  //    lazy-safe -- rejecting on the mere presence of allocatable .data/.bss would
+  //    wrongly exclude legitimately-translatable objects (verified against a real
+  //    function-table gfx1250 kernel that carries .data + .rela.dyn yet has no
+  //    undefined globals).
+  //  - an undefined WEAK symbol is ABI-resolvable to zero and does not require an
+  //    external definition, so it is NOT a reason to reject.
+  // The null symbol at index 0 is always SHN_UNDEF and is skipped.
+  for (const Elf64_Shdr &symtab : shdrs) {
+    if (symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM)
+      continue;
+    if (symtab.sh_entsize != sizeof(Elf64_Sym) ||
+        !image_contains_range(image_.size(), symtab.sh_offset, symtab.sh_size))
+      continue;
+    const size_t count = symtab.sh_size / sizeof(Elf64_Sym);
+    for (size_t i = 1; i < count; ++i) { // skip the null symbol at index 0
+      Elf64_Sym symbol{};
+      std::memcpy(&symbol, image_.data() + symtab.sh_offset + i * sizeof(Elf64_Sym),
+                  sizeof(symbol));
+      if (symbol.st_shndx == SHN_UNDEF && elf_symbol_bind(symbol.st_info) == kElfSymbolBindGlobal)
+        return true;
+    }
+  }
+  return false;
+}
+
 bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
                                      std::span<const TextOffsetRelocation> text_relocations,
                                      std::span<const PcRelativeDataRelocation> data_relocations) {

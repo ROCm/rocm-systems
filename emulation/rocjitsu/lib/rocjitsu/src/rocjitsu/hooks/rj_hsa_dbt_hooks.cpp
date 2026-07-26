@@ -1136,6 +1136,23 @@ public:
         ++it;
       }
     }
+    // Drop the reverse proxy->object mappings for this executable in the SAME
+    // critical section. The entries hold weak_ptrs, but the destroy path keeps the
+    // removed records alive while it tears down their children, so a stale reverse
+    // entry would still resolve to a live object and a concurrent first-dispatch
+    // could re-materialize against an executable that is being destroyed. Removing
+    // them here closes that admission window atomically with map_ erasure.
+    for (const auto &object : removed) {
+      if (object == nullptr)
+        continue;
+      for (auto it = by_proxy_kernel_object_.begin(); it != by_proxy_kernel_object_.end();) {
+        auto locked = it->second.lock();
+        if (locked == nullptr || locked == object)
+          it = by_proxy_kernel_object_.erase(it);
+        else
+          ++it;
+      }
+    }
     return removed;
   }
 
@@ -3198,6 +3215,7 @@ void map_pointer_info_accessible_agents(uint32_t *num_agents_accessible, hsa_age
 struct DoorbellRing {
   void *base = nullptr;
   uint32_t size = 0;
+  uint64_t read_dispatch_id = 0; ///< First packet the CP has NOT yet consumed.
   [[nodiscard]] explicit operator bool() const { return base != nullptr && size != 0; }
 };
 
@@ -3223,7 +3241,15 @@ struct DoorbellRing {
   const ::amd_queue_t *queue = amd_signal->queue_ptr;
   if (queue == nullptr || queue->hsa_queue.base_address == nullptr || queue->hsa_queue.size == 0)
     return {};
-  return DoorbellRing{queue->hsa_queue.base_address, queue->hsa_queue.size};
+  // read_dispatch_id is the count of packets the CP has already consumed, i.e. the
+  // index of the first packet it has NOT processed. It is the correct lower bound
+  // for a cold cursor: a producer may publish several packets and ring the doorbell
+  // once at the final index, so starting the rewrite scan at the doorbell value
+  // alone would miss the earlier proxies in that batch.
+  const uint64_t read_dispatch_id =
+      std::atomic_ref<const volatile uint64_t>(queue->read_dispatch_id)
+          .load(std::memory_order_acquire);
+  return DoorbellRing{queue->hsa_queue.base_address, queue->hsa_queue.size, read_dispatch_id};
 }
 
 /// @brief Return a copy of @p header with the packet type forced to INVALID.
@@ -3289,6 +3315,25 @@ public:
     if (!is_lazy_dispatch_packet(packet))
       return;
     rewrite_lazy_kernel_object(packet, header);
+  }
+
+  /// @brief Test shim: run the full doorbell seam against a synthetic signal.
+  ///
+  /// @details Exercises rewrite_lazy_dispatches_for_doorbell -- including the
+  /// read_dispatch_id-based cold-cursor range derivation (review fix #1) -- so a
+  /// test can publish a BATCH of proxy packets, ring the doorbell ONCE at the final
+  /// index, and confirm every proxy in [read_dispatch_id, value] is rewritten (not
+  /// just the last). @p signal must be a synthetic doorbell AmdSignal whose
+  /// queue_ptr resolves to a ring the test owns.
+  void rewrite_lazy_dispatches_for_doorbell_for_test(hsa_signal_t signal,
+                                                     hsa_signal_value_t value) {
+    rewrite_lazy_dispatches_for_doorbell(signal, value);
+  }
+
+  /// @brief Test shim: clear the per-doorbell lazy cursor so tests start cold.
+  void clear_lazy_cursor_for_test() {
+    std::lock_guard lock(lazy_cursor_mutex_);
+    lazy_cursor_by_doorbell_.clear();
   }
 #endif
 
@@ -3424,12 +3469,24 @@ public:
     auto reentry_guard = make_scope_guard([&] { in_lazy_doorbell = false; });
 
     const uint64_t packet_id = static_cast<uint64_t>(value);
+    // Lower bound of the range to (re)scan. Start from the first packet the CP has
+    // not yet consumed (read_dispatch_id): a producer may publish a batch of packets
+    // and ring the doorbell ONCE at the final index (CLR reserves N slots and rings
+    // once -- rocvirtual.cpp graph path), so starting at the doorbell value alone
+    // would leave the earlier proxies in that batch unrewritten and they would run
+    // their s_endpgm stubs. Anything below read_dispatch_id was already consumed and
+    // must not be rewritten. Our own lazy cursor may sit ABOVE read_dispatch_id when
+    // we have already rewritten part of this range under an earlier doorbell; in
+    // that case start from the cursor to avoid redundant re-fencing. Clamp to the
+    // ring so a stale/huge span cannot be produced.
     uint64_t begin_packet_id = packet_id;
+    if (ring.read_dispatch_id <= packet_id && packet_id - ring.read_dispatch_id < ring.size)
+      begin_packet_id = ring.read_dispatch_id;
     {
       std::lock_guard lock(lazy_cursor_mutex_);
       auto it = lazy_cursor_by_doorbell_.find(signal.handle);
-      if (it != lazy_cursor_by_doorbell_.end() && it->second <= packet_id &&
-          packet_id - it->second < ring.size)
+      if (it != lazy_cursor_by_doorbell_.end() && it->second > begin_packet_id &&
+          it->second <= packet_id)
         begin_packet_id = it->second;
     }
 
@@ -5404,6 +5461,11 @@ create_hidden_child_executable(const std::shared_ptr<const std::vector<uint8_t>>
     return false;
   if (patcher.has_relocations_within_text() || patcher.has_unsupported_relocation_to_text())
     return false;
+  // Reject objects carrying executable-global state the standalone hidden child
+  // would not inherit (undefined external symbols: host globals, device-enqueue
+  // runtime handles, cross-object refs). Those route to eager (§14.6).
+  if (patcher.has_external_or_allocatable_data())
+    return false;
   return true;
 }
 
@@ -6056,7 +6118,22 @@ extern "C" RJ_HOOK_EXPORT void rj_test_record_deferred_with_child(uint64_t paren
   // (and retain-on-failure) is observable via rj_test_retained_translation_count.
   TranslatedExecutableRegistry::instance().retain(hsa_executable_t{parent_handle},
                                                   object->translated_bytes);
+  // Register a synthetic proxy kernel_object in the reverse index (derived from the
+  // parent handle) so a test can verify erase_executable drops the reverse mapping.
+  const uint64_t proxy_ko = 0xF00000000ull | parent_handle;
+  DeferredObjectRegistry::instance().register_proxy_kernel_object(proxy_ko, object);
   DeferredObjectRegistry::instance().record(std::move(object));
+}
+
+/// @brief Test-only: does the reverse index still resolve @p parent_handle's proxy?
+///
+/// @details Mirrors the synthetic proxy_ko rj_test_record_deferred_with_child
+/// registered. Returns true iff find_by_proxy_kernel_object resolves to a live
+/// object, so a test can assert the reverse mapping is dropped on executable
+/// destroy (review fix #4).
+extern "C" RJ_HOOK_EXPORT bool rj_test_reverse_index_resolves(uint64_t parent_handle) {
+  const uint64_t proxy_ko = 0xF00000000ull | parent_handle;
+  return DeferredObjectRegistry::instance().find_by_proxy_kernel_object(proxy_ko) != nullptr;
 }
 
 /// @brief Test-only: report whether an executable handle is mid-destroy anywhere.
@@ -6170,6 +6247,68 @@ extern "C" RJ_HOOK_EXPORT uint64_t rj_test_lazy_rewrite_kernel_object(uint64_t p
 
   VirtualLdsDispatchQueueRegistry::rewrite_lazy_kernel_object_for_test(packet);
   return packet.kernel_object;
+}
+
+/// @brief Test-only: drive the doorbell seam over a synthetic batched ring (#1).
+///
+/// @details Proves the cold-cursor range now covers a whole batch: it builds a ring
+/// of @p packet_count dispatch packets each carrying the same tracked proxy_ko, a
+/// synthetic amd_queue_t whose read_dispatch_id is @p read_dispatch_id, and a
+/// doorbell AmdSignal pointing at that queue, then rings the doorbell ONCE at the
+/// final index (packet_count-1). Returns the number of ring slots whose
+/// kernel_object was rewritten proxy->child. Before the fix a cold cursor rewrote
+/// only the final slot (return 1); after it, every slot in
+/// [read_dispatch_id, packet_count-1] is rewritten.
+extern "C" RJ_HOOK_EXPORT unsigned rj_test_doorbell_batch_rewrite(unsigned packet_count,
+                                                                  uint64_t read_dispatch_id) {
+  if (packet_count == 0)
+    return 0;
+  constexpr uint64_t kProxyKo = 0x5000;
+  constexpr uint64_t kChildKo = 0x6000;
+
+  // A READY deferred object mapping the proxy KO to a child KO, registered in the
+  // reverse index so the seam recognizes the ring's packets as tracked proxies.
+  auto object = std::make_shared<DeferredObject>();
+  object->parent_executable = hsa_executable_t{0xBA7C};
+  object->agent = hsa_agent_t{0xA6E7};
+  {
+    std::lock_guard lock(object->mutex);
+    object->state = DeferredTranslationState::kReady;
+    object->kernel_object_map[kProxyKo] = kChildKo;
+  }
+  DeferredObjectRegistry::instance().record(object);
+  DeferredObjectRegistry::instance().register_proxy_kernel_object(kProxyKo, object);
+
+  // A ring of extended kernel-dispatch packets, each carrying the proxy KO.
+  std::vector<hsa_kernel_dispatch_packet_t> ring(packet_count);
+  for (auto &packet : ring) {
+    auto *ep = reinterpret_cast<rocjitsu::amdgpu::AmdExtKernelDispatchPacket *>(&packet);
+    ep->header = static_cast<uint16_t>(HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE);
+    ep->amd_format = rocjitsu::amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+    ep->kernel_object = kProxyKo;
+  }
+
+  // A synthetic amd_queue_t over that ring, and a doorbell signal pointing at it.
+  ::amd_queue_t queue{};
+  queue.hsa_queue.base_address = ring.data();
+  queue.hsa_queue.size = packet_count;
+  queue.read_dispatch_id = read_dispatch_id;
+  rocjitsu::amdgpu::AmdSignal doorbell{};
+  doorbell.kind = rocjitsu::amdgpu::kAmdSignalKindDoorbell;
+  doorbell.queue_ptr = &queue;
+
+  const bool prev_active = g_lazy_dispatch_active.exchange(true, std::memory_order_acq_rel);
+  VirtualLdsDispatchQueueRegistry::instance().clear_lazy_cursor_for_test();
+  hsa_signal_t signal{reinterpret_cast<uint64_t>(&doorbell)};
+  VirtualLdsDispatchQueueRegistry::instance().rewrite_lazy_dispatches_for_doorbell_for_test(
+      signal, static_cast<hsa_signal_value_t>(packet_count - 1));
+  g_lazy_dispatch_active.store(prev_active, std::memory_order_release);
+
+  unsigned rewritten = 0;
+  for (const auto &packet : ring)
+    if (packet.kernel_object == kChildKo)
+      ++rewritten;
+  return rewritten;
 }
 
 /// @brief Test-only: classify @p bytes with the lazy-safe eligibility predicate.

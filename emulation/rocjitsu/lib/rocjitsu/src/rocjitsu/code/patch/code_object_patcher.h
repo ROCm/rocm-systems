@@ -83,6 +83,22 @@ public:
   /// tables that the text offset map can update safely.
   [[nodiscard]] bool has_unsupported_relocation_to_text() const;
 
+  /// @brief True if the object carries executable-global state a separate hidden
+  /// child executable would not inherit (lazy eligibility guard, §14.6).
+  ///
+  /// @details Lazy translation loads the translated code into a NEW, standalone
+  /// child executable, distinct from the parent the app loaded. Any state the child
+  /// does not carry itself — an allocatable data section with content (`.data` /
+  /// `.rodata` / `.bss` that host globals, device-enqueue runtime handles, or
+  /// managed variables live in), or an undefined/external symbol the parent
+  /// executable would resolve — cannot be satisfied from the child alone. Returns
+  /// true so the caller routes such objects to EAGER translation (which loads into
+  /// the app's own executable and keeps those definitions). Self-contained kernel
+  /// objects (kernels + .text only, no allocatable data, no external symbols)
+  /// return false and stay lazy-eligible. Conservative by design: a false positive
+  /// only costs an eager translation, never a wrong result.
+  [[nodiscard]] bool has_external_or_allocatable_data() const;
+
   void update_elf_flags(uint32_t new_flags);
 
   [[nodiscard]] bool patch_kernel_descriptor(uint64_t file_offset,

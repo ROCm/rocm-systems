@@ -57,7 +57,10 @@ extern "C" bool rj_test_is_lazy_safe(const void *bytes, size_t size);
 extern "C" void rj_test_record_deferred_with_child(uint64_t parent_handle, uint64_t agent_handle,
                                                    uint64_t child_handle);
 extern "C" bool rj_test_destroy_in_flight(uint64_t executable_handle);
+extern "C" bool rj_test_reverse_index_resolves(uint64_t parent_handle);
 extern "C" unsigned rj_test_translation_cache(unsigned op, const void *bytes, size_t size);
+extern "C" unsigned rj_test_doorbell_batch_rewrite(unsigned packet_count,
+                                                   uint64_t read_dispatch_id);
 
 namespace {
 
@@ -1897,6 +1900,63 @@ TEST(HsaHooksUnitTest, OuterDestroyIsIdempotentOnRepeat) {
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(kFakeExecutable), HSA_STATUS_SUCCESS);
   EXPECT_EQ(g_fake_destroy_order.size(), after_first + 1);
   EXPECT_EQ(g_fake_destroy_order.back(), kFakeExecutable.handle);
+}
+
+// §14.5a / review fix #4: destroying the parent executable drops the reverse
+// proxy->object mapping atomically with the primary record, so a concurrent
+// first-dispatch can no longer resolve (and re-materialize against) an executable
+// that is being torn down.
+TEST(HsaHooksUnitTest, DestroyErasesReverseProxyIndex) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  reset_executable_destroy_fake();
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  constexpr uint64_t kChild = 9100;
+  rj_test_record_deferred_with_child(kFakeExecutable.handle, kGuestAgent.handle, kChild);
+  // Before destroy the reverse index resolves the proxy kernel_object.
+  ASSERT_TRUE(rj_test_reverse_index_resolves(kFakeExecutable.handle));
+
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kFakeExecutable), HSA_STATUS_SUCCESS);
+
+  // After destroy the reverse mapping is gone -- no admission of a new dispatch
+  // against the destroyed executable.
+  EXPECT_FALSE(rj_test_reverse_index_resolves(kFakeExecutable.handle));
+  EXPECT_EQ(rj_test_deferred_count(kFakeExecutable.handle), 0u);
+}
+
+// Review fix #1: a batch of proxy packets published before a single doorbell ring
+// (CLR reserves N slots and rings once at the final index) must have EVERY proxy
+// rewritten, not just the last. The cold cursor derives its lower bound from the
+// queue's read_dispatch_id, so all slots in [read_dispatch_id, final] are covered.
+TEST(HsaHooksUnitTest, DoorbellBatchRewritesEveryProxyNotJustLast) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  // A 4-packet batch, CP has consumed nothing (read_dispatch_id == 0), one doorbell
+  // ring at index 3. All four proxies must be rewritten.
+  EXPECT_EQ(rj_test_doorbell_batch_rewrite(/*packet_count=*/4, /*read_dispatch_id=*/0), 4u);
+
+  // A batch where the CP already consumed the first two: only the two unconsumed
+  // proxies [2, 3] are rewritten (slots below read_dispatch_id were already run and
+  // must not be touched).
+  EXPECT_EQ(rj_test_doorbell_batch_rewrite(/*packet_count=*/4, /*read_dispatch_id=*/2), 2u);
+
+  // Single dispatch (the vadd shape) is unaffected: one packet, rewritten.
+  EXPECT_EQ(rj_test_doorbell_batch_rewrite(/*packet_count=*/1, /*read_dispatch_id=*/0), 1u);
 }
 
 // §14.8 in-process cache: a positive entry is returned for an identical source, a
