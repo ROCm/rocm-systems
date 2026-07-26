@@ -152,6 +152,9 @@ jobs:
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
+    env:
+      # sparse-checkout places the project at a fixed path.
+      PROJECT_DIR: ${{ github.workspace }}/projects/amdsmi
 
     steps:
       # rocm-systems is a large monorepo; only the amdsmi project and this
@@ -171,12 +174,6 @@ jobs:
           set -euo pipefail
           echo "PR_NUMBER=PR${{ github.event.pull_request.number }}" >> $GITHUB_ENV
           echo "BUILD_DATE=$(date -u +%m%d%y-%H%M)" >> $GITHUB_ENV
-
-      - name: Set Project Directory
-        run: |
-          set -euo pipefail
-          # sparse-checkout places the project at a fixed path.
-          echo "PROJECT_DIR=$GITHUB_WORKSPACE/projects/amdsmi" >> $GITHUB_ENV
 
       - name: Run AMDSMI Build and Install
         run: |
