@@ -1033,6 +1033,12 @@ struct DeferredObject {
   /// (KD address in the hidden child). The dispatch rewrite (Step 4.2) uses this
   /// to redirect a proxy dispatch to its translated kernel.
   std::unordered_map<uint64_t, uint64_t> kernel_object_map;
+
+  /// True once the hidden child's lower destroy has succeeded (§14.5a). Makes the
+  /// child-destroy transition idempotent: a reentrant/retried teardown of an
+  /// already-destroyed child is a no-op instead of a double-destroy. Guarded by the
+  /// DeferredObjectRegistry lock while the outer wrapper holds the removed records.
+  bool child_destroyed = false;
 };
 
 /// @brief Process-wide registry of lazily-deferred code objects.
@@ -1154,6 +1160,96 @@ private:
   // (dropped from map_) do not keep a DeferredObject alive here; a stale weak_ptr
   // resolves to nullptr and the packet is treated as a non-lazy dispatch.
   std::unordered_map<uint64_t, std::weak_ptr<DeferredObject>> by_proxy_kernel_object_;
+};
+
+/// @brief Process-wide tracker of executable handles whose destroy is in flight.
+///
+/// @details Guards the outer profiler-aware executable-destroy wrapper (§14.5a)
+/// against **cross-handle reentrancy**. rocprofiler holds one nonrecursive
+/// process-global mutex while it runs client unload callbacks during
+/// `hsa_executable_destroy(A)`. If a client callback destroys an *unrelated*
+/// executable B (directly, or by spawning and joining a worker thread that does
+/// so), rocjitsu's wrapper for B must NOT re-drive its own child/parent bookkeeping
+/// -- it would re-enter rocprofiler and deadlock on that same mutex. HSA still
+/// requires B's handle to be invalid when `hsa_executable_destroy(B)` returns, so
+/// the wrapper always performs the real lower destroy synchronously; it only skips
+/// rocjitsu's *own* bookkeeping for B, deferring it to the in-flight destroyer of B.
+///
+/// Process-wide (NOT thread-local): a thread-local flag would miss a callback that
+/// spawns+joins a worker thread doing the B-destroy on a different thread. Tracks
+/// handles by value; entry/exit are balanced by @ref DestroyScope (RAII).
+class DestroyCoordinator {
+public:
+  static DestroyCoordinator &instance() {
+    static DestroyCoordinator coordinator;
+    return coordinator;
+  }
+
+  /// @brief Latch process-exit so the destroy wrapper stops touching this singleton.
+  ///
+  /// @details Like the other teardown-critical registries, this function-local
+  /// static is destroyed at process exit, but CLR's later static-destructor teardown
+  /// still calls hsa_executable_destroy through rj_executable_destroy. That wrapper
+  /// checks g_hook_in_process_exit before entering the coordinator, so setting it
+  /// here turns a post-destruction destroy into a plain lower-destroy passthrough
+  /// instead of a use-after-free on in_flight_.
+  ~DestroyCoordinator() { g_hook_in_process_exit.store(true, std::memory_order_release); }
+
+  /// @brief RAII marker: registers @p handle as mid-destroy for its lifetime.
+  ///
+  /// @details `entered()` is true only for the thread/call that first claimed the
+  /// handle; a reentrant claim of an already-in-flight handle yields `entered() ==
+  /// false`, telling the wrapper to skip rocjitsu bookkeeping (the first claimant
+  /// owns it). Reference-counted so nested claims of the SAME handle on the SAME
+  /// thread (retry within one logical destroy) unwind correctly.
+  class DestroyScope {
+  public:
+    DestroyScope(DestroyCoordinator &coordinator, uint64_t handle)
+        : coordinator_(&coordinator), handle_(handle), entered_(coordinator.enter(handle)) {}
+    DestroyScope(const DestroyScope &) = delete;
+    DestroyScope &operator=(const DestroyScope &) = delete;
+    ~DestroyScope() { coordinator_->leave(handle_); }
+
+    /// @brief True iff this scope first claimed the handle (owns its bookkeeping).
+    [[nodiscard]] bool entered() const { return entered_; }
+
+  private:
+    DestroyCoordinator *coordinator_;
+    uint64_t handle_;
+    bool entered_;
+  };
+
+  [[nodiscard]] DestroyScope scope(hsa_executable_t executable) {
+    return DestroyScope(*this, executable.handle);
+  }
+
+  /// @brief True if @p executable is currently mid-destroy on any thread.
+  [[nodiscard]] bool in_flight(hsa_executable_t executable) {
+    std::lock_guard lock(mutex_);
+    return in_flight_.find(executable.handle) != in_flight_.end();
+  }
+
+  void clear() {
+    std::lock_guard lock(mutex_);
+    in_flight_.clear();
+  }
+
+private:
+  /// @returns true if this call is the FIRST to mark @p handle in flight.
+  bool enter(uint64_t handle) {
+    std::lock_guard lock(mutex_);
+    return ++in_flight_[handle] == 1;
+  }
+
+  void leave(uint64_t handle) {
+    std::lock_guard lock(mutex_);
+    auto it = in_flight_.find(handle);
+    if (it != in_flight_.end() && --it->second == 0)
+      in_flight_.erase(it);
+  }
+
+  std::mutex mutex_;
+  std::unordered_map<uint64_t, uint32_t> in_flight_;
 };
 
 /// @brief Outcome of a single-flight materialization attempt.
@@ -1756,6 +1852,7 @@ public:
       CodeObjectReaderRegistry::instance().clear();
       ExecutableAgentRegistry::instance().clear();
       DeferredObjectRegistry::instance().clear();
+      DestroyCoordinator::instance().clear();
       // NOTE: released here on hook uninstall to keep test/reload state clean. The
       // plan's process-lifetime pinning of translated storage across a real
       // hsa_shut_down (Sec. 7.4/B3) is separate, later lifecycle work.
@@ -4320,29 +4417,114 @@ hsa_status_t HSA_API rj_shut_down() {
   return original();
 }
 
+/// @brief Outer profiler-aware executable-destroy wrapper (§14.5a).
+///
+/// @details Drives child-before-parent teardown of a lazily-deferred executable
+/// through the SAVED (profiler-aware) destroy chain, and is safe under the
+/// cross-handle reentrancy rocprofiler creates (it runs client unload callbacks
+/// under one process-global mutex while destroying an executable; a callback may
+/// destroy an unrelated executable, directly or via a spawned/joined thread).
+///
+/// Ordering: quiesce (drop registry records) → destroy each hidden child through
+/// the saved chain (idempotent per record) → destroy the parent through the saved
+/// chain → release retained translated storage. The child MUST go before the
+/// parent so the loader never sees the parent's mappings vanish under a live child.
+///
+/// Reentrancy: the process-wide DestroyCoordinator marks this handle in flight. If
+/// it was ALREADY in flight (a reentrant destroy of the same handle from a profiler
+/// callback, possibly on a spawned thread), we still perform the real lower destroy
+/// synchronously -- HSA requires the handle be invalid at return -- but SKIP
+/// rocjitsu's own child/parent bookkeeping, leaving it to the first (in-flight)
+/// destroyer. We never return success while leaving the handle valid, and never
+/// auto-destroy it later.
+///
+/// Retain-on-failure: if the parent's lower destroy does not succeed, retained
+/// translated storage is kept (not released) so a retry finds it intact. ROCr's
+/// public destroy is void/always-success for a valid handle and returns
+/// INVALID_EXECUTABLE for an unknown one, so the only realistic non-success is a
+/// reentrant destroy of an already-invalidated handle -- which we treat as a no-op
+/// success without touching storage twice.
 hsa_status_t HSA_API rj_executable_destroy(hsa_executable_t executable) {
   log_message(kLogVerbose, "executable_destroy exec=%llu",
               static_cast<unsigned long long>(executable.handle));
-  VirtualLdsRuntimeRegistry::instance().erase_executable(executable);
-  ExecutableAgentRegistry::instance().erase_executable(executable);
-  // Detach any lazily-deferred records for this executable. Their hidden child
-  // executables must be destroyed through the profiler-aware chain BEFORE the
-  // parent (§14.5a, Step 9); until that outer destroy wrapper exists, releasing
-  // the records here drops the retained source/translated bytes once the parent
-  // is gone. The child handles are carried on the records for Step 9 to consume.
-  std::vector<std::shared_ptr<DeferredObject>> deferred =
-      DeferredObjectRegistry::instance().erase_executable(executable);
+
   auto *original = layer().executable_destroy();
   if (!original)
     return HSA_STATUS_ERROR;
-  for (const auto &object : deferred) {
-    if (object && object->child_executable.handle != 0)
-      (void)original(object->child_executable);
+
+  // Process-exit teardown: our function-local-static registries (DestroyCoordinator,
+  // DeferredObjectRegistry, ...) may already be destroyed by the time CLR's late
+  // static-destructor teardown calls hsa_executable_destroy through this wrapper.
+  // Touching them then is a use-after-free (a teardown-critical singleton sets this
+  // latch in its destructor). Forward straight to the saved lower destroy so the
+  // handle is still invalidated, but skip all rocjitsu bookkeeping.
+  if (g_hook_in_process_exit.load(std::memory_order_acquire))
+    return original(executable);
+
+  // Mark this handle in flight process-wide. `entered()` is false when a reentrant
+  // destroy of the SAME handle is already in progress on any thread.
+  auto destroy_scope = DestroyCoordinator::instance().scope(executable);
+  if (!destroy_scope.entered()) {
+    // Reentrant same-handle destroy (e.g. a profiler unload callback re-entering,
+    // or a spawned worker racing the outer destroy). Do the real lower destroy so
+    // the handle is invalid at return, but do NOT re-run rocjitsu's child/parent
+    // bookkeeping -- the first, still-in-flight destroyer owns it.
+    return original(executable);
   }
+
+  // Non-lazy handles (the common case) and lazy parents alike: detach the
+  // hook-side per-executable state first so no dispatch seam or scanner can touch
+  // it while teardown proceeds.
+  VirtualLdsRuntimeRegistry::instance().erase_executable(executable);
+  ExecutableAgentRegistry::instance().erase_executable(executable);
+
+  // Quiesce: remove this executable's deferred records from the registry (so a
+  // concurrent first-dispatch can no longer materialize against it) and take
+  // ownership of them for child teardown. erase_executable returns the records.
+  std::vector<std::shared_ptr<DeferredObject>> deferred =
+      DeferredObjectRegistry::instance().erase_executable(executable);
+
+  // Child before parent, through the saved (profiler-aware) chain. Idempotent:
+  // child_destroyed guards against a double-destroy if this record is torn down
+  // again on a retry. A child destroy runs its OWN rj_executable_destroy wrapper
+  // (the saved chain points at the next tool, not at us), so the coordinator also
+  // protects the child handle from cross-handle reentrancy.
+  bool all_children_destroyed = true;
+  for (const auto &object : deferred) {
+    if (!object)
+      continue;
+    // Snapshot under the per-object lock, then call the lower destroy with NO lock
+    // held: that destroy runs profiler unload callbacks which may re-enter the tool
+    // chain, and holding object->mutex across it could deadlock a concurrent seam
+    // that locks the same record.
+    hsa_executable_t child{};
+    {
+      std::lock_guard object_lock(object->mutex);
+      if (object->child_executable.handle == 0 || object->child_destroyed)
+        continue;
+      child = object->child_executable;
+    }
+    hsa_status_t child_status = original(child);
+    if (child_status == HSA_STATUS_SUCCESS) {
+      std::lock_guard object_lock(object->mutex);
+      object->child_destroyed = true;
+    } else {
+      // Retain this record's storage: a child whose lower destroy did not succeed
+      // must not have its translated bytes dropped (a retry needs them intact).
+      all_children_destroyed = false;
+      log_message(kLogVerbose, "executable_destroy child status=%d (retained)",
+                  static_cast<int>(child_status));
+    }
+  }
+
   hsa_status_t status = original(executable);
-  // Release translated storage only after the loader has torn the executable
-  // down, so no loader reference into those bytes outlives them.
-  TranslatedExecutableRegistry::instance().erase_executable(executable);
+
+  // Release retained translated storage only after BOTH the loader tore the parent
+  // down AND every child destroyed cleanly -- so no loader reference into those
+  // bytes outlives them, and a partial-failure teardown retains for retry (§14.5a).
+  if (status == HSA_STATUS_SUCCESS && all_children_destroyed)
+    TranslatedExecutableRegistry::instance().erase_executable(executable);
+
   log_message(kLogVerbose, "executable_destroy status=%d", static_cast<int>(status));
   return status;
 }
@@ -5744,6 +5926,32 @@ extern "C" RJ_HOOK_EXPORT void rj_test_record_deferred(uint64_t executable_handl
 /// @brief Test-only: number of deferred objects recorded for an executable.
 extern "C" RJ_HOOK_EXPORT size_t rj_test_deferred_count(uint64_t executable_handle) {
   return DeferredObjectRegistry::instance().deferred_count(hsa_executable_t{executable_handle});
+}
+
+/// @brief Test-only: record a deferred object that already has a hidden child +
+/// retained translated bytes, so the §14.5a outer destroy wrapper has a child to
+/// tear down and storage to retain-or-release. Returns nothing; drive teardown via
+/// the installed executable_destroy fn.
+extern "C" RJ_HOOK_EXPORT void rj_test_record_deferred_with_child(uint64_t parent_handle,
+                                                                  uint64_t agent_handle,
+                                                                  uint64_t child_handle) {
+  auto object = std::make_shared<DeferredObject>();
+  object->parent_executable = hsa_executable_t{parent_handle};
+  object->agent = hsa_agent_t{agent_handle};
+  object->state = DeferredTranslationState::kReady;
+  object->child_executable = hsa_executable_t{child_handle};
+  object->translated_bytes = std::make_shared<const std::vector<uint8_t>>(
+      std::initializer_list<uint8_t>{0x7f, 'E', 'L', 'F'});
+  // Retain storage keyed on the parent so the wrapper's release-on-clean-teardown
+  // (and retain-on-failure) is observable via rj_test_retained_translation_count.
+  TranslatedExecutableRegistry::instance().retain(hsa_executable_t{parent_handle},
+                                                  object->translated_bytes);
+  DeferredObjectRegistry::instance().record(std::move(object));
+}
+
+/// @brief Test-only: report whether an executable handle is mid-destroy anywhere.
+extern "C" RJ_HOOK_EXPORT bool rj_test_destroy_in_flight(uint64_t executable_handle) {
+  return DestroyCoordinator::instance().in_flight(hsa_executable_t{executable_handle});
 }
 
 /// @brief Test-only: create a hidden child executable from translated bytes.

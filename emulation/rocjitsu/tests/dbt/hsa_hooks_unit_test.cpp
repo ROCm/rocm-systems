@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <mutex>
 #include <span>
 #include <string>
@@ -53,6 +54,9 @@ extern "C" unsigned rj_test_single_flight_producer_runs(unsigned thread_count, b
 extern "C" uint64_t rj_test_lazy_rewrite_kernel_object(uint64_t proxy_ko, uint64_t child_ko,
                                                        bool ext);
 extern "C" bool rj_test_is_lazy_safe(const void *bytes, size_t size);
+extern "C" void rj_test_record_deferred_with_child(uint64_t parent_handle, uint64_t agent_handle,
+                                                   uint64_t child_handle);
+extern "C" bool rj_test_destroy_in_flight(uint64_t executable_handle);
 
 namespace {
 
@@ -465,7 +469,35 @@ hsa_status_t HSA_API fake_system_get_major_extension_table(uint16_t extension,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t HSA_API fake_executable_destroy(hsa_executable_t) { return HSA_STATUS_SUCCESS; }
+// Executable-destroy fake for the §14.5a outer-wrapper tests. Records the order in
+// which the lower (saved) destroy is invoked, can fail a specific handle, and can
+// run a reentrancy callback the FIRST time a chosen handle is destroyed (to model a
+// profiler unload callback that destroys an unrelated executable).
+std::vector<uint64_t> g_fake_destroy_order;
+uint64_t g_fake_destroy_fail_handle = 0; // lower destroy of this handle returns error
+uint64_t g_fake_destroy_reentry_on = 0;  // fire the callback when destroying this handle
+std::function<void()> g_fake_destroy_reentry_cb;
+int g_fake_destroy_reentry_fired = 0;
+
+hsa_status_t HSA_API fake_executable_destroy(hsa_executable_t executable) {
+  g_fake_destroy_order.push_back(executable.handle);
+  if (g_fake_destroy_reentry_on != 0 && executable.handle == g_fake_destroy_reentry_on &&
+      g_fake_destroy_reentry_fired == 0 && g_fake_destroy_reentry_cb) {
+    ++g_fake_destroy_reentry_fired;
+    g_fake_destroy_reentry_cb();
+  }
+  if (g_fake_destroy_fail_handle != 0 && executable.handle == g_fake_destroy_fail_handle)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+void reset_executable_destroy_fake() {
+  g_fake_destroy_order.clear();
+  g_fake_destroy_fail_handle = 0;
+  g_fake_destroy_reentry_on = 0;
+  g_fake_destroy_reentry_cb = nullptr;
+  g_fake_destroy_reentry_fired = 0;
+}
 
 // Hidden-child-executable fakes (Step 3). A test drives create/load/freeze via
 // rj_test_create_hidden_child and asserts the sequence and rollback.
@@ -1703,6 +1735,167 @@ TEST(HsaHooksUnitTest, ReleasesTranslatedStorageOnExecutableDestroy) {
   // Destroying the executable through the patched wrapper releases its storage.
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(kFakeExecutable), HSA_STATUS_SUCCESS);
   EXPECT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 0u);
+}
+
+// §14.5a: the outer destroy wrapper tears the hidden child down through the saved
+// (profiler-aware) chain BEFORE the parent, then releases retained storage.
+TEST(HsaHooksUnitTest, OuterDestroyTearsChildBeforeParent) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  reset_executable_destroy_fake();
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  constexpr uint64_t kChild = 9001;
+  rj_test_record_deferred_with_child(kFakeExecutable.handle, kGuestAgent.handle, kChild);
+  ASSERT_EQ(rj_test_deferred_count(kFakeExecutable.handle), 1u);
+  ASSERT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 1u);
+
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kFakeExecutable), HSA_STATUS_SUCCESS);
+
+  // Child lower-destroy precedes the parent's, the records are dropped, and the
+  // retained storage is released (clean teardown).
+  ASSERT_EQ(g_fake_destroy_order.size(), 2u);
+  EXPECT_EQ(g_fake_destroy_order[0], kChild);
+  EXPECT_EQ(g_fake_destroy_order[1], kFakeExecutable.handle);
+  EXPECT_EQ(rj_test_deferred_count(kFakeExecutable.handle), 0u);
+  EXPECT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 0u);
+}
+
+// §14.5a retain-on-failure: if the child's lower destroy fails, the parent still
+// destroys but the retained translated storage is KEPT (not released) so a retry
+// finds it intact.
+TEST(HsaHooksUnitTest, OuterDestroyRetainsStorageWhenChildDestroyFails) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  reset_executable_destroy_fake();
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  constexpr uint64_t kChild = 9002;
+  g_fake_destroy_fail_handle = kChild; // the child's lower destroy returns error
+  rj_test_record_deferred_with_child(kFakeExecutable.handle, kGuestAgent.handle, kChild);
+  ASSERT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 1u);
+
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kFakeExecutable), HSA_STATUS_SUCCESS);
+
+  // Both destroys were attempted (child first), but storage is retained because the
+  // child teardown did not fully succeed.
+  ASSERT_EQ(g_fake_destroy_order.size(), 2u);
+  EXPECT_EQ(g_fake_destroy_order[0], kChild);
+  EXPECT_EQ(g_fake_destroy_order[1], kFakeExecutable.handle);
+  EXPECT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 1u);
+}
+
+// §14.5a cross-handle reentrancy (DIRECT): a profiler unload callback fired while
+// destroying A destroys an unrelated B synchronously. B's lower destroy runs (its
+// handle is invalid at return), and A's own teardown still completes.
+TEST(HsaHooksUnitTest, OuterDestroyReentrantCrossHandleDirect) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  reset_executable_destroy_fake();
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  constexpr hsa_executable_t kExecA{1234};
+  constexpr hsa_executable_t kExecB{5678};
+  // While A's lower destroy runs, a callback destroys B through the same wrapper.
+  g_fake_destroy_reentry_on = kExecA.handle;
+  g_fake_destroy_reentry_cb = [&] {
+    // A must be marked in flight while its lower destroy (and this callback) runs.
+    EXPECT_TRUE(rj_test_destroy_in_flight(kExecA.handle));
+    EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecB), HSA_STATUS_SUCCESS);
+  };
+
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecA), HSA_STATUS_SUCCESS);
+
+  // Both A and B saw their real lower destroy; the callback fired exactly once.
+  EXPECT_EQ(g_fake_destroy_reentry_fired, 1);
+  ASSERT_EQ(g_fake_destroy_order.size(), 2u);
+  EXPECT_EQ(g_fake_destroy_order[0], kExecA.handle); // A's lower destroy started first
+  EXPECT_EQ(g_fake_destroy_order[1], kExecB.handle); // B destroyed inside the callback
+  // Neither handle remains in flight after the calls return.
+  EXPECT_FALSE(rj_test_destroy_in_flight(kExecA.handle));
+  EXPECT_FALSE(rj_test_destroy_in_flight(kExecB.handle));
+}
+
+// §14.5a cross-handle reentrancy (SPAWNED THREAD): the callback destroys B on a
+// spawned+joined worker thread. A thread-local guard would miss this; the
+// process-wide coordinator must still let B's lower destroy complete.
+TEST(HsaHooksUnitTest, OuterDestroyReentrantCrossHandleSpawnedThread) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  reset_executable_destroy_fake();
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  constexpr hsa_executable_t kExecA{4321};
+  constexpr hsa_executable_t kExecB{8765};
+  g_fake_destroy_reentry_on = kExecA.handle;
+  g_fake_destroy_reentry_cb = [&] {
+    std::thread worker(
+        [&] { EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecB), HSA_STATUS_SUCCESS); });
+    worker.join();
+  };
+
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecA), HSA_STATUS_SUCCESS);
+
+  EXPECT_EQ(g_fake_destroy_reentry_fired, 1);
+  ASSERT_EQ(g_fake_destroy_order.size(), 2u);
+  EXPECT_EQ(g_fake_destroy_order[0], kExecA.handle);
+  EXPECT_EQ(g_fake_destroy_order[1], kExecB.handle);
+  EXPECT_FALSE(rj_test_destroy_in_flight(kExecA.handle));
+  EXPECT_FALSE(rj_test_destroy_in_flight(kExecB.handle));
+}
+
+// §14.5a idempotence: destroying the same executable twice is a no-op the second
+// time for rocjitsu bookkeeping -- storage is already gone and no double child
+// teardown occurs. (Sequential re-destroy, not reentrant.)
+TEST(HsaHooksUnitTest, OuterDestroyIsIdempotentOnRepeat) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  reset_queue_fakes();
+  reset_executable_destroy_fake();
+  OnUnload();
+  write_runtime_config_path();
+
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+
+  constexpr uint64_t kChild = 9003;
+  rj_test_record_deferred_with_child(kFakeExecutable.handle, kGuestAgent.handle, kChild);
+
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kFakeExecutable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_deferred_count(kFakeExecutable.handle), 0u);
+  EXPECT_EQ(rj_test_retained_translation_count(kFakeExecutable.handle), 0u);
+
+  const size_t after_first = g_fake_destroy_order.size();
+  // Second destroy: the records are already gone, so only the parent's lower
+  // destroy runs -- no second child teardown, no storage underflow.
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kFakeExecutable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_fake_destroy_order.size(), after_first + 1);
+  EXPECT_EQ(g_fake_destroy_order.back(), kFakeExecutable.handle);
 }
 
 // Retained translated storage is dropped when the hook is uninstalled.
