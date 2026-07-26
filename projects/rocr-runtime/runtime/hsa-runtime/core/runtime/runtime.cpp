@@ -3057,14 +3057,28 @@ hsa_status_t Runtime::LoadHotswapTool() {
   constexpr char kHookLibrary[] = "libhsa_hotswap_rocjitsu.so";
   const std::string adjacent =
       os::GetAdjacentLibraryPath(reinterpret_cast<const void*>(&Runtime::Acquire), kHookLibrary);
+  // Track the name that actually loaded (adjacent path or the fallback) so a later
+  // install-failure message attributes the failure to the right library, rather than
+  // always naming the adjacent path even when the fallback was used.
+  std::string loaded_name = adjacent;
   os::LibHandle tool = os::LoadLib(adjacent);
-  if (tool == nullptr) tool = os::LoadLib(kHookLibrary);
+  if (tool == nullptr) {
+    tool = os::LoadLib(kHookLibrary);
+    loaded_name = kHookLibrary;
+  }
   if (tool == nullptr) {
     if (flag().report_tool_load_failures())
       fprintf(stderr, "rocjitsu hotswap failed to load \"%s\" or \"%s\".\n", adjacent.c_str(),
               kHookLibrary);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
+
+  // Reserve the ownership slot BEFORE invoking OnLoad, so committing the DSO handle
+  // to tool_libs_ after a successful install cannot fail. Otherwise a throwing
+  // push_back would leave the hook installed in the live API table but absent from
+  // the only reverse-unload/close list -- and because the hook rejects a second
+  // OnLoad while already active, that would permanently poison a later hsa_init.
+  tool_libs_.reserve(tool_libs_.size() + 1);
 
   // Invoke OnLoad through the same exception-containing wrapper LoadTools() uses, so
   // an exception thrown by the tool during install cannot cross the C tool boundary
@@ -3075,11 +3089,12 @@ hsa_status_t Runtime::LoadHotswapTool() {
   if (on_load == nullptr ||
       !on_load(&hsa_api_table().hsa_api, hsa_api_table().hsa_api.version.major_id, 0, nullptr)) {
     if (flag().report_tool_load_failures())
-      fprintf(stderr, "rocjitsu hotswap tool \"%s\" failed to install.\n", adjacent.c_str());
+      fprintf(stderr, "rocjitsu hotswap tool \"%s\" failed to install.\n", loaded_name.c_str());
     os::CloseLib(tool);
     return HSA_STATUS_ERROR;
   }
 
+  // No-fail: capacity was reserved above, so this insertion cannot throw.
   tool_libs_.push_back(tool);
   return HSA_STATUS_SUCCESS;
 #endif
