@@ -728,10 +728,11 @@ extern "C" RJ_HOOK_EXPORT void OnUnload() {
 #if defined(RJ_HOTSWAP_TEST_HOOKS)
 // Test-only: total number of translated backing buffers currently retained across
 // all executables. Lets a unit test assert the storage-retention lifecycle --
-// buffers survive OnUnload() (ROCr destroys its loader after OnUnload but before
-// closing the DSO, so the bytes must outlive OnUnload) and are released at the next
-// install() (a fresh runtime generation). Never present in the shipped DSO: its
-// version script exports only OnLoad/OnUnload; the testable build adds rj_test_*.
+// buffers survive OnUnload() AND a runtime-generation reinstall (install() does not
+// clear them, because an old-generation profiler record may still alias them), and
+// are released only at executable destroy or process exit. Never present in the
+// shipped DSO: its version script exports only OnLoad/OnUnload; the testable build
+// adds rj_test_*.
 extern "C" RJ_HOOK_EXPORT size_t rj_test_retained_executable_buffer_count() {
   std::lock_guard lock(g_state.storage_mutex);
   size_t count = 0;
