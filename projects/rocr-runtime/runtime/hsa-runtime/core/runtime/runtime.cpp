@@ -3060,8 +3060,15 @@ hsa_status_t Runtime::LoadHotswapTool() {
   // Track the name that actually loaded (adjacent path or the fallback) so a later
   // install-failure message attributes the failure to the right library, rather than
   // always naming the adjacent path even when the fallback was used.
-  std::string loaded_name = adjacent;
-  os::LibHandle tool = os::LoadLib(adjacent);
+  std::string loaded_name;
+  os::LibHandle tool = nullptr;
+  // Only attempt the adjacent path when it is non-empty. GetAdjacentLibraryPath can
+  // return "" (e.g. dladdr failure), and LoadLib("") -> dlopen("") is platform-
+  // dependent -- it can resolve to the main program handle rather than failing.
+  if (!adjacent.empty()) {
+    tool = os::LoadLib(adjacent);
+    loaded_name = adjacent;
+  }
   if (tool == nullptr) {
     tool = os::LoadLib(kHookLibrary);
     loaded_name = kHookLibrary;
