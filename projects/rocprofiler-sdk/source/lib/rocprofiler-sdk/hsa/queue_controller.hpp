@@ -32,6 +32,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -92,13 +93,10 @@ public:
 
     common::Synchronized<hsa::profiler_serializer>& serializer(const Queue*);
 
-    /**
-     * Disable serialization for QueueController, has no effect if counter collection
-     * is not in use (which defaults to no serialization mechanism). Should only be used for
-     * testing.
-     */
+    // Balanced ownership: the first user enables serialization and the last disables it.
     void enable_serialization();
     void disable_serialization();
+    bool serialization_enabled() const { return _serialized_enabled.load(); }
 
     // Prints current state of signals for queues, used for debugging. Only prints
     // serialization related signals if not compiled in debug mode.
@@ -114,12 +112,14 @@ private:
     using client_id_map_t  = std::unordered_map<ClientID, agent_callback_tuple_t>;
     using resource_alloc_t = void(const AgentCache&, const CoreApiTable&, const AmdExtTable&);
 
-    CoreApiTable                          _core_table         = {};
-    AmdExtTable                           _ext_table          = {};
-    common::Synchronized<queue_map_t>     _queues             = {};
-    common::Synchronized<client_id_map_t> _callback_cache     = {};
-    agent_cache_map_t                     _supported_agents   = {};
-    std::atomic<bool>                     _serialized_enabled = {false};
+    CoreApiTable                          _core_table          = {};
+    AmdExtTable                           _ext_table           = {};
+    common::Synchronized<queue_map_t>     _queues              = {};
+    common::Synchronized<client_id_map_t> _callback_cache      = {};
+    agent_cache_map_t                     _supported_agents    = {};
+    std::atomic<bool>                     _serialized_enabled  = {false};
+    std::mutex                            _serialization_mutex = {};
+    uint64_t                              _serialization_users = 0;
     common::Synchronized<
         std::unordered_map<rocprofiler_agent_id_t,
                            std::shared_ptr<common::Synchronized<hsa::profiler_serializer>>>>

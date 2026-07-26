@@ -156,12 +156,10 @@ att_queue_create(const hsa::AgentCache& agent, size_t buffer_size, size_t num_bu
 {
     ROCP_TRACE << "Constructing Async queue.";
 
-    auto q        = att_queue_t{};
-    q.agent_id    = CHECK_NOTNULL(agent.get_rocp_agent())->id;
-    q.buffer_size = buffer_size;
-    q.hsa_agent   = agent.get_hsa_agent();
-    q.near_cpu    = agent.near_cpu();
-    q.submit_fn   = default_submit;
+    auto q      = att_queue_t{};
+    q.hsa_agent = agent.get_hsa_agent();
+    q.near_cpu  = agent.near_cpu();
+    q.submit_fn = default_submit;
 
     auto* core = CHECK_NOTNULL(hsa::get_core_table());
     auto* ext  = CHECK_NOTNULL(hsa::get_amd_ext_table());
@@ -239,23 +237,6 @@ att_queue_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, boo
 
     att_queue_submit(q, packet, sig.get());
     return sig;
-}
-
-void
-att_queue_deleter_t::operator()(att_queue_t* q) const
-{
-    if(q)
-    {
-        att_queue_destroy(*q);
-        delete q;
-    }
-}
-
-att_queue_ptr_t
-make_att_queue(const hsa::AgentCache& agent, size_t buffer_size, size_t num_buffers)
-{
-    auto* q = new att_queue_t{att_queue_create(agent, buffer_size, num_buffers)};
-    return att_queue_ptr_t{q};
 }
 
 };  // namespace thread_trace

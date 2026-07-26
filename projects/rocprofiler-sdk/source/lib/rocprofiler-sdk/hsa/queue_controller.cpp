@@ -557,6 +557,10 @@ per_dev_map(const QueueController::queue_map_t& _queues_v)
 void
 QueueController::disable_serialization()
 {
+    auto serialization_lk = std::lock_guard{_serialization_mutex};
+    if(_serialization_users == 0) return;
+    if(--_serialization_users > 0) return;
+
     _queues.rlock([&](const queue_map_t& _queues_v) {
         _serialized_enabled.store(false);
         auto pd_map = per_dev_map(_queues_v);
@@ -579,6 +583,9 @@ QueueController::disable_serialization()
 void
 QueueController::enable_serialization()
 {
+    auto serialization_lk = std::lock_guard{_serialization_mutex};
+    if(++_serialization_users > 1) return;
+
     _queues.rlock([&](const queue_map_t& _queues_v) {
         _serialized_enabled.store(true);
         auto pd_map = per_dev_map(_queues_v);

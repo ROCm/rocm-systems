@@ -23,13 +23,10 @@
 // Implements the core coordination logic for thread trace start/stop, buffer
 // iteration, and integration with the public API surface.
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/shared_trace_buffer.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/shared_trace_lease.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/shared_trace_queue.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_resources.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
 
 #include "lib/common/container/stable_vector.hpp"
-#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -73,10 +70,6 @@ struct cbdata_t
     const rocprofiler_user_data_t*                  userdata   = nullptr;
     uint64_t                                        next_chunk = 0;
 };
-
-// Keeps track of a single client registering for serialized thread trace
-// operations so we can gate new traces while one is active.
-common::Synchronized<std::optional<int64_t>> client;
 
 // True once the HSA runtime is registered. Gates start_context() so pre-init
 // start requests are deferred and replayed by start_active_contexts().
@@ -147,14 +140,12 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
     const auto* agent =
         CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)));
 
-    // All contexts on an agent share one queue (only one trace is active per agent at
-    // a time); a queue per context would exhaust the HSA per-agent queue limit. The
-    // shared queue's CPU staging buffers are sized to the max buffer_size/num_buffers
-    // registered across contexts (see register_shared_queue_size).
-    hw_agent = agent->get_hsa_agent();
-    queue    = CHECK_NOTNULL(acquire_shared_queue(*agent, params.buffer_size, params.num_buffers));
+    // All contexts targeting an agent retain the same resource handle. It owns the
+    // shared queue, staging allocations, and GPU output slots for their full lifetime.
+    resources = acquire_shared_trace_resources(*agent);
 
-    factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(*agent, this->params, *core, *ext);
+    factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(
+        *agent, this->params, *core, *ext, resources);
     control_packet = factory->construct_control_packet();
 
     codeobj_reg = std::make_unique<code_object::CodeobjCallbackRegistry>(
@@ -168,7 +159,7 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
 
 ThreadTracerAgent::~ThreadTracerAgent()
 {
-    ROCP_TRACE << "Destroying ATT Queue...";
+    ROCP_TRACE << "Destroying ATT tracer for agent " << agent_id.handle;
     if(active_traces.load() < 1) return;
 
     // This is handled in multi-buffer case
@@ -178,12 +169,15 @@ ThreadTracerAgent::~ThreadTracerAgent()
         ROCP_WARNING << "Thread tracer being destroyed with thread trace active";
 
     if(auto flag = worker_flag) flag->store(WORKER_FLAG_DESTRUCTOR);
-    stop_thread_trace();
+    auto stop_signal = stop_thread_trace();
+    if(stop_signal) signal_wait(*stop_signal);
+    if(worker_flag && params.num_buffers <= 1 && active_traces.load() > 0) iterate_data();
 
-    // Safety net for the abnormal destroy-while-active path: a single-buffer trace's
-    // lease is normally released in iterate_data, which will not run now. No-op if this
-    // tracer no longer holds the lease.
-    release_agent_lease(hw_agent, this);
+    // Abnormal teardown fallback. Normal dispatch/device stop paths drain every
+    // trace before destroying the tracer.
+    auto remaining = active_traces.exchange(0);
+    while(remaining-- > 0)
+        resources->end_trace(params.context_id);
 }
 
 /**
@@ -194,32 +188,15 @@ std::unique_ptr<hsa::TraceControlAQLPacket>
 ThreadTracerAgent::get_control(bool bStart)
 {
     // Clone the control packet first so callers can safely mutate state without racing
-    // with concurrent dispatches, and so a throwing clone leaves active_traces and the
-    // per-agent lease untouched (exception safety).
+    // with concurrent dispatches, and so a throwing clone leaves active_traces
+    // untouched (exception safety).
     auto active_resources = std::make_unique<hsa::TraceControlAQLPacket>(*control_packet);
     active_resources->clear();
 
     if(bStart)
     {
-        // The first active trace on this agent takes the per-agent lease so no other
-        // context can touch the shared buffer/queue while we trace; it is re-entrant
-        // for this tracer's own overlapping traces. Fail-fast (skip this trace) if
-        // another context already holds the agent rather than corrupting the shared
-        // buffer. Callers treat a null return as "do not trace".
-        if(active_traces.fetch_add(1) == 0 && !try_acquire_agent_lease(hw_agent, this))
-        {
-            active_traces.fetch_sub(1);
-            // get_control runs on the per-kernel dispatch path; log once per tracer so a
-            // context that keeps losing the lease doesn't flood the log every dispatch.
-            if(!lease_contention_logged)
-            {
-                lease_contention_logged = true;
-                ROCP_WARNING << "Agent " << agent_id.handle
-                             << " is already being traced by another context; skipping"
-                                " its traces until the agent is free";
-            }
-            return nullptr;
-        }
+        resources->begin_trace(params.context_id);
+        active_traces.fetch_add(1);
     }
 
     return active_resources;
@@ -235,7 +212,8 @@ ThreadTracerAgent::get_start_packet()
 void
 ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_data_t data)
 {
-    if(active_traces.load() <= 0) return;
+    ROCP_FATAL_IF(active_traces.load() <= 0)
+        << "ATT data callback without an active trace for agent " << agent_id.handle;
 
     cbdata_t cb_dt{};
 
@@ -251,9 +229,9 @@ ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_dat
     else if(status != HSA_STATUS_SUCCESS)
         ROCP_CI_LOG(ERROR) << "Failed to iterate ATT data: " << status;
 
-    // Last in-flight trace on this agent: release the per-agent lease so another
-    // context may use the shared buffer/queue.
-    if(active_traces.fetch_sub(1) == 1) release_agent_lease(hw_agent, this);
+    auto previous = active_traces.fetch_sub(1);
+    ROCP_FATAL_IF(previous < 1) << "ATT active trace count underflow for agent " << agent_id.handle;
+    resources->end_trace(params.context_id);
 }
 
 void
@@ -261,6 +239,7 @@ ThreadTracerAgent::iterate_data()
 {
     // Already executed by producer thread, skip
     if(params.num_buffers > 1) return;
+    if(active_traces.load() == 0) return;
 
     auto lock = std::unique_lock{trace_resources_mut};
     iterate_data(control_packet->GetHandle(), params.callback_userdata);
@@ -275,10 +254,10 @@ ThreadTracerAgent::load_codeobj(code_object_id_t id, uint64_t addr, uint64_t siz
     // Keep shader metadata in sync while traces are live so symbol resolution
     // remains accurate in the emitted stream.
 
-    if(!queue || active_traces.load() < 1) return;
+    if(active_traces.load() < 1) return;
 
     auto packet = factory->construct_load_marker_packet(id, addr, size);
-    auto sig    = att_queue_submit(*queue, &packet->packet, true);
+    auto sig    = att_queue_submit(resources->queue(), &packet->packet, true);
     if(sig) signal_wait(*sig);
 }
 
@@ -290,10 +269,10 @@ ThreadTracerAgent::unload_codeobj(code_object_id_t id)
     if(!control_packet->remove_codeobj(id)) return;
     // Tear down metadata when code objects disappear to avoid dangling
     // references in the trace stream.
-    if(!queue || active_traces.load() < 1) return;
+    if(active_traces.load() < 1) return;
 
     auto packet = factory->construct_unload_marker_packet(id);
-    auto sig    = att_queue_submit(*queue, &packet->packet, true);
+    auto sig    = att_queue_submit(resources->queue(), &packet->packet, true);
     if(sig) signal_wait(*sig);
 }
 
@@ -305,32 +284,24 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
     worker_flag = std::move(_flag);
 
     auto control_packet_copy = get_control(true);
-    if(!control_packet_copy)
-    {
-        // Another context holds this agent's trace lease; skip starting on this agent.
-        // DeviceThreadTracer::start_context tolerates a null signal.
-        return nullptr;
-    }
     control_packet_copy->clear();
     control_packet_copy->populate_before();
     control_packet_copy->populate_after();
 
+    auto& queue = resources->queue();
+
     // Warmup the async copy so we dont wait too long for the flip.
     if(params.num_buffers > 1)
     {
-        auto& buffer = queue->cpu_buffers;
-        copy_data_sync(buffer.at(0),
-                       buffer.at(1),
-                       queue->near_cpu,
-                       queue->hsa_agent,
-                       MIN_BUFFER_SIZE,
-                       nullptr);
+        auto& buffer = queue.cpu_buffers;
+        copy_data_sync(
+            buffer.at(0), buffer.at(1), queue.near_cpu, queue.hsa_agent, MIN_BUFFER_SIZE, nullptr);
     }
 
     // Submit the start packets without waiting: the producer thread (multi-buffer
     // path) and DeviceThreadTracer::start_context (single-buffer path) wait on the
     // returned signal so multiple agents can be launched in parallel.
-    auto unique_signal = att_queue_submit_signal_last(*queue, control_packet_copy->before_krn_pkt);
+    auto unique_signal = att_queue_submit_signal_last(queue, control_packet_copy->before_krn_pkt);
     auto shared_signal = std::shared_ptr<hsa_signal_t>(std::move(unique_signal));
 
     if(params.num_buffers > 1)
@@ -347,21 +318,22 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         // producer thread continues the sequence from 1.
 
         auto worker_data         = std::make_shared<triple_buffer_shared_data_t>();
-        worker_data->queue       = queue;  // non-owning; owned by the shared-queue manager
+        worker_data->resources   = resources;
         worker_data->num_buffers = params.num_buffers;
 
         // Wire each slot to its CPU staging buffer. Slots default to FREE.
         for(size_t i = 0; i < worker_data->num_buffers; i++)
-            worker_data->buffers[i].memory = worker_data->queue->cpu_buffers.at(i);
+            worker_data->buffers[i].memory = queue.cpu_buffers.at(i);
 
-        auto producer_data             = triple_buffer_producer_data_t{};
-        producer_data.producer_running = worker_flag;
-        producer_data.start_pkt_signal = shared_signal;
-        producer_data.control_packet   = std::move(control_packet_copy);
-        producer_data.copy_data_fn     = copy_data_sync;
-        producer_data.shared           = worker_data;
-        producer_data.buffer_packet    = std::move(buffer_packet);
-        producer_data.shader_engine_id = shader_engine_id;
+        auto producer_data               = triple_buffer_producer_data_t{};
+        producer_data.producer_running   = worker_flag;
+        producer_data.start_pkt_signal   = shared_signal;
+        producer_data.control_packet     = std::move(control_packet_copy);
+        producer_data.copy_data_fn       = copy_data_sync;
+        producer_data.shared             = worker_data;
+        producer_data.buffer_packet      = std::move(buffer_packet);
+        producer_data.shader_engine_id   = shader_engine_id;
+        producer_data.active_buffer_size = params.buffer_size;
 
         // Other call sites (kfd, internal_threading) wrap each std::thread
         // creation in its own pre/post pair, so match that convention.
@@ -405,7 +377,10 @@ ThreadTracerAgent::stop_thread_trace()
         for(auto& t : consumers)
             if(t.joinable()) t.join();
         consumers.clear();
-        if(active_traces.fetch_sub(1) == 1) release_agent_lease(hw_agent, this);
+        auto previous = active_traces.fetch_sub(1);
+        ROCP_FATAL_IF(previous < 1)
+            << "ATT active trace count underflow for agent " << agent_id.handle;
+        resources->end_trace(params.context_id);
         worker_flag = nullptr;
         return nullptr;
     }
@@ -418,7 +393,7 @@ ThreadTracerAgent::stop_thread_trace()
         // Submit without waiting; DeviceThreadTracer::stop_context fans out
         // submissions across agents and waits on every signal in parallel
         // before calling iterate_data.
-        return att_queue_submit_signal_last(*queue, control_packet_copy->after_krn_pkt);
+        return att_queue_submit_signal_last(resources->queue(), control_packet_copy->after_krn_pkt);
     }
 }
 
@@ -459,10 +434,9 @@ DispatchThreadTracer::resource_deinit()
 
 namespace
 {
-// Report each context's per-agent buffer and queue staging requirements to the shared
-// managers before resource_init builds them, so both are sized to the max. Caller holds
-// the tracer's own params lock; templated because Dispatch and Device store params in
-// different container types.
+// Report each context's complete per-agent requirements before resource_init builds
+// anything. Caller holds the tracer's params lock; templated because Dispatch and
+// Device store params in different container types.
 template <typename ParamsMap>
 void
 register_shared_sizes_locked(const ParamsMap& params)
@@ -471,8 +445,8 @@ register_shared_sizes_locked(const ParamsMap& params)
     {
         auto hsa_agent = rocprofiler::agent::get_hsa_agent(agent_id);
         if(!hsa_agent.has_value()) continue;
-        register_shared_buffer_size(*hsa_agent, pack.buffer_size);
-        register_shared_queue_size(*hsa_agent, pack.buffer_size, pack.num_buffers);
+        register_shared_trace_requirements(
+            agent_id, *hsa_agent, pack.buffer_size, pack.num_buffers);
     }
 }
 }  // namespace
@@ -480,7 +454,6 @@ register_shared_sizes_locked(const ParamsMap& params)
 void
 DispatchThreadTracer::register_shared_sizes()
 {
-    // Read-only over params; register_shared_*_size modify the (separate) manager state.
     auto lk = std::shared_lock{agents_map_mut};
     register_shared_sizes_locked(params);
 }
@@ -496,6 +469,12 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
                                       rocprofiler_user_data_t*       user_data,
                                       const context::correlation_id* corr_id)
 {
+    auto admission_lk = std::shared_lock{admission_mut};
+
+    // Once stop begins, do not accept new trace requests. The callback remains installed
+    // until queue_controller_sync drains every packet already injected by this tracer.
+    if(!accepting_dispatches) return {nullptr, false};
+
     rocprofiler_async_correlation_id_t rocprof_corr_id =
         rocprofiler_async_correlation_id_t{.internal = 0, .external = context::null_user_data};
 
@@ -526,12 +505,6 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
         return {nullptr, parameters.bSerialize};
 
     auto packet = agent.get_start_packet();
-    if(!packet)
-    {
-        // Agent's trace lease is held by another context; run the kernel untraced
-        // rather than sharing (and corrupting) the agent's buffer.
-        return {nullptr, parameters.bSerialize};
-    }
     post_move_data.fetch_add(1);
     packet->populate_before();
     packet->populate_after();
@@ -543,21 +516,34 @@ DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t& aql,
                                        const hsa::queue_info_session_t& /*session*/,
                                        const hsa::packet_data_t& packet_data)
 {
-    if(post_move_data.load() < 1) return;
+    auto client_id = client.rlock([](const auto& value) { return value; });
+    if(!client_id) return;
 
     for(auto& aql_pkt : aql)
     {
+        if(aql_pkt.second != *client_id) continue;
+
         auto* pkt = dynamic_cast<hsa::TraceControlAQLPacket*>(aql_pkt.first.get());
         if(!pkt) continue;
 
-        std::shared_lock<std::shared_mutex> lk(agents_map_mut);
-        post_move_data.fetch_sub(1);
-
-        if(pkt->after_krn_pkt.empty()) continue;
-
-        auto it = agents.find(pkt->GetAgent());
-        if(it != agents.end() && it->second != nullptr)
+        {
+            std::shared_lock<std::shared_mutex> lk(agents_map_mut);
+            ROCP_FATAL_IF(pkt->after_krn_pkt.empty())
+                << "ATT completion packet has no stop/read commands";
+            auto it = agents.find(pkt->GetAgent());
+            ROCP_FATAL_IF(it == agents.end() || !it->second)
+                << "ATT completion for an unknown agent";
             it->second->iterate_data(pkt->GetHandle(), packet_data.user_data);
+        }
+
+        // Release the packet's shared-resource handle before publishing completion.
+        aql_pkt.first.reset();
+        {
+            auto lk       = std::lock_guard{post_move_mut};
+            auto previous = post_move_data.fetch_sub(1);
+            ROCP_FATAL_IF(previous < 1) << "ATT dispatch completion count underflow";
+            if(previous == 1) post_move_cv.notify_all();
+        }
     }
 }
 
@@ -566,13 +552,21 @@ DispatchThreadTracer::start_context()
 {
     using corr_id_map_t = hsa::queue_info_session_t::external_corr_id_map_t;
 
-    // Only installs queue-controller callbacks (cached and applied to queues as
-    // they are created), so this is safe to call before hsa_init.
-    CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization();
+    auto  lifecycle_lk = std::unique_lock{lifecycle_mut};
+    auto  admission_lk = std::unique_lock{admission_mut};
+    auto* controller   = CHECK_NOTNULL(hsa::get_queue_controller());
 
-    // Only one thread should be attempting to enable/disable this context
+    // Each DispatchThreadTracer owns its callback registration. Different contexts can
+    // coexist only when context activation reserved disjoint agent sets.
     client.wlock([&](auto& client_id) {
-        if(client_id) return;
+        if(client_id)
+        {
+            accepting_dispatches = true;
+            return;
+        }
+
+        controller->enable_serialization();
+        accepting_dispatches = true;
 
         auto&& _callbacks = hsa::queue_callbacks_t{
             .batch_packets = []() { return false; },
@@ -596,24 +590,44 @@ DispatchThreadTracer::start_context()
                     this->post_kernel_call(aql, *session, packet_data);
                 }};
 
-        client_id = CHECK_NOTNULL(hsa::get_queue_controller())
-                        ->add_callback(std::nullopt, std::move(_callbacks));
+        client_id = controller->add_callback(std::nullopt, std::move(_callbacks));
     });
 }
 
 void
 DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-functions-to-static)
 {
-    auto* controller = hsa::get_queue_controller();
+    auto  lifecycle_lk = std::unique_lock{lifecycle_mut};
+    auto* controller   = hsa::get_queue_controller();
     if(!controller) return;
 
-    client.wlock([&](auto& client_id) {
-        if(!client_id) return;
+    {
+        // Close admission after every callback that already observed "accepting"
+        // has finished constructing its instrumentation packet. Release this gate
+        // before queue sync/removal: Queue invokes callbacks under its own read lock.
+        auto admission_lk    = std::unique_lock{admission_mut};
+        accepting_dispatches = false;
+    }
 
-        // Remove our callbacks from HSA's queue controller
-        controller->remove_callback(*client_id);
-        client_id = std::nullopt;
+    const bool has_client =
+        client.rlock([](const auto& client_id) { return client_id.has_value(); });
+    if(!has_client) return;
+
+    // Keep the completion callback installed while every admitted trace drains.
+    hsa::queue_controller_sync();
+    auto drain_lk = std::unique_lock{post_move_mut};
+    post_move_cv.wait(drain_lk, [this]() { return post_move_data.load() == 0; });
+    drain_lk.unlock();
+
+    // Extract the ID before touching Queue's callback map. Completion callbacks run
+    // under that map's read lock and take our client read lock, so nesting them in the
+    // opposite order would deadlock.
+    auto client_to_remove = client.wlock([](auto& client_id) {
+        auto result = client_id;
+        client_id   = std::nullopt;
+        return result;
     });
+    if(client_to_remove) controller->remove_callback(*client_to_remove);
 
     controller->disable_serialization();
 }
@@ -684,6 +698,7 @@ DeviceThreadTracer::start_context()
     int expected = WORKER_FLAG_STOP;
     if(!worker_flag->compare_exchange_strong(expected, WORKER_FLAG_RUNNING))
     {
+        if(expected == WORKER_FLAG_RUNNING) return;
         ROCP_ERROR << "Unable to start thread trace worker thread";
         return;
     }
@@ -692,8 +707,7 @@ DeviceThreadTracer::start_context()
     for(auto& [_, tracer] : agents)
         wait_list.emplace_back(tracer->start_thread_trace(worker_flag));
 
-    // A null signal means the agent was skipped (its lease is held by another
-    // context); only wait on agents that actually started a trace.
+    // Only wait on queues that returned a completion signal.
     for(auto& sig : wait_list)
         if(sig) signal_wait(*sig);
 }
@@ -729,8 +743,8 @@ initialize(HsaApiTable* table)
 {
     ROCP_FATAL_IF(!table->core_ || !table->amd_ext_);
 
-    // Register every context's buffer and queue sizes before resource_init builds
-    // them, so the shared per-agent buffer and queue are sized to the max requested.
+    // Register complete per-agent requirements before resource_init freezes and builds
+    // the unified resources.
     for(auto& ctx : context::get_registered_contexts())
     {
         if(ctx->device_thread_trace) ctx->device_thread_trace->register_shared_sizes();
@@ -773,6 +787,15 @@ flush_and_stop()
         }
         if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->stop_context();
     }
+
+    // The last HSA shutdown follows this call. Destroy every ATT borrower and
+    // HSA allocation while the runtime is still available.
+    for(auto& ctx : context::get_registered_contexts())
+    {
+        if(ctx->device_thread_trace) ctx->device_thread_trace->resource_deinit();
+        if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->resource_deinit();
+    }
+    free_shared_trace_resources();
 }
 
 void
@@ -785,11 +808,9 @@ finalize()
         if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->resource_deinit();
     }
 
-    // ThreadTracerAgents and their packets are gone; release the shared buffers,
-    // queues, and per-agent leases (all safe to destroy now that no agent can submit).
-    free_shared_buffers();
-    free_shared_queues();
-    free_agent_leases();
+    // Every tracer, packet, and worker handle is gone; destroy each per-agent queue
+    // and output set exactly once.
+    free_shared_trace_resources();
 
     code_object::finalize();
 }

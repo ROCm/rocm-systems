@@ -33,16 +33,18 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/shared_trace_buffer.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_resources.hpp"
 
 #include <gtest/gtest.h>
 #include "lib/common/logging.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <map>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -115,8 +117,14 @@ TEST(thread_trace, resource_creation)
     for(const auto& [_, agent] : agents)
     {
         auto params = thread_trace::thread_trace_parameter_pack{};
+        thread_trace::register_shared_trace_requirements(agent.get_rocp_agent()->id,
+                                                         agent.get_hsa_agent(),
+                                                         params.buffer_size,
+                                                         params.num_buffers);
+        auto resources = thread_trace::acquire_shared_trace_resources(agent);
 
-        aql::ThreadTraceAQLPacketFactory factory(agent, params, get_api_table(), get_ext_table());
+        aql::ThreadTraceAQLPacketFactory factory(
+            agent, params, get_api_table(), get_ext_table(), resources);
 
         auto packet = factory.construct_control_packet();
         packet->populate_before();
@@ -144,6 +152,7 @@ TEST(thread_trace, resource_creation)
 
         tracer.resource_deinit();
     }
+    thread_trace::free_shared_trace_resources();
 }
 
 // Shared buffers are reused across contexts (same slot -> same pointer) and
@@ -157,7 +166,7 @@ TEST(thread_trace, shared_buffer_reuse)
     registration::set_init_status(-1);
 
     // Isolate from any prior test that may have populated the manager.
-    thread_trace::free_shared_buffers();
+    thread_trace::free_shared_trace_resources();
 
     auto agents = hsa::get_queue_controller()->get_supported_agents();
     ASSERT_GT(agents.size(), 0);
@@ -165,44 +174,60 @@ TEST(thread_trace, shared_buffer_reuse)
     const auto& agent = begin(agents)->second;
 
     // Build a TraceMemoryPool the same way ThreadTraceAQLPacketFactory does.
-    auto make_pool = [&agent]() {
+    auto make_pool = [&agent](const thread_trace::agent_trace_resources_ptr_t& resources) {
         hsa::TraceMemoryPool pool{};
         pool.allocate_fn     = get_ext_table().hsa_amd_memory_pool_allocate_fn;
         pool.allow_access_fn = get_ext_table().hsa_amd_agents_allow_access_fn;
         pool.free_fn         = get_ext_table().hsa_amd_memory_pool_free_fn;
         pool.gpu_agent       = agent.get_hsa_agent();
         pool.gpu_pool_       = agent.gpu_pool();
+        pool.resources       = resources;
         return pool;
     };
 
     // Two contexts with different sizes; shared buffer is sized to the max.
-    thread_trace::register_shared_buffer_size(agent.get_hsa_agent(), 0x1000000);
-    thread_trace::register_shared_buffer_size(agent.get_hsa_agent(), 0x2000000);
+    thread_trace::register_shared_trace_requirements(
+        agent.get_rocp_agent()->id, agent.get_hsa_agent(), 0x1000000, 1);
+    thread_trace::register_shared_trace_requirements(
+        agent.get_rocp_agent()->id, agent.get_hsa_agent(), 0x2000000, 1);
+    auto resources      = thread_trace::acquire_shared_trace_resources(agent);
+    auto same_resources = thread_trace::acquire_shared_trace_resources(agent);
+    EXPECT_EQ(resources.get(), same_resources.get());
 
-    auto pool_a = make_pool();
-    auto pool_b = make_pool();
+    auto pool_a = make_pool(resources);
+    auto pool_b = make_pool(resources);
 
     constexpr uint64_t kSize = 0x2000000;
 
     // First context requests two ring slots (e.g. triple buffering).
-    void* a0 = thread_trace::acquire_shared_buffer(pool_a, 0, kSize);
-    void* a1 = thread_trace::acquire_shared_buffer(pool_a, 1, kSize);
+    void* a0 = pool_a.allocate_output(kSize);
+    void* a1 = pool_a.allocate_output(kSize);
     ASSERT_NE(a0, nullptr);
     ASSERT_NE(a1, nullptr);
     EXPECT_NE(a0, a1) << "distinct ring slots must be distinct buffers";
 
     // Second context reuses the same physical buffers per slot.
-    void* b0 = thread_trace::acquire_shared_buffer(pool_b, 0, kSize);
-    void* b1 = thread_trace::acquire_shared_buffer(pool_b, 1, kSize);
+    void* b0 = pool_b.allocate_output(kSize);
+    void* b1 = pool_b.allocate_output(kSize);
     EXPECT_EQ(a0, b0) << "same ring slot must be shared across contexts";
     EXPECT_EQ(a1, b1) << "same ring slot must be shared across contexts";
 
-    EXPECT_TRUE(thread_trace::is_shared_buffer(a0));
-    EXPECT_TRUE(thread_trace::is_shared_buffer(a1));
-    EXPECT_FALSE(thread_trace::is_shared_buffer(nullptr));
+    EXPECT_TRUE(resources->owns_output_buffer(a0));
+    EXPECT_TRUE(resources->owns_output_buffer(a1));
+    EXPECT_FALSE(resources->owns_output_buffer(nullptr));
 
-    thread_trace::free_shared_buffers();
-    EXPECT_FALSE(thread_trace::is_shared_buffer(a0));
+    // Arbitrary nonzero ID: verifies nested traces from the same context share ownership.
+    constexpr auto test_context_id = rocprofiler_context_id_t{42};
+    resources->begin_trace(test_context_id);
+    resources->begin_trace(test_context_id);
+    resources->end_trace(test_context_id);
+    resources->end_trace(test_context_id);
+
+    pool_a.resources.reset();
+    pool_b.resources.reset();
+    same_resources.reset();
+    resources.reset();
+    thread_trace::free_shared_trace_resources();
 }
 
 TEST(thread_trace, configure_test)
@@ -249,6 +274,95 @@ TEST(thread_trace, configure_test)
     ROCPROFILER_CALL(rocprofiler_start_context(ctx), "context start failed");
     ROCPROFILER_CALL(rocprofiler_stop_context(ctx), "context stop failed");
     context::pop_client(1);
+}
+
+TEST(thread_trace, disjoint_dispatch_contexts_own_independent_callbacks)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    if(agents.size() < 2) GTEST_SKIP() << "requires two GPU agents";
+    context::push_client(1);
+
+    auto       itr     = agents.begin();
+    const auto agent_a = (itr++)->second.get_rocp_agent()->id;
+    const auto agent_b = itr->second.get_rocp_agent()->id;
+
+    auto dispatch_callback = [](rocprofiler_agent_id_t,
+                                rocprofiler_queue_id_t,
+                                rocprofiler_async_correlation_id_t,
+                                rocprofiler_kernel_id_t,
+                                rocprofiler_dispatch_id_t,
+                                void*,
+                                rocprofiler_user_data_t*) {
+        return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
+    };
+    auto shader_callback = [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {};
+
+    rocprofiler_context_id_t context_a{0};
+    rocprofiler_context_id_t context_b{0};
+    ROCPROFILER_CALL(rocprofiler_create_context(&context_a), "context A creation");
+    ROCPROFILER_CALL(rocprofiler_create_context(&context_b), "context B creation");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_dispatch_thread_trace_service(
+            context_a, agent_a, nullptr, 0, dispatch_callback, shader_callback, nullptr),
+        "context A ATT configuration");
+    ROCPROFILER_CALL(
+        rocprofiler_configure_dispatch_thread_trace_service(
+            context_b, agent_b, nullptr, 0, dispatch_callback, shader_callback, nullptr),
+        "context B ATT configuration");
+
+    auto callback_count = []() {
+        size_t count = 0;
+        hsa::get_queue_controller()->iterate_callbacks([&](auto, const auto&) { ++count; });
+        return count;
+    };
+
+    const auto initial_callbacks = callback_count();
+    EXPECT_EQ(rocprofiler_start_context(context_a), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(rocprofiler_start_context(context_b), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(callback_count(), initial_callbacks + 2);
+    EXPECT_TRUE(hsa::get_queue_controller()->serialization_enabled());
+
+    EXPECT_EQ(rocprofiler_stop_context(context_a), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(callback_count(), initial_callbacks + 1);
+    EXPECT_TRUE(hsa::get_queue_controller()->serialization_enabled());
+    EXPECT_EQ(rocprofiler_stop_context(context_b), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(callback_count(), initial_callbacks);
+    EXPECT_FALSE(hsa::get_queue_controller()->serialization_enabled());
+
+    context::pop_client(1);
+}
+
+TEST(thread_trace, concurrent_dispatch_stops_release_serialization_once)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto callback_count = []() {
+        size_t count = 0;
+        hsa::get_queue_controller()->iterate_callbacks([&](auto, const auto&) { ++count; });
+        return count;
+    };
+
+    thread_trace::DispatchThreadTracer tracer{};
+    const auto                         initial_callbacks = callback_count();
+    tracer.start_context();
+    EXPECT_EQ(callback_count(), initial_callbacks + 1);
+    EXPECT_TRUE(hsa::get_queue_controller()->serialization_enabled());
+
+    auto stop_a = std::thread{[&]() { tracer.stop_context(); }};
+    auto stop_b = std::thread{[&]() { tracer.stop_context(); }};
+    stop_a.join();
+    stop_b.join();
+
+    EXPECT_EQ(callback_count(), initial_callbacks);
+    EXPECT_FALSE(hsa::get_queue_controller()->serialization_enabled());
 }
 
 TEST(thread_trace, perfcounters_configure_test)
@@ -386,11 +500,18 @@ TEST(thread_trace, perfcounters_aql_options_test)
             if(metric.name() == counter_name)
                 _params.perfcounters.push_back({std::atoi(metric.event().c_str()), simd_mask});
     _params.perfcounter_ctrl = 2;
-    auto new_tracer          = std::make_unique<thread_trace::ThreadTracerAgent>(
-        _params, begin(agents)->second.get_rocp_agent()->id);
+    const auto& agent        = begin(agents)->second;
+    thread_trace::register_shared_trace_requirements(agent.get_rocp_agent()->id,
+                                                     agent.get_hsa_agent(),
+                                                     _params.buffer_size,
+                                                     _params.num_buffers);
+    auto new_tracer =
+        std::make_unique<thread_trace::ThreadTracerAgent>(_params, agent.get_rocp_agent()->id);
 
     ASSERT_EQ(new_tracer->factory->aql_params.size(),
               sqtt_default_num_options + perf_counters.size());
+    new_tracer.reset();
+    thread_trace::free_shared_trace_resources();
     context::pop_client(1);
 }
 

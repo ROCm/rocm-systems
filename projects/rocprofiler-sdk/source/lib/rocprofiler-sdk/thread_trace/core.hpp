@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
@@ -29,6 +30,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/code_object.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/hsa_util.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_resources.hpp"
 
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/intercept_table.h>
@@ -36,11 +38,13 @@
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <future>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <tuple>
@@ -97,7 +101,7 @@ class ThreadTracerAgent
     using code_object_id_t = uint64_t;
 
 public:
-    /// Owns the lifetime of an ATT queue for a single GPU agent.
+    /// Owns context-specific ATT packets and retains the agent's shared resources.
     ThreadTracerAgent(thread_trace_parameter_pack _params, rocprofiler_agent_id_t);
     virtual ~ThreadTracerAgent();
 
@@ -128,20 +132,11 @@ private:
     /// Acquire a copy of the control packet, with optional increment to active_traces
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
 
-    // Non-owning: the shared-queue manager owns this per-agent queue and frees it in
-    // free_shared_queues().
-    att_queue_t* queue{nullptr};
-
-    // Hardware agent this tracer drives; keys the per-agent trace lease so no two
-    // contexts use the same agent's shared buffer/queue concurrently.
-    hsa_agent_t hw_agent{};
+    // Retained by every packet/worker that uses the shared queue or output slots.
+    agent_trace_resources_ptr_t resources = {};
 
     std::atomic<int> active_traces{0};
     std::mutex       trace_resources_mut{};
-
-    // Log lease contention (this agent already traced by another context) only once per
-    // tracer instead of on every skipped dispatch. Guarded by trace_resources_mut.
-    bool lease_contention_logged{false};
 
     std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
@@ -167,8 +162,7 @@ public:
     void resource_init();
     void resource_deinit();
 
-    /// Report this context's per-agent buffer and queue staging sizes to the shared
-    /// buffer and queue managers before their resources are built.
+    /// Report this context's per-agent output and staging requirements before build.
     void register_shared_sizes();
 
     void add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack)
@@ -192,8 +186,14 @@ private:
     std::unordered_map<hsa_agent_t, std::unique_ptr<ThreadTracerAgent>>     agents{};
     std::unordered_map<rocprofiler_agent_id_t, thread_trace_parameter_pack> params{};
 
-    std::shared_mutex agents_map_mut{};
-    std::atomic<int>  post_move_data{0};
+    std::shared_mutex                            agents_map_mut{};
+    std::atomic<int>                             post_move_data{0};
+    bool                                         accepting_dispatches{false};
+    common::Synchronized<std::optional<int64_t>> client        = {};
+    std::mutex                                   lifecycle_mut = {};
+    std::shared_mutex                            admission_mut = {};
+    std::mutex                                   post_move_mut = {};
+    std::condition_variable                      post_move_cv  = {};
 };
 
 class DeviceThreadTracer
@@ -208,8 +208,7 @@ public:
     void resource_init();
     void resource_deinit();
 
-    /// Report this context's per-agent buffer and queue staging sizes to the shared
-    /// buffer and queue managers before their resources are built.
+    /// Report this context's per-agent output and staging requirements before build.
     void register_shared_sizes();
 
     void add_agent(rocprofiler_agent_id_t id, thread_trace_parameter_pack _params)

@@ -26,7 +26,7 @@
 #include "lib/rocprofiler-sdk/spm/decode.hpp"
 #include "lib/rocprofiler-sdk/spm/interface.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/shared_trace_buffer.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_resources.hpp"
 
 #include <fmt/format.h>
 #include <cstddef>
@@ -167,12 +167,10 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
         return status;
     }
 
-    // Device (SQTT output) buffer: the shared manager is the single source, handing out
-    // one buffer per ring slot (output_buffer_index), reused across contexts. Marker and
-    // control packets allocate only host memory (above), so this device path is used
-    // solely for SQTT output slots and never aliases them with other allocations.
-    const size_t index  = pool.output_buffer_index++;
-    void*        shared = thread_trace::acquire_shared_buffer(pool, index, size);
+    // Device (SQTT output) buffer: the per-agent resource handle is the single source.
+    // The pool owns the packet-local slot cursor, so every context maps its slot i to
+    // the same shared per-agent allocation.
+    void* shared = pool.allocate_output(size);
     if(shared == nullptr) return HSA_STATUS_ERROR;
 
     *ptr = shared;
@@ -184,14 +182,21 @@ TraceMemoryPool::Free(void* ptr, void* data)
 {
     if(ptr == nullptr) return;
 
-    // Shared device buffers are owned by the manager (freed once in free_shared_buffers());
-    // skip them here to avoid a double free. Only per-call host buffers are freed.
-    if(thread_trace::is_shared_buffer(ptr)) return;
-
     assert(data);
     auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
 
+    // Output buffers are borrowed from the retained per-agent resource handle.
+    // AQLProfile still invokes this callback for them, so skip the per-packet free.
+    if(pool.resources && pool.resources->owns_output_buffer(ptr)) return;
+
     if(pool.free_fn) pool.free_fn(ptr);
+}
+
+void*
+TraceMemoryPool::allocate_output(size_t requested_size)
+{
+    auto resources_ptr = CHECK_NOTNULL(resources.get());
+    return resources_ptr->acquire_output_buffer(*this, output_buffer_index++, requested_size);
 }
 
 hsa_status_t

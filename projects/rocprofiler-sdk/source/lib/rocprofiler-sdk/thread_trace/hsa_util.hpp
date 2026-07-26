@@ -68,11 +68,9 @@ struct att_queue_t
     hsa_queue_t* hsa_queue{nullptr};
     /// CPU staging buffers; size matches the user-supplied NUM_BUFFERS. Empty
     /// in single-buffer (synchronous) mode.
-    std::vector<void*>     cpu_buffers{};
-    rocprofiler_agent_id_t agent_id{};
-    size_t                 buffer_size{0};
-    hsa_agent_t            hsa_agent{};
-    hsa_agent_t            near_cpu{};
+    std::vector<void*> cpu_buffers{};
+    hsa_agent_t        hsa_agent{};
+    hsa_agent_t        near_cpu{};
 
     /// Function pointer for submit — allows test injection (replaces virtual dispatch).
     void (*submit_fn)(const att_queue_t&            self,
@@ -123,15 +121,6 @@ att_queue_submit_and_wait_last(const att_queue_t& q, VecType& vec)
     if(sig) signal_wait(*sig);
     return sig;
 }
-
-struct att_queue_deleter_t
-{
-    void operator()(att_queue_t* q) const;
-};
-using att_queue_ptr_t = std::unique_ptr<att_queue_t, att_queue_deleter_t>;
-
-att_queue_ptr_t
-make_att_queue(const hsa::AgentCache& agent, size_t buffer_size, size_t num_buffers = 0);
 
 };  // namespace thread_trace
 };  // namespace rocprofiler
