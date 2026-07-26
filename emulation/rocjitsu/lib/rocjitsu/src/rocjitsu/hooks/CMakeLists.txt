@@ -54,7 +54,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_library(hsa_hotswap_rocjitsu SHARED gfx1250_b0_a0_hotswap.cpp)
     set_target_properties(
         hsa_hotswap_rocjitsu
-        PROPERTIES OUTPUT_NAME hsa_hotswap_rocjitsu INSTALL_RPATH "$ORIGIN"
+        PROPERTIES OUTPUT_NAME hsa_hotswap_rocjitsu
     )
     target_link_libraries(
         hsa_hotswap_rocjitsu

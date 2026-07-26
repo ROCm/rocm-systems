@@ -78,7 +78,6 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/inc/exceptions.h"
 #include "core/inc/host_queue.h"
 #include "core/inc/hotswap.hpp"
-#include "core/inc/hotswap_gfx_query.hpp"
 #include "core/inc/hsa_api_trace_int.h"
 #include "core/inc/hsa_ext_amd_impl.h"
 #include "core/inc/hsa_ext_interface.h"
@@ -3031,12 +3030,24 @@ void Runtime::LoadTools() {
 // CloseTools handling without dedicated runtime state.
 hsa_status_t Runtime::LoadHotswapTool() {
   if (!hotswap::IsRocjitsuHotswapEnabled()) return HSA_STATUS_SUCCESS;
-  const bool has_supported_agent =
-      std::any_of(gpu_agents_.begin(), gpu_agents_.end(), [](const Agent* agent) {
-        return hotswap::IsHotswapSupportedGfxRevision(
-            hotswap::GetAgentGfxRevision(agent->public_handle()));
-      });
-  if (!has_supported_agent) return HSA_STATUS_SUCCESS;
+
+  bool has_gfx1250_a0_agent = false;
+  for (const Agent* agent : gpu_agents_) {
+    char name[64] = {};
+    hsa_status_t status = agent->GetInfo(HSA_AGENT_INFO_NAME, name);
+    if (status != HSA_STATUS_SUCCESS) return status;
+    if (std::strcmp(name, "gfx1250") != 0) continue;
+
+    uint32_t asic_revision = 0;
+    status = agent->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION),
+                            &asic_revision);
+    if (status != HSA_STATUS_SUCCESS) return status;
+    if (asic_revision == 0) {
+      has_gfx1250_a0_agent = true;
+      break;
+    }
+  }
+  if (!has_gfx1250_a0_agent) return HSA_STATUS_SUCCESS;
 
 #if !defined(__linux__)
   if (flag().report_tool_load_failures())
