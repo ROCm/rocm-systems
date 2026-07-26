@@ -96,6 +96,11 @@ void *hsakmt_fmm_allocate_doorbell(HsaKFDContext *ctx,
 void hsakmt_fmm_print(HsaKFDContext *ctx, uint32_t node);
 HSAKMT_STATUS hsakmt_fmm_release(HsaKFDContext *ctx, void *address);
 
+/* UKI DRM mode: bytes of VRAM allocated via the DRM BO path on the given GPU,
+ * which KFD's AVAILABLE_MEMORY ioctl does not account for. */
+HSAKMT_STATUS hsakmt_fmm_get_drm_vram_used(HsaKFDContext *ctx, uint32_t gpu_id,
+					   uint64_t *bytes);
+
 // Memory mmap/munmap functions
 HSAKMT_STATUS hsakmt_fmm_map_to_gpu(HsaKFDContext *ctx,
 						void *address,
