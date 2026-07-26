@@ -325,12 +325,12 @@ TEST_F(HsaHotswapHookTest, FailedLoadDestroysTransientReaderImmediately) {
   EXPECT_EQ(g_reader_destroy_calls, 1);
 }
 
-// A late lower-load failure must KEEP the translated bytes retained, not free them:
-// ROCr's loader appends a loaded-code-object holding the raw ELF pointer before the
-// fallible stages and does not roll it back on failure, so freeing the bytes would
-// leave ROCr/debugger/profiler enumeration with a dangling pointer. The bytes are
-// released only at executable destroy.
-TEST_F(HsaHotswapHookTest, FailedLoadRetainsTranslatedBytesUntilDestroy) {
+// A failed lower load must NOT retain the translated bytes. The failure may be a
+// pre-publication rejection (null/invalid executable, profile/ISA mismatch) where
+// ROCr never referenced the bytes, and there is no successful executable-destroy to
+// release a stranded blob -- so retaining on failure would grow storage without
+// bound across repeated invalid loads. Retention happens only on success.
+TEST_F(HsaHotswapHookTest, FailedLoadDoesNotRetainAndDoesNotGrow) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   ASSERT_EQ(rj_test_retained_executable_buffer_count(), 0u);
 
@@ -340,16 +340,30 @@ TEST_F(HsaHotswapHookTest, FailedLoadRetainsTranslatedBytesUntilDestroy) {
       api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
       HSA_STATUS_SUCCESS);
 
-  // The lower load fails AFTER load_owned_bytes has retained the bytes and entered
-  // the lower loader (modeling ROCr appending its loaded-object then failing a later
-  // stage).
+  // Repeated failing loads must not accumulate retained buffers.
   g_load_agent_status = HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
-  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
-                                                              nullptr, nullptr),
-            HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  for (int i = 0; i < 5; ++i) {
+    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                                nullptr, nullptr),
+              HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  }
+  EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);
+}
 
-  // Bytes are retained despite the failure (would have been freed by the old
-  // unretain-on-failure), and are released only when the executable is destroyed.
+// A successful load retains the bytes until the executable is destroyed (ROCr
+// aliases the ELF pointer, so a live loaded object references them for its lifetime).
+TEST_F(HsaHotswapHookTest, SuccessfulLoadRetainsUntilDestroy) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  ASSERT_EQ(rj_test_retained_executable_buffer_count(), 0u);
+
+  const std::vector<uint8_t> source{1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
+      HSA_STATUS_SUCCESS);
+  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
   EXPECT_EQ(rj_test_retained_executable_buffer_count(), 1u);
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
   EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);

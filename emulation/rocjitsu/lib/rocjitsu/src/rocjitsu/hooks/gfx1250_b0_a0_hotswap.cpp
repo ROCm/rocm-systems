@@ -140,9 +140,21 @@ struct HookState {
   std::unordered_map<uint64_t, std::vector<Blob>> executables;
 };
 
-// ROCr calls OnUnload before releasing this tool, so one DSO-local state owns
-// the saved API and the buffers that must outlive code-object load calls.
-HookState g_state;
+// ROCr calls OnUnload before releasing this tool, so one DSO-local state owns the
+// saved API and the buffers that must outlive code-object load calls.
+//
+// INTENTIONALLY LEAKED (never destructed): a heap object referenced by a function-
+// local reference, so it has no static destructor. A plain namespace-scope object
+// would run its map destructors at process exit -- and that ordering is unsafe here.
+// A supported profiler startup (rocprofv3 force-configures rocprofiler and registers
+// an atexit finalizer BEFORE the application's hsa_init loads this hook) means our
+// state is constructed AFTER rocprofiler's. Reverse-order exit teardown would then
+// destroy g_state -- freeing translated bytes -- before rocprofiler's finalizer
+// processes its code-object records that alias those bytes, a use-after-free.
+// RTLD_NODELETE only defers the DSO's unmap to process exit; it does not make a
+// static object indestructible. Leaking the state makes the retained bytes truly
+// process-lifetime: reclaimed only by the OS at exit, after all consumers are gone.
+HookState &g_state = *new HookState();
 
 bool store_reader(hsa_code_object_reader_t reader, Blob bytes) noexcept {
   try {
@@ -443,20 +455,27 @@ hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, co
     return reader_status;
   auto reader_guard = make_scope_guard([&] { (void)destroy(owned_reader); });
 
-  if (!retain(executable, bytes))
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-
-  // Retain the translated bytes until the executable is destroyed, EVEN IF the
-  // lower load returns failure. ROCr's loader is not transactional: LoadCodeObject
-  // appends a LoadedCodeObjectImpl holding the raw ELF pointer BEFORE the fallible
-  // segment/symbol/relocation/trampoline stages, and those stages' error paths do
-  // not remove the appended object (each does a bare `return status`). So on a late
-  // failure ROCr -- and any debugger/profiler that enumerates loaded code objects --
-  // keeps a pointer into these bytes. Freeing them here (the previous
-  // unretain-on-failure) would leave that pointer dangling. The bytes are released
-  // only on hsa_executable_destroy (release()) or at process exit; they are NOT
-  // freed on a runtime-generation reinstall (see install()).
+  // Retain the translated bytes ONLY on a successful load. ROCr aliases (does not
+  // copy) the ELF pointer -- CodeObjectReaderImpl::SetMemory stores it directly and
+  // the loader hands code->ElfData() to the LoadedCodeObjectImpl -- so a loaded
+  // object that survives references these bytes for its lifetime; hence retention
+  // until executable destroy.
+  //
+  // We do NOT retain on failure. A failure can be rejected BEFORE the loader
+  // publishes anything (a null/invalid executable, a profile/ISA mismatch), and the
+  // rejection status is not distinguishable from a post-publication failure (e.g.
+  // INCOMPATIBLE_ARGUMENTS occurs on both sides of the LoadedCodeObjectImpl append).
+  // Retaining on every failure would strand a blob under an executable handle that
+  // no successful destroy ever releases -- unbounded growth on repeated invalid
+  // loads. KNOWN LIMITATION: if ROCr publishes the loaded object and then a LATER
+  // stage (segment/symbol/relocation/trampoline) fails, ROCr does not roll back the
+  // appended object, so it briefly holds a pointer into bytes we free here. Closing
+  // that window requires a transactional lower loader (or a published-object query)
+  // upstream in ROCr; it is not fixable from the hook without a status-guessing
+  // heuristic that would reintroduce the unbounded-growth bug.
   const hsa_status_t status = original_load(executable, agent, owned_reader, options, loaded);
+  if (status == HSA_STATUS_SUCCESS)
+    (void)retain(executable, bytes);
   return status;
 }
 

@@ -1083,7 +1083,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     target_link_libraries(
         hsa_hotswap_rocjitsu_unit_test
-        PRIVATE hsa_hotswap_rocjitsu GTest::gtest_main
+        PRIVATE hsa_hotswap_rocjitsu_testable GTest::gtest_main
     )
     rj_configure_target(hsa_hotswap_rocjitsu_unit_test TEST)
     gtest_discover_tests(hsa_hotswap_rocjitsu_unit_test)
