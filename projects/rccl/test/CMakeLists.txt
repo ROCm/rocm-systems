@@ -348,6 +348,7 @@ if(BUILD_TESTS)
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
       NetSocketTests.cpp
+      PluginCompatV11_test.cpp
       ProxyTests.cpp
       RcclWrapTests.cpp
       TransportTests.cpp
@@ -378,6 +379,12 @@ if(BUILD_TESTS)
     # so they can build the path.
     target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
       RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+    # PluginCompatV11_test.cpp resolves its in-process mock plugin symbols via
+    # dlsym(dlopen(NULL), ...), which only sees the executable's dynamic symbols.
+    target_link_options(rccl-UnitTestsFixturesDebug PRIVATE
+      -Wl,--export-dynamic-symbol=ncclNetPlugin_v11
+      -Wl,--export-dynamic-symbol=ncclCollNetPlugin_v11)
   endif()
 
   # rccl-UnitTestsAltRsmi: Compiles alt_rsmi.cc directly (not via librccl.so) with
@@ -441,6 +448,7 @@ if(BUILD_TESTS)
       GinNcclTimeoutMPITests.cpp
       SymmetricKernelMPITests.cpp
       SymmetricWindowMPITests.cpp
+      CommNetMismatchMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})

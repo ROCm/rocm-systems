@@ -22,8 +22,6 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-const bool VMovB32Vop3::execute_registered_ = register_exec_fn<VMovB32Vop3>();
-
 void VMovB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -53,8 +51,6 @@ void VMovB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   src0.clear_delegate();
 }
-
-const bool VReadfirstlaneB32Vop3::execute_registered_ = register_exec_fn<VReadfirstlaneB32Vop3>();
 
 void VReadfirstlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
@@ -97,8 +93,6 @@ void VReadfirstlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src0.clear_delegate();
 }
 
-const bool VMovB16Vop3::execute_registered_ = register_exec_fn<VMovB16Vop3>();
-
 void VMovB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -140,8 +134,6 @@ void VMovB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src0.clear_delegate();
 }
 
-const bool VMovB64Vop3::execute_registered_ = register_exec_fn<VMovB64Vop3>();
-
 void VMovB64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -177,8 +169,6 @@ void VMovB64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   src0.clear_delegate();
 }
-
-const bool VMovreldB32Vop3::execute_registered_ = register_exec_fn<VMovreldB32Vop3>();
 
 void VMovreldB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
@@ -224,8 +214,6 @@ void VMovreldB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src0.clear_delegate();
 }
 
-const bool VMovrelsB32Vop3::execute_registered_ = register_exec_fn<VMovrelsB32Vop3>();
-
 void VMovrelsB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -270,8 +258,6 @@ void VMovrelsB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src0.clear_delegate();
 }
 
-const bool VPermlane16SwapB32Vop3::execute_registered_ = register_exec_fn<VPermlane16SwapB32Vop3>();
-
 void VPermlane16SwapB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -306,8 +292,6 @@ void VPermlane16SwapB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-const bool VCndmaskB32Vop3::execute_registered_ = register_exec_fn<VCndmaskB32Vop3>();
-
 void VCndmaskB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -340,8 +324,6 @@ void VCndmaskB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src0.clear_delegate();
   src1.clear_delegate();
 }
-
-const bool VCubeidF32Vop3::execute_registered_ = register_exec_fn<VCubeidF32Vop3>();
 
 void VCubeidF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
@@ -376,8 +358,6 @@ void VCubeidF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src1.clear_delegate();
 }
 
-const bool VCubescF32Vop3::execute_registered_ = register_exec_fn<VCubescF32Vop3>();
-
 void VCubescF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -410,8 +390,6 @@ void VCubescF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src0.clear_delegate();
   src1.clear_delegate();
 }
-
-const bool VCubetcF32Vop3::execute_registered_ = register_exec_fn<VCubetcF32Vop3>();
 
 void VCubetcF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
@@ -446,8 +424,6 @@ void VCubetcF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src1.clear_delegate();
 }
 
-const bool VCubemaF32Vop3::execute_registered_ = register_exec_fn<VCubemaF32Vop3>();
-
 void VCubemaF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -481,28 +457,20 @@ void VCubemaF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src1.clear_delegate();
 }
 
-const bool VPermPk16B4U4Vop3::execute_registered_ = register_exec_fn<VPermPk16B4U4Vop3>();
-
 void VPermPk16B4U4Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(mnemonic());
 }
-
-const bool VPermPk16B6U4Vop3::execute_registered_ = register_exec_fn<VPermPk16B6U4Vop3>();
 
 void VPermPk16B6U4Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(mnemonic());
 }
 
-const bool VPermPk16B8U4Vop3::execute_registered_ = register_exec_fn<VPermPk16B8U4Vop3>();
-
 void VPermPk16B8U4Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(mnemonic());
 }
-
-const bool VPermB32Vop3::execute_registered_ = register_exec_fn<VPermB32Vop3>();
 
 void VPermB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
@@ -536,8 +504,6 @@ void VPermB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src0.clear_delegate();
   src1.clear_delegate();
 }
-
-const bool VPermlane16B32Vop3::execute_registered_ = register_exec_fn<VPermlane16B32Vop3>();
 
 void VPermlane16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
@@ -594,8 +560,6 @@ void VPermlane16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src0.clear_delegate();
   src1.clear_delegate();
 }
-
-const bool VPermlanex16B32Vop3::execute_registered_ = register_exec_fn<VPermlanex16B32Vop3>();
 
 void VPermlanex16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
@@ -655,8 +619,6 @@ void VPermlanex16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src1.clear_delegate();
 }
 
-const bool VCndmaskB16Vop3::execute_registered_ = register_exec_fn<VCndmaskB16Vop3>();
-
 void VCndmaskB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -704,8 +666,6 @@ void VCndmaskB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src0.clear_delegate();
   src1.clear_delegate();
 }
-
-const bool VPermlaneBcastB32Vop3::execute_registered_ = register_exec_fn<VPermlaneBcastB32Vop3>();
 
 void VPermlaneBcastB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
@@ -759,8 +719,6 @@ void VPermlaneBcastB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src0.clear_delegate();
   src1.clear_delegate();
 }
-
-const bool VPermlaneUpB32Vop3::execute_registered_ = register_exec_fn<VPermlaneUpB32Vop3>();
 
 void VPermlaneUpB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
@@ -816,8 +774,6 @@ void VPermlaneUpB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src1.clear_delegate();
 }
 
-const bool VPermlaneDownB32Vop3::execute_registered_ = register_exec_fn<VPermlaneDownB32Vop3>();
-
 void VPermlaneDownB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -871,8 +827,6 @@ void VPermlaneDownB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src0.clear_delegate();
   src1.clear_delegate();
 }
-
-const bool VPermlaneXorB32Vop3::execute_registered_ = register_exec_fn<VPermlaneXorB32Vop3>();
 
 void VPermlaneXorB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
@@ -928,8 +882,6 @@ void VPermlaneXorB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src1.clear_delegate();
 }
 
-const bool VPermlane16VarB32Vop3::execute_registered_ = register_exec_fn<VPermlane16VarB32Vop3>();
-
 void VPermlane16VarB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -982,8 +934,6 @@ void VPermlane16VarB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src0.clear_delegate();
   src1.clear_delegate();
 }
-
-const bool VPermlanex16VarB32Vop3::execute_registered_ = register_exec_fn<VPermlanex16VarB32Vop3>();
 
 void VPermlanex16VarB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
@@ -1040,8 +990,6 @@ void VPermlanex16VarB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src1.clear_delegate();
 }
 
-const bool VPermlaneIdxGenB32Vop3::execute_registered_ = register_exec_fn<VPermlaneIdxGenB32Vop3>();
-
 void VPermlaneIdxGenB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -1082,8 +1030,6 @@ void VPermlaneIdxGenB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src1.clear_delegate();
 }
 
-const bool VReadlaneB32Vop3::execute_registered_ = register_exec_fn<VReadlaneB32Vop3>();
-
 void VReadlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -1120,8 +1066,6 @@ void VReadlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   src0.clear_delegate();
   src1.clear_delegate();
 }
-
-const bool VWritelaneB32Vop3::execute_registered_ = register_exec_fn<VWritelaneB32Vop3>();
 
 void VWritelaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t sdwa_old_dst_[64] = {};
