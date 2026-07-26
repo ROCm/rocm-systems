@@ -3066,8 +3066,12 @@ hsa_status_t Runtime::LoadHotswapTool() {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
+  // Invoke OnLoad through the same exception-containing wrapper LoadTools() uses, so
+  // an exception thrown by the tool during install cannot cross the C tool boundary
+  // and terminate the process; it is contained and reported as an install failure.
   typedef bool (*tool_init_t)(::HsaApiTable*, uint64_t, uint64_t, const char* const*);
-  auto on_load = reinterpret_cast<tool_init_t>(os::GetExportAddress(tool, "OnLoad"));
+  rocr::AMD::callback_t<tool_init_t> on_load =
+      reinterpret_cast<tool_init_t>(os::GetExportAddress(tool, "OnLoad"));
   if (on_load == nullptr ||
       !on_load(&hsa_api_table().hsa_api, hsa_api_table().hsa_api.version.major_id, 0, nullptr)) {
     if (flag().report_tool_load_failures())
