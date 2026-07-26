@@ -14,12 +14,11 @@ find_package(rocprofiler-sdk REQUIRED)
 rocprofiler_sdk_pc_sampling_disabled(IS_PC_SAMPLING_DISABLED)
 
 # TODO(pc-sampling): Temporarily quarantined (kept building, not run). Under heavy
-# host-trap multi-agent load (16 threads across all 8 agents at --pc-sampling-interval 1)
-# these tests intermittently (~0.25% of runs) trigger a GPU hardware hang that escalates
-# to a failed ASIC reset (PSP resume -62) and requires a full node reboot. This is a
-# runtime/driver-level issue, not a test-logic bug: the other PC sampling test families
-# pass 500/500 under the same harness. Re-enable once the multi-agent host-trap hang is
-# root-caused/fixed.
+# host-trap load (16 threads across all four MI300A GPU agents at interval 1), this
+# intermittently triggers a GPU hang followed by a failed ASIC reset (PSP resume -62).
+# The affected nodes run SOS 0x00360159, which predates the 0x00360259 host-trap
+# firmware fix. Keep this disabled until the node firmware is upgraded and the KFD
+# sampling-thread teardown races are fixed, then repeat the multi-agent stress run.
 set(IS_PC_SAMPLING_DISABLED TRUE)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV

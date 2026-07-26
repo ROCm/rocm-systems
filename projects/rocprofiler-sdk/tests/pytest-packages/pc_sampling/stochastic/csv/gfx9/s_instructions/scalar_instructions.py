@@ -36,9 +36,9 @@ def validate_scalar_instructions_issued(all_samples, scalar_samples):
 
     # scalar_samples contains instructions starting with `s_`
     scalar_samples_issued = scalar_samples[scalar_samples["Wave_Issued_Instruction"]]
-    # sanity check
+
+    # Every hardware-SCALAR sample must correspond to an s_ instruction.
     assert len(scalar_type_samples_issued) == len(scalar_samples_issued)
-    # same checks as above
     assert (
         scalar_samples_issued["Instruction_Type"]
         == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_SCALAR"

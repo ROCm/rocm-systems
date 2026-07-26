@@ -638,9 +638,18 @@ trap_entry:
   s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x38      // ttmp[4:5] is correlation ID. Store correlation_id to sample
   // get_correlation_id() -- end //
 
-  // complete stores before returning
+  // Publish the complete 64-byte record before incrementing buf_written_val.
+  // The host uses that counter as a release/acquire handoff. Scalar stores can
+  // otherwise remain in K$/GL2 after the atomic counter becomes CPU-visible,
+  // exposing a record whose PC/timestamp are new but EXEC/correlation fields
+  // still belong to the previous buffer generation.
+  s_waitcnt                             lgkmcnt(0)
   s_dcache_wb
   s_waitcnt                             lgkmcnt(0)
+.if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
+  buffer_wbl2                           sc1 sc0
+.endif
+  s_waitcnt                             vmcnt(0) & lgkmcnt(0)
   // fill_sample(...) - end //
 
   // ttmp[2:3], ttmp[4:5], ttmp7, and ttmp13 are free

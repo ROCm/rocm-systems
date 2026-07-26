@@ -246,7 +246,7 @@ class WaveIssueAndErrorTestGFX12
         perf_snapshot_data.valid  = valid;
         perf_snapshot_data.issued = issued;
 
-        perf_sample_snapshot_v1 pss;
+        perf_sample_snapshot_v1 pss{};
         pss.perf_snapshot_data = perf_snapshot_data.raw;
         pss.correlation_id     = this->dispatch->getMockId().raw;
         this->dispatch->submit(std::move(pss));

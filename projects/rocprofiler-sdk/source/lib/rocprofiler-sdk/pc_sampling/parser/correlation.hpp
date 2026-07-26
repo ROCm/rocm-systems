@@ -244,6 +244,15 @@ add_upcoming_samples(const device_handle     device,
         // skip invalid samples
         if(pc_sample.size == 0) continue;
 
+        // A zero hardware timestamp means the trap arrived too late to collect
+        // valid wave state. ROCr preserves that marker while converting valid
+        // timestamps to the system clock domain.
+        if(snap->timestamp == 0)
+        {
+            pc_sample.size = 0;
+            continue;
+        }
+
         // Correct PC address of the original sample (if needed) prior to decoding it.
         auto pc_address = correct_pc_address<GFXIP, PcSamplingRecordT>(snap);
 
@@ -270,6 +279,10 @@ add_upcoming_samples(const device_handle     device,
             }
         } catch(std::exception& e)
         {
+            // Samples without a live dispatch mapping cannot be attributed and
+            // may contain undefined wave state from a late trap. Keep reporting
+            // the parser error, but expose the record as explicitly invalid.
+            pc_sample.size           = 0;
             // TODO: introduce ROCPROFILER_DISPATCH_ID_INTERNAL_NONE
             pc_sample.dispatch_id    = 0;
             pc_sample.correlation_id = {.internal = ROCPROFILER_CORRELATION_ID_INTERNAL_NONE,

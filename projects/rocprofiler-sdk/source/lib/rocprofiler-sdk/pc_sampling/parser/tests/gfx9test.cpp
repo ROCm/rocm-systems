@@ -249,7 +249,7 @@ class WaveIssueAndErrorTestGFX9
         snap.dual   = dual;
         snap.error  = error;
 
-        perf_sample_snapshot_v1 pss;
+        perf_sample_snapshot_v1 pss{};
         pss.perf_snapshot_data = snap.raw;
         pss.correlation_id     = this->dispatch->getMockId().raw;
         this->dispatch->submit(std::move(pss));

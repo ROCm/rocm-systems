@@ -188,18 +188,6 @@ emplace_records_in_buffer(rocprofiler::buffer::instance*        buff,
                           rocprofiler_pc_sampling_record_kind_t record_kind)
 {
     for(size_t i = 0; i < num_samples; i++)
-        buff->emplace(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING, record_kind, samples[i]);
-}
-
-template <>
-inline void
-emplace_records_in_buffer<rocprofiler_pc_sampling_record_stochastic_v0_t>(
-    rocprofiler::buffer::instance*                        buff,
-    const rocprofiler_pc_sampling_record_stochastic_v0_t* samples,
-    size_t                                                num_samples,
-    rocprofiler_pc_sampling_record_kind_t                 record_kind)
-{
-    for(size_t i = 0; i < num_samples; i++)
     {
         if(samples[i].size == 0)
         {

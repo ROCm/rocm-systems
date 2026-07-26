@@ -1031,6 +1031,7 @@ class GpuAgent : public GpuAgentInt {
     std::mutex consumer_mutex;              // Protects consumer_cv, pending_flush_count, consumer_exit (for notify)
     std::condition_variable consumer_cv;    // Wakes consumer when XCC threads have new data
     std::atomic<bool> consumer_exit;        // Signal consumer thread to exit (atomic for lockless loop check)
+    std::atomic<bool> stopping;             // Stop requested; prevents workers entering new GPU waits
     uint32_t pending_flush_count;           // How many XCCs have notified consumer (protected by consumer_mutex)
     std::mutex delivery_mutex;              // Serializes callback delivery (consumer vs Flush)
 
@@ -1085,6 +1086,11 @@ class GpuAgent : public GpuAgentInt {
 
   // structure for stochastic sampling
   pcs_data_t pcs_stochastic_data_;
+
+  // Serializes asynchronous PM4 submissions through QueuePCSampling. Although
+  // each XCC has private command storage and a completion signal, AqlQueue
+  // executes every submission from one shared indirect buffer.
+  std::mutex pc_sampling_pm4_mutex_;
 
   /// @brief XGMI CPU<->GPU
   bool xgmi_cpu_gpu_;

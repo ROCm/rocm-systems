@@ -45,11 +45,21 @@ def test_validate_pc_sampling_roctx_pause_resume(json_data):
 
     instructions = data["strings"]["pc_sample_instructions"]
 
-    v_mov_b32_count = 0
+    v_mov_b32_dispatch_counts = {}
     for sample in samples:
         inst_index = sample["inst_index"]
         if inst_index >= 0 and instructions[inst_index].startswith("v_mov_b32"):
-            v_mov_b32_count += 1
+            dispatch_id = sample["record"]["dispatch_id"]
+            v_mov_b32_dispatch_counts[dispatch_id] = (
+                v_mov_b32_dispatch_counts.get(dispatch_id, 0) + 1
+            )
+
+    assert len(v_mov_b32_dispatch_counts) == 4, (
+        "Expected v_mov_b32 samples from all four resumed target-kernel dispatches, "
+        f"got {v_mov_b32_dispatch_counts}"
+    )
+
+    v_mov_b32_count = sum(v_mov_b32_dispatch_counts.values())
 
     assert (
         v_mov_b32_count >= 100

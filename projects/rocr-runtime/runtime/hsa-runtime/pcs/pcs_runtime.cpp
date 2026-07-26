@@ -344,7 +344,10 @@ hsa_status_t PcsRuntime::PcSamplingDestroy(hsa_ven_amd_pcs_t handle) {
   AMD::GpuAgentInt* gpu_agent = static_cast<AMD::GpuAgentInt*>(pcSamplingSessionIt->second.agent);
 
   hsa_status_t ret = gpu_agent->PcSamplingDestroy(pcSamplingSessionIt->second);
-  pc_sampling_.erase(pcSamplingSessionIt);
+  // Agent teardown deliberately retains kernel-visible allocations when stop
+  // or destroy fails. Keep the owning session alive as well so the caller can
+  // retry without leaving GpuAgent::pcs_data with a dangling session pointer.
+  if (ret == HSA_STATUS_SUCCESS) pc_sampling_.erase(pcSamplingSessionIt);
   return ret;
 }
 

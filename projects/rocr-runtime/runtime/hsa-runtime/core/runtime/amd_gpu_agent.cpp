@@ -3158,6 +3158,11 @@ Intervals larger than t0_ will be frequency adjusted.  This admits a numerical e
 than twice the frequency stability (~10^-5).
 */
 uint64_t GpuAgent::TranslateTime(uint64_t tick) {
+  // A zero timestamp is the hardware's invalid/unavailable marker. Preserve it
+  // instead of translating it as a tick predating HSA startup, which wraps the
+  // result into a plausible-looking system timestamp.
+  if (tick == 0) return 0;
+
   // Only allow short (error bounded) extrapolation for times during program execution.
   // Limit errors due to relative frequency drift to ~0.5us.  Sync clocks at 16Hz.
   const int64_t max_extrapolation = core::Runtime::runtime_singleton_->sys_clock_freq() >> 4;
@@ -3648,20 +3653,15 @@ hsa_status_t GpuAgent::PcSamplingIterateConfig(hsa_ven_amd_pcs_iterate_configura
 }
 
 hsa_status_t GpuAgent::PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& session) {
-  hsa_status_t ret;
   HsaPcSamplingInfo sampleInfo = {};
   HsaPcSamplingTraceId thunkId;
-
-  // IOCTL id does not exist at the moment, so passing 0 is OK,
-  // since it will be overridden later in this function.
-  ret = PcSamplingCreateFromId(0, session);
-  if (ret != HSA_STATUS_SUCCESS) return ret;
 
   // Obtain the sampling information from the session.
   session.GetHsaKmtSamplingInfo(&sampleInfo);
 
-  // Pass the sampling information to the kernel driver to create PC
-  // sampling session.
+  // Create the kernel session first. If subsequent runtime allocation or trap
+  // handler setup fails, the kernel object can be rolled back without leaving
+  // pcs_data pointing at a PcSamplingSession that PcsRuntime has erased.
   HSAKMT_STATUS retkmt = HSAKMT_CALL(hsaKmtPcSamplingCreate(node_id(), &sampleInfo, &thunkId));
   if (retkmt != HSAKMT_STATUS_SUCCESS) {
     return (retkmt == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) ? (hsa_status_t)HSA_STATUS_ERROR_RESOURCE_BUSY
@@ -3669,8 +3669,16 @@ hsa_status_t GpuAgent::PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& sess
   }
 
   debug_print("Created PC sampling session with thunkId:%d\n", thunkId);
-
   session.SetThunkId(thunkId);
+
+  hsa_status_t ret = PcSamplingCreateFromId(thunkId, session);
+  if (ret != HSA_STATUS_SUCCESS) {
+    HSAKMT_STATUS destroy_ret =
+        HSAKMT_CALL(hsaKmtPcSamplingDestroy(node_id(), thunkId));
+    if (destroy_ret != HSAKMT_STATUS_SUCCESS) {
+      debug_print("Failed to roll back PC sampling session with thunkId:%d\n", thunkId);
+    }
+  }
 
   return ret;
 }
@@ -3707,8 +3715,10 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
   // Initialize per-XCC structures
   pcs_data->num_xcc = properties_.NumXcc;
 
-  // Detect if we need PM4 fallback (non-large-BAR systems cannot use CPU atomics on VRAM)
-  pcs_data->use_pm4_fallback = !LargeBarEnabled();
+  // Integrated GPUs expose CPU-coherent local memory and can use the direct
+  // atomic path without a PCIe BAR. Discrete non-large-BAR GPUs require PM4.
+  pcs_data->use_pm4_fallback = !properties_.Integrated && !LargeBarEnabled();
+  pcs_data->stopping.store(false, std::memory_order_relaxed);
 
   // Allocate cache-line aligned per-XCC data array
   // Each per_xcc_pcs_data_t is 64-byte aligned to prevent false sharing between XCCs
@@ -3769,6 +3779,7 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
       system_deallocator()(pcs_data->staging_buffer);
       pcs_data->staging_buffer = nullptr;
     }
+    pcs_data->session = nullptr;
   });
 
   // PM4 fallback requires PCSampling queue and per-XCC resources
@@ -4137,6 +4148,12 @@ hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& ses
   if (PcSamplingStop(session) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingDestroy(node_id(), session.ThunkId()));
+  if (retKmt != HSAKMT_STATUS_SUCCESS) {
+    // The kernel still owns this sampling session. Retain trap-handler pointers
+    // and all backing allocations so the caller can safely retry destroy.
+    return HSA_STATUS_ERROR;
+  }
+
   hsa_ven_amd_pcs_method_kind_t sampling_method = session.method();
 
   pcs_data_t* pcs_data = nullptr;
@@ -4213,7 +4230,7 @@ hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& ses
     pcs_data->staging_buffer = nullptr;
   }
 
-  return (retKmt == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& session) {
@@ -4250,9 +4267,13 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
     pcs_data->xcc_data[xcc_id].host_read_offset = 0;
     HSA::hsa_signal_store_screlease(pcs_data->xcc_data[xcc_id].done_sig0, 1);
     HSA::hsa_signal_store_screlease(pcs_data->xcc_data[xcc_id].done_sig1, 1);
-    pcs_data->xcc_data[xcc_id].which_buffer = 0;
+    // Preserve which_buffer across stop/start. The final stop flush advances
+    // both this selector and device_data->buf_write_val. Resetting only the
+    // host selector here would make the worker wait on and drain the opposite
+    // buffer after a profiler resume.
   }
   pcs_data->consumer_exit.store(false, std::memory_order_relaxed);
+  pcs_data->stopping.store(false, std::memory_order_release);
   pcs_data->pending_flush_count = 0;
 
   struct ThreadData {
@@ -4391,15 +4412,17 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  // Stop sampling at KFD level first - this ensures no new trap handler invocations.
-  // Must happen before session.stop() so that isActive() check in flush spin loop
-  // doesn't race with trap handlers still writing to buffers.
-  HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingStop(node_id(), session.ThunkId()));
+  // Request worker shutdown before asking KFD to quiesce queues. In the PM4
+  // fallback path KFD stop may need to evict the same internal queue used for
+  // device-buffer draining. No worker may leave an unbounded command on that
+  // queue while hsaKmtPcSamplingStop is waiting for queue quiescence.
+  //
+  // Keep the session active until KFD has stopped new traps. The separate
+  // stopping flag tells workers to leave without making trap handlers race an
+  // inactive session.
+  pcs_data->stopping.store(true, std::memory_order_release);
 
-  // Now safe to mark session inactive - trap handlers are quiesced
-  session.stop();
-
-  // Wake up XCC threads waiting on signals by setting value to -1 (exit sentinel)
+  // Wake up XCC threads waiting on signals by setting value to -1 (exit sentinel).
   for (uint32_t xcc_id = 0; xcc_id < pcs_data->num_xcc; xcc_id++) {
     HSA::hsa_signal_store_screlease(pcs_data->xcc_data[xcc_id].done_sig0, -1);
     HSA::hsa_signal_store_screlease(pcs_data->xcc_data[xcc_id].done_sig1, -1);
@@ -4413,6 +4436,21 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
       pcs_data->xcc_data[xcc_id].thread = nullptr;
     }
   }
+
+  // Workers no longer submit commands through QueuePCSampling, so KFD can
+  // safely quiesce sampling and its queues without a circular PM4 wait.
+  HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingStop(node_id(), session.ThunkId()));
+  if (retKmt != HSAKMT_STATUS_SUCCESS) {
+    // KFD may still be producing samples. Keep the session active and retain
+    // the consumer/resources so a later stop can retry without freeing memory
+    // that the trap handler can still access.
+    return HSA_STATUS_ERROR;
+  }
+
+  // Trap handlers are now quiesced. Mark the API session inactive before the
+  // final drain so a short/incomplete buffer is accounted as lost, not waited
+  // on indefinitely.
+  session.stop();
 
   // Stop consumer thread before final flush. This ordering is intentional:
   // 1. XCC threads have already exited, so host_read/write_offset are stable
@@ -4439,7 +4477,7 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
 
   pcs_data->session = nullptr;
 
-  return (retKmt == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
@@ -4513,12 +4551,13 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
         ? &pcs_data->xcc_data[xcc_id].device_data->buf_written_val0
         : &pcs_data->xcc_data[xcc_id].device_data->buf_written_val1;
 
-    // Wait for GPU to finish writing samples (per-XCC isolation eliminates contention)
-    // Check session.isActive() to avoid spinning forever if GPU hangs or session is stopping.
+    // Wait for GPU to finish writing samples (per-XCC isolation eliminates contention).
+    // During stop, KFD is deliberately still active while workers finish this
+    // in-flight drain. Only a post-KFD final flush may truncate an incomplete
+    // buffer; resetting a live buffer early would race trap-handler writes.
     uint32_t expected_written = (uint32_t)sample_count;
 
     while (rocr::atomic::Load(bwv_written, std::memory_order_acquire) < expected_written) {
-      // Exit early if session is being stopped - prevents infinite spin on GPU hang
       if (!session.isActive()) {
         // Treat remaining expected samples as lost
         uint32_t actual_written = rocr::atomic::Load(bwv_written, std::memory_order_acquire);
@@ -4577,11 +4616,18 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
 hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
     pcs_data_t* pcs_data, pcs::PcsRuntime::PcSamplingSession& session, uint32_t xcc_id) {
   // PM4 fallback for non-large-BAR systems where CPU cannot directly access VRAM.
-  // Uses ATOMIC_MEM for buffer swap, WAIT_REG_MEM + DMA_DATA for copy, WRITE_DATA for reset.
+  // Uses ATOMIC_MEM for buffer swap, finite DMA_DATA reads for completion polling,
+  // DMA_DATA for sample copies, and WRITE_DATA for counter reset.
 
   if (!pcs_data->xcc_data[xcc_id].device_data) {
     return HSA_STATUS_SUCCESS;
   }
+
+  // QueuePCSampling has one shared indirect buffer. ExecutePM4's internal lock
+  // only protects submission; it is released before an externally signaled
+  // command completes. Keep the buffer stable through both submit-and-wait
+  // sequences so another XCC cannot overwrite in-flight commands.
+  std::lock_guard<std::mutex> pm4_lock(pc_sampling_pm4_mutex_);
 
   uint32_t next_buffer;
   uint64_t reset_write_val;
@@ -4589,7 +4635,6 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
 
   // PM4 command sizes (in DWORDs)
   const uint32_t atomic_ex_cmd_sz = 9;
-  const uint32_t wait_reg_mem_cmd_sz = 7;
   const uint32_t acquire_mem_cmd_sz = 8;
   const uint32_t dma_data_cmd_sz = 7;
   const uint32_t copy_data_cmd_sz = 6;
@@ -4704,6 +4749,67 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
 
   to_copy = sample_count * session.sample_size();
 
+  // Poll buf_written_val with finite PM4 copies instead of placing an
+  // unbounded WAIT_REG_MEM on QueuePCSampling. KFD stop may quiesce this
+  // queue while trap handlers are completing; a WAIT_REG_MEM in that state
+  // creates a circular wait inside hsaKmtPcSamplingStop. Each DMA packet below
+  // always retires, allowing a stop request to be observed on the host.
+  if (sample_count > 0) {
+    uint32_t expected_written = static_cast<uint32_t>(sample_count);
+
+    while (true) {
+      *old_val = 0;
+      i = 0;
+      if (properties_.NumXcc > 1) i += pred_exec_cmd_sz;
+      memset(cmd_data, 0, cmd_data_sz);
+
+      cmd_data[i++] =
+          PM4_HDR(PM4_HDR_IT_OPCODE_DMA_DATA, dma_data_cmd_sz, supported_isas()[0]->GetMajorVersion());
+      cmd_data[i++] = PM4_DMA_DATA_DW1(PM4_DMA_DATA_DST_SEL_DST_ADDR_USING_L2 |
+                                       PM4_DMA_DATA_SRC_SEL_SRC_ADDR_USING_L2);
+      cmd_data[i++] = PM4_DMA_DATA_DW2_SRC_ADDR_LO(buf_written_val_addr[which_buffer]);
+      cmd_data[i++] = PM4_DMA_DATA_DW3_SRC_ADDR_HI(buf_written_val_addr[which_buffer] >> 32);
+      cmd_data[i++] = PM4_DMA_DATA_DW4_DST_ADDR_LO(reinterpret_cast<uint64_t>(old_val));
+      cmd_data[i++] = PM4_DMA_DATA_DW5_DST_ADDR_HI(reinterpret_cast<uint64_t>(old_val) >> 32);
+      cmd_data[i++] =
+          PM4_DMA_DATA_DW6(PM4_DMA_DATA_BYTE_COUNT(sizeof(uint32_t)) | PM4_DMA_DATA_DIS_WC_LAST);
+
+      if (properties_.NumXcc > 1) {
+        cmd_data[0] =
+            PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, supported_isas()[0]->GetMajorVersion());
+        cmd_data[1] = PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) |
+                      PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
+      }
+
+      HSA::hsa_signal_store_screlease(exec_pm4_signal, 1);
+      queues_[QueuePCSampling]->ExecutePM4(cmd_data, i * sizeof(uint32_t), HSA_FENCE_SCOPE_NONE,
+                                           HSA_FENCE_SCOPE_SYSTEM, &exec_pm4_signal);
+
+      do {
+        val = HSA::hsa_signal_wait_scacquire(exec_pm4_signal, HSA_SIGNAL_CONDITION_LT, 1,
+                                             UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+      } while (val > 0);
+
+      if (val == -1) return HSA_STATUS_SUCCESS;
+
+      uint32_t actual_written = static_cast<uint32_t>(*old_val);
+      if (actual_written >= expected_written) break;
+
+      // A stop request leaves KFD/trap producers active until this worker has
+      // completed its current drain. Truncate only in the final post-KFD flush,
+      // when no producer can still update this buffer.
+      if (!session.isActive()) {
+        pcs_data->xcc_data[xcc_id].lost_sample_count.fetch_add(
+            expected_written - actual_written, std::memory_order_relaxed);
+        sample_count = actual_written;
+        to_copy = sample_count * session.sample_size();
+        break;
+      }
+
+      os::YieldThread();
+    }
+  }
+
   // Calculate host buffer write position
   uint64_t write_offset = pcs_data->xcc_data[xcc_id].host_write_offset;
   size_t bytes_to_copy = to_copy;
@@ -4729,31 +4835,12 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   uint64_t buffer_offset = write_offset % per_xcc_host_buffer_size;
   uint8_t* host_write_ptr = host_buffer_begin + buffer_offset;
 
-  /*
-   * Build PM4 commands for WAIT_REG_MEM + DMA_DATA + WRITE_DATA:
-   *
-   * 1. Wait for all trap handlers to finish writing values to this buffer by waiting for
-   *    buf_written_val to equal sample_count (returned from atomic swap).
-   * 2. Copy the values out of device buffer to the host buffers via DMA_DATA.
-   * 3. Reset buf_written_val so that we start writing to beginning of this buffer on the next
-   *    buffer swap.
-   */
+  // The finite polling loop established that every sample being copied is
+  // complete. Build only the sample-copy and written-counter-reset commands;
+  // no command submitted here can wait on future trap-handler progress.
   i = 0;
   if (properties_.NumXcc > 1) i += pred_exec_cmd_sz;
   memset(cmd_data, 0, cmd_data_sz);
-
-  // WAIT_REG_MEM: Wait for trap handler to finish writing samples
-  cmd_data[i++] =
-      PM4_HDR(PM4_HDR_IT_OPCODE_WAIT_REG_MEM, wait_reg_mem_cmd_sz, supported_isas()[0]->GetMajorVersion());
-  cmd_data[i++] = PM4_WAIT_REG_MEM_DW1(PM4_WAIT_REG_MEM_FUNCTION_EQUAL_TO_REFERENCE |
-                                       PM4_WAIT_REG_MEM_MEM_SPACE_MEMORY_SPACE |
-                                       PM4_WAIT_REG_MEM_OPERATION_WAIT_REG_MEM);
-  cmd_data[i++] = PM4_WAIT_REG_MEM_DW2_MEM_POLL_ADDR_LO(buf_written_val_addr[which_buffer]);
-  cmd_data[i++] = PM4_WAIT_REG_MEM_DW3_MEM_POLL_ADDR_HI(buf_written_val_addr[which_buffer] >> 32);
-  cmd_data[i++] = PM4_WAIT_REG_MEM_DW4_REFERENCE(sample_count);
-  cmd_data[i++] = 0xFFFFFFFF;  // Mask
-  cmd_data[i++] = PM4_WAIT_REG_MEM_DW6(PM4_WAIT_REG_MEM_POLL_INTERVAL(4) |
-                                       PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE);
 
   // ACQUIRE_MEM: Flush L2 cache for GFX12 before DMA copy
   if (supported_isas()[0]->GetMajorVersion() == 12 &&
@@ -4865,22 +4952,27 @@ void GpuAgent::PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id,
     // Get this XCC's double-buffer done signals
     hsa_signal_t done_sig[] = {xcc.done_sig0, xcc.done_sig1};
 
+    auto notify_consumer_on_exit = [&pcs_data]() {
+      std::lock_guard<std::mutex> lock(pcs_data.consumer_mutex);
+      pcs_data.pending_flush_count++;
+      pcs_data.consumer_cv.notify_one();
+    };
+
     while (true) {
+      // A trap reaching its watermark can overwrite the -1 signal sentinel.
+      // Check the independent stop flag before every wait as well.
+      if (pcs_data.stopping.load(std::memory_order_acquire)) {
+        notify_consumer_on_exit();
+        break;
+      }
+
       // Wait for trap handler to signal buffer is ready (val=0) or exit (val=-1)
       hsa_signal_value_t val = HSA::hsa_signal_wait_scacquire(
           done_sig[which_buffer], HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
 
-      if (val == -1) {
-        // Exit signal received - notify consumer and exit.
-        // Increment + notify must be under same lock to prevent lost-wakeup race.
-        // The consumer's wait() predicate checks pending_flush_count under this same lock, so either:
-        // 1. Consumer is waiting: we increment, then notify wakes it up
-        // 2. Consumer checks predicate: it sees our incremented count and doesn't wait
-        {
-          std::lock_guard<std::mutex> lock(pcs_data.consumer_mutex);
-          pcs_data.pending_flush_count++;
-          pcs_data.consumer_cv.notify_one();
-        }
+      if (val == -1 || pcs_data.stopping.load(std::memory_order_acquire)) {
+        // Exit signal/flag received - notify consumer and exit.
+        notify_consumer_on_exit();
         break;
       } else if (val != 0) {
         // Spurious wakeup - continue waiting

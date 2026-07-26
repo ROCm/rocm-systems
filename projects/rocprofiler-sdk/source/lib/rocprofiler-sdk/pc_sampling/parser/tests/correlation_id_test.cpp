@@ -413,3 +413,32 @@ TEST(pcs_parser, multi_buffer)
     pcs_parser_multi_buffer<rocprofiler_pc_sampling_record_host_trap_v0_t>();
     pcs_parser_multi_buffer<rocprofiler_pc_sampling_record_stochastic_v0_t>();
 }
+
+TEST(pcs_parser, invalid_host_trap_samples)
+{
+    auto buffer   = std::make_shared<
+        MockRuntimeBuffer<rocprofiler_pc_sampling_record_host_trap_v0_t>>();
+    auto queue    = std::make_shared<
+        MockQueue<rocprofiler_pc_sampling_record_host_trap_v0_t>>(16, buffer);
+    auto dispatch = std::make_shared<
+        MockDispatch<rocprofiler_pc_sampling_record_host_trap_v0_t>>(queue);
+
+    Parser::CorrelationMap corr_map;
+    corr_map.newDispatch(buffer->packets.at(0).dispatch_id);
+
+    packet_union_t sample{};
+    sample.host.correlation_id = dispatch->getMockId().raw;
+
+    rocprofiler_pc_sampling_record_host_trap_v0_t output{};
+    EXPECT_EQ(add_upcoming_samples<GFX9>(
+                  device_handle{buffer->device}, &sample.generic, 1, &corr_map, &output),
+              PCSAMPLE_STATUS_SUCCESS);
+    EXPECT_EQ(output.size, 0);
+
+    sample.host.timestamp      = 1;
+    sample.host.correlation_id = 0xFFFFFFFFFFFFFFFFull;
+    EXPECT_EQ(add_upcoming_samples<GFX9>(
+                  device_handle{buffer->device}, &sample.generic, 1, &corr_map, &output),
+              PCSAMPLE_STATUS_PARSER_ERROR);
+    EXPECT_EQ(output.size, 0);
+}

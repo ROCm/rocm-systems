@@ -251,9 +251,16 @@ public:
     };
 
     //! Submits a packet to the buffer
-    void submit(const packet_union_t& pkt) { queue->submit(pkt); }
-    void submit(const perf_sample_snapshot_v1& snap)
+    void submit(packet_union_t pkt)
     {
+        // Runtime-delivered samples use nonzero system-domain timestamps.
+        // Reserve zero for tests that intentionally exercise invalid samples.
+        if(pkt.snap.timestamp == 0) pkt.snap.timestamp = 1;
+        queue->submit(pkt);
+    }
+    void submit(perf_sample_snapshot_v1 snap)
+    {
+        if(snap.timestamp == 0) snap.timestamp = 1;
         queue->submit(packet_union_t{.snap = snap});
     }
     void print()
