@@ -129,12 +129,13 @@ def validate_exec_mask_based_on_correlation_id(df):
         df["active_SIMD_threads"] == df["Correlation_Id"]
     ).all(), "Active SIMD thread count does not match Correlation_Id for all samples"
 
-    df["Expected_Exec_Mask"] = df["Correlation_Id"].astype(int).apply(
-        lambda active_lanes: (1 << active_lanes) - 1
+    df["Expected_Exec_Mask"] = (
+        df["Correlation_Id"]
+        .astype(int)
+        .apply(lambda active_lanes: (1 << active_lanes) - 1)
     )
     assert (
-        df["Exec_Mask"].astype(np.uint64)
-        == df["Expected_Exec_Mask"].astype(np.uint64)
+        df["Exec_Mask"].astype(np.uint64) == df["Expected_Exec_Mask"].astype(np.uint64)
     ).all(), "Exec_Mask does not match the launch-time partial-wave mask"
 
 

@@ -162,8 +162,8 @@ def validate_json_exec_mask_manipulation(
                 ), "Active SIMD thread count does not match Correlation_Id"
 
                 expected_exec_mask = (1 << cid) - 1
-                assert (
-                    np.uint64(exec_mask) == np.uint64(expected_exec_mask)
+                assert np.uint64(exec_mask) == np.uint64(
+                    expected_exec_mask
                 ), "Exec_Mask does not match the launch-time partial-wave mask"
             else:
                 # No more than `unique_kernels_num`` cids
