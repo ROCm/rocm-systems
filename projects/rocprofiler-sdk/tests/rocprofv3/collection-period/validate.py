@@ -41,70 +41,92 @@ class TimeWindow(object):
         return f"[{self.offset}:{self.offset+self.duration}]"
 
 
-def compute_guard(collection_period_data):
-    # Collection switches between off windows (delay) and on windows (duration). Right
-    # at each switch, a record's timestamp could belong to either window, because
-    # collection doesn't flip the instant start()/stop() is called -- the runtime applies
-    # it a little later, and by a varying amount. So the assertions ignore a guard band
-    # (in ns) on both sides of every switch, and this returns its width.
-    #
-    # The width is loose on purpose: windows are seconds long but the flip latency is
-    # sub-millisecond, so anything from a few ms to tens of ms hides the ambiguity yet
-    # still leaves nearly the whole window testable. It scales with the start()/stop()
-    # call duration (stop minus start), a rough proxy for machine load, since a slower
-    # call means a slower flip; 8x is empirically enough headroom. The 2 ms floor covers
-    # fast idle machines, where 8x a tiny call duration would undershoot timestamp jitter.
-    call_spans = []
-    for period in collection_period_data:
-        for key in ("start", "stop"):
-            if key in period.keys():
-                call_spans.append(period[key].stop - period[key].start)
+def compute_guard(period, transition):
+    # Collection doesn't flip the instant start()/stop() is called, so exclude a guard
+    # band around each transition. The call duration is a rough proxy for machine load;
+    # 8x gives the runtime headroom to apply the change, while the 2 ms floor covers
+    # timestamp jitter on fast idle machines.
+    if period is None or transition not in period.keys():
+        return int(2e6)
 
-    return max([8 * span for span in call_spans] + [int(2e6)])
+    call_span = period[transition].stop - period[transition].start
+    return max(8 * call_span, int(2e6))
 
 
 def test_collection_period_trace(json_data, collection_period_data):
-    guard = compute_guard(collection_period_data)
-
-    # off_cores: genuinely-off (delay) time, shrunk by guard -- must contain no records.
-    # on_cores:  genuinely-on (collection) time, shrunk by guard -- records expected.
+    # off_cores: genuinely-off (delay) time, shrunk by guard -- must not contain
+    # sustained collection from any thread.
+    # on_cores: genuinely-on (collection) time, shrunk by guard -- records expected.
+    #
+    # Guards are local to each boundary. A single slow start/stop call can make its
+    # adjacent core untestable, but must not erase otherwise stable windows elsewhere.
     off_cores = []
     on_cores = []
+    guards = []
+    previous_period = None
     for period in collection_period_data:
+        start_guard = compute_guard(period, "start")
+        stop_guard = compute_guard(period, "stop")
+        previous_stop_guard = compute_guard(previous_period, "stop")
+        guards.append(
+            {
+                "previous_stop": previous_stop_guard,
+                "start": start_guard,
+                "stop": stop_guard,
+            }
+        )
+
         if "delay" in period.keys():
-            beg = period.delay.start + guard
-            end = period.delay.stop - guard
+            beg = period.delay.start + previous_stop_guard
+            end = period.delay.stop - start_guard
             if end > beg:
                 off_cores.append(TimeWindow(beg, end))
 
         if "duration" in period.keys():
-            beg = period.duration.start + guard
-            end = period.duration.stop - guard
+            beg = period.duration.start + start_guard
+            end = period.duration.stop - stop_guard
             if end > beg:
                 on_cores.append(TimeWindow(beg, end))
+
+        previous_period = period
+
+    assert off_cores, f"no stable off-window cores (guards={guards})"
+    assert on_cores, f"no stable on-window cores (guards={guards})"
 
     data = json_data["rocprofiler-sdk-tool"]
 
     on_core_records = 0
+    off_core_records = {}
     for itr in ["hsa_api", "hip_api", "marker_api", "rccl_api"]:
         grp = data.buffer_records[itr]
         for record in grp:
             ts = record.start_timestamp
 
-            off_hit = [w for w in off_cores if w.in_region(ts)]
-            assert len(off_hit) == 0, (
-                f"\nrecord collected while tracing was off:\n\t{record}\n"
-                f"found in off-window(s):\n{off_hit}\nguard={guard} ns"
-            )
+            for index, window in enumerate(off_cores):
+                if window.in_region(ts):
+                    key = (index, record.thread_id)
+                    off_core_records.setdefault(key, []).append((itr, record))
 
             if any(w.in_region(ts) for w in on_cores):
                 on_core_records += 1
+
+    # An API interceptor can snapshot the active context immediately before stop_context,
+    # then be descheduled before taking the record's public start timestamp. Such a record
+    # can appear anywhere in the following off window, but there can be at most one
+    # in-flight interceptor per application thread. A second record from the same thread
+    # proves that a subsequent API call was also collected while the context was stopped.
+    for (window_index, thread_id), records in off_core_records.items():
+        assert len(records) <= 1, (
+            "multiple records from one thread were collected while tracing was off "
+            f"(window={off_cores[window_index]}, thread_id={thread_id}, "
+            f"records={records}, guards={guards})"
+        )
 
     # Sanity check: collection must have actually captured data inside the active
     # windows (guards against the feature silently collecting nothing).
     assert on_core_records > 0, (
         "no records were collected inside any active collection window "
-        f"(on_cores={on_cores}, guard={guard} ns)"
+        f"(on_cores={on_cores}, guards={guards})"
     )
 
 
