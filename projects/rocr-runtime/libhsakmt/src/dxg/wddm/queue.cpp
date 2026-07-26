@@ -971,6 +971,9 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
 
   ib_size = i;
   cmdbuf_aql_frame_write_index++;
+  // Clear ven_hdr on consume so a recycled slot can't transiently read a stale
+  // PM4-IB format before the next producer republishes its body.
+  packet->ven_hdr = 0;
   packet->header = HSA_PACKET_TYPE_INVALID;
   return HSA_STATUS_SUCCESS;
 }
