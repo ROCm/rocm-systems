@@ -1065,6 +1065,30 @@ target_link_libraries(
 rj_configure_target(hsa_hooks_unit_test TEST)
 gtest_discover_tests(hsa_hooks_unit_test)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(
+        hsa_hotswap_rocjitsu_unit_test
+        dbt/hsa_hotswap_rocjitsu_unit_test.cpp
+    )
+    target_include_directories(
+        hsa_hotswap_rocjitsu_unit_test
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+    )
+    target_include_directories(
+        hsa_hotswap_rocjitsu_unit_test
+        SYSTEM
+        PRIVATE ${HSA_INCLUDE_DIR}
+    )
+    target_link_libraries(
+        hsa_hotswap_rocjitsu_unit_test
+        PRIVATE hsa_hotswap_rocjitsu GTest::gtest_main
+    )
+    rj_configure_target(hsa_hotswap_rocjitsu_unit_test TEST)
+    gtest_discover_tests(hsa_hotswap_rocjitsu_unit_test)
+endif()
+
 # --- Interposer loader initialization regression tests ---
 
 add_library(early_mmap_preload SHARED early_mmap_preload_test.cpp)

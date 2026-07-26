@@ -426,6 +426,12 @@ install(
     TARGETS rocjitsu_shared rocjitsu_hooks
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    install(
+        TARGETS hsa_hotswap_rocjitsu
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     install(

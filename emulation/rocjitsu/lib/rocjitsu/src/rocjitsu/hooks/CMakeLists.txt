@@ -46,3 +46,50 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
         PRIVATE -Wall -Wextra -Wpedantic -Werror
     )
 endif()
+
+# Dedicated eager-only HSA hotswap hook. Keep this separate from the general
+# DBT hook: its only translation dependency is the fixed-profile gfx1250
+# B0-to-A0 library.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(hsa_hotswap_rocjitsu SHARED gfx1250_b0_a0_hotswap.cpp)
+    set_target_properties(
+        hsa_hotswap_rocjitsu
+        PROPERTIES OUTPUT_NAME hsa_hotswap_rocjitsu INSTALL_RPATH "$ORIGIN"
+    )
+    target_link_libraries(
+        hsa_hotswap_rocjitsu
+        PRIVATE rocjitsu_gfx1250_b0_to_a0 Threads::Threads
+    )
+    target_include_directories(
+        hsa_hotswap_rocjitsu
+        PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR}
+    )
+    target_include_directories(
+        hsa_hotswap_rocjitsu
+        SYSTEM
+        PRIVATE ${HSA_INCLUDE_DIR}
+    )
+    rj_configure_target(
+        hsa_hotswap_rocjitsu
+        WARNINGS
+        HIDDEN
+    )
+    target_compile_options(
+        hsa_hotswap_rocjitsu
+        PRIVATE -ffunction-sections -fdata-sections
+    )
+    set(_hsa_hotswap_exports
+        ${CMAKE_CURRENT_SOURCE_DIR}/hsa_hotswap_rocjitsu.map
+    )
+    set_property(
+        TARGET hsa_hotswap_rocjitsu
+        APPEND
+        PROPERTY LINK_DEPENDS ${_hsa_hotswap_exports}
+    )
+    target_link_options(
+        hsa_hotswap_rocjitsu
+        PRIVATE
+            "LINKER:--gc-sections"
+            "LINKER:--version-script=${_hsa_hotswap_exports}"
+    )
+endif()

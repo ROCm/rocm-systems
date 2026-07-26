@@ -1,0 +1,278 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include <gtest/gtest.h>
+
+#include "hsa/hsa_api_trace_minimal.h"
+
+#include <cstdint>
+#include <cstring>
+#include <new>
+#include <unordered_map>
+#include <vector>
+
+extern "C" bool OnLoad(HsaApiTable *, uint64_t, uint64_t, const char *const *);
+extern "C" void OnUnload();
+
+namespace {
+
+constexpr hsa_agent_t kA0Agent{1250};
+constexpr hsa_executable_t kExecutable{42};
+constexpr uint32_t kAsicRevisionAttribute = 0xA012;
+
+struct ReaderView {
+  const uint8_t *bytes;
+  size_t size;
+};
+
+uint64_t g_next_reader = 1;
+std::unordered_map<uint64_t, ReaderView> g_readers;
+std::vector<uint8_t> g_loaded_bytes;
+hsa_code_object_reader_t g_loaded_reader{};
+hsa_status_t g_reader_destroy_status = HSA_STATUS_SUCCESS;
+hsa_status_t g_executable_destroy_status = HSA_STATUS_SUCCESS;
+uint32_t g_asic_revision = 0;
+int g_reader_destroy_calls = 0;
+int g_load_agent_calls = 0;
+int g_load_program_calls = 0;
+int g_load_deprecated_calls = 0;
+bool g_throw_from_deprecated_load = false;
+
+void reset_fakes() {
+  g_next_reader = 1;
+  g_readers.clear();
+  g_loaded_bytes.clear();
+  g_loaded_reader = {};
+  g_reader_destroy_status = HSA_STATUS_SUCCESS;
+  g_executable_destroy_status = HSA_STATUS_SUCCESS;
+  g_asic_revision = 0;
+  g_reader_destroy_calls = 0;
+  g_load_agent_calls = 0;
+  g_load_program_calls = 0;
+  g_load_deprecated_calls = 0;
+  g_throw_from_deprecated_load = false;
+}
+
+hsa_status_t HSA_API fake_iterate_agents(hsa_status_t (*callback)(hsa_agent_t, void *),
+                                         void *data) {
+  return callback == nullptr ? HSA_STATUS_ERROR_INVALID_ARGUMENT : callback(kA0Agent, data);
+}
+
+hsa_status_t HSA_API fake_agent_get_info(hsa_agent_t agent, hsa_agent_info_t attribute,
+                                         void *value) {
+  if (agent.handle != kA0Agent.handle || value == nullptr ||
+      static_cast<uint32_t>(attribute) != kAsicRevisionAttribute)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  *static_cast<uint32_t *>(value) = g_asic_revision;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_agent_iterate_isas(hsa_agent_t agent,
+                                             hsa_status_t (*callback)(hsa_isa_t, void *),
+                                             void *data) {
+  if (agent.handle != kA0Agent.handle || callback == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  return callback(hsa_isa_t{1250}, data);
+}
+
+hsa_status_t HSA_API fake_isa_get_info(hsa_isa_t isa, hsa_isa_info_t attribute, void *value) {
+  constexpr char kIsaName[] = "amdgcn-amd-amdhsa--gfx1250";
+  if (isa.handle != 1250 || value == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (attribute == HSA_ISA_INFO_NAME_LENGTH) {
+    *static_cast<uint32_t *>(value) = sizeof(kIsaName);
+    return HSA_STATUS_SUCCESS;
+  }
+  if (attribute == HSA_ISA_INFO_NAME) {
+    std::memcpy(value, kIsaName, sizeof(kIsaName));
+    return HSA_STATUS_SUCCESS;
+  }
+  return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+}
+
+hsa_status_t HSA_API fake_create_file(hsa_file_t, hsa_code_object_reader_t *reader) {
+  if (reader == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  *reader = hsa_code_object_reader_t{g_next_reader++};
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_create_memory(const void *bytes, size_t size,
+                                        hsa_code_object_reader_t *reader) {
+  if (bytes == nullptr || size == 0 || reader == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  *reader = hsa_code_object_reader_t{g_next_reader++};
+  g_readers.emplace(reader->handle, ReaderView{static_cast<const uint8_t *>(bytes), size});
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_destroy_reader(hsa_code_object_reader_t reader) {
+  ++g_reader_destroy_calls;
+  if (g_reader_destroy_status == HSA_STATUS_SUCCESS)
+    g_readers.erase(reader.handle);
+  return g_reader_destroy_status;
+}
+
+hsa_status_t HSA_API fake_destroy_executable(hsa_executable_t) {
+  return g_executable_destroy_status;
+}
+
+hsa_status_t HSA_API fake_load_agent(hsa_executable_t, hsa_agent_t, hsa_code_object_reader_t reader,
+                                     const char *, hsa_loaded_code_object_t *loaded) {
+  ++g_load_agent_calls;
+  g_loaded_reader = reader;
+  const auto it = g_readers.find(reader.handle);
+  if (it == g_readers.end())
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
+  g_loaded_bytes.assign(it->second.bytes, it->second.bytes + it->second.size);
+  if (loaded != nullptr)
+    loaded->handle = 99;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_load_program(hsa_executable_t, hsa_code_object_reader_t, const char *,
+                                       hsa_loaded_code_object_t *) {
+  ++g_load_program_calls;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_load_deprecated(hsa_executable_t, hsa_agent_t, hsa_code_object_t,
+                                          const char *) {
+  ++g_load_deprecated_calls;
+  if (g_throw_from_deprecated_load)
+    throw std::bad_alloc();
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_get_extension_table(uint16_t, uint16_t, size_t, void *) {
+  return HSA_STATUS_SUCCESS;
+}
+
+struct FakeApi {
+  CoreApiTable core{};
+  HsaApiTable table{};
+
+  FakeApi() {
+    core.version.minor_id = sizeof(core);
+    table.version.minor_id = sizeof(table);
+    table.core_ = &core;
+    core.hsa_iterate_agents_fn = fake_iterate_agents;
+    core.hsa_agent_get_info_fn = fake_agent_get_info;
+    core.hsa_agent_iterate_isas_fn = fake_agent_iterate_isas;
+    core.hsa_isa_get_info_alt_fn = fake_isa_get_info;
+    core.hsa_code_object_reader_create_from_file_fn = fake_create_file;
+    core.hsa_code_object_reader_create_from_memory_fn = fake_create_memory;
+    core.hsa_code_object_reader_destroy_fn = fake_destroy_reader;
+    core.hsa_executable_destroy_fn = fake_destroy_executable;
+    core.hsa_executable_load_agent_code_object_fn = fake_load_agent;
+    core.hsa_executable_load_program_code_object_fn = fake_load_program;
+    core.hsa_executable_load_code_object_fn = fake_load_deprecated;
+    core.hsa_system_get_major_extension_table_fn = fake_get_extension_table;
+  }
+};
+
+class HsaHotswapHookTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    OnUnload();
+    reset_fakes();
+  }
+  void TearDown() override { OnUnload(); }
+
+  FakeApi api;
+};
+
+TEST_F(HsaHotswapHookTest, InstallsOnlyTheEightEntryEagerSurface) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+
+  EXPECT_NE(api.core.hsa_code_object_reader_create_from_file_fn, fake_create_file);
+  EXPECT_NE(api.core.hsa_code_object_reader_create_from_memory_fn, fake_create_memory);
+  EXPECT_NE(api.core.hsa_code_object_reader_destroy_fn, fake_destroy_reader);
+  EXPECT_NE(api.core.hsa_executable_destroy_fn, fake_destroy_executable);
+  EXPECT_NE(api.core.hsa_executable_load_agent_code_object_fn, fake_load_agent);
+  EXPECT_NE(api.core.hsa_executable_load_program_code_object_fn, fake_load_program);
+  EXPECT_NE(api.core.hsa_executable_load_code_object_fn, fake_load_deprecated);
+  EXPECT_NE(api.core.hsa_system_get_major_extension_table_fn, fake_get_extension_table);
+
+  EXPECT_EQ(api.core.hsa_iterate_agents_fn, fake_iterate_agents);
+  EXPECT_EQ(api.core.hsa_agent_get_info_fn, fake_agent_get_info);
+  EXPECT_EQ(api.core.hsa_agent_iterate_isas_fn, fake_agent_iterate_isas);
+  EXPECT_EQ(api.core.hsa_isa_get_info_alt_fn, fake_isa_get_info);
+}
+
+TEST_F(HsaHotswapHookTest, UnloadRestoresAndAllowsReinstall) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  OnUnload();
+  EXPECT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn, fake_create_memory);
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn, fake_load_agent);
+
+  EXPECT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+}
+
+TEST_F(HsaHotswapHookTest, UsesImmutableSnapshotForForwardedA0Load) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  std::vector<uint8_t> source{1, 2, 3, 4};
+  const std::vector<uint8_t> expected = source;
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
+      HSA_STATUS_SUCCESS);
+  source.assign(source.size(), 0xff);
+
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_loaded_bytes, expected);
+  EXPECT_NE(g_loaded_reader.handle, reader.handle);
+  EXPECT_EQ(g_load_agent_calls, 1);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(HsaHotswapHookTest, FailedReaderDestroyKeepsCapturedBytes) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source{1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
+      HSA_STATUS_SUCCESS);
+
+  g_reader_destroy_status = HSA_STATUS_ERROR;
+  EXPECT_EQ(api.core.hsa_code_object_reader_destroy_fn(reader), HSA_STATUS_ERROR);
+  g_reader_destroy_status = HSA_STATUS_SUCCESS;
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+}
+
+TEST_F(HsaHotswapHookTest, FileCaptureFailureDestroysCreatedReader) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  hsa_code_object_reader_t reader{777};
+  EXPECT_EQ(api.core.hsa_code_object_reader_create_from_file_fn(-1, &reader),
+            HSA_STATUS_ERROR_OUT_OF_RESOURCES);
+  EXPECT_EQ(reader.handle, 0u);
+  EXPECT_EQ(g_reader_destroy_calls, 1);
+}
+
+TEST_F(HsaHotswapHookTest, RefusesAgentlessAndDeprecatedA0Loads) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  EXPECT_EQ(api.core.hsa_executable_load_program_code_object_fn(
+                kExecutable, hsa_code_object_reader_t{1}, nullptr, nullptr),
+            HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS);
+  EXPECT_EQ(g_load_program_calls, 0);
+  EXPECT_EQ(api.core.hsa_executable_load_code_object_fn(kExecutable, kA0Agent, hsa_code_object_t{1},
+                                                        nullptr),
+            HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS);
+  EXPECT_EQ(g_load_deprecated_calls, 0);
+}
+
+TEST_F(HsaHotswapHookTest, ContainsExceptionsAtTheHsaBoundary) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  g_asic_revision = 1;
+  g_throw_from_deprecated_load = true;
+  EXPECT_EQ(api.core.hsa_executable_load_code_object_fn(kExecutable, kA0Agent, hsa_code_object_t{1},
+                                                        nullptr),
+            HSA_STATUS_ERROR_OUT_OF_RESOURCES);
+  EXPECT_EQ(g_load_deprecated_calls, 1);
+}
+
+} // namespace
