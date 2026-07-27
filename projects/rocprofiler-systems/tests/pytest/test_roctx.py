@@ -52,14 +52,9 @@ class TestROCTx(RocprofsysTest):
 
     def roctx_expected_labels(self) -> list[str]:
         # The validate-perfetto-proto.py script aggregates (name, depth) pairs from
-        # the Perfetto slice table in dict-insertion order.  Because roctxRangeStart
-        # and roctxRangePush are each called on BOTH the main thread and the worker
-        # thread, both depths for a given name accumulate into the same outer dict
-        # entry (name → {depth: count}).  The flat list therefore groups all depths
-        # of the same name together, in the order those depths were first seen:
+        # the Perfetto slice table in dict-insertion order. Ex:
         #   roctxRangeStart_GPU_Compute  d=2 (main, first call) then d=0 (worker)
         #   roctxRangePush_HIP_Kernel    d=3 (main)             then d=1 (worker)
-        # The per-thread marks appear after those, in thread-call order.
         return [
             "roctxMark_GPU_workload",
             "roctxRangePush_run_profiling",
