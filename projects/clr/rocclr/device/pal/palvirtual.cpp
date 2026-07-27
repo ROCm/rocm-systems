@@ -2850,6 +2850,10 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   dispatchParam.useAtc = dev().settings().svmFineGrainSystem_ ? true : false;
   dispatchParam.kernargSegmentSize = hsaKernel.argsBufferSize();
   dispatchParam.aqlPacketIndex = aql_index;
+  // Copy cluster sizes from kernel metadata to dispatch params
+  dispatchParam.clusterSizeX = static_cast<uint8>(hsaKernel.getClusterSize(0));
+  dispatchParam.clusterSizeY = static_cast<uint8>(hsaKernel.getClusterSize(1));
+  dispatchParam.clusterSizeZ = static_cast<uint8>(hsaKernel.getClusterSize(2));
 
   // Update the mqd's information about scratch memory.
   amd_queue.scratch_backing_memory_location = static_cast<uint64_t>(dispatchParam.scratchAddr);
