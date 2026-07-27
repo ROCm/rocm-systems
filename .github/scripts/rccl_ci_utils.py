@@ -44,16 +44,21 @@ def setup_rccl_preload(rccl_lib_dir: Path) -> None:
 
 
 def find_rocm_sdk_lib_dirs() -> list[Path]:
-    """Find _rocm_sdk_libraries*/lib/ dirs in the pip-installed environment.
+    """Find ROCm SDK lib dirs in the pip-installed environment.
 
-    Pip wheels bundle ROCm shared libraries (libamd_smi.so, etc.) under
-    _rocm_sdk_libraries/lib/ or _rocm_sdk_libraries_<target>/lib/.
-    The CI-built librccl.so may depend on these (e.g. libamd_smi.so.26)
-    so their directories must be on LD_LIBRARY_PATH.
+    Pip wheels bundle ROCm shared libraries under _rocm_sdk_libraries/lib/,
+    _rocm_sdk_libraries_<target>/lib/, _rocm_sdk_core/lib/, etc.
+    The CI-built librccl.so may depend on these (e.g. libamd_smi.so.26
+    in _rocm_sdk_core) so their directories must be on LD_LIBRARY_PATH.
     """
     dirs: list[Path] = []
     seen: set[str] = set()
-    for pattern in ("_rocm_sdk_libraries/lib", "_rocm_sdk_libraries_*/lib"):
+    for pattern in (
+        "_rocm_sdk_libraries/lib",
+        "_rocm_sdk_libraries_*/lib",
+        "_rocm_sdk_core/lib",
+        "_rocm_sdk_core_*/lib",
+    ):
         for d in Path(sys.prefix).rglob(pattern):
             if d.is_dir() and str(d) not in seen:
                 seen.add(str(d))
