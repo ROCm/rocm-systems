@@ -82,9 +82,10 @@
  * - 1.28 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED
  * - 1.29 - hsa_amd_image_create_v2, hsa_amd_interop_map_buffer_with_size
  * - 1.30 - hsa_amd_queue_get_info: engine type and SDMA engine ID
+ * - 1.31 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_EXECUTION_ISA
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 30
+#define HSA_AMD_INTERFACE_VERSION_MINOR 31
 
 #ifdef __cplusplus
 extern "C" {
@@ -986,6 +987,15 @@ typedef enum hsa_amd_agent_info_s {
    * The type of this attribute is bool.
    */
   HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
+  /**
+   * Concrete physical instruction set used by a GPU agent for hardware
+   * execution. The type of this attribute is ::hsa_isa_t. This attribute is
+   * only for hardware-specific runtime policy. Code-object and compilation
+   * target selection must use the standard agent ISA queries. API tools must
+   * preserve this value when presenting another ISA through
+   * ::HSA_AGENT_INFO_ISA.
+   */
+  HSA_AMD_AGENT_INFO_EXECUTION_ISA = 0xA125,
 } hsa_amd_agent_info_t;
 
 /**

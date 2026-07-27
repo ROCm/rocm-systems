@@ -2344,6 +2344,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       }
     } break;
     case HSA_AGENT_INFO_ISA:
+    case HSA_AMD_AGENT_INFO_EXECUTION_ISA:
       *((hsa_isa_t*)value) = core::Isa::Handle(supported_isas()[0]);
       break;
     case HSA_AGENT_INFO_EXTENSIONS: {

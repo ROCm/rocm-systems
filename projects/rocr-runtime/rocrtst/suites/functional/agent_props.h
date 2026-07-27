@@ -80,6 +80,9 @@ class AgentPropTest : public TestBase {
   // @Brief: Query Clock Counter property of agents of a ROCm platform
   void QueryAgentClockCounters();
 
+  // @Brief: Query physical execution ISA property of GPU agents
+  void QueryAgentExecutionIsa();
+
  private:
   // Capture value for all agents on system
   std::vector<std::string> propList_;

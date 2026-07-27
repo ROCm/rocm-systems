@@ -507,6 +507,7 @@ TEST(rocrtstFunc, AgentPropertiesTests) {
     if (!RunCustomTestProlog(&propTest)) return;
     propTest.QueryAgentUUID();
     propTest.QueryAgentClockCounters();
+    propTest.QueryAgentExecutionIsa();
     RunCustomTestEpilog(&propTest);
 }
 

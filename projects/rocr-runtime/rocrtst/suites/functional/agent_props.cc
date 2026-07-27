@@ -239,4 +239,22 @@ void AgentPropTest::QueryAgentClockCounters() {
   }
 }
 
+void AgentPropTest::QueryAgentExecutionIsa() {
+  std::vector<hsa_agent_t> gpus;
+  hsa_status_t err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  for (hsa_agent_t gpu : gpus) {
+    hsa_isa_t isa = {};
+    hsa_isa_t execution_isa = {};
+    err = hsa_agent_get_info(gpu, HSA_AGENT_INFO_ISA, &isa);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+    err = hsa_agent_get_info(
+        gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_EXECUTION_ISA),
+        &execution_isa);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+    EXPECT_EQ(execution_isa.handle, isa.handle);
+  }
+}
+
 #undef RET_IF_HSA_ERR
