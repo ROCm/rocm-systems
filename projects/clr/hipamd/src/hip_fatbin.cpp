@@ -14,6 +14,7 @@
 #include "comgrctx.hpp"
 #include "amd_hsa_elf.hpp"
 #include "hip_comgr_helper.hpp"
+#include "hotswap.hpp"
 
 #if ROCM_KPACK_ENABLED
 #include <rocm_kpack/kpack.h>
@@ -406,8 +407,11 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     if (fdesc != amd::Os::FDescInit()) amd::Os::CloseFileHandle(fdesc);
   });
 
+  // Readable bytes from image_ to the end of its mapping; used to bound the ELF
+  // parse on the in-memory path (e.g. hipModuleLoadData) where no length is given.
+  size_t image_region_bound = 0;
   if (image_ != nullptr) {
-    if (!amd::Os::FindFileNameFromAddress(image_, &fname_, &foffset_)) {
+    if (!amd::Os::FindFileNameFromAddress(image_, &fname_, &foffset_, &image_region_bound)) {
       fname_ = std::string("");
       foffset_ = 0;
     }
@@ -435,8 +439,20 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   // It better be elf if its neither compressed nor uncompressed
   if (!is_compressed && !is_uncompressed) {
     if (IsCodeObjectElf(image_)) {
-      // Load the binary directly
-      auto elf_size = amd::Elf::getElfSize(image_);
+      // Use the exact file size when known, else the mapping bound derived above.
+      size_t buf_size = image_size_ != 0 ? image_size_ : image_region_bound;
+      if (buf_size == 0) {
+        LogError("Cannot determine bounds of in-memory code object");
+        return hipErrorInvalidImage;
+      }
+      auto elf_size = amd::Elf::getElfSize(image_, buf_size);
+      // If we got 0, validation has failed.
+      if (elf_size == 0) {
+        LogPrintfError(
+            "Invalid ELF code object: failed size/bounds validation, image_size is: %zu",
+            buf_size);
+        return hipErrorInvalidImage;
+      }
       for (auto* device : devices) {
         if (hipSuccess != AddDevProgram(device, image_, elf_size, fdesc))
           return hipErrorInvalidImage;
@@ -461,6 +477,18 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     auto generic_name = TargetToGeneric(device_name);
     if (!generic_name.empty()) {
       unique_isa_names.insert(generic_name);
+    }
+  }
+
+  // HotSwap: also request supported source ISAs for forwarding (skipped when forcing SPIRV).
+  if (amd::hotswap::Enabled() && !HIP_FORCE_SPIRV_CODEOBJECT) {
+    for (auto device : devices) {
+      const std::string target_gfx = device->devices()[0]->isa().processorName();
+      for (const amd::hotswap::SourceTargetPair& p : amd::hotswap::kSupportedPairs) {
+        if (target_gfx == p.target) {
+          unique_isa_names.insert(std::string("amdgcn-amd-amdhsa--") + p.source);
+        }
+      }
     }
   }
 
@@ -490,9 +518,37 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       auto native_co = code_obj_map.find(device_name);           // Native Code Object
       auto generic_co = code_obj_map.find(generic_target_name);  // generic Code Object
 
+      // HotSwap: pick the first supported source bundle for this device's target.
+      auto hotswap_co = code_obj_map.end();
+      if (amd::hotswap::Enabled() && !HIP_FORCE_SPIRV_CODEOBJECT) {
+        const std::string target_gfx = device->devices()[0]->isa().processorName();
+        for (const amd::hotswap::SourceTargetPair& p : amd::hotswap::kSupportedPairs) {
+          if (target_gfx != p.target) {
+            continue;
+          }
+          for (auto it = code_obj_map.begin(); it != code_obj_map.end(); ++it) {
+            if (amd::hotswap::IsaIsGfx(it->first, p.source)) {
+              hotswap_co = it;
+              break;
+            }
+          }
+          if (hotswap_co != code_obj_map.end()) {
+            break;
+          }
+        }
+      }
 
-      // If the size is not 0, that means we found the native isa code object
-      if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
+      // HotSwap: forward the chosen source bundle first so the HSA loader transpiles/rewrites it.
+      if (hotswap_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
+        LogPrintfInfo("HotSwap: forwarding %s for transpilation to device %s",
+                      hotswap_co->first.c_str(), device_name.c_str());
+        hip_status =
+            AddDevProgram(device, hotswap_co->second.first, hotswap_co->second.second, fdesc);
+        if (hip_status != hipSuccess) {
+          break;
+        }
+        // If the size is not 0, that means we found the native isa code object
+      } else if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
         hip_status =
             AddDevProgram(device, native_co->second.first, native_co->second.second, fdesc);
         if (hip_status != hipSuccess) {

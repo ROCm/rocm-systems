@@ -12,12 +12,69 @@ executionctx:
     <<: *level_2
   Unit_hipExecutionCtxStreamDestroy_Negative:
     <<: *level_2
-    disabled: [amd_linux, amd_windows]
+    disabled: [amd_linux, amd_windows, amd_wsl]
+  Unit_hipExecutionCtxStreamDetached_StreamApis_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_EventRecord_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_KernelLaunch_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_MemcpyAsync_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_MemsetAsync_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_MempoolAsync_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_HmmAsync_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_GraphLaunch_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_StreamCapture_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_ActiveCapture_Invalidated:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_ParallelCapture_Invalidated:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_MetadataGetters_Succeed:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_StreamOutlivesCtx:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_StreamDestroyedBeforeCtx:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_MultipleStreams:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_EmptyCtx:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_MultiCtx_Isolation:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_RegularStream_NotAffected:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_DefaultStreams_NeverDetach:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_StreamMemOps_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_MemcpyBatch_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_EventRecordedBeforeDetach_StillUsable:
+    <<: *level_2
   Unit_hipExecutionCtxRecordWaitEvent_Sanity:
     <<: *level_2
   Unit_hipExecutionCtxRecordEventFunctional:
     <<: *level_2
   Unit_hipExecutionCtxRecordWait_Blocking:
+    <<: *level_2
+  Unit_hipExecutionCtxRecordEvent_ElapsedTime_SingleStream:
+    <<: *level_2
+  Unit_hipExecutionCtxRecordEvent_ElapsedTime_MultiStream:
+    <<: *level_2
+    disabled: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+  Unit_hipExecutionCtxRecordWaitEvent_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxWaitEvent_CrossCtx:
+    <<: *level_2
+  Unit_hipExecutionCtxRecordEvent_WaitFromPlainStream:
+    <<: *level_2
+  Unit_hipExecutionCtxWaitEvent_RecordedOnPlainStream:
     <<: *level_2
   Unit_hipExecutionCtxResourceSplit_Sanity:
     <<: *level_2
@@ -36,3 +93,33 @@ executionctx:
   Unit_hipExecutionCtxResourceSplit_Disjoint_Sets:
     <<: *level_2
     disabled: [nvidia_linux]
+  Unit_hipExecutionCtxSmAlignment_DeviceGetDevResource:
+    <<: *level_2
+  Unit_hipExecutionCtxSmAlignment_StreamGetDevResource:
+    <<: *level_2
+  Unit_hipExecutionCtxSmAlignment_PropagatesThroughSplit:
+    <<: *level_2
+  Unit_hipExecutionCtxSmAlignment_GreenCtxPreservesAlignment:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_Sanity:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_Consistent:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_MultiDevice:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_GetDevice_RoundTrip:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_GetId:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_Negative:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_KernelLaunch_Functional:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_PrimaryCtx_Persistence:
+    <<: *level_2
+  Unit_hipStreamGetDevResource_GreenCtxStream_Functional:
+    <<: *level_2
+  Unit_hipStreamGetDevResource_RegularStream_Functional:
+    <<: *level_2
+  Unit_hipStreamGetDevResource_Negative:
+    <<: *level_2

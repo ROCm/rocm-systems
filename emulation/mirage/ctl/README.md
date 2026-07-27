@@ -16,9 +16,9 @@ kill the daemon
 ### mirage workload create
 --name filename.json
 
-a wizard to help create a workload
+prompts interactively to help create a workload
 has a bunch of arguments to prefill things you could want
-combos the profile and exec wizards
+combos the profile and exec creation prompts
 
 ### mirage workload run
 
@@ -42,7 +42,7 @@ delete a profile
 ### mirage profile create
 create a profile
 has lots of arguments for everything you could want to set for a profile
-wizard to answer questions that where not specified
+prompts for any questions that were not specified
 
 ### mirage profile import
 import a profile from a json file
@@ -68,7 +68,7 @@ upgrading mirage to refresh the bundled set.
 
 ### mirage state purge
 completely stop and purge all mirage processes and state.
-Removes the runtime, state, and cache directories; pass `--all`
+Removes the runtime and state directories; pass `--all`
 to also delete the config directory (profiles + topologies).
 
 ## mirage session

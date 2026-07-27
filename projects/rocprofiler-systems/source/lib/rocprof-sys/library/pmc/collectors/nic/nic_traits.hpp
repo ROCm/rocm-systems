@@ -5,14 +5,17 @@
 
 #include "core/agent_manager.hpp"
 #include "library/pmc/collectors/nic/device.hpp"
-#include "library/pmc/collectors/nic/nic_driver.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 
 #include <cstdint>
 #include <memory>
+#include <set>
 #include <vector>
+
+#include <spdlog/fmt/fmt.h>
+#include <spdlog/fmt/ranges.h>
 
 namespace rocprofsys::pmc::collectors::nic
 {
@@ -32,15 +35,17 @@ using ::rocprofsys::pmc::nic_device_filter;
  * - Device context storage for NIC-specific API signatures (device_name, product_name)
  * - Agent registration during device enumeration
  *
- * @tparam Driver The AMD SMI driver type (real or mock for testing)
+ * @tparam BackendProvider Device provider type.
+ * @tparam DeviceType      Concrete device type; exposes @c backend_type so traits
+ *                         stay decoupled from the AMD SMI backend headers.
  */
-template <typename DriverProvider>
+template <typename BackendProvider, typename DeviceType>
 struct nic_traits
 {
     using metrics_t         = pmc::collectors::nic::metrics;
     using enabled_metrics_t = pmc::collectors::nic::enabled_metrics;
-    using driver_t          = pmc::collectors::nic::nic_driver;
-    using device_t          = device<driver_t>;
+    using backend_t         = DeviceType::backend_type;
+    using device_t          = DeviceType;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
 
@@ -121,16 +126,21 @@ struct nic_traits
             return entries;
         }
 
-        auto devices = provider->template get_nic_devices<device_t, driver_t>();
+        auto devices = provider->template get_nic_devices<device_t>();
+
+        LOG_DEBUG("Discovered {} AI NIC device(s) via AMD SMI", devices.size());
+
+        std::set<std::string> available_names;
+        for(const auto& device : devices)
+            available_names.insert(device->get_name());
 
         for(auto& device : devices)
         {
-            if(!device->is_supported()) continue;
-
             bool should_include = false;
             switch(filter.mode)
             {
                 case device_selection_mode::ALL: should_include = true; break;
+                // Unreachable (early return above), kept for switch exhaustiveness
                 case device_selection_mode::NONE: should_include = false; break;
                 case device_selection_mode::SPECIFIC:
                     should_include = filter.names.count(device->get_name()) > 0;
@@ -139,14 +149,61 @@ struct nic_traits
 
             if(should_include)
             {
+                if(!device->is_supported())
+                {
+                    // Warn only when the user explicitly requested this device; under
+                    // ALL an unsupported (e.g. non-RDMA) NIC is expected, not an error.
+                    if(filter.mode == device_selection_mode::SPECIFIC)
+                    {
+                        LOG_WARNING("Requested NIC device [{}] ({}) has no supported "
+                                    "RDMA metrics, skipping",
+                                    device->get_index(), device->get_name());
+                    }
+                    else
+                    {
+                        LOG_DEBUG("NIC device [{}] ({}) has no supported RDMA metrics, "
+                                  "skipping",
+                                  device->get_index(), device->get_name());
+                    }
+                    continue;
+                }
+                LOG_INFO("NIC device [{}] ({}) enabled for AI NIC PMC sampling",
+                         device->get_index(), device->get_name());
                 auto supported = device->get_supported_metrics();
                 entries.push_back(device_entry{ std::move(device), supported });
             }
+            else
+            {
+                LOG_DEBUG(
+                    "NIC device [{}] ({}) excluded by ROCPROFSYS_SAMPLING_AINICS filter",
+                    device->get_index(), device->get_name());
+            }
         }
 
+        warn_invalid_names(filter, available_names);
         register_nic_agents(entries);
 
         return entries;
+    }
+
+    static void warn_invalid_names(const nic_device_filter&     filter,
+                                   const std::set<std::string>& available_names)
+    {
+        if(filter.mode != device_selection_mode::SPECIFIC) return;
+        if(available_names.empty())
+        {
+            LOG_WARNING("No AI NIC devices were discovered.");
+            return;
+        }
+        for(const auto& requested : filter.names)
+        {
+            if(available_names.find(requested) == available_names.end())
+            {
+                LOG_WARNING("Requested AI NIC device '{}' not found. "
+                            "Available device(s): [{}]",
+                            requested, fmt::join(available_names, ", "));
+            }
+        }
     }
 
     static void register_nic_agents(const std::vector<device_entry>& entries)

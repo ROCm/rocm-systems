@@ -23,9 +23,9 @@
 #pragma once
 
 #define TOOL_VERSION_MAJOR 3
-#define TOOL_VERSION_MINOR 0
+#define TOOL_VERSION_MINOR 1
 #define TOOL_VERSION_REV   0
-#define TOOL_VERSION       "3.0.0"
+#define TOOL_VERSION       "3.1.0"
 
 #include <rocprofiler-sdk/experimental/thread-trace/trace_decoder_types.h>
 #include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
@@ -55,6 +55,8 @@ using wave_t             = rocprofiler_thread_trace_decoder_wave_t;
 using perfevent_t        = rocprofiler_thread_trace_decoder_perfevent_t;
 using wave_instruction_t = rocprofiler_thread_trace_decoder_inst_t;
 using realtime_t         = rocprofiler_thread_trace_decoder_realtime_t;
+using trace_event_t      = rocprofiler_thread_trace_decoder_event_t;
+using dispatch_t         = rocprofiler_thread_trace_decoder_dispatch_t;
 
 class GlobalDefs
 {

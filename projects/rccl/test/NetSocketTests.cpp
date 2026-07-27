@@ -893,6 +893,7 @@ TEST_F(NetSocketTests, TestConcurrentOperationsTaskCreation) {
                           {"NCCL_NSOCKS_PERTHREAD", "2"},
                           {"NCCL_DEBUG", "TRACE"},
                           {"NCCL_DEBUG_SUBSYS", "ALL"}})
+        .withNumGpus(0)
   );
 }
 
@@ -1219,6 +1220,7 @@ TEST_F(NetSocketTests, TestExcessiveThreadConfig) {
                           {"NCCL_NSOCKS_PERTHREAD", "1"},
                           {"NCCL_DEBUG", "TRACE"},
                           {"NCCL_DEBUG_SUBSYS", "ALL"}})
+        .withNumGpus(0)
   );
 }
 
@@ -1338,6 +1340,7 @@ TEST_F(NetSocketTests, TestExcessiveSocketConfig) {
                           {"NCCL_NSOCKS_PERTHREAD", "10"},
                           {"NCCL_DEBUG", "TRACE"},
                           {"NCCL_DEBUG_SUBSYS", "ALL"}})
+        .withNumGpus(0)
   );
 }
 

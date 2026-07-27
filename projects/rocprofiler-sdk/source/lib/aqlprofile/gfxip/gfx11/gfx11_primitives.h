@@ -467,6 +467,8 @@ public:
         select_value(SPI_PERFCOUNTER0_SELECT);
     static auto constexpr select_value_TA_PERFCOUNTER0_SELECT =
         select_value(TA_PERFCOUNTER0_SELECT);
+    static auto constexpr select_value_TD_PERFCOUNTER0_SELECT =
+        select_value(TD_PERFCOUNTER0_SELECT);
     static auto constexpr select_value_TCP_PERFCOUNTER0_SELECT =
         select_value(TCP_PERFCOUNTER0_SELECT);
     static auto constexpr select_value_SX_PERFCOUNTER0_SELECT =
@@ -766,7 +768,7 @@ public:
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, SPI_STALL_EN, 1) |
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, SQ_STALL_EN, 1) |
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, LOWATER_OFFSET, 4) |
-            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, AUTO_FLUSH_MODE, 1);
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, AUTO_FLUSH_MODE, 0);
         return sq_thread_trace_ctrl;
     }
 

@@ -209,6 +209,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Event) {
     REQUIRE(validateHostArray(hostMem, N, 11) == true);
 
     HIP_CHECK(hipEventDestroy(stop));
+    HIP_CHECK(hipEventDestroy(start));
     HIP_CHECK(hipStreamDestroy(stream));
     free(hostMem);
     HIP_CHECK(hipFree(devMem));

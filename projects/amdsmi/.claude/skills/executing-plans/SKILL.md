@@ -1,6 +1,6 @@
 ---
 name: executing-plans
-description: "Use when a written implementation plan exists at docs/dev/plans/ and you need to execute it task-by-task in the current session with verification at each step."
+description: "Use when a written implementation plan exists at ${TMPDIR:-/tmp}/amdsmi-agent-plans/ and you need to execute it task-by-task in the current session with verification at each step."
 ---
 
 # Executing Plans — amd-smi
@@ -23,7 +23,7 @@ If subagent dispatch is available and the plan has 3+ independent tasks, prefer 
 
 ### Step 2: Workspace Setup
 
-Verify you're in an isolated workspace. If not, invoke `using-git-worktrees` before touching code.
+Verify you're in an isolated workspace. If not, invoke `amdsmi-using-git-worktrees` before touching code.
 
 ### Step 3: Execute Each Task
 
@@ -47,7 +47,7 @@ After all tasks complete:
 
 ### Step 5: Finish the Branch
 
-Invoke the `restructure-commits` skill — the "Finishing" section handles merge/PR/discard options.
+Invoke the `amdsmi-restructure-commits` skill — the "Finishing" section handles merge/PR/discard options.
 
 ## When to Stop and Ask
 
@@ -82,8 +82,8 @@ Do NOT batch-edit later tasks to compensate for an earlier task's gaps — fix t
 
 ## Required Companion Skills
 
-- **`using-git-worktrees`** — set up isolated workspace before Step 3
+- **`amdsmi-using-git-worktrees`** — set up isolated workspace before Step 3
 - **`test-driven-development`** — when the plan says "write failing test", follow strict RED-GREEN-REFACTOR
 - **`verification-before-completion`** — after every task
 - **`systematic-debugging`** — when a step fails unexpectedly
-- **`restructure-commits`** — to finish the branch (Step 5)
+- **`amdsmi-restructure-commits`** — to finish the branch (Step 5)

@@ -306,6 +306,7 @@ enum OpSelVgpr {
 
 [[nodiscard]] constexpr bool is_vgpr_operand_type(OperandType t) {
   switch (t) {
+  case OperandType::OPR_SRC:
   case OperandType::OPR_SRC_VGPR:
   case OperandType::OPR_SRC_VGPR_OR_INLINE:
   case OperandType::OPR_VGPR:

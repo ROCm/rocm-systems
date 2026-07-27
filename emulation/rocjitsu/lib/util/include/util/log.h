@@ -38,8 +38,11 @@ class Logger {
 public:
   /// @brief Log group IDs, independently enableable via RJ_LOG_GROUPS.
   enum Group : unsigned {
-    GROUP_VM = 0, ///< Kernel dispatch, instruction execution, memory access, etc.
-    // Future groups added here
+    GROUP_VM = 0,        ///< Instruction execution, VGPR dumps, memory access.
+    GROUP_CP = 1,        ///< Command processor: doorbell, dispatch, completion.
+    GROUP_DBT_HOOKS = 2, ///< ROCR HSA tools DBT hook tracing.
+    GROUP_PLUGINS = 3,   ///< Plugin discovery, loading, and configuration.
+    GROUP_DRIVER = 4,    ///< KFD driver: ioctl dispatch, process/session state.
   };
 
   /// @brief Human-readable group name for log prefixes.
@@ -47,6 +50,14 @@ public:
     switch (group_id) {
     case GROUP_VM:
       return "VM";
+    case GROUP_CP:
+      return "CP";
+    case GROUP_DBT_HOOKS:
+      return "DBT_HOOKS";
+    case GROUP_PLUGINS:
+      return "PLUGINS";
+    case GROUP_DRIVER:
+      return "DRIVER";
     default:
       return " ";
     }
@@ -147,6 +158,54 @@ public:
     requires std::invocable<Fn, std::ostringstream &>
   static void vm(Fn &&fn) {
     print<GROUP_VM>(std::forward<Fn>(fn));
+  }
+
+  /// @brief Convenience for logging in GROUP_CP, variadic.
+  template <typename... Args> static void cp(Args &&...args) {
+    print<GROUP_CP>(std::forward<Args>(args)...);
+  }
+
+  /// @brief Convenience for logging in GROUP_CP, lambda.
+  template <typename Fn>
+    requires std::invocable<Fn, std::ostringstream &>
+  static void cp(Fn &&fn) {
+    print<GROUP_CP>(std::forward<Fn>(fn));
+  }
+
+  /// @brief Convenience for logging ROCR HSA tools DBT hook activity.
+  template <typename... Args> static void dbt_hooks(Args &&...args) {
+    print<GROUP_DBT_HOOKS>(std::forward<Args>(args)...);
+  }
+
+  /// @brief Lambda overload for ROCR HSA tools DBT hook logging.
+  template <typename Fn>
+    requires std::invocable<Fn, std::ostringstream &>
+  static void dbt_hooks(Fn &&fn) {
+    print<GROUP_DBT_HOOKS>(std::forward<Fn>(fn));
+  }
+
+  /// @brief Convenience for logging plugin discovery/loading, variadic.
+  template <typename... Args> static void plugins(Args &&...args) {
+    print<GROUP_PLUGINS>(std::forward<Args>(args)...);
+  }
+
+  /// @brief Lambda overload for plugin discovery/loading logging.
+  template <typename Fn>
+    requires std::invocable<Fn, std::ostringstream &>
+  static void plugins(Fn &&fn) {
+    print<GROUP_PLUGINS>(std::forward<Fn>(fn));
+  }
+
+  /// @brief Convenience for logging in GROUP_DRIVER, variadic.
+  template <typename... Args> static void driver(Args &&...args) {
+    print<GROUP_DRIVER>(std::forward<Args>(args)...);
+  }
+
+  /// @brief Convenience for logging in GROUP_DRIVER, lambda.
+  template <typename Fn>
+    requires std::invocable<Fn, std::ostringstream &>
+  static void driver(Fn &&fn) {
+    print<GROUP_DRIVER>(std::forward<Fn>(fn));
   }
 
 private:

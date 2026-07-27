@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -33,7 +34,7 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
     : simdojo::CompositeComponent(std::move(name)), config_(config), memory_(memory),
       wf_size_(wf_size), decoder_(Decoder::create(config.arch)), l2_(l2), l1_scalar_(l2),
       l1_vector_(l2), lds_(config.lds_size_kb), scalar_mem_pipeline_(&l1_scalar_),
-      global_mem_pipeline_(&l1_vector_, l2), local_mem_pipeline_(&lds_) {
+      global_mem_pipeline_(&l1_vector_, l2), local_mem_pipeline_() {
   if (!decoder_)
     throw std::runtime_error("Unsupported architecture for ComputeUnit decoder");
 
@@ -44,11 +45,12 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
 
   wfs_.resize(config.num_wf_slots);
   sgpr_file_.init(config.num_wf_slots * config.sgprs_per_wf, config.sgprs_per_wf);
+  sgpr_to_wave_.resize(config.num_wf_slots * config.sgprs_per_wf, nullptr);
 
   // Completer port: CP sends dispatch activation messages here.
   cpl_ = add_port(std::make_unique<simdojo::Port>("cpl", 0, this, simdojo::PortDirection::IN,
                                                   simdojo::PortProtocol::DISPATCH));
-  cpl_->set_handler([this](simdojo::Tick, simdojo::Message *) { activate(); });
+  cpl_->set_handler([this](simdojo::Tick, simdojo::Message *) { schedule_work(); });
 
   // Requester port: structural connection to shared L2 cache.
   req_ = add_port(std::make_unique<simdojo::Port>("req", 1, this, simdojo::PortDirection::OUT,
@@ -72,6 +74,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
     break
 
   switch (config.arch) {
+    // \NPI new ISA family: add ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_<NAME>, <isa>::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA1, cdna1::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA2, cdna2::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA3, cdna3::Isa);
@@ -81,6 +84,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3, rdna3::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA4, rdna4::Isa);
+    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::Isa);
   default:
     break;
   }
@@ -88,16 +92,11 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
   throw std::runtime_error("Unsupported architecture for ComputeUnit");
 }
 
-Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sgprs,
-                                        uint32_t vgprs) {
+Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
+                                        uint32_t num_vgprs) {
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
-  // Free register allocations from previously halted wavefronts before claiming
-  // a new slot. This is needed so SGPR/VGPR blocks can be reused. However, we
-  // must NOT reset the LDS allocator here — that would zero next_lds_alloc_
-  // between WF dispatches of the same WG, causing concurrent WGs to share
-  // the same LDS base. The LDS reset is handled separately by the CP.
-  retire_halted_wfs_no_lds_reset();
-  // Find an idle slot.
+  // Halted wavefronts have already freed their SGPR/VGPR blocks at s_endpgm, so a
+  // halted slot is immediately available. Find an idle slot.
   size_t slot = config_.num_wf_slots;
   for (size_t i = 0; i < wfs_.size(); ++i) {
     if (wfs_[i]->is_halted()) {
@@ -105,26 +104,29 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
       break;
     }
   }
+
+  // No free slot: fail the dispatch (like the register-allocation failures below)
+  // rather than indexing wfs_ out of bounds. The CP normally gates placement on
+  // can_accept_workgroup(), but returning nullptr is part of this API's contract
+  // and must hold even when a caller dispatches directly to a full CU.
   if (slot >= config_.num_wf_slots)
     return nullptr;
 
-  int32_t sgpr_base = sgpr_file_.allocate(sgprs);
+  int32_t sgpr_base = sgpr_file_.allocate(num_sgprs);
   if (sgpr_base < 0)
     return nullptr;
 
-  int32_t vgpr_base = allocate_vgprs(vgprs);
+  int32_t vgpr_base = allocate_vgprs(num_vgprs);
   if (vgpr_base < 0) {
     sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
     return nullptr;
   }
 
   // Zero the allocated register blocks so reused slots don't inherit stale
-  // values from previous kernel runs. Without this, wavefronts reading
-  // uninitialized registers (e.g., user SGPRs not set by init_wavefront_regs)
-  // see leftover data from the prior occupant.
+  // values from previous kernel runs.
   std::fill(&sgpr_file_[sgpr_base], &sgpr_file_[sgpr_base] + config_.sgprs_per_wf, 0u);
-  std::memset(vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
-              config_.vgprs_per_wf * wf_size_ * sizeof(uint32_t));
+  std::memset(raw_vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
+              vgpr_allocation_block_size() * wf_size_ * sizeof(uint32_t));
 
   // Invalidate the L1 scalar cache so this wavefront reads fresh kernel
   // arguments from L2/memory rather than stale lines from a prior kernel.
@@ -134,68 +136,78 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   auto *wf = wfs_[slot].get();
   wf->wg_id_ = wg_id;
   wf->pc = pc;
-  wf->sgpr_alloc_ = {static_cast<uint32_t>(sgpr_base), sgprs};
-  wf->vgpr_alloc_ = {static_cast<uint32_t>(vgpr_base), vgprs};
-  wf->num_sgprs_ = sgprs;
-  wf->num_vgprs_ = vgprs;
+  wf->sgpr_alloc_ = {static_cast<uint32_t>(sgpr_base), num_sgprs};
+  wf->vgpr_alloc_ = {static_cast<uint32_t>(vgpr_base), num_vgprs};
+  wf->num_sgprs_ = num_sgprs;
+  wf->num_vgprs_ = num_vgprs;
   wf->exec_ = wf_size_ == 64 ? ~0ULL : (1ULL << wf_size_) - 1;
   wf->vcc_ = 0;
   wf->m0_ = 0;
+  wf->set_apertures(shared_aperture_base_, shared_aperture_limit_, private_aperture_base_,
+                    private_aperture_limit_);
   wf->state_ = WfState::RUNNING;
+  wf->set_ready_cycle(cycle_counter_);
+  wf->trace_inst_count_ = 0;
+
+  std::fill(sgpr_to_wave_.begin() + sgpr_base, sgpr_to_wave_.begin() + sgpr_base + num_sgprs, wf);
+  fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgpr_allocation_block_size(), wf);
+
+  util::Logger::cp("DISPATCH_WF cu=", this->full_path(), " wf=", wf->wf_id(), " slot=", slot,
+                   " pc=0x", std::hex, pc, std::dec, " wg=", wg_id, " pid=", wf->process_id());
+
+  schedule_work();
   return wf;
 }
 
 size_t ComputeUnitCore::num_wfs() const {
   size_t count = 0;
   for (const auto &w : wfs_)
-    if (w->sgpr_alloc().count > 0)
+    if (!w->is_halted())
       ++count;
   return count;
 }
 
-void ComputeUnitCore::reset_all_wf() {
-  for (auto &w : wfs_) {
-    if (w->sgpr_alloc().count > 0) {
-      sgpr_file_.free(w->sgpr_alloc().base);
-      free_vgprs(w->vgpr_alloc().base);
-    }
-    w->reset();
+void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
+  if (wf.sgpr_alloc().count > 0) {
+    sgpr_file_.free(wf.sgpr_alloc().base);
+    free_vgprs(wf.vgpr_alloc().base);
   }
+  wf.trace_inst_count_ = 0;
+  wf.reset();
 }
 
-void ComputeUnitCore::retire_halted_wfs_no_lds_reset() {
-  for (auto &w : wfs_) {
-    if (w->is_halted() && w->sgpr_alloc().count > 0) {
-      sgpr_file_.free(w->sgpr_alloc().base);
-      free_vgprs(w->vgpr_alloc().base);
-      w->trace_inst_count_ = 0;
-      w->reset();
-    }
-  }
-}
-
-void ComputeUnitCore::retire_halted_wfs() {
-  for (auto &w : wfs_) {
-    if (w->is_halted() && w->sgpr_alloc().count > 0) {
-      sgpr_file_.free(w->sgpr_alloc().base);
-      free_vgprs(w->vgpr_alloc().base);
-      w->trace_inst_count_ = 0;
-      w->reset();
-    }
-  }
-  if (!has_active_wfs()) {
+void ComputeUnitCore::maybe_reset_lds_alloc() {
+  if (!has_active_wfs() && !lds_allocation_pinned())
     reset_lds_alloc();
-  }
 }
 
 void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id) {
   auto key = wg_key(dispatch_id, wg_id);
   auto it = active_wgs_.find(key);
   if (it != active_wgs_.end() && --it->second == 0) {
+    plugin_group_->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
     active_wgs_.erase(it);
     if (cp_)
       cp_->notify_wg_complete(dispatch_id, wg_id);
   }
+  // The whole workgroup's per-WG LDS region can be reclaimed once the CU has fully
+  // drained and no cluster peer can still multicast into it.
+  maybe_reset_lds_alloc();
+}
+
+void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
+  // Roll back a workgroup that was committed via begin_workgroup() but whose peers
+  // in the same clustered dispatch failed to fully dispatch. Unlike release_wf(),
+  // this fires no completion hook and no CP notify — the WG never executed. Free any
+  // resident (not-yet-halted) waves belonging to this WG, drop the refcount entry,
+  // and reclaim LDS if the CU is now idle and unpinned. The caller unpins the cluster
+  // LDS separately (the pin is CP-side bookkeeping).
+  for (const auto &w : wfs_) {
+    if (!w->is_halted() && w->dispatch_id() == dispatch_id && w->wg_id() == wg_id)
+      free_wavefront_resources(*w);
+  }
+  active_wgs_.erase(wg_key(dispatch_id, wg_id));
+  maybe_reset_lds_alloc();
 }
 
 bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes) const {
@@ -244,7 +256,31 @@ void ComputeUnitCore::tick_pipelines() {
 }
 
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
-  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst);
+  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
+
+  if (inst->data()->tag() == GLOBAL_MEM && shared_aperture_base_ != 0) {
+    auto &d = *inst->data_as<VectorMemState>();
+    uint64_t probe = 0;
+    for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+      if (d.lane_mask & (1ULL << lane)) {
+        probe = d.per_lane_addr[lane];
+        break;
+      }
+    }
+    // FLAT ops targeting the shared aperture are routed to LDS (LGKMCNT,
+    // not VMCNT).  Scratch-targeting FLATs stay on the global path.
+    if (probe >= shared_aperture_base_ && probe <= shared_aperture_limit_) {
+      for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+        if (d.lane_mask & (1ULL << lane))
+          d.per_lane_addr[lane] = (d.per_lane_addr[lane] - shared_aperture_base_) + wf.lds_base();
+      }
+      inst->data()->set_tag(LOCAL_MEM);
+      d.wait_counter_type = WaitCounterType::LGKMCNT;
+      local_mem_pipeline_.issue(inst, wf);
+      return;
+    }
+  }
+
   switch (inst->data()->tag()) {
   case SCALAR_MEM:
     scalar_mem_pipeline_.issue(inst, wf);
@@ -260,168 +296,53 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
   }
 }
 
-void ComputeUnitCore::issue_scalar_mem(uint64_t addr, uint32_t dst_sgpr, uint32_t dword_count,
-                                       Mtype /*mtype*/) {
-  // Functional mode: synchronous read through L1 scalar cache.
-  // Phase D will use mtype to select the correct cache path.
-  l1_scalar_.load(addr, dword_count, &sgpr_file_[dst_sgpr]);
-}
+void ComputeUnitCore::update_wf_states() {
+  ++cycle_counter_;
 
-void ComputeUnitCore::issue_global_mem(const std::array<uint64_t, 64> &addrs, uint64_t lane_mask,
-                                       uint32_t dst_vgpr, uint32_t dword_count, Mtype mtype) {
-  // Functional mode: synchronous per-lane read through L1 vector cache.
-  auto *dst = vgpr_data(dst_vgpr);
-  l1_vector_.load(addrs.data(), lane_mask, /*elem_size=*/4, dword_count, dst, mtype,
-                  /*non_temporal=*/false);
-}
+  for (auto &w : wfs_) {
+    if (w->state() == WfState::WAITCNT && w->wait_satisfied()) {
+      w->set_state(WfState::RUNNING);
+      w->set_ready_cycle(cycle_counter_);
+    } else if (w->state() == WfState::ENDING && w->wait_counters().empty()) {
+      w->halt();
+    }
+  }
 
-void ComputeUnitCore::issue_local_mem(const std::array<uint64_t, 64> &addrs, uint64_t lane_mask,
-                                      uint32_t dst_vgpr, uint32_t dword_count) {
-  // Functional mode: synchronous per-lane read from LDS.
-  for (uint32_t lane = 0; lane < wf_size_; ++lane) {
-    if (!(lane_mask & (1ULL << lane)))
+  for (auto &w : wfs_) {
+    if (w->state() != WfState::BARRIER)
       continue;
-    for (uint32_t d = 0; d < dword_count; ++d)
-      write_vgpr(dst_vgpr + d, lane, lds_.read32(static_cast<uint32_t>(addrs[lane] + d * 4)));
+    uint32_t did = w->dispatch_id();
+    uint32_t wg = w->wg_id();
+    bool all_at_barrier = true;
+    for (auto &w2 : wfs_) {
+      if (w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() != WfState::HALTED &&
+          w2->state() != WfState::BARRIER) {
+        all_at_barrier = false;
+        break;
+      }
+    }
+    if (all_at_barrier) {
+      std::vector<Wavefront *> barrier_wfs;
+      for (auto &w2 : wfs_)
+        if (w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() == WfState::BARRIER)
+          barrier_wfs.push_back(w2.get());
+      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(barrier_wfs));
+      for (auto *bwf : barrier_wfs) {
+        bwf->set_state(WfState::RUNNING);
+        bwf->set_ready_cycle(cycle_counter_);
+      }
+    }
   }
 }
 
-bool ComputeUnitCore::step() {
-  tick_pipelines();
-
-  {
-    static thread_local uint64_t step_count = 0;
-    if ((++step_count % 2000000) == 0) {
-      util::Logger::vm([&](auto &os) {
-        for (auto &w : wfs_) {
-          if (w->sgpr_alloc().count == 0)
-            continue;
-          const char *st = "?";
-          switch (w->state()) {
-          case WfState::HALTED:
-            st = "H";
-            break;
-          case WfState::RUNNING:
-            st = "R";
-            break;
-          case WfState::WAITCNT:
-            st = "W";
-            break;
-          case WfState::BARRIER:
-            st = "B";
-            break;
-          case WfState::ENDING:
-            st = "E";
-            break;
-          }
-          os << std::format("wf{}[d={} wg={} {}] ", w->wf_id(), w->dispatch_id(), w->wg_id(), st);
-        }
-      });
-    }
-  }
-
-  if (!has_active_wfs()) {
-    // Final pipeline drain: complete deferred load writebacks for wavefronts
-    // that halted on the previous step (after tick_pipelines ran but before
-    // the next tick could drain them).
-    tick_pipelines();
-    return false;
-  }
-
-  size_t start = next_wf_;
-  Wavefront *active = nullptr;
-  for (size_t i = 0; i < wfs_.size(); ++i) {
-    size_t idx = (start + i) % wfs_.size();
-    if (wfs_[idx]->state() == WfState::RUNNING) {
-      active = wfs_[idx].get();
-      next_wf_ = (idx + 1) % wfs_.size();
-      break;
-    }
-  }
-
-  if (active == nullptr) {
-    // Log wavefront states when no RUNNING wf found.
-    util::Logger::vm([&](auto &os) {
-      static thread_local uint64_t no_run_count = 0;
-      if (++no_run_count <= 5) {
-        uint32_t n_halt = 0, n_wait = 0, n_bar = 0;
-        for (auto &w : wfs_) {
-          if (w->state() == WfState::HALTED)
-            ++n_halt;
-          else if (w->state() == WfState::WAITCNT)
-            ++n_wait;
-          else if (w->state() == WfState::BARRIER)
-            ++n_bar;
-        }
-        os << std::format("CU {}: no RUNNING wf. halted={} waitcnt={} barrier={} has_active={}",
-                          this->name(), n_halt, n_wait, n_bar, has_active_wfs());
-      }
-    });
-    // Check for barrier resolution: if all non-halted wavefronts in a
-    // workgroup are at BARRIER, resume them all to RUNNING.
-    for (auto &w : wfs_) {
-      if (w->state() != WfState::BARRIER)
-        continue;
-      uint32_t wg = w->wg_id();
-      bool all_at_barrier = true;
-      for (auto &w2 : wfs_) {
-        if (w2->wg_id() == wg && w2->state() != WfState::HALTED &&
-            w2->state() != WfState::BARRIER) {
-          all_at_barrier = false;
-          break;
-        }
-      }
-      if (all_at_barrier) {
-        plugin_group_->onAmdgpuBarrierResolved(wg);
-        for (auto &w2 : wfs_)
-          if (w2->wg_id() == wg && w2->state() == WfState::BARRIER)
-            w2->set_state(WfState::RUNNING);
-      }
-    }
-    // Drain WAITCNT and ENDING wavefronts that are ready to proceed.
-    for (auto &w : wfs_) {
-      if (w->state() == WfState::WAITCNT && w->wait_satisfied())
-        w->set_state(WfState::RUNNING);
-      else if (w->state() == WfState::ENDING && w->wait_counters().empty())
-        w->halt();
-    }
-    retire_halted_wfs();
-    return has_active_wfs();
-  }
+void ComputeUnitCore::issue_instruction(Wavefront *active) {
+  uint32_t vmid = active->process_id();
 
   rj_code_binary_inst_t words[4];
   for (int i = 0; i < 4; ++i)
-    words[i] = memory_->fetch32(active->pc + i * 4);
+    words[i] = memory_->fetch32(active->pc + i * 4, vmid);
 
   active->trace_inst_count_++;
-
-  // No instruction-count safety valve — real kernels (Triton flash attention)
-  // can legitimately execute hundreds of thousands of instructions per wavefront.
-  // Infinite loops are detected via the dispatch logger showing no progress.
-
-  // Trace v4 and instruction words at key PCs in the fill kernel.
-  util::Logger::vm([&](auto &os) {
-    uint32_t vbase = active->vgpr_alloc().base;
-    if (active->pc == 0x4d00249258ULL) {
-      os << std::format("VOR_BEFORE pc={:#x} w0={:#x} w1(lit)={:#x} v4[0]={} v0[0]={} wf={}",
-                        active->pc, words[0], words[1], read_vgpr(vbase + 4, 0),
-                        read_vgpr(vbase + 0, 0), active->wf_id());
-    } else if (active->pc == 0x4d00249260ULL) {
-      os << std::format("VOR_AFTER pc={:#x} v4[0]={} wf={}", active->pc, read_vgpr(vbase + 4, 0),
-                        active->wf_id());
-    } else if (active->pc == 0x4d00249200ULL) {
-      static bool dumped = false;
-      if (!dumped) {
-        dumped = true;
-        os << std::format("FILL_RUNTIME_CODE at {:#x}", active->pc);
-        for (int i = 0; i < 128; i += 4)
-          os << std::format(
-              "\n[rj log VM]   +{:#x}: {:08x} {:08x} {:08x} {:08x}", i * 4,
-              memory_->fetch32(active->pc + i * 4), memory_->fetch32(active->pc + i * 4 + 4),
-              memory_->fetch32(active->pc + i * 4 + 8), memory_->fetch32(active->pc + i * 4 + 12));
-      }
-    }
-  });
 
   Instruction *inst = nullptr;
   try {
@@ -431,14 +352,14 @@ bool ComputeUnitCore::step() {
                      std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
                      ",0x", words[3], "]", std::dec, " what=", e.what());
     active->halt();
-    return has_active_wfs();
+    return;
   }
   if (!inst) {
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(null decode) pc=0x",
                      std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
                      ",0x", words[3], "]", std::dec);
     active->halt();
-    return has_active_wfs();
+    return;
   }
 
   int inst_size_signed = inst->size();
@@ -467,9 +388,44 @@ bool ComputeUnitCore::step() {
     }
   }
 
-  plugin_group_->onAmdgpuExecuteInstruction(active->pc, *inst);
+  plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
+
+  {
+    auto mn = std::string_view(inst->mnemonic());
+    if (mn.find("s_setpc") != std::string_view::npos ||
+        mn.find("s_swappc") != std::string_view::npos) {
+      uint32_t ssrc0_idx = words[0] & 0x7F;
+      uint32_t sb = active->sgpr_alloc().base;
+      uint64_t target = static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx)) |
+                        (static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx + 1)) << 32);
+      if (target == 0) {
+        active->halt();
+        delete inst;
+        return;
+      }
+    }
+  }
 
   execute_instruction(inst, *active);
+
+  // A terminating instruction (s_endpgm with no pending waits) halts the wave
+  // inside execute_instruction, which frees and resets its slot. Its registers,
+  // pc, and allocations are now zeroed, so the after-execute hook, result logging,
+  // and pc-advance below must not run on the dead slot. The dedicated
+  // onAmdgpuWavefrontHalted hook already fired (with live state) from halt().
+  // s_endpgm is never a memory op, so just reclaim the decoded instruction.
+  //
+  // Note the intentional asymmetry: an s_endpgm that defers to ENDING (pending
+  // memory waits) is NOT halted here, so it DOES fire onAmdgpuAfterExecuteInstruction
+  // below; the immediate-halt case does not. onAmdgpuWavefrontHalted is the
+  // authoritative terminal hook and fires in both cases — consumers should observe
+  // termination there, not via the after-execute hook.
+  if (active->is_halted()) {
+    delete inst;
+    return;
+  }
+
+  plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
     if (active->num_vgprs_ > 0) {
@@ -488,7 +444,6 @@ bool ComputeUnitCore::step() {
   }
 
   if (inst->is_memory_op()) {
-    // Tag store with issue PC for debugging.
     if (inst->data() && inst->data()->tag() == GLOBAL_MEM) {
       auto *d = inst->data_as<VectorMemState>();
       d->issue_pc = active->pc;
@@ -497,17 +452,38 @@ bool ComputeUnitCore::step() {
   } else
     delete inst;
 
-  // Advance PC past the current instruction. Branch execute() methods are required
-  // to account for this by computing: wf.pc = target - inst_size, so the net result
-  // after this advance is the correct branch target. Non-taken conditional branches
-  // leave wf.pc unchanged, so the +inst_size advance correctly moves to the next
-  // instruction.
   active->pc += inst_size;
+}
+
+bool ComputeUnitCore::step() {
+  update_wf_states();
+
+  for (auto &wf : wfs_) {
+    if (wf->state() == WfState::RUNNING)
+      issue_instruction(wf.get());
+  }
+
+  ++step_count_;
+  if constexpr (util::Logger::group_enabled(util::Logger::GROUP_CP)) {
+    if ((step_count_ & 0xFFFFF) == 0) {
+      util::Logger::cp([&](auto &os) {
+        os << std::format("CU[{}] steps={}M", this->full_path(), step_count_ >> 20);
+        for (auto &wf : wfs_) {
+          auto st = wf->state();
+          if (st == WfState::RUNNING || st == WfState::WAITCNT || st == WfState::BARRIER)
+            os << std::format(" wf{}:pc={:#x}:{}", wf->wf_id(), wf->pc,
+                              st == WfState::RUNNING   ? "R"
+                              : st == WfState::WAITCNT ? "W"
+                                                       : "B");
+        }
+      });
+    }
+  }
 
   return has_active_wfs();
 }
 
-// Explicit template instantiations for all 9 ISAs × 2 execution modes.
+// Explicit template instantiations for all AMDGPU ISAs and execution modes.
 #define ROCJITSU_CU_INSTANTIATE(ISA_TYPE)                                                          \
   template class IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, ISA_TYPE>;                      \
   template class IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, ISA_TYPE>
@@ -521,6 +497,7 @@ ROCJITSU_CU_INSTANTIATE(rdna2::Isa);
 ROCJITSU_CU_INSTANTIATE(rdna3::Isa);
 ROCJITSU_CU_INSTANTIATE(rdna3_5::Isa);
 ROCJITSU_CU_INSTANTIATE(rdna4::Isa);
+ROCJITSU_CU_INSTANTIATE(gfx1250::Isa);
 
 #undef ROCJITSU_CU_INSTANTIATE
 

@@ -24,6 +24,7 @@
 #include "cuid_file.h"
 #include "cuid_util.h"
 #include "pci_util.h"
+#include <algorithm>
 #include <cstring>
 #include <dirent.h>
 #include <fstream>
@@ -84,7 +85,10 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
       std::string device_path =
           std::string(drm_path) + "/" + card_name + "/device";
       amdcuid_gpu_info info = {};
-      discover_single(&info, device_path);
+      amdcuid_status_t status = CuidGpu::discover_single(&info, device_path);
+      if (status == AMDCUID_STATUS_UNSUPPORTED) {
+        continue;
+      }
 
       gpus.emplace_back(std::make_shared<CuidGpu>(info));
     }
@@ -104,6 +108,15 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
   // For VFs, unit_id is the 1-based VF index.
   // Falls back to 0 if VF detection is unavailable.
   info.header.fields.gpu.unit_id = CuidUtilities::get_gpu_vf_id(device_path);
+
+  // check for XCP partitioning by looking for pci config space file on devices
+  // where unit_id is 0 (bare metal or passthrough). If config file is missing,
+  // that indicates partition which is unsupported for CUID generation.
+  std::string config_file = device_path + "/config";
+  if (access(config_file.c_str(), F_OK) == -1 &&
+      info.header.fields.gpu.unit_id == 0) {
+    return AMDCUID_STATUS_UNSUPPORTED;
+  }
 
   std::string vendor = CuidUtilities::read_sysfs_file(device_path + "/vendor");
   if (vendor.empty() && !bdf.empty()) {
@@ -204,10 +217,6 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
 
 amdcuid_status_t
 CuidGpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
-  if (geteuid() != 0) {
-    return AMDCUID_STATUS_PERMISSION_DENIED;
-  }
-
   std::string unique_id_path = m_info.render_node + "/device/unique_id";
 
   // Try to read the unique_id from the device sysfs file
@@ -234,29 +243,36 @@ CuidGpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
       return AMDCUID_STATUS_UNSUPPORTED;
     }
   } else if (m_info.header.fields.gpu.unit_id == 0) {
-    // attempt to get fingerprint through PCI Config Space if not a partition
+    // attempt to get fingerprint through PCI Config Space if not a VF
     uint16_t offset = 0;
     amdcuid_status_t status =
-        PciUtil::get_pci_cap_offset(m_info.bdf, 0x03, offset);
+        PciUtil::get_pci_dsn_cap_offset(m_info.bdf, offset);
     if (status != AMDCUID_STATUS_SUCCESS) {
-      return status;
+      // attempt to get fingerprint through VSEC fallback if DSN capability is
+      // not found
+      status = PciUtil::get_pci_vsec_cap_offset(m_info.bdf, offset);
+      if (status != AMDCUID_STATUS_SUCCESS) {
+        fingerprint = 0;
+        return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
+      }
     }
 
-    uint8_t fingerprint_size = 8;
-    uint8_t *fingerprint_buffer = new uint8_t[fingerprint_size];
-    status = PciUtil::read_pci_config_space(m_info.bdf, fingerprint_buffer,
+    const uint8_t fingerprint_size = 8;
+    uint8_t fingerprint_bytes[fingerprint_size] = {0};
+    status = PciUtil::read_pci_config_space(m_info.bdf, fingerprint_bytes,
                                             fingerprint_size, offset);
     if (status != AMDCUID_STATUS_SUCCESS) {
       fingerprint = 0;
-      delete[] fingerprint_buffer;
       return status;
     }
     // pcie config file is little endian, so need to convert to big endian
-    fingerprint = PciUtil::le64_to_be64(
-        *reinterpret_cast<uint64_t *>(fingerprint_buffer));
-    delete[] fingerprint_buffer;
+    uint64_t fingerprint_value = 0;
+    std::memcpy(&fingerprint_value, fingerprint_bytes,
+                sizeof(fingerprint_value));
+    fingerprint = PciUtil::le64_to_be64(fingerprint_value);
   } else {
-    // partitioned device without unique_id file cannot get fingerprint
+    // partitioned device without unique_id file or pci config cannot get
+    // fingerprint
     fingerprint = 0;
     return AMDCUID_STATUS_UNSUPPORTED;
   }
@@ -264,39 +280,47 @@ CuidGpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
 }
 
 amdcuid_status_t CuidGpu::get_primary_cuid(amdcuid_primary_id &id) const {
-  if (geteuid() != 0) {
-    return AMDCUID_STATUS_PERMISSION_DENIED;
-  }
-
-  // attempt to read the CUID from the file first
-  std::string cuid_file_path = CuidUtilities::priv_cuid_file();
-  CuidFile primary_file(cuid_file_path, false);
-  primary_file.load();
-  std::vector<CuidFileEntry> entries = primary_file.get_entries();
-
-  CuidFileEntry entry;
-  amdcuid_status_t status =
-      primary_file.find_by_device_node(m_info.render_node, entry);
-  if (status == AMDCUID_STATUS_SUCCESS) {
-    id.UUIDv8_representation = entry.primary_cuid;
-    CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-    return AMDCUID_STATUS_SUCCESS;
-  }
-
-  // primary CUID not found in file so generate it
+  amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
   uint64_t fingerprint = 0;
-  status = get_hardware_fingerprint(fingerprint);
-  if (status != AMDCUID_STATUS_SUCCESS) {
-    std::memset(&id, 0, sizeof(id));
-    return status;
+  bool temp = false;
+  if (geteuid() == 0) {
+    // attempt to read the CUID from the file first
+    std::string cuid_file_path = CuidUtilities::priv_cuid_file();
+    CuidFile primary_file(cuid_file_path, false);
+    primary_file.load();
+    std::vector<CuidFileEntry> entries = primary_file.get_entries();
+
+    CuidFileEntry entry;
+    status = primary_file.find_by_device_node(m_info.render_node, entry);
+    if (status == AMDCUID_STATUS_SUCCESS && entry.is_temporary == false) {
+      id.UUIDv8_representation = entry.primary_cuid;
+      CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
+      return AMDCUID_STATUS_SUCCESS;
+    }
+
+    // primary CUID not found in file so it needs to be generated
+    status = get_hardware_fingerprint(fingerprint);
   }
+  if (geteuid() != 0 || (status != AMDCUID_STATUS_SUCCESS)) {
+    std::string bdf;
+    status = this->get_bdf(bdf);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+      return status;
+    }
+    status = CuidUtilities::make_fallback_fingerprint(bdf, fingerprint);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+      return status;
+    }
+    temp = true;
+  }
+
   // Use header fields for the rest
   amdcuid_primary_id result = {};
   const auto &h = m_info.header;
   CuidUtilities::generate_primary_cuid(
       fingerprint, h.fields.gpu.unit_id, h.fields.gpu.revision_id,
       h.fields.gpu.device_id, h.fields.gpu.vendor_id,
-      static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_GPU), &result);
+      static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_GPU), &result, temp);
 
   id = result;
   return AMDCUID_STATUS_SUCCESS;

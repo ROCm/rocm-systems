@@ -606,6 +606,9 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc_child) {
       (int *)ptrImp);
   HIP_CHECK(hipStreamSynchronize(0));
 
+  HIP_CHECK(hipFree(ptrImp));
+  HIP_CHECK(hipMemPoolDestroy(mempoolImp));
+
   checkSysCallErrors(sockObj.closeThisSock());
 }
 

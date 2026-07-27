@@ -14,6 +14,8 @@ namespace rocjitsu {
 namespace rdna4 {
 
 std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {
+  if (Vopd::is_vopd(opcode))
+    return std::make_unique<Vopd>(opcode);
   Sop1MachineInst op = std::bit_cast<decltype(op)>(*opcode);
   return primary_decode_table[op.encoding](opcode);
 }
@@ -2130,6 +2132,10 @@ std::unique_ptr<Instruction> Decoder::decodeSDelayAluSopp(const MachineInst *opc
 
 std::unique_ptr<Instruction> Decoder::decodeSWaitAluSopp(const MachineInst *opcode) {
   return std::make_unique<SWaitAluSopp>(opcode);
+}
+
+std::unique_ptr<Instruction> Decoder::decodeSWaitcntSopp(const MachineInst *opcode) {
+  return std::make_unique<SWaitcntSopp>(opcode);
 }
 
 std::unique_ptr<Instruction> Decoder::decodeSWaitIdleSopp(const MachineInst *opcode) {
@@ -7437,7 +7443,7 @@ const std::array<Decoder::DecodeFunc, 128> Decoder::sub_decode_sopp = {
     &Decoder::decodeInvalid,
     &Decoder::decodeSDelayAluSopp,
     &Decoder::decodeSWaitAluSopp,
-    &Decoder::decodeInvalid,
+    &Decoder::decodeSWaitcntSopp,
     &Decoder::decodeSWaitIdleSopp,
     &Decoder::decodeSWaitEventSopp,
     &Decoder::decodeInvalid,

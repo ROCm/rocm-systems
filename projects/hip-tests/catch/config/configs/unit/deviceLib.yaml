@@ -243,7 +243,7 @@ deviceLib:
   Unit_Test_makechar_functionality:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
     tags: [types]
   Unit_bf16_basic:
     <<: *level_2
@@ -341,6 +341,27 @@ deviceLib:
   Unit__hip_cvt_e8m0_to_bf16raw:
     <<: *level_2
     tags: [types]
+  Unit_e8m0_float_constructors:
+    <<: *level_2
+    tags: [types]
+  Unit_e8m0_int_constructors:
+    <<: *level_2
+    tags: [types]
+  Unit_e8m0_float_conversions:
+    <<: *level_2
+    tags: [types]
+  Unit_e8m0_int_conversions:
+    <<: *level_2
+    tags: [types]
+  Unit__hip_cvt_e8m0_to_double_exhaustive_host:
+    <<: *level_2
+    tags: [types]
+  Unit_e8m0_int_conversions_saturation:
+    <<: *level_2
+    tags: [types]
+  Unit_e8m0_int_conversions_saturation_boundary:
+    <<: *level_2
+    tags: [types]
   Unit_all_fp6_ocp_vector_cvt_interger_data:
     <<: *level_2
     tags: [types]
@@ -376,6 +397,79 @@ deviceLib:
     tags: [types]
   Unit_ocp_fp4_from_double_full_range_device:
     <<: *level_2
+    tags: [types]
+  Unit_ext_ocp_fp8_roundtrip_host:
+    <<: *level_2
+    # Sources compiled only on non-Windows (see unit/deviceLib/CMakeLists.txt)
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp8_known_values_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp8_scaled_decode_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp8x2_scaled_roundtrip_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp8_stochastic_rounding_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp8_fp16_bf16_source_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp8_device_matches_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp4_roundtrip_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp4_known_values_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp4_scaled_roundtrip_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp4_stochastic_rounding_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp4_fp16_bf16_source_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp4_device_matches_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp6_roundtrip_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp6_known_values_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp6_scaled_roundtrip_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp6_fp16_bf16_source_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp6_device_matches_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
     tags: [types]
   Unit_AtomicAdd_Coherent:
     <<: *level_2
@@ -482,10 +576,13 @@ deviceLib:
   Unit_hipTestHalfConstexpr_DeviceConstexpr:
     <<: *level_2
     tags: [types]
+  Unit_device_memcpy_async:
+    <<: *level_2
+    tags: [memory]
   Unit_MemcpyToSymbolInParallelWithStreamLaunch:
     <<: *level_3
     tags: [misc]
     # "============================TheRock_Bump_Windows_timeout #4547==========================="
     # "=== This is newly added test to check ASAN memory errors deduced from rocDecode ==="
     # "=== during ASAN/memleak detection work on Linux ==="
-    disabled: [amd_linux, amd_windows]
+    disabled: [amd_linux, amd_windows, amd_wsl]

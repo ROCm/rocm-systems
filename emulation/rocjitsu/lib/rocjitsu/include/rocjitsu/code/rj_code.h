@@ -43,8 +43,12 @@ typedef enum rj_code_arch_e {
   ROCJITSU_CODE_ARCH_RV32I = 9,
   /// @brief RISC-V 64-bit integer base ISA.
   ROCJITSU_CODE_ARCH_RV64I = 10,
-  /// @brief Total number of supported architectures.
-  ROCJITSU_CODE_ARCH_NUM_ARCHS = 11,
+  /// @brief gfx1250 ISA architecture.
+  ROCJITSU_CODE_ARCH_GFX1250 = 11,
+  // \NPI new ISA family: add its public architecture identifier here and wire
+  // its closed-world semantics through the ISA traits, properties, and users.
+  /// @brief Number of named, built-in architectures.
+  ROCJITSU_CODE_ARCH_NUM_ARCHS = 12,
   /// @brief Sentinel value representing an invalid architecture.
   ROCJITSU_CODE_ARCH_INVALID = ROCJITSU_CODE_ARCH_NUM_ARCHS
 } rj_code_arch_t;
@@ -63,7 +67,18 @@ typedef struct rj_code_decoder_t rj_code_decoder_t;
 /// @param[out] decoder Newly created decoder handle (refcount = 0).
 /// @retval ROCJITSU_STATUS_SUCCESS Decoder was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT if @p arch is invalid or @p decoder is NULL.
+/// @retval ROCJITSU_STATUS_ERROR if this component did not bind @p arch.
 RJ_API_EXPORT rj_status_t rj_code_decoder_create(rj_code_arch_t arch, rj_code_decoder_t **decoder);
+
+/// @brief Create a decoder by canonical target ID or alias.
+/// @param[in] target_id Null-terminated target identity selected in this
+/// component's statically composed registry.
+/// @param[out] decoder Newly created decoder handle (refcount = 0).
+/// @retval ROCJITSU_STATUS_SUCCESS Decoder was created successfully.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT if an argument is NULL or empty.
+/// @retval ROCJITSU_STATUS_ERROR if this component did not include @p target_id.
+RJ_API_EXPORT rj_status_t rj_code_decoder_create_for_target(const char *target_id,
+                                                            rj_code_decoder_t **decoder);
 
 /// @brief Increment a decoder's reference count.
 /// @param[in] decoder Decoder handle (may be NULL, in which case this is a no-op).
@@ -96,16 +111,22 @@ RJ_API_EXPORT rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
 
 /// @brief GPU target identifiers.
 typedef enum rj_code_target_id_t {
+  /// @brief gfx90a target ID (CDNA2).
+  ROCJITSU_CODE_TARGET_GFX90A = 0,
   /// @brief gfx942 target ID (CDNA3).
-  ROCJITSU_CODE_TARGET_GFX942,
+  ROCJITSU_CODE_TARGET_GFX942 = 1,
   /// @brief gfx950 target ID (CDNA4).
-  ROCJITSU_CODE_TARGET_GFX950,
+  ROCJITSU_CODE_TARGET_GFX950 = 2,
   /// @brief gfx1200 target ID (RDNA4).
-  ROCJITSU_CODE_TARGET_GFX1200,
+  ROCJITSU_CODE_TARGET_GFX1200 = 3,
   /// @brief gfx1201 target ID (RDNA4).
-  ROCJITSU_CODE_TARGET_GFX1201,
+  ROCJITSU_CODE_TARGET_GFX1201 = 4,
+  /// @brief gfx1250 target ID.
+  ROCJITSU_CODE_TARGET_GFX1250 = 5,
+  // \NPI new GPU: add its public target identifier here and bind its
+  // code-object name and ELF machine value in the corresponding ISA provider.
   /// @brief Sentinel value representing an invalid target.
-  ROCJITSU_CODE_TARGET_INVALID
+  ROCJITSU_CODE_TARGET_INVALID = 6
 } rj_code_target_id_t;
 
 /// @brief Instruction property flags.
@@ -349,6 +370,14 @@ RJ_API_EXPORT const rj_code_inst_t *rj_code_inst_next(const rj_code_inst_t *inst
 /// @defgroup dbt Dynamic Binary Translation
 /// @{
 
+/// @brief Options for rj_code_translate.
+///
+/// @details Silicon revision is intentionally NOT part of this struct. gfx1250 A0
+/// and B0 share an ELF machine ID, so a same-architecture gfx1250 translation is
+/// direction-ambiguous; rather than carry a revision through this C ABI, that case
+/// is rejected here. The revision-aware B0->A0 path is driven internally through
+/// the C++ BinaryTranslator (used by the DBT hook, which sources the revision from
+/// its guest configuration, and by the rj_dbt_translate CLI).
 typedef struct rj_code_dbt_options_t {
   rj_code_arch_t guest_arch;
   rj_code_arch_t host_arch;

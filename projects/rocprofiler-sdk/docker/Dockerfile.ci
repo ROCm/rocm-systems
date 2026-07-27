@@ -15,7 +15,7 @@ ENV HIP_COMPILER=amdclang++
 ENV LLVM_PATH=/opt/rocm/llvm
 ENV CMAKE_PREFIX_PATH=/opt/rocm
 ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:/usr/lib64/openmpi/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:/usr/local/bin:~/.local/bin:${PATH}
-ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/llvm/lib:${LD_LIBRARY_PATH}
+ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/llvm/lib:${LD_LIBRARY_PATH:-}
 
 # Debian/Ubuntu
 RUN set-euo pipefail; \
@@ -73,8 +73,9 @@ RUN set -euo pipefail; \
     if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
         echo -e "[ROCm-latest]\nname=ROCm\nbaseurl=https://repo.radeon.com/rocm/zyp/latest/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/rocm.repo; \
         echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/latest/sle/15.7/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/amdgpu.repo; \
-        zypper --gpg-auto-import-keys refresh; \
-        zypper --non-interactive install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang sqlite3-devel python3-pip; \
+        zypper --gpg-auto-import-keys refresh || true; \
+        zypper --gpg-auto-import-keys refresh ROCm-latest amdgpu; \
+        zypper --non-interactive --no-refresh install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang sqlite3-devel python3-pip; \
         python3 -m venv rocprofiler-sdk; \
         source rocprofiler-sdk/bin/activate; \
         python3 -m pip install --upgrade pip pipx; \
@@ -96,5 +97,8 @@ RUN set -euo pipefail; \
         python3 -m pipx ensurepath; \
         source ~/.bashrc; \
     fi; \
-    aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${GPU_TYPE}.tar.gz --no-sign-request && \
-    mv rocm-${GPU_TYPE}.tar.gz /opt/rocm-${GPU_TYPE}.tar.gz;
+    aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" /tmp/rocm-${GPU_TYPE}.tar.gz --no-sign-request && \
+    rm -rf /opt/rocm* && \
+    mkdir -p /opt/rocm && \
+    tar -xf /tmp/rocm-${GPU_TYPE}.tar.gz -C /opt/rocm && \
+    rm -f /tmp/rocm-${GPU_TYPE}.tar.gz;

@@ -450,6 +450,9 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
       *pi = static_cast<int>(
           g_devices[device]->devices()[0]->info().gpuDirectRdmaWithHipVmmSupported_);
       break;
+    case hipDeviceAttributeHandleTypeFabricSupported:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().fabric_handle_);
+      break;
     case hipDeviceAttributeExpertSchedMode:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().hasExpertSchedMode_);
       break;

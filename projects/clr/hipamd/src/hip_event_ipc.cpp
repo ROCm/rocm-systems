@@ -61,6 +61,7 @@ bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
 
 // ================================================================================================
 hipError_t IPCEventEmulated::query() {
+  std::scoped_lock lock(lock_);
   if (ipc_evt_.ipc_shmem_) {
     const int prev_read_idx = ipc_evt_.ipc_shmem_->read_index;
     const int offset = prev_read_idx % IPC_SIGNALS_PER_EVENT;
@@ -75,6 +76,7 @@ hipError_t IPCEventEmulated::query() {
 
 // ================================================================================================
 hipError_t IPCEventEmulated::synchronize() {
+  std::scoped_lock lock(lock_);
   if (ipc_evt_.ipc_shmem_) {
     int prev_read_idx = ipc_evt_.ipc_shmem_->read_index;
     if (prev_read_idx >= 0) {
@@ -90,6 +92,7 @@ hipError_t IPCEventEmulated::synchronize() {
 
 // ================================================================================================
 hipError_t IPCEventEmulated::streamWait(hip::Stream* stream, uint flags) {
+  std::scoped_lock lock(lock_);
   const int offset = ipc_evt_.ipc_shmem_->read_index;
   return ihipStreamOperation(
       reinterpret_cast<hipStream_t>(stream),
@@ -101,12 +104,18 @@ hipError_t IPCEventEmulated::streamWait(hip::Stream* stream, uint flags) {
 // ================================================================================================
 hipError_t IPCEventEmulated::recordCommand(amd::Command*& command, amd::HostQueue* stream,
                                            uint32_t flags, bool batch_flush) {
+  // Graph event-record nodes call this directly; lock_ is recursive so the
+  // normal addMarker path is unaffected.
+  std::scoped_lock lock(lock_);
   command = new amd::Marker(*stream, kMarkerDisableFlush);
   return hipSuccess;
 }
 
 // ================================================================================================
 hipError_t IPCEventEmulated::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
+  // Guard event_/shmem against concurrent query/synchronize/streamWait. Graph
+  // event-record nodes call this directly; lock_ is recursive.
+  std::scoped_lock lock(lock_);
   createIpcEventShmemIfNeeded();
 
   // Allocate signal slot for this event
@@ -150,6 +159,7 @@ hipError_t IPCEventEmulated::enqueueRecordCommand(hip::Stream* stream, amd::Comm
 
 // ================================================================================================
 hipError_t IPCEventEmulated::GetHandle(ihipIpcEventHandle_t* handle) {
+  std::scoped_lock lock(lock_);
   if (!createIpcEventShmemIfNeeded()) {
     return hipErrorInvalidValue;
   }
@@ -164,6 +174,7 @@ hipError_t IPCEventEmulated::GetHandle(ihipIpcEventHandle_t* handle) {
 
 // ================================================================================================
 hipError_t IPCEventEmulated::OpenHandle(ihipIpcEventHandle_t* handle) {
+  std::scoped_lock lock(lock_);
   ipc_evt_.ipc_name_ = handle->shmem_name;
 
   // Map shared memory from IPC handle
@@ -220,20 +231,20 @@ hipError_t IPCEvent::createIpcSignalIfNeeded() {
 
 IPCEvent::~IPCEvent() {
   if (ipc_signal_ != nullptr) {
-    // If the event was recorded (signal armed), wait for any in-flight barrier
-    // to finish before destroying the signal; otherwise the GPU could write to
-    // freed memory.  Skip the wait when the signal was never recorded (still at
-    // its initial value) — waiting would hang forever.
-    if (event_ != nullptr) {
-      ipc_signal_->Wait(1, amd::device::Signal::Condition::Lt, UINT64_MAX);
-    }
-    delete ipc_signal_;
+    // Transfer the signal (and the record marker's event) to the owning device's
+    // deferred-cleanup queue, which waits for the barrier and frees them at the next device
+    // sync/reset (or on overflow).
+    g_devices[deviceId()]->EnqueueDeferredIpcSignal(ipc_signal_, event_);
     ipc_signal_ = nullptr;
+    // Ownership of event_ is transferred to the deferred queue; clear it so the base ~Event()
+    // does not release it (the deferred cleanup will).
+    event_ = nullptr;
   }
 }
 
 // ================================================================================================
 hipError_t IPCEvent::GetHandle(ihipIpcEventHandle_t* handle) {
+  std::scoped_lock lock(lock_);
   auto status = createIpcSignalIfNeeded();
   if (status != hipSuccess) {
     return status;
@@ -250,6 +261,7 @@ hipError_t IPCEvent::GetHandle(ihipIpcEventHandle_t* handle) {
 
 // ================================================================================================
 hipError_t IPCEvent::OpenHandle(ihipIpcEventHandle_t* handle) {
+  std::scoped_lock lock(lock_);
   if (handle->type != kIpcEventHandleROCr) {
     return hipErrorInvalidValue;
   }
@@ -264,7 +276,7 @@ hipError_t IPCEvent::OpenHandle(ihipIpcEventHandle_t* handle) {
     return hipErrorInvalidValue;
   }
 
-  if (!ipc_signal_->IpcImport(handle->ipc_signal_handle, IHIP_IPC_EVENT_HANDLE_SIZE, dev)) {
+  if (!ipc_signal_->IpcImport(handle->ipc_signal_handle, IHIP_IPC_EVENT_HANDLE_SIZE)) {
     delete ipc_signal_;
     ipc_signal_ = nullptr;
     return hipErrorInvalidValue;
@@ -276,6 +288,11 @@ hipError_t IPCEvent::OpenHandle(ihipIpcEventHandle_t* handle) {
 // ================================================================================================
 hipError_t IPCEvent::recordCommand(amd::Command*& command, amd::HostQueue* stream,
                                    uint32_t flags, bool batch_flush) {
+  // Protect ipc_signal_ creation against concurrent access. Not all callers hold
+  // Event::lock() (e.g. graph event-record nodes call this directly from
+  // CreateCommand); lock_ is recursive, so the normal addMarker path is safe.
+  std::scoped_lock lock(lock_);
+
   auto status = createIpcSignalIfNeeded();
   if (status != hipSuccess) {
     return status;
@@ -289,6 +306,23 @@ hipError_t IPCEvent::recordCommand(amd::Command*& command, amd::HostQueue* strea
 
 // ================================================================================================
 hipError_t IPCEvent::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
+  // Protect event_/ipc_signal_ against concurrent query/synchronize/streamWait.
+  // Not all callers hold Event::lock() (e.g. graph event-record nodes enqueue
+  // directly), so take it here; lock_ is recursive, so the normal addMarker path
+  // that already holds it is unaffected.
+  std::scoped_lock lock(lock_);
+
+  // A single shared IPC signal cannot represent overlapping recordings, and the
+  // consumer is attached to this exact signal (it cannot be rotated). So we must
+  // serialize re-recordings: wait for the previous record's GPU work to drain
+  // before re-arming, otherwise the absolute Reset(1) races with the prior
+  // barrier's pending decrement and a waiter can wake on the wrong recording.
+  // Skip the wait on the first record (signal still at its initial value, never
+  // decremented) — waiting there would hang forever.
+  if (event_ != nullptr) {
+    ipc_signal_->Wait(1, amd::device::Signal::Condition::Lt, UINT64_MAX);
+  }
+
   // Re-arm the signal; GPU barrier will decrement to 0 when work completes
   ipc_signal_->Reset(1);
 

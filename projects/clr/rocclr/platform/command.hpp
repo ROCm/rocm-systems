@@ -327,6 +327,7 @@ class Command : public Event {
 
   bool packetCapturing_ = false;       //!< Flag to enable/disable graph gpu packet capture
   std::vector<uint8_t*>* gpuPackets_;  //!< GPU packets captured when graph capturing is enabled
+  std::vector<uint8_t*>* gpuMetadataPackets_ = nullptr;  //!< Metadata packets (parallel to gpuPackets_)
   GraphKernelArgManager* graphKernArgMgr_ = nullptr;  //!< KernelMgr for graph
   address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
   const std::string** capturedKernelName_ = nullptr;  //!< Kernel under capture
@@ -374,12 +375,16 @@ class Command : public Event {
   }
   bool getPktCapturingState() const { return packetCapturing_; }
 
-  //! Sets AQL capture state, aql packet to capture and where to copy kernArgs
+  //! Sets AQL capture state, aql packet to capture and where to copy kernArgs.
+  //! |metadataPacket|, when non-null, also enables capturing the metadata-prefetch
+  //! packet that parallels each captured AQL packet.
   void setPktCapturingState(bool state, std::vector<uint8_t*>* packet,
                             amd::GraphKernelArgManager* graphKernArgMgr,
-                            const std::string** capturedKernelName) {
+                            const std::string** capturedKernelName,
+                            std::vector<uint8_t*>* metadataPackets = nullptr) {
     packetCapturing_ = state;
     gpuPackets_ = packet;
+    gpuMetadataPackets_ = metadataPackets;
     graphKernArgMgr_ = graphKernArgMgr;
     capturedKernelName_ = capturedKernelName;
   }
@@ -395,6 +400,23 @@ class Command : public Event {
   const uint8_t* getAqlPacket() const {
     uint8_t* packet = new uint8_t[64];
     gpuPackets_->push_back(packet);
+    return packet;
+  }
+
+  //! Allocates and returns a metadata packet buffer for graph capture.
+  //! Returns nullptr if metadata capture is not enabled.
+  //! The buffer is initialized with HSA_PACKET_TYPE_INVALID
+  uint8_t* getMetadataPacket() const {
+    if (gpuMetadataPackets_ == nullptr) {
+      return nullptr;
+    }
+    uint8_t* packet = new uint8_t[256]();
+    static constexpr size_t kHdrOff[4] = {0, 64, 128, 192};
+    static constexpr uint32_t kInvalidMetadataHeader = 1;  // HSA_PACKET_TYPE_INVALID
+    for (size_t h = 0; h < 4; ++h) {
+      memcpy(packet + kHdrOff[h], &kInvalidMetadataHeader, sizeof(kInvalidMetadataHeader));
+    }
+    gpuMetadataPackets_->push_back(packet);
     return packet;
   }
 
@@ -442,6 +464,10 @@ class Command : public Event {
    *  \note This function will execute in the command queue thread.
    */
   virtual void submit(device::VirtualDevice& device) = 0;
+
+  //! True only for marker commands; lets the device layer keep its coalescing
+  //! window across markers while resetting it for any other (intervening) command.
+  virtual bool isMarkerCommand() const { return false; }
 
   //! Release the resources associated with this event.
   virtual void releaseResources();
@@ -1167,6 +1193,42 @@ struct BatchCopyOp {
         dstOffset(dstOff), size(sz), metadata(meta) {}
 };
 
+//! Structure to hold pageable host-to-device write operation info for batch
+//! writes
+struct BatchWriteMemoryOp {
+  const void* src_host;   //!< Source host pointer
+  Memory* dst_memory;     //!< Destination memory object
+  size_t dst_offset;      //!< Offset in destination buffer
+  size_t size;            //!< Size of the copy in bytes
+  CopyMetadata metadata;  //!< Copy metadata for this operation
+
+  BatchWriteMemoryOp(const void* src_host_arg, Memory* dst_memory_arg, size_t dst_offset_arg,
+                     size_t size_arg, CopyMetadata metadata_arg = CopyMetadata())
+      : src_host(src_host_arg),
+        dst_memory(dst_memory_arg),
+        dst_offset(dst_offset_arg),
+        size(size_arg),
+        metadata(metadata_arg) {}
+};
+
+//! Structure to hold device-to-pageable-host read operation info for batch
+//! reads
+struct BatchReadMemoryOp {
+  Memory* src_memory;     //!< Source memory object
+  void* dst_host;         //!< Destination host pointer
+  size_t src_offset;      //!< Offset in source buffer
+  size_t size;            //!< Size of the copy in bytes
+  CopyMetadata metadata;  //!< Copy metadata for this operation
+
+  BatchReadMemoryOp(Memory* src_memory_arg, void* dst_host_arg, size_t src_offset_arg,
+                    size_t size_arg, CopyMetadata metadata_arg = CopyMetadata())
+      : src_memory(src_memory_arg),
+        dst_host(dst_host_arg),
+        src_offset(src_offset_arg),
+        size(size_arg),
+        metadata(metadata_arg) {}
+};
+
 /*! \brief  A batch copy memory command for multiple buffer-to-buffer copies
  *
  *  \details Executes multiple copy operations as a batch. Copies within
@@ -1207,6 +1269,86 @@ class BatchCopyMemoryCommand : public Command {
     }
     return true;
   }
+};
+
+/*! \brief  A batch write memory command for multiple pageable host-to-device
+ * writes
+ *
+ *  \details Copies pageable host sources through the backend's batch write path.
+ */
+class BatchWriteMemoryCommand : public Command {
+ public:
+  BatchWriteMemoryCommand(HostQueue& queue, cl_command_type cmd_type,
+                          const EventWaitList& event_wait_list,
+                          std::vector<BatchWriteMemoryOp>&& write_ops,
+                          std::vector<std::vector<char>>&& host_snapshots = {})
+      : Command(queue, cmd_type, event_wait_list),
+        write_ops_(std::move(write_ops)),
+        host_snapshots_(std::move(host_snapshots)) {}
+
+  void submit(device::VirtualDevice& device) override { device.SubmitBatchWriteMemory(*this); }
+
+  void ReleasePinnedMemory() override {
+    for (Memory* pinned_memory : pinned_memory_) {
+      pinned_memory->release();
+    }
+    pinned_memory_.clear();
+  }
+
+  bool IsMemoryPinned() const override { return !pinned_memory_.empty(); }
+
+  void AddPinnedMemory(Memory* pinned_memory) override { pinned_memory_.push_back(pinned_memory); }
+
+  std::vector<Memory*> TakePinnedMemory() {
+    std::vector<Memory*> pinned_memory;
+    pinned_memory.swap(pinned_memory_);
+    return pinned_memory;
+  }
+
+  const std::vector<BatchWriteMemoryOp>& WriteOps() const { return write_ops_; }
+
+ private:
+  std::vector<BatchWriteMemoryOp> write_ops_;      //!< Vector of write operations
+  std::vector<Memory*> pinned_memory_;             //!< Pinned memory used by the batch
+  std::vector<std::vector<char>> host_snapshots_;  //!< DuringApiCall source snapshots
+};
+
+/*! \brief  A batch read memory command for multiple device-to-pageable-host
+ * reads
+ *
+ *  \details Copies pageable host destinations through the backend's batch read path.
+ */
+class BatchReadMemoryCommand : public Command {
+ public:
+  BatchReadMemoryCommand(HostQueue& queue, cl_command_type cmd_type,
+                         const EventWaitList& event_wait_list,
+                         std::vector<BatchReadMemoryOp>&& read_ops)
+      : Command(queue, cmd_type, event_wait_list), read_ops_(std::move(read_ops)) {}
+
+  void submit(device::VirtualDevice& device) override { device.SubmitBatchReadMemory(*this); }
+
+  void ReleasePinnedMemory() override {
+    for (Memory* pinned_memory : pinned_memory_) {
+      pinned_memory->release();
+    }
+    pinned_memory_.clear();
+  }
+
+  bool IsMemoryPinned() const override { return !pinned_memory_.empty(); }
+
+  void AddPinnedMemory(Memory* pinned_memory) override { pinned_memory_.push_back(pinned_memory); }
+
+  std::vector<Memory*> TakePinnedMemory() {
+    std::vector<Memory*> pinned_memory;
+    pinned_memory.swap(pinned_memory_);
+    return pinned_memory;
+  }
+
+  const std::vector<BatchReadMemoryOp>& ReadOps() const { return read_ops_; }
+
+ private:
+  std::vector<BatchReadMemoryOp> read_ops_;  //!< Vector of read operations
+  std::vector<Memory*> pinned_memory_;       //!< Pinned memory used by the batch
 };
 
 /*! \brief  A generic map memory command. Makes a memory object accessible to the host.
@@ -1497,6 +1639,10 @@ class ExternalSemaphoreCmd : public Command {
 class Marker : public Command {
   device::Signal* ipc_completion_signal_ = nullptr;
   device::Signal* ipc_dep_signal_ = nullptr;
+  //! Monotonic client (HIP) coalesce identity for detecting consecutive records;
+  //! a non-zero value also opts the record into coalescing. 0 = not coalesceable.
+  uint64_t coalesce_event_ = 0;
+  bool synced_since_record_ = false;  //!< Client synced the event since its last record
 
  public:
   //! Create a new Marker
@@ -1514,21 +1660,42 @@ class Marker : public Command {
   void setIpcDepSignal(device::Signal* s) { ipc_dep_signal_ = s; }
   device::Signal* ipcDepSignal() const { return ipc_dep_signal_; }
 
+  //! Coalescing metadata set by the client layer (opaque to rocclr). A non-zero
+  //! coalesceEvent() both identifies the event and marks the record eligible.
+  void setCoalesceEvent(uint64_t id) { coalesce_event_ = id; }
+  uint64_t coalesceEvent() const { return coalesce_event_; }
+  void setSyncedSinceRecord(bool v) { synced_since_record_ = v; }
+  bool syncedSinceRecord() const { return synced_since_record_; }
+
+  bool isMarkerCommand() const override { return true; }
+
   //! The actual command implementation.
   virtual void submit(device::VirtualDevice& device) { device.submitMarker(*this); }
 };
 
 class AccumulateCommand : public Command {
  private:
-  //! Kernel names and timestamps list for activity profiling
-  std::vector<const std::string*> kernelNames_;
-  const std::vector<const std::string*>* kernelNamesRef_ = nullptr;
-  std::vector<std::pair<uint64_t, uint64_t>> tsList_;
+  //! Stable kernel name pointers — one entry per kernel dispatch slot (base and
+  //! ext variants). Resolved from KernelMap at dispatch time; point into Kernel
+  //! objects that live for the device lifetime. Non-dispatch slots (barriers,
+  //! SDMA) are skipped so kernelNames_ and timestamps_ are always parallel.
+  //! "<unknown>" is used when the kernel_object is not found in KernelMap.
+  std::vector<const char*> kernelNames_;
+  //! GPU timestamps — one entry per kernel dispatch slot, parallel to
+  //! kernelNames_, populated at signal completion time.
+  struct KernelTimestamp {
+    uint64_t start;
+    uint64_t end;
+    uint32_t queue_index;  //!< vGPU index of the stream that ran this kernel
+  };
+  std::vector<KernelTimestamp> timestamps_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
+  //! When false, the destructor does not destroy hw_events_ (an external owner,
+  //! e.g. the graph signal pool, reclaims them instead).
+  bool owns_hw_events_ = true;
 
  public:
-  //! Create a new Marker
   AccumulateCommand(HostQueue& queue, const EventWaitList& eventWaitList = nullWaitList,
                     const Event* waitingEvent = nullptr)
       : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent) {}
@@ -1537,9 +1704,11 @@ class AccumulateCommand : public Command {
   virtual ~AccumulateCommand();
 
   //! Add HW event to the list for later cleanup.
-  //! Does not retain — caller owns the reference. Attached events are
-  //! released via ReleaseGlobalSignal in ~AccumulateCommand when the
-  //! profiling signals are destroyed after graph completion.
+  //! Does not retain — caller owns the reference. By default (owns_hw_events_ ==
+  //! true) attached events are released via ReleaseGlobalSignal in
+  //! ~AccumulateCommand after graph completion. If an external owner recycles
+  //! them (see setOwnsHwEvents(false), e.g. the graph signal pool), the
+  //! destructor leaves them untouched.
   void addHwEvent(void* hw_event, Device* device = nullptr) {
     if (hw_event != nullptr) {
       Device* dev = (device != nullptr) ? device : const_cast<Device*>(device_);
@@ -1552,31 +1721,25 @@ class AccumulateCommand : public Command {
   //! Get HW events map (for profiling pre-patched graph signals)
   const std::unordered_map<Device*, std::vector<void*>>& getHwEvents() const { return hw_events_; }
 
-  //! Add kernel name to the list if available
-  void addKernelName(const std::string* kernelName) { kernelNames_.push_back(kernelName); }
+  //! Control whether the destructor destroys the attached HW event signals.
+  //! Set to false when an external owner (e.g. the graph signal pool) recycles
+  //! them across launches instead.
+  void setOwnsHwEvents(bool owns) { owns_hw_events_ = owns; }
 
-  //! Add multiple kernel names in bulk
-  void addKernelNames(const std::vector<const std::string*>& kernelNames) {
-    kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
+  //! Record a stable kernel name pointer for one kernel dispatch slot.
+  //! Must not be nullptr — use "<unknown>" when the name cannot be resolved.
+  void addKernelName(const char* name) { kernelNames_.push_back(name); }
+
+  //! Add GPU timestamps for one dispatch slot (called at signal completion).
+  void addTimestamps(uint64_t startTs, uint64_t endTs, uint32_t queue_index = UINT32_MAX) {
+    timestamps_.push_back({startTs, endTs, queue_index});
   }
 
-  //! Set kernel names by reference
-  void setKernelNamesRef(const std::vector<const std::string*>* kernelNames) {
-    kernelNamesRef_ = kernelNames;
-  }
+  //! Return kernel name pointers (one per dispatch slot)
+  const std::vector<const char*>& getKernelNames() const { return kernelNames_; }
 
-  //! Add kernel timestamp to the list if available
-  void addTimestamps(uint64_t startTs, uint64_t endTs) {
-    tsList_.push_back(std::make_pair(startTs, endTs));
-  }
-
-  //! Return the kernel names (pointers to stable strings, no copies)
-  const std::vector<const std::string*>& getKernelNames() const {
-    return kernelNamesRef_ != nullptr ? *kernelNamesRef_ : kernelNames_;
-  }
-
-  //! Return the kernel timestamps
-  const std::vector<std::pair<uint64_t, uint64_t>>& getTimestamps() const { return tsList_; }
+  //! Return GPU timestamps (one per dispatch slot, populated at signal completion)
+  const std::vector<KernelTimestamp>& getTimestamps() const { return timestamps_; }
 
   //! The command implementation
   virtual void submit(device::VirtualDevice& device) { device.submitAccumulate(*this); }
@@ -2009,9 +2172,10 @@ class CopyMemoryP2PCommand : public CopyMemoryCommand {
  public:
   CopyMemoryP2PCommand(HostQueue& queue, cl_command_type cmdType,
                        const EventWaitList& eventWaitList, Memory& srcMemory, Memory& dstMemory,
-                       Coord3D srcOrigin, Coord3D dstOrigin, Coord3D size)
+                       Coord3D srcOrigin, Coord3D dstOrigin, Coord3D size,
+                       amd::CopyMetadata copyMetadata = amd::CopyMetadata())
       : CopyMemoryCommand(queue, cmdType, eventWaitList, srcMemory, dstMemory, srcOrigin, dstOrigin,
-                          size) {}
+                          size, copyMetadata) {}
 
   CopyMemoryP2PCommand(HostQueue& queue, cl_command_type cmdType,
                        const EventWaitList& eventWaitList, Memory& srcMemory, Memory& dstMemory,
@@ -2019,7 +2183,7 @@ class CopyMemoryP2PCommand : public CopyMemoryCommand {
                        const BufferRect& srcRect, const BufferRect& dstRect,
                        amd::CopyMetadata copyMetadata = amd::CopyMetadata())
       : CopyMemoryCommand(queue, cmdType, eventWaitList, srcMemory, dstMemory, srcOrigin, dstOrigin,
-                          size, srcRect, dstRect) {}
+                          size, srcRect, dstRect, copyMetadata) {}
 
   virtual void submit(device::VirtualDevice& device) { device.submitCopyMemoryP2P(*this); }
 
@@ -2088,6 +2252,29 @@ class SvmPrefetchBatchAsyncCommand : public Command {
   std::vector<size_t> sizes_;                 //!< Array of sizes for prefetch
   std::vector<amd::Device*> target_devices_;  //!< Array of device pointers (one per operation)
   size_t count_;                              //!< Number of prefetch operations
+};
+
+class SvmDiscardBatchAsyncCommand : public Command {
+ public:
+  SvmDiscardBatchAsyncCommand(HostQueue& queue, std::vector<void*>& dev_ptrs,
+                              std::vector<size_t>& sizes)
+      : Command(queue, 1),
+        dev_ptrs_(std::move(dev_ptrs)),
+        sizes_(std::move(sizes)),
+        count_(dev_ptrs_.size()) {
+    assert(sizes_.size() == count_ && "sizes vector must match dev_ptrs size");
+  }
+
+  virtual void submit(device::VirtualDevice& device) { device.SubmitSvmDiscardBatchAsync(*this); }
+
+  void* const* DevicePointers() const { return dev_ptrs_.data(); }
+  const size_t* Sizes() const { return sizes_.data(); }
+  size_t Count() const { return count_; }
+
+ private:
+  std::vector<void*> dev_ptrs_;  //!< Array of device pointers to memory for discard
+  std::vector<size_t> sizes_;    //!< Array of sizes for discard
+  size_t count_;                 //!< Number of discard operations
 };
 
 /*! \brief  A virtual map memory command.
@@ -2162,6 +2349,7 @@ union ComputeCommand {
   VirtualMapCommand cmd27;
   BatchMemoryOperationCommand cmd28;
   SvmPrefetchBatchAsyncCommand cmd29;
+  SvmDiscardBatchAsyncCommand cmd30;
   ComputeCommand() {}
   ~ComputeCommand() {}
 };

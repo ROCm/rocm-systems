@@ -27,7 +27,6 @@ import json
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
-from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
 
 import re
 import os
@@ -57,6 +56,11 @@ def pytest_addoption(parser):
         help="Target CU for perfcounter validation.",
     )
     parser.addoption(
+        "--att-occupancy-event-trace-out-dir",
+        action="store",
+        help="Path to ATT occupancy event trace output directory.",
+    )
+    parser.addoption(
         "--att-other-simd-out-dir",
         action="store",
         help="Path to Output directory.",
@@ -76,6 +80,11 @@ def pytest_addoption(parser):
         action="store",
         help="Path to ATT marker trace output directory.",
     )
+    parser.addoption(
+        "--att-no-intercept-out-dir",
+        action="store",
+        help="Path to ATT no-intercept output directory.",
+    )
 
 
 @pytest.fixture
@@ -88,6 +97,14 @@ def json_data(request):
 @pytest.fixture
 def output_path(request):
     return request.config.getoption("--output-path")
+
+
+@pytest.fixture
+def att_occupancy_event_trace_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-occupancy-event-trace-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-occupancy-event-trace-out-dir not provided")
+    return output_dir_path
 
 
 @pytest.fixture
@@ -137,4 +154,12 @@ def att_marker_trace_out_dir_path(request):
     output_dir_path = request.config.getoption("--att-marker-trace-out-dir")
     if not output_dir_path:
         pytest.skip("--att-marker-trace-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_no_intercept_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-no-intercept-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-no-intercept-out-dir not provided")
     return output_dir_path

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,11 +22,20 @@
 
 #include <rocprofiler-sdk-roctx/roctx.h>
 
-#include <math.h>
-#include <stdio.h>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <string_view>
 
+namespace
+{
 constexpr float  EPS_FLOAT  = 1.0e-7f;
 constexpr double EPS_DOUBLE = 1.0e-15;
+
+// Number of times the target kernel repeats the multiply per element. Kept as a
+// tunable constant so the kernel can be made heavier for timing-sensitive tests.
+constexpr int INNER_ITERS = 1;
 
 #pragma omp declare target
 template <typename T>
@@ -46,14 +55,29 @@ vmul(T* a, T* b, T* c, int N)
 #pragma omp teams distribute parallel for
     for(int i = 0; i < N; i++)
     {
-        for(int j = 0; j < 100000; ++j)
+        for(int j = 0; j < INNER_ITERS; ++j)
             c[i] = mul(a[i], b[i]);
     }
 }
+}  // namespace
 
 int
-main()
+main(int argc, char** argv)
 {
+    auto*    exe_name = ::basename(argv[0]);
+    uint64_t nitr     = 1;
+    for(int i = 1; i < argc; ++i)
+    {
+        auto _arg = std::string_view{argv[i]};
+        if(_arg == "?" || _arg == "-h" || _arg == "--help")
+        {
+            fprintf(stderr, "usage: %s [NUM_ITERATION (%lu)]\n", exe_name, nitr);
+            exit(EXIT_SUCCESS);
+        }
+    }
+
+    if(argc > 1) nitr = std::stoul(argv[1]);
+
     auto range_id = roctxRangeStart("main");
 
     constexpr int N = 100000;
@@ -77,8 +101,11 @@ main()
         validate_d[i]   = a_d[i] * b_d[i];
     }
 
-    vmul(a_i, b_i, c_i, N);
-    vmul(a_f, b_f, c_f, N);
+    for(uint64_t i = 0; i < nitr; i++)
+    {
+        vmul(a_i, b_i, c_i, N);
+        vmul(a_f, b_f, c_f, N);
+    }
 
     auto tid = roctx_thread_id_t{};
     // get the thread id recognized by rocprofiler-sdk from roctx

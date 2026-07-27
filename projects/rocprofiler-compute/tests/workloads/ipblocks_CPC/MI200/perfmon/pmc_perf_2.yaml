@@ -1,0 +1,6 @@
+jobs:
+- pmc:
+  - CPC_CPC_TCIU_IDLE
+  - CPC_CPC_UTCL2IU_BUSY
+  - CPF_CPF_TCIU_BUSY
+  - CPF_CPF_TCIU_IDLE

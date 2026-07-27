@@ -227,6 +227,8 @@ def get_kernel_csv_query(config) -> str:
         f"{agent_id} AS Agent_Id",
         "queue_id",
         "stream_id",
+        "graph_exec_id AS Graph_Exec_Id",
+        "graph_node_id AS Graph_Node_Id",
         "tid AS Thread_Id",
         "dispatch_id",
         "kernel_Id",
@@ -275,6 +277,8 @@ def write_memory_copy_csv(importData, config) -> None:
             'MEMORY_COPY' AS Kind,
             name AS Direction,
             stream_id,
+            graph_exec_id AS Graph_Exec_Id,
+            graph_node_id AS Graph_Node_Id,
             {src_agent_id} AS Source_Agent_Id,
             {dst_agent_id} AS Destination_Agent_Id,
             stack_id AS Correlation_Id,
@@ -285,6 +289,30 @@ def write_memory_copy_csv(importData, config) -> None:
             guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(importData, config, query, "memory_copy")
+
+
+def write_graph_launch_csv(importData, config) -> None:
+
+    agent_id = build_agent_id_string(config.agent_index_value)
+
+    query = f"""
+        SELECT
+            guid,
+            'Graph Launch' AS Kind,
+            {agent_id} AS Agent_Id,
+            queue_id,
+            tid AS Thread_Id,
+            stack_id AS Correlation_Id,
+            start AS Start_Timestamp,
+            end AS End_Timestamp,
+            duration AS Duration,
+            graph_exec_id AS Graph_Exec_Id,
+            kernel_dispatch_count AS Kernel_Dispatch_Count
+        FROM "graph_launches"
+        ORDER BY
+            guid ASC, start ASC, end DESC
+    """
+    write_sql_query_to_csv(importData, config, query, "graph_launch")
 
 
 def write_memory_allocation_csv(importData, config) -> None:
@@ -369,6 +397,48 @@ def write_counters_csv(importData, config) -> None:
     write_sql_query_to_csv(importData, config, query, "counter_collection")
 
 
+def write_spm_counters_csv(importData, config) -> None:
+
+    agent_id = build_agent_id_string(config.agent_index_value)
+
+    select_columns = [
+        "guid",
+        "stack_id AS Correlation_Id",
+        "dispatch_id",
+        f"{agent_id} AS Agent_Id",
+        "queue_id",
+        "pid AS Process_Id",
+        "tid AS Thread_Id",
+        "grid_size",
+        "kernel_id",
+        "kernel_name",
+        "workgroup_size",
+        "lds_block_size AS Lds_Block_Size",
+        "scratch_size",
+        "vgpr_count",
+        "accum_vgpr_count",
+        "sgpr_count",
+        "counter_name || '[XCC: ' || xcc || ', SE: ' || shader_engine || ', Instance: ' || instance || ']' AS counter_name",
+        "value AS Counter_Value",
+        "timestamp AS Timestamp",
+    ]
+
+    aliased_headers = []
+    for column in select_columns:
+        aliased_headers.append(column)
+
+    select_clause = ",\n".join(aliased_headers)
+
+    query = f"""
+        SELECT
+            {select_clause}
+        FROM "spm_counters"
+        ORDER BY
+            guid ASC, timestamp ASC
+    """
+    write_sql_query_to_csv(importData, config, query, "spm_counter_collection")
+
+
 def write_scratch_memory_csv(importData, config) -> None:
 
     agent_id = build_agent_id_string(config.agent_index_value)
@@ -414,6 +484,8 @@ def write_csv(importData, config):
 
     write_agent_info_csv(importData, config)
     write_counters_csv(importData, config)
+    write_graph_launch_csv(importData, config)
+    write_spm_counters_csv(importData, config)
     write_kernel_csv(importData, config)
     write_memory_allocation_csv(importData, config)
     write_memory_copy_csv(importData, config)

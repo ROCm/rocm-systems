@@ -34,6 +34,34 @@ in the following table.
       - | String value for host identification
         | Used for host hash generation
 
+    * - | ``NCCL_BOOTSTRAP_BIDIR_ALLGATHER``
+        | Enables the bidirectional ring AllGather (N/2 steps) on the socket OOB path
+          during bootstrap. The unidirectional ring (N-1 steps) is kept as a fallback.
+          Has no effect when net OOB is in use.
+      - | ``0``: Force unidirectional ring.
+        | ``1``: Force bidirectional ring (default).
+
+    * - | ``NCCL_CUMEM_ENABLE``
+        | Enables cuMem virtual memory management (VMM) for RCCL allocations,
+          which is required for ``ncclCommSuspend`` and ``ncclCommResume`` to
+          release the physical GPU memory of a suspended communicator. See
+          :ref:`suspend-resume` for the full prerequisites.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+        | ``-2``: Auto-detect; enable when the platform supports VMM.
+
+    * - | ``NCCL_MIN_CTAS``
+        | Minimum number of CTAs (channels) used for a collective. Overrides
+          the ``minCTAs`` field of ``ncclConfig_t``.
+      - | Positive integer (values ``<= 0`` are ignored).
+        | Default: unset (uses the RCCL default).
+
+    * - | ``NCCL_MAX_CTAS``
+        | Maximum number of CTAs (channels) used for a collective. Overrides
+          the ``maxCTAs`` field of ``ncclConfig_t``.
+      - | Positive integer (values ``<= 0`` are ignored).
+        | Default: unset (uses the RCCL default).
+
 Logging and debugging
 =====================
 
@@ -80,6 +108,7 @@ in the following table.
         | ``PROFILE``: Prints logs related to the profiling/timing info.
         | ``RAS``: Prints logs related to RAS.
         | ``VERBS``: Prints logs related to IB/Verbs.
+        | ``DESTROY``: Prints logs related to communicator/plugin teardown (destroy, abort, revoke, plugin unload).
         | ``ALL``: Activates all logging subsystems.
 
     * - | ``NCCL_WARN_ENABLE_DEBUG_INFO``
@@ -145,6 +174,13 @@ in the following table.
       - | Integer value (default: ``-1``)
         | See InfiniBand ``show_gids`` command for valid values
 
+    * - | ``NCCL_PXN_C2C``
+        | Allows PXN routing through a C2C link to reach a NIC attached to a
+          peer GPU. The C2C path is NVIDIA-specific and is not currently
+          applicable on AMD hardware.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
     * - | ``NCCL_SOCKET_IFNAME``
         | Specifies which IP interfaces to use for communication.
       - | Interface prefix string or list
@@ -158,6 +194,24 @@ in the following table.
         | ``AF_INET6``: Force IPv6
         | Unset: Use first available
 
+    * - | ``NCCL_IGNORE_NET_MISMATCH``
+        | Controls what happens when ranks report a different number of local
+          network (NET) devices during communicator initialization. RCCL gathers
+          each rank's local NET device count and compares the minimum and maximum
+          across the communicator. A mismatch usually means the job was launched
+          with an inconsistent NIC selection (for example, an uneven
+          ``NCCL_SOCKET_IFNAME``/``NCCL_IB_HCA`` per rank, or nodes with different
+          NIC counts), which otherwise surfaces later as obscure transport
+          failures. See :ref:`heterogeneous-nic-counts`.
+      - | ``1``: Detect and continue, logging the mismatch at ``INFO`` level (default).
+        | ``0``: Fail initialization with ``ncclSystemError`` and a warning on the mismatch.
+
+    * - | ``NCCL_IGNORE_COLLNET_MISMATCH``
+        | Same as ``NCCL_IGNORE_NET_MISMATCH`` but for the number of local CollNet
+          devices reported by each rank.
+      - | ``0``: Fail initialization with ``ncclSystemError`` and a warning on the mismatch (default).
+        | ``1``: Detect and continue, logging the mismatch at ``INFO`` level.
+
     * - | ``NCCL_NET_MERGE_LEVEL``
         | Controls network device merging behavior.
       - | Integer value specifying merge level
@@ -166,6 +220,19 @@ in the following table.
     * - | ``NCCL_NET_FORCE_MERGE``
         | Forces merging of network devices.
       - | String specifying forced merge configuration
+
+    * - | ``NCCL_NETDEVS_POLICY``
+        | Controls how many of a GPU's locally reachable NICs are used on the
+        | network path for ``send``, ``recv``, and ``all-to-all``. The policy
+        | governs per-channel NIC selection (``ncclTopoGetLocalNet``); the
+        | per-peer network channel count is still bounded by available NIC
+        | bandwidth.
+        | Any unset, malformed, or out-of-range value falls back to ``AUTO``.
+      - | ``AUTO`` (default): use ``ceil(localNetCount / localGpuCount)`` NICs,
+        | dividing the local NICs across the GPUs that share them.
+        | ``ALL``: use every locally reachable NIC.
+        | ``MAX:N``: use at most ``N`` NICs (clamped to the number reachable);
+        | ``N`` must be a positive integer.
 
     * - | ``RCCL_IB_SPLIT_DATA_THRESHOLD``
         | Minimum message size (in bytes) before the payload is split across
@@ -213,6 +280,29 @@ intended for debugging and development purposes.
         | Enables multi-process mode in test applications.
       - | Any non-empty value enables multi-process mode
         | Used with test executables for distributed testing
+
+    * - | ``NCCL_DISABLE_MEM_MANAGER``
+        | Disables the internal RCCL memory manager. This is an internal
+          parameter intended for testing and debugging only. When the memory
+          manager is disabled, ``ncclCommSuspend``, ``ncclCommResume``, and
+          ``ncclCommMemStats`` return ``ncclInvalidUsage``.
+      - | ``0``: Memory manager enabled (default).
+        | ``1``: Memory manager disabled.
+
+    * - | ``NCCL_NO_CACHE``
+        | Disables caching for selected RCCL environment parameters so their
+          values are re-read from the environment on each access. By default,
+          RCCL caches parameter values after the first read for performance.
+          This variable is intended for testing and debugging when parameters
+          need to be changed without restarting the process. The value is
+          parsed once on first use, so it must be set before RCCL reads any
+          parameters. ``NCCL_NO_CACHE`` itself is always cached and cannot
+          be listed.
+      - | Unset (default): all parameters are cached after first read.
+        | Comma-separated list of parameter names (for example,
+          ``NCCL_DEBUG,NCCL_ALGO``): disable caching for those keys only.
+        | ``ALL``: disable caching for every parameter except
+          ``NCCL_NO_CACHE``.
 
 Multi-communicator ordering
 ===========================

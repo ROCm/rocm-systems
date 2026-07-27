@@ -571,7 +571,7 @@ int main() {
       hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float),
                 hipMemcpyHostToDevice);
 
-      // Lauching kernel from host
+      // Launching kernel from host
       hipLaunchKernel(matrixTranspose,
                       dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH /
                            THREADS_PER_BLOCK_Y),

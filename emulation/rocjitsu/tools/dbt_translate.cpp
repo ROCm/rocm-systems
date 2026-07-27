@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "tools/dbt_translate.h"
+#include "dbt_translate.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -60,7 +60,7 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
   if (!decoder) {
     if (include_disassembly)
       os << "decoder unavailable\n";
-    for (const auto *section : obj.code_sections()) {
+    for (const auto *section : obj.text_sections()) {
       CodeSectionReport section_report;
       section_report.name = section->name();
       section_report.size_bytes = section->size();
@@ -70,7 +70,7 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
     return inspection;
   }
 
-  for (const auto *section : obj.code_sections()) {
+  for (const auto *section : obj.text_sections()) {
     CodeSectionReport section_report;
     section_report.name = section->name();
     section_report.size_bytes = section->size();
@@ -180,9 +180,9 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
   if (text_sections.empty())
     return "<source section unavailable>";
 
-  // BinaryTranslator trace offsets are relative to the original .text section.
-  // Use text_sections() instead of code_sections() so the DBT cave never shifts
-  // source locations when a translated object is inspected again.
+  // BinaryTranslator source offsets are relative to the original .text section.
+  // Use the primary .text section so relocated local-cave bytes are not treated
+  // as source instructions when a translated object is inspected again.
   const auto *text = text_sections.front();
   if (offset % sizeof(uint32_t) != 0)
     return "<source offset unaligned>";
@@ -301,6 +301,38 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
   output.value.host_arch = options.host_arch;
   output.value.target_mach =
       options.target_mach ? options.target_mach : elf_mach_for_arch(options.host_arch);
+  output.value.input_revision = options.input_revision;
+  output.value.output_revision = options.output_revision;
+
+  // A0 and B0 share gfx1250's ELF machine ID, so the tool API requires the
+  // separate input and output revisions before it can choose a direction.
+  if (options.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      options.input_revision == ProcessorRevision::Unspecified) {
+    add_error(output, kInputError, "input revision is required for gfx1250");
+    return output;
+  }
+  if (options.guest_arch != ROCJITSU_CODE_ARCH_GFX1250 &&
+      options.input_revision != ProcessorRevision::Unspecified) {
+    add_error(output, kInputError, "input revision is only supported for gfx1250");
+    return output;
+  }
+  if (options.host_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      options.output_revision == ProcessorRevision::Unspecified) {
+    add_error(output, kInputError, "output revision is required for gfx1250");
+    return output;
+  }
+  if (options.host_arch != ROCJITSU_CODE_ARCH_GFX1250 &&
+      options.output_revision != ProcessorRevision::Unspecified) {
+    add_error(output, kInputError, "output revision is only supported for gfx1250");
+    return output;
+  }
+  if (options.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      options.host_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      options.input_revision == ProcessorRevision::Gfx1250A0 &&
+      options.output_revision == ProcessorRevision::Gfx1250B0) {
+    add_error(output, kInputError, "gfx1250 A0-to-B0 translation is not supported");
+    return output;
+  }
 
   if (options.input_path.empty()) {
     add_error(output, kInputError, "input path is required");
@@ -331,6 +363,9 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     BinaryTranslatorOptions translator_options;
     translator_options.debug_min_free_vgpr = options.debug_min_free_vgpr;
     translator_options.debug_continue_after_failure = options.debug_continue_after_failure;
+    translator_options.skip_failed_kernels = options.skip_failed_kernels;
+    translator_options.input_revision = options.input_revision;
+    translator_options.output_revision = options.output_revision;
     BinaryTranslator translator(options.guest_arch, options.host_arch, options.target_mach,
                                 translator_options);
     if (need_report) {

@@ -6,10 +6,13 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
+#include "scoped_temp.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -30,16 +33,6 @@ namespace {
 
 std::filesystem::path g_translate_tool;
 
-struct TempDir {
-  std::filesystem::path path;
-
-  explicit TempDir(std::filesystem::path temp_path) : path(std::move(temp_path)) {
-    std::filesystem::create_directories(path);
-  }
-
-  ~TempDir() { std::filesystem::remove_all(path); }
-};
-
 uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
   names.insert(names.end(), name.begin(), name.end());
@@ -50,6 +43,16 @@ uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
 uint64_t align_up(uint64_t value, uint64_t alignment) {
   const uint64_t remainder = value % alignment;
   return remainder == 0 ? value : value + alignment - remainder;
+}
+
+void write_bytes(std::vector<uint8_t> &image, uint64_t offset, const void *src, size_t size) {
+  assert(offset <= image.size());
+  assert(size <= image.size() - offset);
+  std::memcpy(image.data() + offset, src, size);
+}
+
+template <typename T> void write_value(std::vector<uint8_t> &image, uint64_t offset, T value) {
+  write_bytes(image, offset, &value, sizeof(value));
 }
 
 std::vector<uint8_t> make_smoke_code_object() {
@@ -83,46 +86,44 @@ std::vector<uint8_t> make_smoke_code_object() {
 
   std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
 
-  Elf64_Ehdr ehdr{};
-  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
-  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
-  ehdr.e_ident[EI_DATA] = 1;
-  ehdr.e_ident[EI_VERSION] = 1;
-  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
-  ehdr.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
-  ehdr.e_type = ET_DYN;
-  ehdr.e_machine = EM_AMDGPU;
-  ehdr.e_version = 1;
-  ehdr.e_phoff = sizeof(Elf64_Ehdr);
-  ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
-  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
-  ehdr.e_phentsize = sizeof(Elf64_Phdr);
-  ehdr.e_phnum = phdr_count;
-  ehdr.e_shentsize = sizeof(Elf64_Shdr);
-  ehdr.e_shnum = section_count;
-  ehdr.e_shstrndx = 5;
-  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+  write_bytes(image, offsetof(Elf64_Ehdr, e_ident), EI_MAGIC, EI_MAGIC_SIZE);
+  image[offsetof(Elf64_Ehdr, e_ident) + EI_CLASS] = ELFCLASS64;
+  image[offsetof(Elf64_Ehdr, e_ident) + EI_DATA] = 1;
+  image[offsetof(Elf64_Ehdr, e_ident) + EI_VERSION] = 1;
+  image[offsetof(Elf64_Ehdr, e_ident) + EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  image[offsetof(Elf64_Ehdr, e_ident) + EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_type), ET_DYN);
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_machine), EM_AMDGPU);
+  write_value<uint32_t>(image, offsetof(Elf64_Ehdr, e_version), 1);
+  write_value<uint64_t>(image, offsetof(Elf64_Ehdr, e_phoff), sizeof(Elf64_Ehdr));
+  write_value<uint64_t>(image, offsetof(Elf64_Ehdr, e_shoff), shoff);
+  write_value<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags), EF_AMDGPU_MACH_AMDGCN_GFX950);
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_ehsize), sizeof(Elf64_Ehdr));
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_phentsize), sizeof(Elf64_Phdr));
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_phnum), phdr_count);
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_shentsize), sizeof(Elf64_Shdr));
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_shnum), section_count);
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_shstrndx), 5);
 
-  std::array<Elf64_Phdr, phdr_count> phdrs{};
-  phdrs[0].p_type = PT_LOAD;
-  phdrs[0].p_flags = 0x5; // PF_R | PF_X
-  phdrs[0].p_offset = text_offset;
-  phdrs[0].p_vaddr = text_vaddr;
-  phdrs[0].p_paddr = text_vaddr;
-  phdrs[0].p_filesz = text_size;
-  phdrs[0].p_memsz = text_size;
-  phdrs[0].p_align = load_align;
+  const uint64_t phdr0 = sizeof(Elf64_Ehdr);
+  write_value<uint32_t>(image, phdr0 + offsetof(Elf64_Phdr, p_type), PT_LOAD);
+  write_value<uint32_t>(image, phdr0 + offsetof(Elf64_Phdr, p_flags), 0x5); // PF_R | PF_X
+  write_value<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_offset), text_offset);
+  write_value<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_vaddr), text_vaddr);
+  write_value<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_paddr), text_vaddr);
+  write_value<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_filesz), text_size);
+  write_value<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_memsz), text_size);
+  write_value<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_align), load_align);
 
-  phdrs[1].p_type = PT_LOAD;
-  phdrs[1].p_flags = 0x4; // PF_R
-  phdrs[1].p_offset = rodata_offset;
-  phdrs[1].p_vaddr = rodata_vaddr;
-  phdrs[1].p_paddr = rodata_vaddr;
-  phdrs[1].p_filesz = kernel_descriptor_size;
-  phdrs[1].p_memsz = kernel_descriptor_size;
-  phdrs[1].p_align = load_align;
-  std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
+  const uint64_t phdr1 = phdr0 + sizeof(Elf64_Phdr);
+  write_value<uint32_t>(image, phdr1 + offsetof(Elf64_Phdr, p_type), PT_LOAD);
+  write_value<uint32_t>(image, phdr1 + offsetof(Elf64_Phdr, p_flags), 0x4); // PF_R
+  write_value<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_offset), rodata_offset);
+  write_value<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_vaddr), rodata_vaddr);
+  write_value<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_paddr), rodata_vaddr);
+  write_value<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_filesz), kernel_descriptor_size);
+  write_value<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_memsz), kernel_descriptor_size);
+  write_value<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_align), load_align);
 
   // Use a CDNA4 waitcnt that lowers to split RDNA4 wait instructions so the
   // diff report is guaranteed to contain a shown source/target pair.
@@ -133,7 +134,7 @@ std::vector<uint8_t> make_smoke_code_object() {
   // descriptors. For this smoke fixture only the entry offset must be valid;
   // the remaining descriptor fields can stay zero.
   constexpr size_t kernel_code_entry_byte_offset_offset = 16;
-  std::array<uint8_t, kernel_descriptor_size> kernel_descriptor{};
+  std::vector<uint8_t> kernel_descriptor(kernel_descriptor_size, 0);
   const int64_t entry_offset =
       static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(rodata_vaddr);
   std::memcpy(kernel_descriptor.data() + kernel_code_entry_byte_offset_offset, &entry_offset,
@@ -141,55 +142,39 @@ std::vector<uint8_t> make_smoke_code_object() {
   std::memcpy(image.data() + rodata_offset, kernel_descriptor.data(), kernel_descriptor.size());
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
 
-  std::array<Elf64_Sym, sym_count> syms{};
-  syms[1].st_name = kd_symbol_name;
-  syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
-  syms[1].st_shndx = 2;
-  syms[1].st_value = rodata_vaddr;
-  syms[1].st_size = kernel_descriptor.size();
-  std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
+  const uint64_t sym1 = symtab_offset + sizeof(Elf64_Sym);
+  write_value<uint32_t>(image, sym1 + offsetof(Elf64_Sym, st_name), kd_symbol_name);
+  write_value<unsigned char>(image, sym1 + offsetof(Elf64_Sym, st_info),
+                             elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject));
+  write_value<uint16_t>(image, sym1 + offsetof(Elf64_Sym, st_shndx), 2);
+  write_value<uint64_t>(image, sym1 + offsetof(Elf64_Sym, st_value), rodata_vaddr);
+  write_value<uint64_t>(image, sym1 + offsetof(Elf64_Sym, st_size), kernel_descriptor.size());
 
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
 
-  std::array<Elf64_Shdr, section_count> shdrs{};
-  shdrs[1].sh_name = text_name;
-  shdrs[1].sh_type = SHT_PROGBITS;
-  shdrs[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
-  shdrs[1].sh_addr = text_vaddr;
-  shdrs[1].sh_offset = text_offset;
-  shdrs[1].sh_size = text_size;
-  shdrs[1].sh_addralign = sizeof(uint32_t);
-
-  shdrs[2].sh_name = rodata_name;
-  shdrs[2].sh_type = SHT_PROGBITS;
-  shdrs[2].sh_flags = SHF_ALLOC;
-  shdrs[2].sh_addr = rodata_vaddr;
-  shdrs[2].sh_offset = rodata_offset;
-  shdrs[2].sh_size = kernel_descriptor_size;
-  shdrs[2].sh_addralign = 64;
-
-  shdrs[3].sh_name = symtab_name;
-  shdrs[3].sh_type = SHT_SYMTAB;
-  shdrs[3].sh_offset = symtab_offset;
-  shdrs[3].sh_size = syms.size() * sizeof(Elf64_Sym);
-  shdrs[3].sh_link = 4;
-  shdrs[3].sh_info = 1;
-  shdrs[3].sh_addralign = 8;
-  shdrs[3].sh_entsize = sizeof(Elf64_Sym);
-
-  shdrs[4].sh_name = strtab_name;
-  shdrs[4].sh_type = SHT_STRTAB;
-  shdrs[4].sh_offset = strtab_offset;
-  shdrs[4].sh_size = strtab.size();
-  shdrs[4].sh_addralign = 1;
-
-  shdrs[5].sh_name = shstrtab_name;
-  shdrs[5].sh_type = SHT_STRTAB;
-  shdrs[5].sh_offset = shstrtab_offset;
-  shdrs[5].sh_size = shstrtab.size();
-  shdrs[5].sh_addralign = 1;
-
-  std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+  const auto write_shdr = [&](uint64_t index, uint32_t name, uint32_t type, uint64_t flags,
+                              uint64_t addr, uint64_t offset, uint64_t size, uint32_t link,
+                              uint32_t info, uint64_t addralign, uint64_t entsize) {
+    const uint64_t base = shoff + index * sizeof(Elf64_Shdr);
+    write_value<uint32_t>(image, base + offsetof(Elf64_Shdr, sh_name), name);
+    write_value<uint32_t>(image, base + offsetof(Elf64_Shdr, sh_type), type);
+    write_value<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_flags), flags);
+    write_value<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_addr), addr);
+    write_value<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_offset), offset);
+    write_value<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_size), size);
+    write_value<uint32_t>(image, base + offsetof(Elf64_Shdr, sh_link), link);
+    write_value<uint32_t>(image, base + offsetof(Elf64_Shdr, sh_info), info);
+    write_value<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_addralign), addralign);
+    write_value<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_entsize), entsize);
+  };
+  write_shdr(1, text_name, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, text_vaddr, text_offset,
+             text_size, 0, 0, sizeof(uint32_t), 0);
+  write_shdr(2, rodata_name, SHT_PROGBITS, SHF_ALLOC, rodata_vaddr, rodata_offset,
+             kernel_descriptor_size, 0, 0, 64, 0);
+  write_shdr(3, symtab_name, SHT_SYMTAB, 0, 0, symtab_offset, sym_count * sizeof(Elf64_Sym), 4, 1,
+             8, sizeof(Elf64_Sym));
+  write_shdr(4, strtab_name, SHT_STRTAB, 0, 0, strtab_offset, strtab.size(), 0, 0, 1, 0);
+  write_shdr(5, shstrtab_name, SHT_STRTAB, 0, 0, shstrtab_offset, shstrtab.size(), 0, 0, 1, 0);
   return image;
 }
 
@@ -218,16 +203,19 @@ bool command_succeeded(int status) {
   return status != -1 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
+bool command_exited_with(int status, int exit_code) {
+  return status != -1 && WIFEXITED(status) && WEXITSTATUS(status) == exit_code;
+}
+
 } // namespace
 
 TEST(RjDbtTranslate, Smoke) {
-  const TempDir temp_dir(
-      std::filesystem::temp_directory_path() /
-      ("rj_dbt_translate_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_smoke_");
+  const std::filesystem::path temp_path(temp_dir.path());
 
-  const auto input = temp_dir.path / "smoke_gfx950.co";
-  const auto output = temp_dir.path / "stdout.txt";
-  const auto error = temp_dir.path / "stderr.txt";
+  const auto input = temp_path / "smoke_gfx950.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
 
   {
     const auto image = make_smoke_code_object();
@@ -259,6 +247,66 @@ TEST(RjDbtTranslate, Smoke) {
         << "missing expected output fragment: " << needle << "\noutput:\n"
         << stdout_text;
   }
+}
+
+TEST(RjDbtTranslate, RequiresRevisionsOnlyForGfx1250) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_revision_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const auto input = temp_path / "smoke.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
+
+  {
+    const auto image = make_smoke_code_object();
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string missing_input_revision_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx1250 --output-target gfx1250 > " + shell_quote(output.string()) + " 2> " +
+      shell_quote(error.string());
+  int status = std::system(missing_input_revision_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--input-revision is required when --input-target is gfx1250"));
+
+  const std::string missing_output_revision_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx1250 --input-revision b0 --output-target gfx1250 > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  status = std::system(missing_output_revision_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--output-revision is required when --output-target is gfx1250"));
+
+  const std::string unsupported_input_revision_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx950 --input-revision b0 --output-target gfx1200 > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  status = std::system(unsupported_input_revision_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--input-revision is only valid when --input-target is gfx1250"));
+
+  const std::string unsupported_output_revision_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx950 --output-target gfx1200 --output-revision a0 > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  status = std::system(unsupported_output_revision_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--output-revision is only valid when --output-target is gfx1250"));
+
+  const std::string reverse_revision_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx1250 --input-revision a0 --output-target gfx1250 "
+      "--output-revision b0 > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  status = std::system(reverse_revision_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error), "gfx1250 A0-to-B0 translation is not supported"));
 }
 
 int main(int argc, char **argv) {

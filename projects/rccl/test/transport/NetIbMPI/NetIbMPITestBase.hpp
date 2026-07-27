@@ -31,6 +31,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <dirent.h>
@@ -85,7 +86,7 @@ using namespace RCCLTestHelpers;
 
 // External NET IB plugin
 extern ncclNet_t ncclNetIb;
-// External NET IB-CAST plugin (WRR scheduler, multi-QP)
+// External NET IB-CAST plugin (WRR scheduler, multi-QP, AINIC features)
 extern ncclNet_t netIbCast;
 
 // Select plugin by NCCL_NET env var name; falls back to ncclNetIb.
@@ -167,6 +168,7 @@ protected:
     // Timing constants
     static constexpr int kDefaultTimeoutMs = 5000;
     static constexpr int kLargeTransferTimeoutMs = 30000;
+    static constexpr int kConnectTimeoutMs = 30000;  // Handshake watchdog (see SetupConnection)
     static constexpr int kPollIntervalUs = 10000;  // 10ms
     static constexpr int kPollIntervalMs = 10;
     static constexpr int kMaxRetryAttempts = 1000;  // For NULL request handling
@@ -317,6 +319,9 @@ protected:
     };
 
     ncclResult_t SetupConnection(int dev, ConnectionPair& pair, int rank, int peerRank) {
+        // Cap the accept/connect handshake so a dead fabric fails fast instead
+        // of spinning forever (AICOMRCCL-1577).
+        const int maxAttempts = kConnectTimeoutMs / kPollIntervalMs;
         if (rank == 0) {
             // Rank 0: Listen
             RCCL_TEST_CHECK(CreateListenComm(dev, &pair.handle, &pair.listenComm));
@@ -326,11 +331,20 @@ protected:
 
             // Accept connection
             int done = 0;
+            int attempts = 0;
             while (!done) {
                 ncclResult_t result = AcceptConnection(pair.listenComm, &pair.recvComm);
-                if (result == ncclSuccess && pair.recvComm != nullptr) {
-                    done = 1;
+                if (result != ncclSuccess) {
+                    return result;
                 }
+                if (pair.recvComm != nullptr) {
+                    done = 1;
+                    break;
+                }
+                if (++attempts >= maxAttempts) {
+                    return ncclInternalError;
+                }
+                usleep(kPollIntervalUs);
             }
         } else {
             // Rank 1: Connect
@@ -338,11 +352,20 @@ protected:
 
             // Connect to peer
             int done = 0;
+            int attempts = 0;
             while (!done) {
                 ncclResult_t result = ConnectToRemote(dev, &pair.handle, &pair.sendComm);
-                if (result == ncclSuccess && pair.sendComm != nullptr) {
-                    done = 1;
+                if (result != ncclSuccess) {
+                    return result;
                 }
+                if (pair.sendComm != nullptr) {
+                    done = 1;
+                    break;
+                }
+                if (++attempts >= maxAttempts) {
+                    return ncclInternalError;
+                }
+                usleep(kPollIntervalUs);
             }
         }
 
@@ -399,6 +422,27 @@ protected:
         ASSERT_EQ(InitNetIb(), ncclSuccess);
         ASSERT_EQ(GetDeviceCount(p), ncclSuccess);
         ASSERT_GT(*p, 0);
+    }
+
+    // Count physical IB devices only. The plugin's devices()/GetDeviceCount
+    // returns ncclNMergedIbDevs, which GROWS as makeVDevice creates virtual
+    // NICs — so it is order-dependent across tests in the same process. Note a
+    // single-device vNIC (e.g. a deduped merge) also reports vProps.ndevs == 1,
+    // so ndevs alone cannot tell it apart from a physical NIC. Each physical NIC
+    // is registered with a unique underlying index in vProps.devs[0], while a
+    // 1-device vNIC reuses an existing physical index — so the count of DISTINCT
+    // single-device vProps.devs[0] values is the true physical device count.
+    int GetPhysicalDeviceCount() {
+        int n = 0;
+        if (GetDeviceCount(&n) != ncclSuccess) return 0;
+        std::set<int> physIdx;
+        for (int i = 0; i < n; i++) {
+            ncclNetProperties_t props;
+            memset(&props, 0, sizeof(props));
+            if (GetDeviceProperties(i, &props) != ncclSuccess) continue;
+            if (props.vProps.ndevs <= 1) physIdx.insert(props.vProps.devs[0]);
+        }
+        return (int)physIdx.size();
     }
 
     // Composite block: SetupConnection + wire up NetConnectionGuard for RAII cleanup.

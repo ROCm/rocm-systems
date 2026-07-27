@@ -31,13 +31,16 @@ Operand make_smem_offset(const Smem::OpEncoding *enc) {
 SLoadB32Smem::SLoadB32Smem(const MachineInst *inst)
     : Smem("s_load_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLoadB32Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -45,7 +48,10 @@ void SLoadB32Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 1;
+  d->elem_size = 4;
+  d->sign_extend = false;
   d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
@@ -54,13 +60,16 @@ void SLoadB32Smem::execute_impl(amdgpu::Wavefront &wf) {
 SLoadB64Smem::SLoadB64Smem(const MachineInst *inst)
     : Smem("s_load_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLoadB64Smem>()),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -68,7 +77,10 @@ void SLoadB64Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 2;
+  d->elem_size = 4;
+  d->sign_extend = false;
   d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
@@ -78,13 +90,16 @@ SLoadB128Smem::SLoadB128Smem(const MachineInst *inst)
     : Smem("s_load_b128", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SLoadB128Smem>()),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -92,7 +107,10 @@ void SLoadB128Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 4;
+  d->elem_size = 4;
+  d->sign_extend = false;
   d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
@@ -102,13 +120,16 @@ SLoadB256Smem::SLoadB256Smem(const MachineInst *inst)
     : Smem("s_load_b256", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SLoadB256Smem>()),
       sdata(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(256, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -116,7 +137,10 @@ void SLoadB256Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 8;
+  d->elem_size = 4;
+  d->sign_extend = false;
   d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
@@ -126,13 +150,16 @@ SLoadB512Smem::SLoadB512Smem(const MachineInst *inst)
     : Smem("s_load_b512", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SLoadB512Smem>()),
       sdata(512, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(512, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -140,7 +167,10 @@ void SLoadB512Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 16;
+  d->elem_size = 4;
+  d->sign_extend = false;
   d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
@@ -149,99 +179,162 @@ void SLoadB512Smem::execute_impl(amdgpu::Wavefront &wf) {
 SLoadB96Smem::SLoadB96Smem(const MachineInst *inst)
     : Smem("s_load_b96", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLoadB96Smem>()),
       sdata(96, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void SLoadB96Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->num_dwords = 3;
+  d->elem_size = 4;
+  d->sign_extend = false;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->addr = smem_calculate_address(inst_, wf);
+  set_data(std::move(d));
 }
 
 SLoadI8Smem::SLoadI8Smem(const MachineInst *inst)
     : Smem("s_load_i8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLoadI8Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void SLoadI8Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->num_dwords = 1;
+  d->elem_size = 1;
+  d->sign_extend = true;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->addr = smem_calculate_address(inst_, wf);
+  set_data(std::move(d));
 }
 
 SLoadU8Smem::SLoadU8Smem(const MachineInst *inst)
     : Smem("s_load_u8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLoadU8Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void SLoadU8Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->num_dwords = 1;
+  d->elem_size = 1;
+  d->sign_extend = false;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->addr = smem_calculate_address(inst_, wf);
+  set_data(std::move(d));
 }
 
 SLoadI16Smem::SLoadI16Smem(const MachineInst *inst)
     : Smem("s_load_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLoadI16Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void SLoadI16Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->num_dwords = 1;
+  d->elem_size = 2;
+  d->sign_extend = true;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->addr = smem_calculate_address(inst_, wf);
+  set_data(std::move(d));
 }
 
 SLoadU16Smem::SLoadU16Smem(const MachineInst *inst)
     : Smem("s_load_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLoadU16Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void SLoadU16Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->num_dwords = 1;
+  d->elem_size = 2;
+  d->sign_extend = false;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->addr = smem_calculate_address(inst_, wf);
+  set_data(std::move(d));
 }
 
 SBufferLoadB32Smem::SBufferLoadB32Smem(const MachineInst *inst)
     : Smem("s_buffer_load_b32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SBufferLoadB32Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -249,7 +342,10 @@ void SBufferLoadB32Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 1;
+  d->elem_size = 4;
+  d->sign_extend = false;
   d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
@@ -259,13 +355,16 @@ SBufferLoadB64Smem::SBufferLoadB64Smem(const MachineInst *inst)
     : Smem("s_buffer_load_b64", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SBufferLoadB64Smem>()),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -273,7 +372,10 @@ void SBufferLoadB64Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 2;
+  d->elem_size = 4;
+  d->sign_extend = false;
   d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
@@ -283,13 +385,16 @@ SBufferLoadB128Smem::SBufferLoadB128Smem(const MachineInst *inst)
     : Smem("s_buffer_load_b128", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SBufferLoadB128Smem>()),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -297,7 +402,10 @@ void SBufferLoadB128Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 4;
+  d->elem_size = 4;
+  d->sign_extend = false;
   d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
@@ -307,13 +415,16 @@ SBufferLoadB256Smem::SBufferLoadB256Smem(const MachineInst *inst)
     : Smem("s_buffer_load_b256", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SBufferLoadB256Smem>()),
       sdata(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(256, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -321,7 +432,10 @@ void SBufferLoadB256Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 8;
+  d->elem_size = 4;
+  d->sign_extend = false;
   d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
@@ -331,13 +445,16 @@ SBufferLoadB512Smem::SBufferLoadB512Smem(const MachineInst *inst)
     : Smem("s_buffer_load_b512", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SBufferLoadB512Smem>()),
       sdata(512, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(512, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -345,7 +462,10 @@ void SBufferLoadB512Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 16;
+  d->elem_size = 4;
+  d->sign_extend = false;
   d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
@@ -355,90 +475,150 @@ SBufferLoadB96Smem::SBufferLoadB96Smem(const MachineInst *inst)
     : Smem("s_buffer_load_b96", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SBufferLoadB96Smem>()),
       sdata(96, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void SBufferLoadB96Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->num_dwords = 3;
+  d->elem_size = 4;
+  d->sign_extend = false;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->addr = smem_calculate_address(inst_, wf);
+  set_data(std::move(d));
 }
 
 SBufferLoadI8Smem::SBufferLoadI8Smem(const MachineInst *inst)
     : Smem("s_buffer_load_i8", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SBufferLoadI8Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void SBufferLoadI8Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->num_dwords = 1;
+  d->elem_size = 1;
+  d->sign_extend = true;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->addr = smem_calculate_address(inst_, wf);
+  set_data(std::move(d));
 }
 
 SBufferLoadU8Smem::SBufferLoadU8Smem(const MachineInst *inst)
     : Smem("s_buffer_load_u8", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SBufferLoadU8Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void SBufferLoadU8Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->num_dwords = 1;
+  d->elem_size = 1;
+  d->sign_extend = false;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->addr = smem_calculate_address(inst_, wf);
+  set_data(std::move(d));
 }
 
 SBufferLoadI16Smem::SBufferLoadI16Smem(const MachineInst *inst)
     : Smem("s_buffer_load_i16", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SBufferLoadI16Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void SBufferLoadI16Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->num_dwords = 1;
+  d->elem_size = 2;
+  d->sign_extend = true;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->addr = smem_calculate_address(inst_, wf);
+  set_data(std::move(d));
 }
 
 SBufferLoadU16Smem::SBufferLoadU16Smem(const MachineInst *inst)
     : Smem("s_buffer_load_u16", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SBufferLoadU16Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
 }
 
 void SBufferLoadU16Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->num_dwords = 1;
+  d->elem_size = 2;
+  d->sign_extend = false;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->addr = smem_calculate_address(inst_, wf);
+  set_data(std::move(d));
 }
 
 SDcacheInvSmem::SDcacheInvSmem(const MachineInst *inst)
@@ -454,7 +634,7 @@ SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
     : Smem("s_atc_probe", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SAtcProbeSmem>()),
       sdata(8, OperandType::OPR_SIMM8, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
+      sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
@@ -463,16 +643,13 @@ SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
     : Smem("s_atc_probe_buffer", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SAtcProbeBufferSmem>()),
       sdata(8, OperandType::OPR_SIMM8, reinterpret_cast<const OpEncoding *>(inst)->sdata),
-      sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
+      sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
@@ -481,15 +658,12 @@ SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 SPrefetchInstSmem::SPrefetchInstSmem(const MachineInst *inst)
     : Smem("s_prefetch_inst", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SPrefetchInstSmem>()),
-      sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
+      sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       ioffset(32, OperandType::OPR_SIMM24, reinterpret_cast<const OpEncoding *>(inst)->ioffset),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
       sdata(32, OperandType::OPR_SIMM5, reinterpret_cast<const OpEncoding *>(inst)->sdata) {
@@ -501,10 +675,7 @@ SPrefetchInstSmem::SPrefetchInstSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SPrefetchInstSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void SPrefetchInstSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 SPrefetchInstPcRelSmem::SPrefetchInstPcRelSmem(const MachineInst *inst)
     : Smem("s_prefetch_inst_pc_rel", reinterpret_cast<const OpEncoding *>(inst),
@@ -519,15 +690,12 @@ SPrefetchInstPcRelSmem::SPrefetchInstPcRelSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SPrefetchInstPcRelSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void SPrefetchInstPcRelSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 SPrefetchDataSmem::SPrefetchDataSmem(const MachineInst *inst)
     : Smem("s_prefetch_data", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SPrefetchDataSmem>()),
-      sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
+      sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       ioffset(32, OperandType::OPR_SIMM24, reinterpret_cast<const OpEncoding *>(inst)->ioffset),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
       sdata(32, OperandType::OPR_SIMM5, reinterpret_cast<const OpEncoding *>(inst)->sdata) {
@@ -539,15 +707,12 @@ SPrefetchDataSmem::SPrefetchDataSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SPrefetchDataSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void SPrefetchDataSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 SBufferPrefetchDataSmem::SBufferPrefetchDataSmem(const MachineInst *inst)
     : Smem("s_buffer_prefetch_data", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SBufferPrefetchDataSmem>()),
-      sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
+      sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       ioffset(32, OperandType::OPR_SIMM24, reinterpret_cast<const OpEncoding *>(inst)->ioffset),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
       sdata(32, OperandType::OPR_SIMM5, reinterpret_cast<const OpEncoding *>(inst)->sdata) {
@@ -559,10 +724,7 @@ SBufferPrefetchDataSmem::SBufferPrefetchDataSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SBufferPrefetchDataSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void SBufferPrefetchDataSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 SPrefetchDataPcRelSmem::SPrefetchDataPcRelSmem(const MachineInst *inst)
     : Smem("s_prefetch_data_pc_rel", reinterpret_cast<const OpEncoding *>(inst),
@@ -577,10 +739,7 @@ SPrefetchDataPcRelSmem::SPrefetchDataPcRelSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SPrefetchDataPcRelSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void SPrefetchDataPcRelSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 } // namespace rdna4
 } // namespace rocjitsu

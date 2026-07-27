@@ -424,6 +424,16 @@ typedef rsmi_compute_partition_type_t rsmi_compute_partition_type;
 /// \endcond
 
 /**
+ * @brief Compute Partition Memory Allocation Mode. Controls how GPU memory
+ * is allocated across XCPs within a memory partition.
+ */
+typedef enum {
+  RSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID = 0,  //!< Invalid mode
+  RSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING,      //!< Memory evenly capped per XCP
+  RSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL           //!< Each XCP may use full partition memory
+} rsmi_compute_partition_mem_alloc_mode_t;
+
+/**
  * @brief Memory Partitions. This enum is used to identify various
  * memory partition types.
  */
@@ -5111,6 +5121,27 @@ rsmi_status_t rsmi_dev_compute_partition_set(uint32_t dv_ind,
                                              rsmi_compute_partition_type_t compute_partition);
 
 /**
+ *  @brief Retrieves the compute partition memory allocation mode for a device.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[out] mode a pointer to an ::rsmi_compute_partition_mem_alloc_mode_t into
+ *  which the current mode will be written.
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ */
+rsmi_status_t rsmi_dev_compute_partition_mem_alloc_mode_get(
+    uint32_t dv_ind, rsmi_compute_partition_mem_alloc_mode_t* mode);
+
+/**
+ *  @brief Sets the compute partition memory allocation mode for a device.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[in] mode the desired ::rsmi_compute_partition_mem_alloc_mode_t value.
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ */
+rsmi_status_t rsmi_dev_compute_partition_mem_alloc_mode_set(
+    uint32_t dv_ind, rsmi_compute_partition_mem_alloc_mode_t mode);
+
+/**
  *  @brief Retrieves the partition_id for a desired device
  *
  *  @details
@@ -5821,15 +5852,16 @@ rsmi_status_t rsmi_get_gpu_ptl_state(uint32_t dv_ind, bool* enabled);
  *  @platform{gpu_bm_linux} @platform{host}
  *
  *  @details This function enables or disables PTL (Peak Tops Limiter) operation.
- *  Use rsmi_set_gpu_ptl_enable_with_formats()
+ *  Use rsmi_set_gpu_ptl_formats()
  *  for more control over the preferred data formats when enabling.
  *
- *  @param[in] processor_handle Device to configure
+ *  @param[in] dv_ind a device index
  *
- *  @param[in] enable Boolean flag: true to enable PTL with default formats,
+ *  @param[in] enabled Boolean flag: true to enable PTL with default formats,
  *  false to disable PTL
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the sysfs fails
  */
 rsmi_status_t rsmi_set_gpu_ptl_state(uint32_t dv_ind, bool enabled);
 

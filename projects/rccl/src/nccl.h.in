@@ -60,7 +60,8 @@ typedef struct { char internal[NCCL_UNIQUE_ID_BYTES]; /*!< Opaque array>*/} nccl
     ncclInvalidUsage            =  5, /*!< Invalid usage */
     ncclRemoteError             =  6, /*!< Remote process exited or there was a network error */
     ncclInProgress              =  7, /*!< RCCL operation in progress */
-    ncclNumResults              =  8  /*!< Number of result types */
+    ncclTimeout                 =  8, /*!< Operation timed out */
+    ncclNumResults              =  9  /*!< Number of result types */
   } ncclResult_t;
 /*! @} */
 
@@ -119,6 +120,7 @@ typedef struct ncclConfig_v22800 {
   int nvlinkCentricSched;      /*!< nvlinkCentricSched*/
   int graphUsageMode;          /*!< CUDA Graph usage mode hint*/
   int numRmaCtx;               /*!< Number of RMA contexts*/
+  int maxP2pPeers;             /*!< Maximum number of P2P peers*/
 } ncclConfig_t;
 
 /* Config initializer must be assigned to initialize config structure when it is created.
@@ -143,6 +145,7 @@ typedef struct ncclConfig_v22800 {
   NCCL_CONFIG_UNDEF_INT,                            /* nvlinkCentricSched */    \
   NCCL_CONFIG_UNDEF_INT,                            /* graphUsageMode */        \
   NCCL_CONFIG_UNDEF_INT,                            /* numRmaCtx */             \
+  NCCL_CONFIG_UNDEF_INT,                            /* maxP2pPeers */           \
 }
 /*! @} */
 
@@ -156,11 +159,11 @@ typedef struct ncclSimInfo_v22200 {
 
 /* NCCL_SIM_INFO_INITIALIZER must be assigned to initialize simInfo structure when it is created.
  * Not initialized simInfo will result in NCCL error. */
-#define NCCL_SIM_INFO_INITIALIZER {                                         \
-  sizeof(ncclSimInfo_t),                            /* size */              \
-  0x74685283,                                       /* magic */             \
-  NCCL_VERSION(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH), /* version */           \
-  NCCL_UNDEF_FLOAT                                  /* estimated time */    \
+#define NCCL_SIM_INFO_INITIALIZER {                                  \
+  sizeof(ncclSimInfo_t),                     /* size */              \
+  0x74685283,                                /* magic */             \
+  NCCL_VERSION_CODE,                         /* version */           \
+  NCCL_UNDEF_FLOAT                           /* estimated time */    \
 }
 
 /* NCCL malloc and free function for all types of NCCL optimizations
@@ -354,22 +357,44 @@ ncclResult_t pncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t *new
 ncclResult_t  ncclCommShrink(ncclComm_t comm, int* excludeRanksList, int excludeRanksCount, ncclComm_t* newcomm, ncclConfig_t* config, int shrinkFlags);
 ncclResult_t pncclCommShrink(ncclComm_t comm, int* excludeRanksList, int excludeRanksCount, ncclComm_t* newcomm, ncclConfig_t* config, int shrinkFlags);
 
-/* Generate per-communicator unique ID for grow.
- * Constraints:
- * - Cannot generate a new UID while a previous UID is unconsumed
- * - Each UID can only be used once (no reuse after consumption)
- * - Must wait for grow operation to complete before calling again */
-ncclResult_t ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
-ncclResult_t pncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
+/*! @brief      Generate a per-communicator unique ID for growing a communicator.
+    @details    Generates a unique ID on an existing communicator. The ID must be
+                distributed to the ranks joining through ncclCommGrow.
+                Constraints:
+                - A new ID cannot be generated while a previous ID is unconsumed.
+                - Each ID can only be used once (no reuse after consumption).
+                - The grow operation must complete before calling this again.
+    @return     Result code. See @ref rccl_result_code for more details.
 
-/* Grow communicator by adding new ranks.
- * Parameter usage:
- * - Existing non-root: comm, uniqueId=NULL, rank=-1
- * - Existing root: comm, uniqueId=&id, rank=-1
- * - New ranks: comm=NULL, uniqueId=&id, rank=assigned
- * The UID is consumed upon successful grow and cannot be reused. */
+    @param[in]  comm          Existing communicator that coordinates the grow
+    @param[out] uniqueId      Pointer to the generated unique ID */
+ncclResult_t ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
+/*! @cond       include_hidden */
+ncclResult_t pncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
+/*! @endcond */
+
+/*! @brief      Grow a communicator by adding new ranks.
+    @details    Creates a larger communicator from an existing one plus newly
+                joining ranks. The unique ID obtained from ncclCommGetUniqueId
+                must be distributed to the new ranks. Parameter usage:
+                - Existing non-root ranks: comm set, uniqueId = NULL, rank = -1
+                - Existing root rank: comm set, uniqueId = &id, rank = -1
+                - New ranks: comm = NULL, uniqueId = &id, rank = assigned
+                The unique ID is consumed upon a successful grow and cannot be reused.
+                If config is NULL, the new communicator inherits the original
+                communicator's configuration.
+    @return     Result code. See @ref rccl_result_code for more details.
+
+    @param[in]  comm          Existing communicator, or NULL for newly joining ranks
+    @param[in]  nRanks        Total number of ranks in the new communicator
+    @param[in]  uniqueId      Unique ID from ncclCommGetUniqueId; NULL on existing non-root ranks
+    @param[in]  rank          Rank in the new communicator for joining ranks; -1 for existing ranks
+    @param[out] newcomm       Pointer to the new communicator
+    @param[in]  config        Config for the new communicator. May be NULL to inherit from comm */
 ncclResult_t  ncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config);
+/*! @cond       include_hidden */
 ncclResult_t pncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config);
+/*! @endcond */
 
 /*! @brief      Creates a new communicator (multi thread/process version), similar to ncclCommInitRankConfig.
      @details    Allows to use more than one ncclUniqueId (up to one per rank), 
@@ -413,6 +438,7 @@ const char* pncclGetLastError(ncclComm_t comm);
 __attribute__ ((deprecated("ncclResetDebugInit is not supported as part of the NCCL API and will be removed in the future")))
 void  ncclResetDebugInit();
 /*! @cond       include_hidden */
+__attribute__ ((deprecated("pncclResetDebugInit is not supported as part of the NCCL API and will be removed in the future")))
 void pncclResetDebugInit();
 /*! @endcond */
 
@@ -660,7 +686,7 @@ ncclResult_t pncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Local device data buffer to be reduced
-    @param[out] recvbuff      Data buffer where result is stored (only for *root* rank).  May be null for other ranks.
+    @param[in,out] recvbuff      Data buffer where result is stored (only for *root* rank).  May be null for other ranks.
     @param[in]  count         Number of elements in every send buffer
     @param[in]  datatype      Data buffer element datatype
     @param[in]  op            Reduction operator type
@@ -702,7 +728,7 @@ ncclResult_t pncclBcast(void* buff, size_t count, ncclDataType_t datatype, int r
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Data array to copy (if *root*).  May be NULL for other ranks
-    @param[in]  recvbuff      Data array to store received array
+    @param[in,out] recvbuff   Data array to store received array
     @param[in]  count         Number of elements in data buffer
     @param[in]  datatype      Data buffer element datatype
     @param[in]  root          Rank of broadcast root
@@ -722,7 +748,7 @@ ncclResult_t pncclBroadcast(const void* sendbuff, void* recvbuff, size_t count, 
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Input data array to reduce
-    @param[out] recvbuff      Data array to store reduced result array
+    @param[in,out] recvbuff      Data array to store reduced result array
     @param[in]  count         Number of elements in data buffer
     @param[in]  datatype      Data buffer element datatype
     @param[in]  op            Reduction operator
@@ -742,7 +768,7 @@ ncclResult_t pncclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Input data array to reduce
-    @param[out] recvbuff      Data array to store reduced result array
+    @param[in,out] recvbuff      Data array to store reduced result array
     @param[in]  count         Number of elements in data buffer
     @param[in]  datatype      Data buffer element datatype
     @param[in]  op            Reduction operator
@@ -766,7 +792,7 @@ ncclResult_t pncclAllReduceWithBias(const void* sendbuff, void* recvbuff, size_t
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Input data array to reduce
-    @param[out] recvbuff      Data array to store reduced result subarray
+    @param[in,out] recvbuff      Data array to store reduced result subarray
     @param[in]  recvcount     Number of elements each rank receives
     @param[in]  datatype      Data buffer element datatype
     @param[in]  op            Reduction operator
@@ -790,7 +816,7 @@ ncclResult_t pncclReduceScatter(const void* sendbuff, void* recvbuff,
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Input data array to send
-    @param[out] recvbuff      Data array to store the gathered result
+    @param[in,out] recvbuff      Data array to store the gathered result
     @param[in]  sendcount     Number of elements each rank sends
     @param[in]  datatype      Data buffer element datatype
     @param[in]  comm          Communicator group object to execute on
@@ -810,7 +836,7 @@ ncclResult_t pncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcou
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Data array to send (contains blocks for each other rank)
-    @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
+    @param[in,out] recvbuff      Data array to receive (contains blocks from each other rank)
     @param[in]  count         Number of elements to send between each pair of ranks
     @param[in]  datatype      Data buffer element datatype
     @param[in]  comm          Communicator group object to execute on
@@ -834,7 +860,7 @@ ncclResult_t pncclAlltoAll(const void* sendbuff, void* recvbuff, size_t count,
     @param[in]  sendbuff      Data array to send (contains blocks for each other rank)
     @param[in]  sendcounts    Array containing number of elements to send to each participating rank
     @param[in]  sdispls       Array of offsets into *sendbuff* for each participating rank
-    @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
+    @param[in,out] recvbuff      Data array to receive (contains blocks from each other rank)
     @param[in]  recvcounts    Array containing number of elements to receive from each participating rank
     @param[in]  rdispls       Array of offsets into *recvbuff* for each participating rank
     @param[in]  datatype      Data buffer element datatype
@@ -859,7 +885,7 @@ ncclResult_t pncclAlltoAllv(const void *sendbuff, const size_t sendcounts[],
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Data array to send
-    @param[in]  recvbuff      Data array to recv
+    @param[in,out] recvbuff   Data array to recv
     @param[in]  count         Number of elements
     @param[in]  datatype      Data buffer element datatype
     @param[in]  root          Rank of gather root
@@ -882,7 +908,7 @@ ncclResult_t pncclGather(const void* sendbuff, void* recvbuff, size_t count,
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Data array to send
-    @param[in]  recvbuff      Data array to recv
+    @param[in,out] recvbuff   Data array to recv
     @param[in]  count         Number of elements
     @param[in]  datatype      Data buffer element datatype
     @param[in]  root          Rank of scatter root
@@ -905,7 +931,7 @@ ncclResult_t pncclScatter(const void* sendbuff, void* recvbuff, size_t count,
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Data array to send (contains blocks for each other rank)
-    @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
+    @param[in,out] recvbuff      Data array to receive (contains blocks from each other rank)
     @param[in]  count         Number of elements to send between each pair of ranks
     @param[in]  datatype      Data buffer element datatype
     @param[in]  comm          Communicator group object to execute on
@@ -931,7 +957,7 @@ ncclResult_t pncclAllToAll(const void* sendbuff, void* recvbuff, size_t count,
     @param[in]  sendbuff      Data array to send (contains blocks for each other rank)
     @param[in]  sendcounts    Array containing number of elements to send to each participating rank
     @param[in]  sdispls       Array of offsets into *sendbuff* for each participating rank
-    @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
+    @param[in,out] recvbuff      Data array to receive (contains blocks from each other rank)
     @param[in]  recvcounts    Array containing number of elements to receive from each participating rank
     @param[in]  rdispls       Array of offsets into *recvbuff* for each participating rank
     @param[in]  datatype      Data buffer element datatype
@@ -978,7 +1004,7 @@ ncclResult_t pncclSend(const void* sendbuff, size_t count, ncclDataType_t dataty
                 ncclGroupEnd section.
     @return     Result code. See @ref rccl_result_code for more details.
 
-    @param[out] recvbuff      Data array to receive
+    @param[in,out] recvbuff      Data array to receive
     @param[in]  count         Number of elements to receive
     @param[in]  datatype      Data buffer element datatype
     @param[in]  peer          Peer rank to send to
@@ -1070,7 +1096,7 @@ ncclResult_t pmscclLoadAlgo(const char *mscclAlgoFilePath, mscclAlgoHandle_t *ms
     @param[in]  sendBuff         Data array to send
     @param[in]  sendCounts       Array containing number of elements to send to each participating rank
     @param[in]  sDisPls          Array of offsets into *sendbuff* for each participating rank
-    @param[out] recvBuff         Data array to receive
+    @param[in,out] recvBuff      Data array to receive
     @param[in]  recvCounts       Array containing number of elements to receive from each participating rank
     @param[in]  rDisPls          Array of offsets into *recvbuff* for each participating rank
     @param[in]  count            Number of elements
@@ -1157,6 +1183,102 @@ ncclResult_t pncclGroupEnd();
  */
 ncclResult_t  ncclGroupSimulateEnd(ncclSimInfo_t* simInfo);
 ncclResult_t pncclGroupSimulateEnd(ncclSimInfo_t* simInfo);
+
+/*
+ * Parameter access
+ *
+ * For accessing NCCL runtime parameters. Parameters are identified by string keys
+ * and can be read as typed values or as strings. NCCL provides two styles of parameter
+ * APIs: handle-based and key-based.
+ */
+
+/*
+ * Handle-based API (allows typed access)
+ *
+ * Handles represents parameters and are opaque (internal details hidden).
+ */
+typedef struct ncclParamHandle ncclParamHandle_t;
+
+/*
+ * Look up the parameter identified by key and store a handle to it in
+ * out. The returned handle is owned by the parameter system and must not
+ * be freed by the caller.
+ */
+ncclResult_t ncclParamBind(ncclParamHandle_t** out, const char* key);
+ncclResult_t pncclParamBind(ncclParamHandle_t** out, const char* key);
+
+/*
+ * Read the value of the parameter bound to h as the type of out.
+ * Function names are suffixed with I/U and 8/16/32/64 for 8-, 16-, 32- and 64-bit
+ * signed and unsigned integers.
+ */
+ncclResult_t ncclParamGetI8(ncclParamHandle_t* h, int8_t* out);
+ncclResult_t pncclParamGetI8(ncclParamHandle_t* h, int8_t* out);
+
+ncclResult_t ncclParamGetI16(ncclParamHandle_t* h, int16_t* out);
+ncclResult_t pncclParamGetI16(ncclParamHandle_t* h, int16_t* out);
+
+ncclResult_t ncclParamGetI32(ncclParamHandle_t* h, int32_t* out);
+ncclResult_t pncclParamGetI32(ncclParamHandle_t* h, int32_t* out);
+
+ncclResult_t ncclParamGetI64(ncclParamHandle_t* h, int64_t* out);
+ncclResult_t pncclParamGetI64(ncclParamHandle_t* h, int64_t* out);
+
+ncclResult_t ncclParamGetU8(ncclParamHandle_t* h, uint8_t* out);
+ncclResult_t pncclParamGetU8(ncclParamHandle_t* h, uint8_t* out);
+
+ncclResult_t ncclParamGetU16(ncclParamHandle_t* h, uint16_t* out);
+ncclResult_t pncclParamGetU16(ncclParamHandle_t* h, uint16_t* out);
+
+ncclResult_t ncclParamGetU32(ncclParamHandle_t* h, uint32_t* out);
+ncclResult_t pncclParamGetU32(ncclParamHandle_t* h, uint32_t* out);
+
+ncclResult_t ncclParamGetU64(ncclParamHandle_t* h, uint64_t* out);
+ncclResult_t pncclParamGetU64(ncclParamHandle_t* h, uint64_t* out);
+
+/*
+ * Read the value of the parameter bound to h as a string.
+ * Returned pointer is owned by the parameter system and is valid until the
+ * next ncclParamGetStr() call on the same thread.
+ */
+ncclResult_t ncclParamGetStr(ncclParamHandle_t* h, const char** out);
+ncclResult_t pncclParamGetStr(ncclParamHandle_t* h, const char** out);
+
+/*
+ * Read the value of the parameter bound to h as raw binary data.
+ * The user needs to allocate a buffer for the result and the parameter value is copied
+ * into user buffer as bytes.
+ */
+ncclResult_t ncclParamGet(ncclParamHandle_t* h, void* out, int maxLen, int* len);
+ncclResult_t pncclParamGet(ncclParamHandle_t* h, void* out, int maxLen, int* len);
+
+/*
+ * Key-based API (no handle required, typeless access, return value as string)
+ */
+
+/*
+ * Get parameter value as string by key. Returned pointer is owned by the
+ * parameter system and is valid until the next ncclParamGetParameter() call
+ * on the same thread.
+ */
+ncclResult_t ncclParamGetParameter(const char* key, const char** value, int* valueLen);
+ncclResult_t pncclParamGetParameter(const char* key, const char** value, int* valueLen);
+
+/*
+ * Get all registered parameter keys. Returned pointer table is owned by the
+ * parameter system and is valid until the next ncclParamGetAllParameterKeys()
+ * call on the same thread. By default, the results include only parameters published
+ * in NCCL documentation. Setting NCCL_PARAM_DUMP_ALL=true will include all parameters.
+ */
+ncclResult_t ncclParamGetAllParameterKeys(const char*** table, int* tableLen);
+ncclResult_t pncclParamGetAllParameterKeys(const char*** table, int* tableLen);
+
+/*
+ * Dump all parameters to log output. By default, the result includes only parameters published
+ * in NCCL documentation. Setting NCCL_PARAM_DUMP_ALL=true will include all parameters.
+ */
+void ncclParamDumpAll(void);
+void pncclParamDumpAll(void);
 
 #ifdef __cplusplus
 } // end extern "C"
