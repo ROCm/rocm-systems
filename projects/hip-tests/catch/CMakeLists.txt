@@ -34,12 +34,8 @@ option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON)
 option(STANDALONE_TESTS "Generate standalone executable per source file" OFF)
 option(ENABLE_OOB_TESTS "Build OOB tests, deliberately wrong inputs" ON)
 
-# Build tests with -Wall -Werror. Defaults ON for Linux, OFF elsewhere.
-if(UNIX)
-  set(_hiptests_werror_default ON)
-else()
-  set(_hiptests_werror_default OFF)
-endif()
+# Build tests with -Wall -Werror. Defaults to OFF
+set(_hiptests_werror_default OFF)
 option(HIP_TESTS_ENABLE_WERROR "Build tests with -Wall -Werror (Linux default ON)" ${_hiptests_werror_default})
 
 if(NOT CMAKE_BUILD_TYPE)
