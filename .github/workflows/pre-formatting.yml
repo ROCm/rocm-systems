@@ -3,6 +3,10 @@ on:
   pull_request:
     branches:
       - testbranch
+
+permissions:
+  contents: write
+
 jobs:
   pre-commit:
     runs-on: ubuntu-latest

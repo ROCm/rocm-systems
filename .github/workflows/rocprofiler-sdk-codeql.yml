@@ -34,6 +34,12 @@ on:
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
 
+permissions:
+  contents: read
+  security-events: write
+  packages: read
+  actions: read
+
 env:
   ROCM_PATH: "/opt/rocm"
   GPU_TARGETS: "gfx906;gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1201"

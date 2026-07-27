@@ -12,6 +12,9 @@ on:
       - 'shared/kpack/**'
       - '.github/workflows/kpack-ci.yml'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

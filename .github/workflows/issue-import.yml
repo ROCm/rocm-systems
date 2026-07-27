@@ -37,6 +37,8 @@ on:
         description: 'Issue number to import'
         required: true
 
+permissions: {}
+
 jobs:
   import:
     runs-on: ubuntu-24.04

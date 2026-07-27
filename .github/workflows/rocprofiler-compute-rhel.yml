@@ -31,6 +31,10 @@ on:
       - '!projects/rocprofiler-compute/docker/**'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

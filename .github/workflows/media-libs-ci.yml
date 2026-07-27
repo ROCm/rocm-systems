@@ -77,7 +77,6 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/therock-ci-linux.yml
-    secrets: inherit
     with:
       package_version: ${{ needs.setup.outputs.package_version }}
       cmake_options: >

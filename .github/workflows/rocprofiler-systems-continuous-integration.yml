@@ -48,6 +48,9 @@ on:
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/CMakePresets.json'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -97,6 +100,7 @@ jobs:
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
     permissions:
+      contents: read
       packages: read
       checks: write
     defaults:

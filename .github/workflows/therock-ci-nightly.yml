@@ -129,7 +129,6 @@ jobs:
         projects: ${{ fromJSON(needs.setup.outputs.linux_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.linux_package_targets) }}
     uses: ./.github/workflows/therock-ci-linux.yml
-    secrets: inherit
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
@@ -150,7 +149,6 @@ jobs:
       matrix:
         amdgpu_family: [gfx94X-dcgpu, gfx950-dcgpu]
     uses: ./.github/workflows/therock-rccl-ci-linux.yml
-    secrets: inherit
     with:
       amdgpu_families: ${{ matrix.amdgpu_family }}
       artifact_group: ${{ matrix.amdgpu_family }}
@@ -176,7 +174,6 @@ jobs:
         projects: ${{ fromJSON(needs.setup.outputs.windows_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.windows_package_targets) }}
     uses: ./.github/workflows/therock-ci-windows.yml
-    secrets: inherit
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}

@@ -8,6 +8,8 @@ on:
   schedule:
     - cron: "*/30 * * * *"  # every 30 minutes
 
+permissions: {}
+
 jobs:
   label-prs:
     if: github.repository == 'ROCm/rocm-systems'

@@ -10,6 +10,10 @@ on:
       - 'projects/rdc/tools/dme_rdc_metric_mapping.json'
       - 'projects/rdc/tools/dme_rdc_metric_sync_check.py'
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   sync-check:
     runs-on: ubuntu-latest

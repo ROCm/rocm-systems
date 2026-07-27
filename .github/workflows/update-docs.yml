@@ -23,6 +23,9 @@ on:
      - 'projects/**'
      - 'shared/**'
 
+permissions:
+  contents: read
+
 jobs:
   trigger-rtd:
     runs-on: ubuntu-latest

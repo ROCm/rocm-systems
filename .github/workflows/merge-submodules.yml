@@ -3,6 +3,9 @@ name: Merge .gitmodules
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   combine-gitmodules:
     runs-on: ubuntu-latest
