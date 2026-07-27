@@ -11,7 +11,8 @@ USAGE:
 
 API:
     normalize_mem_chart_metrics(metric_dict) -> flat ordered dict for UIs
-    plot_mem_chart(metric_dict, *, chart_title=...) -> str
+    plot_mem_chart(..., *, chart_title=...) -> str
+    format_mem_chart_heading(normal_unit, *, panel_id=300, section_label=...) -> str
 
 Metric dict keys must match the Memory Chart panel YAML for RDNA3.5:
 
@@ -241,6 +242,21 @@ def _print_mem_chart_scope_bar(console: Console) -> None:
         + "-" * 4
         + "|"
     )
+
+
+def format_mem_chart_heading(
+    normal_unit: str,
+    *,
+    panel_id: int = 300,
+    section_label: str = "Memory Chart",
+) -> str:
+    """Build CLI diagram title: ``{panel_id//100}. {label} (Normalization: …)``.
+
+    Matches other panels (e.g. ``3. System Speed-of-Light``) where the leading
+    number is ``Panel Config id // 100`` (panel 300 → ``3.``).
+    """
+    section = max(0, int(panel_id)) // 100
+    return f"{section}. {section_label} (Normalization: {normal_unit})"
 
 
 def normalize_mem_chart_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
@@ -721,9 +737,10 @@ def create_mem_chart_diagram(
 
 
 def plot_mem_chart(
+    normal_unit: str,
     metric_dict: dict[str, Any],
     *,
-    chart_title: str,
+    chart_title: Optional[str] = None,
 ) -> str:
     """Plot the memory chart and return as string.
 
@@ -731,16 +748,22 @@ def plot_mem_chart(
     ``MEM_CHART_PANEL_METRIC_KEYS``. Values for bandwidth metrics are in **Bytes/s**.
     Input is normalized to a flat ordered dict before rendering.
 
-    ``chart_title``: full heading line printed above the diagram.
+    ``chart_title``: full heading line; if omitted, uses ``format_mem_chart_heading``
+    with ``panel_id=300`` (section ``3.``).
     """
     flat = normalize_mem_chart_metrics(metric_dict)
+    resolved_heading = (
+        format_mem_chart_heading(normal_unit, panel_id=300)
+        if chart_title is None
+        else chart_title
+    )
     buf = StringIO()
     console = Console(file=buf, force_terminal=True, width=200, height=80)
     create_mem_chart_diagram(
         flat,
         console,
         show_debug=False,
-        chart_title=chart_title,
+        chart_title=resolved_heading,
     )
     return buf.getvalue()
 
@@ -766,7 +789,7 @@ def main() -> None:
     else:
         metric_dict = normalize_mem_chart_metrics(DEFAULT_SAMPLE_METRICS.copy())
 
-    heading = f"3. Memory Chart (Normalization: {args.norm})"
+    heading = format_mem_chart_heading(args.norm, panel_id=300)
 
     if args.txt:
         buf = StringIO()
