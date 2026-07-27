@@ -3105,16 +3105,11 @@ amdsmi_status_t amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_han
 namespace amd {
 namespace smi {
 
-// Pure redirect decision factored out of get_primary_partition_handle() so it
-// can be unit tested without hardware.
-//
-// Given the partition ids of every logical GPU partition that shares a physical
-// device and the index of the querying partition within that list, return the
-// index of the primary partition (partition_id == 0) that partition-config
-// queries must be redirected to, or -1 when no redirect is needed: the device is
-// not split into multiple logical partitions, the querying partition is already
-// the primary, or no primary sibling exists. Siblings whose id could not be read
-// must be passed as UINT32_MAX so they are skipped.
+// Pure redirect decision factored out of get_primary_partition_handle() for
+// hardware-free unit testing. Returns the index of the primary partition
+// (partition_id == 0) that partition-config queries should redirect to, or -1
+// when no redirect is needed (single partition, caller is already primary, or no
+// primary sibling). Unreadable sibling ids must be passed as UINT32_MAX.
 int primary_partition_redirect_index(const std::vector<uint32_t>& partition_ids,
                                      size_t self_index) {
   // A physical device that exposes a single logical GPU has no separate primary
@@ -3136,19 +3131,14 @@ int primary_partition_redirect_index(const std::vector<uint32_t>& partition_ids,
 }  // namespace smi
 }  // namespace amd
 
-// On MI300-class accelerators that are split into multiple logical partitions
-// (for example CPX + NPS4), the compute- and memory-partition sysfs nodes only
-// respond on the primary partition (partition_id == 0) of each physical device.
-// Queries issued against a logical sub-partition handle (partition_id > 0)
-// therefore fail and the tool falls back to reporting "N/A". All logical
-// partitions of a physical device share the same partition configuration and are
-// grouped under the same AMDSmiSocket (keyed on the BD portion of the BDF), so
-// this helper walks the owning socket and returns the primary partition's handle
-// for a given sub-partition handle.
-//
-// Returns nullptr when the handle is already the primary partition, when the
-// device is not partitioned into multiple logical GPUs, or when no primary
-// sibling can be found.
+// On MI300-class accelerators split into multiple logical partitions (for
+// example CPX + NPS4), the compute-/memory-partition sysfs nodes only respond on
+// each physical device's primary partition (partition_id == 0); queries against a
+// sub-partition handle (partition_id > 0) fail and fall back to "N/A". All logical
+// partitions share one partition config and one AMDSmiSocket (keyed on the BD
+// portion of the BDF), so this walks the owning socket and returns the primary
+// partition's handle. Returns nullptr when the handle is already primary, the
+// device is not multi-partitioned, or no primary sibling exists.
 static amdsmi_processor_handle get_primary_partition_handle(
     amdsmi_processor_handle processor_handle) {
   amd::smi::AMDSmiProcessor* processor = nullptr;
@@ -3158,11 +3148,10 @@ static amdsmi_processor_handle get_primary_partition_handle(
     return nullptr;
   }
 
-  // Fast path: the primary partition (partition_id == 0) already answers
-  // partition-config queries directly, so it never needs a redirect. Reading the
-  // caller's own partition id first avoids the socket walk and the per-sibling
-  // sysfs reads below on every primary partition and every unpartitioned (SPX)
-  // device.
+  // Fast path: the primary partition (partition_id == 0) answers partition-config
+  // queries directly and never needs a redirect. Reading the caller's own
+  // partition id first avoids the socket walk and per-sibling sysfs reads on every
+  // primary and unpartitioned (SPX) device.
   uint32_t self_partition_id = std::numeric_limits<uint32_t>::max();
   if (rsmi_wrapper(rsmi_dev_partition_id_get, processor_handle, 0, &self_partition_id) ==
           AMDSMI_STATUS_SUCCESS &&
@@ -3187,10 +3176,9 @@ static amdsmi_processor_handle get_primary_partition_handle(
     return nullptr;
   }
 
-  // Collect the partition id of every logical GPU partition on this physical
-  // device (marking siblings whose id cannot be read as unqueryable) and locate
-  // this processor within that list, then defer the redirect decision to the
-  // pure helper above.
+  // Collect every logical partition's id on this physical device (unreadable
+  // siblings marked unqueryable), locate this processor in the list, and defer the
+  // redirect decision to the pure helper above.
   auto& siblings = owning_socket->get_processors(AMDSMI_PROCESSOR_TYPE_AMD_GPU);
   std::vector<uint32_t> partition_ids(siblings.size(), std::numeric_limits<uint32_t>::max());
   size_t self_index = siblings.size();
@@ -3225,10 +3213,9 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle process
 
   auto status =
       rsmi_wrapper(rsmi_dev_compute_partition_get, processor_handle, 0, compute_partition, len);
-  // The compute-partition sysfs node only responds on the primary partition
-  // (partition_id == 0). For a logical sub-partition handle the query above fails,
-  // so retry against the owning physical device's primary partition handle. All
-  // partitions of a physical device share the same compute-partition mode.
+  // The compute-partition sysfs node only responds on the primary partition, so
+  // for a sub-partition handle the query above fails; retry against the owning
+  // device's primary handle (all partitions share one compute-partition mode).
   if (status != AMDSMI_STATUS_SUCCESS) {
     amdsmi_processor_handle primary_handle = get_primary_partition_handle(processor_handle);
     if (primary_handle != nullptr) {
@@ -3303,10 +3290,9 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processo
   AMDSMI_CHECK_INIT();
   amdsmi_status_t ret =
       rsmi_wrapper(rsmi_dev_memory_partition_get, processor_handle, 0, memory_partition, len);
-  // The memory-partition sysfs node only responds on the primary partition
-  // (partition_id == 0). For a logical sub-partition handle the query above fails,
-  // so retry against the owning physical device's primary partition handle. All
-  // partitions of a physical device share the same memory-partition (NPS) mode.
+  // The memory-partition sysfs node only responds on the primary partition, so
+  // for a sub-partition handle the query above fails; retry against the owning
+  // device's primary handle (all partitions share one memory-partition/NPS mode).
   if (ret != AMDSMI_STATUS_SUCCESS) {
     amdsmi_processor_handle primary_handle = get_primary_partition_handle(processor_handle);
     if (primary_handle != nullptr) {
@@ -3342,9 +3328,8 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle p
   // TODO(amdsmi_team): Will BM/guest VMs have numa ranges?
   config->num_numa_ranges = 0;
 
-  // For a logical sub-partition handle (partition_id > 0) the partition-capability
-  // sysfs nodes only respond on the owning physical device's primary partition, so
-  // redirect capability queries there.
+  // A sub-partition handle's capability sysfs nodes only respond on the owning
+  // device's primary partition, so redirect capability queries there.
   amdsmi_processor_handle query_handle = processor_handle;
   amdsmi_processor_handle primary_handle = get_primary_partition_handle(processor_handle);
   if (primary_handle != nullptr) {
@@ -3887,12 +3872,10 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   auto tmp_partition_id = uint32_t(0);
   amdsmi_status_t status = AMDSMI_STATUS_NOT_SUPPORTED;
 
-  // For a logical sub-partition handle (partition_id > 0) the partition-profile
-  // sysfs/ioctl interfaces only respond on the owning physical device's primary
-  // partition (partition_id == 0). Redirect the capability/profile queries there so
-  // sub-partitions report the same profile as their parent instead of "N/A". The
-  // reported partition_id below intentionally continues to use the original handle
-  // so each logical partition keeps its own identity.
+  // A sub-partition handle's partition-profile sysfs/ioctl interfaces only respond
+  // on the owning device's primary partition, so redirect the capability/profile
+  // queries there (otherwise sub-partitions report "N/A"). The reported partition_id
+  // below intentionally keeps the original handle so each partition keeps its identity.
   amdsmi_processor_handle query_handle = processor_handle;
   amdsmi_processor_handle primary_handle = get_primary_partition_handle(processor_handle);
   if (primary_handle != nullptr) {

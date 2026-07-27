@@ -22,12 +22,11 @@
 
 // Hardware-free unit tests for the partition-redirect decision.
 //
-// On MI300-class accelerators split into multiple logical partitions (for
-// example CPX + NPS4) the compute-/memory-partition sysfs nodes only respond on
-// the primary partition (partition_id == 0). Queries against a logical
-// sub-partition handle must be redirected to that primary, otherwise the tool
-// reports "N/A". amdsmi.cc factors the redirect decision into the pure helper
-// exercised below so it can be verified without any GPU present.
+// On MI300-class accelerators split into multiple logical partitions (e.g. CPX +
+// NPS4) the compute-/memory-partition sysfs nodes only respond on the primary
+// partition (partition_id == 0), so queries against a sub-partition handle must
+// be redirected there or the tool reports "N/A". amd_smi.cc factors that decision
+// into the pure helper exercised below so it can be verified without a GPU.
 
 #include <gtest/gtest.h>
 
