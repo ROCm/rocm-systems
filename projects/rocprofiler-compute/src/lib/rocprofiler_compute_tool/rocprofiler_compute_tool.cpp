@@ -189,15 +189,12 @@ void tool_fini(void* user_data)
 
 static std::string generate_output_filename(std::string_view output_path, std::string_view suffix)
 {
-    const auto filename = std::to_string(getpid()) + std::string{suffix};
-    return (std::filesystem::path{std::string{output_path}} / filename).string();
-}
-
-static std::string generate_output_directory(std::string_view output_path, std::string_view directory_name)
-{
-    return (std::filesystem::path{std::string{output_path}} /
-            std::filesystem::path{std::string{directory_name}})
-        .string();
+    std::string filename{output_path};
+    if (filename.back() != '/')
+        filename += '/';
+    filename += std::to_string(getpid());
+    filename.append(suffix);
+    return filename;
 }
 
 std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
@@ -212,9 +209,7 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
     {
         const auto pc_mode = parse_pc_sampling_mode(std::string{pc_sampling_method});
         tool_data->pc_sampling =
-            pc_sampling_feature_t{pc_mode,
-                                  generate_output_filename(output_path, "_code_obj_info.json"),
-                                  generate_output_directory(output_path, "src")};
+            pc_sampling_feature_t{pc_mode, generate_output_filename(output_path, "_code_obj_info.json")};
     }
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."

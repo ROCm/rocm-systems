@@ -7,12 +7,11 @@ Helpers for building a normalized PC sampling dataframe from a parsed
 ``rocprofiler-sdk-tool[0]`` dict.
 """
 
-from typing import Any, NamedTuple, Optional
+from typing import Any, Optional
 
 import pandas as pd
 
 PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
-PC_SAMPLING_INST_TYPE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_"
 
 # Canonical not-issued stall reasons (rocprofiler-sdk enum, prefix stripped).
 # Reasons outside this set are dropped during aggregation.
@@ -38,32 +37,9 @@ NORMALIZED_RECORD_COLUMNS = [
     "kernel_id",
     "wave_issued",
     "stall_reason",
-    "inst_type",
 ]
 
 SOURCE_LINE_MISSING = "N/A"
-
-
-class InstructionLineRecord(NamedTuple):
-    """One sampled offset attributed to one kernel, with aggregated counts."""
-
-    code_object_offset: int
-    kernel_name: Optional[str]
-    instruction: Optional[str]
-    comment: str
-    total_count: int
-    issue_count: Optional[int]
-    stall_count: Optional[int]
-    stall_reasons: dict[str, int]
-    inst_types: dict[str, int]
-
-
-class CodeObjectRecord(NamedTuple):
-    """A code object and the sampled instruction lines it owns."""
-
-    code_object_id: int
-    load_base: Optional[int]
-    instruction_lines: list[InstructionLineRecord]
 
 
 def detect_pc_sampling_method(tool_data: dict[str, Any]) -> Optional[str]:
@@ -112,7 +88,6 @@ def load_pc_sample_records(tool_data: dict[str, Any]) -> pd.DataFrame:
             "kernel_id": dispatch_to_kernel_id.get(dispatch_id),
             "wave_issued": record.get("wave_issued"),
             "stall_reason": record.get("snapshot", {}).get("stall_reason"),
-            "inst_type": record.get("inst_type"),
         })
 
     return pd.DataFrame(rows, columns=NORMALIZED_RECORD_COLUMNS)
@@ -122,7 +97,7 @@ def aggregate_pc_sample_records(
     records_df: pd.DataFrame,
     group_by: list[str],
 ) -> pd.DataFrame:
-    """Group normalized records into per-group counts, stall reasons, inst types."""
+    """Group normalized records into per-group counts and stall reasons."""
     # inst_index and kernel_id are constant within a group; carry the first when
     # they are not group keys.
     carried = [
@@ -136,7 +111,6 @@ def aggregate_pc_sample_records(
                 "count_issued",
                 "count_stalled",
                 "stall_reason",
-                "inst_type",
                 *carried,
             ]
         )
@@ -146,7 +120,6 @@ def aggregate_pc_sample_records(
         "count_issued": ("wave_issued", _aggregate_count_issued),
         "count_stalled": ("wave_issued", _aggregate_count_stalled),
         "stall_reason": ("stall_reason", _aggregate_stall_reason),
-        "inst_type": ("inst_type", _aggregate_inst_type),
     }
     for column in carried:
         aggregations[column] = (column, "first")
@@ -194,57 +167,15 @@ def enrich_with_metadata(
     return df
 
 
-def load_aggregated_pc_sampling(tool_data: dict[str, Any]) -> list[CodeObjectRecord]:
-    """Build the normalized code-object tree the analysis DB inserts.
-
-    Runs load -> aggregate -> enrich, grouping samples by
-    (code_object_id, offset, kernel_id) so each line is attributed to the kernel
-    its dispatch ran, then joins the code object catalog (load_base).
-    """
+def load_aggregated_pc_sampling(
+    tool_data: dict[str, Any],
+    group_by: list[str],
+    attach: set[str],
+) -> pd.DataFrame:
+    """Run load -> aggregate -> enrich for the given grouping and columns."""
     records_df = load_pc_sample_records(tool_data)
-    aggregated_df = aggregate_pc_sample_records(
-        records_df,
-        group_by=["code_object_id", "code_object_offset", "kernel_id"],
-    )
-    aggregated_df = enrich_with_metadata(
-        aggregated_df,
-        tool_data,
-        attach={"instruction", "source_line", "kernel_name"},
-    )
-
-    catalog = {
-        code_object["code_object_id"]: code_object
-        for code_object in tool_data.get("code_objects", [])
-    }
-
-    records = []
-    for code_object_id, group in aggregated_df.groupby("code_object_id", dropna=False):
-        catalog_entry = catalog.get(code_object_id, {})
-        records.append(
-            CodeObjectRecord(
-                code_object_id=int(code_object_id),
-                load_base=catalog_entry.get("load_base"),
-                instruction_lines=[
-                    _to_instruction_line_record(row) for row in group.itertuples()
-                ],
-            )
-        )
-    return records
-
-
-def _to_instruction_line_record(row: Any) -> InstructionLineRecord:  # noqa: ANN401
-    """Convert one aggregated dataframe row into an InstructionLineRecord."""
-    return InstructionLineRecord(
-        code_object_offset=int(row.code_object_offset),
-        kernel_name=row.kernel_name,
-        instruction=row.instruction,
-        comment=row.source_line,
-        total_count=int(row.count),
-        issue_count=None if pd.isna(row.count_issued) else int(row.count_issued),
-        stall_count=None if pd.isna(row.count_stalled) else int(row.count_stalled),
-        stall_reasons={} if pd.isna(row.stall_reason) else row.stall_reason,
-        inst_types={} if pd.isna(row.inst_type) else row.inst_type,
-    )
+    aggregated_df = aggregate_pc_sample_records(records_df, group_by)
+    return enrich_with_metadata(aggregated_df, tool_data, attach)
 
 
 def _aggregate_count_issued(wave_issued: pd.Series) -> Optional[int]:
@@ -273,16 +204,3 @@ def _aggregate_stall_reason(stall_reason: pd.Series) -> Optional[dict[str, int]]
     stripped = present.str[len(PC_SAMPLING_NOT_ISSUE_PREFIX) :]
     valid = stripped[stripped.isin(STALL_REASON_KEYS)]
     return valid.value_counts().to_dict()
-
-
-def _aggregate_inst_type(inst_type: pd.Series) -> Optional[dict[str, int]]:
-    """Count sampled instruction types as a descending {type: count} dict.
-
-    None when no inst_type info exists. The raw SDK enum prefix is stripped so
-    stored values read as VALU, FLAT, NO_INST, etc.
-    """
-    present = inst_type.dropna()
-    if present.empty:
-        return None
-    stripped = present.str[len(PC_SAMPLING_INST_TYPE_PREFIX) :]
-    return stripped.value_counts().to_dict()
