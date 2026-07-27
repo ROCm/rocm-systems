@@ -757,6 +757,11 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       plan.preserve_exec = true;
       plan.preserve_vcc = true;
       plan.preserve_m0 = summary->touches_m0;
+      // Cap envelope/temp SGPR selection at the kernel's own allocation so a temp
+      // never lands past its .sgpr_count. Unknown count -> leave the conservative
+      // default (the cross-ISA allocatable bound).
+      if (kernel_sgpr_count)
+        plan.kernel_sgpr_count = *kernel_sgpr_count;
       // Given liveness, clobbers, and calling convention, select registers
       // for trampoline and determine how big the trampoline will be
       if (!TrampolineBuilder::plan_probe_call(plan, probe.cc, live, summary->ordinary_clobbers,

@@ -86,6 +86,13 @@ struct TrampolinePlan {
   // TrampolinePlan for now since this is the builder's one input;
   // lift back out into a dedicated resource-plan type if it grows unwieldy.
   //----------------------------------------------------------------------------
+  /// Upper bound (exclusive) for envelope/temp SGPR selection: the kernel's own
+  /// allocation. find_free_sgpr* never picks an index >= this, so a temp cannot
+  /// land past the kernel's .sgpr_count. Defaults to the conservative cross-ISA
+  /// allocatable bound (no kernel-specific limit); the orchestrator narrows it to
+  /// the patched kernel's actual count.
+  uint32_t kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS;
+
   bool is_probe_call = false;    ///< True once plan_probe_call() populated these.
   uint16_t link_pair_base = 30;  ///< Return-link pair, derived from the probe cc.
   uint16_t target_pair_base = 0; ///< Dead even SGPR pair holding the probe address.

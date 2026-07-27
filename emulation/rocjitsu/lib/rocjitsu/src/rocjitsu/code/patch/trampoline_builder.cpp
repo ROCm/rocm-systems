@@ -7,6 +7,7 @@
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/patch/error_report.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <string>
@@ -47,20 +48,24 @@ namespace {
   return false;
 }
 
-// First even-aligned SGPR pair with both lanes free of @p unavailable, within the
-// conservative cross-family allocatable bound. nullopt if none.
-[[nodiscard]] std::optional<uint16_t> find_free_sgpr_pair(const RegisterSet &unavailable) {
-  for (uint16_t base = 0; static_cast<size_t>(base) + 1 < REGISTER_SET_ALLOCATABLE_SGPRS;
-       base += 2) {
+// First even-aligned SGPR pair with both lanes free of @p unavailable, below
+// @p bound (exclusive). @p bound caps selection at the kernel's own allocation so
+// no temp lands past its .sgpr_count; pass REGISTER_SET_ALLOCATABLE_SGPRS for the
+// conservative cross-family limit. nullopt if none.
+[[nodiscard]] std::optional<uint16_t> find_free_sgpr_pair(const RegisterSet &unavailable,
+                                                          uint32_t bound) {
+  for (uint16_t base = 0; static_cast<uint32_t>(base) + 1 < bound; base += 2) {
     if (!any_sgpr_in_range(unavailable, base, 2))
       return base;
   }
   return std::nullopt;
 }
 
-// First single SGPR free of @p unavailable, within the allocatable bound.
-[[nodiscard]] std::optional<uint16_t> find_free_sgpr(const RegisterSet &unavailable) {
-  for (uint16_t base = 0; base < REGISTER_SET_ALLOCATABLE_SGPRS; ++base) {
+// First single SGPR free of @p unavailable, below @p bound (exclusive; see
+// find_free_sgpr_pair).
+[[nodiscard]] std::optional<uint16_t> find_free_sgpr(const RegisterSet &unavailable,
+                                                     uint32_t bound) {
+  for (uint16_t base = 0; static_cast<uint32_t>(base) < bound; ++base) {
     if (!unavailable.contains(RegisterRef{RegClass::SGPR, base, 1}))
       return base;
   }
@@ -188,16 +193,18 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, ProbeCallingConven
   RegisterSet link_pair;
   link_pair.expand(RegisterRef{RegClass::SGPR, kLinkPairBase, 2});
 
-  // NOTE: target/scc selection scans the conservative cross-ISA allocatable
-  // bound (REGISTER_SET_ALLOCATABLE_SGPRS), not the patched kernel's actual
-  // .sgpr_count. This is safe today only because the scan returns the lowest
-  // dead registers, and we currently require the s30/31 regs. Handling this
-  // is deferred.
+  // Target/scc/special-state selection is capped at plan.kernel_sgpr_count so a
+  // temp never lands past the patched kernel's actual .sgpr_count (a wider kernel
+  // is not synthesized). The orchestrator sets the bound; it defaults to the
+  // conservative cross-ISA allocatable limit.
+  const uint32_t sgpr_bound =
+      std::min<uint32_t>(plan.kernel_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
+
   // Target-address pair: dead, even-aligned, and not the link pair. It is
   // read by s_swappc before the probe body runs, so it may overlap
   // probe_body_clobbers.
   const RegisterSet target_unavail = live_at_anchor | link_pair;
-  const std::optional<uint16_t> target_pair = find_free_sgpr_pair(target_unavail);
+  const std::optional<uint16_t> target_pair = find_free_sgpr_pair(target_unavail, sgpr_bound);
   if (!target_pair) {
     report(error_out, "probe-call resource planning: no dead SGPR pair available for the probe "
                       "target address");
@@ -217,7 +224,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, ProbeCallingConven
   // SCC temp: one dead SGPR, only when preserving SCC.
   std::optional<uint16_t> scc_temp;
   if (plan.preserve_scc) {
-    scc_temp = find_free_sgpr(reserved);
+    scc_temp = find_free_sgpr(reserved, sgpr_bound);
     if (!scc_temp) {
       report(error_out, "probe-call resource planning: no dead SGPR available for the SCC "
                         "preservation temp");
@@ -234,8 +241,8 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, ProbeCallingConven
                              const char *name) -> bool {
     if (!requested)
       return true;
-    const std::optional<uint16_t> temp =
-        width == 2 ? find_free_sgpr_pair(reserved) : find_free_sgpr(reserved);
+    const std::optional<uint16_t> temp = width == 2 ? find_free_sgpr_pair(reserved, sgpr_bound)
+                                                    : find_free_sgpr(reserved, sgpr_bound);
     if (!temp) {
       report(error_out,
              (std::string("probe-call resource planning: no dead SGPR available for the ") + name +

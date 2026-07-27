@@ -407,6 +407,41 @@ TEST(TrampolineBuilderPlan, NoSccPreserveSkipsSccTemp) {
   EXPECT_EQ(plan.builder_clobbers.size(), 4u);
 }
 
+// Envelope temps must not be selected past the kernel's own SGPR allocation. A
+// 32-SGPR kernel owns s0..s31; the link pair s[30:31] fits, but with s0..s29 live
+// only the link pair remains dead within the allocation. Under the kernel_sgpr_count
+// cap the target-pair search fails closed instead of reaching for s32:33 (dead in
+// the conservative 102-SGPR scan but absent from this kernel).
+TEST(TrampolineBuilderPlan, TempPastKernelAllocationFailsClosed) {
+  RegisterSet live;
+  for (uint16_t i = 0; i < 30; ++i)
+    live.expand(RegisterRef{RegClass::SGPR, i, 1});
+
+  TrampolinePlan plan;
+  plan.kernel_sgpr_count = 32; // kernel owns s0..s31 only.
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, live,
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_NE(err.find("target"), std::string::npos);
+  EXPECT_FALSE(plan.is_probe_call); // plan left unmodified on failure.
+}
+
+// Companion: the same register-starved anchor plans successfully under the default
+// (conservative) bound, placing the target pair above the 32-SGPR line -- the exact
+// out-of-allocation pick the cap above prevents.
+TEST(TrampolineBuilderPlan, TempAboveKernelLineAllowedWithoutCap) {
+  RegisterSet live;
+  for (uint16_t i = 0; i < 30; ++i)
+    live.expand(RegisterRef{RegClass::SGPR, i, 1});
+
+  TrampolinePlan plan; // default kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS.
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, live,
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  EXPECT_GE(plan.target_pair_base, 32u); // absent from a 32-SGPR kernel.
+}
+
 // Happy path: dead resources selected, distinct, and reported as builder clobbers.
 TEST(TrampolineBuilderPlan, SelectsDeadResourcesAndReportsClobbers) {
   TrampolinePlan plan;
