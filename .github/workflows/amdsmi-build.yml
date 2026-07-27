@@ -38,6 +38,91 @@ defaults:
     shell: bash
 
 jobs:
+  manylinux-build:
+    name: Build (Manylinux Gate)
+    runs-on: ubuntu-24.04
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64
+    env:
+      BUILD_DIR: /tmp/amdsmi-build
+
+    steps:
+      # rocm-systems is a large monorepo; the wheel gate only needs the amdsmi
+      # project and this workflow, so sparse-checkout keeps the fetch cheap.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          sparse-checkout: |
+            projects/amdsmi
+            .github/workflows
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Select build interpreter
+        run: |
+          set -euo pipefail
+          # The manylinux image periodically drops EOL interpreters
+          # (e.g. cp38 was removed once Python 3.8 reached end-of-life),
+          # so pick the newest available stable CPython rather than
+          # hardcoding a version that may vanish on the next image bump.
+          PY_BUILD=""
+          for _py in cp313 cp312 cp311 cp310 cp39; do
+            _cand="/opt/python/${_py}-${_py}/bin/python3"
+            if [ -x "$_cand" ]; then PY_BUILD="$_cand"; break; fi
+          done
+          if [ -z "$PY_BUILD" ]; then
+            echo "ERROR: no suitable CPython interpreter found under /opt/python" >&2
+            exit 1
+          fi
+          echo "Using build interpreter: $PY_BUILD ($("$PY_BUILD" --version 2>&1))"
+          echo "PY_BUILD=$PY_BUILD" >> "$GITHUB_ENV"
+
+      - name: Install build prerequisites
+        run: |
+          set -euo pipefail
+          dnf -y install git make gcc gcc-c++ cmake ninja-build openssl-devel libnl3-devel libmnl-devel
+          "$PY_BUILD" -m pip install --upgrade pip
+
+      - name: Configure
+        run: |
+          set -euo pipefail
+          rm -rf "$BUILD_DIR"
+          cmake -S "$GITHUB_WORKSPACE/projects/amdsmi" -B "$BUILD_DIR" \
+            -DENABLE_ESMI_LIB=ON \
+            -DBUILD_PYTHON_WHEEL=ON \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPython3_EXECUTABLE="$PY_BUILD"
+
+      - name: Build library and wheel
+        # The CMake `python_wheel` target is part of ALL (gated on
+        # BUILD_PYTHON_WHEEL), so this single build produces both the
+        # SONAME-isolated libamd_smi_python.so and the .whl that bundles it --
+        # no separate `pip wheel` invocation, which would bypass the target's
+        # disable_system_fallback.py loader-flag step.
+        run: make -C "$BUILD_DIR" -j"$(nproc)"
+
+      - name: Verify wheel artifact
+        run: |
+          set -euo pipefail
+          wheel_dir="$BUILD_DIR/py-interface/python_package"
+          shopt -s nullglob
+          wheels=("$wheel_dir"/*.whl)
+          if [ "${#wheels[@]}" -eq 0 ]; then
+            echo "ERROR: no wheel produced under $wheel_dir" >&2
+            exit 1
+          fi
+          printf 'Python wheel built: %s\n' "${wheels[@]}"
+          echo "WHEEL=${wheels[0]}" >> "$GITHUB_ENV"
+
+      - name: Install and import the wheel
+        run: |
+          set -euo pipefail
+          # Prove the wheel is installable and loads its bundled library, not
+          # just that the file exists. No GPU needed for import.
+          "$PY_BUILD" -m pip install "$WHEEL"
+          "$PY_BUILD" -c "import amdsmi; print('import amdsmi OK from', amdsmi.__file__)"
+          echo "Build gate passed"
+
   # Single job covering every distro + package format. The build-time logic
   # (package manager, distro quirks) is autodetected by run_amdsmi_build.py
   # from /etc/os-release, so the matrix only needs the OS label plus the
