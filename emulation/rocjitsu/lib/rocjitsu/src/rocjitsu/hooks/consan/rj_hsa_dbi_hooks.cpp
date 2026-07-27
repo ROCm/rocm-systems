@@ -281,36 +281,28 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
 
 [[nodiscard]] bool require_patch_applies_to(const rocjitsu::ConSanResult &result,
                                             const HookConfig &config) {
-  for (const rocjitsu::ConSanKernelInfo &kernel : result.kernels) {
+  const auto container_applies = [&](const auto &container) {
     if (config.probe_lds_check_trap) {
-      for (const rocjitsu::ConSanLdsSite &site : kernel.lds_sites) {
-        if (site.supported_mvp &&
-            (site.mnemonic == "ds_load_b32" || site.mnemonic == "ds_load_b64" ||
-             site.mnemonic == "ds_load_b128" || site.mnemonic == "ds_load_2addr_b32" ||
-             site.mnemonic == "ds_load_2addr_b64" ||
-             site.mnemonic == "ds_load_2addr_stride64_b32" ||
-             site.mnemonic == "ds_load_2addr_stride64_b64" || site.mnemonic == "ds_load_u16" ||
-             site.mnemonic == "ds_load_u16_d16" || site.mnemonic == "ds_load_u16_d16_hi" ||
-             site.mnemonic == "ds_store_b32" || site.mnemonic == "ds_store_b64" ||
-             site.mnemonic == "ds_store_b128" || site.mnemonic == "ds_store_2addr_b32" ||
-             site.mnemonic == "ds_store_2addr_b64"))
+      for (const rocjitsu::ConSanLdsSite &site : container.lds_sites) {
+        if (rocjitsu::consan_supercollider_supports_lds_site(site, result.arch))
           return true;
       }
     }
     if (config.probe_flat_check_trap) {
-      for (const rocjitsu::ConSanFlatSite &site : kernel.flat_sites) {
+      for (const rocjitsu::ConSanFlatSite &site : container.flat_sites) {
         if (rocjitsu::consan_supercollider_supports_flat_site(site, config.flat_provenance_mode))
           return true;
       }
     }
+    return false;
+  };
+  for (const rocjitsu::ConSanKernelInfo &kernel : result.kernels) {
+    if (container_applies(kernel))
+      return true;
   }
-  if (config.probe_flat_check_trap) {
-    for (const rocjitsu::ConSanFunctionInfo &function : result.functions) {
-      for (const rocjitsu::ConSanFlatSite &site : function.flat_sites) {
-        if (rocjitsu::consan_supercollider_supports_flat_site(site, config.flat_provenance_mode))
-          return true;
-      }
-    }
+  for (const rocjitsu::ConSanFunctionInfo &function : result.functions) {
+    if (container_applies(function))
+      return true;
   }
   return false;
 }
@@ -575,41 +567,10 @@ compute_consan_static_coverage(const rocjitsu::ConSanResult &result, const HookC
       }
     }
   } else if (result.flavor == rocjitsu::ConSanFlavor::SuperCollider) {
-    const auto count_container = [&](const auto &container) {
-      if (config.probe_lds_check_trap) {
-        for (const rocjitsu::ConSanLdsSite &site : container.lds_sites) {
-          if (site.kind != rocjitsu::ConSanLdsAccessKind::Read &&
-              site.kind != rocjitsu::ConSanLdsAccessKind::Write)
-            continue;
-          ++coverage.access.discovered;
-          if (site.supported_mvp)
-            ++coverage.access.supported;
-        }
-      }
-      if (config.probe_flat_check_trap) {
-        for (const rocjitsu::ConSanFlatSite &site : container.flat_sites) {
-          if (site.kind != rocjitsu::ConSanLdsAccessKind::Read &&
-              site.kind != rocjitsu::ConSanLdsAccessKind::Write)
-            continue;
-          const bool applicable_group =
-              site.address_space_hint == rocjitsu::ConSanFlatAddressSpaceHint::Group ||
-              (config.flat_provenance_mode == rocjitsu::ConSanFlatProvenanceMode::Likely &&
-               site.address_space_hint == rocjitsu::ConSanFlatAddressSpaceHint::MaybeGroup);
-          // SuperCollider's redundant-access proof is specifically a shared-memory
-          // detector. Global, private, and provenance-unknown FLAT operations are
-          // outside its semantic denominator rather than unsupported attempts.
-          if (!applicable_group)
-            continue;
-          ++coverage.access.discovered;
-          if (rocjitsu::consan_supercollider_supports_flat_site(site, config.flat_provenance_mode))
-            ++coverage.access.supported;
-        }
-      }
-    };
-    for (const auto &kernel : result.kernels)
-      count_container(kernel);
-    for (const auto &function : result.functions)
-      count_container(function);
+    const ConSanSuperColliderAccessCoverage access =
+        compute_consan_supercollider_access_coverage(result, config);
+    coverage.access.discovered = access.discovered;
+    coverage.access.supported = access.supported;
   }
   if (!has_durable_moi_lowering_outcomes) {
     for (const rocjitsu::ConSanPatchInfo &patch : result.patches) {
@@ -3100,6 +3061,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 patch_result.errors.size(), patch_result.warnings.size(),
                 patch_result.patches.size());
 
+    for (const std::string &warning : patch_result.warnings)
+      log_message(kLogVerbose, "%s", warning.c_str());
     if (!patch_result.errors.empty()) {
       for (const std::string &error : patch_result.errors)
         std::fprintf(stderr, "[rocjitsu-dbi-hooks] %s\n", error.c_str());
@@ -3108,8 +3071,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                                        code_object_reader.handle, "transform-error",
                                        fault_installation_evidence);
     }
-    for (const std::string &warning : patch_result.warnings)
-      log_message(kLogVerbose, "%s", warning.c_str());
     if (install_action == rocjitsu::ConSanInstallAction::Reject) {
       std::fprintf(stderr,
                    "[rocjitsu-dbi-hooks] ConSan outcome %s is not installable "

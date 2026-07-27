@@ -281,12 +281,18 @@ build_v_readfirstlane_b32(uint16_t sdst, uint16_t vsrc, rj_code_arch_t arch) {
 
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
 build_v_writelane_b32(uint16_t vdst, uint16_t ssrc, uint16_t lane, rj_code_arch_t arch) {
-  return build_gfx1250_v_writelane_b32(vdst, ssrc, lane, arch);
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return build_rdna4_v_writelane_b32(vdst, ssrc, lane, arch);
+  return arch == ROCJITSU_CODE_ARCH_GFX1250 ? build_gfx1250_v_writelane_b32(vdst, ssrc, lane, arch)
+                                            : std::nullopt;
 }
 
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
 build_v_readlane_b32(uint16_t sdst, uint16_t vsrc, uint16_t lane, rj_code_arch_t arch) {
-  return build_gfx1250_v_readlane_b32(sdst, vsrc, lane, arch);
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return build_rdna4_v_readlane_b32(sdst, vsrc, lane, arch);
+  return arch == ROCJITSU_CODE_ARCH_GFX1250 ? build_gfx1250_v_readlane_b32(sdst, vsrc, lane, arch)
+                                            : std::nullopt;
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>

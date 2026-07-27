@@ -374,6 +374,32 @@ build_v_readfirstlane_b32(uint16_t sdst, uint16_t vsrc, rj_code_arch_t arch) {
   return (0x3Fu << 25) | (static_cast<uint32_t>(sdst) << 17) | (2u << 9) | vector_source_vgpr(vsrc);
 }
 
+/// @brief Encode RDNA4 `v_writelane_b32 vdst, ssrc, lane`.
+///
+/// Unlike ordinary vector writes, this fixed-lane transfer executes
+/// independently of EXEC and can therefore preserve scalar state across an
+/// instrumentation body entered with no active lanes.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_rdna4_v_writelane_b32(uint16_t vdst, uint16_t ssrc, uint16_t lane, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vdst > 255 || ssrc > 105 || lane > 63)
+    return std::nullopt;
+  return rdna4::build_vop3(rdna4::kVWritelaneB32Vop3, {.vdst = static_cast<uint8_t>(vdst),
+                                                       .src0 = ssrc,
+                                                       .src1 = scalar_positive_inline_u32(lane),
+                                                       .src2 = scalar_positive_inline_u32(0)});
+}
+
+/// @brief Encode RDNA4 `v_readlane_b32 sdst, vsrc, lane`.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_rdna4_v_readlane_b32(uint16_t sdst, uint16_t vsrc, uint16_t lane, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || sdst > 105 || vsrc > 255 || lane > 63)
+    return std::nullopt;
+  return rdna4::build_vop3(rdna4::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sdst),
+                                                      .src0 = vector_source_vgpr(vsrc),
+                                                      .src1 = scalar_positive_inline_u32(lane),
+                                                      .src2 = scalar_positive_inline_u32(0)});
+}
+
 /// @brief Encode RDNA4 `v_mbcnt_lo_u32_b32 vdst, src0, src1`.
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
 build_v_mbcnt_lo_u32_b32(uint16_t vdst, uint16_t src0, uint16_t src1, rj_code_arch_t arch) {

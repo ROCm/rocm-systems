@@ -276,20 +276,36 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
     std::span<const uint64_t> source_offsets, std::span<const uint64_t> relay_offsets,
     std::span<const uint64_t> island_offsets, uint64_t maximum_hop_bytes, std::string *error_out) {
+  enum class CoordinateKind : uint8_t {
+    Source,
+    Relay,
+    Island,
+  };
+  const auto coordinate_kind_name = [](CoordinateKind kind) {
+    switch (kind) {
+    case CoordinateKind::Source:
+      return "source";
+    case CoordinateKind::Relay:
+      return "relay";
+    case CoordinateKind::Island:
+      return "island";
+    }
+    return "unknown";
+  };
   struct Coordinate {
     uint64_t offset = 0;
-    uint8_t kind = 0; // 0 = source, 1 = relay, 2 = island.
+    CoordinateKind kind = CoordinateKind::Source;
     size_t input_index = 0;
   };
   std::vector<Coordinate> coordinates;
   coordinates.reserve(source_offsets.size() + relay_offsets.size() + island_offsets.size());
-  const auto append_coordinates = [&](std::span<const uint64_t> offsets, uint8_t kind) {
+  const auto append_coordinates = [&](std::span<const uint64_t> offsets, CoordinateKind kind) {
     for (size_t i = 0; i < offsets.size(); ++i)
       coordinates.push_back({offsets[i], kind, i});
   };
-  append_coordinates(source_offsets, 0);
-  append_coordinates(relay_offsets, 1);
-  append_coordinates(island_offsets, 2);
+  append_coordinates(source_offsets, CoordinateKind::Source);
+  append_coordinates(relay_offsets, CoordinateKind::Relay);
+  append_coordinates(island_offsets, CoordinateKind::Island);
   std::ranges::sort(coordinates, [](const Coordinate &lhs, const Coordinate &rhs) {
     if (lhs.offset != rhs.offset)
       return lhs.offset < rhs.offset;
@@ -303,7 +319,15 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
       return std::nullopt;
     }
     if (i != 0 && coordinates[i - 1].offset == coordinates[i].offset) {
-      report(error_out, "SOPP relay planner: coordinates must be globally unique");
+      if (error_out != nullptr) {
+        const Coordinate &first = coordinates[i - 1];
+        const Coordinate &second = coordinates[i];
+        *error_out = "SOPP relay planner: coordinates must be globally unique; offset=" +
+                     std::to_string(first.offset) + " first=" + coordinate_kind_name(first.kind) +
+                     "[" + std::to_string(first.input_index) +
+                     "] second=" + coordinate_kind_name(second.kind) + "[" +
+                     std::to_string(second.input_index) + "]";
+      }
       return std::nullopt;
     }
   }
@@ -330,7 +354,7 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
     std::vector<GreedyRouteState> route_states(source_offsets.size());
     std::vector<std::pair<uint64_t, uint64_t>> cut_hops;
     for (const Coordinate &coordinate : coordinates) {
-      if (coordinate.kind == 0u) {
+      if (coordinate.kind == CoordinateKind::Source) {
         active.emplace(coordinate.offset, coordinate.input_index);
         continue;
       }
@@ -343,7 +367,7 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
       const auto [endpoint, source_index] = active.top();
       (void)endpoint;
       active.pop();
-      if (coordinate.kind == 1u) {
+      if (coordinate.kind == CoordinateKind::Relay) {
         route_states[source_index].relay_offsets.push_back(coordinate.offset);
         active.emplace(coordinate.offset, source_index);
       } else {

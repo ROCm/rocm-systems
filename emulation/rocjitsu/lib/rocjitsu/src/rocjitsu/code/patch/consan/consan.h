@@ -40,4 +40,9 @@ consan_gfx1250_vgpr_msb_mode_at(std::span<const uint8_t> bytes, uint64_t text_fi
 [[nodiscard]] bool consan_supercollider_supports_flat_site(const ConSanFlatSite &site,
                                                            ConSanFlatProvenanceMode mode);
 
+/// Return whether SuperCollider can instrument this decoded native-LDS site
+/// on the requested architecture.
+[[nodiscard]] bool consan_supercollider_supports_lds_site(const ConSanLdsSite &site,
+                                                          rj_code_arch_t arch);
+
 } // namespace rocjitsu

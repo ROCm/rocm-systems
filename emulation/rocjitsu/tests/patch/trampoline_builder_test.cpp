@@ -564,7 +564,16 @@ TEST(SoppBranchRelayPlanner, RejectsUnalignedOrAliasedCoordinates) {
   error.clear();
   EXPECT_FALSE(plan_forward_sopp_branch_relays(std::vector<uint64_t>{0}, std::vector<uint64_t>{16},
                                                std::vector<uint64_t>{16}, &error));
-  EXPECT_NE(error.find("unique"), std::string::npos);
+  EXPECT_EQ(error,
+            "SOPP relay planner: coordinates must be globally unique; offset=16 first=relay[0] "
+            "second=island[0]");
+
+  error.clear();
+  EXPECT_FALSE(plan_forward_sopp_branch_relays(std::vector<uint64_t>{16}, std::vector<uint64_t>{16},
+                                               std::vector<uint64_t>{32}, &error));
+  EXPECT_EQ(error,
+            "SOPP relay planner: coordinates must be globally unique; offset=16 first=source[0] "
+            "second=relay[0]");
 }
 
 // NOTE: the inline-nop guardrail used to live in TrampolineBuilder and was

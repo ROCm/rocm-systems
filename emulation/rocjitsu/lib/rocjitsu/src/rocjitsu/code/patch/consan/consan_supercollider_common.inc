@@ -41,18 +41,18 @@ struct ByteRange {
 
 [[nodiscard]] std::optional<uint16_t> choose_sc_dead_vcc_save_sgpr(
     const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
-    std::optional<uint16_t> min_preferred_sgpr, uint16_t selection_limit, rj_code_arch_t arch,
-    const ConSanOptions &options) {
+    uint16_t allocated_sgpr_count, std::optional<uint16_t> min_preferred_sgpr,
+    uint16_t selection_limit, rj_code_arch_t arch, const ConSanOptions &options) {
   if (inst == nullptr || owner_liveness.empty() ||
       std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
     return std::nullopt;
   const uint16_t width = sc_vcc_save_sgpr_width(arch);
   const uint16_t limit =
       std::min<uint16_t>(selection_limit, REGISTER_SET_ALLOCATABLE_SGPRS);
-  const auto find_free = [&](uint16_t start) -> std::optional<uint16_t> {
+  const auto find_free = [&](uint16_t start, uint16_t end) -> std::optional<uint16_t> {
     if (width == 2u && (start & 1u) != 0u)
       ++start;
-    for (uint16_t base = start; static_cast<uint32_t>(base) + width <= limit;
+    for (uint16_t base = start; static_cast<uint32_t>(base) + width <= end;
          base = static_cast<uint16_t>(base + width)) {
       if (sc_sgpr_range_overlaps_delay_source(base, width, options))
         continue;
@@ -64,11 +64,26 @@ struct ByteRange {
     }
     return std::nullopt;
   };
-  if (min_preferred_sgpr) {
-    if (auto high_sgpr = find_free(*min_preferred_sgpr))
-      return high_sgpr;
+  const uint16_t allocated_limit = std::min(allocated_sgpr_count, limit);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    // CDNA SGPR allocation participates in occupancy. Reuse an all-owner dead
+    // hole inside the current allocation before growing every descriptor.
+    if (auto existing = find_free(0, allocated_limit))
+      return existing;
+    const uint16_t fresh_start =
+        std::max(allocated_limit, min_preferred_sgpr.value_or(allocated_limit));
+    return find_free(fresh_start, limit);
   }
-  return find_free(0);
+
+  // RDNA allocation is effectively fixed, so retain the high-first policy.
+  // Besides avoiding churn in established physical workloads, this keeps
+  // instrumentation temporaries away from the guest's referenced scalar
+  // range whenever a fresh register is available.
+  if (min_preferred_sgpr) {
+    if (auto preferred = find_free(*min_preferred_sgpr, limit))
+      return preferred;
+  }
+  return find_free(0, limit);
 }
 
 [[nodiscard]] std::optional<uint64_t>
@@ -158,7 +173,12 @@ reserved_ranges_for_existing_patches(const AmdGpuCodeObject &code_object,
 }
 
 [[nodiscard]] bool is_d16_lds_load(const ConSanLdsSite &site) {
-  return site.mnemonic == "ds_load_u16_d16" || site.mnemonic == "ds_load_u16_d16_hi";
+  return site.mnemonic == "ds_load_u8_d16" || site.mnemonic == "ds_load_u8_d16_hi" ||
+         site.mnemonic == "ds_load_i8_d16" || site.mnemonic == "ds_load_i8_d16_hi" ||
+         site.mnemonic == "ds_load_u16_d16" || site.mnemonic == "ds_load_u16_d16_hi" ||
+         site.mnemonic == "ds_read_u8_d16" || site.mnemonic == "ds_read_u8_d16_hi" ||
+         site.mnemonic == "ds_read_i8_d16" || site.mnemonic == "ds_read_i8_d16_hi" ||
+         site.mnemonic == "ds_read_u16_d16" || site.mnemonic == "ds_read_u16_d16_hi";
 }
 
 [[nodiscard]] uint32_t lds_check_trap_predelay_setup_words(const ConSanLdsSite &site) {

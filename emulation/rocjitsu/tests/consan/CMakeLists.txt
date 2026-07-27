@@ -1301,6 +1301,45 @@ function(rj_add_consan_hip_tests)
             ARCH gfx1201
             SOURCE dbi/consan/hip_consan_malformed_sync_test.hip
     )
+    # Keep a small RDNA4 execution gate independent of physical-host
+    # availability. The zero-EXEC case specifically exercises the fixed-lane
+    # scalar preservation used by SuperCollider's full-pressure fallback.
+    rj_add_consan_hip_case(
+        NAME "ConSanGfx1201Sim.SuperColliderClean"
+        TARGET hip_consan_lds_test
+        FILTER "${RJ_CONSAN_LDS_CLEAN_TEST}"
+        CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1201_r9700.json"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX "\\[  PASSED  \\] 1 test"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=supercollider"
+            "RJ_CONSAN_LOG=1"
+            "RJ_CONSAN_DELAY=2"
+            "RJ_CONSAN_TMP_VGPR=3"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "ConSanGfx1201Sim.SuperColliderZeroExecNativeLdsScalarSpill"
+        TARGET hip_consan_lds_test
+        FILTER "${RJ_CONSAN_LDS_ZERO_EXEC_NATIVE_SCALAR_SPILL_TEST}"
+        CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1201_r9700.json"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX
+            "kind=inline-lds-load-check-trap[ -~]*scalar_vcc_spill_sgpr=[1-9][0-9]*[ -~]*scalar_vcc_spill_vgpr=[0-9]+"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=supercollider"
+            "RJ_CONSAN_DELAY_MODE=sleep_var"
+            "RJ_CONSAN_DELAY_VAR_SSRC=0"
+            "RJ_CONSAN_DELAY=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=padded_zero_exec_native_lds_load_preserves_allocated_scalars_for_instrumentation"
+            "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_MAX_PATCHES=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
     if(HAS_GFX1201_GPU)
         set(RJ_CONSAN_LDS_RACY_TEST
             "ConSanLdsTest.PaddedRacyStoreCompletesOrTripsDbiTrap"

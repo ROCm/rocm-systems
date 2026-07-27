@@ -246,6 +246,10 @@ bool consan_supercollider_supports_flat_site(const ConSanFlatSite &site,
   return is_supported_flat_check_trap_site(site, mode);
 }
 
+bool consan_supercollider_supports_lds_site(const ConSanLdsSite &site, rj_code_arch_t arch) {
+  return is_supported_check_trap_site(site, arch);
+}
+
 namespace {
 
 [[nodiscard]] std::optional<std::string> access_patch_kind(ConSanPatchKind kind) {

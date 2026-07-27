@@ -137,6 +137,43 @@ TEST(InstructionBuilder, BuildVReadfirstlaneB32) {
   EXPECT_FALSE(build_v_readfirstlane_b32(/*sdst=*/20, /*vsrc=*/8, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
+TEST(InstructionBuilder, BuildRdna4FixedLaneScalarTransfers) {
+  const auto write =
+      build_rdna4_v_writelane_b32(/*vdst=*/40, /*ssrc=*/18, /*lane=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto read =
+      build_rdna4_v_readlane_b32(/*sdst=*/3, /*vsrc=*/40, /*lane=*/1, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(write);
+  ASSERT_TRUE(read);
+  EXPECT_EQ(*write, (std::array<uint32_t, 2>{0xD7610028u, 0x02010012u}));
+  EXPECT_EQ(*read, (std::array<uint32_t, 2>{0xD7600003u, 0x02010328u}));
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> write_inst(decoder->decode(write->data()));
+  std::unique_ptr<Instruction> read_inst(decoder->decode(read->data()));
+  ASSERT_NE(write_inst, nullptr);
+  ASSERT_NE(read_inst, nullptr);
+  EXPECT_EQ(std::string_view(write_inst->mnemonic()), "v_writelane_b32");
+  EXPECT_EQ(std::string_view(read_inst->mnemonic()), "v_readlane_b32");
+
+  EXPECT_FALSE(
+      build_rdna4_v_writelane_b32(/*vdst=*/256, /*ssrc=*/18, /*lane=*/0, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(
+      build_rdna4_v_writelane_b32(/*vdst=*/40, /*ssrc=*/106, /*lane=*/0, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(
+      build_rdna4_v_writelane_b32(/*vdst=*/40, /*ssrc=*/18, /*lane=*/64, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(
+      build_rdna4_v_readlane_b32(/*sdst=*/106, /*vsrc=*/40, /*lane=*/0, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(
+      build_rdna4_v_readlane_b32(/*sdst=*/3, /*vsrc=*/256, /*lane=*/0, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(
+      build_rdna4_v_readlane_b32(/*sdst=*/3, /*vsrc=*/40, /*lane=*/64, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(build_rdna4_v_writelane_b32(/*vdst=*/40, /*ssrc=*/18, /*lane=*/0,
+                                           ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_FALSE(
+      build_rdna4_v_readlane_b32(/*sdst=*/3, /*vsrc=*/40, /*lane=*/1, ROCJITSU_CODE_ARCH_GFX1250));
+}
+
 TEST(InstructionBuilder, BuildSGetregB32) {
   const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
   ASSERT_TRUE(hwreg);

@@ -180,6 +180,28 @@ apply_descriptor_sgpr_growths_to_patcher(CodeObjectPatcher &patcher,
   return true;
 }
 
+[[nodiscard]] bool
+apply_descriptor_sgpr_growths_to_bytes(std::span<uint8_t> image,
+                                       std::span<const DescriptorSgprGrowth> growths,
+                                       std::vector<std::string> &errors) {
+  for (const auto &[descriptor_file_offset, required_count] :
+       merge_descriptor_sgpr_growths(growths)) {
+    if (descriptor_file_offset > image.size() ||
+        sizeof(KD) > image.size() - descriptor_file_offset) {
+      errors.emplace_back("ConSan relay-reservoir descriptor SGPR growth exceeds ELF bytes");
+      return false;
+    }
+    KD desc{};
+    std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
+    if (!grow_descriptor_sgpr_allocation(desc, required_count)) {
+      errors.emplace_back("ConSan relay reservoir could not grow descriptor SGPR allocation");
+      return false;
+    }
+    std::memcpy(image.data() + descriptor_file_offset, &desc, sizeof(desc));
+  }
+  return true;
+}
+
 [[nodiscard]] std::unordered_map<uint64_t, uint16_t>
 merge_descriptor_vgpr_growths(std::span<const DescriptorVgprGrowth> growths) {
   std::unordered_map<uint64_t, uint16_t> merged;

@@ -515,7 +515,12 @@ two_address_lds_element_width_bits(const ConSanLdsSite &site) {
   const bool is_two_addr_store = is_two_address_lds_store(site);
   if (site.mnemonic == "ds_load_i8" || site.mnemonic == "ds_load_u8" ||
       site.mnemonic == "ds_load_i16" || site.mnemonic == "ds_load_u16" ||
+      site.mnemonic == "ds_load_u8_d16" || site.mnemonic == "ds_load_u8_d16_hi" ||
+      site.mnemonic == "ds_load_i8_d16" || site.mnemonic == "ds_load_i8_d16_hi" ||
       site.mnemonic == "ds_load_u16_d16" || site.mnemonic == "ds_load_u16_d16_hi" ||
+      site.mnemonic == "ds_read_u8_d16" || site.mnemonic == "ds_read_u8_d16_hi" ||
+      site.mnemonic == "ds_read_i8_d16" || site.mnemonic == "ds_read_i8_d16_hi" ||
+      site.mnemonic == "ds_read_u16_d16" || site.mnemonic == "ds_read_u16_d16_hi" ||
       site.mnemonic == "ds_read_i16" || site.mnemonic == "ds_read_u16" ||
       site.mnemonic == "ds_store_b8" || site.mnemonic == "ds_store_b8_d16_hi" ||
       site.mnemonic == "ds_store_b16" || site.mnemonic == "ds_store_b16_d16_hi")

@@ -82,6 +82,80 @@ TEST(HsaHooksUnitTest, QueueInterceptionEntriesUsePublicAbiSignatures) {
                               ExpectedQueueInterceptRegister>));
 }
 
+rocjitsu::ConSanLdsSite make_supported_sc_lds_site(uint64_t file_offset) {
+  rocjitsu::ConSanLdsSite site;
+  site.kind = rocjitsu::ConSanLdsAccessKind::Read;
+  site.supported_mvp = true;
+  site.file_offset = file_offset;
+  site.size = 2u * sizeof(uint32_t);
+  site.width_bits = 32u;
+  site.dst_vgpr = 1u;
+  site.addr_vgpr = 2u;
+  site.mnemonic = "ds_load_b32";
+  return site;
+}
+
+TEST(HsaHooksUnitTest, SuperColliderCoverageDeduplicatesPhysicalLdsAliases) {
+  rocjitsu::ConSanResult result;
+  result.flavor = rocjitsu::ConSanFlavor::SuperCollider;
+  result.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  result.kernels.resize(1);
+  result.functions.resize(1);
+  result.kernels.front().lds_sites.push_back(make_supported_sc_lds_site(0x120u));
+  result.functions.front().lds_sites.push_back(make_supported_sc_lds_site(0x120u));
+  rocjitsu::consan_hook::HookConfig config;
+  config.probe_lds_check_trap = true;
+
+  const auto coverage =
+      rocjitsu::consan_hook::compute_consan_supercollider_access_coverage(result, config);
+
+  EXPECT_EQ(coverage.discovered, 1u);
+  EXPECT_EQ(coverage.supported, 1u);
+}
+
+TEST(HsaHooksUnitTest, SuperColliderCoverageFailsClosedOnRawAliasDisagreement) {
+  rocjitsu::ConSanResult result;
+  result.flavor = rocjitsu::ConSanFlavor::SuperCollider;
+  result.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  result.kernels.resize(1);
+  result.functions.resize(1);
+  result.kernels.front().lds_sites.push_back(make_supported_sc_lds_site(0x120u));
+  auto unsupported = make_supported_sc_lds_site(0x120u);
+  unsupported.addr_vgpr.reset();
+  result.functions.front().lds_sites.push_back(std::move(unsupported));
+  rocjitsu::consan_hook::HookConfig config;
+  config.probe_lds_check_trap = true;
+
+  const auto coverage =
+      rocjitsu::consan_hook::compute_consan_supercollider_access_coverage(result, config);
+
+  EXPECT_EQ(coverage.discovered, 1u);
+  EXPECT_EQ(coverage.supported, 0u);
+}
+
+TEST(HsaHooksUnitTest, SuperColliderCoverageUsesResolvedPlannerLedger) {
+  rocjitsu::ConSanResult result;
+  result.flavor = rocjitsu::ConSanFlavor::SuperCollider;
+  result.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  result.sc_lds_coverage_resolved = true;
+  result.sc_lds_coverage_sites = {
+      {.file_offset = 0x120u, .supported = true},
+      {.file_offset = 0x128u, .supported = false},
+  };
+  // Once resolved, raw container inventory must not resurrect or alter the
+  // planner's canonical physical LDS denominator.
+  result.kernels.resize(1);
+  result.kernels.front().lds_sites.push_back(make_supported_sc_lds_site(0x130u));
+  rocjitsu::consan_hook::HookConfig config;
+  config.probe_lds_check_trap = true;
+
+  const auto coverage =
+      rocjitsu::consan_hook::compute_consan_supercollider_access_coverage(result, config);
+
+  EXPECT_EQ(coverage.discovered, 2u);
+  EXPECT_EQ(coverage.supported, 1u);
+}
+
 constexpr hsa_agent_t kGuestAgent{1};
 constexpr hsa_agent_t kHostAgent{2};
 // An agent that is neither the guest nor the guest's execution host. Its queues
@@ -1720,6 +1794,29 @@ TEST(HsaHooksUnitTest, ConSanRequirePatchRejectsPrologueOnlyMoiMutation) {
   site_patched.patches.push_back(site_patch);
   run_hook_load_case(kConSanHookProfiles[1], false, site_patched, HSA_STATUS_SUCCESS, 102u,
                      site_patched.elf_bytes);
+}
+
+TEST(HsaHooksUnitTest, ConSanRequirePatchUsesSharedLdsSupportForFunctions) {
+  ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", "1");
+  rocjitsu::ConSanResult structural_only;
+  structural_only.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  structural_only.flavor = rocjitsu::ConSanFlavor::SuperCollider;
+  structural_only.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  structural_only.modified = true;
+  structural_only.final_validation_passed = true;
+  structural_only.elf_bytes = {0x7f, 'E', 'L', 'F', 'd', '1', '6'};
+  structural_only.functions.resize(1);
+  auto d16 = make_supported_sc_lds_site(0x120u);
+  d16.width_bits = 8u;
+  d16.mnemonic = "ds_read_u8_d16";
+  structural_only.functions.front().lds_sites.push_back(std::move(d16));
+  rocjitsu::ConSanPatchInfo structural_patch;
+  structural_patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
+  structural_patch.kind = rocjitsu::ConSanPatchKind::TrampolineScDenseCallDispatcher;
+  structural_only.patches.push_back(structural_patch);
+
+  run_hook_load_case(kConSanHookProfiles[0], false, structural_only,
+                     HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
 }
 
 rocjitsu::ConSanResult b96_require_patch_result_for_arch(rj_code_arch_t arch) {

@@ -53,6 +53,15 @@ struct ConSanBarrierLifecycleGroup {
   std::string rejection_reason;
 };
 
+/// One canonical physical native-LDS access in SuperCollider's resolved
+/// planning scope. The hook consumes this ledger instead of reconstructing
+/// applicability from aliased kernel inventories that may lack a complete
+/// all-owner CFG/liveness context.
+struct ConSanScLdsCoverageSite {
+  uint64_t file_offset = 0;
+  bool supported = false;
+};
+
 struct ConSanResult {
   bool visited_code_object = false;
   bool modified = false;
@@ -135,6 +144,11 @@ struct ConSanResult {
   std::optional<std::string> applied_fault_logical_identity;
   std::vector<ConSanMoiCandidate> moi_candidates;
   std::vector<ConSanSiteDispositionRecord> site_dispositions;
+  /// True when sc_lds_coverage_sites is the authoritative physical native-LDS
+  /// denominator for this transform. Independently planned FLAT sites remain
+  /// outside this ledger.
+  bool sc_lds_coverage_resolved = false;
+  std::vector<ConSanScLdsCoverageSite> sc_lds_coverage_sites;
   /// Warning boundary immediately before MOI planning. A validated retry with
   /// a runtime-allocated report buffer trims only the prior MOI-stage
   /// diagnostics while retaining parser and semantic-analysis warnings.
