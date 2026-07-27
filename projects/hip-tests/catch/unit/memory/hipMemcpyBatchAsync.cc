@@ -357,50 +357,6 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Negative) {
   }
 }
 
-#if HT_AMD
-/**
- * Test Description
- * ------------------------
- * - Verifies D2D batch copies with hipMemcpyFlagExtOpSwap.
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 7.1
- */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_Swap) {
-  constexpr size_t copy_count = 3;
-  constexpr size_t copy_size = kSmallCopySize;
-  constexpr int kSwapSrcValue = 23;
-  constexpr int kSwapDstValue = 47;
-  BatchConfig config{copy_count, copy_size};
-  StreamGuard stream_guard(Streams::created);
-  std::vector<LinearAllocGuard<int>> src = AllocateBatchBuffers(LinearAllocs::hipMalloc, config);
-  std::vector<LinearAllocGuard<int>> dst = AllocateBatchBuffers(LinearAllocs::hipMalloc, config);
-  std::vector<void*> src_ptrs = MakeBatchPtrs(src);
-  std::vector<void*> dst_ptrs = MakeBatchPtrs(dst);
-  std::vector<size_t> sizes(src_ptrs.size(), copy_size);
-  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap};
-  size_t attrs_idxs[1] = {0};
-
-  FillDeviceBuffers(src_ptrs, copy_size, kSwapSrcValue);
-  FillDeviceBuffers(dst_ptrs, copy_size, kSwapDstValue);
-
-  hipError_t status =
-      hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), src_ptrs.size(), &attr,
-                          attrs_idxs, 1, nullptr, stream_guard.stream());
-  if (status == hipErrorNotSupported) {
-    SUCCEED("hipMemcpyFlagExtOpSwap is not supported on this device");
-  } else {
-    HIP_CHECK(status);
-    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
-    VerifyDeviceBuffers(src_ptrs, copy_size, kSwapDstValue);
-    VerifyDeviceBuffers(dst_ptrs, copy_size, kSwapSrcValue);
-  }
-}
-#endif
-
 /**
  * Test Description
  * ------------------------

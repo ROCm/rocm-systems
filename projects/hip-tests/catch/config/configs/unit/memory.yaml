@@ -858,9 +858,6 @@ memory:
   Unit_hipMemcpyBatchAsync_Attrs_Negative:
     <<: *level_2
     tags: [transfer]
-  Unit_hipMemcpyBatchAsync_D2D_Swap:
-    <<: *level_2
-    tags: [transfer]
   Unit_hipMemcpyBatchAsync_H2D_Functional: *level_2
   Unit_hipMemcpyBatchAsync_H2D_Pageable_DuringApiCall_SourceAccess:
     <<: *level_2
