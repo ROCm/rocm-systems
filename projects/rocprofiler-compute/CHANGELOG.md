@@ -44,10 +44,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added support for GPU metrics on gfx1153 hardware.
 
-* Added multi-process PC sampling support across profile and analyze modes.
-  * Profile mode writes PID-prefixed `<pid>_ps_file_results.json` files, keeping each process's results associated with its code-object data.
-  * Analyze mode combines all PID-scoped results into a unified PC sampling result.
-
 ### Changed
 
 * Split Python version requirements by mode. Profile mode now runs on Python 3.8+ (standard library only). Analyze mode requires Python 3.9+ and exits with a clear message on older interpreters instead of failing with an import error.
@@ -64,11 +60,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Renamed `num_hbm_channels` to `num_memory_channels` in machine specifications to unify memory channel reporting across GPU families.
 
-* Changed PC sampling analysis database and dispatch CSV output to include a nullable `pid` field.
-  * Dispatch identity now includes the process ID, preserving dispatches that reuse the same kernel and dispatch ID in different processes.
-
-* Changed the analysis database schema version to `2.1.0` for PID-scoped dispatch records.
-
 ### Removed
 
 * Removed the multi-node analysis options ``--nodes``, ``--list-nodes`` (analyze mode) and the experimental ``--spatial-multiplexing`` option (profile and analyze modes). These features did not work as expected and will be redesigned in a future release.
@@ -84,6 +75,19 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed CDNA memory chart CLI output to show the numbered `3. Memory Chart` header without repeating the default per-kernel normalization label.
 
 ### Upcoming changes
+
+#### Added
+
+* Added multi-process PC sampling support across profile and analyze modes.
+  * Profile mode writes PID-prefixed `<pid>_ps_file_results.json` files, keeping each process's results associated with its code-object data.
+  * Analyze mode combines all PID-scoped results into a unified PC sampling result.
+
+#### Changed
+
+* Changed PC sampling analysis database and dispatch CSV output to include a nullable `pid` field.
+  * Dispatch identity now includes the process ID, preserving dispatches that reuse the same kernel and dispatch ID in different processes.
+
+* Changed the analysis database schema version to `2.1.0` for PID-scoped dispatch records.
 
 ### Known issues
 
