@@ -749,11 +749,13 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // Set the probe's offset
       TrampolinePlan plan = make_base_plan(site, arch_, trampoline_offset);
       plan.probe_target_offset = probe.output_text_offset;
-      // Preserve any special state the probe body clobbers by saving it to a dead
-      // SGPR around the call. EXEC/VCC/M0 liveness is not tracked, so save
-      // whenever the probe clobbers the register (conservative but correct).
-      plan.preserve_exec = summary->touches_exec;
-      plan.preserve_vcc = summary->touches_vcc;
+      // Preserve special state the probe clobbers by saving it to a dead SGPR
+      // around the call. EXEC/VCC are saved unconditionally: the clobber summary
+      // scans only explicit operands, so implicit defs (v_cmp->VCC, v_cmpx->EXEC)
+      // are invisible (see probe_clobber.cpp). M0 has no implicit writer here, so
+      // it stays clobber-gated.
+      plan.preserve_exec = true;
+      plan.preserve_vcc = true;
       plan.preserve_m0 = summary->touches_m0;
       // Given liveness, clobbers, and calling convention, select registers
       // for trampoline and determine how big the trampoline will be

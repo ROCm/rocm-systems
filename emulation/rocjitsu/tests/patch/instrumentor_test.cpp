@@ -2543,6 +2543,34 @@ TEST(InstrumentorProbeSpill, Rdna4PreservesClobberedM0) {
   expect_special_preserved(cave, sop1_op_mov_b32(kArch), m0);
 }
 
+// EXEC and VCC are preserved unconditionally, even when the probe body touches
+// neither explicitly. The clobber summary sees only explicit operands, so implicit
+// defs (v_cmp->VCC, v_cmpx->EXEC) would otherwise slip through; always saving both
+// closes that hole. Probe body here is a bare s_nop (no special-state operand).
+TEST(InstrumentorProbeSpill, Cdna3PreservesExecAndVccUnconditionally) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
+  const std::vector<uint32_t> cave = patch_probe_clobbering(build_s_nop(0, kArch), kArch);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+}
+
+TEST(InstrumentorProbeSpill, Cdna4PreservesExecAndVccUnconditionally) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::vector<uint32_t> cave = patch_probe_clobbering(build_s_nop(0, kArch), kArch);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+}
+
+TEST(InstrumentorProbeSpill, Rdna4PreservesExecAndVccUnconditionally) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  const std::vector<uint32_t> cave = patch_probe_clobbering(build_s_nop(0, kArch), kArch);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+}
+
 // FLAT_SCRATCH stays rejected (the spill store/load depend on it), failing closed.
 // gfx9 only (CDNA3, CDNA4): flat_scratch_lo/hi are writable operands (102/103) here;
 // gfx11+ removed them (OPR_SDST_SGPR_MAX=105, so dst 102 is the plain SGPR s102), so
