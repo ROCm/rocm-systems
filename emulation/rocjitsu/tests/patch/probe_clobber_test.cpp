@@ -36,6 +36,11 @@ constexpr uint32_t kSMovM0_0 = 0xbefc0080;        // s_mov_b32 m0, 0
 constexpr uint32_t kSMovVccLo_0 = 0xbeea0080;     // s_mov_b32 vcc_lo, 0
 constexpr uint32_t kSMovFlatScrLo_0 = 0xbee60080; // s_mov_b32 flat_scratch_lo, 0
 
+// Implicit special-state writers: v_cmp writes VCC and v_cmpx writes EXEC with no
+// operand naming them, so the operand-scanning summary cannot see the def.
+constexpr uint32_t kVCmpEqU32 = 0x7D940000;  // v_cmp_eq_u32 vcc, s0, v0  -> implicit VCC
+constexpr uint32_t kVCmpxEqU32 = 0x7DB40000; // v_cmpx_eq_u32 s0, v0      -> implicit EXEC
+
 constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA2;
 
 ProbeCallable make_callable(std::vector<uint32_t> body) {
@@ -127,6 +132,26 @@ TEST(ProbeClobber, DetectsExplicitVccWrite) {
   EXPECT_FALSE(summary->touches_exec);
   EXPECT_FALSE(summary->touches_m0);
   EXPECT_FALSE(summary->touches_flat_scratch);
+}
+
+// Implicit special-state defs are invisible to the operand-scanning summary:
+// v_cmp writes VCC and v_cmpx writes EXEC with no operand, so touches_vcc /
+// touches_exec stay false. The trampoline compensates by preserving EXEC/VCC
+// unconditionally rather than relying on these flags.
+TEST(ProbeClobber, ImplicitVccWriteFromCompareIsInvisible) {
+  const auto callable = make_callable({kVCmpEqU32, kSSetpcS30S31});
+  std::string err;
+  const auto summary = build_probe_clobber_summary(callable, &err);
+  ASSERT_TRUE(summary.has_value()) << err;
+  EXPECT_FALSE(summary->touches_vcc) << "v_cmp's VCC def has no operand to scan";
+}
+
+TEST(ProbeClobber, ImplicitExecWriteFromCmpxIsInvisible) {
+  const auto callable = make_callable({kVCmpxEqU32, kSSetpcS30S31});
+  std::string err;
+  const auto summary = build_probe_clobber_summary(callable, &err);
+  ASSERT_TRUE(summary.has_value()) << err;
+  EXPECT_FALSE(summary->touches_exec) << "v_cmpx's EXEC def has no operand to scan";
 }
 
 // A body that writes FLAT_SCRATCH via an explicit operand must set
