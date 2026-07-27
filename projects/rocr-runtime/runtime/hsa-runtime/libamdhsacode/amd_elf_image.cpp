@@ -738,7 +738,15 @@ namespace elf {
       GElfStringTable* strtab() override;
       GElfSymbolTable* getReferencedSymbolTable(uint16_t index)
       {
-        return static_cast<GElfSymbolTable*>(section(index));
+        // index derives from an attacker-controlled sh_link. section() already
+        // bounds-checks and returns nullptr for an out-of-range index, but a
+        // crafted value may reference an in-range wrong-type section. Verify it
+        // is actually a symbol table so the static_cast cannot produce a
+        // mis-typed pointer later virtual-dispatched during relocation.
+        GElfSection* s = section(index);
+        if (s && (s->type() == SHT_SYMTAB || s->type() == SHT_DYNSYM))
+          return static_cast<GElfSymbolTable*>(s);
+        return nullptr;
       }
       GElfSymbolTable* getSymtab(uint16_t index) override
       {
@@ -1347,9 +1355,10 @@ namespace elf {
       if (hdr.sh_info >= elf->sectionCount()) { return false; }
       section = elf->section(hdr.sh_info);
       // sh_link must reference the associated symbol table;
-      // getReferencedSymbolTable() returns nullptr for an out-of-range index
-      // (section() is bounds-checked). Reject rather than storing a garbage
-      // pointer that later gets virtual-dispatched during relocation.
+      // getReferencedSymbolTable() returns nullptr for an out-of-range index or
+      // an in-range section that is not a symbol table. Reject rather than
+      // storing a garbage/mis-typed pointer that later gets virtual-dispatched
+      // during relocation.
       symtab = elf->getReferencedSymbolTable(hdr.sh_link);
       if (!symtab) { return false; }
       Elf_Scn *lScn = elf_getscn(elf->e, ndxscn);
@@ -1685,7 +1694,13 @@ namespace elf {
       // index derives from the attacker-controlled sh_link field; reject
       // out-of-range values instead of reading past the sections vector.
       if (index >= sections.size()) { return nullptr; }
-      return static_cast<GElfStringTable*>(sections[index].get());
+      // A crafted sh_link may reference an in-range but wrong-type section
+      // (e.g. SHT_PROGBITS). Reject it so the static_cast below cannot produce
+      // a mis-typed pointer later used as a string table (type confusion).
+      // Note: section index 0 (SHT_NULL) is stored as a null unique_ptr.
+      GElfSection* s = sections[index].get();
+      if (!s || s->type() != SHT_STRTAB) { return nullptr; }
+      return static_cast<GElfStringTable*>(s);
     }
 
     GElfSymbolTable* GElfImage::addSymbolTable(const std::string& name, StringTable* stab)
