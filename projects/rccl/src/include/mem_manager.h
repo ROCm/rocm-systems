@@ -25,7 +25,9 @@ extern "C" {
 #ifndef HIP_IPC_HANDLE_SIZE
 #define HIP_IPC_HANDLE_SIZE 64
 #endif
-typedef struct hipMemFabricHandle_st {
+// AICOMRCCL-1629: anonymous tag; newer HIP defines struct hipMemFabricHandle_st,
+// which this compat type redefined when HIP_FABRIC_API is unset.
+typedef struct {
   unsigned char data[HIP_IPC_HANDLE_SIZE];
 } hipMemFabricHandle_compat_t;
 #else

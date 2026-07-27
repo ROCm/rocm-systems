@@ -33,10 +33,19 @@ CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION)
            -Wl,--gc-sections -fgpu-rdc \
            -Iinclude -Itest -Ihipify_rccl/include -Ihipify_rccl/include/plugin \
 		   -Ihipify_rccl/include/nccl_device \
-           -Ihipify_rccl/src/device/include -Ihipify_rccl/graph -I/opt/rocm/include/ \
+           -Ihipify_rccl/src/device/include -Ihipify_rccl/graph -I$(ROCM_PATH)/include/ \
            -DTOPO_EXPL -DENABLE_TRACE -DENABLE_LL128 -DNVTX_NO_IMPL -DRCCL_EXPOSE_STATIC \
            $(NCCL_OS_DEFINE) \
            -lpthread
+
+# AICOMRCCL-1629: set AMDSMI_FABRIC_DIRECT when amd_smi provides the fabric API,
+# else amdsmi_wrap.h's compat types redefine the real ones. CMake does this for
+# the main build; the standalone build must probe.
+HAVE_AMDSMI_FABRIC := $(shell printf '#include <amd_smi/amdsmi.h>\namdsmi_fabric_info_t topo_expl_amdsmi_probe_;\n' | \
+                        $(HIPCC) -xc++ -std=c++17 -I$(ROCM_PATH)/include -fsyntax-only - >/dev/null 2>&1 && echo yes || echo no)
+ifeq ($(HAVE_AMDSMI_FABRIC),yes)
+  CXXFLAGS += -DAMDSMI_FABRIC_DIRECT
+endif
 
 TOPO_EXPL_FILES = src/$(EXE).cpp src/topo_expl_api.cpp src/model.cpp src/topo_expl_impl.cpp src/utils.cpp src/stubs.cc test/topo_expl_tests.cpp
 
