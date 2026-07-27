@@ -49,13 +49,6 @@ namespace
 constexpr size_t PAGE_ALIGN_PADDING = 0x2000;
 constexpr size_t PAGE_ALIGN_MASK    = 0xFFFul;
 
-struct shared_buffer_t
-{
-    void*                               raw     = nullptr;
-    void*                               aligned = nullptr;
-    decltype(hsa_amd_memory_pool_free)* free_fn = nullptr;
-};
-
 struct manager_entry_t
 {
     std::optional<hsa_agent_t>    hsa_agent    = std::nullopt;
@@ -148,47 +141,29 @@ get_manager()
 }
 }  // namespace
 
-struct AgentTraceResources::impl
-{
-    impl(const hsa::AgentCache& _agent, trace_resource_requirements_t _requirements)
-    : agent_id(CHECK_NOTNULL(_agent.get_rocp_agent())->id)
-    , requirements(std::move(_requirements))
-    , queue(att_queue_create(_agent,
-                             requirements.staging_buffer_size,
-                             requirements.staging_buffer_count))
-    {}
-
-    ~impl()
-    {
-        ROCP_FATAL_IF(active_traces != 0)
-            << "Destroying ATT resources for agent " << agent_id.handle << " with " << active_traces
-            << " active trace(s)";
-        for(auto& buffer : output_buffers)
-            if(buffer.raw && buffer.free_fn) buffer.free_fn(buffer.raw);
-        att_queue_destroy(queue);
-    }
-
-    rocprofiler_agent_id_t        agent_id     = {};
-    trace_resource_requirements_t requirements = {};
-    att_queue_t                   queue        = {};
-
-    mutable std::mutex                      mutex          = {};
-    std::vector<shared_buffer_t>            output_buffers = {};
-    std::optional<rocprofiler_context_id_t> active_context = std::nullopt;
-    uint64_t                                active_traces  = 0;
-};
-
 AgentTraceResources::AgentTraceResources(const hsa::AgentCache&        agent,
                                          trace_resource_requirements_t requirements)
-: m_impl(std::make_unique<impl>(agent, std::move(requirements)))
+: m_agent_id(CHECK_NOTNULL(agent.get_rocp_agent())->id)
+, m_requirements(std::move(requirements))
+, m_queue(att_queue_create(agent,
+                           m_requirements.staging_buffer_size,
+                           m_requirements.staging_buffer_count))
 {}
 
-AgentTraceResources::~AgentTraceResources() = default;
+AgentTraceResources::~AgentTraceResources()
+{
+    ROCP_FATAL_IF(m_active_traces != 0)
+        << "Destroying ATT resources for agent " << m_agent_id.handle << " with " << m_active_traces
+        << " active trace(s)";
+    for(auto& buffer : m_output_buffers)
+        if(buffer.raw && buffer.free_fn) buffer.free_fn(buffer.raw);
+    att_queue_destroy(m_queue);
+}
 
 att_queue_t&
 AgentTraceResources::queue()
 {
-    return m_impl->queue;
+    return m_queue;
 }
 
 void*
@@ -196,20 +171,20 @@ AgentTraceResources::acquire_output_buffer(const hsa::TraceMemoryPool& pool,
                                            size_t                      slot,
                                            uint64_t                    requested_size)
 {
-    auto lk = std::lock_guard{m_impl->mutex};
-    ROCP_FATAL_IF(requested_size > m_impl->requirements.output_buffer_size)
+    auto lk = std::lock_guard{m_mutex};
+    ROCP_FATAL_IF(requested_size > m_requirements.output_buffer_size)
         << "ATT output request of " << requested_size << " bytes exceeds registered maximum "
-        << m_impl->requirements.output_buffer_size << " for agent " << m_impl->agent_id.handle;
+        << m_requirements.output_buffer_size << " for agent " << m_agent_id.handle;
 
-    if(m_impl->output_buffers.size() <= slot) m_impl->output_buffers.resize(slot + 1);
+    if(m_output_buffers.size() <= slot) m_output_buffers.resize(slot + 1);
 
-    auto& buffer = m_impl->output_buffers.at(slot);
+    auto& buffer = m_output_buffers.at(slot);
     if(buffer.aligned) return buffer.aligned;
     if(!pool.allocate_fn) return nullptr;
 
     void* raw    = nullptr;
     auto  status = pool.allocate_fn(pool.gpu_pool_,
-                                   m_impl->requirements.output_buffer_size + PAGE_ALIGN_PADDING,
+                                   m_requirements.output_buffer_size + PAGE_ALIGN_PADDING,
                                    hsa::hsa_amd_memory_pool_executable_flag,
                                    &raw);
     if(status != HSA_STATUS_SUCCESS || raw == nullptr)
@@ -231,40 +206,39 @@ bool
 AgentTraceResources::owns_output_buffer(void* ptr) const
 {
     if(!ptr) return false;
-    auto lk = std::lock_guard{m_impl->mutex};
-    return std::any_of(m_impl->output_buffers.begin(),
-                       m_impl->output_buffers.end(),
-                       [ptr](const auto& buffer) { return buffer.aligned == ptr; });
+    auto lk = std::lock_guard{m_mutex};
+    return std::any_of(m_output_buffers.begin(), m_output_buffers.end(), [ptr](const auto& buffer) {
+        return buffer.aligned == ptr;
+    });
 }
 
 rocprofiler_agent_id_t
 AgentTraceResources::agent_id() const
 {
-    return m_impl->agent_id;
+    return m_agent_id;
 }
 
 void
 AgentTraceResources::begin_trace(rocprofiler_context_id_t context_id)
 {
-    auto lk = std::lock_guard{m_impl->mutex};
-    if(m_impl->active_traces == 0) m_impl->active_context = context_id;
-    ROCP_FATAL_IF(!m_impl->active_context)
-        << "ATT resource owner missing for agent " << m_impl->agent_id.handle;
-    ROCP_FATAL_IF(m_impl->active_context->handle != context_id.handle)
-        << "ATT trace overlap on agent " << m_impl->agent_id.handle << ": context "
-        << context_id.handle << " attempted to use resources owned by context "
-        << m_impl->active_context->handle;
-    ++m_impl->active_traces;
+    auto lk = std::lock_guard{m_mutex};
+    if(m_active_traces == 0) m_active_context = context_id;
+    ROCP_FATAL_IF(!m_active_context)
+        << "ATT resource owner missing for agent " << m_agent_id.handle;
+    ROCP_FATAL_IF(m_active_context->handle != context_id.handle)
+        << "ATT trace overlap on agent " << m_agent_id.handle << ": context " << context_id.handle
+        << " attempted to use resources owned by context " << m_active_context->handle;
+    ++m_active_traces;
 }
 
 void
 AgentTraceResources::end_trace(rocprofiler_context_id_t context_id)
 {
-    auto lk = std::lock_guard{m_impl->mutex};
-    ROCP_FATAL_IF(m_impl->active_traces == 0 || !m_impl->active_context ||
-                  m_impl->active_context->handle != context_id.handle)
-        << "ATT trace ownership underflow on agent " << m_impl->agent_id.handle;
-    if(--m_impl->active_traces == 0) m_impl->active_context = std::nullopt;
+    auto lk = std::lock_guard{m_mutex};
+    ROCP_FATAL_IF(m_active_traces == 0 || !m_active_context ||
+                  m_active_context->handle != context_id.handle)
+        << "ATT trace ownership underflow on agent " << m_agent_id.handle;
+    if(--m_active_traces == 0) m_active_context = std::nullopt;
 }
 
 void

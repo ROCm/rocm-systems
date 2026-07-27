@@ -22,13 +22,19 @@
 
 #pragma once
 
+#include "lib/rocprofiler-sdk/thread_trace/hsa_util.hpp"
+
 #include <rocprofiler-sdk/fwd.h>
 
 #include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <optional>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -40,8 +46,6 @@ struct TraceMemoryPool;
 
 namespace thread_trace
 {
-struct att_queue_t;
-
 struct trace_resource_requirements_t
 {
     uint64_t output_buffer_size   = 0;
@@ -78,8 +82,21 @@ public:
     void end_trace(rocprofiler_context_id_t context_id);
 
 private:
-    struct impl;
-    std::unique_ptr<impl> m_impl;
+    struct shared_buffer_t
+    {
+        void*                               raw     = nullptr;
+        void*                               aligned = nullptr;
+        decltype(hsa_amd_memory_pool_free)* free_fn = nullptr;
+    };
+
+    rocprofiler_agent_id_t        m_agent_id     = {};
+    trace_resource_requirements_t m_requirements = {};
+    att_queue_t                   m_queue        = {};
+
+    mutable std::mutex                      m_mutex          = {};
+    std::vector<shared_buffer_t>            m_output_buffers = {};
+    std::optional<rocprofiler_context_id_t> m_active_context = std::nullopt;
+    uint64_t                                m_active_traces  = 0;
 };
 
 using agent_trace_resources_ptr_t = std::shared_ptr<AgentTraceResources>;
