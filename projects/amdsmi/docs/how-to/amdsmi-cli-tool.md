@@ -1550,7 +1550,7 @@ interfaces (sysfs / modprobe.d) and do **not** require libdrm.
 | Feature | Hardware | Status |
 |---|---|---|
 | `--mem-carveout` (UMA carveout) | Strix and later APUs (gfx1150, gfx1151, gfx1152) whose VBIOS exposes ATCS 0xA | Supported |
-| `--mem-carveout` (UMA carveout) | Radeon dGPUs, Instinct MI-series (MI100, MI200, MI300, MI300A) | Not supported — omitted from default human-readable `amd-smi static` output (JSON/CSV keep an `N/A` key); `MEM_CARVEOUT: N/A` when queried explicitly with `-m`/`--mem-carveout` |
+| `--mem-carveout` (UMA carveout) | Radeon dGPUs, Instinct MI-series (MI100, MI200, MI300, MI300A) | Not supported — omitted from default human-readable `amd-smi static` output (JSON/CSV keep stable `N/A` fields); `MEM_CARVEOUT: N/A` when queried explicitly with `-m`/`--mem-carveout` |
 | `--gtt` (TTM `pages_limit`) | Any amdgpu system, including Instinct MI300A (`amdttm` / `amd-ttm`) and Ryzen APUs (`ttm`) | Supported |
 
 ### Prerequisites
@@ -1563,7 +1563,7 @@ interfaces (sysfs / modprobe.d) and do **not** require libdrm.
 On MI300A (and every non-APU / pre-ATCS-0xA platform) the kernel does not
 create `/sys/class/drm/<card>/device/uma/`, so carveout is not supported. A
 default human-readable `amd-smi static` run omits the `MEM_CARVEOUT` section
-entirely on these platforms (JSON and CSV keep a stable `N/A` key). Querying
+entirely on these platforms (JSON and CSV keep stable `N/A` fields). Querying
 it explicitly prints a plain `N/A`:
 
 ```text
@@ -1574,3 +1574,16 @@ MEM_CARVEOUT: N/A
 
 This is expected. Use `amd-smi node --gtt` / `amd-smi set --gtt` to tune
 shared GPU memory on those platforms instead.
+
+### CSV output fields
+
+Because CSV is flat, the carveout options list cannot be a single column, so
+CSV emits scalar summaries instead of the full JSON `options` list:
+
+| Field | Meaning |
+|---|---|
+| `mem_carveout_index` | Index of the currently selected carveout option |
+| `mem_carveout_current_desc` | Description of the selected option (e.g. `2 GB`) |
+| `mem_carveout_num_options` | Number of available carveout options |
+
+All three fields report `N/A` on hardware without carveout support.

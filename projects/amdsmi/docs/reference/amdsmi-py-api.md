@@ -6013,7 +6013,7 @@ Refer to [amd_smi_partition_example.py](https://github.com/ROCm/rocm-systems/blo
 - **Not available** on dedicated GPUs or Instinct MI-series accelerators
   (including MI300A); the call returns `AMDSMI_STATUS_NOT_SUPPORTED`. A
   default human-readable `amd-smi static` run omits the `MEM_CARVEOUT`
-  section on these platforms (JSON and CSV keep a stable `N/A` key), and
+  section on these platforms (JSON and CSV keep stable `N/A` fields), and
   querying it explicitly with `--mem-carveout` prints `MEM_CARVEOUT: N/A`.
 - Requires Linux kernel >= 7.0 (upstream commit
   [`685b711`](https://github.com/torvalds/linux/commit/685b711); some

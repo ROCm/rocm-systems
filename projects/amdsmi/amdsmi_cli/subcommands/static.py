@@ -1155,8 +1155,21 @@ class StaticCommands:
                     }
                     static_dict["mem_carveout"] = carveout_dict
                 elif self.logger.is_csv_format():
-                    # CSV: show only current index
-                    static_dict["mem_carveout_index"] = uma_info.get("current_index", -1)
+                    # CSV is flat; emit scalar summaries since the options list
+                    # can't be a single column.
+                    options = uma_info.get("options", [])
+                    current_index = uma_info.get("current_index", -1)
+                    current_desc = next(
+                        (
+                            opt.get("description", "N/A")
+                            for opt in options
+                            if opt.get("index") == current_index
+                        ),
+                        "N/A",
+                    )
+                    static_dict["mem_carveout_index"] = current_index
+                    static_dict["mem_carveout_current_desc"] = current_desc
+                    static_dict["mem_carveout_num_options"] = uma_info.get("num_options", 0)
                 else:
                     # Human readable: show all options with current marked
                     options = uma_info.get("options", [])
@@ -1189,6 +1202,8 @@ class StaticCommands:
                     pass
                 elif self.logger.is_csv_format():
                     static_dict["mem_carveout_index"] = "N/A"
+                    static_dict["mem_carveout_current_desc"] = "N/A"
+                    static_dict["mem_carveout_num_options"] = "N/A"
                 else:
                     static_dict["mem_carveout"] = "N/A"
                 logging.debug(

@@ -17,6 +17,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amd-smi static` now omits `MEM_CARVEOUT` from default human-readable output on hardware without VRAM carveout support**.  
   - On a default run the human-readable output drops the section entirely instead of printing a verbose reason string; JSON and CSV keep a stable `N/A` key. An explicit `-m`/`--mem-carveout` always reports `N/A` in every format. VRAM carveout is only exposed on carveout-capable APUs.
 
+- **Expanded `amd-smi static --mem-carveout` CSV output**.  
+  - CSV previously exposed only the opaque `mem_carveout_index`. It now also emits `mem_carveout_current_desc` (the selected option's description) and `mem_carveout_num_options`, so a CSV consumer can interpret the index without the JSON `options` list.
+
 ### Fixed
 
 - **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.
