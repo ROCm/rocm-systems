@@ -286,9 +286,10 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, ProbeCallingConven
     before_words += 2; // s_cselect_b32 (save) + s_cmp_lg_u32 (restore)
   // Each special-state register adds one s_mov save + one s_mov restore.
   before_words += static_cast<uint32_t>(special_saves.size()) * 2;
-  // Spilling adds s_mov_b64 exec, -1 before the store and before the load.
+  // Spilling adds three EXEC toggles: widen before the stores, restore the anchor
+  // mask before the call (probe runs under the anchor mask), re-widen before the loads.
   if (will_spill)
-    before_words += 2;
+    before_words += 3;
 
   plan.is_probe_call = true;
   plan.link_pair_base = kLinkPairBase;
@@ -328,6 +329,13 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // toggles only. EXEC save/restore is decided by special_state_saves membership.
   const bool full_mask_exec = !plan.vgpr_spills.empty() || !plan.sgpr_spills.empty();
 
+  // SGPR pair holding the saved anchor EXEC (populated by the save loop below).
+  // Reused to restore the anchor mask before the call; always present when spilling.
+  uint16_t exec_temp = 0;
+  for (const SpecialStateSlot &s : plan.special_state_saves)
+    if (s.operand == kScalarOperandExecLo)
+      exec_temp = s.temp_base;
+
   // Special-state saves: copy each preserved EXEC/VCC/M0 into its dead temp. Before
   // the stores so EXEC is captured before we force it to -1. Plain s_mov, SCC-safe.
   for (const SpecialStateSlot &s : plan.special_state_saves)
@@ -341,6 +349,11 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 
   // Spill saves: store each live+clobbered register before the call.
   env.insert(env.end(), spill.prologue.begin(), spill.prologue.end());
+
+  // Restore the anchor EXEC before the call so the probe runs under the anchor mask,
+  // not the full mask used to bracket the stores. The loads are re-widened after.
+  if (full_mask_exec)
+    env.push_back(build_s_mov_b64(kScalarOperandExecLo, exec_temp, plan.arch));
 
   // SCC save (prologue): capture SCC into the temp without disturbing it. The
   // matching restore is emitted after the call but still before the relocated
