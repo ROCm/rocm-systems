@@ -209,22 +209,28 @@ __global__ void tile_memcpy_async_kernel(float* out, const float* in,
 }
 
 __global__ void coalesced_memcpy_async_kernel(float* out, const float* in,
-                                              size_t total_bytes) {
+                                              size_t chunk_elems) {
   namespace cg = cooperative_groups;
   extern __shared__ float smem[];
   auto active = cg::coalesced_threads();
-  // All lanes are active here, so coalesced_group covers the whole warp/block
-  // tile that entered the kernel; the API still has to accept this group type.
-  cg::memcpy_async(active, smem, in, total_bytes);
+
+  // coalesced_threads() groups the converged lanes of a single wave, so a
+  // multi-wave block yields one group per wave and active.sync() orders only
+  // that wave. Each group therefore needs a disjoint chunk.
+  const size_t offset =
+      (threadIdx.x / static_cast<unsigned int>(warpSize)) * chunk_elems;
+  const size_t chunk_bytes = chunk_elems * sizeof(float);
+  float* smem_chunk = smem + offset;
+
+  cg::memcpy_async(active, smem_chunk, in + offset, chunk_bytes);
   active.sync();
 
-  const size_t total_elems = total_bytes / sizeof(float);
-  for (size_t i = active.thread_rank(); i < total_elems; i += active.size()) {
-    smem[i] += 1.0f;
+  for (size_t i = active.thread_rank(); i < chunk_elems; i += active.size()) {
+    smem_chunk[i] += 1.0f;
   }
   active.sync();
 
-  cg::memcpy_async(active, out, smem, total_bytes);
+  cg::memcpy_async(active, out + offset, smem_chunk, chunk_bytes);
   active.sync();
 }
 
@@ -316,23 +322,40 @@ HIP_TEST_CASE(Unit_coop_memcpy_async_thread_block_tile_Basic) {
 }
 
 HIP_TEST_CASE(Unit_coop_memcpy_async_coalesced_group_Basic) {
-  for (const size_t size : {32u, 64u, 128u}) {
-    const size_t bytes = size * sizeof(float);
+  hipDeviceProp_t prop;
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  const unsigned int wave = static_cast<unsigned int>(prop.warpSize);
+  constexpr size_t chunk_elems = 64;
+
+  // Size the block in whole waves so the number of coalesced groups is known
+  // and each one owns a chunk, on both wave32 and wave64.
+  for (const unsigned int waves : {1u, 2u, 4u}) {
+    const unsigned int threads = wave * waves;
+    if (threads > static_cast<unsigned int>(prop.maxThreadsPerBlock)) continue;
+
+    const size_t total_elems = chunk_elems * waves;
+    const size_t bytes = total_elems * sizeof(float);
+
     float *d_in, *d_out;
     HIP_CHECK(hipMalloc(&d_in, bytes));
     HIP_CHECK(hipMalloc(&d_out, bytes));
 
-    std::vector<float> in(size), out(size, 0.0f);
-    for (size_t i = 0; i < size; i++) in[i] = static_cast<float>(i * 2 + 1);
+    std::vector<float> in(total_elems), out(total_elems, 0.0f);
+    for (size_t i = 0; i < total_elems; i++) {
+      in[i] = static_cast<float>(i * 2 + 1);
+    }
     HIP_CHECK(hipMemcpy(d_in, in.data(), bytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemset(d_out, 0, bytes));
 
-    INFO("size " << size);
-    coalesced_memcpy_async_kernel<<<1, size, bytes>>>(d_out, d_in, bytes);
+    INFO("waves " << waves << " threads " << threads);
+    coalesced_memcpy_async_kernel<<<1, threads, bytes>>>(d_out, d_in,
+                                                         chunk_elems);
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(out.data(), d_out, bytes, hipMemcpyDeviceToHost));
     HIP_CHECK(hipFree(d_in));
     HIP_CHECK(hipFree(d_out));
 
-    for (size_t i = 0; i < size; i++) {
+    for (size_t i = 0; i < total_elems; i++) {
       INFO("idx " << i);
       REQUIRE(out[i] == Catch::Approx(in[i] + 1.0f));
     }
