@@ -845,6 +845,11 @@ class _AmdgpuProfileBase(IsaProfile):
         return 256
 
     @property
+    def descriptor_vgpr_count_granule(self) -> int:
+        """VGPR count granule encoded in compute descriptors."""
+        return 4
+
+    @property
     def descriptor_sgpr_count_encoded(self) -> bool:
         """Whether zero SGPR granule fields still use descriptor encoding."""
         return True
@@ -1077,6 +1082,10 @@ class CdnaProfile(_AmdgpuProfileBase):
         return 256
 
     @property
+    def descriptor_vgpr_count_granule(self) -> int:
+        return 8
+
+    @property
     def flat_scratch_mechanism(self) -> str:
         return 'hwreg'  # CDNA3/4 use HW register for scratch base
 
@@ -1113,6 +1122,10 @@ class Cdna1Profile(CdnaProfile):
     @property
     def max_acc_vgprs(self) -> int:
         return 0
+
+    @property
+    def descriptor_vgpr_count_granule(self) -> int:
+        return 4
 
     @property
     def flat_scratch_mechanism(self) -> str:
@@ -1156,6 +1169,10 @@ class Cdna2Profile(CdnaProfile):
     @property
     def acc_vgpr_encoding_base(self) -> int:
         return 512  # CDNA2: AccVGPR range starts at encoding 512
+
+    @property
+    def descriptor_vgpr_count_granule(self) -> int:
+        return 4
 
     @property
     def flat_scratch_mechanism(self) -> str:
@@ -1242,6 +1259,10 @@ class Rdna1Profile(_AmdgpuProfileBase):
     @property
     def descriptor_sgpr_count_encoded(self) -> bool:
         return False
+
+    @property
+    def descriptor_vgpr_count_granule(self) -> int:
+        return 8
 
     @property
     def waitcnt_family(self) -> str:
@@ -1364,6 +1385,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
     @property
     def descriptor_sgpr_count_encoded(self) -> bool:
         return False
+
+    @property
+    def descriptor_vgpr_count_granule(self) -> int:
+        return 8
 
     @property
     def waitcnt_family(self) -> str:
@@ -1509,6 +1534,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def descriptor_sgpr_count_encoded(self) -> bool:
         return False
+
+    @property
+    def descriptor_vgpr_count_granule(self) -> int:
+        return 8
 
     @property
     def waitcnt_family(self) -> str:
@@ -1679,6 +1708,15 @@ class Gfx1250Profile(Rdna4Profile):
     @property
     def max_addressable_vgprs_per_wf(self) -> int:
         return 1024
+
+    @property
+    def descriptor_vgpr_count_granule(self) -> int:
+        # Matches LLVM AMDGPUBaseInfo::getVGPREncodingGranule():
+        # gfx1250 has Feature1024AddressableVGPRs, so Wave32 descriptors
+        # encode VGPR counts in 16-register blocks. The separate
+        # s_set_vgpr_msb high-bank indexing needed above v255 is modeled by
+        # uses_vgpr_msb_indexing.
+        return 16
 
     @property
     def has_vopd3(self) -> bool:

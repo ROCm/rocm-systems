@@ -123,6 +123,10 @@ static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).uses_ttmp_workgroup_ids);
 static_assert(!isa_properties(ROCJITSU_CODE_ARCH_RDNA4).uses_cluster_ttmp_workgroup_ids);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).uses_ttmp_workgroup_ids);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).uses_cluster_ttmp_workgroup_ids);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA2).descriptor_vgpr_count_granule == 4);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA3).descriptor_vgpr_count_granule == 8);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).descriptor_vgpr_count_granule == 8);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).descriptor_vgpr_count_granule == 16);
 
 // RDNA3/3.5 retain monolithic S_WAITCNT (GFX11 layout).
 static_assert(HasMonolithicWaitcnt<rdna3::Isa>);

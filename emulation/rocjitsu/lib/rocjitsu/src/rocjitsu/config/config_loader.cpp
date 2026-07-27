@@ -4,6 +4,7 @@
 #include "rocjitsu/config/config_loader.h"
 
 #include "rocjitsu/config/config_common.h"
+#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "rocjitsu/vm/amdgpu/command_processor.h"

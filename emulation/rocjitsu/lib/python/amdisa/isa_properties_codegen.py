@@ -42,6 +42,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
             'true' if profile.uses_cluster_ttmp_workgroup_ids else 'false'
         )
         addressable_vgprs = profile.max_addressable_vgprs_per_wf
+        vgpr_count_granule = profile.descriptor_vgpr_count_granule
         max_addressable_vgprs_per_wf = max(
             max_addressable_vgprs_per_wf, addressable_vgprs
         )
@@ -53,6 +54,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
             f'        .uses_ttmp_workgroup_ids = {uses_ttmp_workgroup_ids},',
             f'        .uses_cluster_ttmp_workgroup_ids = {uses_cluster_ttmp_workgroup_ids},',
             f'        .max_addressable_vgprs_per_wf = {addressable_vgprs},',
+            f'        .descriptor_vgpr_count_granule = {vgpr_count_granule},',
             '    };',
         ]
 
@@ -78,6 +80,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         '  bool uses_ttmp_workgroup_ids = false;',
         '  bool uses_cluster_ttmp_workgroup_ids = false;',
         '  uint32_t max_addressable_vgprs_per_wf = 0;',
+        '  uint32_t descriptor_vgpr_count_granule = 4;',
         '};',
         '',
         'inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = '
