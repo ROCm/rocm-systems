@@ -21,9 +21,8 @@ for enforced rules including type annotations, f-strings, and `pathlib` usage.
 
 ## Test Placement
 
-Read **[`.ai/rules/test-placement.md`](.ai/rules/test-placement.md)** before adding
-or moving test code. Tests mirror the source module they exercise; CLI suites stay
-CLI-only.
+Read **[`PYTHON_CODING_STYLE.md`](PYTHON_CODING_STYLE.md#testing-conventions)** to
+understand how testing code is maintained.
 
 ## Git Workflows
 
