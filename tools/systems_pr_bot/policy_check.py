@@ -770,8 +770,16 @@ def build_policy_table_comment(
         "for details on every check and how to fix failures."
     )
 
+    override_url = (
+        "https://github.com/ROCm/rocm-systems/blob/develop/docs/"
+        "SYSTEMS_PR_BOT_FAQ.md#-wish-to-override-the-policy-process-and-get-unblocked"
+    )
+    override_link = f"\n\n🙋 **[Wish to Override Policy?]({override_url})**"
+
     note_block = f"\n\n{note}" if note else ""
-    return f"{marker}\n{heading}{note_block}\n\n{table}{footer}{faq_link}"
+    return (
+        f"{marker}\n{heading}{note_block}\n\n{table}{footer}{faq_link}{override_link}"
+    )
 
 
 def build_check_results(
@@ -929,7 +937,7 @@ def build_bump_pr_results(policy: Policy) -> List[CheckResult]:
     bump_note = "Bump PR — check auto-approved (automated dependency update)"
     rows: List[CheckResult] = [
         CheckResult("Branch Name", "🌿", True, [], note=bump_note),
-        CheckResult("PR Title/Description", "📝", True, [], note=bump_note),
+        CheckResult("PR Description", "📝", True, [], note=bump_note),
         CheckResult("Draft PR", "🚫", True, [], note=bump_note),
         CheckResult("Forbidden Files", "⛔", True, [], note=bump_note),
         CheckResult("Unit Test", "🧪", True, [], note=bump_note),
@@ -1076,7 +1084,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     check_errors = []
     ensure_no_forbidden_files(policy, pr_files, check_errors)
     # Forbidden Files is WARNING-ONLY: passed=True + warn=True when a forbidden
-    # file is present, so it never blocks the workflow or adds a label.
+    # file is present, so it never blocks the workflow or adds the label.
     results.append(
         CheckResult(
             name="Forbidden Files",
