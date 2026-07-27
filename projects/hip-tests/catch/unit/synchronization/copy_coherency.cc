@@ -293,12 +293,8 @@ void testWrapper(size_t numElements) {
  */
 
 HIP_TEST_CASE(Unit_Copy_Coherency) {
-  if (isQuickLevel()) {
-    testWrapper(g_elementSizes[0]);
-  } else {
-    for (int index = 0; index < sizeof(g_elementSizes) / sizeof(int); index++) {
-      size_t numElements = g_elementSizes[index];
-      testWrapper(numElements);
-    }
+  for (int index = 0; index < sizeof(g_elementSizes) / sizeof(int); index++) {
+    size_t numElements = g_elementSizes[index];
+    testWrapper(numElements);
   }
 }
