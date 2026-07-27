@@ -709,7 +709,7 @@ def _cdash_link_url(name: str) -> str:
             "filtercount": "1",
             "showfilters": "1",
             "field1": "buildname",
-            "compare1": "65",
+            "compare1": "65",  # CDash filter op "65" == "starts with"
             "value1": _cdash_build_name(name),
         }
     )
