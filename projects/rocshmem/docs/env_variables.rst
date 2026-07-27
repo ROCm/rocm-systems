@@ -182,6 +182,15 @@ control the behavior of rocSHMEM.
       - ``4``
       - Maximum number of user buffer registrations for GDA
 
+    * - | ``ROCSHMEM_MAX_SYMM_REGIONS``
+        | rocSHMEM supports ``rocshmem_buffer_register_symmetric`` and
+        | ``rocshmem_buffer_unregister_symmetric`` for symmetric user buffers.
+        | This variable sets the maximum number of symmetric user buffers an
+        | application may register concurrently. It is backend-agnostic and is
+        | currently honored by the IPC backend.
+      - ``4``
+      - Maximum number of symmetric user buffer registrations
+
     * - | ``ROCSHMEM_MAX_WF_BUFFERS``
         | Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)
       - ``1024``

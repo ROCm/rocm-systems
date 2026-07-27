@@ -23,12 +23,16 @@ def _append_pk_f32_pair_read(
     if use_gfx1250_helpers:
         L.append(f'    const auto {var} = read_pk_f32_words({src}, wf, lane);')
         return
-    L.append(f'    uint32_t {var}_lo_w = {src}.read_lane(wf, lane);')
+    L.append(
+        f'    uint32_t {var}_lo_w = amdgpu::RegisterAccess(wf).read_lane({src}, lane);'
+    )
     L.append(f'    uint32_t {var}_hi_w = {var}_lo_w;')
     L.append(
         f'    if ({src}.encoding_value_ >= 256 && {src}.encoding_value_ <= 511) {{'
     )
-    L.append(f'      uint64_t {var}_pair_w = {src}.read_lane64(wf, lane);')
+    L.append(
+        f'      uint64_t {var}_pair_w = amdgpu::RegisterAccess(wf).read_lane64({src}, lane);'
+    )
     L.append(f'      {var}_lo_w = static_cast<uint32_t>({var}_pair_w);')
     L.append(f'      {var}_hi_w = static_cast<uint32_t>({var}_pair_w >> 32);')
     L.append('    }')
@@ -53,8 +57,8 @@ def gen_pk_binop(
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
-    L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
+    L.append(f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
+    L.append(f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
 
     # op_sel: which half of each src for LO result
     # op_sel_hi: which half for HI result (default = hi)
@@ -93,7 +97,7 @@ def gen_pk_binop(
         L.append(f'    float rlo = {lo_expr};')
         L.append(f'    float rhi = {hi_expr};')
         L.append(
-            f'    {d}.write_lane(wf, lane, util::f32_to_f16(rlo) | (static_cast<uint32_t>(util::f32_to_f16(rhi)) << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) | (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));'
         )
     elif dtype == 'bf16':
         L.append(
@@ -121,8 +125,10 @@ def gen_pk_binop(
         lo_expr, hi_expr = f_op_map[op]
         L.append(f'    float rlo = {lo_expr};')
         L.append(f'    float rhi = {hi_expr};')
+        # Packed BF16 arithmetic is not mode-aware here. Explicit F32-to-BF16
+        # data conversions use the mode-aware helpers instead.
         L.append(
-            f'    {d}.write_lane(wf, lane, util::f32_to_bf16(rlo) | (static_cast<uint32_t>(util::f32_to_bf16(rhi)) << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_bf16(rlo) | (static_cast<uint32_t>(util::f32_to_bf16(rhi)) << 16));'
         )
     elif dtype == 'i16':
         L.append(
@@ -151,7 +157,7 @@ def gen_pk_binop(
         L.append(f'    uint16_t rlo = static_cast<uint16_t>({lo_expr});')
         L.append(f'    uint16_t rhi = static_cast<uint16_t>({hi_expr});')
         L.append(
-            f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
         )
     else:  # u16
         L.append(
@@ -188,7 +194,7 @@ def gen_pk_binop(
         L.append(f'    uint16_t rlo = static_cast<uint16_t>({lo_expr});')
         L.append(f'    uint16_t rhi = static_cast<uint16_t>({hi_expr});')
         L.append(
-            f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
         )
 
     L.append('  }')
@@ -209,9 +215,9 @@ def gen_pk_ternary(
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
-    L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
-    L.append(f'    uint32_t raw2 = {s2}.read_lane(wf, lane);')
+    L.append(f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
+    L.append(f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
+    L.append(f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);')
     opsel, opsel_hi = opsel_exprs
     L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
     L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
@@ -270,7 +276,7 @@ def gen_pk_ternary(
             L.append('    float rlo = a_lo * b_lo + c_lo;')
             L.append('    float rhi = a_hi * b_hi + c_hi;')
         L.append(
-            f'    {d}.write_lane(wf, lane, util::f32_to_f16(rlo) | (static_cast<uint32_t>(util::f32_to_f16(rhi)) << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) | (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));'
         )
     elif dtype == 'bf16':
         L.append(
@@ -303,8 +309,10 @@ def gen_pk_ternary(
         else:
             L.append('    float rlo = a_lo * b_lo + c_lo;')
             L.append('    float rhi = a_hi * b_hi + c_hi;')
+        # Packed BF16 arithmetic is not mode-aware here. Explicit F32-to-BF16
+        # data conversions use the mode-aware helpers instead.
         L.append(
-            f'    {d}.write_lane(wf, lane, util::f32_to_bf16(rlo) | (static_cast<uint32_t>(util::f32_to_bf16(rhi)) << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_bf16(rlo) | (static_cast<uint32_t>(util::f32_to_bf16(rhi)) << 16));'
         )
     elif dtype == 'i16':
         L.append(
@@ -347,7 +355,7 @@ def gen_pk_ternary(
                 '    uint16_t rhi = static_cast<uint16_t>(static_cast<uint32_t>(a_hi) * b_hi + c_hi);'
             )
         L.append(
-            f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
         )
     else:  # u16
         L.append(
@@ -382,7 +390,7 @@ def gen_pk_ternary(
                 '    uint16_t rhi = static_cast<uint16_t>(static_cast<uint32_t>(a_hi) * b_hi + c_hi);'
             )
         L.append(
-            f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
         )
 
     L.append('  }')
@@ -434,7 +442,7 @@ def gen_pk_binop_f32(
     L.append(f'    uint32_t rlo = std::bit_cast<uint32_t>({lo_expr});')
     L.append(f'    uint32_t rhi = std::bit_cast<uint32_t>({hi_expr});')
     L.append(
-        f'    {d}.write_lane64(wf, lane, static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));'
+        f'    amdgpu::RegisterAccess(wf).write_lane64({d}, lane, static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));'
     )
     L.append('  }')
     return '\n'.join(L)
@@ -489,7 +497,7 @@ def gen_pk_ternary_f32(
     L.append('    uint32_t rlo = std::bit_cast<uint32_t>(std::fma(a_lo, b_lo, c_lo));')
     L.append('    uint32_t rhi = std::bit_cast<uint32_t>(std::fma(a_hi, b_hi, c_hi));')
     L.append(
-        f'    {d}.write_lane64(wf, lane, static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));'
+        f'    amdgpu::RegisterAccess(wf).write_lane64({d}, lane, static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));'
     )
     L.append('  }')
     return '\n'.join(L)
@@ -499,7 +507,6 @@ def gen_pk_mov_b32(
     dst: list[str],
     src: list[str],
     opsel_exprs: tuple[str, str] = ('', ''),
-    use_gfx1250_helpers: bool = False,
 ) -> str:
     """Generate V_PK_MOV_B32: move two 32-bit values based on op_sel."""
     d, s0, s1 = dst[0], src[0], src[1]
@@ -508,16 +515,22 @@ def gen_pk_mov_b32(
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     for var, src in [('s0', s0), ('s1', s1)]:
-        _append_pk_f32_pair_read(L, var, src, use_gfx1250_helpers)
+        L.append(
+            f'    uint64_t {var}_pair_w = amdgpu::RegisterAccess(wf).read_lane64({src}, lane);'
+        )
+        L.append(f'    uint32_t {var}_lo_w = static_cast<uint32_t>({var}_pair_w);')
+        L.append(
+            f'    uint32_t {var}_hi_w = static_cast<uint32_t>({var}_pair_w >> 32);'
+        )
     opsel, opsel_hi = opsel_exprs
-    s0_lo = _pk_f32_word_expr('s0', 'lo', use_gfx1250_helpers)
-    s0_hi = _pk_f32_word_expr('s0', 'hi', use_gfx1250_helpers)
-    s1_lo = _pk_f32_word_expr('s1', 'lo', use_gfx1250_helpers)
-    s1_hi = _pk_f32_word_expr('s1', 'hi', use_gfx1250_helpers)
+    s0_lo = _pk_f32_word_expr('s0', 'lo')
+    s0_hi = _pk_f32_word_expr('s0', 'hi')
+    s1_lo = _pk_f32_word_expr('s1', 'lo')
+    s1_hi = _pk_f32_word_expr('s1', 'hi')
     L.append(f'    uint32_t lo = ({opsel} & 1) ? {s0_hi} : {s0_lo};')
-    L.append(f'    uint32_t hi = ({opsel_hi} & 2) ? {s1_hi} : {s1_lo};')
+    L.append(f'    uint32_t hi = ({opsel} & 2) ? {s1_hi} : {s1_lo};')
     L.append(
-        f'    {d}.write_lane64(wf, lane, static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32));'
+        f'    amdgpu::RegisterAccess(wf).write_lane64({d}, lane, static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32));'
     )
     L.append('  }')
     return '\n'.join(L)
@@ -548,9 +561,15 @@ def gen_mad_mix_f32(
         )
     else:
         opsel, opsel_hi = opsel_exprs
-        L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
-        L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
-        L.append(f'    uint32_t raw2 = {s2}.read_lane(wf, lane);')
+        L.append(
+            f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);'
+        )
+        L.append(
+            f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);'
+        )
+        L.append(
+            f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+        )
         L.append(
             '    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,'
         )
@@ -584,7 +603,9 @@ def gen_mad_mix_f32(
         f'    float result = {"std::fma(a, b, c)" if use_gfx1250_helpers else "a * b + c"};'
     )
     L.append('    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);')
-    L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
+    L.append(
+        f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(result));'
+    )
     L.append('  }')
     return '\n'.join(L)
 
@@ -615,9 +636,15 @@ def gen_mad_mix_lo_hi(
         )
     else:
         opsel, opsel_hi = opsel_exprs
-        L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
-        L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
-        L.append(f'    uint32_t raw2 = {s2}.read_lane(wf, lane);')
+        L.append(
+            f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);'
+        )
+        L.append(
+            f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);'
+        )
+        L.append(
+            f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+        )
         L.append(
             '    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,'
         )
@@ -651,7 +678,7 @@ def gen_mad_mix_lo_hi(
         f'    float result = {"std::fma(a, b, c)" if use_gfx1250_helpers else "a * b + c"};'
     )
     L.append('    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);')
-    L.append(f'    uint16_t h = util::f32_to_f16(result);')
+    L.append(f'    uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());')
     if is_lo:
         L.append(
             f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, 0u, h);'
@@ -690,9 +717,15 @@ def gen_mad_mix_bf16(
         )
     else:
         opsel, opsel_hi = opsel_exprs
-        L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
-        L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
-        L.append(f'    uint32_t raw2 = {s2}.read_lane(wf, lane);')
+        L.append(
+            f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);'
+        )
+        L.append(
+            f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);'
+        )
+        L.append(
+            f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+        )
         L.append(
             '    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_bf16,'
         )
@@ -725,7 +758,9 @@ def gen_mad_mix_bf16(
     L.append('    float result = std::fma(a, b, c);')
     L.append('    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);')
     if result == 'f32':
-        L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
+        L.append(
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(result));'
+        )
     else:
         L.append(f'    uint16_t h = util::f32_to_bf16(result);')
         if result == 'lo':
@@ -755,35 +790,43 @@ def gen_dot2(
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
-    L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
+    L.append(f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
+    L.append(f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
     L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
     L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
     L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
     L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
 
-    if cls == 'dot2_f32_f16':
+    if cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
+        # F16 and BF16 share the dot2 structure but widen differently: BF16 has
+        # an 8-bit exponent and no denormal renormalization, so it must use
+        # bf16_to_f32, not f16_to_f32 (which would misinterpret the exponent).
+        widen = 'util::bf16_to_f32' if cls == 'dot2_f32_bf16' else 'util::f16_to_f32'
         L.append(
-            '    float a0 = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));'
+            f'    float a0 = {widen}(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));'
         )
         L.append(
-            '    float a1 = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));'
+            f'    float a1 = {widen}(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));'
         )
         L.append(
-            '    float b0 = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));'
+            f'    float b0 = {widen}(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));'
         )
         L.append(
-            '    float b1 = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));'
+            f'    float b1 = {widen}(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));'
         )
         L.append('    if (inst_.neg & 1) a0 = -a0;')
         L.append('    if (inst_.neg & 2) b0 = -b0;')
         L.append('    if (inst_.neg_hi & 1) a1 = -a1;')
         L.append('    if (inst_.neg_hi & 2) b1 = -b1;')
-        L.append(f'    float acc = std::bit_cast<float>({s2}.read_lane(wf, lane));')
+        L.append(
+            f'    float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({s2}, lane));'
+        )
         L.append('    if (inst_.neg & 4) acc = -acc;')
         L.append('    float result = a0 * b0 + a1 * b1 + acc;')
         L.append('    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);')
-        L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
+        L.append(
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(result));'
+        )
     elif cls == 'dot2_i32_i16':
         L.append(
             '    int16_t a0 = static_cast<int16_t>(sel0_lo ? (raw0 >> 16) : raw0);'
@@ -797,14 +840,16 @@ def gen_dot2(
         L.append(
             '    int16_t b1 = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);'
         )
-        L.append(f'    uint32_t result = {s2}.read_lane(wf, lane);')
+        L.append(
+            f'    uint32_t result = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+        )
         L.append('    result += static_cast<uint32_t>(static_cast<int32_t>(a0) * b0);')
         L.append('    result += static_cast<uint32_t>(static_cast<int32_t>(a1) * b1);')
         L.append('    if (inst_.clamp) {')
         L.append('      int32_t signed_result = static_cast<int32_t>(result);')
         L.append('      if (signed_result < 0) result = 0u;')
         L.append('    }')
-        L.append(f'    {d}.write_lane(wf, lane, result);')
+        L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, result);')
     else:  # dot2_u32_u16
         L.append(
             '    uint16_t a0 = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);'
@@ -818,11 +863,13 @@ def gen_dot2(
         L.append(
             '    uint16_t b1 = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);'
         )
-        L.append(f'    uint32_t acc = {s2}.read_lane(wf, lane);')
+        L.append(
+            f'    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+        )
         L.append(
             '    uint32_t result = static_cast<uint32_t>(a0) * b0 + static_cast<uint32_t>(a1) * b1 + acc;'
         )
-        L.append(f'    {d}.write_lane(wf, lane, result);')
+        L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, result);')
 
     L.append('  }')
     return '\n'.join(L)
@@ -839,9 +886,10 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
     if cls == 'dot2_f16_f16':
         widen = 'util::f16_to_f32'
-        narrow = 'util::f32_to_f16'
+        narrow = 'util::f32_to_f16_mode'
     elif cls == 'dot2_bf16_bf16':
         widen = 'util::bf16_to_f32'
+        # DOT2_BF16_BF16 is a packed arithmetic op, not a data conversion.
         narrow = 'util::f32_to_bf16'
     else:
         raise ValueError(f'unhandled true16 dot2 class: {cls}')
@@ -852,8 +900,8 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
     L.append('    if (!(exec & (1ULL << lane)))')
     L.append('      continue;')
     L.append('    uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);')
-    L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
-    L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
+    L.append(f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
+    L.append(f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
     L.append(
         f'    uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src({s2}, wf, lane, opsel, 2);'
     )
@@ -869,9 +917,12 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
     L.extend(vop3_src_mod('acc', 2, True))
     L.append('    float result = a0 * b0 + a1 * b1 + acc;')
     L.extend(vop3_dst_mod('result'))
-    L.append(f'    uint32_t result_bits = {narrow}(result);')
+    if cls == 'dot2_f16_f16':
+        L.append(f'    uint32_t result_bits = {narrow}(result, wf.fp16_ovfl());')
+    else:
+        L.append(f'    uint32_t result_bits = {narrow}(result);')
     L.append(
-        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, opsel, result_bits);'
+        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, opsel, result_bits, true);'
     )
     L.append('  }')
     return '\n'.join(L)
@@ -884,11 +935,13 @@ def gen_dot4(dst: list[str], src: list[str], cls: str) -> str:
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
-    L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
+    L.append(f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
+    L.append(f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
 
     if cls in ('dot4_i32_i8', 'dot4_i32_iu8'):
-        L.append(f'    uint32_t sum = {s2}.read_lane(wf, lane);')
+        L.append(
+            f'    uint32_t sum = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+        )
         if cls == 'dot4_i32_iu8':
             L.append('    const bool src0_signed = (inst_.neg & 0x1u) != 0;')
             L.append('    const bool src1_signed = (inst_.neg & 0x2u) != 0;')
@@ -916,10 +969,12 @@ def gen_dot4(dst: list[str], src: list[str], cls: str) -> str:
         L.append('      int32_t signed_sum = static_cast<int32_t>(sum);')
         L.append('      if (signed_sum < 0) sum = 0u;')
         L.append('    }')
-        L.append(f'    {d}.write_lane(wf, lane, sum);')
+        L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, sum);')
     elif cls == 'dot4_f32_fp8':
         # FP8 dot product: D.f32 += sum(A.fp8[i] * B.fp8[i]) for i in 0..3
-        L.append(f'    float acc = std::bit_cast<float>({s2}.read_lane(wf, lane));')
+        L.append(
+            f'    float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({s2}, lane));'
+        )
         L.append('    for (int i = 0; i < 4; ++i) {')
         L.append(
             '      float a = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));'
@@ -929,16 +984,20 @@ def gen_dot4(dst: list[str], src: list[str], cls: str) -> str:
         )
         L.append('      acc += a * b;')
         L.append('    }')
-        L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(acc));')
+        L.append(
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(acc));'
+        )
     else:  # dot4_u32_u8
-        L.append(f'    uint32_t acc = {s2}.read_lane(wf, lane);')
+        L.append(
+            f'    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+        )
         L.append('    uint32_t sum = acc;')
         L.append('    for (int i = 0; i < 4; ++i) {')
         L.append('      uint8_t a = static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF);')
         L.append('      uint8_t b = static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF);')
         L.append('      sum += static_cast<uint32_t>(a) * b;')
         L.append('    }')
-        L.append(f'    {d}.write_lane(wf, lane, sum);')
+        L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, sum);')
 
     L.append('  }')
     return '\n'.join(L)
@@ -951,11 +1010,13 @@ def gen_dot8(dst: list[str], src: list[str], cls: str) -> str:
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
-    L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
+    L.append(f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
+    L.append(f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
 
     if cls in ('dot8_i32_i4', 'dot8_i32_iu4'):
-        L.append(f'    uint32_t sum = {s2}.read_lane(wf, lane);')
+        L.append(
+            f'    uint32_t sum = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+        )
         if cls == 'dot8_i32_iu4':
             L.append('    const bool src0_signed = (inst_.neg & 0x1u) != 0;')
             L.append('    const bool src1_signed = (inst_.neg & 0x2u) != 0;')
@@ -982,16 +1043,18 @@ def gen_dot8(dst: list[str], src: list[str], cls: str) -> str:
         L.append('      int32_t signed_sum = static_cast<int32_t>(sum);')
         L.append('      if (signed_sum < 0) sum = 0u;')
         L.append('    }')
-        L.append(f'    {d}.write_lane(wf, lane, sum);')
+        L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, sum);')
     else:  # dot8_u32_u4
-        L.append(f'    uint32_t acc = {s2}.read_lane(wf, lane);')
+        L.append(
+            f'    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+        )
         L.append('    uint32_t sum = acc;')
         L.append('    for (int i = 0; i < 8; ++i) {')
         L.append('      uint32_t a = (raw0 >> (i * 4)) & 0xF;')
         L.append('      uint32_t b = (raw1 >> (i * 4)) & 0xF;')
         L.append('      sum += a * b;')
         L.append('    }')
-        L.append(f'    {d}.write_lane(wf, lane, sum);')
+        L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, sum);')
 
     L.append('  }')
     return '\n'.join(L)

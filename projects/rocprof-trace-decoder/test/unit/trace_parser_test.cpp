@@ -23,6 +23,11 @@
 #include "trace_parser.hpp"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <array>
+#include <cstring>
+#include <vector>
+#include "gfx10/gfx10token.h"
+#include "gfx9/gfx9token.h"
 #include "rocprof_trace_decoder/rocprof_trace_decoder.h"
 #include "stitch/stitch.hpp"
 
@@ -346,6 +351,120 @@ class AnalyseBinaryMock : public ICodeServicer
 public:
     MOCK_METHOD(assemblyLine, GetInstruction, (pcinfo_t addr, int gfxip), (override));
 };
+
+struct Gfx9ParserSink
+{
+    std::vector<rocprofiler_thread_trace_decoder_event_t> events{};
+    std::vector<rocprofiler_thread_trace_decoder_occupancy_t> occupancy{};
+};
+
+rocprofiler_thread_trace_decoder_status_t collect_gfx9_records(
+    rocprofiler_thread_trace_decoder_record_type_t type, void* data, uint64_t count, void* userdata
+)
+{
+    auto& sink = *static_cast<Gfx9ParserSink*>(userdata);
+    if (type == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT)
+    {
+        auto* records = static_cast<rocprofiler_thread_trace_decoder_event_t*>(data);
+        sink.events.insert(sink.events.end(), records, records + count);
+    }
+    else if (type == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY)
+    {
+        auto* records = static_cast<rocprofiler_thread_trace_decoder_occupancy_t*>(data);
+        sink.occupancy.insert(sink.occupancy.end(), records, records + count);
+    }
+
+    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+}
+
+void append_gfx9_word(std::vector<uint8_t>& data, uint64_t word, size_t bytes)
+{
+    for (size_t i = 0; i < bytes; ++i) data.push_back(static_cast<uint8_t>((word >> (8 * i)) & 0xFF));
+}
+
+uint64_t encode_gfx9_reg(uint8_t me, uint8_t pipe, uint16_t regaddr, uint32_t regdata)
+{
+    const uint64_t enc_me = (1u - (me & 1u)) & 1u;
+    return static_cast<uint64_t>(gfx9::TOKEN_REG) | (static_cast<uint64_t>(pipe & 0x3) << 5) | (enc_me << 7) |
+           (uint64_t{gfx9::Reg::REG_TYPE_USERDATA} << 10) | (uint64_t{1} << 15) |
+           (static_cast<uint64_t>(regaddr) << 16) | (static_cast<uint64_t>(regdata) << 32);
+}
+
+void append_gfx9_userdata2(std::vector<uint8_t>& data, uint32_t regdata)
+{
+    append_gfx9_word(data, encode_gfx9_reg(0, 0, CSRegisterHandler::USERDATA_ADDR_2, regdata), 8);
+}
+
+void append_gfx9_codeobj_field(
+    std::vector<uint8_t>& data, rocprof_trace_decoder_codeobj_marker_type_t type, uint32_t payload
+)
+{
+    rocprof_trace_decoder_packet_header_t header{};
+    header.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_CODEOBJ;
+    header.type = type;
+    append_gfx9_userdata2(data, header.u32All);
+    append_gfx9_userdata2(data, payload);
+}
+
+void append_gfx9_codeobj_load_unload(std::vector<uint8_t>& data, uint32_t code_object_id)
+{
+    rocprof_trace_decoder_instrument_enable_t enable{};
+    enable.char1 = '\0';
+    enable.char2 = 'R';
+    enable.char3 = 'O';
+    enable.char4 = 'C';
+    append_gfx9_userdata2(data, enable.u32All);
+
+    append_gfx9_codeobj_field(data, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ADDR_LO, 0x1000);
+    append_gfx9_codeobj_field(data, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_SIZE_LO, 0x200);
+
+    rocprof_trace_decoder_codeobj_marker_tail_t tail{};
+    tail.bFromStart = 1;
+    tail.legacy_id = code_object_id;
+    append_gfx9_codeobj_field(data, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_TAIL, tail.raw);
+
+    tail.isUnload = 1;
+    append_gfx9_codeobj_field(data, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_TAIL, tail.raw);
+}
+
+void append_gfx9_counter_interval(std::vector<uint8_t>& data, uint32_t interval)
+{
+    rocprof_trace_decoder_packet_header_t header{};
+    header.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_AGENT_INFO;
+    header.type = ROCPROF_TRACE_DECODER_AGENT_INFO_TYPE_COUNTER_INTERVAL;
+    header.data20 = interval;
+    append_gfx9_userdata2(data, header.u32All);
+}
+
+void append_gfx9_perf(
+    std::vector<uint8_t>& data, uint8_t cu, uint8_t bank, std::array<uint16_t, 4> counters, bool advance_time = true
+)
+{
+    uint64_t word = static_cast<uint64_t>(gfx9::TOKEN_PERF);
+    if (advance_time) word |= uint64_t{1} << 4;
+    word |= static_cast<uint64_t>(cu & 0xF) << 6;
+    word |= static_cast<uint64_t>(bank & 0x3) << 10;
+    word |= static_cast<uint64_t>(counters[0] & 0x1FFF) << 12;
+    word |= static_cast<uint64_t>(counters[1] & 0x1FFF) << 25;
+    word |= static_cast<uint64_t>(counters[2] & 0x1FFF) << 38;
+    word |= static_cast<uint64_t>(counters[3] & 0x1FFF) << 51;
+    append_gfx9_word(data, word, 8);
+}
+
+void append_gfx9_misc_time_delta(std::vector<uint8_t>& data, uint8_t delta)
+{
+    const uint16_t word = static_cast<uint16_t>(gfx9::TOKEN_MISC) | (static_cast<uint16_t>(delta) << 4);
+    append_gfx9_word(data, word, 2);
+}
+
+void append_gfx9_wave_end(std::vector<uint8_t>& data, uint8_t cu, uint8_t simd, uint8_t wave)
+{
+    uint16_t word = static_cast<uint16_t>(gfx9::TOKEN_WAVE_END);
+    word |= static_cast<uint16_t>(cu & 0xF) << 6;
+    word |= static_cast<uint16_t>(wave & 0xF) << 10;
+    word |= static_cast<uint16_t>(simd & 0x3) << 14;
+    append_gfx9_word(data, word, 2);
+}
 } // namespace
 
 TEST(AnalyseBinaryTest, InvalidBufferReturnsNull)
@@ -364,4 +483,115 @@ TEST(AnalyseBinaryTest, Gfx9PositiveTargetCu)
     uint8_t buf[64] = {0};
     CppReturnInfo info;
     EXPECT_NE(AnalyseBinary_GFX9_internal(info, buf, sizeof(buf), 0, stitch, false, false), nullptr);
+}
+
+TEST(AnalyseBinaryGfx9Test, EmitsCodeObjectPerfAndRecoveredOccupancyRecords)
+{
+    constexpr uint32_t code_object_id = 42;
+
+    std::vector<uint8_t> buffer;
+    append_gfx9_codeobj_load_unload(buffer, code_object_id);
+    append_gfx9_wave_end(buffer, 1, 2, 3);
+    append_gfx9_counter_interval(buffer, 4);
+    append_gfx9_perf(buffer, 0, 1, {11, 22, 33, 44});
+    append_gfx9_misc_time_delta(buffer, 5);
+    append_gfx9_perf(buffer, 0, 1, {55, 66, 77, 88});
+
+    auto mock = std::make_shared<AnalyseBinaryMock>();
+    Gfx9ParserSink sink;
+    Stitcher stitch(mock, collect_gfx9_records, &sink);
+    CppReturnInfo info;
+
+    EXPECT_NE(AnalyseBinary_GFX9_internal(info, buffer.data(), buffer.size(), 0, stitch, false, false), nullptr);
+
+    ASSERT_EQ(sink.occupancy.size(), 2u);
+    EXPECT_EQ(sink.occupancy[0].start, 1u);
+    EXPECT_EQ(sink.occupancy[1].start, 0u);
+    for (const auto& occ : sink.occupancy)
+    {
+        EXPECT_EQ(occ.time, 0u);
+        EXPECT_EQ(occ.cu, 1u);
+        EXPECT_EQ(occ.simd, 2u);
+        EXPECT_EQ(occ.wave_id, 3u);
+    }
+
+    ASSERT_EQ(sink.events.size(), 2u);
+    EXPECT_EQ(sink.events[0].type, ROCPROF_TRACE_DECODER_EVENT_CODE_OBJECT_LOAD);
+    EXPECT_EQ(sink.events[0].payload.raw, code_object_id);
+    EXPECT_EQ(sink.events[1].type, ROCPROF_TRACE_DECODER_EVENT_CODE_OBJECT_UNLOAD);
+    EXPECT_EQ(sink.events[1].payload.raw, code_object_id);
+
+    EXPECT_EQ(info.counter_frequency, 4u);
+    ASSERT_EQ(info.perfevents.size(), 4u);
+    EXPECT_EQ(info.perfevents[0].time, 4);
+    EXPECT_EQ(info.perfevents[0].bank, 1u);
+    EXPECT_EQ(info.perfevents[0].events0, 11u);
+    EXPECT_EQ(info.perfevents[0].events3, 44u);
+    EXPECT_EQ(info.perfevents[1].time, 28);
+    EXPECT_EQ(info.perfevents[1].events0, 0u);
+    EXPECT_EQ(info.perfevents[2].time, 28);
+    EXPECT_EQ(info.perfevents[2].events0, 55u);
+    EXPECT_EQ(info.perfevents[2].events3, 88u);
+    EXPECT_EQ(info.perfevents[3].time, 32);
+    EXPECT_EQ(info.perfevents[3].events0, 0u);
+}
+
+namespace
+{
+std::array<uint8_t, sizeof(uint64_t)> bytes_from_word(uint64_t word)
+{
+    std::array<uint8_t, sizeof(uint64_t)> bytes{};
+    std::memcpy(bytes.data(), &word, sizeof(word));
+    return bytes;
+}
+} // namespace
+
+TEST(DetectArchInternalTest, SniffsSupportedHeadersAndRejectsInvalidBuffers)
+{
+    EXPECT_EQ(DetectArch_internal(nullptr, sizeof(uint64_t)), TraceArch::UNKNOWN);
+
+    std::array<uint8_t, sizeof(uint64_t)> zeros{};
+    EXPECT_EQ(DetectArch_internal(zeros.data(), sizeof(uint64_t) - 1), TraceArch::UNKNOWN);
+    EXPECT_EQ(DetectArch_internal(zeros.data(), zeros.size()), TraceArch::UNKNOWN);
+
+    rocprof_trace_decoder_gfx9_header_t gfx9{};
+    gfx9.legacy_version = 0;
+    gfx9.gfx9_version2 = 5;
+    auto bytes = bytes_from_word(gfx9.raw);
+    EXPECT_EQ(DetectArch_internal(bytes.data(), bytes.size()), TraceArch::GFX9);
+
+    gfx9.legacy_version = 0x11;
+    gfx9.gfx9_version2 = 6;
+    bytes = bytes_from_word(gfx9.raw);
+    EXPECT_EQ(DetectArch_internal(bytes.data(), bytes.size()), TraceArch::GFX9);
+
+    gfx9.legacy_version = 0;
+    gfx9.gfx9_version2 = 7;
+    bytes = bytes_from_word(gfx9.raw);
+    EXPECT_EQ(DetectArch_internal(bytes.data(), bytes.size()), TraceArch::UNKNOWN);
+
+    struct rdna_case_t
+    {
+        uint8_t version;
+        TraceArch expected;
+    };
+
+    const std::array<rdna_case_t, 6> cases{
+        rdna_case_t{1, TraceArch::GFX10  },
+        rdna_case_t{2, TraceArch::GFX10  },
+        rdna_case_t{3, TraceArch::GFX11  },
+        rdna_case_t{4, TraceArch::GFX12  },
+        rdna_case_t{5, TraceArch::MI400  },
+        rdna_case_t{6, TraceArch::UNKNOWN},
+    };
+
+    for (const auto& c : cases)
+    {
+        header_type header{};
+        header.header = 0b0010001;
+        header.version = c.version;
+
+        bytes = bytes_from_word(header.raw);
+        EXPECT_EQ(DetectArch_internal(bytes.data(), bytes.size()), c.expected) << "version=" << int(c.version);
+    }
 }

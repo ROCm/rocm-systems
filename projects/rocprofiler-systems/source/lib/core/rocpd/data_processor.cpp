@@ -193,9 +193,6 @@ void
 data_processor::insert_pmc_event(size_t event_id, size_t agent_id, const char* pmc_name,
                                  double value, const char* extdata)
 {
-    LOG_TRACE(
-        "Insert PMC event: id {}, agent id: {}, pmc name: {}, value: {}, extdata: {}",
-        event_id, agent_id, pmc_name, value, extdata);
     auto it = _pmc_descriptor_map.find({ agent_id, pmc_name });
     if(it == _pmc_descriptor_map.end())
     {
@@ -214,8 +211,6 @@ void
 data_processor::insert_sample(const char* track, std::uint64_t timestamp, size_t event_id,
                               const char* extdata)
 {
-    LOG_TRACE("Insert sample: track: {}, timestamp: {}, event id: {}, extdata: {}", track,
-              timestamp, event_id, extdata);
     auto it = _tracks.find(track);
     if(it == _tracks.end())
     {
@@ -450,7 +445,6 @@ data_processor::insert_code_object(size_t id, size_t node_id, size_t process_id,
                                    std::uint64_t ld_delta, const char* storage_type,
                                    const char* extdata)
 {
-    LOG_TRACE("Insert code object with ID: {}", id);
     _insert_code_object_statement(id, _upid.c_str(), node_id, process_id, agent_id, uri,
                                   ld_base, ld_size, ld_delta, storage_type, extdata);
 }
@@ -464,7 +458,6 @@ data_processor::insert_kernel_symbol(
     std::uint32_t sgrp_count, std::uint32_t arch_vgrp_count,
     std::uint32_t accum_vgrp_count, const char* extdata)
 {
-    LOG_TRACE("Insert kernel symbol: {} with ID: {}", name, id);
     _insert_kernel_symbol_statement(
         id, _upid.c_str(), node_id, process_id, code_obj_id, name, display_name,
         kernel_obj, kernarg_segmnt_size, kernarg_segment_alignment, group_segment_size,
@@ -476,8 +469,6 @@ data_processor::insert_region(size_t node_id, size_t process_id, size_t thread_i
                               std::uint64_t start, std::uint64_t end, size_t name_id,
                               size_t event_id, const char* extdata)
 {
-    LOG_TRACE("Insert region for event id: {}", event_id);
-
     _insert_region_statement(_upid.c_str(), node_id, process_id, thread_id, start, end,
                              name_id, event_id, extdata);
 }
@@ -491,8 +482,6 @@ data_processor::insert_kernel_dispatch(
     size_t workgroup_size_z, size_t grid_size_x, size_t grid_size_y, size_t grid_size_z,
     size_t region_name_id, size_t event_id, const char* extdata)
 {
-    LOG_TRACE("Insert kernel dispatch for event id: {}", event_id);
-
     _insert_kernel_dispatch_statement(
         _upid.c_str(), node_id, process_id, thread_id, agent_id, kernel_id, dispatch_id,
         queue_id, stream_id, start, end, private_segment_size, group_segment_size,

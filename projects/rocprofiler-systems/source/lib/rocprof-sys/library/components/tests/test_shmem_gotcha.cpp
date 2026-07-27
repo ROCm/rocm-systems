@@ -124,7 +124,7 @@ struct MockedCategoryRegion
     }
 
     template <typename... Args>
-    static void stop(std::string_view name, Args&&...)
+    static void stop(std::string_view, Args&&...)
     {
         FAIL() << "Unexpected call of category_region::stop";
     }
@@ -547,7 +547,7 @@ TEST_F(shmem_gotcha_test, test_get_permit_list_assignable_and_invokable)
 
 TEST_F(shmem_gotcha_test, test_different_gotcha_tool_ids)
 {
-    auto test_incoming = [this](const std::string& tool_id) {
+    auto test_incoming = [](const std::string& tool_id) {
         MockedGotchaData data;
         data.tool_id = tool_id;
         EXPECT_CALL(*test_globals::g_category_region_gmock, start_generic)

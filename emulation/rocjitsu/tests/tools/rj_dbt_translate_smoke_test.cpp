@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
+#include "scoped_temp.h"
 
 #include <gtest/gtest.h>
 
@@ -31,16 +32,6 @@
 namespace {
 
 std::filesystem::path g_translate_tool;
-
-struct TempDir {
-  std::filesystem::path path;
-
-  explicit TempDir(std::filesystem::path temp_path) : path(std::move(temp_path)) {
-    std::filesystem::create_directories(path);
-  }
-
-  ~TempDir() { std::filesystem::remove_all(path); }
-};
 
 uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
@@ -212,16 +203,19 @@ bool command_succeeded(int status) {
   return status != -1 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
+bool command_exited_with(int status, int exit_code) {
+  return status != -1 && WIFEXITED(status) && WEXITSTATUS(status) == exit_code;
+}
+
 } // namespace
 
 TEST(RjDbtTranslate, Smoke) {
-  const TempDir temp_dir(
-      std::filesystem::temp_directory_path() /
-      ("rj_dbt_translate_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_smoke_");
+  const std::filesystem::path temp_path(temp_dir.path());
 
-  const auto input = temp_dir.path / "smoke_gfx950.co";
-  const auto output = temp_dir.path / "stdout.txt";
-  const auto error = temp_dir.path / "stderr.txt";
+  const auto input = temp_path / "smoke_gfx950.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
 
   {
     const auto image = make_smoke_code_object();
@@ -253,6 +247,66 @@ TEST(RjDbtTranslate, Smoke) {
         << "missing expected output fragment: " << needle << "\noutput:\n"
         << stdout_text;
   }
+}
+
+TEST(RjDbtTranslate, RequiresRevisionsOnlyForGfx1250) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_revision_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const auto input = temp_path / "smoke.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
+
+  {
+    const auto image = make_smoke_code_object();
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string missing_input_revision_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx1250 --output-target gfx1250 > " + shell_quote(output.string()) + " 2> " +
+      shell_quote(error.string());
+  int status = std::system(missing_input_revision_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--input-revision is required when --input-target is gfx1250"));
+
+  const std::string missing_output_revision_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx1250 --input-revision b0 --output-target gfx1250 > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  status = std::system(missing_output_revision_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--output-revision is required when --output-target is gfx1250"));
+
+  const std::string unsupported_input_revision_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx950 --input-revision b0 --output-target gfx1200 > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  status = std::system(unsupported_input_revision_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--input-revision is only valid when --input-target is gfx1250"));
+
+  const std::string unsupported_output_revision_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx950 --output-target gfx1200 --output-revision a0 > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  status = std::system(unsupported_output_revision_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--output-revision is only valid when --output-target is gfx1250"));
+
+  const std::string reverse_revision_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx1250 --input-revision a0 --output-target gfx1250 "
+      "--output-revision b0 > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  status = std::system(reverse_revision_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error), "gfx1250 A0-to-B0 translation is not supported"));
 }
 
 int main(int argc, char **argv) {

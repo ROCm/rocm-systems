@@ -133,7 +133,8 @@ class Memory : public device::Memory {
 
   // Map interop buffer
   hsa_status_t interopMapBuffer(hsa_handle_t fdn,
-                                hsa_interop_map_flag_t flags = HSA_INTEROP_MAP_FLAG_NONE);
+                                hsa_interop_map_flag_t flags = HSA_INTEROP_MAP_FLAG_NONE,
+                                size_t size_hint = 0);
 
   // Place interop object into HSA's flat address space
   bool createInteropBuffer(GLenum targetType, int miplevel);
@@ -147,7 +148,7 @@ class Memory : public device::Memory {
   void* deviceMemory_;
 
   // Pointer to the interop device memory, which has an offset from deviceMemory_
-  void* interop_deviceMemory_;
+  void* interop_deviceMemory_ = nullptr;
 
   // Track if this memory is interop, lock, gart, or normal.
   MEMORY_KIND kind_;

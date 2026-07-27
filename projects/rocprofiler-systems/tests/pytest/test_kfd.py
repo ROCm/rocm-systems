@@ -18,6 +18,8 @@ pytestmark = [
     pytest.mark.xnack,
     pytest.mark.hip,
     pytest.mark.kfd,
+    # rocprofiler-sdk < 1.2.2 can abort on undefined KFD node IDs; product disables KFD domains.
+    pytest.mark.rocprofiler_sdk_min_version("1.2.2"),
 ]
 
 # =============================================================================

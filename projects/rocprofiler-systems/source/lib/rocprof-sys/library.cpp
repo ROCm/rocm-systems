@@ -8,6 +8,7 @@
 //
 #include "api.hpp"
 #include "common/defines.h"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
@@ -436,26 +437,25 @@ rocprofsys_external_register_pause_callbacks(void (*pause_fn)(), void (*resume_f
 }
 
 extern "C" void
-rocprofsys_set_mpi_hidden(bool use, bool attached)
+rocprofsys_set_mpi_hidden(bool use)
 {
     static bool _once = false;
-    static auto _args = std::make_pair(use, attached);
+    static bool _arg  = use;
 
     // this function may be called multiple times if multiple libraries are instrumented
     // we want to guard against multiple calls which with different arguments
-    if(_once && std::tie(_args.first, _args.second) == std::tie(use, attached)) return;
+    if(_once && _arg == use) return;
     _once = true;
 
     // just search env to avoid initializing the settings
     if(get_debug_init())
     {
-        LOG_DEBUG("use: {}, attached: {}", (use) ? "y" : "n", (attached) ? "y" : "n");
+        LOG_DEBUG("use: {}", (use) ? "y" : "n");
     }
 
-    _set_mpi_called       = true;
-    config::is_attached() = attached;
+    _set_mpi_called = true;
 
-    if(use && !attached && get_state() == State::PreInit)
+    if(use && get_state() == State::PreInit)
     {
         rocprofsys::set_env(env_vars::USE_PID, "ON", 1);
     }
@@ -467,10 +467,10 @@ rocprofsys_set_mpi_hidden(bool use, bool attached)
     if(get_state() >= State::Init)
     {
         LOG_WARNING(
-            "rocprofsys_set_mpi(use={}, attached={}) called after rocprof-sys was "
+            "rocprofsys_set_mpi(use={}) called after rocprof-sys was "
             "initialized. state = {}. MPI support may not be properly initialized. Use "
             "ROCPROFSYS_USE_MPIP=ON and ROCPROFSYS_USE_PID=ON to ensure full support",
-            use, attached, static_cast<int>(get_state()));
+            use, static_cast<int>(get_state()));
     }
 
     rocprofsys_preinit_hidden();
@@ -749,7 +749,7 @@ rocprofsys_init_tooling_hidden(void)
         comp::user_global_bundle::global_init();
         std::set<int> _comps{};
         // convert string into set of enumerations
-        for(auto&& itr : tim::delimit(tim::settings::global_components()))
+        for(auto&& itr : rocprofsys::delimit(tim::settings::global_components()))
             _comps.emplace(tim::runtime::enumerate(itr));
         if(_comps.size() == 1 && _comps.find(TIMEMORY_WALL_CLOCK) != _comps.end())
         {
@@ -1252,7 +1252,7 @@ rocprofsys_finalize_hidden(void)
                                    std::string{ env_vars::TIMEMORY_COMPONENTS })
                                    .value_or("wall_clock");
 
-            for(auto&& _comp_name : tim::delimit(_components, ",; "))
+            for(auto&& _comp_name : rocprofsys::delimit(_components, ",; "))
             {
                 if(_comp_name.empty()) continue;
 

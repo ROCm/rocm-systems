@@ -17,6 +17,12 @@ target_compile_options(minimal-recursion PRIVATE -fno-optimize-sibling-calls)
 
 set(MINIMAL_EXAMPLES minimal-recursion)
 
+# Minimal pthread example: exercises the pthread_create gotcha trace-args.
+find_package(Threads REQUIRED)
+add_executable(minimal-pthreads ${CMAKE_CURRENT_SOURCE_DIR}/pthreads.cpp)
+target_link_libraries(minimal-pthreads PRIVATE Threads::Threads)
+list(APPEND MINIMAL_EXAMPLES minimal-pthreads)
+
 foreach(MINIMAL_EXAMPLE IN LISTS MINIMAL_EXAMPLES)
     if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET ${MINIMAL_EXAMPLE})
         install(

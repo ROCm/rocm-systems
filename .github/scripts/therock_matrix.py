@@ -26,7 +26,6 @@ subtree_to_project_map = {
     "projects/rocprofiler-sdk": "profiler",
     "projects/rocprofiler-systems": "profiler",
     "projects/rocr-debug-agent": "debug_tools-debug-agent",
-    "projects/hotswap": "runtimes",
     "projects/rocr-runtime": "runtimes",
     "projects/rocshmem": "rocshmem",
     "projects/roctracer": "profiler",
@@ -35,8 +34,8 @@ subtree_to_project_map = {
 
 project_map = {
     "core": {
-        "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF"],
-        "projects_to_test": "",  # will run sanity test to cover rocminfo and amdsmi
+        "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_PROFILER=ON"],
+        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems",  # will run sanity test to cover rocminfo and amdsmi
     },
     "emulation": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_EMULATION=ON"],
@@ -112,6 +111,7 @@ trigger_windows_ci_for_subtrees_paths = [
     "projects/clr/*",
     "projects/hip/*",
     "projects/hip-tests/*",
+    "projects/rocdbgapi/*",
     "projects/rocr-runtime/*",
     "shared/amdgpu-windows-interop/**",
     ".github/*/therock*",

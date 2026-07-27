@@ -43,7 +43,10 @@ TEST_CASE("Unit_hipOccupancyMaxActiveClusters_Positive_RangeValidation") {
   // maximum number of blocks per CU using no shared memory
   int maxBlocks;
   hipDeviceProp_t props;
-  int numSharedEngines;
+  int numXCDs;
+  int sePerXCD;
+  int totalSE;
+  int maxInFlightClusterPerSPI;
 
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
 
@@ -68,16 +71,19 @@ TEST_CASE("Unit_hipOccupancyMaxActiveClusters_Positive_RangeValidation") {
   HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
       &maxBlocks, reinterpret_cast<const void*>(f1), 128, 0));
   REQUIRE(maxBlocks > 0);
-  // if using a partial simulation; this number would need to be changed
-  // (e.g. to 2 SEs if using 2 XCCs)
-  numSharedEngines = props.multiProcessorCount / maxClusterSize;
 
   // these check that shared memory usage has an effect on occupancy calculations
   HIP_CHECK(
       hipOccupancyMaxActiveClusters(&clustersNoLDS, reinterpret_cast<const void*>(f1), &config));
   INFO("occupancy with no shared memory: " << clustersNoLDS);
+
+  numXCDs = 8;
+  sePerXCD = 2;
+  totalSE = numXCDs * sePerXCD;
+  maxInFlightClusterPerSPI = 15;
+
   // limited by the number of in-flight clusters per SE
-  REQUIRE(clustersNoLDS == 30);
+  REQUIRE(clustersNoLDS == totalSE * maxInFlightClusterPerSPI);
 
   config.dynamicSmemBytes = props.sharedMemPerBlock / 8;
   HIP_CHECK(
@@ -86,7 +92,7 @@ TEST_CASE("Unit_hipOccupancyMaxActiveClusters_Positive_RangeValidation") {
 
   float ratio = maxBlocks / static_cast<float>(clusterDim.x * clusterDim.y * clusterDim.z);
   // limited due to shared memory
-  REQUIRE(clustersLDS == (maxClusterSize * ratio * numSharedEngines) / 2);
+  REQUIRE(clustersLDS == (maxClusterSize * ratio * totalSE) / 2);
 
   config.dynamicSmemBytes = props.sharedMemPerBlock / 4;
   HIP_CHECK(
@@ -94,7 +100,7 @@ TEST_CASE("Unit_hipOccupancyMaxActiveClusters_Positive_RangeValidation") {
   INFO("occupancy non-max cluster size: " << clustersLDS);
   // further limited by shared memory; the number of clusters per SE is lower than the maximum
   // cluster size
-  REQUIRE(clustersLDS == (maxBlocks * ratio * numSharedEngines) / 4);
+  REQUIRE(clustersLDS == (maxBlocks * ratio * totalSE) / 4);
 }
 
 TEST_CASE("Unit_hipOccupancyMaxActiveClusters_Negative_Zero_Cluster") {

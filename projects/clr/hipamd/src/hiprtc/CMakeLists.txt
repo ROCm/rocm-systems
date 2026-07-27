@@ -165,6 +165,7 @@ ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_warp_sync_functions.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/hip_cooperative_groups_helper.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_cooperative_groups.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_cooperative_groups_reduce.h
+${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_cooperative_groups_scan.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_unsafe_atomics.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_atomic.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/math_fwd.h
@@ -182,11 +183,22 @@ FILE(MAKE_DIRECTORY ${HIPRTC_GEN_DIR})
 generate_hiprtc_header("${HIPRTC_GEN_HEADER}")
 generate_hiprtc_mcin("${HIPRTC_GEN_MCIN}" "${HIPRTC_GEN_PREPROCESSED}")
 
+# When device code is built with the address sanitizer, the builtins header must
+# be preprocessed with ASAN enabled too.
+set(HIPRTC_ASAN_OPTIONS "")
+if(ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
+  # The --offload-arch below is only a vehicle to enable
+  # __has_feature(address_sanitizer) during preprocessing. clang silently ignores
+  # -fsanitize=address unless the offload arch supports it. The preprocessing
+  # defaults to gfx906, which does not support asan.
+  set(HIPRTC_ASAN_OPTIONS -fsanitize=address --offload-arch=gfx90a:xnack+)
+endif()
+
 # Generate HIPRTC Builtins Preprocessed Object.
 # Note: second command appends define macros at build time.
 add_custom_command(
   OUTPUT ${HIPRTC_GEN_PREPROCESSED}
-  COMMAND ${clang} -O3 --rocm-path=${PROJECT_SOURCE_DIR}/include/.. -std=c++17 -nogpulib --hip-version=${HIP_LIB_VERSION_MAJOR}.${HIP_LIB_VERSION_MINOR} -isystem ${HIP_COMMON_INCLUDE_DIR} -isystem ${PROJECT_SOURCE_DIR}/include -isystem ${PROJECT_BINARY_DIR}/include -isystem ${CMAKE_CURRENT_SOURCE_DIR}/include --cuda-device-only -D__HIPCC_RTC__ -DHIP_VERSION_MAJOR=${HIP_LIB_VERSION_MAJOR} -DHIP_VERSION_MINOR=${HIP_LIB_VERSION_MINOR} -x hip ${HIPRTC_GEN_HEADER} -E -P -o ${HIPRTC_GEN_PREPROCESSED}
+  COMMAND ${clang} -O3 --rocm-path=${PROJECT_SOURCE_DIR}/include/.. -std=c++17 -nogpulib --hip-version=${HIP_LIB_VERSION_MAJOR}.${HIP_LIB_VERSION_MINOR} -isystem ${HIP_COMMON_INCLUDE_DIR} -isystem ${PROJECT_SOURCE_DIR}/include -isystem ${PROJECT_BINARY_DIR}/include -isystem ${CMAKE_CURRENT_SOURCE_DIR}/include --cuda-device-only -D__HIPCC_RTC__ -DHIP_VERSION_MAJOR=${HIP_LIB_VERSION_MAJOR} -DHIP_VERSION_MINOR=${HIP_LIB_VERSION_MINOR} ${HIPRTC_ASAN_OPTIONS} -x hip ${HIPRTC_GEN_HEADER} -E -P -o ${HIPRTC_GEN_PREPROCESSED}
   COMMAND ${CMAKE_COMMAND} -DHIPRTC_ADD_MACROS=1 -DHIPRTC_HEADERS="${HIPRTC_HEADERS}" -DHIPRTC_PREPROCESSED_FILE=${HIPRTC_GEN_PREPROCESSED} -P ${HIPRTC_CMAKE}
   DEPENDS ${clang} ${HIPRTC_GEN_HEADER})
 add_custom_command(

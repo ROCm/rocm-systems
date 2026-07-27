@@ -201,7 +201,7 @@ void KFDMemoryTest::MapUnmapToNodes(int gpuNode) {
     memFlags.ui32.HostAccess = 1;
 
     for (unsigned i = 0; i < 1<<14; i ++) {
-        HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, srcBuffer.As<void*>(), PAGE_SIZE, NULL, memFlags, (i>>5)&1+1, mapNodes);
+        HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, srcBuffer.As<void*>(), PAGE_SIZE, NULL, memFlags, ((i>>5)&1)+1, mapNodes);
     }
 
     /* Fill src buffer so shader quits */

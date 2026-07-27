@@ -179,19 +179,13 @@ main(int argc, char *argv[])
      * file has undefined coherence per open(2); closing first sidesteps that
      * and also flushes file-size metadata for the fresh open() in the hasher.
      * Then hash and compare. */
-    if (close_file(write_path, wfd, whandle)) {
-        wfd          = -1;
-        whandle_open = false;
+    if (close_file(write_path, wfd, whandle))
         goto close_rfile;
-    }
     wfd          = -1;
     whandle_open = false;
 
-    if (close_file(read_path, rfd, rhandle)) {
-        rfd          = -1;
-        rhandle_open = false;
+    if (close_file(read_path, rfd, rhandle))
         goto deregister_buf;
-    }
     rfd          = -1;
     rhandle_open = false;
 

@@ -1,9 +1,10 @@
 ## Copyright (c) Advanced Micro Devices, Inc.
 ## SPDX-License-Identifier:  MIT
 ##
-## Builds the roctx_recordfn pybind11 extension used by --torch-trace.
-## Configured either as a subdirectory of the parent project (test
-## fixture) or standalone by the runtime loader.
+## Builds roctx_recordfn-<tag>.so for --torch-trace.
+##   A. parent add_subdirectory() under ENABLE_TESTS (CI fixture).
+##   B. standalone (runtime cmake-tier from
+##      utils/inject_roctx/_backends/torch_cpp_loader.py).
 set(_rcfn_standalone OFF)
 if(NOT PROJECT_NAME)
     cmake_minimum_required(VERSION 3.16)
@@ -104,7 +105,7 @@ execute_process(
         "${TORCH_TRACE_PYTHON}" -c
         "import sys, pathlib; \
 sys.path.insert(0, str(pathlib.Path('${CMAKE_CURRENT_SOURCE_DIR}/../..').resolve())); \
-from utils.inject_roctx_loader import _source_fingerprint; \
+from utils.inject_roctx._backends.torch_cpp_loader import _source_fingerprint; \
 print(_source_fingerprint())"
     OUTPUT_VARIABLE _src_fingerprint
     OUTPUT_STRIP_TRAILING_WHITESPACE

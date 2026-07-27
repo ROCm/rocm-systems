@@ -4,10 +4,12 @@
 #include "rocjitsu/code/patch/trampoline_builder.h"
 
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/rj_code.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -49,7 +51,7 @@ TEST(TrampolineBuilder, Emits4ByteRelocationAnchorPatch) {
   plan.original_size = 4;
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
-  plan.original_words = {kOriginalWord};
+  plan.original_words.assign(1, kOriginalWord);
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
   plan.emit_original = true;
 
@@ -117,7 +119,7 @@ TEST(TrampolineBuilder, RespectsTargetArchForBranchEncoding) {
   plan.original_size = 4;
   plan.trampoline_offset = 0x200;
   plan.return_target = 0x104;
-  plan.original_words = {0xCAFEF00Du};
+  plan.original_words.assign(1, 0xCAFEF00Du);
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kRdna)}}};
   plan.emit_original = true;
 
@@ -143,7 +145,7 @@ TEST(TrampolineBuilder, ForwardBranchOverflowFails) {
   plan.original_size = 4;
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
-  plan.original_words = {0xDEADBEEFu};
+  plan.original_words.assign(1, 0xDEADBEEFu);
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
   plan.emit_original = true;
 
@@ -164,7 +166,7 @@ TEST(TrampolineBuilder, RejectsOriginalWordsSizeMismatch) {
   plan.original_size = 8; // expects 2 words ...
   plan.trampoline_offset = 0x200;
   plan.return_target = 0x108;
-  plan.original_words = {0xDEADBEEFu}; // ... but only one provided.
+  plan.original_words.assign(1, 0xDEADBEEFu); // ... but only one provided.
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
   plan.emit_original = true;
 
@@ -181,7 +183,7 @@ TEST(TrampolineBuilder, RejectsUnsetArch) {
   plan.original_size = 4;
   plan.trampoline_offset = 0x200;
   plan.return_target = 0x104;
-  plan.original_words = {0xDEADBEEFu};
+  plan.original_words.assign(1, 0xDEADBEEFu);
   plan.emit_original = true;
 
   std::string err;
@@ -205,7 +207,7 @@ TEST(TrampolineBuilder, ReturnBranchOverflowFails) {
   plan.original_size = 4;
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
-  plan.original_words = {0xDEADBEEFu};
+  plan.original_words.assign(1, 0xDEADBEEFu);
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
   plan.emit_original = true;
 
@@ -232,7 +234,7 @@ TEST(TrampolineBuilder, EncodedBranchesRoundTripToPlanCoordinates) {
   plan.original_size = 4;
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
-  plan.original_words = {0xDEADBEEFu};
+  plan.original_words.assign(1, 0xDEADBEEFu);
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
   plan.emit_original = true;
 
@@ -274,7 +276,7 @@ TEST(TrampolineBuilder, ForwardSimm16AtNegativeLimitSucceeds) {
   plan.original_size = 4;
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
-  plan.original_words = {0xDEADBEEFu};
+  plan.original_words.assign(1, 0xDEADBEEFu);
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
   plan.emit_original = true;
 
@@ -301,7 +303,7 @@ TEST(TrampolineBuilder, ReturnSimm16AtNegativeLimitSucceeds) {
   plan.original_size = 4;
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
-  plan.original_words = {0xDEADBEEFu};
+  plan.original_words.assign(1, 0xDEADBEEFu);
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
   plan.emit_original = true;
 
@@ -317,6 +319,322 @@ TEST(TrampolineBuilder, ReturnSimm16AtNegativeLimitSucceeds) {
 // (see InlineNopGuardrail.* in instrumentor_test.cpp). The builder is now
 // generic and accepts any well-formed plan; milestone-scoped restrictions
 // are the orchestrator's responsibility.
+
+//==============================================================================
+// Probe-call resource planning (plan_probe_call)
+//
+// Resource selection only: which envelope registers, how many envelope words.
+// No layout, no bytes. Exercised here on synthetic RegisterSets.
+//==============================================================================
+
+// The only verified convention today; its link pair is s[30:31].
+constexpr ProbeCallingConvention kNoArgsCc = ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31;
+
+RegisterSet make_sgpr_set(std::initializer_list<uint16_t> indices) {
+  RegisterSet set;
+  for (uint16_t i : indices)
+    set.expand(RegisterRef{RegClass::SGPR, i, 1});
+  return set;
+}
+
+// All allocatable SGPRs marked live, except the listed indices left dead.
+RegisterSet all_sgprs_live_except(std::initializer_list<uint16_t> dead) {
+  RegisterSet set;
+  for (uint16_t i = 0; i < REGISTER_SET_ALLOCATABLE_SGPRS; ++i)
+    set.expand(RegisterRef{RegClass::SGPR, i, 1});
+  for (uint16_t i : dead)
+    set.erase(RegisterRef{RegClass::SGPR, i, 1});
+  return set;
+}
+
+bool has_sgpr(const RegisterSet &set, uint16_t index) {
+  return set.contains(RegisterRef{RegClass::SGPR, index, 1});
+}
+
+// A live link pair s[30:31] fails closed (until this is supported)
+TEST(TrampolineBuilderPlan, LiveLinkPairFails) {
+  TrampolinePlan plan;
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, make_sgpr_set({30}),
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_NE(err.find("s[30:31]"), std::string::npos);
+  EXPECT_FALSE(plan.is_probe_call); // plan left unmodified on failure.
+}
+
+// No dead even SGPR pair (everything live but the excluded link pair) fails and
+// names the target resource.
+TEST(TrampolineBuilderPlan, NoDeadTargetPairFails) {
+  TrampolinePlan plan;
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, all_sgprs_live_except({30, 31}),
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_NE(err.find("target"), std::string::npos);
+}
+
+// A target pair is available but nothing else is, so the SCC temp search fails
+// and names the SCC resource.
+TEST(TrampolineBuilderPlan, NoSccTempFails) {
+  TrampolinePlan plan;
+  std::string err;
+  // s[0:1] is a dead even pair (the target); s30/s31 are the reserved link pair;
+  // every other SGPR is live, so no SCC temp remains.
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc,
+                                                  all_sgprs_live_except({0, 1, 30, 31}),
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_NE(err.find("SCC"), std::string::npos);
+}
+
+// Mirror of NoSccTempFails with SCC preservation disabled: no SCC temp is
+// needed, so the same register-starved kernel that fails closed above now plans
+// successfully and reserves only the link + target pairs. Guards the regression
+// where the SCC temp was searched/reserved even when preserve_scc was false.
+TEST(TrampolineBuilderPlan, NoSccPreserveSkipsSccTemp) {
+  TrampolinePlan plan;
+  plan.preserve_scc = false;
+  std::string err;
+  // Same dead set as NoSccTempFails: only the link pair s[30:31] and the target
+  // pair s[0:1] are dead; nothing remains for an SCC temp.
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc,
+                                                 all_sgprs_live_except({0, 1, 30, 31}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  EXPECT_TRUE(plan.is_probe_call);
+  // builder_clobbers = {link pair} | {target pair} only -- no SCC temp reserved
+  EXPECT_TRUE(has_sgpr(plan.builder_clobbers, 30));
+  EXPECT_TRUE(has_sgpr(plan.builder_clobbers, 31));
+  EXPECT_TRUE(has_sgpr(plan.builder_clobbers, plan.target_pair_base));
+  EXPECT_TRUE(has_sgpr(plan.builder_clobbers, plan.target_pair_base + 1));
+  EXPECT_EQ(plan.builder_clobbers.size(), 4u);
+}
+
+// Happy path: dead resources selected, distinct, and reported as builder clobbers.
+TEST(TrampolineBuilderPlan, SelectsDeadResourcesAndReportsClobbers) {
+  TrampolinePlan plan;
+  std::string err;
+  // s4 live; everything else dead. Target pair and SCC temp must avoid s4 and the
+  // link pair s[30:31].
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err));
+  EXPECT_TRUE(plan.is_probe_call);
+  EXPECT_EQ(plan.link_pair_base, 30u);
+
+  // Target pair: even-aligned, not live, not the link pair.
+  EXPECT_EQ(plan.target_pair_base % 2u, 0u);
+  EXPECT_FALSE(has_sgpr(make_sgpr_set({4}), plan.target_pair_base));
+  EXPECT_NE(plan.target_pair_base, 30u);
+
+  // SCC temp: not live, not the link pair, outside the target pair.
+  EXPECT_NE(plan.scc_temp, 4u);
+  EXPECT_NE(plan.scc_temp, 30u);
+  EXPECT_NE(plan.scc_temp, 31u);
+  EXPECT_NE(plan.scc_temp, plan.target_pair_base);
+  EXPECT_NE(plan.scc_temp, plan.target_pair_base + 1);
+
+  // builder_clobbers = {link pair} | {target pair} | {scc temp}.
+  EXPECT_TRUE(has_sgpr(plan.builder_clobbers, 30));
+  EXPECT_TRUE(has_sgpr(plan.builder_clobbers, 31));
+  EXPECT_TRUE(has_sgpr(plan.builder_clobbers, plan.target_pair_base));
+  EXPECT_TRUE(has_sgpr(plan.builder_clobbers, plan.target_pair_base + 1));
+  EXPECT_TRUE(has_sgpr(plan.builder_clobbers, plan.scc_temp));
+}
+
+// The SCC temp lives across the call, so it must avoid the probe body clobbers
+// even when those registers are dead at the anchor. The target pair, consumed
+// before the call, may overlap them.
+TEST(TrampolineBuilderPlan, SccTempAvoidsProbeBodyClobbers) {
+  TrampolinePlan plan;
+  std::string err;
+  // Dead SGPRs are {0,1,2,3,4}: the target pair takes s[0:1], and {2,3} are
+  // probe-clobbered. The SCC temp must skip the dead-but-clobbered {2,3} and land
+  // on s4, the only dead SGPR that survives the call.
+  RegisterSet live = all_sgprs_live_except({0, 1, 2, 3, 4, 30, 31});
+  RegisterSet probe_clobbers = make_sgpr_set({2, 3});
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, live, probe_clobbers, &err));
+  EXPECT_EQ(plan.target_pair_base, 0u);
+  EXPECT_EQ(plan.scc_temp, 4u);
+}
+
+// Word count is derived from the chosen envelope: getpc(1) + add/addc with
+// literals(4) + swappc(1) = 6, plus SCC save/restore(2) when preserving SCC.
+TEST(TrampolineBuilderPlan, BeforeWordCountReflectsEnvelope) {
+  TrampolinePlan with_scc;
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(with_scc, kNoArgsCc, make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err));
+  EXPECT_TRUE(with_scc.preserve_scc);
+  EXPECT_EQ(with_scc.before_word_count, 8u);
+
+  TrampolinePlan no_scc;
+  no_scc.preserve_scc = false;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(no_scc, kNoArgsCc, make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err));
+  EXPECT_EQ(no_scc.before_word_count, 6u);
+}
+
+// An unknown calling convention has no link pair, so planning fails closed.
+TEST(TrampolineBuilderPlan, UnknownCcFails) {
+  TrampolinePlan plan;
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, ProbeCallingConvention::Unknown,
+                                                  /*live_at_anchor=*/{}, /*probe_body_clobbers=*/{},
+                                                  &err));
+  EXPECT_NE(err.find("calling convention"), std::string::npos);
+  EXPECT_FALSE(plan.is_probe_call);
+}
+
+//==============================================================================
+// Probe-call emission (emit_probe_call)
+//
+// Plans, then lowers, a probe call and checks the emitted trampoline words:
+// the target-address materialization, the call through the cc-derived link
+// pair, the single relocated original, and the return branch.
+//==============================================================================
+
+// SOP1 field decoders (matching pack_sop1 in instruction_builder.h).
+uint16_t decode_sop1_op(uint32_t word) { return static_cast<uint16_t>((word >> 8) & 0xFFu); }
+uint16_t decode_sop1_sdst(uint32_t word) { return static_cast<uint16_t>((word >> 16) & 0x7Fu); }
+uint16_t decode_sop1_ssrc0(uint32_t word) { return static_cast<uint16_t>(word & 0xFFu); }
+
+// A valid probe-call plan over a gfx90a/CDNA2 layout. Resources are planned with
+// only s4 live so the envelope picks low, dead SGPRs.
+TrampolinePlan make_probe_plan(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA2) {
+  TrampolinePlan plan;
+  plan.arch = arch;
+  plan.anchor_offset = 0x1000;
+  plan.original_size = 4;
+  plan.original_words.assign(1, 0xDEADBEEFu);
+  plan.trampoline_offset = 0x2000;
+  plan.return_target = plan.anchor_offset + plan.original_size;
+  plan.probe_target_offset = 0x3000;
+  std::string err;
+  EXPECT_TRUE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  return plan;
+}
+
+// The envelope materializes the target address with getpc + add + addc.
+TEST(TrampolineBuilderEmit, ContainsTargetMaterialization) {
+  const TrampolinePlan plan = make_probe_plan();
+  std::string err;
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+  ASSERT_TRUE(bytes.has_value()) << err;
+
+  const std::vector<uint32_t> &w = bytes->trampoline_words;
+  // preserve_scc default: [cselect, getpc, add (2 words), addc (2 words), swappc, cmp_lg, original,
+  // branch].
+  EXPECT_EQ(w[1], build_s_getpc_b64(plan.target_pair_base, plan.arch));
+  EXPECT_EQ(w[2], build_s_add_u32(plan.target_pair_base, plan.target_pair_base, 0xFF, plan.arch));
+  EXPECT_EQ(w[4], build_s_addc_u32(plan.target_pair_base + 1, plan.target_pair_base + 1, 0xFF,
+                                   plan.arch));
+}
+
+// The envelope calls the probe via s_swappc_b64 through the cc-derived link pair,
+// from the chosen target pair.
+TEST(TrampolineBuilderEmit, SwappcUsesCcLinkPairAndTargetPair) {
+  const TrampolinePlan plan = make_probe_plan();
+  std::string err;
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+  ASSERT_TRUE(bytes.has_value()) << err;
+
+  // The swappc precedes the SCC restore, which precedes the relocated original.
+  const std::vector<uint32_t> &w = bytes->trampoline_words;
+  const uint32_t swappc = w[6];
+  EXPECT_EQ(decode_sop1_op(swappc), sop1_op_swappc_b64(plan.arch));
+
+  // sdst is the link pair; it must equal the pair link_pair_for(cc) reports, the
+  // same pair the probe's s_setpc_b64 returns through.
+  const std::optional<uint16_t> cc_link = link_pair_for(kNoArgsCc);
+  ASSERT_TRUE(cc_link.has_value());
+  EXPECT_EQ(decode_sop1_sdst(swappc), *cc_link);
+  EXPECT_EQ(decode_sop1_sdst(swappc), plan.link_pair_base);
+  // ssrc0 is the materialized target pair.
+  EXPECT_EQ(decode_sop1_ssrc0(swappc), plan.target_pair_base);
+}
+
+// The relocated original appears exactly once, after the call.
+TEST(TrampolineBuilderEmit, OriginalAppearsOnceAfterCall) {
+  const TrampolinePlan plan = make_probe_plan();
+  std::string err;
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+  ASSERT_TRUE(bytes.has_value()) << err;
+
+  const std::vector<uint32_t> &w = bytes->trampoline_words;
+  const auto first = std::find(w.begin(), w.end(), plan.original_words[0]);
+  ASSERT_NE(first, w.end());
+  // Exactly one occurrence.
+  EXPECT_EQ(std::count(w.begin(), w.end(), plan.original_words[0]), 1);
+  // It sits after the swappc (the call is at index before_word_count - 1 when
+  // SCC is preserved, but the original is always after the whole envelope).
+  const size_t original_index = static_cast<size_t>(first - w.begin());
+  EXPECT_EQ(original_index, plan.before_word_count);
+}
+
+// The return branch (trailing word) targets anchor + original_size.
+TEST(TrampolineBuilderEmit, ReturnBranchTargetsAnchorPlusOriginalSize) {
+  const TrampolinePlan plan = make_probe_plan();
+  std::string err;
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+  ASSERT_TRUE(bytes.has_value()) << err;
+
+  const std::vector<uint32_t> &w = bytes->trampoline_words;
+  const uint32_t return_branch = w.back();
+  const uint64_t return_branch_pc = plan.trampoline_offset + (w.size() - 1) * sizeof(uint32_t);
+  EXPECT_EQ(resolve_sopp_target(return_branch_pc, return_branch),
+            plan.anchor_offset + plan.original_size);
+}
+
+// Dropping SCC preservation removes the cselect/cmp_lg pair (6 envelope words).
+TEST(TrampolineBuilderEmit, NoSccPreserveShrinksEnvelope) {
+  TrampolinePlan plan = make_probe_plan();
+  // Re-plan without SCC preservation so before_word_count is consistent.
+  std::string err;
+  plan.preserve_scc = false;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err));
+  ASSERT_EQ(plan.before_word_count, 6u);
+
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+  ASSERT_TRUE(bytes.has_value()) << err;
+
+  // getpc is now the first word; swappc is the last envelope word.
+  const std::vector<uint32_t> &w = bytes->trampoline_words;
+  EXPECT_EQ(decode_sop1_op(w[0]), sop1_op_getpc_b64(plan.arch));
+  EXPECT_EQ(decode_sop1_op(w[5]), sop1_op_swappc_b64(plan.arch));
+  // Envelope (6) + original (1) + return branch (1).
+  EXPECT_EQ(w.size(), plan.before_word_count + 1u + 1u);
+}
+
+// A plan that was never planned as a probe call cannot be emitted.
+TEST(TrampolineBuilderEmit, RejectsNonProbeCallPlan) {
+  TrampolinePlan plan;
+  plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  plan.original_size = 4;
+  plan.original_words.assign(1, 0xDEADBEEFu);
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &err).has_value());
+  EXPECT_NE(err.find("not a probe call"), std::string::npos);
+}
+
+// A planned word count that disagrees with the synthesized envelope fails closed.
+TEST(TrampolineBuilderEmit, DetectsBeforeWordCountDrift) {
+  TrampolinePlan plan = make_probe_plan();
+  plan.before_word_count += 1; // Tamper after planning.
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &err).has_value());
+  EXPECT_NE(err.find("before_word_count"), std::string::npos);
+}
+
+// The forward (anchor -> trampoline) and return branch ranges are still checked
+// via build(): an out-of-range trampoline placement is reported, not emitted.
+TEST(TrampolineBuilderEmit, ForwardBranchRangeFailureReported) {
+  TrampolinePlan plan = make_probe_plan();
+  // Push the trampoline far past the anchor so the forward s_branch overflows.
+  plan.trampoline_offset = plan.anchor_offset + (static_cast<uint64_t>(0x10000) * 4);
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &err).has_value());
+  EXPECT_NE(err.find("forward branch"), std::string::npos);
+}
 
 } // namespace
 } // namespace rocjitsu
