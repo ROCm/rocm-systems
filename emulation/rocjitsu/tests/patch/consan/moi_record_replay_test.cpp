@@ -30,6 +30,22 @@ std::vector<uint32_t> make_expected_fetch_add_one_words(uint64_t address, uint16
   return words;
 }
 
+std::vector<uint32_t> record_access_patch_words(const ConSanResult &result,
+                                                const ConSanPatchInfo &patch,
+                                                uint64_t text_file_offset) {
+  if (patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore) {
+    return patched_words_at_file_offset(result, text_file_offset + patch.anchor_offset,
+                                        patch.original_size);
+  }
+
+  EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  EXPECT_TRUE(patched.is_valid());
+  if (!patched.is_valid())
+    return {};
+  return text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+}
+
 TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
@@ -2660,12 +2676,13 @@ TEST(ConSanMoi, DynamicAccessRecordProbeAppendsPerLaneRecords) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified);
   ASSERT_EQ(result.patches.size(), 1u);
-  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiAccessRecordStore);
-  ASSERT_TRUE(result.patches.front().scratch_vgpr);
-  EXPECT_EQ(*result.patches.front().scratch_vgpr, 16u);
+  const ConSanPatchInfo &patch = result.patches.front();
+  ASSERT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
+  ASSERT_TRUE(patch.scratch_vgpr);
+  EXPECT_EQ(*patch.scratch_vgpr, 16u);
 
   const std::vector<uint32_t> rewritten_words =
-      patched_words_at_file_offset(result, 0x100, result.patches.front().original_size);
+      record_access_patch_words(result, patch, /*text_file_offset=*/0x100u);
 
   const uint64_t base = *options.moi_report_buffer_address;
   EXPECT_TRUE(contains_subsequence(
@@ -2963,7 +2980,7 @@ TEST(ConSanMoi, FirstLightProbeDerivesOwnerFromWorkitemIdWhenOwnerVgprIsUnset) {
   EXPECT_EQ(rewritten_words.back(), text_words[1]);
 }
 
-TEST(ConSanMoi, FirstLightProbeStoresDescriptorWorkgroupIds) {
+TEST(ConSanMoi, FirstLightProbeStoresCompleteHardwareGridWhenDescriptorCopiesAreDisabled) {
   std::array<uint32_t, 320> text_words{};
   text_words[0] = 0xD8340000u;
   text_words[1] = 0x00000000u; // ds_store_b32 v0, v0
@@ -2975,11 +2992,11 @@ TEST(ConSanMoi, FirstLightProbeStoresDescriptorWorkgroupIds) {
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 5u);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
-                    1u);
+                    0u);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
-                    1u);
+                    0u);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
-                    1u);
+                    0u);
   });
 
   ConSanOptions options = moi_options();
@@ -3173,9 +3190,11 @@ TEST(ConSanMoi, FirstLightProbeLowersTwoAddressNativeLdsSitesToTwoRecords) {
   EXPECT_EQ(result.moi_candidates.front().mnemonic, "ds_store_2addr_b32");
   EXPECT_TRUE(result.modified);
   ASSERT_EQ(result.patches.size(), 1u);
+  const ConSanPatchInfo &patch = result.patches.front();
+  ASSERT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
 
   const std::vector<uint32_t> rewritten_words =
-      patched_words_at_file_offset(result, 0x100, result.patches.front().original_size);
+      record_access_patch_words(result, patch, /*text_file_offset=*/0x100u);
 
   const std::vector<uint32_t> offset_store = make_expected_offset_store_words(
       offsetof(ConSanMoiAccessRecord, lds_byte_offset), /*value_vgpr=*/22, *options.scratch_vgpr);
@@ -3212,8 +3231,11 @@ TEST(ConSanMoi, FirstLightRecordLinearizesBeforeDisplacedTwoAddressLoad) {
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
   ASSERT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
-  EXPECT_LT(patch.trampoline_size, 2048u)
-      << "two-range dispatch/workgroup-qualified Record/Replay probes must remain below 2 KiB";
+  // Include the complete hardware workgroup identity while keeping the two-range
+  // Record/Replay probe within a tightly bounded append-cave footprint.
+  EXPECT_LE(patch.trampoline_size, 2112u)
+      << "two-range dispatch/workgroup-qualified Record/Replay probes must remain within the "
+         "2112-byte append-cave budget";
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -5782,9 +5804,12 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
       << testing::PrintToString(result.resource_plans);
   EXPECT_EQ(atomic_patch->anchor_offset, 12u);
   EXPECT_EQ(atomic_patch->original_size, 3u * sizeof(uint32_t));
-  // Non-CAS RMWs have no meaningful success mask. Keep the dynamically
-  // indexed record body within a bounded append-cave footprint.
-  EXPECT_LT(atomic_patch->trampoline_size, 1000u);
+  // Non-CAS RMWs have no meaningful success mask. Include the complete hardware
+  // workgroup identity while keeping the dynamically indexed record body tightly
+  // bounded.
+  EXPECT_LE(atomic_patch->trampoline_size, 1152u)
+      << "dynamically indexed atomic Record/Replay probes must remain within the 1152-byte "
+         "append-cave budget";
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());

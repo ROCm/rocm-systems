@@ -746,8 +746,16 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
                                    sequence.container_name);
       continue;
     }
+    if (sequence.member_event_identities.size() >
+        std::numeric_limits<uint32_t>::max() - result.sampled_barrier_applicable_event_count) {
+      result.errors.emplace_back("ConSan MOI sampled barrier applicable event count overflow");
+      return;
+    }
+    result.sampled_barrier_applicable_event_count +=
+        static_cast<uint32_t>(sequence.member_event_identities.size());
     std::vector<SampledBarrierWindow> windows;
     bool every_owner_has_window = true;
+    std::string owner_lowering_failure;
     bool uses_cluster_workgroup_id = false;
     bool first_owner = true;
     std::optional<ConSanMoiWorkgroupSources> common_workgroup_sources;
@@ -755,12 +763,12 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     for (const ConSanExecutionOwner &owner : sequence.execution_owners) {
       const auto context = context_by_descriptor.find(owner.descriptor_file_offset);
       if (context == context_by_descriptor.end() || context->second->kernel == nullptr) {
-        every_owner_has_window = false;
+        owner_lowering_failure = "missing kernel resource context";
         break;
       }
       if (!first_owner &&
           uses_cluster_workgroup_id != context->second->kernel->uses_gfx1250_cluster_workgroup_id) {
-        every_owner_has_window = false;
+        owner_lowering_failure = "incompatible cluster workgroup ABI";
         break;
       }
       uses_cluster_workgroup_id = context->second->kernel->uses_gfx1250_cluster_workgroup_id;
@@ -774,7 +782,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       if (!workgroup_sources || !owner_shift ||
           (common_workgroup_sources && *common_workgroup_sources != *workgroup_sources) ||
           (common_owner_shift && *common_owner_shift != *owner_shift)) {
-        every_owner_has_window = false;
+        owner_lowering_failure = "incompatible descriptor ABI inputs";
         break;
       }
       common_workgroup_sources = *workgroup_sources;
@@ -782,7 +790,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       const auto distance_index = build_sampled_cfg_forward_distance_index(
           resource_state, *context->second, sequence.begin_text_offset);
       if (!distance_index) {
-        every_owner_has_window = false;
+        owner_lowering_failure = "missing owner CFG distance proof";
         break;
       }
       const auto owner_windows = windows_by_descriptor.find(owner.descriptor_file_offset);
@@ -811,6 +819,15 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     }
     std::ranges::sort(windows);
     windows.erase(std::ranges::unique(windows).begin(), windows.end());
+    if (!owner_lowering_failure.empty()) {
+      // The sequence is semantically applicable and must remain in the strict
+      // coverage denominator. Leaving its Supported disposition unpatched
+      // records a durable placement/lowering failure instead of hiding a
+      // descriptor or CFG incompatibility as a missing causal window.
+      result.warnings.emplace_back("ConSan MOI sampled barrier sync cannot lower every owner in " +
+                                   sequence.container_name + ": " + owner_lowering_failure);
+      continue;
+    }
     if (!every_owner_has_window || windows.empty()) {
       result.warnings.emplace_back(
           "ConSan MOI sampled barrier sync has no preceding selected causal window for every "
@@ -837,6 +854,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         // non-applicable site, not lost coverage.
         disposition->disposition = ConSanSiteDisposition::NotApplicable;
         disposition->reason = ConSanSiteDispositionReason::NoPrecedingSampledWindow;
+        --result.sampled_barrier_applicable_event_count;
       }
       continue;
     }
@@ -874,11 +892,6 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     begin = end;
   }
   candidates = std::move(unambiguous);
-  result.sampled_barrier_applicable_event_count = std::accumulate(
-      candidates.begin(), candidates.end(), 0u,
-      [](uint32_t count, const SampledBarrierCandidate &candidate) {
-        return count + static_cast<uint32_t>(candidate.sequence->member_event_identities.size());
-      });
   if (candidates.size() > options.max_patches)
     candidates.resize(options.max_patches);
 

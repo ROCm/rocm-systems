@@ -864,7 +864,9 @@ consan_moi_sampled_publish_sync_metadata(std::span<ConSanMoiSampledSyncMetadataP
 /// Returns true only for an exact, complete workgroup barrier sequence that
 /// Sampled may use to advance its selected causal epoch. This deliberately
 /// excludes individual signal/wait halves, dynamic IDs, cyclic forms, scalar
-/// clauses, unresolved/multiple kernel owners, and ambiguous membership.
+/// clauses, unresolved owners, and ambiguous membership. Shared physical
+/// sequences may have several proven kernel owners; lowering validates their
+/// common ABI inputs and requires a preceding selected window for every owner.
 [[nodiscard]] bool
 consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &sequence);
 

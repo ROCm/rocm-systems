@@ -287,8 +287,11 @@ bool consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &seq
   const bool static_id =
       sequence.barrier_operand_source == ConSanBarrierSite::OperandSource::Immediate ||
       sequence.barrier_operand_source == ConSanBarrierSite::OperandSource::Literal32;
-  const bool owner_proven = sequence.in_kernel ? sequence.execution_owners.size() == 1u
-                                               : !sequence.execution_owners.empty();
+  // A physical barrier sequence can be reached from several kernel
+  // descriptors through shared helper code. Ownership is still proven when
+  // every reachable descriptor is known; lowering validates that all owners
+  // have compatible ABI inputs and a preceding selected causal window.
+  const bool owner_proven = !sequence.execution_owners.empty();
   return sequence.kind == ConSanSyncSequenceKind::Barrier &&
          sequence.operation == ConSanSyncOperation::BarrierFull &&
          sequence.memory_role == ConSanSyncMemoryRole::AcquireRelease &&

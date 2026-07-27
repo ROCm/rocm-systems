@@ -391,22 +391,6 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
   return std::nullopt;
 }
 
-[[nodiscard]] bool moi_descriptor_enables_workgroup_id(const KD &desc, uint32_t dimension) {
-  switch (dimension) {
-  case 0:
-    return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2,
-                           kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X) != 0;
-  case 1:
-    return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2,
-                           kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y) != 0;
-  case 2:
-    return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2,
-                           kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z) != 0;
-  default:
-    return false;
-  }
-}
-
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
 moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descriptor_file_offset,
                                  rj_code_arch_t arch, std::vector<std::string> &errors,
@@ -423,18 +407,18 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
     // descriptor-selected entry SGPRs copied from them by the kernel prologue.
     // They remain dispatch inputs for the lifetime of the wave and are outside
     // both guest SGPR allocation and ConSan's ordinary SGPR scratch planner.
+    // The GFX12 launch ABI writes the complete grid tuple regardless of which
+    // ordinary WORKGROUP_ID SGPR copies a descriptor requests. This is the same
+    // TTMP payload materialized by command_processor.cpp and consumed by
+    // append_rdna4_workgroup_grid_prologue in kernel_descriptor_translator.cpp.
+    // Always use that complete tuple so one shared physical instruction has
+    // identical inputs under owners with different descriptor enable bits.
     return ConSanMoiWorkgroupSources{
-        moi_descriptor_enables_workgroup_id(desc, 0)
-            ? ConSanMoiWorkgroupSource{ttmp_scalar_operand(kTtmpRdna4GridX), false}
-            : ConSanMoiWorkgroupSource{},
-        moi_descriptor_enables_workgroup_id(desc, 1)
-            ? ConSanMoiWorkgroupSource{ttmp_scalar_operand(kTtmpRdna4GridYz),
-                                       /*shift_right_16=*/false, /*mask_low_16=*/true}
-            : ConSanMoiWorkgroupSource{},
-        moi_descriptor_enables_workgroup_id(desc, 2)
-            ? ConSanMoiWorkgroupSource{ttmp_scalar_operand(kTtmpRdna4GridYz),
-                                       /*shift_right_16=*/true}
-            : ConSanMoiWorkgroupSource{},
+        ConSanMoiWorkgroupSource{ttmp_scalar_operand(kTtmpRdna4GridX), false},
+        ConSanMoiWorkgroupSource{ttmp_scalar_operand(kTtmpRdna4GridYz),
+                                 /*shift_right_16=*/false, /*mask_low_16=*/true},
+        ConSanMoiWorkgroupSource{ttmp_scalar_operand(kTtmpRdna4GridYz),
+                                 /*shift_right_16=*/true},
         arch == ROCJITSU_CODE_ARCH_GFX1250 && uses_gfx1250_cluster_workgroup_id
             ? ConSanMoiWorkgroupSource{ttmp_scalar_operand(kTtmpGfx1250ClusterWorkgroupId), false,
                                        false}

@@ -171,11 +171,17 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
       warnings.insert(warnings.end(), errors.begin(), errors.end());
       return std::nullopt;
     }
-    if ((common_shift && *common_shift != *shift) ||
-        (common_workgroup_sources &&
-         !same_workgroup_sources(*common_workgroup_sources, *workgroup_sources))) {
-      warnings.emplace_back(
-          "ConSan MOI shared record owner has incompatible descriptor ABI inputs");
+    const bool owner_shift_mismatch = common_shift && *common_shift != *shift;
+    const bool workgroup_source_mismatch =
+        common_workgroup_sources &&
+        !same_workgroup_sources(*common_workgroup_sources, *workgroup_sources);
+    if (owner_shift_mismatch || workgroup_source_mismatch) {
+      warnings.emplace_back("ConSan MOI shared record owner has incompatible descriptor ABI "
+                            "inputs: " +
+                            std::string(owner_shift_mismatch && workgroup_source_mismatch
+                                            ? "owner shift and workgroup sources"
+                                        : owner_shift_mismatch ? "owner shift"
+                                                               : "workgroup sources"));
       return std::nullopt;
     }
     common_shift = shift;

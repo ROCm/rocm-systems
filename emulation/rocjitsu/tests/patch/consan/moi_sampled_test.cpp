@@ -3789,6 +3789,29 @@ TEST(ConSanMoi, SampledBarrierQualificationAcceptsCompleteStaticOwnedSequence) {
   rejects([](auto &item) { item.member_event_identities.push_back("ambiguous-third-member"); });
 }
 
+TEST(ConSanMoi, SampledBarrierQualificationAcceptsInKernelSequenceWithSeveralProvenOwners) {
+  ConSanSyncSequence sequence;
+  sequence.kind = ConSanSyncSequenceKind::Barrier;
+  sequence.operation = ConSanSyncOperation::BarrierFull;
+  sequence.memory_role = ConSanSyncMemoryRole::AcquireRelease;
+  sequence.confidence = ConSanSemanticConfidence::Conservative;
+  sequence.memory_role_confidence = ConSanSemanticConfidence::Conservative;
+  sequence.in_kernel = true;
+  sequence.basic_block_index = 0;
+  sequence.begin_text_offset = 8;
+  sequence.end_text_offset = 16;
+  sequence.member_event_identities = {"barrier-signal", "barrier-wait"};
+  sequence.barrier_id = 0;
+  sequence.barrier_operand_source = ConSanBarrierSite::OperandSource::Immediate;
+  sequence.barrier_scope = ConSanBarrierSite::Scope::Workgroup;
+  sequence.execution_owners = {
+      {.descriptor_file_offset = 0x80},
+      {.descriptor_file_offset = 0x90},
+  };
+
+  EXPECT_TRUE(consan_moi_sampled_qualifies_barrier_sequence(sequence));
+}
+
 TEST(ConSanMoi, SampledBarrierSnapshotMustStartAtPairedSelectedEpoch) {
   const auto encoded = encode_consan_moi_sampled_sync_metadata({
       .kind = ConSanMoiSampledSyncKind::Barrier,
@@ -4292,6 +4315,205 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierRelayKeepsManyFarPairsReachable) {
     return warning.find("no reachable entry island") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Rdna4SampledPatchesDenseAliasedOwnersWithFullHardwareGridIdentity) {
+  // Exceed the 16-site local-island reservoir so the regression covers the
+  // dense shared relay path used by the large torch.mode object.
+  constexpr uint32_t kSiteCount = 17u;
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.entry_nop_words = 96u;
+  std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto first =
+      std::ranges::find(original.kernels(), "shared_owner_0", &AmdGpuKernelInfo::name);
+  const auto alias =
+      std::ranges::find(original.kernels(), "shared_owner_1", &AmdGpuKernelInfo::name);
+  ASSERT_NE(first, original.kernels().end());
+  ASSERT_NE(alias, original.kernels().end());
+  ASSERT_EQ(first->code_size, alias->code_size);
+  ASSERT_FALSE(original.text_sections().empty());
+
+  const uint64_t target_entry_address =
+      original.text_sections().front()->vaddr() + first->entry_text_offset;
+  const uint64_t alias_descriptor_address = original.kernel_descriptor_offset(alias->name);
+  mutate_kernel_descriptor(bytes, first->name, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+                    1u);
+  });
+  mutate_kernel_descriptor(bytes, alias->name, [&](KD &descriptor) {
+    descriptor.kernel_code_entry_byte_offset =
+        static_cast<int64_t>(target_entry_address) - static_cast<int64_t>(alias_descriptor_address);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    0u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                    0u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+                    0u);
+  });
+  mutate_elf_symbol_by_name(bytes, alias->name, [&](Elf64_Sym &symbol) {
+    symbol.st_value = target_entry_address;
+    symbol.st_size = first->code_size;
+  });
+
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, ROCJITSU_CODE_ARCH_RDNA4);
+  std::vector<uint32_t> body(first->code_size / sizeof(uint32_t), filler);
+  size_t cursor = 8u;
+  for (uint32_t index = 0u; index < kSiteCount; ++index) {
+    body[cursor++] = 0xD8340000u | index * sizeof(uint32_t);
+    body[cursor++] = 0x00000000u; // ds_store_b32 v0, v0 offset:index*4
+    body[cursor++] = 0xBE804EC1u; // s_barrier_signal -1
+    body[cursor++] = 0xBF94FFFFu; // s_barrier_wait -1
+  }
+  body.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  const uint64_t body_file_offset = first->text_file_offset + first->entry_text_offset;
+  ASSERT_LE(body_file_offset, bytes.size());
+  ASSERT_LE(body.size() * sizeof(uint32_t), bytes.size() - body_file_offset);
+  std::memcpy(bytes.data() + body_file_offset, body.data(), body.size() * sizeof(uint32_t));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.test_kernel_name_filter = "shared_owner";
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_dispatch_id_sgpr = 70u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2u * kSiteCount);
+  options.moi_runtime_sample_stride = 16384u;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 4u * kSiteCount;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.moi_candidates.size(), kSiteCount);
+  EXPECT_EQ(result.sampled_barrier_applicable_event_count, 2u * kSiteCount);
+  const auto is_access_patch = [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+  };
+  EXPECT_EQ(std::ranges::count_if(result.patches, is_access_patch), kSiteCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                               &ConSanPatchInfo::kind),
+            kSiteCount);
+  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Access,
+                               &ConSanSiteDispositionRecord::site_kind),
+            2u * kSiteCount);
+  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Barrier,
+                               &ConSanSiteDispositionRecord::site_kind),
+            4u * kSiteCount);
+  EXPECT_TRUE(std::ranges::all_of(result.site_dispositions, [](const auto &site) {
+    return site.disposition == ConSanSiteDisposition::Supported &&
+           site.lowering_outcome == ConSanSiteLoweringOutcome::Patched &&
+           site.lowering_reason == ConSanSiteLoweringReason::None;
+  })) << testing::PrintToString(result.site_dispositions);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  std::vector<uint32_t> patched_words(patched.text_sections().front()->size() / sizeof(uint32_t));
+  std::memcpy(patched_words.data(), patched.text_sections().front()->data(),
+              patched.text_sections().front()->size());
+  const std::vector<uint32_t> full_grid_mix = {
+      *build_s_sub_u32(/*sdst=*/86, /*ssrc0=*/86, ttmp_scalar_operand(kTtmpRdna4GridX),
+                       ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_lshl_b32(/*sdst=*/85, ttmp_scalar_operand(kTtmpRdna4GridYz),
+                       scalar_positive_inline_u32(16), ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_lshr_b32(/*sdst=*/85, /*ssrc0=*/85, scalar_positive_inline_u32(16),
+                       ROCJITSU_CODE_ARCH_RDNA4),
+      *build_s_sub_u32(/*sdst=*/86, /*ssrc0=*/86, /*ssrc1=*/85, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_lshr_b32(/*sdst=*/85, ttmp_scalar_operand(kTtmpRdna4GridYz),
+                       scalar_positive_inline_u32(16), ROCJITSU_CODE_ARCH_RDNA4),
+      *build_s_sub_u32(/*sdst=*/86, /*ssrc0=*/86, /*ssrc1=*/85, ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  EXPECT_TRUE(contains_subsequence(patched_words, full_grid_mix));
+
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (!is_access_patch(patch) && patch.kind != ConSanPatchKind::TrampolineMoiSampledSyncMetadata)
+      continue;
+    EXPECT_EQ(patch.owner_descriptor_file_offsets.size(), 2u);
+  }
+}
+
+TEST(ConSanMoi, SampledOwnerAbiFailureRemainsApplicableAndFailsLowering) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.entry_nop_words = 32u;
+  const auto store = build_cdna4_ds_store_b32(
+      /*vaddr=*/0u, /*vdata=*/0u, /*byte_offset=*/0u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto barrier = build_cdna4_s_barrier(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(store);
+  ASSERT_TRUE(barrier);
+  std::vector<uint32_t> helper_words(store->begin(), store->end());
+  helper_words.push_back(*barrier);
+  std::vector<uint8_t> bytes =
+      make_two_kernel_shared_helper_code_object(fixture, ROCJITSU_CODE_ARCH_CDNA4, helper_words);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto first =
+      std::ranges::find(original.kernels(), "shared_owner_0", &AmdGpuKernelInfo::name);
+  const auto alias =
+      std::ranges::find(original.kernels(), "shared_owner_1", &AmdGpuKernelInfo::name);
+  ASSERT_NE(first, original.kernels().end());
+  ASSERT_NE(alias, original.kernels().end());
+  mutate_kernel_descriptor(bytes, first->name, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+                    1u);
+  });
+  mutate_kernel_descriptor(bytes, alias->name, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                    0u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+                    0u);
+  });
+  const uint64_t first_entry_file_offset = first->text_file_offset + first->entry_text_offset;
+  ASSERT_LE(first_entry_file_offset, bytes.size());
+  ASSERT_LE(store->size() * sizeof(uint32_t), bytes.size() - first_entry_file_offset);
+  std::memcpy(bytes.data() + first_entry_file_offset, store->data(),
+              store->size() * sizeof(uint32_t));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(6u);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 6u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_EQ(result.sampled_barrier_applicable_event_count, 1u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                               &ConSanPatchInfo::kind),
+            0u);
+  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Barrier,
+                               &ConSanSiteDispositionRecord::site_kind),
+            1);
+  EXPECT_TRUE(std::ranges::all_of(result.site_dispositions, [](const auto &site) {
+    return site.site_kind != ConSanResourceSiteKind::Barrier ||
+           (site.disposition == ConSanSiteDisposition::Supported &&
+            site.lowering_outcome == ConSanSiteLoweringOutcome::PlacementOrLoweringFailed &&
+            site.lowering_reason == ConSanSiteLoweringReason::InstrumentationPatchMissing);
+  })) << testing::PrintToString(result.site_dispositions);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("sampled barrier sync cannot lower every owner") != std::string::npos &&
+           warning.find("incompatible descriptor ABI inputs") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
 }
 
 TEST(ConSanMoi, SampledQualifiedBarrierAdmitsLongStraightLinePair) {
