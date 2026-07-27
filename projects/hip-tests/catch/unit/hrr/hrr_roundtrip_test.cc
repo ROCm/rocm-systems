@@ -848,6 +848,23 @@ HIP_TEST_CASE(Unit_HRR_MemsetD2DRoundtrip) {
   hrr_run_exact_roundtrip("Unit_HRR_MemsetD2D_Direct", cap.path);
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_MemsetD2DPitchAlloc_Direct, which aims all six
+ *     hipMemsetD2D* variants at a hipMemAllocPitch destination.  That API is a
+ *     playback no-op, so the recorded destination has no alloc_map entry at
+ *     replay.
+ *   - Replay must warn and skip those calls, not hand a null destination to the
+ *     real API: a non-success handler return is fatal and would abort the whole
+ *     replay.  The archive's other (translatable) D2H blob is only reached and
+ *     validated if the replay survived, which is what this asserts.
+ */
+HIP_TEST_CASE(Unit_HRR_MemsetD2DPitchAllocRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetd2dpitchalloc"};
+  hrr_run_exact_roundtrip("Unit_HRR_MemsetD2DPitchAlloc_Direct", cap.path);
+}
+
 HIP_TEST_CASE(Unit_HRR_MemsetVariantsRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetvariants"};
   hrr_run_roundtrip("Unit_HRR_MemsetVariants_Direct", cap.path);

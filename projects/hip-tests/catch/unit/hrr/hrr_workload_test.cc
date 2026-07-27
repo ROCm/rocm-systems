@@ -998,6 +998,70 @@ TEST_CASE("Unit_HRR_MemsetD2D_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
+// Workload: hipMemsetD2D* onto a destination whose allocation is NOT replayed
+//
+// hipMemAllocPitch is itself in the playback no-op set, so nothing it returns
+// ever reaches alloc_map, yet hipMemAllocPitch + hipMemsetD2D* is the idiomatic
+// driver-API pairing, which makes an untranslatable destination the expected
+// case rather than a corner case.  dispatch_event() treats any
+// non-success handler return as fatal, so passing the real API a null
+// destination (hipErrorInvalidValue) would abort the whole replay; the
+// handlers must warn once and skip instead.
+//
+// A plain hipMalloc buffer is filled and read back as well, so the archive
+// still carries a translatable D2H blob.  Replay only reaches and validates
+// that blob if the untranslatable memsets were skipped rather than fatal,
+// which is what makes the roundtrip a regression guard for the skip path.
+// ===========================================================================
+TEST_CASE("Unit_HRR_MemsetD2DPitchAlloc_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  // Destination that replay cannot translate.
+  hipDeviceptr_t pitched = nullptr;
+  size_t pitch = 0;
+  HIP_CHECK(hipMemAllocPitch(&pitched, &pitch, kD2DWidth, kD2DRows,
+                             /*elementSizeBytes=*/4));
+  REQUIRE(pitched != nullptr);
+  REQUIRE(pitch >= kD2DWidth);
+
+  // All six variants, so every generated handler takes the skip path on replay.
+  // These fills are mutually unordered (null stream vs non-blocking `s`), which
+  // is harmless: this buffer is never read back, only its recorded destination
+  // matters.
+  HIP_CHECK(hipMemsetD2D8(pitched, pitch, 0x11, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipMemsetD2D8Async(pitched, pitch, 0x22, kD2DWidth, kD2DRows, s));
+  HIP_CHECK(hipMemsetD2D16(pitched, pitch, 0x3333, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipMemsetD2D16Async(pitched, pitch, 0x4444, kD2DWidth, kD2DRows, s));
+  HIP_CHECK(hipMemsetD2D32(pitched, pitch, 0x11223344u, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipMemsetD2D32Async(pitched, pitch, kD2DPattern, kD2DWidth, kD2DRows, s));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // Translatable destination: this is the blob replay must still validate.
+  void* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, kD2DTotal));
+  const hipDeviceptr_t dp = reinterpret_cast<hipDeviceptr_t>(d);
+  HIP_CHECK(hipMemsetD8(dp, kD2DSentinelByte, kD2DTotal));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemsetD2D32(dp, kD2DPitch, kD2DPattern, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  std::vector<unsigned char> h(kD2DTotal, 0);
+  HIP_CHECK(hipMemcpy(h.data(), d, kD2DTotal, hipMemcpyDeviceToHost));
+
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(pitched)));
+  HIP_CHECK(hipStreamDestroy(s));
+
+  size_t filled_ok = 0, padding_ok = 0;
+  d2d_count_matches(h, kD2DPattern, &filled_ok, &padding_ok);
+  REQUIRE(filled_ok == kD2DRows * (kD2DWidth / sizeof(unsigned int)));
+  REQUIRE(padding_ok == kD2DRows * kD2DPad);
+}
+
+// ===========================================================================
 // Workload B: hipMemsetD8/16/32 variants + hipMemset2D/2DAsync
 //
 // Exercises typed-memset driver APIs and 2-D pitched memset.

@@ -291,7 +291,13 @@ hrr:
   Unit_HRR_MemsetD2D_Direct:
     <<: *level_2
     tags: [direct, memset]
+  Unit_HRR_MemsetD2DPitchAlloc_Direct:
+    <<: *level_2
+    tags: [direct, memset]
   Unit_HRR_MemsetD2DRoundtrip:
+    <<: *level_2
+    tags: [capture, memset, playback, roundtrip]
+  Unit_HRR_MemsetD2DPitchAllocRoundtrip:
     <<: *level_2
     tags: [capture, memset, playback, roundtrip]
   Unit_HRR_MemsetVariants_Direct:
