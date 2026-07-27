@@ -15,21 +15,43 @@
 # =============================================================================
 
 architectures:
-  # CDNA / MI-class (no default same-bucket priority set here).
+  # CDNA / MI-class: co-locate RDREQ_DRAM_sum with RDREQ_sum (and WRREQ
+  # equivalents) so HBM/Remote traffic % never exceeds 100% due to
+  # multi-pass replay variance.
   gfx908:
-    same_bucket_priority_metric_ids: {}
+    same_bucket_priority_metric_ids:
+      "3.1.63":
+        name: "HBM Read Traffic"
+      "3.1.64":
+        name: "HBM Write and Atomic Traffic"
 
   gfx90a:
-    same_bucket_priority_metric_ids: {}
+    same_bucket_priority_metric_ids:
+      "3.1.63":
+        name: "HBM Read Traffic"
+      "3.1.64":
+        name: "HBM Write and Atomic Traffic"
 
   gfx940:
-    same_bucket_priority_metric_ids: {}
+    same_bucket_priority_metric_ids:
+      "3.1.60":
+        name: "HBM Read Traffic"
+      "3.1.61":
+        name: "HBM Write and Atomic Traffic"
 
   gfx941:
-    same_bucket_priority_metric_ids: {}
+    same_bucket_priority_metric_ids:
+      "3.1.60":
+        name: "HBM Read Traffic"
+      "3.1.61":
+        name: "HBM Write and Atomic Traffic"
 
   gfx942:
-    same_bucket_priority_metric_ids: {}
+    same_bucket_priority_metric_ids:
+      "3.1.60":
+        name: "HBM Read Traffic"
+      "3.1.61":
+        name: "HBM Write and Atomic Traffic"
 
   gfx950:
     same_bucket_priority_metric_ids: {}
