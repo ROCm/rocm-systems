@@ -50,7 +50,7 @@ bool PrintfDbg::create() {
   return false;
 }
 
-bool PrintfDbg::init(VirtualGPU& gpu, bool printfEnabled, const amd::NDRange& size) {
+bool PrintfDbg::init(VirtualGPU& gpu, bool printfEnabled, const amd::NDRange<>& size) {
   // Set up debug output buffer (if printf active)
   if (printfEnabled) {
     if (!allocate()) {
@@ -81,7 +81,7 @@ bool PrintfDbg::init(VirtualGPU& gpu, bool printfEnabled, const amd::NDRange& si
   return true;
 }
 
-bool PrintfDbg::output(VirtualGPU& gpu, bool printfEnabled, const amd::NDRange& size,
+bool PrintfDbg::output(VirtualGPU& gpu, bool printfEnabled, const amd::NDRange<>& size,
                        const std::vector<device::PrintfInfo>& printfInfo) {
   // Are we expected to generate debug output?
   if (printfEnabled && !printfInfo.empty()) {

@@ -191,8 +191,8 @@ Kernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
     parameters = aqlArgBuf;
   }
 
-  amd::NDRange local(sizes.local());
-  const amd::NDRange& global = sizes.global();
+  amd::NDRange<> local(sizes.local());
+  const amd::NDRange<>& global = sizes.global();
 
   // Check if runtime has to find local workgroup size
   FindLocalWorkSize(sizes.dimensions(), sizes.global(), local);
