@@ -115,6 +115,60 @@ def test_perfetto_data(pftrace_data, json_data):
     )
 
 
+def test_perfetto_counter_samples(pftrace_reader, json_data):
+    samples = pftrace_reader.query_tp("""
+        SELECT counter_track.name AS track_name, counter.ts, counter.value
+        FROM counter
+        JOIN counter_track ON counter.track_id = counter_track.id
+        WHERE counter_track.name GLOB 'Agent * PMC *'
+        """)
+    assert not samples.empty
+    assert (samples["ts"] > 0).all()
+    assert (samples["value"] >= 0).all()
+
+    data = json_data["rocprofiler-sdk-tool"]
+    counter_names = {
+        counter["id"]["handle"]: counter["name"] for counter in data["counters"]
+    }
+    agent_nodes = {
+        agent["id"]["handle"]: agent["logical_node_id"] for agent in data["agents"]
+    }
+    expected_tracks = set()
+    for entry in data["callback_records"]["counter_collection"]:
+        agent_id = entry["dispatch_data"]["dispatch_info"]["agent_id"]["handle"]
+        for record in entry["records"]:
+            expected_tracks.add(
+                "Agent [{}] PMC {}".format(
+                    agent_nodes[agent_id],
+                    counter_names[record["counter_id"]["handle"]],
+                )
+            )
+
+    actual_tracks = set(samples["track_name"])
+    assert expected_tracks == actual_tracks
+    maxima = samples.groupby("track_name")["value"].max()
+    assert all(maxima[track] > 0 for track in expected_tracks)
+
+
+def test_dimensioned_counter_values(counter_input_data, request):
+    expected = {"SQ_CYCLES", "SQ_BUSY_CYCLES"}
+    input_path = str(request.config.getoption("--counter-input")).replace("\\", "/")
+    if "/cmdl/multiple/" not in input_path:
+        pytest.skip("not the dimension-qualified counter case")
+
+    names = set(counter_input_data["Counter_Name"])
+    assert expected.issubset(names)
+
+    dimensioned = counter_input_data[counter_input_data["Counter_Name"].isin(expected)]
+    assert set(dimensioned["Counter_Name"]) == expected
+    assert (dimensioned["Counter_Value"] >= 0).all()
+    assert dimensioned.groupby("Counter_Name")["Counter_Value"].max().gt(0).all()
+    grouped = dimensioned.groupby(["Dispatch_Id", "Counter_Name"]).size()
+    assert (grouped == 1).all()
+    counters_by_dispatch = dimensioned.groupby("Dispatch_Id")["Counter_Name"].apply(set)
+    assert all(counters == expected for counters in counters_by_dispatch)
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)

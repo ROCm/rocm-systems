@@ -54,7 +54,7 @@ INVALID_OPTION_CASES = [
         id="multipass-with-collection-period",
     ),
     pytest.param(
-        ["--pmc", "SQ_WAVES", "--pmc", "GRBM_COUNT", "--pid", "1"],
+        ["--pmc", "SQ_WAVES", "--pmc", "GRBM_COUNT", "--pid", "99999999"],
         "Multi-pass counter collection (multiple --pmc flags) is not compatible "
         "with attach mode (--pid)",
         id="multipass-with-pid",
@@ -67,8 +67,8 @@ INVALID_OPTION_CASES = [
 ]
 
 
-@pytest.mark.parametrize("tool_args, expected_error", INVALID_OPTION_CASES)
-def test_invalid_counter_collection_options_fail_before_application(
+@pytest.mark.parametrize("tool_args,expected_error", INVALID_OPTION_CASES)
+def test_invalid_counter_collection_options(
     rocprofv3,
     pmc_groups_input,
     tool_args,
@@ -80,11 +80,11 @@ def test_invalid_counter_collection_options_fail_before_application(
     application = [
         sys.executable,
         "-c",
-        f"print({APPLICATION_SUCCESS!r})",
+        "print({!r})".format(APPLICATION_SUCCESS),
     ]
 
     result = subprocess.run(
-        [rocprofv3, *tool_args, "--", *application],
+        [rocprofv3] + tool_args + ["--"] + application,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,

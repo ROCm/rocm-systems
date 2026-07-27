@@ -63,6 +63,11 @@ def pytest_addoption(parser):
         help="Paths to CSV files.",
     )
     parser.addoption(
+        "--db-input",
+        action="store",
+        help="Path to the source rocpd database.",
+    )
+    parser.addoption(
         "--summary-input",
         action="store",
         help="Path to summary markdown file.",
@@ -153,6 +158,11 @@ def csv_data(request):
     return [
         (filename, list(csv.DictReader(open(filename, "r")))) for filename in filenames
     ]
+
+
+@pytest.fixture
+def db_input(request):
+    return request.config.getoption("--db-input")
 
 
 @pytest.fixture
