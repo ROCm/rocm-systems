@@ -971,8 +971,11 @@ TEST_CASE("Unit_HRR_MemsetSpt_Direct", "[.][hrr-direct]") {
 
   // 2-D geometry for the pitched variants: pitch == row width, so the memset
   // covers the buffer contiguously and every validated byte is written by it.
+  // Leaving part of a validated buffer unwritten would capture whatever the
+  // allocation happened to hold, which replay cannot reproduce.
   constexpr size_t PITCH = 128;         // bytes per row
   constexpr size_t ROWS  = SZ / PITCH;  // 8 rows
+  static_assert(PITCH * ROWS == SZ, "2-D memset must cover the whole buffer");
 
   // The async variants take an explicitly created stream rather than the
   // per-thread default one, so replay must translate the recorded stream too.
