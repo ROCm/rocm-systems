@@ -118,6 +118,13 @@ jobs:
           NOTIFY_EMAIL: ${{ inputs.notify_email }}
           NOTIFY_WEBHOOK: ${{ inputs.notify_webhook }}
         run: |
+          # LD_LIBRARY_PATH must be set BEFORE the Python process starts.
+          SITE_PKGS=$(python -c "import site; print(site.getsitepackages()[0])")
+          for d in "$SITE_PKGS"/_rocm_sdk_*/lib; do
+            [ -d "$d" ] && export LD_LIBRARY_PATH="${d}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          done
+          echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
+
           NOTIFY_ARGS=()
           [ -n "$NOTIFY_EMAIL" ] && NOTIFY_ARGS+=(--notify-email "$NOTIFY_EMAIL")
           [ -n "$NOTIFY_WEBHOOK" ] && NOTIFY_ARGS+=(--notify-webhook "$NOTIFY_WEBHOOK")
