@@ -1273,6 +1273,105 @@ TEST(ExecutionPluginTest, SdwaInstructionReuseRestagesOriginalSource) {
   EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0xCCu);
 }
 
+TEST(ExecutionPluginTest, SdwaVop2Src1SelectorReportsExactBytes) {
+  ForceScalarOverride force_scalar(true);
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  constexpr uint32_t kSrc0 = 2;
+  constexpr uint32_t kSrc1 = 3;
+  constexpr uint32_t kDst = 5;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + kSrc0, 0, 10u);
+  cu->write_vgpr(vb + kSrc1, 0, 0x11807F22u);
+
+  cdna4::Vop2VopSdwaMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.vsrc0 = kSrc0;
+  raw.vsrc1 = kSrc1;
+  raw.vdst = kDst;
+  raw.op = 52; // v_add_u32
+  raw.src0_sel = amdgpu::sdwa::DWORD;
+  raw.src1_sel = amdgpu::sdwa::BYTE_2;
+  raw.src1_sext = 1;
+  raw.dst_sel = amdgpu::sdwa::DWORD;
+  raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  std::unique_ptr<Instruction> inst(decoder->decode(reinterpret_cast<const uint32_t *>(&raw)));
+  ASSERT_NE(inst, nullptr);
+  plugin->events.clear();
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0xFFFFFF8Au);
+
+  std::vector<HookEvent> src1_reads;
+  for (const auto &event : vgpr_read_events(*plugin))
+    if (event.physical_reg == vb + kSrc1)
+      src1_reads.push_back(event);
+  ASSERT_EQ(src1_reads.size(), 1u);
+  EXPECT_EQ(src1_reads[0].lane_mask, 1u);
+  EXPECT_EQ(src1_reads[0].byte_mask, 0b0100);
+}
+
+TEST(ExecutionPluginTest, SdwaVop2ScalarSelectorsUseSgprs) {
+  ForceScalarOverride force_scalar(true);
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  constexpr uint32_t kVectorSrc = 2;
+  constexpr uint32_t kScalarSrc = 4;
+  constexpr uint32_t kDst = 5;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint32_t sb = wf->sgpr_alloc().base;
+
+  auto run = [&](bool scalar_src1) {
+    SCOPED_TRACE(scalar_src1 ? "scalar src1" : "scalar src0");
+    cu->write_vgpr(vb + kVectorSrc, 0, 10u);
+    cu->write_sgpr(sb + kScalarSrc, 0x11807F22u);
+
+    cdna4::Vop2VopSdwaMachineInst raw{};
+    raw.src0 = amdgpu::SRC_SDWA;
+    raw.vsrc0 = scalar_src1 ? kVectorSrc : kScalarSrc;
+    raw.vsrc1 = scalar_src1 ? kScalarSrc : kVectorSrc;
+    raw.vdst = kDst;
+    raw.op = 52; // v_add_u32
+    raw.src0_sel = scalar_src1 ? amdgpu::sdwa::DWORD : amdgpu::sdwa::BYTE_2;
+    raw.src0_sext = scalar_src1 ? 0 : 1;
+    raw.s0 = scalar_src1 ? 0 : 1;
+    raw.src1_sel = scalar_src1 ? amdgpu::sdwa::BYTE_2 : amdgpu::sdwa::DWORD;
+    raw.src1_sext = scalar_src1 ? 1 : 0;
+    raw.s1 = scalar_src1 ? 1 : 0;
+    raw.dst_sel = amdgpu::sdwa::DWORD;
+    raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    std::unique_ptr<Instruction> inst(decoder->decode(reinterpret_cast<const uint32_t *>(&raw)));
+    ASSERT_NE(inst, nullptr);
+    plugin->events.clear();
+    cu->execute_instruction(inst.get(), *wf);
+
+    EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0xFFFFFF8Au);
+    expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {kVectorSrc}, 1u);
+
+    uint32_t sgpr_reads = 0;
+    for (const HookEvent &event : plugin->events)
+      sgpr_reads += event.kind == HookEvent::READ_SGPR;
+    EXPECT_EQ(sgpr_reads, 1u);
+  };
+
+  run(false);
+  run(true);
+}
+
 // SDWA observation tests cover byte, word, and dword source selectors plus
 // preserve, pad, sign-extension, and clamp behavior.
 // Selected source bytes must be the only bytes read. Preserved destination
