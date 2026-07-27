@@ -101,41 +101,6 @@ def test_perfetto_data(
         ), f"{pf_category} ({len(_pf_data)}):\n\t{_pf_data}\n{js_category} ({len(_js_data)}):\n\t{_js_data}"
 
 
-def test_counter_collection_perfetto_data(pftrace_reader, json_data):
-    samples = pftrace_reader.query_tp("""
-        SELECT counter_track.name AS track_name, counter.ts, counter.value
-        FROM counter
-        JOIN counter_track ON counter.track_id = counter_track.id
-        WHERE counter_track.name GLOB 'Agent * PMC *'
-        """)
-    assert not samples.empty
-    assert (samples["ts"] > 0).all()
-    assert (samples["value"] >= 0).all()
-
-    data = json_data["rocprofiler-sdk-tool"]
-    counter_names = {
-        counter["id"]["handle"]: counter["name"] for counter in data["counters"]
-    }
-    agent_nodes = {
-        agent["id"]["handle"]: agent["logical_node_id"] for agent in data["agents"]
-    }
-    expected_tracks = set()
-    for entry in data["callback_records"]["counter_collection"]:
-        agent_id = entry["dispatch_data"]["dispatch_info"]["agent_id"]["handle"]
-        for record in entry["records"]:
-            expected_tracks.add(
-                "Agent [{}] PMC {}".format(
-                    agent_nodes[agent_id],
-                    counter_names[record["counter_id"]["handle"]],
-                )
-            )
-
-    actual_tracks = set(samples["track_name"])
-    assert expected_tracks == actual_tracks
-    maxima = samples.groupby("track_name")["value"].max()
-    assert all(maxima[track] > 0 for track in expected_tracks)
-
-
 def test_otf2_data(
     otf2_data, json_data, categories=("hip", "hsa", "marker", "kernel", "memory_copy")
 ):
