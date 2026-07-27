@@ -68,7 +68,7 @@ void amdcuid_get_library_version(uint32_t* major, uint32_t* minor, uint32_t* pat
  * @return A constant character pointer to the version string. The format is
  * "MAJOR.MINOR.PATCH".
  */
-const char* amdcuid_library_version_to_string();
+const char* amdcuid_library_version_to_string(void);
 
 /**
  * @brief Status codes returned by CUID API functions.
