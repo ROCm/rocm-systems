@@ -89,8 +89,9 @@ impl<T> NcclMemory<T> {
     /// Return the device pointer for APIs that write this allocation.
     ///
     /// The mutable borrow only prevents overlapping access through this Rust
-    /// owner; CUDA stream ordering and outstanding device aliases remain the
-    /// caller's responsibility at every unsafe enqueue boundary.
+    /// owner. Current raw-pointer enqueue APIs do not track CUDA stream ordering
+    /// or outstanding device aliases; callers coordinate them according to each
+    /// method's documented contract.
     pub fn as_mut_ptr(&mut self) -> *mut T {
         self.pointer.as_ptr()
     }

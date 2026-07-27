@@ -1,6 +1,6 @@
 [package]
 name = "nccl"
-description = "Safe-ish Rust wrappers for NCCL's host API"
+description = "Rust wrappers for NCCL's public host API"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

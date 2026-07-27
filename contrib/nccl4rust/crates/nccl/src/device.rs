@@ -493,8 +493,9 @@ impl DeviceCommunicator<'_> {
     /// Copy all bytes, unchanged, to storage satisfying [`Self::copy_layout`].
     /// Do not interpret or patch pointer fields. Every copied image becomes
     /// invalid when this owner is dropped; all kernels using a copy must finish
-    /// first. A CUDA HtoD copy and subsequent kernel launch are outside Rust's
-    /// lifetime model and therefore remain unsafe at that integration boundary.
+    /// first. The current `as_bytes` API does not track the copied image through
+    /// CUDA or kernel completion, so keep this owner and every copied image alive
+    /// until all dependent kernels finish.
     pub fn as_bytes(&self) -> &[u8] {
         let raw = self
             .raw

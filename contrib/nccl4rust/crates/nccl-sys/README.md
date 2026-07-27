@@ -44,8 +44,10 @@ crate, that checkout is used as the final default.
 If no explicit or source-tree library directory is available, the platform
 linker's standard search paths are used for `-lnccl`.
 
-The generated API retains the exact C names and is therefore unsafe. Profiling
-interposition entry points named `pnccl*` are deliberately excluded. The crate's
-tests cover NCCL's central opaque handles and the current public device-setup
-structure layouts. Bindgen's automatic layout-test mode is intentionally off:
-bindgen 0.71.1 otherwise treats these complete CUDA C++ structures as opaque.
+The generated crate is a direct C-ABI layer: it retains the exact C names and
+adds no ownership or lifetime checks. Calls must follow NCCL's documented
+preconditions. Profiling interposition entry points named `pnccl*` are
+deliberately excluded. The crate's tests cover NCCL's central opaque handles
+and the current public device-setup structure layouts. Bindgen's automatic
+layout-test mode is intentionally off: bindgen 0.71.1 otherwise treats these
+complete CUDA C++ structures as opaque.

@@ -1,12 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Safe-ish Rust wrappers for NCCL's host API.
+//! Rust wrappers for NCCL's public host API.
 //!
 //! This crate owns NCCL resources and gives scalar element types a checked
-//! mapping to `ncclDataType_t`. Communication calls are still `unsafe`: NCCL
-//! only enqueues work, so Rust cannot prove that a raw CUDA pointer is valid,
-//! device-accessible, correctly sized, or kept alive until its stream finishes.
+//! mapping to `ncclDataType_t`. Current communication methods accept raw CUDA
+//! pointers and are declared `unsafe`; their contracts require valid,
+//! CUDA-accessible, correctly sized buffers to remain alive until stream
+//! completion. Higher-level buffer wrappers can encode those requirements in
+//! safe interfaces.
 
 mod communicator;
 mod config;

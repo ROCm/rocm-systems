@@ -39,9 +39,10 @@ helpers are intentionally outside that generated FFI. The initial Rust host
 layer covers version and unique-ID handling, communicator ownership and
 queries, typed collectives and point-to-point operations, grouped calls, NCCL
 memory, registered windows, and creation of a public device communicator.
-Enqueueing host operations remains `unsafe`: NCCL is asynchronous with respect
-to the host, so a Rust borrow ending at the function return cannot prove that a
-device buffer is no longer in use.
+The current collective and point-to-point wrappers accept raw device pointers
+and are declared `unsafe`. Their contracts require correctly sized,
+CUDA-accessible buffers to remain valid until the stream completes; a
+stream-aware buffer abstraction can encode those requirements in safe APIs.
 
 Safe communicator initialization consumes and retains its `Config`, forces the
 initial blocking mode, and rejects explicitly nonblocking configuration. Safe
@@ -145,9 +146,9 @@ fn initialize_rank(
 }
 ```
 
-Collective and point-to-point methods take raw device pointers and a
-`CudaStream`, so enqueueing them remains `unsafe`; the caller must keep buffers
-alive until the CUDA stream completes.
+Collective and point-to-point methods currently take raw device pointers and a
+`CudaStream`. Their documented contracts require buffers to remain valid until
+the CUDA stream completes.
 
 ## Build the device LTOIR
 
@@ -226,24 +227,26 @@ streams, copy memory, or load modules. Those remain responsibilities of the
 application's CUDA host library. Unlike NVSHMEM's module API, NCCL device
 communicators do not require per-module registration.
 
-## Safety model
+## Current API contracts
 
-- The raw `-sys` crates expose the C ABI and are unsafe by definition.
+- The raw `-sys` crates mirror the C ABI without adding ownership or lifetime
+  validation; calls must follow NCCL and CUDA preconditions.
 - Communicator, allocation, window, and device-communicator wrappers enforce
   destruction order through Rust lifetimes and RAII where the host API permits.
 - NCCL retains `ncclConfig_t::commName`; the owned communicator therefore keeps
   its `Config` and string storage alive through final destruction.
 - Safe initialization and output-producing management calls must not be mixed
   with raw `nccl-sys` group state, which the wrapper cannot observe.
-- CUDA stream handles and device pointers are opaque. All asynchronous enqueue
-  functions are unsafe until an API can carry completion-dependent lifetimes.
-- Device pointer translation is unsafe because byte offsets, element types,
-  peer membership, and window lifetimes are caller invariants.
-- Device barriers are unsafe because every required thread and rank must
-  participate convergently with matching arguments. Reduce/copy invocations
-  are not rank-collective: callers must assign each output region to one issuer
-  or to issuers with disjoint regions, while arranging any required barriers
-  separately.
+- Current raw-pointer enqueue methods do not tie buffer borrows to CUDA
+  completion; callers maintain the documented stream and resource lifetimes.
+- Current pointer-translation methods return raw device pointers and cannot
+  validate offset bounds, alignment, peer membership, aliasing, or window
+  lifetime; callers supply those invariants.
+- Current barrier methods do not encode participation and convergence in their
+  types; callers coordinate all required threads and ranks with matching
+  arguments. Reduce/copy invocations are not rank-collective: callers assign
+  each output region to one issuer or to issuers with disjoint regions, while
+  arranging any required barriers separately.
 
 ## Validation status
 
