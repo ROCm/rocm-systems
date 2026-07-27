@@ -63,12 +63,21 @@ set(SPECIALIZED_DIR  "${GEN_DIR}/specialized")
 # oversubscribe an already parallel build), --offload-compress (packaging, see
 # ENABLE_COMPRESS below) and diagnostics (generated sources are compiled
 # quietly by design, and some need -w).
+#
+# Also dropped are options that are only meaningful to something other than the
+# amdclang++ invocations below: SHELL: is an escaping prefix CMake expands only
+# when generating a target's own command line, so forwarding it here would pass
+# the literal string through (ENABLE_CODE_COVERAGE adds two), and --hipcc-* are
+# hipcc driver options while these commands drive amdclang++ directly.
 # ---------------------------------------------------------------------------
 set(DL_INHERITED_FLAGS "")
 get_target_property(_rccl_copts rccl COMPILE_OPTIONS)
 if(_rccl_copts)
   foreach(_opt IN LISTS _rccl_copts)
     if(_opt MATCHES "^(-x|hip|-fgpu-rdc|--offload-host-only|--offload-compress|--offload-arch=.*|-parallel-jobs=.*|-w|-W.*)$")
+      continue()
+    endif()
+    if(_opt MATCHES "^(SHELL:|--hipcc-)")
       continue()
     endif()
     list(APPEND DL_INHERITED_FLAGS "${_opt}")
