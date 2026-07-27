@@ -9,7 +9,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Added
 
 - **Exposed `BOOT_FIRMWARE` field in `amd-smi static --vbios` output**.
-  - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` is no longer stripped from the CLI output and now appears under the `IFWI` section(`--vbios` remains available as a legacy alias).
+  - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` now appears under the `IFWI` section(`--vbios` remains available as a legacy alias).
 
   ```shell
   $ amd-smi static --ifwi
