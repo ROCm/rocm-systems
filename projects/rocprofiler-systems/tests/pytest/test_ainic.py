@@ -99,7 +99,6 @@ def ainic_download_url() -> str:
     return "https://github.com/ROCm/rocprofiler-systems/releases/download/rocm-6.4.1/rocprofiler-systems-1.0.1-ubuntu-22.04-ROCm-60400-PAPI-OMPT-Python3.sh"
 
 
-
 @pytest.fixture
 def ainic_rocpd_rules(validation_rules_dir) -> list[Path]:
     """Validation rules for AI NIC RDMA track presence in ROCpd database."""
