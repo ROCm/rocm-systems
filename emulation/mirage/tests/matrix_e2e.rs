@@ -17,7 +17,7 @@
 //! * `rocjitsu-dbt` is skipped unless a translation-target GPU is
 //!   physically present (DBT runs translated code on real hardware).
 //! * `rocjitsu` is skipped when its KMD library cannot be located.
-//! * the `hazard-detection` plugin is skipped when the backend does not
+//! * the `race` plugin is skipped when the selected backend does not
 //!   advertise it.
 //!
 //! The containerised dimensions (`podman`, `docker`) are driven through
@@ -148,14 +148,14 @@ impl Payload {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Plugin {
     None,
-    HazardDetection,
+    Race,
 }
 
 impl Plugin {
     fn label(self) -> &'static str {
         match self {
             Plugin::None => "none",
-            Plugin::HazardDetection => "hazard-detection",
+            Plugin::Race => "race",
         }
     }
 }
@@ -190,7 +190,7 @@ fn all_combos() -> Vec<Combo> {
         for container in [Container::Node, Container::Podman, Container::Docker] {
             for hardware in [Hardware::Mi350x, Hardware::Mi450x] {
                 for payload in [Payload::TinyTorch, Payload::Rccl, Payload::Crash] {
-                    for plugin in [Plugin::None, Plugin::HazardDetection] {
+                    for plugin in [Plugin::None, Plugin::Race] {
                         combos.push(Combo {
                             emulator,
                             container,
@@ -214,8 +214,8 @@ fn all_combos() -> Vec<Combo> {
 struct Caps {
     /// Per-emulator `(installed, supported)` from `mirage emulators`.
     emulators: BTreeMap<String, (bool, bool)>,
-    /// Plugins the backends advertise, lower-cased for matching.
-    plugins: Vec<String>,
+    /// Plugins each backend advertises, lower-cased for matching.
+    plugins: BTreeMap<String, Vec<String>>,
 }
 
 impl Caps {
@@ -253,9 +253,16 @@ impl Caps {
             _ => {}
         }
 
-        if c.plugin == Plugin::HazardDetection && !self.plugins.iter().any(|p| p.contains("hazard"))
+        if c.plugin == Plugin::Race
+            && !self
+                .plugins
+                .get(c.emulator.kind())
+                .is_some_and(|plugins| plugins.iter().any(|plugin| plugin == "race"))
         {
-            return Some("hazard-detection plugin not advertised by the backend".into());
+            return Some(format!(
+                "race plugin not advertised by {}",
+                c.emulator.kind()
+            ));
         }
 
         None
@@ -272,20 +279,20 @@ fn probe_caps(mirage_bin: &Path) -> Caps {
         serde_json::from_slice(&out.stdout).expect("emulators output should be JSON");
 
     let mut emulators = BTreeMap::new();
-    let mut plugins = Vec::new();
+    let mut plugins = BTreeMap::new();
     if let Some(arr) = json.as_array() {
         for e in arr {
             let name = e["name"].as_str().unwrap_or_default().to_string();
             let installed = e["installed"].as_bool().unwrap_or(false);
             let supported = e["support"]["supported"].as_bool().unwrap_or(false);
+            let emulator_plugins = e["plugins"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|plugin| plugin.as_str().map(str::to_lowercase))
+                .collect();
+            plugins.insert(name.clone(), emulator_plugins);
             emulators.insert(name, (installed, supported));
-            if let Some(ps) = e["plugins"].as_array() {
-                for p in ps {
-                    if let Some(s) = p.as_str() {
-                        plugins.push(s.to_lowercase());
-                    }
-                }
-            }
         }
     }
 
@@ -443,7 +450,11 @@ fn run_combo(c: &Combo, caps: &Caps) -> Outcome {
     //    timeout guards against regressions that could otherwise hang the
     //    whole suite (e.g. a multi-node aggregator waiting forever).
     let mut run = env.mirage();
-    run.args(["run", "--profile", &profile, "--"]);
+    run.args(["run", "--profile", &profile]);
+    if c.plugin == Plugin::Race {
+        run.args(["--plugin", "race"]);
+    }
+    run.arg("--");
     run.args(c.payload.argv());
     let status = run_with_timeout(run, Duration::from_secs(60), &profile);
 
@@ -534,8 +545,8 @@ fn matrix_lifecycle_across_all_dimensions() {
 
     eprintln!("\nmirage testing matrix — {total} combinations\n");
     eprintln!(
-        "  {:<58}  {}",
-        "COMBINATION (emulator+container+hw+payload+plugin)", "RESULT"
+        "  {:<58}  RESULT",
+        "COMBINATION (emulator+container+hw+payload+plugin)"
     );
 
     for c in &combos {
@@ -554,7 +565,7 @@ fn matrix_lifecycle_across_all_dimensions() {
     eprintln!("\nmatrix summary: {ran} ran, {skipped} skipped, {total} total\n");
 
     // Sanity: the matrix must be coherent. Every dbt + mi450x and every
-    // hazard-detection combination is expected to skip on a host without
+    // race-plugin combinations are expected to skip on a host without
     // that hardware/plugin, but the suite must never silently skip
     // *everything* on a host where the software emulator is available.
     if caps

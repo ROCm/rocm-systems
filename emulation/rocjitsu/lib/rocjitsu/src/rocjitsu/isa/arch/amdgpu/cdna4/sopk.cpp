@@ -6,7 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/sopk.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
-#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -340,34 +340,12 @@ SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
 
 void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t hwreg = simm16.encoding_value_;
-  uint32_t reg_id = hwreg & 0x3Fu;
-  uint32_t offset = (hwreg >> 6) & 0x1Fu;
-  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
   uint32_t reg_val = 0;
-  switch (reg_id) {
-  case 1:
-    reg_val = wf.status_raw();
-    break;
-  case 4:
-    reg_val = static_cast<uint32_t>(wf.cu().id());
-    break;
-  case 5:
-    reg_val = static_cast<uint32_t>(wf.cu().id() >> 16);
-    break;
-  case 6:
-    reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8);
-    break;
-  case 7:
-    reg_val = (wf.vgpr_alloc().count & 0xFFu) | ((wf.vgpr_alloc().base & 0xFFu) << 8);
-    break;
-  default:
-    util::Logger::warn("s_getreg_b32: unhandled hwreg id=", reg_id);
-    break;
-  }
-  if (offset + size > 32)
-    size = 32 - offset;
-  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
-  amdgpu::RegisterAccess(wf).write_scalar(sdst, (reg_val >> offset) & mask);
+  auto result = amdgpu::read_hwreg_field(wf, hwreg, reg_val);
+  if (result != amdgpu::HwregAccessResult::Success)
+    util::Logger::warn("s_getreg_b32: ", amdgpu::hwreg_access_result_name(result),
+                       " hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, reg_val);
 }
 
 SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
@@ -389,24 +367,11 @@ void SSetregB32Sopk::implicit_uses(RegisterSet &uses) const {
 
 void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t hwreg = simm16.encoding_value_;
-  uint32_t reg_id = hwreg & 0x3Fu;
-  uint32_t offset = (hwreg >> 6) & 0x1Fu;
-  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
-  if (offset + size > 32)
-    size = 32 - offset;
-  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
   uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(sdst);
-  switch (reg_id) {
-  case 1: {
-    uint32_t s = wf.status_raw();
-    s = (s & ~(mask << offset)) | ((src & mask) << offset);
-    wf.set_status_raw(s);
-    break;
-  }
-  default:
-    util::Logger::warn("s_setreg_b32: unhandled hwreg id=", reg_id);
-    break;
-  }
+  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);
+  if (result != amdgpu::HwregAccessResult::Success)
+    util::Logger::warn("s_setreg_b32: ", amdgpu::hwreg_access_result_name(result),
+                       " hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));
 }
 
 SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
@@ -430,24 +395,11 @@ void SSetregImm32B32Sopk::implicit_uses(RegisterSet &uses) const {
 
 void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t hwreg = simm16.encoding_value_;
-  uint32_t reg_id = hwreg & 0x3Fu;
-  uint32_t offset = (hwreg >> 6) & 0x1Fu;
-  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
-  if (offset + size > 32)
-    size = 32 - offset;
-  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
   uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(simm32);
-  switch (reg_id) {
-  case 1: {
-    uint32_t s = wf.status_raw();
-    s = (s & ~(mask << offset)) | ((src & mask) << offset);
-    wf.set_status_raw(s);
-    break;
-  }
-  default:
-    util::Logger::warn("s_setreg_imm32_b32: unhandled hwreg id=", reg_id);
-    break;
-  }
+  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);
+  if (result != amdgpu::HwregAccessResult::Success)
+    util::Logger::warn("s_setreg_imm32_b32: ", amdgpu::hwreg_access_result_name(result),
+                       " hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));
 }
 
 SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
