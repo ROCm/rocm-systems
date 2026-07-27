@@ -13,6 +13,7 @@ set(component_sources
     ${CMAKE_CURRENT_LIST_DIR}/kill_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mpi_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/numa_gotcha.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/sampling_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/shmem_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/ucx_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/vaapi_gotcha.cpp
@@ -35,6 +36,7 @@ set(component_headers
     ${CMAKE_CURRENT_LIST_DIR}/mpip.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mpi_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/numa_gotcha.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/sampling_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/shmem_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/ucx_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/vaapi_gotcha.hpp

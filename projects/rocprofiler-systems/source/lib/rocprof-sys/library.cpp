@@ -41,6 +41,7 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
+#include "library/components/sampling_gotcha_policy.hpp"
 #include "library/components/shmem_gotcha_policy.hpp"
 #include "library/components/ucx_gotcha_policy.hpp"
 #include "library/components/vaapi_gotcha.hpp"
@@ -733,6 +734,15 @@ rocprofsys_init_tooling_hidden(void)
         component::vaapi_gotcha::start();
     }
 
+    if(get_use_sampling())
+    {
+        // certain functions can fail if a sampling signal is delivered during their
+        // execution
+        LOG_DEBUG(
+            "Setting up sampling signal protection for certain runtime functions...");
+        component::sampling_gotcha<rocprofsys::DefaultSamplingPolicy>::start();
+    }
+
     if(get_use_sampling()) sampling::block_signals();
 
     // perfetto initialization
@@ -1100,6 +1110,7 @@ rocprofsys_finalize_hidden(void)
     {
         LOG_DEBUG("Shutting down sampling...");
         sampling::shutdown();
+        component::sampling_gotcha<rocprofsys::DefaultSamplingPolicy>::shutdown();
     }
 
     LOG_TRACE("Reporting the process- and thread-level metrics...");
