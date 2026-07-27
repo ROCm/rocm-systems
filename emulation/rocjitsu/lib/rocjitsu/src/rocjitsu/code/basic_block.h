@@ -69,10 +69,19 @@ public:
   /// @returns Instruction count.
   uint32_t num_instructions() const { return num_instructions_; }
 
-  /// @brief Whether the block ends with a terminator instruction.
-  /// @retval true The last instruction is a branch or program terminator.
+  /// @brief Whether the block ends with a terminator instruction or compiler stub.
+  /// @retval true The last instruction is a branch/program terminator, or the
+  /// block is an exact gfx1250 clang unreachable-stub body followed by padding.
   /// @retval false The block falls through to the next.
   bool has_terminator() const { return has_terminator_; }
+
+  /// @brief Whether sequential execution would enter undecodable source bytes.
+  ///
+  /// @details Large code objects may place padding or opaque data between
+  /// functions in `.text`. Fallthrough into an undecodable gap cannot be safely
+  /// relocated and must make translation fail closed. The only exception is a
+  /// recognized gfx1250 clang unreachable-stub body followed by zero padding.
+  bool falls_through_to_undecodable_text() const { return falls_through_to_undecodable_text_; }
 
   /// @brief Last instruction in the block, or nullptr for an empty block.
   [[nodiscard]] const Instruction *terminator() const;
@@ -89,6 +98,14 @@ public:
 
   /// @brief Function-call edges that leave this block.
   [[nodiscard]] const std::vector<CallEdge> &call_edges() const { return call_edges_; }
+
+  /// @brief Add a call edge proven by an external finite-target analysis.
+  ///
+  /// @details Relocation-backed device function tables are discovered after
+  /// ordinary block construction. Their dynamic dispatch remains indirect in
+  /// the instruction stream, but each populated table slot is a concrete
+  /// callee for reachability and kernel-scoped liveness.
+  void add_call_edge(CallEdge edge);
 
   /// @brief Static indirect branch fixup metadata rooted in this block.
   ///
@@ -128,14 +145,15 @@ public:
 
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);
+  [[nodiscard]] bool is_gfx1250_clang_unreachable_stub() const;
   void add_successor(BasicBlock &successor);
-  void add_call_edge(CallEdge edge);
   void add_static_indirect_call_fixup(IndirectCallFixup fixup);
 
   uint64_t start_offset_;
   uint32_t size_ = 0;
   uint32_t num_instructions_ = 0;
   bool has_terminator_ = false;
+  bool falls_through_to_undecodable_text_ = false;
   InstructionList instructions_;
   std::vector<std::unique_ptr<Instruction>> storage_;
   std::vector<BasicBlock *> successors_;

@@ -1359,16 +1359,6 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
   if (is_swap && !swap_supported_ && !is_gfx125plus_)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-  if (is_swap) {
-    constexpr size_t kAlign = SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250::kAlignment_;
-    for (size_t i = 0; i < num_entries; ++i) {
-      const uint32_t d = indices[i];
-      if ((reinterpret_cast<uintptr_t>(dst_list[d]) & (kAlign - 1)) != 0 ||
-          (reinterpret_cast<uintptr_t>(src_list[d]) & (kAlign - 1)) != 0)
-        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-  }
-
   const size_t max_copy_size = is_swap
       ? SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250::kMaxSize_
       : (max_single_linear_copy_size_ ? max_single_linear_copy_size_ : kMaxSingleCopySize);

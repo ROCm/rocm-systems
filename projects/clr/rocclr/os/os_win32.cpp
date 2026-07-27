@@ -677,8 +677,12 @@ bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t
 
 bool Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr, size_t* foffset_ptr,
                                  size_t* region_bound_ptr) {
+  // Fail closed: callers must never read a stale bound if we can't compute one.
   if (region_bound_ptr != nullptr) {
     *region_bound_ptr = 0;
+  }
+  // Readable bytes from image to the end of its committed region (anonymous or not).
+  if (region_bound_ptr != nullptr && image != nullptr) {
     MEMORY_BASIC_INFORMATION mbi = {};
     if (VirtualQuery(image, &mbi, sizeof(mbi)) == sizeof(mbi) && mbi.State == MEM_COMMIT &&
         (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) == 0) {
