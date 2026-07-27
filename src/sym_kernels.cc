@@ -189,6 +189,8 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     symk->hasLsaMultimem = comm->nvlsSupport && ncclTeamLsa(comm).nRanks > 2 && !comm->p2pCrossClique;
     reqs.lsaMultimem = symk->hasLsaMultimem;
     reqs.lsaBarrierCount = ncclSymkMaxBlocks;
+    reqs.ginStrongSignalsRequired = false;
+    reqs.ginVaSignalsRequired = false;
 
     struct ncclDevResourceRequirements lla2aReq;
     ncclLLA2ACreateRequirement(ncclSymkMaxBlocks,
@@ -239,6 +241,8 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
       reqs.resourceRequirementsList = &railSignalReq;
       reqs.barrierCount = ncclSymkMaxBlocks;
       reqs.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
+      reqs.ginStrongSignalsRequired = true;
+      reqs.ginVaSignalsRequired = true;
     }
 
     NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &symk->kcomm.devComm, /*isInternal=*/true,
