@@ -2571,6 +2571,52 @@ TEST(InstrumentorProbeSpill, Rdna4PreservesExecAndVccUnconditionally) {
   expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
 }
 
+// Compare-based coverage: v_cmp writes VCC and v_cmpx writes EXEC implicitly (no
+// operand), so the clobber summary is blind to them (see ProbeClobber.Implicit*).
+// The always-on preservation still brackets the call, so VCC/EXEC round-trip.
+// Single-word VOPC encodings of v_cmp_eq_u32 / v_cmpx_eq_u32 per arch.
+TEST(InstrumentorProbeSpill, Cdna3PreservesVccFromImplicitCompare) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
+  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmp_eq_u32=*/0x7D940000u, kArch);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+}
+
+TEST(InstrumentorProbeSpill, Cdna3PreservesExecFromImplicitCmpx) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
+  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32=*/0x7DB40000u, kArch);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
+}
+
+TEST(InstrumentorProbeSpill, Cdna4PreservesVccFromImplicitCompare) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmp_eq_u32=*/0x7D940000u, kArch);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+}
+
+TEST(InstrumentorProbeSpill, Cdna4PreservesExecFromImplicitCmpx) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32=*/0x7DB40000u, kArch);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
+}
+
+TEST(InstrumentorProbeSpill, Rdna4PreservesVccFromImplicitCompare) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmp_eq_u32=*/0x7C940000u, kArch);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+}
+
+TEST(InstrumentorProbeSpill, Rdna4PreservesExecFromImplicitCmpx) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32=*/0x7D940000u, kArch);
+  ASSERT_FALSE(cave.empty());
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
+}
+
 // FLAT_SCRATCH stays rejected (the spill store/load depend on it), failing closed.
 // gfx9 only (CDNA3, CDNA4): flat_scratch_lo/hi are writable operands (102/103) here;
 // gfx11+ removed them (OPR_SDST_SGPR_MAX=105, so dst 102 is the plain SGPR s102), so
