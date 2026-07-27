@@ -779,5 +779,134 @@ TEST_F(DbiRdna4ExecWidenSpillSimFixture, MissingStoreFullMaskLosesHighLanes) {
   expect_missing_store_full_mask_loses_high_lanes();
 }
 
+//==============================================================================
+// Spilling site: the probe body runs under the ANCHOR mask, not EXEC=-1.
+//
+// The store bracket forces EXEC=-1 to spill all lanes; the trampoline must restore
+// the anchor mask before the call so a probe doing per-lane work only touches
+// anchor-active lanes. Observed via v5, which the probe writes but the kernel never
+// reads -- so it is dead at the anchor and NOT spilled, letting the probe's write
+// (and thus the mask it ran under) survive to the end. v2 is the spilled register
+// (live + clobbered) that makes this a spilling site.
+//==============================================================================
+class DbiExecMaskAtSpillSimBase : public ::testing::Test {
+protected:
+  explicit DbiExecMaskAtSpillSimBase(ExecSimArch a) : a_(std::move(a)) {}
+
+  void SetUp() override {
+    const uint32_t endpgm = build_s_endpgm(a_.base.arch);
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch);
+    const uint32_t mov_v5_0 = 0x7E0A0280u;                         // v_mov v5, 0 (all lanes)
+    const uint32_t mov_v5_k = 0x7E0A0200u | (128u + kSentinel);    // v_mov v5, K (probe marker)
+    const uint32_t mov_v2_k = test::make_mov_v2_inline(kSentinel); // v_mov v2, K (spilled reg)
+    const uint32_t mov_v4_v2 = 0x7E080302u;                        // v_mov v4, v2 (v2 live)
+    // Probe marks v5 per lane, then clobbers v2 (forcing the spill + EXEC toggles).
+    auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {mov_v5_k, kMovV2Zero, setpc},
+                                             a_.base.e_flags);
+
+    // v5=0 ; v2=K ; <narrow EXEC> ; ANCHOR v_mov v4,v2 ; <widen EXEC> ; endpgm.
+    std::vector<uint32_t> code = {mov_v5_0, mov_v2_k};
+    code.insert(code.end(), a_.set_partial_mask.begin(), a_.set_partial_mask.end());
+    const uint32_t anchor_off = static_cast<uint32_t>(code.size() * sizeof(uint32_t));
+    code.push_back(mov_v4_v2);
+    code.insert(code.end(), a_.restore_full_mask.begin(), a_.restore_full_mask.end());
+    code.push_back(endpgm);
+
+    auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/64,
+                                               /*granulated_sgpr_count=*/3, a_.base.e_flags);
+    AmdGpuCodeObject obj(target.data(), target.size());
+    AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+    ASSERT_TRUE(obj.is_valid());
+    ASSERT_TRUE(probe_obj.is_valid());
+
+    Instrumentor instr(obj, a_.base.arch);
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor_off;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    instr.add_point(pt);
+
+    auto result = instr.patch_with_debug_summaries();
+    ASSERT_TRUE(result.errors.empty())
+        << (result.errors.empty() ? std::string{} : result.errors.front());
+    ASSERT_EQ(result.patches.size(), 1u);
+    ASSERT_TRUE(result.patches[0].is_probe_call);
+
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    patched_text_ = test::section_words(patched, ".text");
+    ASSERT_FALSE(patched_text_.empty());
+    patched_scratch_ = test::patched_private_segment_size(patched);
+    ASSERT_EQ(patched_scratch_, 68u) << "descriptor scratch must grow to cover the spill slot";
+  }
+
+  // The probe ran under the anchor mask: v5 holds the marker only on the lanes that
+  // were active at the anchor; the rest keep their prior 0.
+  void expect_probe_runs_under_anchor_mask() {
+    DbiSim sim(a_.base.sim_arch, a_.base.wave_size);
+    const std::vector<uint32_t> v5 =
+        sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/5);
+    ASSERT_EQ(v5.size(), a_.base.wave_size) << "kernel did not run to completion";
+    for (uint32_t lane = 0; lane < a_.base.wave_size; ++lane)
+      EXPECT_EQ(v5[lane], lane < a_.active_lanes ? kSentinel : 0u)
+          << "lane " << lane << ": probe write should honor the anchor mask";
+  }
+
+  // Negative control: nop the pre-call anchor-mask restore, so the probe runs under
+  // the store-side EXEC=-1 and marks every lane, including anchor-inactive ones.
+  void expect_missing_anchor_restore_runs_probe_full_mask() {
+    const size_t restore = find_exec_restore(patched_text_, a_.base.arch);
+    ASSERT_LT(restore, patched_text_.size()) << "pre-call EXEC anchor-restore not found";
+
+    std::vector<uint32_t> sabotaged = patched_text_;
+    sabotaged[restore] = build_s_nop(0, a_.base.arch);
+
+    DbiSim broken(a_.base.sim_arch, a_.base.wave_size);
+    const std::vector<uint32_t> v5 =
+        broken.run_and_read_vgpr(sabotaged, patched_scratch_, /*reg=*/5);
+    ASSERT_EQ(v5.size(), a_.base.wave_size);
+    for (uint32_t lane = a_.active_lanes; lane < a_.base.wave_size; ++lane)
+      EXPECT_EQ(v5[lane], kSentinel)
+          << "lane " << lane
+          << ": without the restore the probe runs full-mask and marks this lane";
+  }
+
+  ExecSimArch a_;
+  std::vector<uint32_t> patched_text_;
+  uint32_t patched_scratch_ = 0;
+};
+
+class DbiCdna3ExecMaskAtSpillSimFixture : public DbiExecMaskAtSpillSimBase {
+protected:
+  DbiCdna3ExecMaskAtSpillSimFixture() : DbiExecMaskAtSpillSimBase(cdna3_exec_arch()) {}
+};
+class DbiCdna4ExecMaskAtSpillSimFixture : public DbiExecMaskAtSpillSimBase {
+protected:
+  DbiCdna4ExecMaskAtSpillSimFixture() : DbiExecMaskAtSpillSimBase(cdna4_exec_arch()) {}
+};
+class DbiRdna4ExecMaskAtSpillSimFixture : public DbiExecMaskAtSpillSimBase {
+protected:
+  DbiRdna4ExecMaskAtSpillSimFixture() : DbiExecMaskAtSpillSimBase(rdna4_exec_arch()) {}
+};
+
+TEST_F(DbiCdna3ExecMaskAtSpillSimFixture, ProbeRunsUnderAnchorMask) {
+  expect_probe_runs_under_anchor_mask();
+}
+TEST_F(DbiCdna3ExecMaskAtSpillSimFixture, MissingAnchorRestoreRunsProbeFullMask) {
+  expect_missing_anchor_restore_runs_probe_full_mask();
+}
+TEST_F(DbiCdna4ExecMaskAtSpillSimFixture, ProbeRunsUnderAnchorMask) {
+  expect_probe_runs_under_anchor_mask();
+}
+TEST_F(DbiCdna4ExecMaskAtSpillSimFixture, MissingAnchorRestoreRunsProbeFullMask) {
+  expect_missing_anchor_restore_runs_probe_full_mask();
+}
+TEST_F(DbiRdna4ExecMaskAtSpillSimFixture, ProbeRunsUnderAnchorMask) {
+  expect_probe_runs_under_anchor_mask();
+}
+TEST_F(DbiRdna4ExecMaskAtSpillSimFixture, MissingAnchorRestoreRunsProbeFullMask) {
+  expect_missing_anchor_restore_runs_probe_full_mask();
+}
+
 } // namespace
 } // namespace rocjitsu
