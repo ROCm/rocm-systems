@@ -176,6 +176,7 @@ rewind:
 
 static int gpuPciBw(struct ncclTopoNode* gpu) {
   struct ncclTopoNode* dev = gpu->gpu.parent;
+  if (dev == NULL) return -1;
   for (int l = 0; l < dev->nlinks; l++) {
     struct ncclTopoLink* gpuLink = dev->links + l;
     if (gpuLink->type != LINK_PCI) continue;
@@ -963,6 +964,7 @@ ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode* xmlChannel, int c, st
         rank = strtol(sub->attrs[rankIndex].value, NULL, 0);
       } else {
         for (int g = 0; g < ngpus; g++) {
+          if (system->nodes[GPU].nodes[g].gpu.parent == NULL) continue;
           int systemId = NCCL_TOPO_ID_SYSTEM_ID(system->nodes[GPU].nodes[g].gpu.parent->id);
           if (NCCL_TOPO_ID(systemId, system->nodes[GPU].nodes[g].gpu.dev) == dev)
             rank = system->nodes[GPU].nodes[g].gpu.rank;

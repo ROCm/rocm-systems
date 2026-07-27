@@ -77,7 +77,11 @@ static ncclResult_t ncclTopoSetPaths(struct ncclTopoNode* baseNode, struct ncclT
         // else, discard the path.
         int pathMaxLength = (baseNode->type == GPU) ? 2 : 1;
         ncclTopoNode* baseDevNode = (baseNode->type == GPU) ? baseNode->gpu.parent : baseNode;
-        if (node != baseDevNode && node->type == DEV && (link->type != LINK_LOC || remNode->type != GPU) &&
+        if (baseDevNode == NULL) {
+          // gpu.parent was removed — block traversal through any DEV for non-LOC links
+          if (node->type == DEV && (link->type != LINK_LOC || remNode->type != GPU))
+            continue;
+        } else if (node != baseDevNode && node->type == DEV && (link->type != LINK_LOC || remNode->type != GPU) &&
             (ncclParamNvbDisable() || link->type != LINK_NVL || remNode->type != DEV || path->count > pathMaxLength))
           continue;
 
@@ -851,6 +855,9 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
 
   // Set direct paths to GPUs.
   for (int g = 0; g < system->nodes[GPU].count; g++) {
+    if (system->nodes[GPU].nodes[g].gpu.parent == NULL) {
+      WARN("GPU %d (id 0x%lx) has NULL parent DEV node", g, system->nodes[GPU].nodes[g].id);
+    }
     NCCLCHECK(ncclTopoSetPaths(system->nodes[GPU].nodes + g, system));
   }
 
