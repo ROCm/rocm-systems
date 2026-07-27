@@ -5,37 +5,40 @@
  ************************************************************************/
 
 /**
- * @file SparseSendRecv.cpp
+ * @file test_sparse_send_recv.cpp
  * @brief Regression test for AICOMRCCL-1112 / NCCL 2.29.7 fix:
  *        "Fix hang issue in send/receive scheduling of repeated sparse patterns"
  *
- * Root cause: NCCL 2.29.2 scheduleP2pTasksToPlan() incremented p2pEpoch at the TOP of its
- * while-loop, before processing rounds. If the kernel plan budget was exhausted
- * mid-round, the function returned early — but the epoch had already been
- * incremented. On the next plan call, the epoch was incremented again before the
- * remaining rounds were processed. In sparse patterns where there is asymmetry in number
- * of operations, budget can be exhausted at different points.
- * This can lead to different epochs.
- * epoch enforces batch boundaries, and a mismatch in batch grouping
- * between sender and receiver breaks the rendezvous protocol.
- * In RCCL, epoch doesn't impact batching, however this test will expose any mismatch
- * due to multi-plan schedule.
+ * Root cause: NCCL 2.29.2 scheduleP2pTasksToPlan() incremented p2pEpoch at
+ * the TOP of its while-loop before processing any rounds. If the kernel plan
+ * budget was exhausted mid-round the function returned early — but the epoch
+ * had already been incremented. The next plan call incremented it again before
+ * the remaining rounds. In sparse patterns with asymmetric operation counts,
+ * budget exhausts at different points per rank, leading to different epochs on
+ * paired send/recv ranks. This corrupts p2pOpCount and the proxy
+ * resources->step counter, causing a permanent deadlock in waitPeer().
  *
  * NOTE: RCCL never had the NCCL 2.29.3 intermediate bug state — it merged
- * NCCL 2.29.2+2.29.3+2.29.7 in one shot. As a result, no RCCL version was susceptible to this bug.
+ * NCCL 2.29.2+2.29.3+2.29.7 in one shot. As a result, no released RCCL
+ * version was susceptible to this bug. This test validates that any future
+ * regression in scheduleP2pTasksToPlan() is caught.
  *
- * Trigger conditions:
- *   1. Budget exhaustion (NCCL_WORK_ARGS_BYTES=512 shrinks inArgsBytes to ~464B;
- *      8 ops x 64B = 512B > 464B, exhausting budget mid-group).
- *   2. Sparse topology (not all-to-all): rank 0 has 2*(N-1) ops while others
- *      have 2. With N>=5, rank 0's ops spill to a 2nd plan; others do not.
+ * Bug trigger — three conditions must all hold:
+ *   1. Budget exhaustion: NCCL_WORK_ARGS_BYTES=512 and NCCL_WORK_FIFO_BYTES=512
+ *      shrink the plan budget so ~7 rounds exhaust it. NCCL_MAX_NCHANNELS=4
+ *      fixes the channel count for deterministic plan splitting.
+ *   2. Sparse + repeated topology: REPS repetitions of the full star pattern
+ *      within ONE rcclGroupStart/End. Rank 0 generates REPS*(nRanks-1) rounds;
+ *      each leaf generates only REPS rounds. Budget exhaustion splits rank 0
+ *      across multiple plans with ascending epochs while leaves stay in one
+ *      plan (epoch=1) — the epoch mismatch.
+ *   3. Multiple outer iterations: corrupted p2pOpCount accumulates across group
+ *      calls; the hang typically surfaces on the 2nd or 3rd iteration.
  *
- * Test topology: rank 0 is the hub — it sends to and receives from every
- * other rank. All other ranks only communicate with rank 0.
- *
- * Run (requires NCCL_WORK_ARGS_BYTES=512 and NCCL_WORK_FIFO_BYTES=512):
+ * Run:
  *   NCCL_WORK_ARGS_BYTES=512 NCCL_WORK_FIFO_BYTES=512 \
- *     mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=SparseSendRecv.*
+ *   NCCL_MIN_NCHANNELS=4 NCCL_MAX_NCHANNELS=4 \
+ *     mpirun -np 16 ./rccl-UnitTestsMPI --gtest_filter=SparseSendRecv.*
  */
 
 #include "MPITestBase.hpp"
@@ -52,11 +55,27 @@
 using namespace MPITestConstants;
 
 namespace {
-constexpr int    MIN_RANKS              = 5;
-constexpr size_t NUM_ELEMS              = 1024;
-constexpr char   kWorkArgsBytesEnv[]    = "NCCL_WORK_ARGS_BYTES";
-constexpr char   kWorkFifoBytesEnv[]    = "NCCL_WORK_FIFO_BYTES";
-constexpr char   kRequiredEnvValue[]    = "512";
+constexpr int    MIN_RANKS           = 5;
+// Repetitions of the full star pattern within ONE ncclGroupStart/End call.
+// Creates the asymmetric round count: rank 0 gets REPS*(nRanks-1) rounds,
+// each leaf gets REPS rounds. This is what forces the epoch mismatch.
+constexpr int    REPS                = 4;
+// Outer iterations. Corrupted resources->step accumulates across group calls;
+// 5 iterations is enough to make the hang definitive rather than flaky.
+constexpr int    ITERS               = 5;
+constexpr size_t NUM_ELEMS           = 1024;
+// Required environment for this test. Set these in the test-runner config or
+// mpirun invocation — the test skips itself if any value is not honored:
+//   NCCL_WORK_ARGS_BYTES=512   shrinks inArgsBytes so ~7 rounds exhaust budget
+//   NCCL_WORK_FIFO_BYTES=512   shrinks outArgsBytes (second budget threshold)
+//   NCCL_MIN_NCHANNELS=4       fixes channel count for deterministic plan split
+//   NCCL_MAX_NCHANNELS=4       (same)
+constexpr char kWorkArgsBytesEnv[]  = "NCCL_WORK_ARGS_BYTES";
+constexpr char kWorkFifoBytesEnv[]  = "NCCL_WORK_FIFO_BYTES";
+constexpr char kMinNChannelsEnv[]   = "NCCL_MIN_NCHANNELS";
+constexpr char kMaxNChannelsEnv[]   = "NCCL_MAX_NCHANNELS";
+constexpr char kBudgetValue[]       = "512";
+constexpr char kNChannelsValue[]    = "4";
 
 bool envVarEquals(const char* name, const char* expected)
 {
@@ -66,50 +85,52 @@ bool envVarEquals(const char* name, const char* expected)
 
 bool sparseSendRecvEnvConfigured()
 {
-    return envVarEquals(kWorkArgsBytesEnv, kRequiredEnvValue)
-        && envVarEquals(kWorkFifoBytesEnv, kRequiredEnvValue);
+    return envVarEquals(kWorkArgsBytesEnv, kBudgetValue)
+        && envVarEquals(kWorkFifoBytesEnv, kBudgetValue)
+        && envVarEquals(kMinNChannelsEnv,  kNChannelsValue)
+        && envVarEquals(kMaxNChannelsEnv,  kNChannelsValue);
 }
-}
+} // namespace
 
 class SparseSendRecv : public MPITestBase
 {
 protected:
-    float*              send_buf = nullptr;
-    float*              recv_buf = nullptr;
-    std::vector<float*> hub_recv_bufs_;
-    const size_t        buf_bytes = NUM_ELEMS * sizeof(float);
+    float*                           send_buf = nullptr;
+    // Hub (rank 0): REPS recv buffers per peer to avoid aliasing within a group call.
+    // Leaf ranks: REPS recv buffers total.
+    std::vector<std::vector<float*>> hub_recv_bufs_;  // [peer-1][rep]
+    std::vector<float*>              leaf_recv_bufs_;  // [rep]
+    const size_t                     buf_bytes = NUM_ELEMS * sizeof(float);
 
     void TearDown() override
     {
-        for (float* buf : hub_recv_bufs_) {
-            if (buf) {
-                hipFree(buf);
+        for (auto& peer_bufs : hub_recv_bufs_) {
+            for (float* buf : peer_bufs) {
+                if (buf) hipFree(buf);
             }
         }
         hub_recv_bufs_.clear();
 
-        if (send_buf) {
-            hipFree(send_buf);
-            send_buf = nullptr;
+        for (float* buf : leaf_recv_bufs_) {
+            if (buf) hipFree(buf);
         }
-        if (recv_buf) {
-            hipFree(recv_buf);
-            recv_buf = nullptr;
-        }
+        leaf_recv_bufs_.clear();
+
+        if (send_buf) { hipFree(send_buf); send_buf = nullptr; }
 
         MPITestBase::TearDown();
     }
 };
 
 /**
- * @brief Validate that sparse P2P group calls do not deadlock when there is asymmetry
- *        in the number of operations and multiple plans are used.
+ * @brief Validate that repeated sparse P2P group calls do not deadlock.
  *
- * Topology: rank 0 <-> all other ranks (star).
- * Rank 0 uses a distinct recv buffer per spoke; hub and spokes verify payload correctness.
- *
- * Requires NCCL_WORK_ARGS_BYTES=512 and NCCL_WORK_FIFO_BYTES=512 so rank 0's ops spill
- * across multiple kernel plans while spoke ranks stay within budget.
+ * Star topology: rank 0 (hub) <-> all other ranks (leaves).
+ * Each group call issues REPS repetitions of the full star pattern, producing
+ * REPS*(nRanks-1) rounds on rank 0 vs REPS rounds on each leaf. Budget
+ * exhaustion (NCCL_WORK_FIFO_BYTES=512) splits rank 0 across multiple kernel
+ * plans with ascending p2pEpoch values while leaves fit in one plan — the
+ * epoch mismatch that causes the hang on pre-fix NCCL/RCCL.
  */
 TEST_F(SparseSendRecv, StarTopology)
 {
@@ -120,8 +141,11 @@ TEST_F(SparseSendRecv, StarTopology)
 
     if (!sparseSendRecvEnvConfigured()) {
         GTEST_SKIP() << "StarTopology requires "
-                     << kWorkArgsBytesEnv << "=" << kRequiredEnvValue << " and "
-                     << kWorkFifoBytesEnv << "=" << kRequiredEnvValue << ".";
+                     << kWorkArgsBytesEnv << "=" << kBudgetValue << ", "
+                     << kWorkFifoBytesEnv << "=" << kBudgetValue << ", "
+                     << kMinNChannelsEnv  << "=" << kNChannelsValue << ", "
+                     << kMaxNChannelsEnv  << "=" << kNChannelsValue
+                     << " — set these in the test-runner config or mpirun -x flags.";
     }
 
     ASSERT_EQ(ncclSuccess, createTestCommunicator());
@@ -139,61 +163,82 @@ TEST_F(SparseSendRecv, StarTopology)
     ASSERT_EQ(hipSuccess,
               hipMemcpy(send_buf, rank_vals.data(), buf_bytes, hipMemcpyHostToDevice));
 
+    // Allocate per-repetition recv buffers to avoid aliasing within a group call.
     if (rank == 0) {
-        hub_recv_bufs_.resize(nRanks - 1);
-        for (int peer = 1; peer < nRanks; peer++) {
-            float* peer_recv_buf = nullptr;
-            ASSERT_EQ(hipSuccess, hipMalloc(&peer_recv_buf, buf_bytes));
-            ASSERT_EQ(hipSuccess, hipMemset(peer_recv_buf, 0, buf_bytes));
-            hub_recv_bufs_[peer - 1] = peer_recv_buf;
-        }
-    } else {
-        ASSERT_EQ(hipSuccess, hipMalloc(&recv_buf, buf_bytes));
-        ASSERT_EQ(hipSuccess, hipMemset(recv_buf, 0, buf_bytes));
-    }
-
-    ASSERT_EQ(ncclSuccess, ncclGroupStart());
-    if (rank == 0) {
-        // Hub: send to and receive from every other rank into a per-peer buffer.
-        for (int peer = 1; peer < nRanks; peer++) {
-            ASSERT_EQ(ncclSuccess,
-                          ncclSend(send_buf, NUM_ELEMS, ncclFloat, peer, comm, stream));
-            ASSERT_EQ(ncclSuccess,
-                          ncclRecv(hub_recv_bufs_[peer - 1], NUM_ELEMS, ncclFloat, peer, comm,
-                                   stream));
-        }
-    } else {
-        // Spoke: send to and receive from rank 0 only.
-        ASSERT_EQ(ncclSuccess,
-                      ncclSend(send_buf, NUM_ELEMS, ncclFloat, 0, comm, stream));
-        ASSERT_EQ(ncclSuccess,
-                      ncclRecv(recv_buf, NUM_ELEMS, ncclFloat, 0, comm, stream));
-    }
-    ASSERT_EQ(ncclSuccess, ncclGroupEnd());
-    ASSERT_EQ(hipSuccess, hipStreamSynchronize(stream));
-
-    if (rank == 0) {
-        for (int peer = 1; peer < nRanks; peer++) {
-            std::vector<float> received_vals(NUM_ELEMS, 0.0f);
-            const float        expected = static_cast<float>(peer);
-            ASSERT_EQ(hipSuccess,
-                      hipMemcpy(received_vals.data(), hub_recv_bufs_[peer - 1], buf_bytes,
-                                hipMemcpyDeviceToHost));
-           for (size_t i = 0; i < NUM_ELEMS; i++) {
-                ASSERT_FLOAT_EQ(received_vals[i], expected)
-                    << "Rank 0 expected " << expected << " from rank " << peer << " at index "
-                    << i << ", got " << received_vals[i];
+        hub_recv_bufs_.assign(nRanks - 1, std::vector<float*>(REPS, nullptr));
+        for (int peer = 1; peer < nRanks; ++peer) {
+            for (int rep = 0; rep < REPS; ++rep) {
+                ASSERT_EQ(hipSuccess, hipMalloc(&hub_recv_bufs_[peer - 1][rep], buf_bytes));
+                ASSERT_EQ(hipSuccess, hipMemset(hub_recv_bufs_[peer - 1][rep], 0, buf_bytes));
             }
         }
     } else {
-        std::vector<float> received_vals(NUM_ELEMS, 0.0f);
-        const float        expected_from_hub = 0.0f;
-        ASSERT_EQ(hipSuccess,
-                  hipMemcpy(received_vals.data(), recv_buf, buf_bytes, hipMemcpyDeviceToHost));
-        for (size_t i = 0; i < NUM_ELEMS; i++) {
-            ASSERT_FLOAT_EQ(received_vals[i], expected_from_hub)
-                << "Rank " << rank << " expected " << expected_from_hub << " from rank 0 at index "
-                << i << ", got " << received_vals[i];
+        leaf_recv_bufs_.assign(REPS, nullptr);
+        for (int rep = 0; rep < REPS; ++rep) {
+            ASSERT_EQ(hipSuccess, hipMalloc(&leaf_recv_bufs_[rep], buf_bytes));
+            ASSERT_EQ(hipSuccess, hipMemset(leaf_recv_bufs_[rep], 0, buf_bytes));
+        }
+    }
+
+    // Outer loop: ITERS group calls with the same sparse pattern.
+    // Corrupted resources->step state accumulates across calls; the hang
+    // typically surfaces on the 2nd or 3rd iteration.
+    for (int iter = 0; iter < ITERS; ++iter) {
+        ASSERT_EQ(ncclSuccess, ncclGroupStart());
+
+        if (rank == 0) {
+            // Hub: REPS full sweeps over all leaf peers within one group call.
+            // Total rounds for rank 0: REPS * (nRanks-1).
+            // Budget exhaustion forces multiple kernel plans with ascending epochs.
+            for (int rep = 0; rep < REPS; ++rep) {
+                for (int peer = 1; peer < nRanks; ++peer) {
+                    ASSERT_EQ(ncclSuccess,
+                        ncclSend(send_buf, NUM_ELEMS, ncclFloat, peer, comm, stream));
+                    ASSERT_EQ(ncclSuccess,
+                        ncclRecv(hub_recv_bufs_[peer - 1][rep], NUM_ELEMS,
+                                 ncclFloat, peer, comm, stream));
+                }
+            }
+        } else {
+            // Leaf: REPS sends+recvs to rank 0 only.
+            // Total rounds: REPS. Fits in one plan (epoch=1) on a pre-fix library.
+            for (int rep = 0; rep < REPS; ++rep) {
+                ASSERT_EQ(ncclSuccess,
+                    ncclSend(send_buf, NUM_ELEMS, ncclFloat, 0, comm, stream));
+                ASSERT_EQ(ncclSuccess,
+                    ncclRecv(leaf_recv_bufs_[rep], NUM_ELEMS, ncclFloat, 0, comm, stream));
+            }
+        }
+
+        ASSERT_EQ(ncclSuccess, ncclGroupEnd());
+        ASSERT_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+        // Spot-check first repetition's recv buffers each iteration.
+        if (rank == 0) {
+            for (int peer = 1; peer < nRanks; ++peer) {
+                std::vector<float> received(NUM_ELEMS, 0.0f);
+                ASSERT_EQ(hipSuccess,
+                          hipMemcpy(received.data(), hub_recv_bufs_[peer - 1][0],
+                                    buf_bytes, hipMemcpyDeviceToHost));
+                const float expected = static_cast<float>(peer);
+                for (size_t i = 0; i < NUM_ELEMS; ++i) {
+                    ASSERT_FLOAT_EQ(received[i], expected)
+                        << "[iter " << iter << "] Rank 0 expected " << expected
+                        << " from rank " << peer << " at index " << i
+                        << ", got " << received[i];
+                }
+            }
+        } else {
+            std::vector<float> received(NUM_ELEMS, 0.0f);
+            ASSERT_EQ(hipSuccess,
+                      hipMemcpy(received.data(), leaf_recv_bufs_[0],
+                                buf_bytes, hipMemcpyDeviceToHost));
+            for (size_t i = 0; i < NUM_ELEMS; ++i) {
+                ASSERT_FLOAT_EQ(received[i], 0.0f)
+                    << "[iter " << iter << "] Rank " << rank
+                    << " expected 0.0f from rank 0 at index " << i
+                    << ", got " << received[i];
+            }
         }
     }
 }

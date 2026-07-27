@@ -126,20 +126,22 @@
       "extends": "default",
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
-      "num_ranks": 8,
-      "num_nodes": 1,
+      "num_ranks": 16,
+      "num_nodes": 2,
       "num_gpus": 8,
       "timeout": 300,
       "env_variables": {
         "NCCL_DEBUG": "INFO",
         "NCCL_WORK_FIFO_BYTES" : "512",
-        "NCCL_WORK_ARGS_BYTES" : "512"
+        "NCCL_WORK_ARGS_BYTES" : "512",
+        "NCCL_MIN_NCHANNELS" : "4",
+        "NCCL_MAX_NCHANNELS" : "4"
       },
       "tests": [
         {
           "name": "sparse_send_recv",
           "description": "Test sparse send/recv functionality over multiple plans",
-          "test_filter": "SparseSendRecv.*"
+          "test_filter": "sparse_send_recv.*"
         }
       ]
     },
